@@ -1,0 +1,81 @@
+---
+title: Getting Started
+description: Learn how to get started with Farm.js, a modern React meta-framework built on Vite.
+---
+
+# Getting Started
+
+Welcome to **Farm.js** - a modern React meta-framework that combines the lightning-fast development experience of Vite with the familiar, powerful semantics of Next.js.
+
+## What is Farm.js?
+
+Farm.js is designed to provide developers with:
+
+- 🚀 **Blazing Fast Development**: Built on Vite for instant server start and lightning-fast HMR
+- ⚛️ **React Server Components**: Full RSC support with streaming SSR
+- 🎯 **Next.js-like API**: Familiar file-based routing and app directory structure
+- 🔄 **Server Actions**: Seamless server-client data mutations
+- 📦 **Zero Configuration**: Works out of the box with sensible defaults
+- 🎨 **AI-Friendly**: Clean, predictable code structure for AI code generation
+
+## Quick Start
+
+### Installation
+
+Create a new Farm.js application using our CLI:
+
+```bash
+pnpm create farm-app my-app
+cd my-app
+pnpm install
+pnpm dev
+```
+
+Your application will be available at `http://localhost:3000`.
+
+### Project Structure
+
+Farm.js uses a familiar app directory structure:
+
+```
+my-app/
+├── src/
+│   └── app/
+│       ├── layout.tsx      # Root layout
+│       ├── page.tsx        # Home page
+│       ├── about/
+│       │   └── page.tsx    # About page
+│       └── users/
+│           ├── page.tsx    # Users list
+│           └── [id]/
+│               └── page.tsx # Dynamic user page
+├── package.json
+└── vite.config.ts
+```
+
+### Your First Page
+
+Create a new page by adding a `page.tsx` file in the `src/app` directory:
+
+```tsx title="src/app/hello/page.tsx"
+import type { PageProps } from 'farm'
+
+export default function HelloPage({ params, searchParams }: PageProps) {
+  return (
+    <div>
+      <h1>Hello from Farm.js!</h1>
+      <p>This is a new page created with Farm.js.</p>
+    </div>
+  )
+}
+```
+
+Navigate to `/hello` to see your new page!
+
+## Next Steps
+
+- [Learn about routing](/docs/routing)
+- [Explore layouts](/docs/layouts)
+- [Understand React Server Components](/docs/server-components)
+- [Try Server Actions](/docs/server-actions)
+

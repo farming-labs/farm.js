@@ -1,0 +1,42 @@
+{
+  "name": "farm-cli",
+  "version": "0.1.0",
+  "description": "CLI for Farm.js framework",
+  "main": "./dist/index.js",
+  "bin": {
+    "farm": "./bin/farm.js"
+  },
+  "files": [
+    "dist",
+    "bin"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "farm": "workspace:*",
+    "commander": "^11.1.0",
+    "picocolors": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3"
+  },
+  "keywords": [
+    "farm",
+    "cli",
+    "react",
+    "vite"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-cli"
+  },
+  "license": "MIT"
+}
+

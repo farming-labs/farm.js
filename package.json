@@ -1,0 +1,35 @@
+{
+  "name": "farm.js",
+  "version": "0.1.0",
+  "description": "A modern React meta-framework built on Vite with Next.js-like semantics",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "examples/*",
+    "docs",
+    "playground"
+  ],
+  "scripts": {
+    "build": "turbo build",
+    "dev": "turbo dev",
+    "test": "turbo test",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "clean": "turbo clean",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "turbo build && changeset publish"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.1",
+    "@types/node": "^20.10.5",
+    "turbo": "^1.11.2",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@8.12.1",
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}
+
