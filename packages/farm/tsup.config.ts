@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsup'
+import { defineConfig } from 'tsup';
 
 export default defineConfig([
   {
@@ -6,7 +6,7 @@ export default defineConfig([
       index: 'src/index.ts',
       server: 'src/server.ts',
       client: 'src/client.ts',
-      vite: 'src/vite.ts'
+      vite: 'src/vite.ts',
     },
     format: ['cjs', 'esm'],
     dts: true,
@@ -14,7 +14,6 @@ export default defineConfig([
     external: ['react', 'react-dom', 'vite'],
     splitting: false,
     sourcemap: true,
-    minify: false
-  }
-])
-
+    minify: false,
+  },
+]);

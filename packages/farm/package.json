@@ -27,17 +27,15 @@
       "require": "./dist/vite.js"
     }
   },
-  "files": [
-    "dist",
-    "client.js",
-    "server.js",
-    "vite.js"
-  ],
+  "files": ["dist", "client.js", "server.js", "vite.js"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -50,7 +48,10 @@
     "esbuild": "^0.19.11",
     "fast-glob": "^3.3.2",
     "picocolors": "^1.0.0",
-    "sirv": "^2.0.4"
+    "sirv": "^2.0.4",
+    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",
@@ -64,15 +65,7 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
-  "keywords": [
-    "react",
-    "vite",
-    "framework",
-    "rsc",
-    "server-components",
-    "ssr",
-    "farm"
-  ],
+  "keywords": ["react", "vite", "framework", "rsc", "server-components", "ssr", "farm"],
   "repository": {
     "type": "git",
     "url": "https://github.com/farm-js/farm.js",

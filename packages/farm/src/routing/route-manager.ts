@@ -1,114 +1,114 @@
-import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule } from '../types'
-import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from '../utils'
-import path from 'path'
-import type { ViteDevServer } from 'vite'
+import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule } from '../types';
+import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from '../utils';
+import path from 'path';
+import type { ViteDevServer } from 'vite';
 
 interface RouteEntry {
-  route: ParsedRoute
-  modulePath: string
-  pattern: string
+  route: ParsedRoute;
+  modulePath: string;
+  pattern: string;
 }
 
 /**
  * Manages route discovery and matching for the Farm.js application
  */
 export class RouteManager {
-  private config: Required<FarmConfig>
-  private routes: Map<string, RouteEntry> = new Map()
-  private layouts: Map<string, RouteEntry> = new Map()
-  private viteServer?: ViteDevServer
+  private config: Required<FarmConfig>;
+  private routes: Map<string, RouteEntry> = new Map();
+  private layouts: Map<string, RouteEntry> = new Map();
+  private viteServer?: ViteDevServer;
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
-    this.config = config
-    this.viteServer = viteServer
+    this.config = config;
+    this.viteServer = viteServer;
   }
 
   /**
    * Discover all routes in the app directory
    */
   async discoverRoutes(): Promise<void> {
-    const appDir = resolveAppPath(this.config.root, this.config.srcDir, 'app')
-    
+    const appDir = resolveAppPath(this.config.root, this.config.srcDir, 'app');
+
     // Find all page and layout files
-    const pageFiles = await globFiles('**/page.{ts,tsx,js,jsx}', appDir)
-    const layoutFiles = await globFiles('**/layout.{ts,tsx,js,jsx}', appDir)
-    
-    logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`)
+    const pageFiles = await globFiles('**/page.{ts,tsx,js,jsx}', appDir);
+    const layoutFiles = await globFiles('**/layout.{ts,tsx,js,jsx}', appDir);
+
+    logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`);
 
     // Process page files
     for (const file of pageFiles) {
-      const route = parseRoutePath(file)
-      const modulePath = path.join(appDir, file)
-      const pattern = this.createRoutePattern(route)
-      
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+
       this.routes.set(pattern, {
         route,
         modulePath,
-        pattern
-      })
+        pattern,
+      });
     }
 
     // Process layout files
     for (const file of layoutFiles) {
-      const route = parseRoutePath(file)
-      const modulePath = path.join(appDir, file)
-      const pattern = this.createRoutePattern(route)
-      
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+
       this.layouts.set(pattern, {
         route,
         modulePath,
-        pattern
-      })
+        pattern,
+      });
     }
 
-    this.logRoutes()
+    this.logRoutes();
   }
 
   /**
    * Find matching route for a given URL path
    */
-  matchRoute(pathname: string): { 
-    route: RouteEntry | null
-    params: Record<string, string>
-    layouts: RouteEntry[]
+  matchRoute(pathname: string): {
+    route: RouteEntry | null;
+    params: Record<string, string>;
+    layouts: RouteEntry[];
   } {
     // Remove trailing slash except for root
-    const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/$/, '')
+    const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/$/, '');
     // Find matching page route
-    let matchedRoute: RouteEntry | null = null
-    let params: Record<string, string> = {}
+    let matchedRoute: RouteEntry | null = null;
+    let params: Record<string, string> = {};
 
     for (const [pattern, routeEntry] of this.routes) {
-      const match = matchRoute(normalizedPath, routeEntry.route.segments)
+      const match = matchRoute(normalizedPath, routeEntry.route.segments);
       if (match.matches) {
-        matchedRoute = routeEntry
-        params = match.params
-        break
+        matchedRoute = routeEntry;
+        params = match.params;
+        break;
       }
     }
 
     // Find all matching layouts (from root to specific)
-    const layouts = this.findMatchingLayouts(normalizedPath)
+    const layouts = this.findMatchingLayouts(normalizedPath);
 
     return {
       route: matchedRoute,
       params,
-      layouts
-    }
+      layouts,
+    };
   }
 
   /**
    * Get all registered routes
    */
   getRoutes(): Map<string, RouteEntry> {
-    return new Map(this.routes)
+    return new Map(this.routes);
   }
 
   /**
    * Get all registered layouts
    */
   getLayouts(): Map<string, RouteEntry> {
-    return new Map(this.layouts)
+    return new Map(this.layouts);
   }
 
   /**
@@ -117,15 +117,15 @@ export class RouteManager {
   async loadRouteModule(modulePath: string): Promise<RouteModule> {
     try {
       if (this.viteServer) {
-        const module = await this.viteServer.ssrLoadModule(modulePath)
-        return module as RouteModule
+        const module = await this.viteServer.ssrLoadModule(modulePath);
+        return module as RouteModule;
       } else {
-        const module = await import(modulePath)
-        return module as RouteModule
+        const module = await import(modulePath);
+        return module as RouteModule;
       }
     } catch (error) {
-      logger.error(`Failed to load route module: ${modulePath}`)
-      throw error
+      logger.error(`Failed to load route module: ${modulePath}`);
+      throw error;
     }
   }
 
@@ -135,15 +135,15 @@ export class RouteManager {
   async loadLayoutModule(modulePath: string): Promise<LayoutModule> {
     try {
       if (this.viteServer) {
-        const module = await this.viteServer.ssrLoadModule(modulePath)
-        return module as LayoutModule
+        const module = await this.viteServer.ssrLoadModule(modulePath);
+        return module as LayoutModule;
       } else {
-        const module = await import(modulePath)
-        return module as LayoutModule
+        const module = await import(modulePath);
+        return module as LayoutModule;
       }
     } catch (error) {
-      logger.error(`Failed to load layout module: ${modulePath}`)
-      throw error
+      logger.error(`Failed to load layout module: ${modulePath}`);
+      throw error;
     }
   }
 
@@ -151,50 +151,55 @@ export class RouteManager {
    * Create a route pattern from parsed route
    */
   private createRoutePattern(route: ParsedRoute): string {
-    if (route.segments.length === 0) return '/'
-    
-    return '/' + route.segments.map(segment => {
-      if (!segment.isDynamic) return segment.segment
-      
-      if (segment.isCatchAll) {
-        return segment.isOptional ? `[[...${segment.segment}]]` : `[...${segment.segment}]`
-      }
-      
-      return `[${segment.segment}]`
-    }).join('/')
+    if (route.segments.length === 0) return '/';
+
+    return (
+      '/' +
+      route.segments
+        .map((segment) => {
+          if (!segment.isDynamic) return segment.segment;
+
+          if (segment.isCatchAll) {
+            return segment.isOptional ? `[[...${segment.segment}]]` : `[...${segment.segment}]`;
+          }
+
+          return `[${segment.segment}]`;
+        })
+        .join('/')
+    );
   }
 
   /**
    * Find all layouts that should wrap a given path
    */
   private findMatchingLayouts(pathname: string): RouteEntry[] {
-    const matchingLayouts: RouteEntry[] = []
-    const pathSegments = pathname.split('/').filter(Boolean)
-    
+    const matchingLayouts: RouteEntry[] = [];
+    const pathSegments = pathname.split('/').filter(Boolean);
+
     const sortedLayouts = Array.from(this.layouts.values()).sort((a, b) => {
-      return a.route.segments.length - b.route.segments.length
-    })
+      return a.route.segments.length - b.route.segments.length;
+    });
 
     for (const layoutEntry of sortedLayouts) {
       if (layoutEntry.route.segments.length > pathSegments.length) {
-        continue
+        continue;
       }
-      
-      let matches = true
+
+      let matches = true;
       for (let i = 0; i < layoutEntry.route.segments.length; i++) {
-        const segment = layoutEntry.route.segments[i]
+        const segment = layoutEntry.route.segments[i];
         if (!segment.isDynamic && segment.segment !== pathSegments[i]) {
-          matches = false
-          break
+          matches = false;
+          break;
         }
       }
-      
+
       if (matches) {
-        matchingLayouts.push(layoutEntry)
+        matchingLayouts.push(layoutEntry);
       }
     }
 
-    return matchingLayouts
+    return matchingLayouts;
   }
 
   /**
@@ -202,18 +207,17 @@ export class RouteManager {
    */
   private logRoutes(): void {
     if (this.routes.size > 0) {
-      logger.info('Registered routes:')
+      logger.info('Registered routes:');
       for (const [pattern, entry] of this.routes) {
-        console.log(`  ${pattern} -> ${entry.modulePath}`)
+        console.log(`  ${pattern} -> ${entry.modulePath}`);
       }
     }
 
     if (this.layouts.size > 0) {
-      logger.info('Registered layouts:')
+      logger.info('Registered layouts:');
       for (const [pattern, entry] of this.layouts) {
-        console.log(`  ${pattern} -> ${entry.modulePath}`)
+        console.log(`  ${pattern} -> ${entry.modulePath}`);
       }
     }
   }
 }
-

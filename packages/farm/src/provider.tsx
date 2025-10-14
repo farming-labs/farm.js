@@ -1,16 +1,16 @@
-import React, { createContext, useContext, ReactNode } from 'react'
-import type { FarmConfig } from './types'
+import React, { createContext, useContext, type ReactNode } from 'react';
+import type { FarmConfig } from './types';
 
 interface FarmContextValue {
-  config: FarmConfig
-  basePath: string
+  config: FarmConfig;
+  basePath: string;
 }
 
-const FarmContext = createContext<FarmContextValue | null>(null)
+const FarmContext = createContext<FarmContextValue | null>(null);
 
 interface FarmProviderProps {
-  children: ReactNode
-  config: FarmConfig
+  children: ReactNode;
+  config: FarmConfig;
 }
 
 /**
@@ -19,34 +19,29 @@ interface FarmProviderProps {
 export function FarmProvider({ children, config }: FarmProviderProps) {
   const value: FarmContextValue = {
     config,
-    basePath: config.basePath || '/'
-  }
+    basePath: config.basePath || '/',
+  };
 
-  return (
-    <FarmContext.Provider value={value}>
-      {children}
-    </FarmContext.Provider>
-  )
+  return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
 }
 
 /**
  * Hook to access Farm.js configuration and utilities
  */
 export function useFarm(): FarmContextValue {
-  const context = useContext(FarmContext)
-  
+  const context = useContext(FarmContext);
+
   if (!context) {
-    throw new Error('useFarm must be used within a FarmProvider')
+    throw new Error('useFarm must be used within a FarmProvider');
   }
-  
-  return context
+
+  return context;
 }
 
 /**
  * Hook to get the current base path
  */
 export function useBasePath(): string {
-  const { basePath } = useFarm()
-  return basePath
+  const { basePath } = useFarm();
+  return basePath;
 }
-
