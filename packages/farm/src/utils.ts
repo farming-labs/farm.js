@@ -173,8 +173,10 @@ export function parseSearchParams(
 }
 
 export const logger = {
-  info: (message: string) => console.log(`ℹ️  ${message}`),
-  success: (message: string) => console.log(`✅ ${message}`),
+  info: (message: string) => {}, // Disabled
+  success: (message: string) => {}, // Disabled
   warn: (message: string) => console.warn(`⚠️  ${message}`),
   error: (message: string) => console.error(`❌ ${message}`),
+  ready: (message: string) => console.log(`${message}`),
+  event: (message: string) => console.log(`  ${message}`),
 };

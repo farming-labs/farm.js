@@ -2,6 +2,21 @@ export * from './types';
 export * from './utils';
 export { createFarmApp } from './app';
 export { FarmProvider } from './provider';
+export { definePlugin, PluginManager } from './plugin';
+export { defineFarmConfig, resolveConfig, loadConfig } from './config';
+export * from './plugins';
+
+export type { FarmPlugin, FarmPluginContext } from './plugin';
+export type {
+  FarmUserConfig,
+  ResolvedFarmConfig,
+  RedirectConfig,
+  HeaderConfig,
+  RewriteConfig,
+  ImageConfig,
+  I18nConfig,
+  MiddlewareConfig,
+} from './config';
 
 export type {
   ComponentType,

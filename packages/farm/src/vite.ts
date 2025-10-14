@@ -3,14 +3,19 @@ import type { FarmConfig } from './types';
 import { FarmApp } from './app';
 import { logger } from './utils';
 import { defaultGlobalCSS } from './default-styles';
+import type { PluginManager } from './plugin';
 import * as fs from 'fs';
 import * as path from 'path';
 
 interface FarmVitePluginOptions extends FarmConfig {}
 
-export function farmPlugin(options: FarmVitePluginOptions = {}): Plugin {
+export function farmPlugin(
+  options: FarmVitePluginOptions = {},
+  initialPluginManager?: PluginManager
+): Plugin {
   let farmApp: FarmApp;
   let server: ViteDevServer;
+  const pluginManager: PluginManager | undefined = initialPluginManager;
 
   return {
     name: 'farm',
@@ -22,6 +27,9 @@ export function farmPlugin(options: FarmVitePluginOptions = {}): Plugin {
     async configureServer(viteServer) {
       server = viteServer;
 
+      // Store the plugin manager passed during creation
+      const pm = initialPluginManager;
+
       farmApp = new FarmApp(
         {
           root: server.config.root,
@@ -30,7 +38,6 @@ export function farmPlugin(options: FarmVitePluginOptions = {}): Plugin {
         server
       );
 
-      // Auto-create globals.css with Tailwind directives if it doesn't exist
       const globalsCSSPath = path.join(server.config.root, 'src/app/globals.css');
       if (!fs.existsSync(globalsCSSPath)) {
         const appDir = path.join(server.config.root, 'src/app');
@@ -38,13 +45,14 @@ export function farmPlugin(options: FarmVitePluginOptions = {}): Plugin {
           fs.mkdirSync(appDir, { recursive: true });
         }
         fs.writeFileSync(globalsCSSPath, defaultGlobalCSS);
-        logger.info('✨ Created globals.css with Tailwind directives');
       }
 
       await farmApp.initialize();
 
-      server.middlewares.use('/', async (req, res, next) => {
-        try {
+      // Register middleware directly (not in return function) to ensure it runs early
+      if (pm) {
+        server.middlewares.use(async (req, res, next) => {
+          // Skip internal Vite requests
           if (
             req.url?.startsWith('/@') ||
             req.url?.startsWith('/node_modules') ||
@@ -53,13 +61,27 @@ export function farmPlugin(options: FarmVitePluginOptions = {}): Plugin {
             return next();
           }
 
-          const renderer = farmApp.getServerRenderer();
-          await renderer.renderPage(req as any, res as any);
-        } catch (error) {
-          logger.error(`Middleware error: ${error}`);
-          next(error);
-        }
-      });
+          try {
+            // Run beforeRequest hooks
+            if (pm) {
+              await pm.runHookParallel('beforeRequest', req, res);
+            }
+
+            if (res.writableEnded) {
+              return;
+            }
+            const renderer = farmApp.getServerRenderer();
+            await renderer.renderPage(req as any, res as any);
+
+            // Run afterResponse hooks
+            if (pm) {
+              await pm.runHookParallel('afterResponse', req, res);
+            }
+          } catch (error) {
+            next(error);
+          }
+        });
+      }
     },
 
     resolveId(id) {

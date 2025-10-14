@@ -1,6 +1,6 @@
 {
   "name": "farm",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Core Farm.js framework - A modern React meta-framework built on Vite",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -25,6 +25,16 @@
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.mjs",
       "require": "./dist/vite.js"
+    },
+    "./plugin/server": {
+      "types": "./dist/server-plugins.d.ts",
+      "import": "./dist/server-plugins.mjs",
+      "require": "./dist/server-plugins.js"
+    },
+    "./plugin/client": {
+      "types": "./dist/client-plugins.d.ts",
+      "import": "./dist/client-plugins.mjs",
+      "require": "./dist/client-plugins.js"
     }
   },
   "files": ["dist", "client.js", "server.js", "vite.js"],

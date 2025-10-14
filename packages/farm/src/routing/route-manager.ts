@@ -30,10 +30,13 @@ export class RouteManager {
     const appDir = resolveAppPath(this.config.root, this.config.srcDir, 'app');
 
     // Find all page and layout files
-    const pageFiles = await globFiles('**/page.{ts,tsx,js,jsx}', appDir);
-    const layoutFiles = await globFiles('**/layout.{ts,tsx,js,jsx}', appDir);
+      const pageFiles = await globFiles('**/page.{ts,tsx,js,jsx}', appDir);
+      const layoutFiles = await globFiles('**/layout.{ts,tsx,js,jsx}', appDir);
 
-    logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`);
+      // Silent discovery - only log if verbose mode enabled
+      if (process.env.FARM_VERBOSE) {
+        logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`);
+      }
 
     // Process page files
     for (const file of pageFiles) {
@@ -61,8 +64,10 @@ export class RouteManager {
       });
     }
 
-    this.logRoutes();
-  }
+      if (process.env.FARM_VERBOSE) {
+        this.logRoutes();
+      }
+    }
 
   /**
    * Find matching route for a given URL path

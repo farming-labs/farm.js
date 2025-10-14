@@ -19,7 +19,10 @@ export class FarmApp {
   }
 
   async initialize(): Promise<void> {
-    logger.info('Initializing Farm.js application...');
+    // Silent initialization unless verbose mode
+    if (process.env.FARM_VERBOSE) {
+      logger.info('Initializing Farm.js application...');
+    }
 
     // Verify app directory structure
     await this.verifyAppStructure();
@@ -27,7 +30,9 @@ export class FarmApp {
     // Discover and register routes
     await this.routeManager.discoverRoutes();
 
-    logger.success('Farm.js application initialized successfully!');
+    if (process.env.FARM_VERBOSE) {
+      logger.success('Farm.js application initialized successfully!');
+    }
   }
 
   getRouteManager(): RouteManager {
