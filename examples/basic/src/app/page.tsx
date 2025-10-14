@@ -3,42 +3,91 @@ import type { PageProps } from 'farm'
 
 export default function HomePage({ params, searchParams }: PageProps) {
   return (
-    <div>
-      <h1>Welcome to Farm.js!</h1>
-      
-      <p>
-        This is a basic example demonstrating the core features of Farm.js, 
-        a modern React meta-framework built on Vite.
-      </p>
+    <div className="space-y-8">
+      <div className="text-center">
+        <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
+          Welcome to Farm.js!
+        </h1>
+        
+        <p className="text-xl text-gray-600 max-w-2xl mx-auto">
+          A modern React meta-framework built on Vite with Next.js-like semantics
+        </p>
+      </div>
 
-      <h2>Features Demonstrated</h2>
-      <ul>
-        <li>✅ File-based routing</li>
-        <li>✅ React Server Components</li>
-        <li>✅ TypeScript support</li>
-        <li>✅ Zero configuration setup</li>
-        <li>✅ Vite-powered development</li>
-      </ul>
+      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <FeatureCard
+          icon="⚡"
+          title="Blazing Fast"
+          description="Built on Vite for instant HMR and lightning-fast builds"
+        />
+        <FeatureCard
+          icon="⚛️"
+          title="React Server Components"
+          description="Full RSC support with streaming SSR"
+        />
+        <FeatureCard
+          icon="🎯"
+          title="Next.js-like API"
+          description="Familiar file-based routing and app directory"
+        />
+        <FeatureCard
+          icon="📦"
+          title="Zero Config"
+          description="Works out of the box with sensible defaults"
+        />
+        <FeatureCard
+          icon="🎨"
+          title="Tailwind CSS"
+          description="Built-in Tailwind support for beautiful UIs"
+        />
+        <FeatureCard
+          icon="🧪"
+          title="Type Safe"
+          description="Full TypeScript support throughout"
+        />
+      </div>
 
-      <h2>Navigation</h2>
-      <p>Try navigating to different pages:</p>
-      <ul>
-        <li><a href="/about">About Page</a></li>
-        <li><a href="/contact">Contact Page</a></li>
-      </ul>
-
-      <div style={{
-        marginTop: '2rem',
-        padding: '1rem',
-        background: '#f8f9fa',
-        borderRadius: '4px',
-        border: '1px solid #dee2e6'
-      }}>
-        <h3>Request Information</h3>
-        <pre style={{ margin: 0, fontSize: '0.875rem' }}>
+      <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">📊 Request Information</h3>
+        <p className="text-sm text-gray-600 mb-3">
+          PageProps received by this component:
+        </p>
+        <pre className="bg-gray-50 p-4 rounded-md text-sm overflow-auto border border-gray-200">
           {JSON.stringify({ params, searchParams }, null, 2)}
         </pre>
+        <p className="text-xs text-gray-500 mt-3">
+          Try adding query params: <a href="/?name=John&framework=Farm.js" className="text-blue-600 hover:underline">/?name=John&framework=Farm.js</a>
+        </p>
       </div>
+
+      <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-6 border border-blue-200">
+        <h3 className="text-lg font-semibold mb-2 text-gray-900">🚀 Quick Links</h3>
+        <div className="flex flex-wrap gap-3">
+          <a href="/about" className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+            About Page
+          </a>
+          <a href="/contact" className="inline-flex items-center px-4 py-2 bg-white text-blue-600 border border-blue-600 rounded-md hover:bg-blue-50 transition-colors">
+            Contact
+          </a>
+          <a href="/users/123?tab=profile" className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
+            Dynamic Route Demo
+          </a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FeatureCard({ icon, title, description }: {
+  icon: string
+  title: string
+  description: string
+}) {
+  return (
+    <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg transition-shadow">
+      <div className="text-4xl mb-3">{icon}</div>
+      <h3 className="text-lg font-semibold mb-2 text-gray-900">{title}</h3>
+      <p className="text-sm text-gray-600">{description}</p>
     </div>
   )
 }

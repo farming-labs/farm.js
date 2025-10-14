@@ -6,18 +6,16 @@ export default function UserPage({ params, searchParams }: PageProps) {
   const { tab } = searchParams
   
   return (
-    <div>
-      <h1>User Profile: {id}</h1>
-      
-      <p style={{ color: '#666', marginBottom: '2rem' }}>
-        This is a dynamic route example showing how params and searchParams work.
-      </p>
+    <div className="max-w-5xl mx-auto space-y-8">
+      <div>
+        <h1 className="text-4xl font-bold text-gray-900 mb-2">User Profile: {id}</h1>
+        
+        <p className="text-gray-600">
+          This is a dynamic route example showing how params and searchParams work.
+        </p>
+      </div>
 
-      <div style={{
-        display: 'grid',
-        gap: '1.5rem',
-        marginBottom: '2rem'
-      }}>
+      <div className="grid md:grid-cols-2 gap-6">
         <InfoCard 
           title="Dynamic Route Params" 
           description="These come from the URL path segments like [id]"
@@ -33,49 +31,52 @@ export default function UserPage({ params, searchParams }: PageProps) {
         />
       </div>
 
-      <div style={{
-        padding: '1.5rem',
-        background: '#f0f9ff',
-        borderRadius: '0.5rem',
-        border: '1px solid #bae6fd'
-      }}>
-        <h3 style={{ marginTop: 0 }}>💡 How to Use PageProps</h3>
-        <div style={{ fontSize: '0.9rem', lineHeight: '1.6' }}>
-          <p><strong>1. Import the type:</strong></p>
-          <pre style={{ background: '#fff', padding: '0.5rem', borderRadius: '4px', overflow: 'auto' }}>
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
+        <h3 className="text-xl font-semibold mb-4 text-gray-900">💡 How to Use PageProps</h3>
+        <div className="space-y-4">
+          <div>
+            <p className="font-semibold mb-2">1. Import the type:</p>
+            <pre className="bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200">
 {`import type { PageProps } from 'farm'`}
-          </pre>
+            </pre>
+          </div>
 
-          <p><strong>2. Use in your component:</strong></p>
-          <pre style={{ background: '#fff', padding: '0.5rem', borderRadius: '4px', overflow: 'auto' }}>
+          <div>
+            <p className="font-semibold mb-2">2. Use in your component:</p>
+            <pre className="bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200">
 {`export default function MyPage({ params, searchParams }: PageProps) {
-  const { id } = params          // URL path params
-  const { tab } = searchParams   // Query string params
+  const { id } = params
+  const { tab } = searchParams
   
   return <div>User {id}, Tab: {tab}</div>
 }`}
-          </pre>
+            </pre>
+          </div>
 
-          <p><strong>3. Current values:</strong></p>
-          <ul style={{ marginBottom: 0 }}>
-            <li><code>params.id</code> = "{id}"</li>
-            <li><code>searchParams.tab</code> = "{tab || 'not set'}"</li>
-          </ul>
+          <div>
+            <p className="font-semibold mb-2">3. Current values:</p>
+            <ul className="space-y-1 text-sm">
+              <li><code className="bg-blue-100 px-2 py-1 rounded">params.id</code> = "{id}"</li>
+              <li><code className="bg-blue-100 px-2 py-1 rounded">searchParams.tab</code> = "{tab || 'not set'}"</li>
+            </ul>
+          </div>
         </div>
       </div>
 
-      <div style={{ marginTop: '2rem' }}>
-        <h3>Try These URLs:</h3>
-        <ul style={{ lineHeight: '2' }}>
-          <li><a href="/users/123">/users/123</a></li>
-          <li><a href="/users/456?tab=settings">/users/456?tab=settings</a></li>
-          <li><a href="/users/john-doe?tab=profile&sort=desc">/users/john-doe?tab=profile&sort=desc</a></li>
-        </ul>
+      <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
+        <h3 className="text-lg font-semibold mb-4 text-gray-900">🧪 Try These URLs:</h3>
+        <div className="space-y-2">
+          <UrlDemo href="/users/123" description="Basic dynamic route" />
+          <UrlDemo href="/users/456?tab=settings" description="With search params" />
+          <UrlDemo href="/users/john-doe?tab=profile&sort=desc" description="String ID with multiple params" />
+        </div>
       </div>
 
-      <p style={{ marginTop: '2rem' }}>
-        <a href="/">← Back to Home</a>
-      </p>
+      <div>
+        <a href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+          ← Back to Home
+        </a>
+      </div>
     </div>
   )
 }
@@ -87,36 +88,38 @@ function InfoCard({ title, description, data, example }: {
   example: string
 }) {
   return (
-    <div style={{
-      padding: '1.5rem',
-      background: 'white',
-      borderRadius: '0.5rem',
-      border: '1px solid #e2e8f0',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
-    }}>
-      <h2 style={{ marginTop: 0, color: '#1e293b' }}>{title}</h2>
-      <p style={{ color: '#64748b', marginBottom: '1rem' }}>{description}</p>
+    <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200">
+      <h2 className="text-xl font-semibold mb-2 text-gray-900">{title}</h2>
+      <p className="text-gray-600 text-sm mb-4">{description}</p>
       
-      <div style={{
-        background: '#f8fafc',
-        padding: '1rem',
-        borderRadius: '4px',
-        marginBottom: '1rem'
-      }}>
-        <strong>Current values:</strong>
-        <pre style={{ margin: '0.5rem 0 0 0', fontSize: '0.875rem', color: '#1e293b' }}>
+      <div className="bg-gray-50 p-4 rounded-md mb-4 border border-gray-200">
+        <strong className="text-sm text-gray-700">Current values:</strong>
+        <pre className="mt-2 text-sm text-gray-900 overflow-auto">
           {JSON.stringify(data, null, 2)}
         </pre>
       </div>
       
-      <div style={{
-        padding: '0.75rem',
-        background: '#fef3c7',
-        borderRadius: '4px',
-        fontSize: '0.875rem'
-      }}>
-        <strong>Example:</strong> <code>{example}</code>
+      <div className="bg-yellow-50 p-3 rounded-md border border-yellow-200">
+        <strong className="text-sm text-gray-700">Example:</strong> 
+        <code className="text-sm ml-2 text-gray-900">{example}</code>
       </div>
+    </div>
+  )
+}
+
+function UrlDemo({ href, description }: { href: string; description: string }) {
+  return (
+    <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors">
+      <div>
+        <code className="text-sm font-mono text-blue-600">{href}</code>
+        <p className="text-xs text-gray-500 mt-1">{description}</p>
+      </div>
+      <a 
+        href={href}
+        className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
+      >
+        Visit
+      </a>
     </div>
   )
 }
