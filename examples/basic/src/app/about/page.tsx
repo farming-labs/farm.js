@@ -5,7 +5,7 @@ export default function AboutPage({ params, searchParams }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">About Farm.js</h1>
+        <h1 className="text-4xl font-bold text-gray-900 mb-4">About .js</h1>
         
         <p className="text-lg text-gray-600 leading-relaxed">
           This basic example showcases the fundamental features of Farm.js without 

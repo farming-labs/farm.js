@@ -6,14 +6,13 @@
   "bin": {
     "create-farm-app": "./bin/create-farm-app.js"
   },
-  "files": [
-    "dist",
-    "bin",
-    "templates"
-  ],
+  "files": ["dist", "bin", "templates"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -28,13 +27,7 @@
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   },
-  "keywords": [
-    "farm",
-    "create-app",
-    "react",
-    "vite",
-    "template"
-  ],
+  "keywords": ["farm", "create-app", "react", "vite", "template"],
   "repository": {
     "type": "git",
     "url": "https://github.com/farm-js/farm.js",
@@ -42,4 +35,3 @@
   },
   "license": "MIT"
 }
-

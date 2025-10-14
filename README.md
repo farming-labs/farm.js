@@ -12,8 +12,9 @@ A modern React meta-framework built on Vite with Next.js-like semantics, featuri
 - 🎯 **Next.js-like API**: Familiar file-based routing and app directory structure
 - 🔄 **Server Actions**: Seamless server-client data mutations
 - 📦 **Zero Config**: Works out of the box with sensible defaults
+- 🎨 **Tailwind CSS Built-in**: Pre-configured Tailwind - just use classes!
 - 🧪 **Type Safe**: Full TypeScript support throughout
-- 🎨 **AI-Friendly**: Clean, predictable code structure for AI code generation
+- 🤖 **AI-Friendly**: Clean, predictable code structure for AI code generation
 
 ## 🚀 Quick Start
 
@@ -50,9 +51,17 @@ Create your first page in `src/app/page.tsx`:
 
 ```tsx
 export default function HomePage() {
-  return <h1>Hello from Farm.js!</h1>
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <h1 className="text-5xl font-bold text-blue-600">
+        Hello from Farm.js!
+      </h1>
+    </div>
+  )
 }
 ```
+
+> 💡 **Tailwind CSS is pre-configured!** Just use Tailwind classes - no setup needed. See [TAILWIND_SETUP.md](./TAILWIND_SETUP.md) for details.
 
 Add a root layout in `src/app/layout.tsx`:
 
@@ -91,6 +100,68 @@ my-farm-app/
 ├── package.json
 └── vite.config.ts
 ```
+
+## ⚙️ Configuration
+
+Farm.js supports a powerful configuration system via `farm.config.ts`:
+
+```typescript
+import { defineFarmConfig } from 'farm'
+
+export default defineFarmConfig({
+  // Routing
+  async redirects() {
+    return [
+      { source: '/old', destination: '/new', permanent: true }
+    ]
+  },
+
+  // Custom headers
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [{ key: 'X-Frame-Options', value: 'DENY' }]
+      }
+    ]
+  },
+
+  // Environment variables
+  env: {
+    API_URL: 'https://api.example.com'
+  },
+
+  // Plugins
+  plugins: [/* your plugins */],
+
+  // And much more...
+})
+```
+
+See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
+
+## 🔌 Plugin System
+
+Extend Farm.js with powerful plugins:
+
+```typescript
+import { definePlugin } from 'farm'
+
+export const myPlugin = definePlugin({
+  name: 'my-plugin',
+  
+  async beforeRequest(req, res, context) {
+    // Add custom logic before request processing
+  },
+
+  async transformHTML(html, context) {
+    // Modify HTML output
+    return html
+  }
+})
+```
+
+See [Plugin System Guide](./PLUGIN_SYSTEM.md) for comprehensive documentation.
 
 ## 🎯 Core Concepts
 

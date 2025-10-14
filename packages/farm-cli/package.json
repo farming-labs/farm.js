@@ -6,13 +6,13 @@
   "bin": {
     "farm": "./bin/farm.js"
   },
-  "files": [
-    "dist",
-    "bin"
-  ],
+  "files": ["dist", "bin"],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -26,12 +26,7 @@
     "tsup": "^8.0.1",
     "typescript": "^5.3.3"
   },
-  "keywords": [
-    "farm",
-    "cli",
-    "react",
-    "vite"
-  ],
+  "keywords": ["farm", "cli", "react", "vite"],
   "repository": {
     "type": "git",
     "url": "https://github.com/farm-js/farm.js",
@@ -39,4 +34,3 @@
   },
   "license": "MIT"
 }
-
