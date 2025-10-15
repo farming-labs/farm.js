@@ -14,10 +14,8 @@ export function createLoggerPlugin(): FarmPlugin {
       const url = req.url || '/';
       const host = req.headers.host || 'localhost:3000';
 
-      // Store start time for duration calculation
       (req as any).__farmStartTime = startTime;
 
-      // Format: [ FARM ] [ GET ] http://localhost:3000/about
       const log = [
         pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
         pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
@@ -35,13 +33,11 @@ export function createLoggerPlugin(): FarmPlugin {
       const status = res.statusCode || 200;
       const url = req.url || '/';
 
-      // Color based on status code
       let statusColor = pc.green;
       if (status >= 500) statusColor = pc.red;
       else if (status >= 400) statusColor = pc.yellow;
       else if (status >= 300) statusColor = pc.cyan;
 
-      // Format: [ FARM ] ✅ /about - 200 (45ms)
       const log = [
         pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
         status >= 400 ? pc.red('✗') : pc.green('✓'),
