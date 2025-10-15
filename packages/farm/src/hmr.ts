@@ -45,14 +45,11 @@ export class HMRManager {
       return;
     }
 
-    // Check if page component changed
     if (file.includes('/app/') && (file.endsWith('page.tsx') || file.endsWith('page.ts'))) {
-      // Full reload for page changes
       await this.reloadPage();
       return;
     }
 
-    // Check if layout changed
     if (file.includes('/app/') && (file.endsWith('layout.tsx') || file.endsWith('layout.ts'))) {
       // Full reload for layout changes
       await this.reloadPage();

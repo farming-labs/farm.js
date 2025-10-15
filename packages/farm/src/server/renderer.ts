@@ -94,7 +94,6 @@ export class ServerRenderer {
           '<head>\n  <link rel="stylesheet" href="/src/app/globals.css" />\n  <script type="module" src="/@vite/client"></script>'
         );
         
-        // Inject client script before </body>
         if (!htmlWithAssets.includes('/@farm/client.js')) {
           htmlWithAssets = htmlWithAssets.replace(
             '</body>',

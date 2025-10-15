@@ -14,13 +14,10 @@ export function createEnvPlugin(env: Record<string, string>): FarmPlugin {
         },
       } as any;
     },
-
     configResolved(config, context) {
-      // Set environment variables for runtime
+      console.log('configResolved', config)
       for (const [key, value] of Object.entries(env)) {
-        if (key.startsWith('FARM_') || key.startsWith('PUBLIC_')) {
-          process.env[key] = value;
-        }
+        process.env[key] = value;
       }
     },
   };
