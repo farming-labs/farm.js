@@ -1,9 +1,10 @@
-import type { Plugin, ViteDevServer } from 'vite';
+import type { Plugin, ViteDevServer, HmrContext } from 'vite';
 import type { FarmConfig } from './types';
 import { FarmApp } from './app';
 import { logger } from './utils';
 import { defaultGlobalCSS } from './default-styles';
 import type { PluginManager } from './plugin';
+import { HMRManager } from './hmr';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -15,6 +16,7 @@ export function farmPlugin(
 ): Plugin {
   let farmApp: FarmApp;
   let server: ViteDevServer;
+  let hmrManager: HMRManager;
   const pluginManager: PluginManager | undefined = initialPluginManager;
 
   return {
@@ -49,6 +51,9 @@ export function farmPlugin(
 
       await farmApp.initialize();
 
+      // Initialize HMR manager
+      hmrManager = new HMRManager(server);
+
       // Register middleware directly (not in return function) to ensure it runs early
       if (pm) {
         server.middlewares.use(async (req, res, next) => {
@@ -70,13 +75,28 @@ export function farmPlugin(
             if (res.writableEnded) {
               return;
             }
+
+            // Intercept res.end to call afterResponse hooks before response is fully sent
+            const originalEnd = res.end.bind(res);
+            let afterResponseCalled = false;
+
+            res.end = function(...args: any[]) {
+              if (!afterResponseCalled && pm) {
+                afterResponseCalled = true;
+                // Call afterResponse synchronously before actually ending
+                pm.runHookParallel('afterResponse', req, res).then(() => {
+                  originalEnd(...args);
+                }).catch((err) => {
+                  console.error('Error in afterResponse hook:', err);
+                  originalEnd(...args);
+                });
+              } else {
+                originalEnd(...args);
+              }
+            } as any;
+
             const renderer = farmApp.getServerRenderer();
             await renderer.renderPage(req as any, res as any);
-
-            // Run afterResponse hooks
-            if (pm) {
-              await pm.runHookParallel('afterResponse', req, res);
-            }
           } catch (error) {
             next(error);
           }
@@ -113,6 +133,30 @@ export function farmPlugin(
         source: JSON.stringify(clientManifest, null, 2),
       });
     },
+
+    async handleHotUpdate(ctx: HmrContext) {
+      const { file, server, modules } = ctx;
+
+      if (file.includes('/app/')) {
+        if (file.includes('page.') || file.includes('layout.')) {
+          const shortPath = file.split('/app/')[1] || file;
+          logger.event(`Updated: ${shortPath}`);
+          
+          for (const mod of modules) {
+            server.moduleGraph.invalidateModule(mod);
+          }
+          
+          server.ws.send({
+            type: 'full-reload',
+            path: '*'
+          });
+          
+          return [];
+        }
+      }
+
+      return modules;
+    },
   };
 }
 
@@ -140,7 +184,14 @@ if (document.readyState === 'loading') {
 }
 
 if (import.meta.hot) {
-  import.meta.hot.accept()
+  import.meta.hot.accept(() => {
+    console.log('[Farm.js] Reloading page...')
+    window.location.reload()
+  })
+  
+  import.meta.hot.on('vite:beforeUpdate', () => {
+    console.log('[Farm.js] ⚡ Update detected')
+  })
 }
 `;
 }

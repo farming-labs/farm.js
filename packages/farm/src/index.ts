@@ -4,6 +4,7 @@ export { createFarmApp } from './app';
 export { FarmProvider } from './provider';
 export { definePlugin, PluginManager } from './plugin';
 export { defineFarmConfig, resolveConfig, loadConfig } from './config';
+export { HMRManager } from './hmr';
 export * from './plugins';
 
 export type { FarmPlugin, FarmPluginContext } from './plugin';

@@ -106,17 +106,22 @@ export class PluginManager {
       for (const plugin of plugins) {
         const hook = plugin[hookName];
         if (typeof hook === 'function') {
-          // Check if response is already sent (for beforeRequest)
-          const res = args[1];
-          if (res && res.writableEnded) {
-            return true;
+          // Check if response is already sent (only for beforeRequest)
+          if (hookName === 'beforeRequest') {
+            const res = args[1];
+            if (res && res.writableEnded) {
+              return true;
+            }
           }
 
           await (hook as any).apply(plugin, [...args, this.context]);
 
-          // Check again after plugin execution
-          if (res && res.writableEnded) {
-            return true;
+          // Check again after plugin execution (only for beforeRequest)
+          if (hookName === 'beforeRequest') {
+            const res = args[1];
+            if (res && res.writableEnded) {
+              return true;
+            }
           }
         }
       }

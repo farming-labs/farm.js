@@ -89,12 +89,21 @@ export class ServerRenderer {
       const html = renderToString(element);
 
       if (html.includes('<html') && html.includes('</html>')) {
-        const htmlWithCSS = html.replace(
+        let htmlWithAssets = html.replace(
           '<head>',
-          '<head>\n  <link rel="stylesheet" href="/src/app/globals.css" />'
+          '<head>\n  <link rel="stylesheet" href="/src/app/globals.css" />\n  <script type="module" src="/@vite/client"></script>'
         );
+        
+        // Inject client script before </body>
+        if (!htmlWithAssets.includes('/@farm/client.js')) {
+          htmlWithAssets = htmlWithAssets.replace(
+            '</body>',
+            '  <script type="module" src="/@farm/client.js"></script>\n</body>'
+          );
+        }
+        
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.write(htmlWithCSS);
+        res.write(htmlWithAssets);
         res.end();
       } else {
         const fullHTML = this.createFullHTML(html);
@@ -141,6 +150,7 @@ export class ServerRenderer {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Farm.js App</title>
   <link rel="stylesheet" href="/src/app/globals.css" />
+  <script type="module" src="/@vite/client"></script>
 </head>
 <body class="">
   <div id="root">${content}</div>
