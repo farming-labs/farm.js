@@ -221,6 +221,28 @@ export function farmPlugin(
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;
       if (file.includes('/app/')) {
+        // Auto-generate types when API routes change
+        if (file.includes('/api/') && file.includes('/route.')) {
+          const shortPath = file.split('/app/')[1] || file;
+          logger.event(`API route updated: ${shortPath} - regenerating types...`);
+          
+          // Dynamically regenerate API types
+          try {
+            const { APITypeGenerator } = await import('./type-generator.js');
+            const { join } = await import('path');
+            const { fileURLToPath } = await import('url');
+            
+            const appDir = file.substring(0, file.indexOf('/app/') + 4);
+            const outputPath = join(appDir, '../lib/api.generated.ts');
+            
+            const generator = new APITypeGenerator(appDir);
+            generator.generateAPIIndex(outputPath);
+            logger.success('✅ API types regenerated!');
+          } catch (error) {
+            logger.warn(`Failed to regenerate API types: ${error}`);
+          }
+        }
+        
         if (file.includes('page.') || file.includes('layout.')) {
           const shortPath = file.split('/app/')[1] || file;
           logger.event(`Updated: ${shortPath}`);

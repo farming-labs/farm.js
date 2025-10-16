@@ -1,3 +1,5 @@
+import { TypedEndpoint } from "..";
+
 export type APIClientOptions = {
   baseURL?: string;
   headers?: Record<string, string>;
@@ -34,12 +36,14 @@ type EndpointMethod<T = any> = (
 
 // Type for converting router structure to client structure
 type RouterToClient<T> = {
-  [K in keyof T]: T[K] extends { get: any; post: any; put?: any; delete?: any; patch?: any }
+  [K in keyof T]: T[K] extends { get: TypedEndpoint<any, any, any>; post: TypedEndpoint<any, any, any>; put?: TypedEndpoint<any, any, any>; delete?: TypedEndpoint<any, any, any>; patch?: TypedEndpoint<any, any, any> }
     ? {
         [M in keyof T[K]]: M extends 'get' | 'post' | 'put' | 'delete' | 'patch'
           ? EndpointMethod<T[K][M]>
           : never;
       }
+    : T[K] extends Record<string, any>
+    ? RouterToClient<T[K]>  // Recurssive handling of the multi level api routes 
     : EndpointMethod<T[K]>;
 };
 
