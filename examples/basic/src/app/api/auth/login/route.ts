@@ -12,7 +12,6 @@ export const POST = createEndpoint('/api/auth/login', {
 }, async (ctx) => {
   const { email, password } = ctx.body;
   
-  // Simulate authentication
   if (password === 'password123') {
     return {
       success: true,
