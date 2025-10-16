@@ -4,11 +4,11 @@
  * Generated at: 2025-10-16T11:39:55.558Z
  */
 
-import { GET as GET_auth_login } from '../api/auth/login/route';
-import { POST as POST_auth_login } from '../api/auth/login/route';
-import { GET as GET_hello } from '../api/hello/route';
-import { GET as GET_users } from '../api/users/route';
-import { POST as POST_users } from './users/route';
+import { GET as GET_auth_login } from '../app/api/auth/login/route';
+import { POST as POST_auth_login } from '../app/api/auth/login/route';
+import { GET as GET_hello } from '../app/api/hello/route';
+import { GET as GET_users } from '../app/api/users/route';
+import { POST as POST_users } from '../app/api/users/route';
 
 // Export all endpoints with their paths for better-call router
 export const api = {

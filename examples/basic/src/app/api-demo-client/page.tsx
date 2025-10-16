@@ -17,7 +17,6 @@ export default function APIClientDemo() {
        const data = await api.hello.post({
             body: { name: 'something' }
       });
-      console.log("Result from api client: " , {data})
       setHelloResponse(data);
     } catch (err) {
       setError('Failed to fetch hello endpoint: ' + err);
@@ -48,9 +47,9 @@ export default function APIClientDemo() {
     setLoading('login');
     setError(null);
     try {
-      // Nested API call: api.auth.login.post()
       const data = await api.auth.login.post({
         body: {
+            hint: "login post",
             email: "test@example.com",
             password: "password123"
         } 

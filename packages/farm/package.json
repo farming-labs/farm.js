@@ -44,8 +44,8 @@
     "vite.js"
   ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
     "lint": "biome lint .",
@@ -74,7 +74,7 @@
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitest/coverage-v8": "^1.1.0",
-    "tsup": "^8.0.1",
+    "tsdown": "^0.15.7",
     "typescript": "^5.3.3",
     "vitest": "^1.1.0"
   },
