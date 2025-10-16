@@ -6,7 +6,7 @@ export default function HomePage({ params, searchParams }: PageProps) {
     <div className="space-y-8">
       <div className="text-center">
         <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
-          Welcome to Farm.js!
+          Welcome to Farm.js 0.0.1
         </h1>
         
         <p className="text-xl text-gray-600 max-w-2xl mx-auto">
@@ -45,6 +45,12 @@ export default function HomePage({ params, searchParams }: PageProps) {
           title="Type Safe"
           description="Full TypeScript support throughout"
         />
+        <FeatureCard
+          icon="🚀"
+          title="API Routes"
+          description="Type-safe API endpoints with better-call"
+          href="/api-demo"
+        />
       </div>
 
       <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
@@ -72,23 +78,44 @@ export default function HomePage({ params, searchParams }: PageProps) {
           <a href="/users/123?tab=profile" className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
             Dynamic Route Demo
           </a>
+          <a href="/api-demo" className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
+            API Demo (Server)
+          </a>
+          <a href="/api-demo-client" className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors">
+            API Demo (Client)
+          </a>
         </div>
       </div>
     </div>
   )
 }
 
-function FeatureCard({ icon, title, description }: {
+function FeatureCard({ icon, title, description, href }: {
   icon: string
   title: string
   description: string
+  href?: string
 }) {
-  return (
-    <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg transition-shadow">
+  const content = (
+    <>
       <div className="text-4xl mb-3">{icon}</div>
       <h3 className="text-lg font-semibold mb-2 text-gray-900">{title}</h3>
       <p className="text-sm text-gray-600">{description}</p>
+    </>
+  );
+
+  if (href) {
+    return (
+      <a href={href} className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg hover:border-blue-400 transition-all block">
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg transition-shadow">
+      {content}
     </div>
-  )
+  );
 }
 

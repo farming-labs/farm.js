@@ -1,14 +1,16 @@
 import React from 'react'
-import type { PageProps } from 'farm'
-
-export default function ContactPage({ params, searchParams }: PageProps) {
+export default async function ContactPage() {
+  console.log("hello world") 
+  // Only access process.env on server side
+  const envVars = typeof process !== 'undefined' ? process.env : {};
+  console.log({envVars})
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
         <h1 className="text-4xl font-bold text-gray-900 mb-4">Contact Us</h1>
         
         <p className="text-lg text-gray-600">
-          Get in touch with the Farm.js team or community.
+           Get in touch h the Farm.js team or community.
         </p>
       </div>
 
@@ -48,9 +50,9 @@ export default function ContactPage({ params, searchParams }: PageProps) {
         <p className="text-sm text-gray-600 mb-4">
           This is a <strong>static route</strong> (no dynamic segments like [id]), so:
         </p>
-        <pre className="bg-gray-50 p-4 rounded-md text-sm overflow-auto border border-gray-200">
+        {/* <pre className="bg-gray-50 p-4 rounded-md text-sm overflow-auto border border-gray-200">
           {JSON.stringify({ params, searchParams }, null, 2)}
-        </pre>
+        </pre> */}
         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm">
           <strong>💡 Note:</strong> <code className="bg-yellow-100 px-1.5 py-0.5 rounded">params</code> is empty because this route has no 
           dynamic segments like [id]. Try adding query params: 

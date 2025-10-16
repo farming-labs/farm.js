@@ -1,5 +1,5 @@
 import { defineFarmConfig } from 'farm';
-import { createLoggerPlugin} from 'farm/plugin/server';
+import { createLoggerPlugin , createEnvPlugin } from 'farm/plugin/server';
 import type { FarmPlugin } from 'farm/plugin/server';
 
 const myCustomPlugin: FarmPlugin = {
@@ -114,7 +114,11 @@ export default defineFarmConfig({
   plugins: [
     myCustomPlugin,
     createLoggerPlugin(),
-  ],
+    createEnvPlugin({
+        FARM_API_URL: 'https://api.example-to-something.com',
+        API_URL: 'https://api.example.com',
+    })
+],
 
   // Vite configuration
   vite: {
