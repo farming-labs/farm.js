@@ -37,7 +37,12 @@
       "require": "./dist/client-plugins.js"
     }
   },
-  "files": ["dist", "client.js", "server.js", "vite.js"],
+  "files": [
+    "dist",
+    "client.js",
+    "server.js",
+    "vite.js"
+  ],
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -50,32 +55,42 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-server-dom-webpack": "^18.3.0-canary-670c8dfb8-20231204",
-    "vite": "^5.0.10",
     "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.16",
+    "better-call": "^1.0.19",
     "esbuild": "^0.19.11",
     "fast-glob": "^3.3.2",
     "picocolors": "^1.0.0",
+    "postcss": "^8.4.32",
+    "react": "19.0.0-rc.1",
+    "react-dom": "19.0.0-rc.1",
+    "react-server-dom-webpack": "^18.3.0-canary-670c8dfb8-20231204",
     "sirv": "^2.0.4",
     "tailwindcss": "^3.4.0",
-    "autoprefixer": "^10.4.16",
-    "postcss": "^8.4.32"
+    "vite": "^5.0.10",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
+    "@vitest/coverage-v8": "^1.1.0",
     "tsup": "^8.0.1",
     "typescript": "^5.3.3",
-    "vitest": "^1.1.0",
-    "@vitest/coverage-v8": "^1.1.0"
+    "vitest": "^1.1.0"
   },
   "peerDependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
-  "keywords": ["react", "vite", "framework", "rsc", "server-components", "ssr", "farm"],
+  "keywords": [
+    "react",
+    "vite",
+    "framework",
+    "rsc",
+    "server-components",
+    "ssr",
+    "farm"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/farm-js/farm.js",

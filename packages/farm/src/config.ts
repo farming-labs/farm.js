@@ -175,7 +175,7 @@ export async function loadConfig(
 
       // Add timestamp to avoid caching during dev
       const moduleUrl = `file://${absolutePath}?t=${Date.now()}`;
-      const config = await import(moduleUrl);
+      const config = await import(/* @vite-ignore */ moduleUrl);
 
       return config.default || config;
     } catch (error) {

@@ -1,8 +1,9 @@
 import React from 'react';
-import { renderToString } from 'react-dom/server';
+import { renderToPipeableStream } from 'react-dom/server';
 import type { FarmConfig, FarmRequest, FarmResponse, PageProps } from '../types';
 import type { RouteManager } from '../routing/route-manager';
 import { logger } from '../utils';
+import { Writable } from 'stream';
 
 export class ServerRenderer {
   private config: Required<FarmConfig>;
@@ -54,6 +55,20 @@ export class ServerRenderer {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
       }
 
+      // Check if this is a client component by reading the file content
+      let isClientComponent = false;
+      try {
+        const fs = await import('fs');
+        const content = fs.readFileSync(route.modulePath, 'utf-8');
+        isClientComponent = content.trimStart().startsWith("'use client'") || content.trimStart().startsWith('"use client"');
+      } catch (error) {
+        isClientComponent = false;
+      }
+
+      (req as any).__FARM_PAGE_PATH__ = route.modulePath;
+      (req as any).__FARM_ROUTE__ = pathname;
+      (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
+
       // Load layout modules
       const layoutModules = await Promise.all(
         layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath))
@@ -85,35 +100,74 @@ export class ServerRenderer {
     req: FarmRequest,
     res: FarmResponse
   ): Promise<void> {
-    try {
-      const html = renderToString(element);
+    return new Promise((resolve, reject) => {
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
 
-      if (html.includes('<html') && html.includes('</html>')) {
-        let htmlWithAssets = html.replace(
-          '<head>',
-          '<head>\n  <link rel="stylesheet" href="/src/app/globals.css" />\n  <script type="module" src="/@vite/client"></script>'
-        );
-        
-        if (!htmlWithAssets.includes('/@farm/client.js')) {
-          htmlWithAssets = htmlWithAssets.replace(
-            '</body>',
-            '  <script type="module" src="/@farm/client.js"></script>\n</body>'
-          );
-        }
-        
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.write(htmlWithAssets);
-        res.end();
-      } else {
-        const fullHTML = this.createFullHTML(html);
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.write(fullHTML);
-        res.end();
-      }
-    } catch (error) {
-      logger.error(`SSR rendering error: ${error}`);
-      throw error;
-    }
+      const htmlParts: string[] = [];
+      let didError = false;
+
+      // Get the page path for client-side hydration
+      const pagePath = (req as any).__FARM_PAGE_PATH__;
+      const relativePath = pagePath ? pagePath.substring(pagePath.indexOf('/src/app/')) : '/src/app/page.tsx';
+
+      // Inject page props and component path for client-side hydration
+      const propsScript = `<script>
+window.__FARM_PROPS__ = ${JSON.stringify((req as any).__FARM_PROPS__ || {})};
+window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || '/')};
+window.__FARM_PAGE_PATH__ = ${JSON.stringify(relativePath)};
+</script>`;
+
+      const { pipe, abort } = renderToPipeableStream(element, {
+        onShellReady() {
+          // Send HTML opening tags
+          res.write(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Farm.js App</title>
+  <link rel="stylesheet" href="/src/app/globals.css" />
+  <script type="module" src="/@vite/client"></script>
+  ${propsScript}
+</head>
+<body class="">
+  <div id="root">`);
+
+          // Pipe the React content
+          const writableStream = new Writable({
+            write(chunk, encoding, callback) {
+              res.write(chunk, encoding);
+              callback();
+            },
+            final(callback) {
+              // Close the root div and conditionally add client hydration script
+              const isClientComponent = (req as any).__FARM_IS_CLIENT_COMPONENT__;
+              const clientScript = isClientComponent ? 
+                `  <script type="module" src="/@farm/client.js"></script>` : '';
+              
+              res.write(`</div>
+${clientScript}
+</body>
+</html>`);
+              res.end();
+              callback();
+              resolve();
+            },
+          });
+
+          pipe(writableStream);
+        },
+        onShellError(error) {
+          didError = true;
+          logger.error(`SSR shell error: ${error}`);
+          reject(error);
+        },
+        onError(error) {
+          didError = true;
+          logger.error(`SSR streaming error: ${error}`);
+        },
+      });
+    });
   }
 
   private async render404(req: FarmRequest, res: FarmResponse): Promise<void> {
@@ -141,7 +195,10 @@ export class ServerRenderer {
     res.end();
   }
 
-  private createFullHTML(content: string): string {
+  private createFullHTML(content: string, isClientComponent: boolean = false): string {
+    const clientScript = isClientComponent ? 
+      `  <script type="module" src="/@farm/client.js"></script>` : '';
+    
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -153,7 +210,7 @@ export class ServerRenderer {
 </head>
 <body class="">
   <div id="root">${content}</div>
-  <script type="module" src="/@farm/client.js"></script>
+${clientScript}
 </body>
 </html>`;
   }

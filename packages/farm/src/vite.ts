@@ -5,6 +5,7 @@ import { logger } from './utils';
 import { defaultGlobalCSS } from './default-styles';
 import type { PluginManager } from './plugin';
 import { HMRManager } from './hmr';
+import { APIRouteManager } from './api/route-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -17,6 +18,7 @@ export function farmPlugin(
   let farmApp: FarmApp;
   let server: ViteDevServer;
   let hmrManager: HMRManager;
+  let apiRouteManager: APIRouteManager;
   const pluginManager: PluginManager | undefined = initialPluginManager;
 
   return {
@@ -54,9 +56,71 @@ export function farmPlugin(
       // Initialize HMR manager
       hmrManager = new HMRManager(server);
 
+      // Initialize API route manager
+      const appDir = path.join(server.config.root, 'src/app');
+      apiRouteManager = new APIRouteManager(appDir, server);
+      await apiRouteManager.discoverRoutes();
+
       // Register middleware directly (not in return function) to ensure it runs early
       if (pm) {
         server.middlewares.use(async (req, res, next) => {
+
+          // Handle API routes first
+          if (req.url?.startsWith('/api/')) {
+            const apiHandler = apiRouteManager.getHandler();
+            if (apiHandler) {
+              try {
+                // Convert Node.js request to Web Request
+                const url = `http://${req.headers.host || 'localhost:3000'}${req.url}`;
+                const headers = new Headers();
+                for (const [key, value] of Object.entries(req.headers)) {
+                  if (value) {
+                    headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+                  }
+                }
+
+                // Get body for POST/PUT/PATCH
+                let body: string | undefined;
+                if (req.method !== 'GET' && req.method !== 'HEAD') {
+                  body = await new Promise<string>((resolve) => {
+                    let data = '';
+                    req.on('data', (chunk) => {
+                      data += chunk;
+                    });
+                    req.on('end', () => {
+                      resolve(data);
+                    });
+                  });
+                }
+
+                const request = new Request(url, {
+                  method: req.method,
+                  headers,
+                  body: body || undefined,
+                });
+
+                // Call better-call handler
+                const response = await apiHandler(request);
+
+                // Send response
+                res.statusCode = response.status;
+                response.headers.forEach((value, key) => {
+                  res.setHeader(key, value);
+                });
+
+                const responseBody = await response.text();
+                res.end(responseBody);
+                return;
+              } catch (error) {
+                logger.error(`API route error: ${error}`);
+                res.statusCode = 500;
+                res.setHeader('Content-Type', 'application/json');
+                res.end(JSON.stringify({ error: 'Internal server error' }));
+                return;
+              }
+            }
+          }
+
           // Skip internal Vite requests
           if (
             req.url?.startsWith('/@') ||
@@ -95,6 +159,9 @@ export function farmPlugin(
               }
             } as any;
 
+            // Store props on request for hydration
+            (req as any).__FARM_PROPS__ = {};
+
             const renderer = farmApp.getServerRenderer();
             await renderer.renderPage(req as any, res as any);
           } catch (error) {
@@ -105,7 +172,7 @@ export function farmPlugin(
     },
 
     resolveId(id) {
-      if (id === '/@farm/client') {
+      if (id === '/@farm/client' || id === '/@farm/client.js') {
         return id;
       }
 
@@ -115,7 +182,7 @@ export function farmPlugin(
     },
 
     load(id) {
-      if (id === '/@farm/client') {
+      if (id === '/@farm/client' || id === '/@farm/client.js') {
         return generateClientCode();
       }
 
@@ -124,9 +191,26 @@ export function farmPlugin(
       }
     },
 
+    transform(code, id) {
+      if (code.trimStart().startsWith("'use client'") || code.trimStart().startsWith('"use client"')) {
+        const moduleInfo = this.getModuleInfo(id);
+        if (moduleInfo) {
+          (moduleInfo as any).isClientComponent = true;
+        }
+        
+        // Store client component for later injection
+        if (!farmApp) return;
+        
+        const clientComponents = (farmApp as any).__clientComponents__ || new Set();
+        clientComponents.add(id);
+        (farmApp as any).__clientComponents__ = clientComponents;
+      }
+      
+      return null;
+    },
+
     generateBundle(options, bundle) {
       const clientManifest = generateClientManifest(bundle);
-
       this.emitFile({
         type: 'asset',
         fileName: 'farm-client-manifest.json',
@@ -136,7 +220,6 @@ export function farmPlugin(
 
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;
-
       if (file.includes('/app/')) {
         if (file.includes('page.') || file.includes('layout.')) {
           const shortPath = file.split('/app/')[1] || file;
@@ -169,12 +252,54 @@ async function hydrate() {
   const container = document.getElementById('root')
   
   if (!container) {
-    console.error('Root container not found')
+    console.error('[Farm.js] Root container not found')
     return
   }
 
-  const App = () => React.createElement('div', { dangerouslySetInnerHTML: { __html: container.innerHTML } })
-  hydrateRoot(container, React.createElement(App))
+  try {
+    const fullPath = window.__FARM_PAGE_PATH__
+    
+    if (!fullPath) {
+      console.error('[Farm.js] No page path found')
+      return
+    }
+
+    const relativePath = fullPath.includes('/src/app/') 
+      ? fullPath.substring(fullPath.indexOf('/src/app/'))
+      : fullPath;
+
+    // First, try to fetch the raw file content to check if it's a client component
+    let isClientComponent = false;
+    try {
+      const response = await fetch(relativePath);
+      const content = await response.text();
+      isClientComponent = content.trimStart().startsWith("'use client'") || 
+                         content.trimStart().startsWith('"use client"');
+    } catch (error) {
+      console.log('[Farm.js] Could not check client component status, assuming server component')
+      return
+    }
+
+    if (!isClientComponent) {
+      console.log('[Farm.js] Skipping hydration for server component:', relativePath)
+      return
+    }
+
+    const pageModule = await import(/* @vite-ignore */ relativePath)
+    const PageComponent = pageModule.default
+    
+    if (!PageComponent) {
+      console.error('[Farm.js] No default export found in', relativePath)
+      return
+    }
+
+    const props = window.__FARM_PROPS__ || {}
+    
+    hydrateRoot(container, React.createElement(PageComponent, props))
+    console.log('[Farm.js] ✅ Hydrated client component:', relativePath)
+  } catch (error) {
+    console.error('[Farm.js] Hydration error:', error)
+  }
 }
 
 if (document.readyState === 'loading') {
@@ -185,7 +310,6 @@ if (document.readyState === 'loading') {
 
 if (import.meta.hot) {
   import.meta.hot.accept(() => {
-    console.log('[Farm.js] Reloading page...')
     window.location.reload()
   })
   

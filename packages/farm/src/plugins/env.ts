@@ -15,7 +15,6 @@ export function createEnvPlugin(env: Record<string, string>): FarmPlugin {
       } as any;
     },
     configResolved(config, context) {
-      console.log('configResolved', config)
       for (const [key, value] of Object.entries(env)) {
         process.env[key] = value;
       }

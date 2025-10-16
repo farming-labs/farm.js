@@ -51,11 +51,9 @@ export class HMRManager {
     }
 
     if (file.includes('/app/') && (file.endsWith('layout.tsx') || file.endsWith('layout.ts'))) {
-      // Full reload for layout changes
       await this.reloadPage();
       return;
     }
-
     // Send update for other files
     this.send({
       type: 'update',

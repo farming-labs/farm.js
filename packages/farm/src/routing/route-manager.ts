@@ -125,7 +125,7 @@ export class RouteManager {
         const module = await this.viteServer.ssrLoadModule(modulePath);
         return module as RouteModule;
       } else {
-        const module = await import(modulePath);
+        const module = await import(/* @vite-ignore */ modulePath);
         return module as RouteModule;
       }
     } catch (error) {
@@ -143,7 +143,7 @@ export class RouteManager {
         const module = await this.viteServer.ssrLoadModule(modulePath);
         return module as LayoutModule;
       } else {
-        const module = await import(modulePath);
+        const module = await import(/* @vite-ignore */ modulePath);
         return module as LayoutModule;
       }
     } catch (error) {
