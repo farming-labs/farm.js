@@ -35,6 +35,26 @@
       "types": "./dist/client-plugins.d.ts",
       "import": "./dist/client-plugins.mjs",
       "require": "./dist/client-plugins.js"
+    },
+    "./query": {
+      "types": "./dist/query/index.d.ts",
+      "import": "./dist/query/index.mjs",
+      "require": "./dist/query/index.js"
+    },
+    "./query/parsers": {
+      "types": "./dist/query/parsers.d.ts",
+      "import": "./dist/query/parsers.mjs",
+      "require": "./dist/query/parsers.js"
+    },
+    "./query/client": {
+      "types": "./dist/query/client.d.ts",
+      "import": "./dist/query/client.mjs",
+      "require": "./dist/query/client.js"
+    },
+    "./query/server": {
+      "types": "./dist/query/server.d.ts",
+      "import": "./dist/query/server.mjs",
+      "require": "./dist/query/server.js"
     }
   },
   "files": [

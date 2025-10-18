@@ -27,24 +27,10 @@ export class ServerRenderer {
         return;
       }
 
-      // Parse search params
-      const searchParams: Record<string, string | string[]> = {};
-      for (const [key, value] of url.searchParams.entries()) {
-        if (key in searchParams) {
-          const existing = searchParams[key];
-          if (Array.isArray(existing)) {
-            existing.push(value);
-          } else {
-            searchParams[key] = [existing, value];
-          }
-        } else {
-          searchParams[key] = value;
-        }
-      }
-      // Create page props
+      // Create page props with URLSearchParams
       const pageProps: PageProps = {
         params,
-        searchParams,
+        searchParams: Promise.resolve(url.searchParams),
         path: pathname,
       };
 

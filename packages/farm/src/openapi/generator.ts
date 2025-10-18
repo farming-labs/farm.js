@@ -324,7 +324,6 @@ export class OpenAPIGenerator {
       // Check for Farm.js endpoint format: handler.__types.body
       if (handler && handler.__types && handler.__types.body) {
         const bodySchema = handler.__types.body;
-        console.log(`Found body schema for ${route.path} ${method}:`, bodySchema);
         
         if (bodySchema instanceof z.ZodObject || bodySchema instanceof z.ZodOptional) {
           const shape = (bodySchema as any).shape || (bodySchema as any)._def?.innerType?.shape;
@@ -359,7 +358,6 @@ export class OpenAPIGenerator {
       // Fallback: Check for better-call format: handler._type.body
       if (handler && handler._type && handler._type.body) {
         const bodySchema = handler._type.body;
-        console.log(`Found better-call body schema for ${route.path} ${method}:`, bodySchema);
         
         if (bodySchema instanceof z.ZodObject || bodySchema instanceof z.ZodOptional) {
           const shape = (bodySchema as any).shape || (bodySchema as any)._def?.innerType?.shape;
@@ -397,7 +395,6 @@ export class OpenAPIGenerator {
     }
 
     // Fallback to generic schema
-    console.log(`Using fallback schema for ${route.path} ${method}`);
     return {
       required: true,
       content: {
@@ -428,7 +425,6 @@ export class OpenAPIGenerator {
       // Check for Farm.js endpoint format: handler.__types.query
       if (handler && handler.__types && handler.__types.query) {
         const querySchema = handler.__types.query;
-        console.log(`Found query schema for ${route.path} ${method}:`, querySchema);
         
         if (querySchema instanceof z.ZodObject) {
           Object.entries((querySchema as any).shape).forEach(([key, value]) => {
@@ -447,9 +443,8 @@ export class OpenAPIGenerator {
       // Fallback: Check for better-call format: handler._type.query
       if (handler && handler._type && handler._type.query) {
         const querySchema = handler._type.query;
-        console.log(`Found better-call query schema for ${route.path} ${method}:`, querySchema);
         
-        if (querySchema instanceof z.ZodObject) {
+        if (queryShema instanceof z.ZodObject) {
           Object.entries((querySchema as any).shape).forEach(([key, value]) => {
             if (value instanceof z.ZodType) {
               parameters.push({

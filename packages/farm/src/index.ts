@@ -9,7 +9,7 @@ export * from './plugins';
 export * from './api';
 export { APITypeGenerator } from './type-generator';
 export * from './openapi';
-
+export * from './query';
 export type { FarmPlugin, FarmPluginContext } from './plugin';
 export type {
   FarmUserConfig,

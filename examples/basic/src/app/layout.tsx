@@ -26,6 +26,27 @@ export default function RootLayout({ children }: LayoutProps) {
             <a href="/users/123" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               User Demo
             </a>
+            <a href="/query-state-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Query State
+            </a>
+            <a href="/query-test" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Query Test
+            </a>
+            <a href="/farm-query-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Farm Query
+            </a>
+            <a href="/farm-query-client-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Farm Client
+            </a>
+            <a href="/api-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Demo
+            </a>
+            <a href="/api-demo-client" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Client
+            </a>
+            <a href="/docs/reference" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Docs
+            </a>
           </div>
         </div>
       </nav>

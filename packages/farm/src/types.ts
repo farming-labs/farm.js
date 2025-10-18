@@ -12,12 +12,12 @@ export interface FarmConfig {
   };
   vite?: any;
 }
+
 export interface PageProps {
   params: Record<string, string>;
-  searchParams: Record<string, string | string[] | undefined>;
-  path: string;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  path: string
 }
-
 export interface LayoutProps {
   children: ReactNode;
   params: Record<string, string>;
