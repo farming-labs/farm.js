@@ -55,6 +55,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@scalar/api-reference": "^1.38.1",
+    "@scalar/openapi-parser": "^0.22.3",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "better-call": "^1.0.19",

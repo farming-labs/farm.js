@@ -36,6 +36,27 @@ export interface I18nConfig {
   localeDetection?: boolean;
 }
 
+export interface OpenAPIConfig {
+  enabled?: boolean;
+  route?: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  servers?: Array<{
+    url: string;
+    description?: string;
+  }>;
+  contact?: {
+    name?: string;
+    email?: string;
+    url?: string;
+  };
+  license?: {
+    name: string;
+    url?: string;
+  };
+}
+
 export interface MiddlewareConfig {
   matcher?: string | string[];
 }
@@ -52,6 +73,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, 'vite'> {
   publicDir?: string;
 
   i18n?: I18nConfig;
+  openapi?: OpenAPIConfig;
 
   middleware?: MiddlewareConfig;
 
@@ -135,6 +157,15 @@ export async function resolveConfig(
     },
     publicDir: userConfig.publicDir || 'public',
     i18n: userConfig.i18n,
+    openapi: {
+      enabled: false,
+      route: '/docs/reference',
+      title: 'API Documentation',
+      description: 'Auto-generated API documentation',
+      version: '1.0.0',
+      servers: [{ url: 'http://localhost:3000', description: 'Development server' }],
+      ...userConfig.openapi,
+    },
     middleware: userConfig.middleware || {},
     output: userConfig.output || 'standalone',
     distDir: userConfig.distDir || '.farm',

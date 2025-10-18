@@ -6,6 +6,7 @@ import { defaultGlobalCSS } from './default-styles';
 import type { PluginManager } from './plugin';
 import { HMRManager } from './hmr';
 import { APIRouteManager } from './api/route-manager';
+import { OpenAPIManager } from './openapi/manager';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -19,6 +20,7 @@ export function farmPlugin(
   let server: ViteDevServer;
   let hmrManager: HMRManager;
   let apiRouteManager: APIRouteManager;
+  let openAPIManager: OpenAPIManager | null = null;
   const pluginManager: PluginManager | undefined = initialPluginManager;
 
   return {
@@ -61,9 +63,22 @@ export function farmPlugin(
       apiRouteManager = new APIRouteManager(appDir, server);
       await apiRouteManager.discoverRoutes();
 
+      // Initialize OpenAPI manager if enabled
+      if (options.openapi?.enabled) {
+        openAPIManager = new OpenAPIManager(appDir, options.openapi);
+        await openAPIManager.generateSpec();
+        logger.success('✅ OpenAPI documentation enabled');
+      }
+
       // Register middleware directly (not in return function) to ensure it runs early
       if (pm) {
         server.middlewares.use(async (req, res, next) => {
+
+          // Handle OpenAPI docs route
+          if (openAPIManager && req.url === options.openapi?.route) {
+            const docsHandler = openAPIManager.getDocsRouteHandler();
+            return docsHandler(req, res);
+          }
 
           // Handle API routes first
           if (req.url?.startsWith('/api/')) {
@@ -238,6 +253,12 @@ export function farmPlugin(
             const generator = new APITypeGenerator(appDir);
             generator.generateAPIIndex(outputPath);
             logger.success('✅ API types regenerated!');
+
+            // Regenerate OpenAPI spec if enabled
+            if (openAPIManager) {
+              await openAPIManager.invalidateCache();
+              logger.success('✅ OpenAPI spec regenerated!');
+            }
           } catch (error) {
             logger.warn(`Failed to regenerate API types: ${error}`);
           }

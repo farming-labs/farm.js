@@ -110,6 +110,27 @@ export default defineFarmConfig({
     ignoreBuildErrors: false,
   },
 
+  // OpenAPI Documentation
+  openapi: {
+    enabled: true,
+    route: '/docs/reference',
+    title: 'Farm.js API Documentation',
+    description: 'Auto-generated API documentation for Farm.js endpoints',
+    version: '1.0.0',
+    servers: [
+      { url: 'http://localhost:3000', description: 'Development server' }
+    ],
+    contact: {
+      name: 'Farm.js Team',
+      email: 'hello@farmjs.dev',
+      url: 'https://farmjs.dev'
+    },
+    license: {
+      name: 'MIT',
+      url: 'https://opensource.org/licenses/MIT'
+    }
+  },
+
   // Plugins
   plugins: [
     myCustomPlugin,

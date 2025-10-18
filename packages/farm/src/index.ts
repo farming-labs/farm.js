@@ -8,6 +8,7 @@ export { HMRManager } from './hmr';
 export * from './plugins';
 export * from './api';
 export { APITypeGenerator } from './type-generator';
+export * from './openapi';
 
 export type { FarmPlugin, FarmPluginContext } from './plugin';
 export type {
@@ -18,6 +19,7 @@ export type {
   RewriteConfig,
   ImageConfig,
   I18nConfig,
+  OpenAPIConfig,
   MiddlewareConfig,
 } from './config';
 

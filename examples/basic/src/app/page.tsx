@@ -84,6 +84,9 @@ export default function HomePage({ params, searchParams }: PageProps) {
           <a href="/api-demo-client" className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors">
             API Demo (Client)
           </a>
+          <a href="/docs/reference" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+            📚 API Documentation
+          </a>
         </div>
       </div>
     </div>
