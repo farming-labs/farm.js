@@ -1,5 +1,6 @@
 import type { OpenAPIConfig } from '../config';
 import type { APIRouteInfo } from '../type-generator';
+import * as z from 'zod';
 
 export interface OpenAPISpec {
   openapi: string;
@@ -24,8 +25,12 @@ export interface OpenAPISpec {
   paths: Record<string, any>;
   components?: {
     schemas?: Record<string, any>;
+    securitySchemes?: Record<string, any>;
   };
 }
+
+type AllowedType = 'string' | 'number' | 'boolean' | 'array' | 'object';
+const allowedType = new Set(['string', 'number', 'boolean', 'array', 'object']);
 
 export class OpenAPIGenerator {
   private config: OpenAPIConfig;
@@ -37,9 +42,204 @@ export class OpenAPIGenerator {
   }
 
   /**
+   * Get type from Zod type
+   */
+  private getTypeFromZodType(zodType: z.ZodType<any>): AllowedType {
+    const typeName = (zodType as any)._def?.typeName;
+    if (typeName) {
+      if (typeName === 'ZodString') return 'string';
+      if (typeName === 'ZodNumber') return 'number';
+      if (typeName === 'ZodBoolean') return 'boolean';
+      if (typeName === 'ZodArray') return 'array';
+      if (typeName === 'ZodObject') return 'object';
+    }
+    return 'string';
+  }
+
+  /**
+   * Process Zod type to OpenAPI schema
+   */
+  private processZodType(zodType: z.ZodType<any>): any {
+    // Handle ZodOptional
+    if (zodType instanceof z.ZodOptional) {
+      const innerType = (zodType as any)._def.innerType;
+      const innerSchema = this.processZodType(innerType);
+      return {
+        ...innerSchema,
+        nullable: true,
+      };
+    }
+
+    // Handle ZodObject
+    if (zodType instanceof z.ZodObject) {
+      const shape = (zodType as any).shape;
+      if (shape) {
+        const properties: Record<string, any> = {};
+        const required: string[] = [];
+        Object.entries(shape).forEach(([key, value]) => {
+          if (value instanceof z.ZodType) {
+            properties[key] = this.processZodType(value as z.ZodType<any>);
+            if (!(value instanceof z.ZodOptional)) {
+              required.push(key);
+            }
+          }
+        });
+        return {
+          type: 'object',
+          properties,
+          ...(required.length > 0 ? { required } : {}),
+          description: (zodType as any).description,
+        };
+      }
+    }
+
+    // Handle ZodArray
+    if (zodType instanceof z.ZodArray) {
+      const itemType = (zodType as any)._def.type;
+      return {
+        type: 'array',
+        items: this.processZodType(itemType),
+        description: (zodType as any).description,
+      };
+    }
+
+    // Handle ZodEnum
+    if (zodType instanceof z.ZodEnum) {
+      return {
+        type: 'string',
+        enum: (zodType as any)._def.values,
+        description: (zodType as any).description,
+      };
+    }
+
+    // For primitive types
+    const baseSchema: any = {
+      type: this.getTypeFromZodType(zodType),
+      description: (zodType as any).description,
+    };
+
+    // Add constraints if available
+    if ('minLength' in zodType && (zodType as any).minLength) {
+      baseSchema.minLength = (zodType as any).minLength;
+    }
+    if ('maxLength' in zodType && (zodType as any).maxLength) {
+      baseSchema.maxLength = (zodType as any).maxLength;
+    }
+    if ('min' in zodType && (zodType as any).min !== undefined) {
+      baseSchema.minimum = (zodType as any).min;
+    }
+    if ('max' in zodType && (zodType as any).max !== undefined) {
+      baseSchema.maximum = (zodType as any).max;
+    }
+
+    return baseSchema;
+  }
+
+  /**
+   * Generate standard error responses
+   */
+  private getStandardResponses(): Record<string, any> {
+    return {
+      '200': {
+        description: 'Successful response',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              description: 'Response data'
+            }
+          }
+        }
+      },
+      '400': {
+        description: 'Bad Request. Usually due to missing parameters, or invalid parameters.',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                message: { type: 'string' },
+                error: { type: 'string' }
+              },
+              required: ['message']
+            }
+          }
+        }
+      },
+      '401': {
+        description: 'Unauthorized. Due to missing or invalid authentication.',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                message: { type: 'string' }
+              },
+              required: ['message']
+            }
+          }
+        }
+      },
+      '403': {
+        description: 'Forbidden. You do not have permission to access this resource or to perform this action.',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                message: { type: 'string' }
+              }
+            }
+          }
+        }
+      },
+      '404': {
+        description: 'Not Found. The requested resource was not found.',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                message: { type: 'string' }
+              }
+            }
+          }
+        }
+      },
+      '429': {
+        description: 'Too Many Requests. You have exceeded the rate limit. Try again later.',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                message: { type: 'string' }
+              }
+            }
+          }
+        }
+      },
+      '500': {
+        description: 'Internal Server Error. This is a problem with the server that you cannot fix.',
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              properties: {
+                message: { type: 'string' },
+                error: { type: 'string' }
+              }
+            }
+          }
+        }
+      }
+    };
+  }
+
+  /**
    * Generate OpenAPI spec from API routes
    */
-  generateSpec(routes: APIRouteInfo[]): OpenAPISpec {
+  async generateSpec(routes: APIRouteInfo[]): Promise<OpenAPISpec> {
     const spec: OpenAPISpec = {
       openapi: '3.0.3',
       info: {
@@ -54,7 +254,20 @@ export class OpenAPIGenerator {
       ],
       paths: {},
       components: {
-        schemas: {}
+        schemas: {},
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            description: 'Bearer token authentication'
+          },
+          apiKeyCookie: {
+            type: 'apiKey',
+            in: 'cookie',
+            name: 'session',
+            description: 'API Key authentication via cookie'
+          }
+        }
       }
     };
 
@@ -76,7 +289,7 @@ export class OpenAPIGenerator {
       for (const route of routeList) {
         for (const method of route.methods) {
           const methodLower = method.toLowerCase();
-          spec.paths[openAPIPath][methodLower] = this.generateOperation(route, method);
+          spec.paths[openAPIPath][methodLower] = await this.generateOperation(route, method);
         }
       }
     }
@@ -93,83 +306,194 @@ export class OpenAPIGenerator {
   }
 
   /**
+   * Extract request body schema from endpoint
+   */
+  private async getRequestBody(route: APIRouteInfo, method: string): Promise<any> {
+    if (!['POST', 'PUT', 'PATCH'].includes(method)) {
+      return undefined;
+    }
+
+    try {
+      // Try to dynamically load the route module
+      const modulePath = route.filePath;
+      const routeModule = await import(/* @vite-ignore */ modulePath);
+      
+      // Get the method handler (GET, POST, etc.)
+      const handler = routeModule[method];
+      
+      // Check for Farm.js endpoint format: handler.__types.body
+      if (handler && handler.__types && handler.__types.body) {
+        const bodySchema = handler.__types.body;
+        console.log(`Found body schema for ${route.path} ${method}:`, bodySchema);
+        
+        if (bodySchema instanceof z.ZodObject || bodySchema instanceof z.ZodOptional) {
+          const shape = (bodySchema as any).shape || (bodySchema as any)._def?.innerType?.shape;
+          if (shape) {
+            const properties: Record<string, any> = {};
+            const required: string[] = [];
+            
+            Object.entries(shape).forEach(([key, value]) => {
+              if (value instanceof z.ZodType) {
+                properties[key] = this.processZodType(value as z.ZodType<any>);
+                if (!(value instanceof z.ZodOptional)) {
+                  required.push(key);
+                }
+              }
+            });
+            return {
+              required: bodySchema instanceof z.ZodOptional ? false : true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties,
+                    ...(required.length > 0 ? { required } : {})
+                  }
+                }
+              }
+            };
+          }
+        }
+      }
+      
+      // Fallback: Check for better-call format: handler._type.body
+      if (handler && handler._type && handler._type.body) {
+        const bodySchema = handler._type.body;
+        console.log(`Found better-call body schema for ${route.path} ${method}:`, bodySchema);
+        
+        if (bodySchema instanceof z.ZodObject || bodySchema instanceof z.ZodOptional) {
+          const shape = (bodySchema as any).shape || (bodySchema as any)._def?.innerType?.shape;
+          if (shape) {
+            const properties: Record<string, any> = {};
+            const required: string[] = [];
+            
+            Object.entries(shape).forEach(([key, value]) => {
+              if (value instanceof z.ZodType) {
+                properties[key] = this.processZodType(value as z.ZodType<any>);
+                if (!(value instanceof z.ZodOptional)) {
+                  required.push(key);
+                }
+              }
+            });
+
+            return {
+              required: bodySchema instanceof z.ZodOptional ? false : true,
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties,
+                    ...(required.length > 0 ? { required } : {})
+                  }
+                }
+              }
+            };
+          }
+        }
+      }
+    } catch (error) {
+      // If we can't load the module, return generic schema
+      console.warn(`Could not extract schema from ${route.filePath}:`, error);
+    }
+
+    // Fallback to generic schema
+    console.log(`Using fallback schema for ${route.path} ${method}`);
+    return {
+      required: true,
+      content: {
+        'application/json': {
+          schema: {
+            type: 'object',
+            description: 'Request body'
+          }
+        }
+      }
+    };
+  }
+
+  /**
+   * Extract query parameters from endpoint
+   */
+  private async getParameters(route: APIRouteInfo, method: string): Promise<any[]> {
+    const parameters: any[] = [];
+
+    try {
+      // Try to dynamically load the route module
+      const modulePath = route.filePath;
+      const routeModule = await import(/* @vite-ignore */ modulePath);
+      
+      // Get the method handler
+      const handler = routeModule[method];
+      
+      // Check for Farm.js endpoint format: handler.__types.query
+      if (handler && handler.__types && handler.__types.query) {
+        const querySchema = handler.__types.query;
+        console.log(`Found query schema for ${route.path} ${method}:`, querySchema);
+        
+        if (querySchema instanceof z.ZodObject) {
+          Object.entries((querySchema as any).shape).forEach(([key, value]) => {
+            if (value instanceof z.ZodType) {
+              parameters.push({
+                name: key,
+                in: 'query',
+                required: !(value instanceof z.ZodOptional),
+                schema: this.processZodType(value as z.ZodType<any>)
+              });
+            }
+          });
+        }
+      }
+      
+      // Fallback: Check for better-call format: handler._type.query
+      if (handler && handler._type && handler._type.query) {
+        const querySchema = handler._type.query;
+        console.log(`Found better-call query schema for ${route.path} ${method}:`, querySchema);
+        
+        if (querySchema instanceof z.ZodObject) {
+          Object.entries((querySchema as any).shape).forEach(([key, value]) => {
+            if (value instanceof z.ZodType) {
+              parameters.push({
+                name: key,
+                in: 'query',
+                required: !(value instanceof z.ZodOptional),
+                schema: this.processZodType(value as z.ZodType<any>)
+              });
+            }
+          });
+        }
+      }
+    } catch (error) {
+      console.warn(`Could not extract query params from ${route.filePath}:`, error);
+    }
+
+    return parameters;
+  }
+
+  /**
    * Generate OpenAPI operation from route info
    */
-  private generateOperation(route: APIRouteInfo, method: string): any {
+  private async generateOperation(route: APIRouteInfo, method: string): Promise<any> {
     const operation: any = {
       summary: this.generateSummary(route.path, method),
       description: this.generateDescription(route.path, method),
       operationId: this.generateOperationId(route.path, method),
       tags: this.generateTags(route.path),
-      responses: {
-        '200': {
-          description: 'Successful response',
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                description: 'Response data'
-              }
-            }
-          }
-        },
-        '400': {
-          description: 'Bad Request',
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  error: { type: 'string' }
-                }
-              }
-            }
-          }
-        },
-        '500': {
-          description: 'Internal Server Error',
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  error: { type: 'string' }
-                }
-              }
-            }
-          }
-        }
-      }
+      security: [
+        { bearerAuth: [] },
+        { apiKeyCookie: [] }
+      ],
+      responses: this.getStandardResponses()
     };
+
+    // Add query parameters
+    const parameters = await this.getParameters(route, method);
+    if (parameters.length > 0) {
+      operation.parameters = parameters;
+    }
 
     // Add request body for POST, PUT, PATCH
     if (['POST', 'PUT', 'PATCH'].includes(method)) {
-      operation.requestBody = {
-        required: true,
-        content: {
-          'application/json': {
-            schema: {
-              type: 'object',
-              description: 'Request body'
-            }
-          }
-        }
-      };
-    }
-
-    // Add query parameters for GET requests
-    if (method === 'GET') {
-      operation.parameters = [
-        {
-          name: 'query',
-          in: 'query',
-          required: false,
-          schema: {
-            type: 'object',
-            description: 'Query parameters'
-          }
-        }
-      ];
+      operation.requestBody = await this.getRequestBody(route, method);
     }
 
     return operation;

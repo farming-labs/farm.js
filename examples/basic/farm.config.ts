@@ -118,7 +118,7 @@ export default defineFarmConfig({
     description: 'Auto-generated API documentation for Farm.js endpoints',
     version: '1.0.0',
     servers: [
-      { url: 'http://localhost:3000', description: 'Development server' }
+      { url: 'http://localhost:3000/api', description: 'Development server' }
     ],
     contact: {
       name: 'Farm.js Team',

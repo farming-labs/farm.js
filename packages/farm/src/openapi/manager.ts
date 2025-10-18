@@ -25,8 +25,8 @@ export class OpenAPIManager {
       // Get API routes using the existing type generator
       const routes = await this.apiTypeGenerator.scanAPIRoutes(`${this.appDir}/api`);
       
-      // Generate OpenAPI spec
-      const spec = this.generator.generateSpec(routes);
+      // Generate OpenAPI spec (now async)
+      const spec = await this.generator.generateSpec(routes);
       
       // Cache the spec
       this.specCache = spec;
