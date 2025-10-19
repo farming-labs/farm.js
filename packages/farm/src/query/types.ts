@@ -12,7 +12,7 @@ import type { ComponentType, ReactNode } from 'react';
 /**
  * Props for Farm.js layout components
  */
-export interface LayoutProps {
+export interface LayoutPropsSafe {
   children: ReactNode;
   params: Record<string, string>;
 }
