@@ -9,6 +9,7 @@ import {
   type SearchParams
 } from 'farm/query/server';
 
+
 // Server Component - demonstrates Farm.js server-side query state
 async function FarmServerQueryDemo({ searchParams }: PagePropsSafe) {
   const params = await loadSearchParams(searchParams, {
@@ -290,6 +291,9 @@ export default async function FarmQueryDemoPage(props: PageProps) {
             Type-safe URL search parameter state management using Farm.js query utilities
           </p>
         </div>
+
+        {/* Middleware Data Demo */}
+        <MiddlewareDataDemo middleware={props.middleware} />
 
         {/* Server Component Demo */}
         <FarmServerQueryDemo {...props} />

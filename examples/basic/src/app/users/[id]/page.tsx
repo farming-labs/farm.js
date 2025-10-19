@@ -1,9 +1,12 @@
 import React from 'react'
 import type { PageProps } from 'farm'
 
-export default function UserPage({ params, searchParams }: PageProps) {
+export default async function UserPage({ params, searchParams }: PageProps) {
   const { id } = params
-  const { tab } = searchParams
+  
+  // searchParams is a Promise, need to await it!
+  const search = await searchParams
+  const tab = search?.tab as string | undefined
   
   return (
     <div className="max-w-5xl mx-auto space-y-8">
@@ -26,7 +29,7 @@ export default function UserPage({ params, searchParams }: PageProps) {
         <InfoCard 
           title="Search/Query Params" 
           description="These come from the query string (?key=value)"
-          data={searchParams}
+          data={search || {}}
           example="/users/123?tab=profile&sort=asc → { tab: 'profile', sort: 'asc' }"
         />
       </div>
@@ -44,9 +47,10 @@ export default function UserPage({ params, searchParams }: PageProps) {
           <div>
             <p className="font-semibold mb-2">2. Use in your component:</p>
             <pre className="bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200">
-{`export default function MyPage({ params, searchParams }: PageProps) {
+{`export default async function MyPage({ params, searchParams }: PageProps) {
   const { id } = params
-  const { tab } = searchParams
+  const search = await searchParams  // searchParams is a Promise!
+  const tab = search?.tab
   
   return <div>User {id}, Tab: {tab}</div>
 }`}

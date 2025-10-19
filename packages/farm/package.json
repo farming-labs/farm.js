@@ -55,6 +55,11 @@
       "types": "./dist/query/server.d.ts",
       "import": "./dist/query/server.mjs",
       "require": "./dist/query/server.js"
+    },
+    "./middleware": {
+      "types": "./dist/middleware.d.ts",
+      "import": "./dist/middleware.mjs",
+      "require": "./dist/middleware.js"
     }
   },
   "files": [

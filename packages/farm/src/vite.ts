@@ -7,10 +7,14 @@ import type { PluginManager } from './plugin';
 import { HMRManager } from './hmr';
 import { APIRouteManager } from './api/route-manager';
 import { OpenAPIManager } from './openapi/manager';
+import { MiddlewareManager } from './middleware/manager';
 import * as fs from 'fs';
 import * as path from 'path';
+import type { FarmUserConfig } from './config';
 
-interface FarmVitePluginOptions extends FarmConfig {}
+interface FarmVitePluginOptions extends FarmConfig {
+  openapi?: FarmUserConfig['openapi'];
+}
 
 export function farmPlugin(
   options: FarmVitePluginOptions = {},
@@ -21,6 +25,7 @@ export function farmPlugin(
   let hmrManager: HMRManager;
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
+  let middlewareManager: MiddlewareManager;
   const pluginManager: PluginManager | undefined = initialPluginManager;
 
   return {
@@ -62,6 +67,9 @@ export function farmPlugin(
       const appDir = path.join(server.config.root, 'src/app');
       apiRouteManager = new APIRouteManager(appDir, server);
       await apiRouteManager.discoverRoutes();
+
+      middlewareManager = new MiddlewareManager(appDir, server);
+      await middlewareManager.discover();
 
       // Initialize OpenAPI manager if enabled
       if (options.openapi?.enabled) {
@@ -146,6 +154,13 @@ export function farmPlugin(
           }
 
           try {
+            if (middlewareManager) {
+              const handled = await middlewareManager.execute(req, res);
+              if (handled) {
+                return; // Middleware handled the response
+              }
+            }
+
             // Run beforeRequest hooks
             if (pm) {
               await pm.runHookParallel('beforeRequest', req, res);
@@ -236,6 +251,16 @@ export function farmPlugin(
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;
       if (file.includes('/app/')) {
+        // Hot reload middleware changes
+        if (file.includes('middleware.')) {
+          if (middlewareManager) {
+            await middlewareManager.reload();
+            logger.success('✅ Middleware reloaded!');
+          }
+          
+          return [];
+        }
+
         // Auto-generate types when API routes change
         if (file.includes('/api/') && file.includes('/route.')) {
           const shortPath = file.split('/app/')[1] || file;

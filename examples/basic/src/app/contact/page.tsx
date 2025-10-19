@@ -1,14 +1,25 @@
+import { getMiddlewareData, getMiddlewareValue } from 'farm/middleware'
 import React from 'react'
-export default async function ContactPage() {
-  console.log("hello world") 
-  // Only access process.env on server side
-  const envVars = typeof process !== 'undefined' ? process.env : {};
-  console.log({envVars})
+import type { PageProps } from 'farm'
+
+export default function ContactPage(props: PageProps) {
+  const middlewareData = props.middleware?.data;
+  const demoInfoFromProps = middlewareData?.get('demoInfo');
+  
+  const data = getMiddlewareData<{ demoInfo: { message: string } }>();
+  const demoInfoFromHelper = data.get('demoInfo');
+  
+  const demoInfoDirect = getMiddlewareValue('demoInfo');
+  console.log('📊 Contact page middleware data:', {
+    fromProps: demoInfoFromProps,
+    fromHelper: demoInfoFromHelper,
+    fromDirect: demoInfoDirect,
+  }); 
+  const allDataMatches = JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) && 
+                         JSON.stringify(demoInfoFromHelper) === JSON.stringify(demoInfoDirect); 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">Contact Us</h1>
-        
         <p className="text-lg text-gray-600">
            Get in touch h the Farm.js team or community.
         </p>

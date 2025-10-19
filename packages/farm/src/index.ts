@@ -10,7 +10,9 @@ export * from './api';
 export { APITypeGenerator } from './type-generator';
 export * from './openapi';
 export * from './query';
+export * from './middleware';
 export type { FarmPlugin, FarmPluginContext } from './plugin';
+export type { MiddlewareProps, PagePropsWithMiddleware } from './types';
 export type {
   FarmUserConfig,
   ResolvedFarmConfig,

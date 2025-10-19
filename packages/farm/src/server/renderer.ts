@@ -4,6 +4,7 @@ import type { FarmConfig, FarmRequest, FarmResponse, PageProps } from '../types'
 import type { RouteManager } from '../routing/route-manager';
 import { logger } from '../utils';
 import { Writable } from 'stream';
+import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from '../middleware/server';
 
 export class ServerRenderer {
   private config: Required<FarmConfig>;
@@ -27,11 +28,30 @@ export class ServerRenderer {
         return;
       }
 
-      // Create page props with URLSearchParams
+      const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
+      const middlewareMap = new Map(Object.entries(middlewareData));
+
+      const searchParamsObject: Record<string, string | string[] | undefined> = {};
+      url.searchParams.forEach((value, key) => {
+        const existing = searchParamsObject[key];
+        if (existing) {
+          // If key already exists, convert to array
+          if (Array.isArray(existing)) {
+            existing.push(value);
+          } else {
+            searchParamsObject[key] = [existing, value];
+          }
+        } else {
+          searchParamsObject[key] = value;
+        }
+      });
+
+      // Create page props with searchParams as plain object and middleware data
       const pageProps: PageProps = {
         params,
-        searchParams: Promise.resolve(url.searchParams),
+        searchParams: Promise.resolve(searchParamsObject),
         path: pathname,
+        middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
       };
 
       // Load route module
@@ -60,21 +80,30 @@ export class ServerRenderer {
         layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath))
       );
 
-      // Create component tree
-      const PageComponent = routeModule.default;
-      const pageElement = React.createElement(PageComponent, pageProps);
+      // Get middleware data for AsyncLocalStorage
+      const middlewareDataForContext = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
+      
+      // Wrap the ENTIRE rendering in AsyncLocalStorage context
+      // This ensures the data is available across ALL module instances
+      await _runWithMiddlewareData(middlewareDataForContext, async () => {
+        // Create component tree
+        const PageComponent = routeModule.default;
+        const pageElement = React.createElement(PageComponent, pageProps);
 
-      // Wrap with layouts (innermost to outermost)
-      let wrappedElement: React.ReactElement = pageElement;
-      for (let i = layoutModules.length - 1; i >= 0; i--) {
-        const layoutModule = layoutModules[i];
-        const LayoutComponent = layoutModule.default;
-        wrappedElement = React.createElement(LayoutComponent, {
-          children: wrappedElement,
-          params,
-        } as any);
-      }
-      await this.renderWithSSR(wrappedElement, req, res);
+        // Wrap with layouts (innermost to outermost)
+        let wrappedElement: React.ReactElement = pageElement;
+        for (let i = layoutModules.length - 1; i >= 0; i--) {
+          const layoutModule = layoutModules[i];
+          const LayoutComponent = layoutModule.default;
+          wrappedElement = React.createElement(LayoutComponent, {
+            children: wrappedElement,
+            params,
+          } as any);
+        }
+        
+        // Render with middleware data available
+        await this.renderWithSSR(wrappedElement, req, res, _clearCurrentMiddlewareData);
+      });
     } catch (error) {
       logger.error(`Error rendering page: ${error}`);
       await this.render500(req, res, error);
@@ -84,7 +113,8 @@ export class ServerRenderer {
   private async renderWithSSR(
     element: React.ReactElement,
     req: FarmRequest,
-    res: FarmResponse
+    res: FarmResponse,
+    clearMiddlewareData?: () => void
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -137,6 +167,12 @@ ${clientScript}
 </html>`);
               res.end();
               callback();
+              
+              // Clear middleware data AFTER rendering completes
+              if (clearMiddlewareData) {
+                clearMiddlewareData();
+              }
+              
               resolve();
             },
           });
@@ -146,6 +182,11 @@ ${clientScript}
         onShellError(error) {
           didError = true;
           logger.error(`SSR shell error: ${error}`);
+          
+          if (clearMiddlewareData) {
+            clearMiddlewareData();
+          }
+          
           reject(error);
         },
         onError(error) {

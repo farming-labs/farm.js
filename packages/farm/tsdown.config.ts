@@ -13,6 +13,7 @@ export default defineConfig([
       'query/parsers': 'src/query/parsers.ts',
       'query/client': 'src/query/client.ts',
       'query/server': 'src/query/server.ts',
+      middleware: 'src/middleware/index.ts',
     },
     format: ['cjs', 'esm'],
     dts: true,
