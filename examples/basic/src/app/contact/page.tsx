@@ -5,25 +5,23 @@ import { GET as helloGet } from "../api/hello/route"
 export default async function ContactPage(props: PageProps) {
   const middlewareData = props.middleware?.data;
   const demoInfoFromProps = middlewareData?.get('demoInfo');
-  
+
   const data = getMiddlewareData<{ demoInfo: { message: string } }>();
   const demoInfoFromHelper = data.get('demoInfo');
-  
+
   const demoInfoDirect = getMiddlewareValue('demoInfo');
   console.log('📊 Contact page middleware data:', {
     fromProps: demoInfoFromProps,
     fromHelper: demoInfoFromHelper,
     fromDirect: demoInfoDirect,
-  }); 
-  const allDataMatches = JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) && 
-                         JSON.stringify(demoInfoFromHelper) === JSON.stringify(demoInfoDirect); 
-  const r = await helloGet({ query: { name: 'world' } }) 
-  console.log({r})
-                         return (
+  });
+  const allDataMatches = JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) &&
+    JSON.stringify(demoInfoFromHelper) === JSON.stringify(demoInfoDirect);
+  return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
         <p className="text-lg text-gray-600">
-           Get in touch h the Farm.js team or community.
+          Get in touch h the Farm.js team or community.
         </p>
       </div>
 
@@ -34,14 +32,14 @@ export default async function ContactPage(props: PageProps) {
           link="https://github.com/farm-js/farm.js"
           icon="📦"
         />
-        
+
         <ContactCard
           title="Documentation"
           description="Learn more about Farm.js features and API"
           link="https://farm.js.dev"
           icon="📚"
         />
-        
+
         <ContactCard
           title="Community"
           description="Join discussions and get help from the community"
@@ -53,7 +51,7 @@ export default async function ContactPage(props: PageProps) {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-2 text-gray-900">💡 Pro Tip</h3>
         <p className="text-gray-700">
-          This page demonstrates how easy it is to create new routes in Farm.js. 
+          This page demonstrates how easy it is to create new routes in Farm.js.
           Just add a <code className="bg-blue-100 px-2 py-1 rounded">page.tsx</code> file in a new directory!
         </p>
       </div>
@@ -67,8 +65,8 @@ export default async function ContactPage(props: PageProps) {
           {JSON.stringify({ params, searchParams }, null, 2)}
         </pre> */}
         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm">
-          <strong>💡 Note:</strong> <code className="bg-yellow-100 px-1.5 py-0.5 rounded">params</code> is empty because this route has no 
-          dynamic segments like [id]. Try adding query params: 
+          <strong>💡 Note:</strong> <code className="bg-yellow-100 px-1.5 py-0.5 rounded">params</code> is empty because this route has no
+          dynamic segments like [id]. Try adding query params:
           <a href="/contact?subject=bug&priority=high" className="text-blue-600 hover:underline ml-1">
             /contact?subject=bug&priority=high
           </a>
@@ -95,11 +93,11 @@ function ContactCard({ title, description, link, icon }: {
       <div className="text-3xl mb-3">{icon}</div>
       <h3 className="text-lg font-semibold mb-2 text-gray-900">{title}</h3>
       <p className="text-gray-600 text-sm mb-4">{description}</p>
-      <a 
+      <a
         href={link}
         className="text-blue-600 hover:text-blue-700 font-medium text-sm inline-flex items-center gap-1"
       >
-        Learn more 
+        Learn more
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
         </svg>
