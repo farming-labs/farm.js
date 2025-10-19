@@ -1,8 +1,8 @@
 import { getMiddlewareData, getMiddlewareValue } from 'farm/middleware'
 import React from 'react'
 import type { PageProps } from 'farm'
-
-export default function ContactPage(props: PageProps) {
+import { GET as helloGet } from "../api/hello/route"
+export default async function ContactPage(props: PageProps) {
   const middlewareData = props.middleware?.data;
   const demoInfoFromProps = middlewareData?.get('demoInfo');
   
@@ -17,7 +17,9 @@ export default function ContactPage(props: PageProps) {
   }); 
   const allDataMatches = JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) && 
                          JSON.stringify(demoInfoFromHelper) === JSON.stringify(demoInfoDirect); 
-  return (
+  const r = await helloGet({ query: { name: 'world' } }) 
+  console.log({r})
+                         return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
         <p className="text-lg text-gray-600">
