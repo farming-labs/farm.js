@@ -16,7 +16,6 @@ import {
   useSearchFilters,
 } from 'farm/query/client';
 
-// Custom parser example
 const parseAsColor = createParser({
   parse: (value: string) => {
     const validColors = ['red', 'blue', 'green', 'yellow', 'purple'];
@@ -26,7 +25,6 @@ const parseAsColor = createParser({
 });
 
 function FarmClientQueryDemo() {
-  // Basic useQueryState examples
   const [search, setSearch] = useQueryState('search', parseAsString);
   const [count, setCount] = useQueryState('count', parseAsInteger.withDefault!(0));
   const [price, setPrice] = useQueryState('price', parseAsFloat);

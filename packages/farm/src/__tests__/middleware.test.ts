@@ -5,9 +5,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { middleware } from '../middleware/chain';
 import { createContext } from '../middleware/context';
+import { _setCurrentMiddlewareData, _clearCurrentMiddlewareData, getMiddlewareData, getMiddlewareValue } from '../middleware/server';
 import type { MiddlewareContext } from '../middleware/types';
 import { IncomingMessage, ServerResponse } from 'http';
 import { Socket } from 'net';
+
+async function executeChain(handlers: any[], ctx: MiddlewareContext) {
+  let index = 0;
+  const executeNext = async (): Promise<void> => {
+    if (index < handlers.length && !ctx._handled) {
+      const handler = handlers[index++];
+      await handler(ctx, executeNext);
+    }
+  };
+  await executeNext();
+}
 
 // Helper to create mock request/response
 function createMockRequest(url: string, method: string = 'GET'): IncomingMessage {
@@ -192,7 +204,7 @@ describe('Middleware Chain', () => {
     const req = createMockRequest('/old-path');
     const res = createMockResponse();
     const ctx = createContext(req, res);
-
+    expect(handlers.length).toBe(1)
     let index = 0;
     const executeNext = async (): Promise<void> => {
       if (index < handlers.length && !ctx._handled) {
@@ -217,6 +229,8 @@ describe('Middleware Chain', () => {
     const ctx = createContext(req, res);
 
     let index = 0;
+    expect(handlers.length).toBe(1)
+    expect(ctx.pathname).toBe('/old-url')
     const executeNext = async (): Promise<void> => {
       if (index < handlers.length) {
         const handler = handlers[index++];
@@ -231,12 +245,18 @@ describe('Middleware Chain', () => {
   });
 
   it('should support rate limiting', async () => {
+    const spyFn = vi.fn() 
     const chain = middleware()
       .rateLimit({
         requests: 2,
         window: '1s',
         keyGenerator: (ctx) => 'test-key',
+        onLimit: (ctx) => {
+            console.log({ctx})
+            spyFn(ctx)
+        }
       });
+      
 
     const { handlers } = chain.build();
 
@@ -291,6 +311,7 @@ describe('Middleware Chain', () => {
       };
 
       await executeNext();
+      expect(spyFn).toHaveBeenCalledWith(ctx)
       expect(ctx._handled).toBe(true);
       expect(res.writeHead).toHaveBeenCalledWith(429, expect.objectContaining({
         'Content-Type': 'application/json',
@@ -426,5 +447,709 @@ describe('Pattern Matching', () => {
       expect(executed).toContain('admin-deep');
     }
   });
+
+  it('should match regex patterns in .when()', async () => {
+    const executed: string[] = [];
+    
+    const chain = middleware()
+      .when(
+        (ctx) => /^\/api\/v[0-9]+\/.*/.test(ctx.pathname),
+        async (ctx, next) => {
+          executed.push('versioned-api');
+          await next();
+        }
+      )
+      .when(
+        (ctx) => /\/dashboard$/.test(ctx.pathname),
+        async (ctx, next) => {
+          executed.push('dashboard-exact');
+          await next();
+        }
+      );
+
+    const { handlers } = chain.build();
+
+    // Test versioned API
+    {
+      executed.length = 0;
+      const req = createMockRequest('/api/v1/users');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed).toContain('versioned-api');
+    }
+
+    // Test exact match
+    {
+      executed.length = 0;
+      const req = createMockRequest('/dashboard');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed).toContain('dashboard-exact');
+    }
+  });
+
+  it('should support function-based conditions in .when()', async () => {
+    const executed: string[] = [];
+    
+    const chain = middleware()
+      .when(
+        (ctx) => ctx.method === 'POST',
+        async (ctx, next) => {
+          executed.push('post-only');
+          await next();
+        }
+      )
+      .when(
+        (ctx) => ctx.searchParams.get('debug') === 'true',
+        async (ctx, next) => {
+          executed.push('debug-mode');
+          await next();
+        }
+      );
+
+    const { handlers } = chain.build();
+
+    // Test POST method
+    {
+      const req = createMockRequest('/test', 'POST');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed).toContain('post-only');
+    }
+
+    // Test debug param
+    {
+      executed.length = 0;
+      const req = createMockRequest('/test?debug=true');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed).toContain('debug-mode');
+    }
+  });
+
+  it('should support boolean conditions in .when()', async () => {
+    const executed: string[] = [];
+    
+    const chain = middleware()
+      .when(true, async (ctx, next) => {
+        executed.push('always');
+        await next();
+      })
+      .when(false, async (ctx, next) => {
+        executed.push('never');
+        await next();
+      });
+
+    const { handlers } = chain.build();
+    const req = createMockRequest('/test');
+    const ctx = createContext(req, createMockResponse());
+    
+    await executeChain(handlers, ctx);
+    
+    expect(executed).toEqual(['always']);
+    expect(executed).not.toContain('never');
+  });
+
+  it('should support nested chains in .when()', async () => {
+    const executed: string[] = [];
+    
+    const chain = middleware()
+      .when('/protected', (subChain) => {
+        subChain
+          .use(async (ctx, next) => {
+            executed.push('auth-check');
+            ctx.data.set('authenticated', true);
+            await next();
+          })
+          .use(async (ctx, next) => {
+            executed.push('role-check');
+            await next();
+          });
+      })
+      .use(async (ctx, next) => {
+        executed.push('final');
+        await next();
+      });
+
+    const { handlers } = chain.build();
+
+    // Test matching path
+    const req1 = createMockRequest('/protected');
+    const ctx1 = createContext(req1, createMockResponse());
+    await executeChain(handlers, ctx1);
+    
+    expect(executed).toEqual(['auth-check', 'role-check', 'final']);
+    expect(ctx1.data.get('authenticated')).toBe(true);
+
+    // Test non-matching path
+    executed.length = 0;
+    const req2 = createMockRequest('/other');
+    const ctx2 = createContext(req2, createMockResponse());
+    await executeChain(handlers, ctx2);
+    
+    expect(executed).toEqual(['final']);
+  });
 });
 
+describe('Response Methods', () => {
+  it('should send text responses', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.text('Hello World', 200);
+
+    expect(ctx._handled).toBe(true);
+    expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+      'Content-Type': 'text/plain',
+    }));
+    expect(res.end).toHaveBeenCalledWith('Hello World');
+  });
+
+  it('should send HTML responses', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.html('<h1>Hello</h1>', 200);
+
+    expect(ctx._handled).toBe(true);
+    expect(res.writeHead).toHaveBeenCalledWith(200, expect.objectContaining({
+      'Content-Type': 'text/html',
+    }));
+    expect(res.end).toHaveBeenCalledWith('<h1>Hello</h1>');
+  });
+
+  it('should handle different redirect status codes', () => {
+    // 307 Temporary Redirect
+    {
+      const req = createMockRequest('/test');
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      
+      ctx.redirect('/new', 307);
+      expect(res.writeHead).toHaveBeenCalledWith(307, expect.any(Object));
+    }
+
+    // 308 Permanent Redirect
+    {
+      const req = createMockRequest('/test');
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      
+      ctx.redirect('/new', 308);
+      expect(res.writeHead).toHaveBeenCalledWith(308, expect.any(Object));
+    }
+
+    // 302 Found
+    {
+      const req = createMockRequest('/test');
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      
+      ctx.redirect('/new', 302);
+      expect(res.writeHead).toHaveBeenCalledWith(302, expect.any(Object));
+    }
+  });
+
+  it('should prevent double responses', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+    const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // First response
+    ctx.json({ success: true }, 200);
+    expect(ctx._handled).toBe(true);
+
+    // Try to send another response
+    ctx.text('Should not work', 200);
+    
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('already sent'));
+    consoleSpy.mockRestore();
+  });
+});
+
+describe('Header Management Advanced', () => {
+  it('should handle multiple values for same header key', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.headers.set('X-Custom', 'value1');
+    expect(ctx.headers.get('X-Custom')).toBe('value1');
+    
+    ctx.headers.set('X-Custom', 'value2'); // Should overwrite
+    expect(ctx.headers.get('X-Custom')).toBe('value2');
+  });
+
+  it('should preserve existing headers', () => {
+    const req = createMockRequest('/test');
+    req.headers['existing-header'] = 'existing-value';
+    
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    expect(ctx.headers.get('existing-header')).toBe('existing-value');
+  });
+});
+
+describe('Cookie Management Advanced', () => {
+  it('should handle cookie expiration', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    const expireDate = new Date(Date.now() + 86400000); // 1 day from now
+    ctx.cookies.set('session', 'abc123', {
+      expires: expireDate,
+    });
+
+    const setCookieCall = (res.setHeader as any).mock.calls.find(
+      (call: any[]) => call[0] === 'Set-Cookie'
+    );
+    
+    expect(setCookieCall).toBeDefined();
+    expect(setCookieCall[1][0]).toContain('Expires=');
+  });
+
+  it('should handle all SameSite options', () => {
+    const req = createMockRequest('/test');
+    
+    ['strict', 'lax', 'none'].forEach((sameSite) => {
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+
+      ctx.cookies.set('test', 'value', {
+        sameSite: sameSite as any,
+      });
+
+      const setCookieCall = (res.setHeader as any).mock.calls.find(
+        (call: any[]) => call[0] === 'Set-Cookie'
+      );
+      
+      expect(setCookieCall[1][0]).toContain(`SameSite=${sameSite.charAt(0).toUpperCase() + sameSite.slice(1)}`);
+    });
+  });
+
+  it('should handle cookies with special characters', () => {
+    const req = createMockRequest('/test');
+    req.headers.cookie = 'encoded=hello%20world; special=test%2Bvalue';
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    expect(ctx.cookies.get('encoded')).toBe('hello world');
+    expect(ctx.cookies.get('special')).toBe('test+value');
+  });
+
+  it('should set secure and httpOnly flags', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.cookies.set('secure-cookie', 'value', {
+      secure: true,
+      httpOnly: true,
+    });
+
+    const setCookieCall = (res.setHeader as any).mock.calls.find(
+      (call: any[]) => call[0] === 'Set-Cookie'
+    );
+    
+    expect(setCookieCall[1][0]).toContain('Secure');
+    expect(setCookieCall[1][0]).toContain('HttpOnly');
+  });
+});
+
+describe('Data Storage & Sharing', () => {
+  it('should store and retrieve complex data types', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    const complexData = {
+      user: { id: 1, name: 'John', roles: ['admin', 'user'] },
+      settings: { theme: 'dark', notifications: true },
+      timestamp: Date.now(),
+    };
+
+    ctx.data.set('complexData', complexData);
+    
+    const retrieved = ctx.data.get('complexData');
+    expect(retrieved).toEqual(complexData);
+    expect(retrieved.user.roles).toEqual(['admin', 'user']);
+  });
+
+  it('should handle multiple data keys', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.data.set('key1', 'value1');
+    ctx.data.set('key2', { nested: 'value2' });
+    ctx.data.set('key3', [1, 2, 3]);
+
+    expect(ctx.data.get('key1')).toBe('value1');
+    expect(ctx.data.get('key2')).toEqual({ nested: 'value2' });
+    expect(ctx.data.get('key3')).toEqual([1, 2, 3]);
+  });
+
+  it('should share data across middleware', async () => {
+    const chain = middleware()
+      .use(async (ctx, next) => {
+        ctx.data.set('step1', 'completed');
+        await next();
+      })
+      .use(async (ctx, next) => {
+        const step1 = ctx.data.get('step1');
+        expect(step1).toBe('completed');
+        ctx.data.set('step2', 'completed');
+        await next();
+      })
+      .use(async (ctx, next) => {
+        expect(ctx.data.get('step1')).toBe('completed');
+        expect(ctx.data.get('step2')).toBe('completed');
+        await next();
+      });
+
+    const { handlers } = chain.build();
+    const req = createMockRequest('/test');
+    const ctx = createContext(req, createMockResponse());
+    
+    await executeChain(handlers, ctx);
+  });
+});
+
+describe('Parent Data Access (Cascading)', () => {
+  it('should access parent middleware data', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    
+    const parentData = new Map<string, any>();
+    parentData.set('parentKey', 'parentValue');
+    parentData.set('userId', 123);
+    
+    const parent = {
+      data: parentData,
+      headers: { 'X-Parent': 'true' },
+    };
+    
+    const ctx = createContext(req, res, undefined, parent);
+
+    expect(ctx.parent).toBeDefined();
+    expect(ctx.parent?.data.get('parentKey')).toBe('parentValue');
+    expect(ctx.parent?.data.get('userId')).toBe(123);
+    expect(ctx.parent?.headers['X-Parent']).toBe('true');
+  });
+
+  it('should merge parent data with current data', async () => {
+    const chain = middleware()
+      .use(async (ctx, next) => {
+        if (ctx.parent) {
+          const parentUserId = ctx.parent.data.get('userId');
+          ctx.data.set('hasParent', true);
+          ctx.data.set('inheritedUserId', parentUserId);
+        }
+        
+        ctx.data.set('ownData', 'value');
+        await next();
+      });
+
+    const { handlers } = chain.build();
+    
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    
+    const parentData = new Map<string, any>();
+    parentData.set('userId', 456);
+    
+    const ctx = createContext(req, res, undefined, {
+      data: parentData,
+      headers: {},
+    });
+    
+    await executeChain(handlers, ctx);
+
+    expect(ctx.data.get('hasParent')).toBe(true);
+    expect(ctx.data.get('inheritedUserId')).toBe(456);
+    expect(ctx.data.get('ownData')).toBe('value');
+  });
+});
+
+describe('URL Rewriting', () => {
+  it('should update pathname when rewriting', () => {
+    const req = createMockRequest('/old-path?foo=bar');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    expect(ctx.pathname).toBe('/old-path');
+    
+    ctx.rewrite('/new-path');
+    
+    expect(ctx.pathname).toBe('/new-path');
+    expect(ctx._rewriteUrl).toBe('/new-path');
+    expect(req.url).toBe('/new-path');
+  });
+
+  it('should preserve query params during rewrite', () => {
+    const req = createMockRequest('/old?keep=this');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.rewrite('/new?keep=this');
+    
+    expect(ctx.searchParams.get('keep')).toBe('this');
+  });
+
+  it('should handle multiple rewrites', () => {
+    const req = createMockRequest('/path1');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    ctx.rewrite('/path2');
+    expect(ctx.pathname).toBe('/path2');
+    
+    ctx.rewrite('/path3');
+    expect(ctx.pathname).toBe('/path3');
+    expect(ctx._rewriteUrl).toBe('/path3');
+  });
+});
+
+describe('Middleware Data Access (getMiddlewareData)', () => {
+  it('should retrieve middleware data without props', () => {
+    // Set data
+    _setCurrentMiddlewareData({
+      user: { id: 1, name: 'John' },
+      stats: { views: 100 },
+    });
+    
+    // Test getMiddlewareData()
+    const data = getMiddlewareData();
+    expect(data.get('user')).toEqual({ id: 1, name: 'John' });
+    expect(data.get('stats')).toEqual({ views: 100 });
+    
+    // Test getMiddlewareValue()
+    const user = getMiddlewareValue('user');
+    expect(user).toEqual({ id: 1, name: 'John' });
+    
+    // Clean up
+    _clearCurrentMiddlewareData();
+  });
+
+  it('should return empty map when no data is set', () => {
+    _clearCurrentMiddlewareData();
+    
+    const data = getMiddlewareData();
+    expect(data.size).toBe(0);
+  });
+
+  it('should handle data isolation between requests', () => {
+    // Request 1
+    _setCurrentMiddlewareData({ req1: 'data1' });
+    let data1 = getMiddlewareData();
+    expect(data1.get('req1')).toBe('data1');
+    _clearCurrentMiddlewareData();
+    
+    // Request 2 (should not have req1 data)
+    _setCurrentMiddlewareData({ req2: 'data2' });
+    let data2 = getMiddlewareData();
+    expect(data2.get('req2')).toBe('data2');
+    expect(data2.get('req1')).toBeUndefined();
+    _clearCurrentMiddlewareData();
+  });
+});
+
+describe('Rate Limiting Advanced', () => {
+  it('should handle custom key generators', async () => {
+    const chain = middleware()
+      .rateLimit({
+        requests: 2,
+        window: '1s',
+        keyGenerator: (ctx) => {
+          const userId = ctx.data.get('userId');
+          return userId ? `user_${userId}` : 'anonymous';
+        },
+      });
+
+    const { handlers } = chain.build();
+
+    // User 1 - first request
+    {
+      const req = createMockRequest('/test');
+      const ctx = createContext(req, createMockResponse());
+      ctx.data.set('userId', 'user1');
+      await executeChain(handlers, ctx);
+      expect(ctx._handled).toBe(false);
+    }
+
+    // User 1 - second request (should still work)
+    {
+      const req = createMockRequest('/test');
+      const ctx = createContext(req, createMockResponse());
+      ctx.data.set('userId', 'user1');
+      await executeChain(handlers, ctx);
+      expect(ctx._handled).toBe(false);
+    }
+
+    // User 2 - should have separate limit
+    {
+      const req = createMockRequest('/test');
+      const ctx = createContext(req, createMockResponse());
+      ctx.data.set('userId', 'user2');
+      await executeChain(handlers, ctx);
+      expect(ctx._handled).toBe(false);
+    }
+  });
+
+  it('should call onLimit callback when rate limited', async () => {
+    const onLimitCalled = vi.fn();
+    
+    const chain = middleware()
+      .rateLimit({
+        requests: 1,
+        window: '10s',
+        keyGenerator: () => 'test-onlimit-key',
+        onLimit: async (ctx) => {
+          onLimitCalled();
+        },
+      });
+
+    const { handlers } = chain.build();
+
+    // First request - should pass
+    {
+      const req = createMockRequest('/test');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(ctx._handled).toBe(false);
+      expect(onLimitCalled).not.toHaveBeenCalled();
+    }
+
+    // Second request - should be rate limited
+    {
+      const req = createMockRequest('/test');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(ctx._handled).toBe(true);
+      expect(onLimitCalled).toHaveBeenCalled();
+    }
+  });
+
+  it('should parse different time windows correctly', async () => {
+    const testWindows = [
+      { window: '500ms', expected: 500 },
+      { window: '1s', expected: 1000 },
+      { window: '2m', expected: 120000 },
+      { window: '1h', expected: 3600000 },
+      { window: '1d', expected: 86400000 },
+    ];
+
+    for (const { window } of testWindows) {
+      const chain = middleware().rateLimit({
+        requests: 100,
+        window,
+      });
+
+      const { handlers } = chain.build();
+      expect(handlers.length).toBe(1);
+    }
+  });
+});
+
+describe('Method-specific Middleware', () => {
+  it('should handle different HTTP methods', async () => {
+    const executed: Record<string, boolean> = {};
+    
+    const chain = middleware()
+      .when((ctx) => ctx.method === 'GET', async (ctx, next) => {
+        executed.GET = true;
+        await next();
+      })
+      .when((ctx) => ctx.method === 'POST', async (ctx, next) => {
+        executed.POST = true;
+        await next();
+      })
+      .when((ctx) => ctx.method === 'DELETE', async (ctx, next) => {
+        executed.DELETE = true;
+        await next();
+      });
+
+    const { handlers } = chain.build();
+
+    // Test GET
+    {
+      const req = createMockRequest('/test', 'GET');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed.GET).toBe(true);
+    }
+
+    // Test POST
+    {
+      const req = createMockRequest('/test', 'POST');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed.POST).toBe(true);
+    }
+
+    // Test DELETE
+    {
+      const req = createMockRequest('/test', 'DELETE');
+      const ctx = createContext(req, createMockResponse());
+      await executeChain(handlers, ctx);
+      expect(executed.DELETE).toBe(true);
+    }
+  });
+});
+
+describe('Query Parameter Access', () => {
+  it('should access query parameters via searchParams', () => {
+    const req = createMockRequest('/test?foo=bar&baz=qux&num=123');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    expect(ctx.searchParams.get('foo')).toBe('bar');
+    expect(ctx.searchParams.get('baz')).toBe('qux');
+    expect(ctx.searchParams.get('num')).toBe('123');
+    expect(ctx.searchParams.get('missing')).toBeNull();
+  });
+
+  it('should handle multiple values for same param', () => {
+    const req = createMockRequest('/test?tag=react&tag=typescript&tag=vite');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    const tags = ctx.searchParams.getAll('tag');
+    expect(tags).toEqual(['react', 'typescript', 'vite']);
+  });
+
+  it('should handle URL-encoded query params', () => {
+    const req = createMockRequest('/test?name=John%20Doe&email=test%40example.com');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    expect(ctx.searchParams.get('name')).toBe('John Doe');
+    expect(ctx.searchParams.get('email')).toBe('test@example.com');
+  });
+});
+
+describe('Vite Integration', () => {
+  it('should detect development mode', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    expect(ctx.vite.isDev).toBeDefined();
+    expect(typeof ctx.vite.isDev).toBe('boolean');
+  });
+
+  it('should include vite server in context', () => {
+    const req = createMockRequest('/test');
+    const res = createMockResponse();
+    const mockViteServer = { hot: {} } as any;
+    const ctx = createContext(req, res, mockViteServer);
+
+    expect(ctx.vite.server).toBe(mockViteServer);
+    expect(ctx.vite.hmr).toBe(true);
+  });
+});

@@ -19,11 +19,24 @@ export default middleware()
             message: 'This data wasnt set by middleware!',
             timestamp: new Date().toISOString(),
         });
-
+        // modify the response
+        await ctx.response.writeHead(200, {
+            'Content-Type': 'text/html',
+            'X-Powered-By': 'Farm.js',
+        });
+        // modify the request 
+        await ctx.request
+        await ctx.response.end('Hello World');
         await next();
     })
     .use(authRequest)
     .use(otherCheck)
+    .when("/api" , (ctx , next) => {
+        ctx.json({
+            message: 'Hello World',
+        }, 200);
+        next();
+    })
     .rateLimit({
         requests: 100,           // 100 requests
         window: '1m',            // per minute

@@ -10,14 +10,9 @@ import type {
   RateLimitConfig,
 } from './types';
 
-/**
- * Rate limiting state
- */
+
 const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
 
-/**
- * Parse time window to milliseconds
- */
 function parseTimeWindow(window: string): number {
   const match = window.match(/^(\d+)(ms|s|m|h|d)$/);
   if (!match) throw new Error(`Invalid time window: ${window}`);
@@ -50,7 +45,6 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
     const now = Date.now();
     const record = rateLimitStore.get(key);
 
-    // Clean up expired records
     if (record && now > record.resetAt) {
       rateLimitStore.delete(key);
     }
@@ -58,7 +52,6 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
     const current = rateLimitStore.get(key);
 
     if (!current) {
-      // First request in window
       rateLimitStore.set(key, {
         count: 1,
         resetAt: now + windowMs,
@@ -68,12 +61,11 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
     }
 
     if (current.count >= config.requests) {
-      // Rate limit exceeded
       if (config.onLimit) {
         const result = await config.onLimit(ctx);
         if (result) return;
       }
-
+      
       ctx.json(
         {
           error: 'Rate limit exceeded',
@@ -84,7 +76,6 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
       return;
     }
 
-    // Increment count
     current.count++;
     await next();
   };
@@ -166,7 +157,6 @@ class MiddlewareChainImpl implements MiddlewareChain {
         await executeNext();
       }
     };
-
     this.handlers.push(conditionalMiddleware);
     return this;
   }
