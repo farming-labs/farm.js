@@ -40,6 +40,34 @@ export interface CookieJar {
 }
 
 /**
+ * Storage interface for rate limiter
+ * Allows custom storage implementations (Redis, Upstash, KV, etc.)
+ */
+export interface RateLimitStorage {
+  /**
+   * Get a value by key
+   * @returns The stored value or null/undefined if not found
+   */
+  get(key: string): Promise<any> | any;
+  
+  /**
+   * Set a value with optional TTL (in seconds)
+   */
+  set(key: string, value: any, ttl?: number): Promise<void> | void;
+  
+  /**
+   * Delete a value by key
+   */
+  delete(key: string): Promise<void> | void;
+  
+  /**
+   * Get the remaining TTL for a key (in seconds)
+   * @returns The TTL in seconds, or null if key doesn't exist or has no expiration
+   */
+  ttl?(key: string): Promise<number | null> | number | null;
+}
+
+/**
  * Rate limit configuration
  */
 export interface RateLimitConfig {
@@ -47,6 +75,7 @@ export interface RateLimitConfig {
   window: string; // e.g., '1m', '1h', '1d'
   keyGenerator?: (ctx: MiddlewareContext) => string;
   onLimit?: (ctx: MiddlewareContext) => void | Response | Promise<void | Response>;
+  storage?: RateLimitStorage; // Custom storage implementation
 }
 
 /**

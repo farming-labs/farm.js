@@ -8,10 +8,30 @@ import type {
   MiddlewareContext,
   MiddlewareConfig,
   RateLimitConfig,
+  RateLimitStorage,
 } from './types';
 
-
-const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+// Default in-memory storage implementation
+const defaultStore = new Map<string, any>();
+const defaultRateLimitStorage: RateLimitStorage = {
+  get(key: string) {
+    return defaultStore.get(key) || null;
+  },
+  set(key: string, value: any, ttl?: number) {
+    defaultStore.set(key, value);
+  },
+  delete(key: string) {
+    defaultStore.delete(key);
+  },
+  ttl(key: string) {
+    const record = defaultStore.get(key);
+    if (!record || !record.resetAt) {
+      return null;
+    }
+    const remainingMs = record.resetAt - Date.now();
+    return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
+  },
+};
 
 function parseTimeWindow(window: string): number {
   const match = window.match(/^(\d+)(ms|s|m|h|d)$/);
@@ -36,6 +56,7 @@ function parseTimeWindow(window: string): number {
  */
 function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction {
   const windowMs = parseTimeWindow(config.window);
+  const storage = config.storage || defaultRateLimitStorage;
 
   return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
     const key = config.keyGenerator
@@ -43,23 +64,30 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
       : `${ctx.request.socket.remoteAddress}:${ctx.pathname}`;
 
     const now = Date.now();
-    const record = rateLimitStore.get(key);
+    const ttlSeconds = Math.ceil(windowMs / 1000);
+    
+    // Get current record
+    const record = await storage.get(key);
 
+    // Check if record exists and is expired
     if (record && now > record.resetAt) {
-      rateLimitStore.delete(key);
+      await storage.delete(key);
     }
 
-    const current = rateLimitStore.get(key);
+    // Get fresh record after potential deletion
+    const current = await storage.get(key);
 
+    // First request - create new record
     if (!current) {
-      rateLimitStore.set(key, {
+      await storage.set(key, {
         count: 1,
         resetAt: now + windowMs,
-      });
+      }, ttlSeconds);
       await next();
       return;
     }
 
+    // Check if limit exceeded
     if (current.count >= config.requests) {
       if (config.onLimit) {
         const result = await config.onLimit(ctx);
@@ -76,7 +104,9 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
       return;
     }
 
+    // Increment count
     current.count++;
+    await storage.set(key, current, ttlSeconds);
     await next();
   };
 }
