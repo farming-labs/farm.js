@@ -39,7 +39,12 @@ function createMockResponse(): ServerResponse {
   
   // Mock writeHead and end
   res.writeHead = vi.fn().mockReturnValue(res);
-  res.end = vi.fn();
+  res.end = vi.fn().mockImplementation((chunk?: any, encoding?: BufferEncoding, cb?: (() => void) | undefined) => {
+    if (cb) {
+      cb();
+    }
+    return res;
+  });
   res.setHeader = vi.fn();
   
   return res;
