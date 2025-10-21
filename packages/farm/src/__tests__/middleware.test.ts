@@ -813,7 +813,6 @@ describe('getRateLimitStatus', () => {
       await executeChain(ctx);
     }
 
-    // Check status
     const status = await getRateLimitStatus('integration-test', 5, testStorage);
 
     expect(status.requests).toBe(3);

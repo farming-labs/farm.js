@@ -174,7 +174,7 @@ export function farmPlugin(
             const originalEnd = res.end.bind(res);
             let afterResponseCalled = false;
 
-            res.end = function(...args: any[]) {
+            res.end = function (...args: any[]) {
               if (!afterResponseCalled && pm) {
                 afterResponseCalled = true;
                 // Call afterResponse synchronously before actually ending
@@ -227,15 +227,15 @@ export function farmPlugin(
         if (moduleInfo) {
           (moduleInfo as any).isClientComponent = true;
         }
-        
+
         // Store client component for later injection
         if (!farmApp) return;
-        
+
         const clientComponents = (farmApp as any).__clientComponents__ || new Set();
         clientComponents.add(id);
         (farmApp as any).__clientComponents__ = clientComponents;
       }
-      
+
       return null;
     },
 
@@ -257,7 +257,7 @@ export function farmPlugin(
             await middlewareManager.reload();
             logger.success('✅ Middleware reloaded!');
           }
-          
+
           return [];
         }
 
@@ -265,16 +265,16 @@ export function farmPlugin(
         if (file.includes('/api/') && file.includes('/route.')) {
           const shortPath = file.split('/app/')[1] || file;
           logger.event(`API route updated: ${shortPath} - regenerating types...`);
-          
+
           // Dynamically regenerate API types
           try {
             const { APITypeGenerator } = await import('./type-generator.js');
             const { join } = await import('path');
             const { fileURLToPath } = await import('url');
-            
+
             const appDir = file.substring(0, file.indexOf('/app/') + 4);
             const outputPath = join(appDir, '../lib/api.generated.ts');
-            
+
             const generator = new APITypeGenerator(appDir);
             generator.generateAPIIndex(outputPath);
             logger.success('✅ API types regenerated!');
@@ -288,20 +288,20 @@ export function farmPlugin(
             logger.warn(`Failed to regenerate API types: ${error}`);
           }
         }
-        
+
         if (file.includes('page.') || file.includes('layout.')) {
           const shortPath = file.split('/app/')[1] || file;
           logger.event(`Updated: ${shortPath}`);
-          
+
           for (const mod of modules) {
             server.moduleGraph.invalidateModule(mod);
           }
-          
+
           server.ws.send({
             type: 'full-reload',
             path: '*'
           });
-          
+
           return [];
         }
       }
