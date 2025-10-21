@@ -252,7 +252,6 @@ describe('Middleware Chain', () => {
         window: '1s',
         keyGenerator: (ctx) => 'test-key',
         onLimit: (ctx) => {
-            console.log({ctx})
             spyFn(ctx)
         }
       });
