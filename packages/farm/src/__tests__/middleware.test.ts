@@ -3,10 +3,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { middleware } from '../middleware/chain';
+import { middleware, getRateLimitStatus } from '../middleware/chain';
 import { createContext } from '../middleware/context';
 import { _setCurrentMiddlewareData, _clearCurrentMiddlewareData, getMiddlewareData, getMiddlewareValue } from '../middleware/server';
-import type { MiddlewareContext } from '../middleware/types';
+import type { MiddlewareContext, RateLimitStorage } from '../middleware/types';
 import { IncomingMessage, ServerResponse } from 'http';
 import { Socket } from 'net';
 
@@ -634,6 +634,222 @@ describe('Middleware Chain', () => {
     // Access the default storage TTL (we need to import the storage, but for testing
     // we can verify the behavior indirectly by checking that records expire)
     // This is more of an integration test to ensure TTL tracking works
+  });
+});
+
+describe('getRateLimitStatus', () => {
+  it('should return status with no requests when key does not exist', async () => {
+    const storage: RateLimitStorage = {
+      get: vi.fn().mockResolvedValue(null),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const status = await getRateLimitStatus('test-key', 100, storage);
+
+    expect(status).toEqual({
+      requests: 0,
+      limit: 100,
+      remaining: 100,
+      resetIn: null,
+      resetAt: null,
+      isLimited: false,
+    });
+    expect(storage.get).toHaveBeenCalledWith('test-key');
+  });
+
+  it('should return current status for active rate limit', async () => {
+    const now = Date.now();
+    const resetAt = now + 60000; // 60 seconds from now
+
+    const storage: RateLimitStorage = {
+      get: vi.fn().mockResolvedValue({
+        count: 42,
+        resetAt,
+      }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const status = await getRateLimitStatus('user:123', 100, storage);
+    expect(status.requests).toBe(42);
+    expect(status.limit).toBe(100);
+    expect(status.remaining).toBe(58);
+    expect(status.isLimited).toBe(false);
+    expect(status.resetIn).toBeGreaterThan(0);
+    expect(status.resetIn).toBeLessThanOrEqual(60);
+    expect(status.resetAt).toBeInstanceOf(Date);
+  });
+
+  it('should return limited status when limit exceeded', async () => {
+    const now = Date.now();
+    const resetAt = now + 120000; // 2 minutes from now
+
+    const storage: RateLimitStorage = {
+      get: vi.fn().mockResolvedValue({
+        count: 150,
+        resetAt,
+      }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const status = await getRateLimitStatus('ip:192.168.1.1', 100, storage);
+
+    expect(status.requests).toBe(150);
+    expect(status.limit).toBe(100);
+    expect(status.remaining).toBe(0);
+    expect(status.isLimited).toBe(true);
+    expect(status.resetIn).toBeGreaterThan(0);
+  });
+
+  it('should return expired status when resetAt is in the past', async () => {
+    const pastTime = Date.now() - 10000; // 10 seconds ago
+
+    const storage: RateLimitStorage = {
+      get: vi.fn().mockResolvedValue({
+        count: 50,
+        resetAt: pastTime,
+      }),
+      set: vi.fn(),
+      delete: vi.fn(),
+    };
+
+    const status = await getRateLimitStatus('expired-key', 100, storage);
+
+    expect(status.requests).toBe(0);
+    expect(status.limit).toBe(100);
+    expect(status.remaining).toBe(100);
+    expect(status.isLimited).toBe(false);
+    expect(status.resetIn).toBeNull();
+    expect(status.resetAt).toBeNull();
+  });
+
+  it('should use storage.ttl() if resetAt is not present', async () => {
+    const storage: RateLimitStorage = {
+      get: vi.fn().mockResolvedValue({
+        count: 30,
+        // No resetAt
+      }),
+      set: vi.fn(),
+      delete: vi.fn(),
+      ttl: vi.fn().mockResolvedValue(90), // 90 seconds remaining
+    };
+
+    const status = await getRateLimitStatus('ttl-key', 100, storage);
+
+    expect(status.requests).toBe(30);
+    expect(status.remaining).toBe(70);
+    expect(status.resetIn).toBe(90);
+    expect(status.resetAt).toBeInstanceOf(Date);
+    expect(storage.ttl).toHaveBeenCalledWith('ttl-key');
+  });
+
+  it('should work with custom storage implementation', async () => {
+    // Create a real custom storage for testing
+    const customStore = new Map<string, any>();
+    const customStorage: RateLimitStorage = {
+      set(key: string, value: any) {
+        customStore.set(key, value);
+      },
+      get(key: string) {
+        return customStore.get(key) || null;
+      },
+      delete(key: string) {
+        customStore.delete(key);
+      },
+      ttl(key: string) {
+        const record = customStore.get(key);
+        if (!record || !record.resetAt) return null;
+        const remainingMs = record.resetAt - Date.now();
+        return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
+      },
+    };
+
+    // Set up initial data
+    customStorage.set('api:user:456', {
+      count: 75,
+      resetAt: Date.now() + 45000, // 45 seconds
+    });
+
+    const status = await getRateLimitStatus('api:user:456', 100, customStorage);
+
+    expect(status.requests).toBe(75);
+    expect(status.limit).toBe(100);
+    expect(status.remaining).toBe(25);
+    expect(status.isLimited).toBe(false);
+    expect(status.resetIn).toBeGreaterThan(0);
+    expect(status.resetIn).toBeLessThanOrEqual(45);
+  });
+
+  it('should integrate with actual rate limiter', async () => {
+    // Create custom storage for testing
+    const testStore = new Map<string, any>();
+    const testStorage: RateLimitStorage = {
+      set(key: string, value: any) {
+        testStore.set(key, value);
+      },
+      get(key: string) {
+        return testStore.get(key) || null;
+      },
+      delete(key: string) {
+        testStore.delete(key);
+      },
+      ttl(key: string) {
+        const record = testStore.get(key);
+        if (!record || !record.resetAt) return null;
+        const remainingMs = record.resetAt - Date.now();
+        return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
+      },
+    };
+
+    const chain = middleware()
+      .rateLimit({
+        requests: 5,
+        window: '1m',
+        keyGenerator: () => 'integration-test',
+        storage: testStorage,
+      });
+
+    const { handlers } = chain.build();
+
+    const executeChain = async (ctx: MiddlewareContext) => {
+      let index = 0;
+      const executeNext = async (): Promise<void> => {
+        if (index < handlers.length) {
+          const handler = handlers[index++];
+          await handler(ctx, executeNext);
+        }
+      };
+      await executeNext();
+    };
+
+    // Make 3 requests
+    for (let i = 0; i < 3; i++) {
+      const req = createMockRequest('/test');
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      await executeChain(ctx);
+    }
+
+    // Check status
+    const status = await getRateLimitStatus('integration-test', 5, testStorage);
+
+    expect(status.requests).toBe(3);
+    expect(status.limit).toBe(5);
+    expect(status.remaining).toBe(2);
+    expect(status.isLimited).toBe(false);
+    expect(status.resetIn).toBeGreaterThan(0);
+    expect(status.resetAt).toBeInstanceOf(Date);
+  });
+
+  it('should use default storage when storage parameter not provided', async () => {
+    const status = await getRateLimitStatus('default-storage-test', 50);
+
+    expect(status).toBeDefined();
+    expect(status.requests).toBe(0);
+    expect(status.limit).toBe(50);
+    expect(status.remaining).toBe(50);
   });
 });
 

@@ -79,6 +79,36 @@ export interface RateLimitConfig {
 }
 
 /**
+ * Rate limit status information
+ */
+export interface RateLimitStatus {
+  /**
+   * Number of requests made in the current window
+   */
+  requests: number;
+  /**
+   * Maximum number of requests allowed in the window
+   */
+  limit: number;
+  /**
+   * Number of requests remaining in the current window
+   */
+  remaining: number;
+  /**
+   * Time remaining until the rate limit resets (in seconds)
+   */
+  resetIn: number | null;
+  /**
+   * Timestamp when the rate limit will reset
+   */
+  resetAt: Date | null;
+  /**
+   * Whether the rate limit has been exceeded
+   */
+  isLimited: boolean;
+}
+
+/**
  * Middleware configuration
  */
 export interface MiddlewareConfig {

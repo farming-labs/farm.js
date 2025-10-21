@@ -9,6 +9,7 @@ import type {
   MiddlewareConfig,
   RateLimitConfig,
   RateLimitStorage,
+  RateLimitStatus,
 } from './types';
 
 // Default in-memory storage implementation
@@ -227,6 +228,83 @@ class MiddlewareChainImpl implements MiddlewareChain {
       config: this.config,
     };
   }
+}
+
+/**
+ * Get the current rate limit status for a key
+ * 
+ * @param key - The rate limit key to check
+ * @param limit - The maximum number of requests allowed
+ * @param storage - The storage implementation (defaults to in-memory storage)
+ * @returns Rate limit status information
+ * 
+ * @example
+ * ```typescript
+ * const status = await getRateLimitStatus('user:123', 100, customStorage);
+ * console.log(`${status.requests}/${status.limit} requests used`);
+ * console.log(`Resets in ${status.resetIn} seconds`);
+ * ```
+ */
+export async function getRateLimitStatus(
+  key: string,
+  limit: number,
+  storage: RateLimitStorage = defaultRateLimitStorage
+): Promise<RateLimitStatus> {
+  const record = await storage.get(key);
+  
+  // No record exists - no requests made yet
+  if (!record) {
+    return {
+      requests: 0,
+      limit,
+      remaining: limit,
+      resetIn: null,
+      resetAt: null,
+      isLimited: false,
+    };
+  }
+
+  const now = Date.now();
+  
+  // Check if record is expired
+  if (record.resetAt && now > record.resetAt) {
+    // Record expired, treat as no requests
+    return {
+      requests: 0,
+      limit,
+      remaining: limit,
+      resetIn: null,
+      resetAt: null,
+      isLimited: false,
+    };
+  }
+
+  const requests = record.count || 0;
+  const remaining = Math.max(0, limit - requests);
+  const isLimited = requests >= limit;
+  
+  // Calculate reset time
+  let resetIn: number | null = null;
+  let resetAt: Date | null = null;
+  
+  if (record.resetAt) {
+    const remainingMs = record.resetAt - now;
+    resetIn = remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
+    resetAt = new Date(record.resetAt);
+  } else if (storage.ttl) {
+    // Try to get TTL from storage if available
+    resetIn = await storage.ttl(key);
+    resetAt = resetIn ? new Date(now + resetIn * 1000) : null;
+  }
+
+  return {
+    requests,
+    limit,
+    remaining,
+    resetIn,
+    resetAt,
+    isLimited,
+  };
 }
 
 /**
