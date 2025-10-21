@@ -12,7 +12,6 @@ import type {
   RateLimitStatus,
 } from './types';
 
-// Default in-memory storage implementation
 const defaultStore = new Map<string, any>();
 const defaultRateLimitStorage: RateLimitStorage = {
   get(key: string) {
@@ -52,9 +51,6 @@ function parseTimeWindow(window: string): number {
   return value * multipliers[unit];
 }
 
-/**
- * Create a rate limiting middleware
- */
 function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction {
   const windowMs = parseTimeWindow(config.window);
   const storage = config.storage || defaultRateLimitStorage;
@@ -66,19 +62,14 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
 
     const now = Date.now();
     const ttlSeconds = Math.ceil(windowMs / 1000);
-    
-    // Get current record
     const record = await storage.get(key);
 
-    // Check if record exists and is expired
     if (record && now > record.resetAt) {
       await storage.delete(key);
     }
 
-    // Get fresh record after potential deletion
     const current = await storage.get(key);
 
-    // First request - create new record
     if (!current) {
       await storage.set(key, {
         count: 1,
@@ -88,7 +79,6 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
       return;
     }
 
-    // Check if limit exceeded
     if (current.count >= config.requests) {
       if (config.onLimit) {
         const result = await config.onLimit(ctx);
@@ -105,24 +95,17 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
       return;
     }
 
-    // Increment count
     current.count++;
     await storage.set(key, current, ttlSeconds);
     await next();
   };
 }
 
-/**
- * Match a pattern against a pathname
- */
 function matchPattern(pattern: string | RegExp, pathname: string): boolean {
   if (pattern instanceof RegExp) {
     return pattern.test(pathname);
   }
 
-  // Convert glob-style pattern to regex
-  // * -> [^/]+ (match anything except /)
-  // ** -> .* (match anything)
   const regexPattern = pattern
     .replace(/\*\*/g, '__DOUBLE_STAR__')
     .replace(/\*/g, '[^/]+')
@@ -133,9 +116,6 @@ function matchPattern(pattern: string | RegExp, pathname: string): boolean {
   return regex.test(pathname);
 }
 
-/**
- * Middleware Chain Implementation
- */
 class MiddlewareChainImpl implements MiddlewareChain {
   private handlers: MiddlewareFunction[] = [];
   public config?: MiddlewareConfig;
@@ -166,15 +146,12 @@ class MiddlewareChainImpl implements MiddlewareChain {
       }
 
       if (typeof fn === 'function' && fn.length === 2) {
-        // It's a middleware function
         await (fn as MiddlewareFunction)(ctx, next);
       } else {
-        // It's a chain builder function
         const subChain = middleware();
         (fn as (chain: MiddlewareChain) => void)(subChain);
         const { handlers } = subChain.build();
 
-        // Execute sub-chain handlers
         let index = 0;
         const executeNext = async (): Promise<void> => {
           if (index < handlers.length) {
@@ -231,19 +208,9 @@ class MiddlewareChainImpl implements MiddlewareChain {
 }
 
 /**
- * Get the current rate limit status for a key
- * 
- * @param key - The rate limit key to check
- * @param limit - The maximum number of requests allowed
- * @param storage - The storage implementation (defaults to in-memory storage)
- * @returns Rate limit status information
- * 
+ * Get rate limit status for a key
  * @example
- * ```typescript
- * const status = await getRateLimitStatus('user:123', 100, customStorage);
- * console.log(`${status.requests}/${status.limit} requests used`);
- * console.log(`Resets in ${status.resetIn} seconds`);
- * ```
+ * const status = await getRateLimitStatus('user:123', 100, storage);
  */
 export async function getRateLimitStatus(
   key: string,
@@ -252,7 +219,6 @@ export async function getRateLimitStatus(
 ): Promise<RateLimitStatus> {
   const record = await storage.get(key);
   
-  // No record exists - no requests made yet
   if (!record) {
     return {
       requests: 0,
@@ -266,9 +232,7 @@ export async function getRateLimitStatus(
 
   const now = Date.now();
   
-  // Check if record is expired
   if (record.resetAt && now > record.resetAt) {
-    // Record expired, treat as no requests
     return {
       requests: 0,
       limit,
@@ -283,7 +247,6 @@ export async function getRateLimitStatus(
   const remaining = Math.max(0, limit - requests);
   const isLimited = requests >= limit;
   
-  // Calculate reset time
   let resetIn: number | null = null;
   let resetAt: Date | null = null;
   
@@ -292,7 +255,6 @@ export async function getRateLimitStatus(
     resetIn = remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
     resetAt = new Date(record.resetAt);
   } else if (storage.ttl) {
-    // Try to get TTL from storage if available
     resetIn = await storage.ttl(key);
     resetAt = resetIn ? new Date(now + resetIn * 1000) : null;
   }
@@ -307,9 +269,6 @@ export async function getRateLimitStatus(
   };
 }
 
-/**
- * Create a new middleware chain
- */
 export function middleware(): MiddlewareChain {
   return new MiddlewareChainImpl();
 }

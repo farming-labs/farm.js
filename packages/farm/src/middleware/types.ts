@@ -39,72 +39,27 @@ export interface CookieJar {
   getAll(): Record<string, string>;
 }
 
-/**
- * Storage interface for rate limiter
- * Allows custom storage implementations (Redis, Upstash, KV, etc.)
- */
 export interface RateLimitStorage {
-  /**
-   * Get a value by key
-   * @returns The stored value or null/undefined if not found
-   */
   get(key: string): Promise<any> | any;
-  
-  /**
-   * Set a value with optional TTL (in seconds)
-   */
   set(key: string, value: any, ttl?: number): Promise<void> | void;
-  
-  /**
-   * Delete a value by key
-   */
   delete(key: string): Promise<void> | void;
-  
-  /**
-   * Get the remaining TTL for a key (in seconds)
-   * @returns The TTL in seconds, or null if key doesn't exist or has no expiration
-   */
   ttl?(key: string): Promise<number | null> | number | null;
 }
 
-/**
- * Rate limit configuration
- */
 export interface RateLimitConfig {
   requests: number;
-  window: string; // e.g., '1m', '1h', '1d'
+  window: string;
   keyGenerator?: (ctx: MiddlewareContext) => string;
   onLimit?: (ctx: MiddlewareContext) => void | Response | Promise<void | Response>;
-  storage?: RateLimitStorage; // Custom storage implementation
+  storage?: RateLimitStorage;
 }
 
-/**
- * Rate limit status information
- */
 export interface RateLimitStatus {
-  /**
-   * Number of requests made in the current window
-   */
   requests: number;
-  /**
-   * Maximum number of requests allowed in the window
-   */
   limit: number;
-  /**
-   * Number of requests remaining in the current window
-   */
   remaining: number;
-  /**
-   * Time remaining until the rate limit resets (in seconds)
-   */
   resetIn: number | null;
-  /**
-   * Timestamp when the rate limit will reset
-   */
   resetAt: Date | null;
-  /**
-   * Whether the rate limit has been exceeded
-   */
   isLimited: boolean;
 }
 

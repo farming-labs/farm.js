@@ -324,12 +324,10 @@ describe('Middleware Chain', () => {
   });
 
   it('should support rate limiting with custom storage (Redis-like)', async () => {
-    // Create a mock Redis-like storage
     const mockRedisStore = new Map<string, string>();
     const customStorage = {
       async set(key: string, value: any, ttl?: number) {
         mockRedisStore.set(key, JSON.stringify(value));
-        // In real Redis, TTL would auto-expire the key
         if (ttl) {
           setTimeout(() => {
             mockRedisStore.delete(key);
@@ -359,7 +357,6 @@ describe('Middleware Chain', () => {
 
     const { handlers } = chain.build();
 
-    // Helper to execute chain
     const executeChain = async (ctx: MiddlewareContext) => {
       let index = 0;
       const executeNext = async (): Promise<void> => {
@@ -371,7 +368,6 @@ describe('Middleware Chain', () => {
       await executeNext();
     };
 
-    // First request - should pass
     {
       const req = createMockRequest('/api/data');
       const res = createMockResponse();
@@ -382,7 +378,6 @@ describe('Middleware Chain', () => {
       expect(count).toBe(1);
     }
 
-    // Second request - should pass
     {
       const req = createMockRequest('/api/data');
       const res = createMockResponse();
@@ -393,7 +388,6 @@ describe('Middleware Chain', () => {
       expect(count).toBe(2);
     }
 
-    // Third request - should pass
     {
       const req = createMockRequest('/api/data');
       const res = createMockResponse();
@@ -404,7 +398,6 @@ describe('Middleware Chain', () => {
       expect(count).toBe(3);
     }
 
-    // Fourth request - should be rate limited
     {
       const req = createMockRequest('/api/data');
       const res = createMockResponse();
@@ -417,12 +410,10 @@ describe('Middleware Chain', () => {
       }));
     }
 
-    // Verify that the custom storage was actually used
     expect(mockRedisStore.size).toBeGreaterThan(0);
   });
 
   it('should support custom storage with synchronous operations', async () => {
-    // Create a simple Map-based synchronous storage
     const syncStore = new Map<string, any>();
     const customStorage = {
       set(key: string, value: any, ttl?: number) {
@@ -457,7 +448,6 @@ describe('Middleware Chain', () => {
       await executeNext();
     };
 
-    // First request
     {
       const req = createMockRequest('/test');
       const res = createMockResponse();
@@ -466,7 +456,6 @@ describe('Middleware Chain', () => {
       expect(ctx._handled).toBe(false);
     }
 
-    // Second request
     {
       const req = createMockRequest('/test');
       const res = createMockResponse();
@@ -475,7 +464,6 @@ describe('Middleware Chain', () => {
       expect(ctx._handled).toBe(false);
     }
 
-    // Third request - should be rate limited
     {
       const req = createMockRequest('/test');
       const res = createMockResponse();
@@ -484,12 +472,11 @@ describe('Middleware Chain', () => {
       expect(ctx._handled).toBe(true);
     }
 
-    // Verify custom storage has the data
     expect(syncStore.has('sync-test-key')).toBe(true);
     const storedData = syncStore.get('sync-test-key');
     expect(storedData).toHaveProperty('count');
     expect(storedData).toHaveProperty('resetAt');
-    expect(storedData.count).toBe(2); // Hit limit at 2
+    expect(storedData.count).toBe(2);
   });
 
   it('should pass TTL to custom storage', async () => {
@@ -501,9 +488,7 @@ describe('Middleware Chain', () => {
       get(key: string) {
         return null;
       },
-      delete(key: string) {
-        // no-op
-      },
+      delete(key: string) {},
     };
 
     const chain = middleware()
@@ -529,14 +514,12 @@ describe('Middleware Chain', () => {
 
     await executeNext();
 
-    // Verify TTL was passed to storage
     expect(ttlSpy).toHaveBeenCalled();
     const [key, value, ttl] = ttlSpy.mock.calls[0];
-    expect(ttl).toBe(120); // 2 minutes = 120 seconds
+    expect(ttl).toBe(120);
   });
 
   it('should support ttl method in custom storage', async () => {
-    // Create a storage that tracks TTL
     const storageWithTTL = new Map<string, { value: any; expiresAt: number }>();
     const customStorage = {
       set(key: string, value: any, ttl?: number) {
@@ -586,7 +569,6 @@ describe('Middleware Chain', () => {
       await executeNext();
     };
 
-    // First request
     {
       const req = createMockRequest('/test');
       const res = createMockResponse();
@@ -595,11 +577,10 @@ describe('Middleware Chain', () => {
       expect(ctx._handled).toBe(false);
     }
 
-    // Check TTL
     const ttl = customStorage.ttl('ttl-test-key');
     expect(ttl).not.toBeNull();
     expect(ttl).toBeGreaterThan(0);
-    expect(ttl).toBeLessThanOrEqual(10); // Should be <= 10 seconds
+    expect(ttl).toBeLessThanOrEqual(10);
   });
 
   it('should support ttl method with default storage', async () => {
