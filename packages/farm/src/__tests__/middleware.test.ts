@@ -142,7 +142,7 @@ describe('Middleware Chain', () => {
       });
 
     const { handlers } = chain.build();
-
+    expect(handlers.length).toBe(3)
     // Test admin path
     {
       executed.length = 0;
