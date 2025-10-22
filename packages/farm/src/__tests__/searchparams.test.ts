@@ -1,7 +1,3 @@
-/**
- * Tests for searchParams handling in Farm.js
- */
-
 import { describe, it, expect } from 'vitest';
 
 describe('SearchParams Parsing', () => {
