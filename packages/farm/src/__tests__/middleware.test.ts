@@ -1,7 +1,3 @@
-/**
- * Tests for Farm.js Middleware System
- */
-
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { middleware, getRateLimitStatus } from '../middleware/chain';
 import { createContext } from '../middleware/context';
