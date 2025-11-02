@@ -1,7 +1,7 @@
 {
   "name": "farm.js",
   "version": "0.1.0",
-  "description": "A modern React meta-framework built on Vite with Next.js-like semantics",
+  "description": "A modern React meta-framework that human and ai could understand",
   "private": true,
   "workspaces": [
     "packages/*",
