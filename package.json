@@ -1,6 +1,6 @@
 {
   "name": "farm.js",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "A modern React meta-framework that human and ai could understand",
   "private": true,
   "workspaces": [
