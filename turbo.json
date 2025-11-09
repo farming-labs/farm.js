@@ -18,6 +18,12 @@
     "lint": {
       "dependsOn": ["^build"]
     },
+    "lint:fix": {
+      "dependsOn": ["^build"]
+    },
+    "format": {
+      "dependsOn": ["^build"]
+    },
     "type-check": {
       "dependsOn": ["^build"]
     },

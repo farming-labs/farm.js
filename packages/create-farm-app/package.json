@@ -1,6 +1,6 @@
 {
   "name": "create-farm-app",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Create a new Farm.js application",
   "main": "./dist/index.js",
   "bin": {
@@ -12,8 +12,11 @@
     "templates"
   ],
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "lint": "biome lint .",
+    "lint:fix": "biome lint --write .",
+    "format": "biome format --write .",
     "type-check": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -25,7 +28,7 @@
   "devDependencies": {
     "@types/node": "^20.10.5",
     "@types/prompts": "^2.4.9",
-    "tsup": "^8.0.1",
+    "tsdown": "^0.15.7",
     "typescript": "^5.3.3"
   },
   "keywords": [
@@ -42,4 +45,3 @@
   },
   "license": "MIT"
 }
-

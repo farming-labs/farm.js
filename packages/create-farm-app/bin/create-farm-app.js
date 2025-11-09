@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
-const { program } = require('commander')
-const { createApp } = require('../dist/index.js')
+const { program } = require('commander');
+const { createApp } = require('../dist/index.js');
 
 program
   .name('create-farm-app')
@@ -12,12 +12,11 @@ program
   .option('--typescript', 'Use TypeScript template')
   .action(async (projectName, options) => {
     try {
-      await createApp(projectName, options)
+      await createApp(projectName, options);
     } catch (error) {
-      console.error('Failed to create app:', error)
-      process.exit(1)
+      console.error('Failed to create app:', error);
+      process.exit(1);
     }
-  })
+  });
 
-program.parse()
-
+program.parse();

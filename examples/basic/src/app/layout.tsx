@@ -1,5 +1,6 @@
 import React from 'react'
 import type { LayoutProps, Metadata } from 'farm'
+import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Farm.js Basic Example',
@@ -8,61 +9,51 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
-    <html lang="en">
-      <head>
-        <meta charSet="utf-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <style dangerouslySetInnerHTML={{
-          __html: `
-            * { box-sizing: border-box; }
-            body { 
-              margin: 0; 
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-              line-height: 1.6;
-              color: #333;
-            }
-            .container { max-width: 800px; margin: 0 auto; padding: 2rem; }
-            .nav { 
-              background: #f8f9fa; 
-              padding: 1rem 0; 
-              margin-bottom: 2rem; 
-              border-bottom: 1px solid #dee2e6;
-            }
-            .nav-content { 
-              max-width: 800px; 
-              margin: 0 auto; 
-              padding: 0 2rem;
-              display: flex;
-              gap: 2rem;
-              align-items: center;
-            }
-            .nav a { 
-              text-decoration: none; 
-              color: #495057; 
-              font-weight: 500;
-              padding: 0.5rem 1rem;
-              border-radius: 4px;
-              transition: background-color 0.2s;
-            }
-            .nav a:hover { background: #e9ecef; }
-            .logo { font-weight: bold; color: #212529; }
-          `
-        }} />
-      </head>
-      <body>
-        <nav className="nav">
-          <div className="nav-content">
-            <div className="logo">🚜 Farm.js Basic Example</div>
-            <a href="/">Home</a>
-            <a href="/about">About</a>
-            <a href="/contact">Contact</a>
+    <div className="min-h-screen bg-gray-50">
+      <nav className="bg-white border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-8 h-16">
+            <div className="text-xl font-bold text-gray-900">🚜 Farm.js</div>
+            <a href="/" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Home
+            </a>
+            <a href="/about" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              About
+            </a>
+            <a href="/contact" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Contact
+            </a>
+            <a href="/users/123" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              User Demo
+            </a>
+            <a href="/query-state-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Query State
+            </a>
+            <a href="/query-test" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Query Test
+            </a>
+            <a href="/farm-query-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Farm Query
+            </a>
+            <a href="/farm-query-client-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Farm Client
+            </a>
+            <a href="/api-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Demo
+            </a>
+            <a href="/api-demo-client" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Client
+            </a>
+            <a href="/docs/reference" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Docs
+            </a>
           </div>
-        </nav>
-        <div className="container">
-          {children}
         </div>
-      </body>
-    </html>
+      </nav>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {children}
+      </main>
+    </div>
   )
 }
 

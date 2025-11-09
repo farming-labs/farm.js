@@ -1,4 +1,5 @@
-export { FarmProvider, useFarm, useBasePath } from './provider'
-export * from './types'
-export { Link } from './client/link'
-export { useRouter } from './client/router'
+// Client-only exports for Farm.js
+// This file only exports browser-compatible code
+
+export { createAPIClient, createServerAPIClient } from './api/client';
+export type { APIClientOptions } from './api/client';
