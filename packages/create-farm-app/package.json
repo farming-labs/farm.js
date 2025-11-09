@@ -1,6 +1,6 @@
 {
   "name": "create-farm-app",
-  "version": "0.0.3-beta.2",
+  "version": "0.0.3-beta.3",
   "description": "Create a new Farm.js application",
   "main": "./dist/index.js",
   "bin": {
