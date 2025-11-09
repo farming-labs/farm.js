@@ -148,7 +148,7 @@ export function createContext(
     cookies,
     _handled: false,
 
-    redirect(redirectUrl: string, status: number = 307): void {
+    redirect(redirectUrl: string, status = 307): void {
       if (handled) {
         console.warn('Response already sent, cannot redirect');
         return;
@@ -176,7 +176,7 @@ export function createContext(
       req.url = rewriteUrl;
     },
 
-    json(jsonData: any, status: number = 200): void {
+    json(jsonData: any, status = 200): void {
       if (handled) {
         console.warn('Response already sent, cannot send JSON');
         return;
@@ -191,7 +191,7 @@ export function createContext(
       res.end(JSON.stringify(jsonData));
     },
 
-    text(content: string, status: number = 200): void {
+    text(content: string, status = 200): void {
       if (handled) {
         console.warn('Response already sent, cannot send text');
         return;
@@ -206,7 +206,7 @@ export function createContext(
       res.end(content);
     },
 
-    html(content: string, status: number = 200): void {
+    html(content: string, status = 200): void {
       if (handled) {
         console.warn('Response already sent, cannot send HTML');
         return;

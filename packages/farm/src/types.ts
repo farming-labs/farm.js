@@ -1,11 +1,29 @@
 import type { ReactNode, ComponentType } from 'react';
 import type { IncomingMessage, ServerResponse } from 'http';
 
+export type NitroPreset = 
+  | 'node-server'
+  | 'vercel'
+  | 'cloudflare'
+  | 'cloudflare-pages'
+  | 'netlify'
+  | 'netlify-edge'
+  | 'bun'
+  | 'deno'
+  | 'azure'
+  | 'aws-lambda'
+  | 'firebase'
+  | 'custom'
+  | 'self-host'
+  | 'farm'
+  | string;
+
 export interface FarmConfig {
   root?: string;
   srcDir?: string;
   outDir?: string;
   basePath?: string;
+  preset?: NitroPreset;
   experimental?: {
     serverComponents?: boolean;
     serverActions?: boolean;

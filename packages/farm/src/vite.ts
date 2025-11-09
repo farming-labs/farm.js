@@ -174,7 +174,7 @@ export function farmPlugin(
             const originalEnd = res.end.bind(res);
             let afterResponseCalled = false;
 
-            res.end = function (...args: any[]) {
+            res.end = ((...args: any[]) => {
               if (!afterResponseCalled && pm) {
                 afterResponseCalled = true;
                 // Call afterResponse synchronously before actually ending
@@ -187,7 +187,7 @@ export function farmPlugin(
               } else {
                 originalEnd(...args);
               }
-            } as any;
+            }) as any;
 
             // Store props on request for hydration
             (req as any).__FARM_PROPS__ = {};

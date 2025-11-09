@@ -28,10 +28,36 @@ program
   .command('build')
   .description('Build for production')
   .option('-r, --root <root>', 'Root directory', process.cwd())
+  .option('-p, --preset <preset>', 'Nitro preset (node-server, vercel, cloudflare, etc.)')
   .action(async (options) => {
-    console.log('🚜 Building Farm.js application...');
-    // Build implementation would go here
-    console.log('✅ Build completed!');
+    try {
+      const { buildFarm } = require('../dist/index.js');
+      await buildFarm({
+        root: options.root,
+        preset: options.preset,
+      });
+    } catch (error) {
+      console.error('Failed to build:', error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('deploy')
+  .description('Deploy to a platform')
+  .option('-r, --root <root>', 'Root directory', process.cwd())
+  .option('--vercel', 'Deploy to Vercel')
+  .option('--cloudflare', 'Deploy to Cloudflare')
+  .option('--netlify', 'Deploy to Netlify')
+  .option('--custom', 'Use your own credentials (not Farm.js managed)')
+  .action(async (options) => {
+    try {
+      const { deployFarm } = require('../dist/index.js');
+      await deployFarm(options);
+    } catch (error) {
+      console.error('Failed to deploy:', error);
+      process.exit(1);
+    }
   });
 
 program.parse();

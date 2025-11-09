@@ -87,7 +87,7 @@ export async function createPaginationMeta(
   const params = await searchParams;
   const pageParam = options.pageParam || 'page';
   const itemsPerPage = options.itemsPerPage || 10;
-  const currentPage = parseInt(params.get(pageParam) || '1', 10);
+  const currentPage = Number.parseInt(params.get(pageParam) || '1', 10);
 
   const totalPages = Math.ceil(options.totalItems / itemsPerPage);
   const offset = (currentPage - 1) * itemsPerPage;

@@ -1,14 +1,15 @@
 {
   "name": "farm-example-basic",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "farm dev",
-    "dev:watch": "node scripts/watch-api-types.js & farm dev",
     "build": "farm build",
-    "type-check": "tsc --noEmit",
-    "generate-api-types": "node scripts/generate-api-types.js"
+    "deploy:vercel": "farm deploy --vercel",
+    "deploy:cloudflare": "farm deploy --cloudflare",
+    "deploy:netlify": "farm deploy --netlify",
+    "type-check": "tsc --noEmit"
   },
   "dependencies": {
     "better-call": "^1.0.19",
@@ -20,6 +21,7 @@
   "devDependencies": {
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
+    "farm-cli": "workspace:*",
     "typescript": "^5.3.3"
   }
 }

@@ -23,13 +23,13 @@ export const parseAsString: Parser<string> = {
 // Integer parser
 export const parseAsInteger: Parser<number> = {
   parse: (value: string) => {
-    const parsed = parseInt(value, 10);
+    const parsed = Number.parseInt(value, 10);
     return isNaN(parsed) ? null : parsed;
   },
   serialize: (value: number) => value.toString(),
   withDefault: (defaultValue: number) => ({
     parse: (value: string) => {
-      const parsed = parseInt(value, 10);
+      const parsed = Number.parseInt(value, 10);
       return isNaN(parsed) ? defaultValue : parsed;
     },
     serialize: (value: number) => value.toString(),
@@ -39,13 +39,13 @@ export const parseAsInteger: Parser<number> = {
 // Float parser
 export const parseAsFloat: Parser<number> = {
   parse: (value: string) => {
-    const parsed = parseFloat(value);
+    const parsed = Number.parseFloat(value);
     return isNaN(parsed) ? null : parsed;
   },
   serialize: (value: number) => value.toString(),
   withDefault: (defaultValue: number) => ({
     parse: (value: string) => {
-      const parsed = parseFloat(value);
+      const parsed = Number.parseFloat(value);
       return isNaN(parsed) ? defaultValue : parsed;
     },
     serialize: (value: number) => value.toString(),

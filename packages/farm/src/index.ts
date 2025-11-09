@@ -11,6 +11,7 @@ export { APITypeGenerator } from './type-generator';
 export * from './openapi';
 export * from './query';
 export * from './middleware';
+export * from './build';
 export type { FarmPlugin, FarmPluginContext } from './plugin';
 export type { MiddlewareProps, PagePropsWithMiddleware } from './types';
 export type {
