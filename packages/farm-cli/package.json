@@ -1,6 +1,6 @@
 {
   "name": "farm-cli",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "CLI for Farm.js framework",
   "main": "./dist/index.js",
   "bin": {
