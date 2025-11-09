@@ -83,14 +83,10 @@ export class ServerRenderer {
       // Get middleware data for AsyncLocalStorage
       const middlewareDataForContext = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
       
-      // Wrap the ENTIRE rendering in AsyncLocalStorage context
-      // This ensures the data is available across ALL module instances
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
-        // Create component tree
         const PageComponent = routeModule.default;
         const pageElement = React.createElement(PageComponent, pageProps);
 
-        // Wrap with layouts (innermost to outermost)
         let wrappedElement: React.ReactElement = pageElement;
         for (let i = layoutModules.length - 1; i >= 0; i--) {
           const layoutModule = layoutModules[i];
@@ -222,7 +218,7 @@ ${clientScript}
     res.end();
   }
 
-  private createFullHTML(content: string, isClientComponent: boolean = false): string {
+  private createFullHTML(content: string, isClientComponent = false): string {
     const clientScript = isClientComponent ? 
       `  <script type="module" src="/@farm/client.js"></script>` : '';
     

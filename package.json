@@ -1,6 +1,6 @@
 {
   "name": "farm.js",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "A modern React meta-framework that human and ai could understand",
   "private": true,
   "workspaces": [
@@ -21,11 +21,15 @@
     "clean": "turbo clean",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "turbo build && changeset publish"
+    "release": "pnpm build && bumpp && pnpm publish --access public --no-git-checks",
+    "release:beta": "pnpm build && bumpp --preid beta && pnpm publish --access public --tag beta --no-git-checks",
+    "release:no-build": "bumpp && pnpm publish --access public --no-git-checks --tag next",
+    "release:canary": "pnpm build && bumpp --preid canary --no-commit --no-tag --no-push && pnpm publish --access public --tag canary --no-git-checks",
+    "bump": "bumpp"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.1",
     "@biomejs/biome": "^1.4.1",
+    "@changesets/cli": "^2.27.1",
     "@types/node": "^20.10.5",
     "turbo": "^1.11.2",
     "typescript": "^5.3.3"
@@ -34,6 +38,11 @@
   "engines": {
     "node": ">=18.0.0",
     "pnpm": ">=8.0.0"
+  },
+  "dependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "bumpp": "^10.3.1",
+    "h3": "2.0.1-rc.5",
+    "nitro": "3.0.0"
   }
 }
-

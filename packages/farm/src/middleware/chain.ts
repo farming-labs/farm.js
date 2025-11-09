@@ -38,7 +38,7 @@ function parseTimeWindow(window: string): number {
   if (!match) throw new Error(`Invalid time window: ${window}`);
 
   const [, amount, unit] = match;
-  const value = parseInt(amount, 10);
+  const value = Number.parseInt(amount, 10);
 
   const multipliers: Record<string, number> = {
     ms: 1,
@@ -174,7 +174,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
     return this;
   }
 
-  redirect(source: string, destination: string, permanent: boolean = false): MiddlewareChain {
+  redirect(source: string, destination: string, permanent = false): MiddlewareChain {
     const redirectMiddleware: MiddlewareFunction = async (ctx, next) => {
       if (matchPattern(source, ctx.pathname)) {
         ctx.redirect(destination, permanent ? 308 : 307);

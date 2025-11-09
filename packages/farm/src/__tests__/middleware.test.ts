@@ -18,7 +18,7 @@ async function executeChain(handlers: any[], ctx: MiddlewareContext) {
 }
 
 // Helper to create mock request/response
-function createMockRequest(url: string, method: string = 'GET'): IncomingMessage {
+function createMockRequest(url: string, method = 'GET'): IncomingMessage {
   const socket = new Socket();
   const req = new IncomingMessage(socket);
   req.url = url;
@@ -521,7 +521,7 @@ describe('Middleware Chain', () => {
       set(key: string, value: any, ttl?: number) {
         storageWithTTL.set(key, {
           value,
-          expiresAt: ttl ? Date.now() + (ttl * 1000) : Infinity,
+          expiresAt: ttl ? Date.now() + (ttl * 1000) : Number.POSITIVE_INFINITY,
         });
       },
       get(key: string) {
@@ -1455,13 +1455,13 @@ describe('Middleware Data Access (getMiddlewareData)', () => {
   it('should handle data isolation between requests', () => {
     // Request 1
     _setCurrentMiddlewareData({ req1: 'data1' });
-    let data1 = getMiddlewareData();
+    const data1 = getMiddlewareData();
     expect(data1.get('req1')).toBe('data1');
     _clearCurrentMiddlewareData();
     
     // Request 2 (should not have req1 data)
     _setCurrentMiddlewareData({ req2: 'data2' });
-    let data2 = getMiddlewareData();
+    const data2 = getMiddlewareData();
     expect(data2.get('req2')).toBe('data2');
     expect(data2.get('req1')).toBeUndefined();
     _clearCurrentMiddlewareData();

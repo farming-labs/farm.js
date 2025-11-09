@@ -63,6 +63,7 @@ export interface MiddlewareConfig {
 
 export interface FarmUserConfig extends Omit<BaseFarmConfig, 'vite'> {
   plugins?: FarmPlugin[];
+  preset?: BaseFarmConfig['preset'];
 
   trailingSlash?: boolean;
   redirects?: () => Promise<RedirectConfig[]> | RedirectConfig[];
@@ -137,6 +138,7 @@ export async function resolveConfig(
     srcDir: userConfig.srcDir || 'src',
     outDir: userConfig.outDir || 'dist',
     basePath: userConfig.basePath || '/',
+    preset: userConfig.preset || 'node-server',
     experimental: {
       serverComponents: true,
       serverActions: true,

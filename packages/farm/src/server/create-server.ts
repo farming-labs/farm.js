@@ -116,7 +116,6 @@ export async function startDevServer(config: FarmConfig = {}, port = 3000) {
   const server = await createServer(config);
   await server.listen(port);
 
-  // Next.js-style startup message
   console.log('');
   logger.ready(` Farm.js 0.0.1`);
   console.log('');

@@ -31,7 +31,7 @@ export class APITypeGenerator {
     return routes;
   }
 
-  private scanDirectory(dir: string, routes: APIRouteInfo[], basePath: string = '') {
+  private scanDirectory(dir: string, routes: APIRouteInfo[], basePath = '') {
     const items = readdirSync(dir, { withFileTypes: true });
     
     for (const item of items) {

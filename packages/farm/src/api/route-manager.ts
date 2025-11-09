@@ -137,7 +137,7 @@ export class APIRouteManager {
 
     for (const [routePath, route] of this.routes) {
       for (const method of route.methods) {
-        let endpoint = route.endpoints[method];
+        const endpoint = route.endpoints[method];
         
         // Check if endpoint already has path set, if not set it
         if (!(endpoint as any).__path) {
