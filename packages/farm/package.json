@@ -1,6 +1,6 @@
 {
   "name": "farm",
-  "version": "0.0.3-beta.1",
+  "version": "0.0.3-beta.2",
   "description": "Core Farm.js framework - A modern React meta-framework",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
