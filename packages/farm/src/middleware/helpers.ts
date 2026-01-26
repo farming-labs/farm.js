@@ -27,7 +27,7 @@ export function unwrapMiddleware<T extends Record<string, any>>(
     return (defaults || {}) as Partial<T>;
   }
 
-  const result: any = { ...(defaults || {}) };
+  const result: any = { ...defaults };
 
   for (const [key, value] of middleware.data) {
     result[key] = value;

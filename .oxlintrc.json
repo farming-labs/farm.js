@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/oxfmt/configuration_schema.json",
+  "rules": {
+    "noUnusedVariables": "warn"
+  },
+  "ignorePatterns": [
+    "dist/**",
+    "frontend/dist/**",
+    "public/**",
+    "test/snapshots/**",
+    "data/**",
+    "scripts/**",
+    "examples/basic/.farm"
+  ]
+}

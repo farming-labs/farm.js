@@ -1068,7 +1068,7 @@ describe('Pattern Matching', () => {
         }
       )
       .when(
-        (ctx) => /\/dashboard$/.test(ctx.pathname),
+        (ctx) => ctx.pathname.endsWith('/dashboard'),
         async (ctx, next) => {
           executed.push('dashboard-exact');
           await next();

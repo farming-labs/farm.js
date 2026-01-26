@@ -99,7 +99,7 @@ export async function createServer(config: FarmConfig = {}) {
         hasErrorLogged: () => false,
         hasWarned: false,
       },
-      ...(resolvedConfig?.vite || {}),
+      ...resolvedConfig?.vite,
     });
 
     // Update plugin manager with vite server
