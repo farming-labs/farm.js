@@ -14,8 +14,8 @@ class Emitter {
    * Emit a global update event (all hooks should sync)
    */
   emitUpdate(searchParams: URLSearchParams): void {
-    const listeners = this.listeners.get('update') || new Set();
-    listeners.forEach(listener => listener(searchParams));
+    const listeners = this.listeners.get("update") || new Set();
+    listeners.forEach((listener) => listener(searchParams));
   }
 
   /**
@@ -23,13 +23,13 @@ class Emitter {
    */
   emitKey(key: string, payload: { state: any; query: string | null }): void {
     const listeners = this.keyListeners.get(key) || new Set();
-    listeners.forEach(listener => listener(payload));
+    listeners.forEach((listener) => listener(payload));
   }
 
   /**
    * Subscribe to global updates
    */
-  on(event: 'update', listener: Listener): void {
+  on(event: "update", listener: Listener): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, new Set());
     }
@@ -49,7 +49,7 @@ class Emitter {
   /**
    * Unsubscribe from global updates
    */
-  off(event: 'update', listener: Listener): void {
+  off(event: "update", listener: Listener): void {
     const listeners = this.listeners.get(event);
     if (listeners) {
       listeners.delete(listener);
@@ -68,4 +68,3 @@ class Emitter {
 }
 
 export const emitter = new Emitter();
-

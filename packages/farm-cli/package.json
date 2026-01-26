@@ -2,7 +2,18 @@
   "name": "@farmjs/cli",
   "version": "0.0.1",
   "description": "CLI for Farm.js framework",
-  "main": "./dist/index.js",
+  "keywords": [
+    "@farmjs/cli",
+    "cli",
+    "react",
+    "vite"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-cli"
+  },
   "bin": {
     "farm": "./bin/farm.js"
   },
@@ -10,6 +21,7 @@
     "dist",
     "bin"
   ],
+  "main": "./dist/index.js",
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
@@ -28,17 +40,5 @@
     "@types/node": "^20.10.5",
     "tsdown": "^0.15.7",
     "typescript": "^5.3.3"
-  },
-  "keywords": [
-    "@farmjs/cli",
-    "cli",
-    "react",
-    "vite"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/farm-js/farm.js",
-    "directory": "packages/farm-cli"
-  },
-  "license": "MIT"
+  }
 }

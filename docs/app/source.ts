@@ -1,26 +1,25 @@
-import { loader } from 'fumadocs-core/source'
-import { createMDXSource } from 'fumadocs-mdx'
-import { icons } from 'lucide-react'
+import { loader } from "fumadocs-core/source";
+import { createMDXSource } from "fumadocs-mdx";
+import { icons } from "lucide-react";
 
 export const source = loader({
-  baseUrl: '/docs',
+  baseUrl: "/docs",
   source: createMDXSource([], {
     schema: {
       frontmatter: {
         title: {
-          type: 'string',
+          type: "string",
           required: true,
         },
         description: {
-          type: 'string',
+          type: "string",
         },
         icon: {
-          type: 'string',
+          type: "string",
         },
       },
     },
   }),
-})
+});
 
-export const pageTree = source.pageTree
-
+export const pageTree = source.pageTree;

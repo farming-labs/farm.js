@@ -2,17 +2,17 @@
  * Farm.js Client-Side Query State Management
  */
 
-'use client';
+"use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { 
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import {
   useQueryState as useNuqsQueryState,
   useQueryStates as useNuqsQueryStates,
   type Parser,
   type Options,
-  type UrlUpdateType
-} from 'nuqs';
-import type { FarmQueryStateContext, QueryStateConfig } from './types';
+  type UrlUpdateType,
+} from "nuqs";
+import type { FarmQueryStateContext, QueryStateConfig } from "./types";
 
 // Create context for Farm.js query state
 const FarmQueryStateContext = createContext<FarmQueryStateContext | null>(null);
@@ -21,32 +21,35 @@ const FarmQueryStateContext = createContext<FarmQueryStateContext | null>(null);
  * Farm.js Query State Provider
  * Provides query state context to client components
  */
-export function FarmQueryStateProvider({ 
-  children, 
+export function FarmQueryStateProvider({
+  children,
   searchParams,
-  pathname = typeof window !== 'undefined' ? window.location.pathname : '/'
+  pathname = typeof window !== "undefined" ? window.location.pathname : "/",
 }: {
   children: ReactNode;
   searchParams?: URLSearchParams;
   pathname?: string;
 }) {
   const [currentSearchParams, setCurrentSearchParams] = useState<URLSearchParams>(
-    searchParams || new URLSearchParams()
+    searchParams || new URLSearchParams(),
   );
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       const urlParams = new URLSearchParams(window.location.search);
       setCurrentSearchParams(urlParams);
     }
   }, []);
 
-  const updateUrl = (params: Record<string, any>, options?: {
-    method?: 'push' | 'replace';
-    shallow?: boolean;
-    scroll?: boolean;
-  }) => {
-    if (typeof window === 'undefined') return;
+  const updateUrl = (
+    params: Record<string, any>,
+    options?: {
+      method?: "push" | "replace";
+      shallow?: boolean;
+      scroll?: boolean;
+    },
+  ) => {
+    if (typeof window === "undefined") return;
 
     const url = new URL(window.location.href);
     const newSearchParams = new URLSearchParams(url.search);
@@ -62,12 +65,12 @@ export function FarmQueryStateProvider({
 
     // Update URL
     const newUrl = `${url.pathname}?${newSearchParams.toString()}`;
-    const method = options?.method || 'push';
-    
-    if (method === 'replace') {
-      window.history.replaceState(null, '', newUrl);
+    const method = options?.method || "push";
+
+    if (method === "replace") {
+      window.history.replaceState(null, "", newUrl);
     } else {
-      window.history.pushState(null, '', newUrl);
+      window.history.pushState(null, "", newUrl);
     }
 
     setCurrentSearchParams(newSearchParams);
@@ -79,10 +82,10 @@ export function FarmQueryStateProvider({
   };
 
   const clearParams = () => {
-    if (typeof window === 'undefined') return;
-    
+    if (typeof window === "undefined") return;
+
     const url = new URL(window.location.href);
-    window.history.pushState(null, '', url.pathname);
+    window.history.pushState(null, "", url.pathname);
     setCurrentSearchParams(new URLSearchParams());
   };
 
@@ -94,9 +97,7 @@ export function FarmQueryStateProvider({
   };
 
   return (
-    <FarmQueryStateContext.Provider value={contextValue}>
-      {children}
-    </FarmQueryStateContext.Provider>
+    <FarmQueryStateContext.Provider value={contextValue}>{children}</FarmQueryStateContext.Provider>
   );
 }
 
@@ -106,22 +107,22 @@ export function FarmQueryStateProvider({
 export function useFarmQueryState() {
   const context = useContext(FarmQueryStateContext);
   if (!context) {
-    throw new Error('useFarmQueryState must be used within a FarmQueryStateProvider');
+    throw new Error("useFarmQueryState must be used within a FarmQueryStateProvider");
   }
   return context;
 }
 
 /**
  * Enhanced useQueryState hook with Farm.js integration
- * 
+ *
  * @example
  * ```tsx
  * // Simple string parameter
  * const [search, setSearch] = useQueryState('q', parseAsString);
- * 
+ *
  * // Integer with default
  * const [page, setPage] = useQueryState('page', parseAsInteger.withDefault(1));
- * 
+ *
  * // Boolean parameter
  * const [enabled, setEnabled] = useQueryState('enabled', parseAsBoolean);
  * ```
@@ -129,16 +130,22 @@ export function useFarmQueryState() {
 export function useQueryState<T>(
   key: string,
   parser: Parser<T>,
-  options?: Options
-): [T, (value: T | null, options?: { method?: UrlUpdateType; shallow?: boolean; scroll?: boolean }) => void] {
+  options?: Options,
+): [
+  T,
+  (
+    value: T | null,
+    options?: { method?: UrlUpdateType; shallow?: boolean; scroll?: boolean },
+  ) => void,
+] {
   const [value, setValue] = useNuqsQueryState(key, parser, options);
-  
+
   const setValueWithOptions = (
-    newValue: T | null, 
-    updateOptions?: { method?: UrlUpdateType; shallow?: boolean; scroll?: boolean }
+    newValue: T | null,
+    updateOptions?: { method?: UrlUpdateType; shallow?: boolean; scroll?: boolean },
   ) => {
     setValue(newValue, {
-      method: updateOptions?.method || 'push',
+      method: updateOptions?.method || "push",
       shallow: updateOptions?.shallow,
       scroll: updateOptions?.scroll,
     });
@@ -149,7 +156,7 @@ export function useQueryState<T>(
 
 /**
  * Enhanced useQueryStates hook with Farm.js integration
- * 
+ *
  * @example
  * ```tsx
  * const [filters, setFilters] = useQueryStates({
@@ -158,30 +165,33 @@ export function useQueryState<T>(
  *   category: parseAsString,
  *   sort: parseAsString.withDefault('name'),
  * });
- * 
+ *
  * // Update multiple parameters at once
  * setFilters({ search: 'react', page: 1 });
  * ```
  */
 export function useQueryStates<T extends Record<string, Parser<any>>>(
   parsers: T,
-  options?: Options
+  options?: Options,
 ): [
-  { [K in keyof T]: ReturnType<T[K]['parse']> },
-  (updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>, options?: { 
-    method?: UrlUpdateType; 
-    shallow?: boolean; 
-    scroll?: boolean 
-  }) => void
+  { [K in keyof T]: ReturnType<T[K]["parse"]> },
+  (
+    updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>,
+    options?: {
+      method?: UrlUpdateType;
+      shallow?: boolean;
+      scroll?: boolean;
+    },
+  ) => void,
 ] {
   const [values, setValues] = useNuqsQueryStates(parsers, options);
-  
+
   const setValuesWithOptions = (
-    updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>,
-    updateOptions?: { method?: UrlUpdateType; shallow?: boolean; scroll?: boolean }
+    updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>,
+    updateOptions?: { method?: UrlUpdateType; shallow?: boolean; scroll?: boolean },
   ) => {
     setValues(updates, {
-      method: updateOptions?.method || 'push',
+      method: updateOptions?.method || "push",
       shallow: updateOptions?.shallow,
       scroll: updateOptions?.scroll,
     });
@@ -192,7 +202,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
 
 /**
  * Hook for managing pagination state in URL
- * 
+ *
  * @example
  * ```tsx
  * const { page, setPage, limit, setLimit, offset } = usePagination({
@@ -210,8 +220,8 @@ export function usePagination(options?: {
   const {
     defaultPage = 1,
     defaultLimit = 10,
-    pageKey = 'page',
-    limitKey = 'limit',
+    pageKey = "page",
+    limitKey = "limit",
   } = options || {};
 
   const [page, setPage] = useQueryState(pageKey, parseAsInteger.withDefault(defaultPage));
@@ -235,7 +245,7 @@ export function usePagination(options?: {
 
 /**
  * Hook for managing search and filter state
- * 
+ *
  * @example
  * ```tsx
  * const { search, setSearch, filters, setFilters, clearFilters } = useSearchFilters({
@@ -250,7 +260,7 @@ export function useSearchFilters<T extends Record<string, any>>(options?: {
   filterKeys?: (keyof T)[];
 }) {
   const {
-    searchKey = 'search',
+    searchKey = "search",
     defaultFilters = {} as T,
     filterKeys = Object.keys(defaultFilters) as (keyof T)[],
   } = options || {};
@@ -258,19 +268,25 @@ export function useSearchFilters<T extends Record<string, any>>(options?: {
   const [search, setSearch] = useQueryState(searchKey, parseAsString);
 
   // Create parsers for each filter
-  const filterParsers = filterKeys.reduce((acc, key) => {
-    acc[key as string] = parseAsString;
-    return acc;
-  }, {} as Record<string, Parser<string>>);
+  const filterParsers = filterKeys.reduce(
+    (acc, key) => {
+      acc[key as string] = parseAsString;
+      return acc;
+    },
+    {} as Record<string, Parser<string>>,
+  );
 
   const [filters, setFilters] = useQueryStates(filterParsers);
 
   const clearFilters = () => {
     setSearch(null);
-    const clearedFilters = filterKeys.reduce((acc, key) => {
-      acc[key as string] = null;
-      return acc;
-    }, {} as Record<string, null>);
+    const clearedFilters = filterKeys.reduce(
+      (acc, key) => {
+        acc[key as string] = null;
+        return acc;
+      },
+      {} as Record<string, null>,
+    );
     setFilters(clearedFilters);
   };
 
@@ -284,4 +300,4 @@ export function useSearchFilters<T extends Record<string, any>>(options?: {
 }
 
 // Re-export parseAsString for convenience
-import { parseAsString, parseAsInteger } from 'nuqs';
+import { parseAsString, parseAsInteger } from "nuqs";

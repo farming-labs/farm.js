@@ -1,23 +1,14 @@
-import { source } from '@/app/source'
-import {
-  DocsPage,
-  DocsBody,
-  DocsDescription,
-  DocsTitle,
-} from 'fumadocs-ui/page'
-import { notFound } from 'next/navigation'
+import { source } from "@/app/source";
+import { DocsPage, DocsBody, DocsDescription, DocsTitle } from "fumadocs-ui/page";
+import { notFound } from "next/navigation";
 
-export default async function Page({
-  params,
-}: {
-  params: { slug?: string[] }
-}) {
-  const page = source.getPage(params.slug)
+export default async function Page({ params }: { params: { slug?: string[] } }) {
+  const page = source.getPage(params.slug);
   if (page == null) {
-    notFound()
+    notFound();
   }
 
-  const MDX = page.data.exports.default
+  const MDX = page.data.exports.default;
 
   return (
     <DocsPage toc={page.data.exports.toc} full={page.data.full}>
@@ -27,20 +18,19 @@ export default async function Page({
         <MDX />
       </DocsBody>
     </DocsPage>
-  )
+  );
 }
 
 export async function generateStaticParams() {
-  return source.generateParams()
+  return source.generateParams();
 }
 
 export function generateMetadata({ params }: { params: { slug?: string[] } }) {
-  const page = source.getPage(params.slug)
-  if (page == null) notFound()
+  const page = source.getPage(params.slug);
+  if (page == null) notFound();
 
   return {
     title: page.data.title,
     description: page.data.description,
-  }
+  };
 }
-

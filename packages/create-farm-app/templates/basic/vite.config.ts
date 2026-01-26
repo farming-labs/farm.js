@@ -1,3 +1,3 @@
-import { defineConfig } from 'farm/vite';
+import { defineConfig } from "farm/vite";
 
 export default defineConfig();

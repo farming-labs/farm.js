@@ -1,13 +1,13 @@
-import { defineConfig } from 'tsdown';
+import { defineConfig } from "tsdown";
 
 export default defineConfig({
   entry: {
-    index: 'src/index.ts',
+    index: "src/index.ts",
   },
-  format: ['cjs' , 'esm'],
+  format: ["cjs", "esm"],
   dts: true,
   clean: true,
-  external: ['@farmjs/core', 'commander'],
+  external: ["@farmjs/core", "commander"],
   splitting: false,
   sourcemap: true,
 });

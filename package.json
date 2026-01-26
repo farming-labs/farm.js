@@ -25,17 +25,6 @@
     "release:canary": "turbo --filter \"./packages/*\" build && bumpp && pnpm -r publish --access public --tag canary --no-git-checks",
     "bump": "bumpp"
   },
-  "devDependencies": {
-    "@changesets/cli": "^2.27.1",
-    "@types/node": "^20.10.5",
-    "turbo": "^1.11.2",
-    "typescript": "^5.3.3"
-  },
-  "packageManager": "pnpm@8.12.1",
-  "engines": {
-    "node": ">=18.0.0",
-    "pnpm": ">=8.0.0"
-  },
   "dependencies": {
     "@rollup/plugin-terser": "^0.4.4",
     "bumpp": "^10.3.1",
@@ -43,5 +32,16 @@
     "nitro": "3.0.0",
     "oxfmt": "^0.27.0",
     "oxlint": "^1.42.0"
-  }
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.1",
+    "@types/node": "^20.10.5",
+    "turbo": "^1.11.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.12.1"
 }

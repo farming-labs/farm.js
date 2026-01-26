@@ -6,11 +6,7 @@ export {
   createEnvPlugin,
   createCompressionPlugin,
   createLoggerPlugin,
-} from './plugins';
+} from "./plugins";
 
-export type { FarmPlugin, FarmPluginContext } from './plugin';
-export type {
-  RedirectConfig,
-  HeaderConfig,
-  RewriteConfig,
-} from './config';
+export type { FarmPlugin, FarmPluginContext } from "./plugin";
+export type { RedirectConfig, HeaderConfig, RewriteConfig } from "./config";

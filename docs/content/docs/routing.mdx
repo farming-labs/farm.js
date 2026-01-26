@@ -15,7 +15,7 @@ Create a page by adding a `page.tsx` file:
 
 ```tsx title="src/app/about/page.tsx"
 export default function AboutPage() {
-  return <h1>About Us</h1>
+  return <h1>About Us</h1>;
 }
 ```
 
@@ -43,12 +43,12 @@ src/app/
 Use square brackets to create dynamic routes:
 
 ```tsx title="src/app/users/[id]/page.tsx"
-import type { PageProps } from '@farmjs/core'
+import type { PageProps } from "@farmjs/core";
 
 export default function UserPage({ params }: PageProps) {
-  const { id } = params
-  
-  return <h1>User: {id}</h1>
+  const { id } = params;
+
+  return <h1>User: {id}</h1>;
 }
 ```
 
@@ -59,12 +59,12 @@ This matches `/users/123`, `/users/abc`, etc.
 Use `[...slug]` for catch-all routes:
 
 ```tsx title="src/app/blog/[...slug]/page.tsx"
-import type { PageProps } from '@farmjs/core'
+import type { PageProps } from "@farmjs/core";
 
 export default function BlogPost({ params }: PageProps) {
-  const { slug } = params // slug is a string like "2024/01/hello-world"
-  
-  return <h1>Blog Post: {slug}</h1>
+  const { slug } = params; // slug is a string like "2024/01/hello-world"
+
+  return <h1>Blog Post: {slug}</h1>;
 }
 ```
 
@@ -75,16 +75,16 @@ This matches `/blog/2024`, `/blog/2024/01`, `/blog/2024/01/hello-world`, etc.
 Use `[[...slug]]` for optional catch-all routes:
 
 ```tsx title="src/app/docs/[[...slug]]/page.tsx"
-import type { PageProps } from '@farmjs/core'
+import type { PageProps } from "@farmjs/core";
 
 export default function DocsPage({ params }: PageProps) {
-  const { slug } = params
-  
+  const { slug } = params;
+
   if (!slug) {
-    return <h1>Documentation Home</h1>
+    return <h1>Documentation Home</h1>;
   }
-  
-  return <h1>Docs: {slug}</h1>
+
+  return <h1>Docs: {slug}</h1>;
 }
 ```
 
@@ -97,17 +97,17 @@ This matches `/docs`, `/docs/getting-started`, `/docs/api/reference`, etc.
 Route parameters are available in the `params` object:
 
 ```tsx title="src/app/products/[category]/[id]/page.tsx"
-import type { PageProps } from '@farmjs/core'
+import type { PageProps } from "@farmjs/core";
 
 export default function ProductPage({ params }: PageProps) {
-  const { category, id } = params
-  
+  const { category, id } = params;
+
   return (
     <div>
       <h1>Product {id}</h1>
       <p>Category: {category}</p>
     </div>
-  )
+  );
 }
 ```
 
@@ -116,18 +116,18 @@ export default function ProductPage({ params }: PageProps) {
 URL search parameters are available in the `searchParams` object:
 
 ```tsx title="src/app/search/page.tsx"
-import type { PageProps } from '@farmjs/core'
+import type { PageProps } from "@farmjs/core";
 
 export default function SearchPage({ searchParams }: PageProps) {
-  const { q, filter } = searchParams
-  
+  const { q, filter } = searchParams;
+
   return (
     <div>
       <h1>Search Results</h1>
       <p>Query: {q}</p>
       <p>Filter: {filter}</p>
     </div>
-  )
+  );
 }
 ```
 
@@ -138,7 +138,7 @@ export default function SearchPage({ searchParams }: PageProps) {
 Use the `Link` component for client-side navigation:
 
 ```tsx
-import { Link } from 'farm/client'
+import { Link } from "farm/client";
 
 export default function Navigation() {
   return (
@@ -147,7 +147,7 @@ export default function Navigation() {
       <Link href="/about">About</Link>
       <Link href="/users/123">User 123</Link>
     </nav>
-  )
+  );
 }
 ```
 
@@ -156,16 +156,15 @@ export default function Navigation() {
 Use the `useRouter` hook for programmatic navigation:
 
 ```tsx
-import { useRouter } from 'farm/client'
+import { useRouter } from "farm/client";
 
 export default function MyComponent() {
-  const router = useRouter()
-  
+  const router = useRouter();
+
   const handleClick = () => {
-    router.push('/dashboard')
-  }
-  
-  return <button onClick={handleClick}>Go to Dashboard</button>
+    router.push("/dashboard");
+  };
+
+  return <button onClick={handleClick}>Go to Dashboard</button>;
 }
 ```
-

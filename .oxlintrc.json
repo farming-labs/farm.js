@@ -3,8 +3,5 @@
   "rules": {
     "noUnusedVariables": "warn"
   },
-  "ignorePatterns": [
-    "dist/**",
-    "examples/**",
-  ]
+  "ignorePatterns": ["dist/**", "examples/**"]
 }

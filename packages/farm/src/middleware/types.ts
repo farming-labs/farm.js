@@ -1,19 +1,19 @@
 /**
  * Farm.js Middleware System
- * 
+ *
  * Type definitions for the middleware system
  */
 
-import type { IncomingMessage, ServerResponse } from 'http';
-import type { ViteDevServer } from 'vite';
-import type { FarmConfig } from '../types';
+import type { IncomingMessage, ServerResponse } from "http";
+import type { ViteDevServer } from "vite";
+import type { FarmConfig } from "../types";
 
 /**
  * Middleware function signature
  */
 export type MiddlewareFunction = (
   ctx: MiddlewareContext,
-  next: () => Promise<void>
+  next: () => Promise<void>,
 ) => void | Promise<void>;
 
 /**
@@ -26,7 +26,7 @@ export interface CookieOptions {
   domain?: string;
   secure?: boolean;
   httpOnly?: boolean;
-  sameSite?: 'strict' | 'lax' | 'none';
+  sameSite?: "strict" | "lax" | "none";
 }
 
 /**
@@ -69,7 +69,7 @@ export interface RateLimitStatus {
 export interface MiddlewareConfig {
   matcher?: (string | RegExp | ((ctx: MiddlewareContext) => boolean))[];
   exclude?: (string | RegExp)[];
-  runtime?: 'nodejs' | 'edge';
+  runtime?: "nodejs" | "edge";
 }
 
 /**
@@ -129,24 +129,24 @@ export interface MiddlewareChain {
   /**
    * Conditionally run middleware based on a condition.
    * Supports boolean values or functions that evaluate to boolean.
-   * 
+   *
    * @example
    * .when(true, (ctx, next) => { ... })  // Always run
    * .when((ctx) => ctx.data.get('flag'), (ctx, next) => { ... })  // Conditional
    */
   when(
     condition: boolean | ((ctx: MiddlewareContext) => boolean),
-    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void)
+    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void),
   ): MiddlewareChain;
   rateLimit(config: RateLimitConfig): MiddlewareChain;
   redirect(source: string, destination: string, permanent?: boolean): MiddlewareChain;
   /**
    * Rewrite the current route to a new destination.
    * In route-specific middleware, this rewrites the middleware's route.
-   * 
+   *
    * @param destination - The destination path to rewrite to
    * @param condition - Optional boolean or function that evaluates to boolean. If false, rewrite is skipped.
-   * 
+   *
    * @example
    * // In /contact/middleware.ts
    * .rewrite('/about')  // Always rewrites /contact to /about
@@ -156,7 +156,7 @@ export interface MiddlewareChain {
    */
   rewrite(
     destination: string,
-    condition?: boolean | ((ctx: MiddlewareContext) => boolean)
+    condition?: boolean | ((ctx: MiddlewareContext) => boolean),
   ): MiddlewareChain;
   build(): {
     handlers: MiddlewareFunction[];
@@ -171,4 +171,3 @@ export interface MiddlewareModule {
   default: MiddlewareChain | MiddlewareFunction;
   config?: MiddlewareConfig;
 }
-

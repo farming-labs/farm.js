@@ -1,24 +1,24 @@
-import type { Plugin, ViteDevServer, HmrContext } from 'vite';
-import type { FarmConfig } from './types';
-import { FarmApp } from './app';
-import { logger } from './utils';
-import { defaultGlobalCSS } from './default-styles';
-import type { PluginManager } from './plugin';
-import { HMRManager } from './hmr';
-import { APIRouteManager } from './api/route-manager';
-import { OpenAPIManager } from './openapi/manager';
-import { MiddlewareManager } from './middleware/manager';
-import * as fs from 'fs';
-import * as path from 'path';
-import type { FarmUserConfig } from './config';
+import type { Plugin, ViteDevServer, HmrContext } from "vite";
+import type { FarmConfig } from "./types";
+import { FarmApp } from "./app";
+import { logger } from "./utils";
+import { defaultGlobalCSS } from "./default-styles";
+import type { PluginManager } from "./plugin";
+import { HMRManager } from "./hmr";
+import { APIRouteManager } from "./api/route-manager";
+import { OpenAPIManager } from "./openapi/manager";
+import { MiddlewareManager } from "./middleware/manager";
+import * as fs from "fs";
+import * as path from "path";
+import type { FarmUserConfig } from "./config";
 
 interface FarmVitePluginOptions extends FarmConfig {
-  openapi?: FarmUserConfig['openapi'];
+  openapi?: FarmUserConfig["openapi"];
 }
 
 export function farmPlugin(
   options: FarmVitePluginOptions = {},
-  initialPluginManager?: PluginManager
+  initialPluginManager?: PluginManager,
 ): Plugin {
   let farmApp: FarmApp;
   let server: ViteDevServer;
@@ -29,7 +29,7 @@ export function farmPlugin(
   const pluginManager: PluginManager | undefined = initialPluginManager;
 
   return {
-    name: 'farm',
+    name: "farm",
 
     async configResolved(config) {
       // Defer initialization until Vite server is available
@@ -46,12 +46,12 @@ export function farmPlugin(
           root: server.config.root,
           ...options,
         },
-        server
+        server,
       );
 
-      const globalsCSSPath = path.join(server.config.root, 'src/app/globals.css');
+      const globalsCSSPath = path.join(server.config.root, "src/app/globals.css");
       if (!fs.existsSync(globalsCSSPath)) {
-        const appDir = path.join(server.config.root, 'src/app');
+        const appDir = path.join(server.config.root, "src/app");
         if (!fs.existsSync(appDir)) {
           fs.mkdirSync(appDir, { recursive: true });
         }
@@ -64,7 +64,7 @@ export function farmPlugin(
       hmrManager = new HMRManager(server);
 
       // Initialize API route manager
-      const appDir = path.join(server.config.root, 'src/app');
+      const appDir = path.join(server.config.root, "src/app");
       apiRouteManager = new APIRouteManager(appDir, server);
       await apiRouteManager.discoverRoutes();
 
@@ -75,43 +75,49 @@ export function farmPlugin(
       if (options.openapi?.enabled) {
         openAPIManager = new OpenAPIManager(appDir, options.openapi);
         await openAPIManager.generateSpec();
-        logger.success('✅ OpenAPI documentation enabled');
+        logger.success("✅ OpenAPI documentation enabled");
       }
 
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
-      const logRequest = (method: string, urlPath: string, tag: 'API' | 'PAGE') => {
+      const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
         try {
-          const pc = require('picocolors');
+          const pc = require("picocolors");
           const log = [
-            pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
-            pc.dim('[') + pc.bold(pc.cyan(tag)) + pc.dim(']'),
-            pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
-            tag === 'API' ? pc.gray("Requesting "): pc.gray("Loading "), 
+            pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+            pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+            pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+            tag === "API" ? pc.gray("Requesting ") : pc.gray("Loading "),
             pc.gray(urlPath),
-          ].join(' ');
+          ].join(" ");
           console.log(log);
         } catch {
           console.log(`[FARM] [${tag}] [${method}] ${urlPath}`);
         }
       };
 
-      const logResponse = (method: string, urlPath: string, status: number, duration: number, tag: 'API' | 'PAGE') => {
+      const logResponse = (
+        method: string,
+        urlPath: string,
+        status: number,
+        duration: number,
+        tag: "API" | "PAGE",
+      ) => {
         try {
-          const pc = require('picocolors');
+          const pc = require("picocolors");
           let statusColor = pc.green;
           if (status >= 500) statusColor = pc.red;
           else if (status >= 400) statusColor = pc.yellow;
           else if (status >= 300) statusColor = pc.cyan;
 
           const log = [
-            pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
-            pc.dim('[') + pc.bold(pc.cyan(tag)) + pc.dim(']'),
-            pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
+            pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+            pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+            pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
             pc.gray(urlPath),
-            pc.dim('-'),
+            pc.dim("-"),
             statusColor(status.toString()),
             pc.dim(`(${duration}ms)`),
-          ].join(' ');
+          ].join(" ");
           console.log(log);
         } catch {
           console.log(`[FARM] [${tag}] [${method}] ${urlPath} - ${status} (${duration}ms)`);
@@ -121,7 +127,6 @@ export function farmPlugin(
       // Register middleware directly (not in return function) to ensure it runs early
       if (pm) {
         server.middlewares.use(async (req, res, next) => {
-
           // Handle OpenAPI docs route
           if (openAPIManager && req.url === options.openapi?.route) {
             const docsHandler = openAPIManager.getDocsRouteHandler();
@@ -129,35 +134,35 @@ export function farmPlugin(
           }
 
           // Handle API routes first
-          if (req.url?.startsWith('/api/')) {
+          if (req.url?.startsWith("/api/")) {
             const apiHandler = apiRouteManager.getHandler();
             if (apiHandler) {
               const startTime = Date.now();
-              const method = req.method || 'GET';
-              const urlPath = req.url || '/';
+              const method = req.method || "GET";
+              const urlPath = req.url || "/";
 
               // Log API request
-              logRequest(method, urlPath, 'API');
+              logRequest(method, urlPath, "API");
 
               try {
                 // Convert Node.js request to Web Request
-                const url = `http://${req.headers.host || 'localhost:3000'}${req.url}`;
+                const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
                 const headers = new Headers();
                 for (const [key, value] of Object.entries(req.headers)) {
                   if (value) {
-                    headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+                    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
                   }
                 }
 
                 // Get body for POST/PUT/PATCH
                 let body: string | undefined;
-                if (req.method !== 'GET' && req.method !== 'HEAD') {
+                if (req.method !== "GET" && req.method !== "HEAD") {
                   body = await new Promise<string>((resolve) => {
-                    let data = '';
-                    req.on('data', (chunk) => {
+                    let data = "";
+                    req.on("data", (chunk) => {
                       data += chunk;
                     });
-                    req.on('end', () => {
+                    req.on("end", () => {
                       resolve(data);
                     });
                   });
@@ -173,7 +178,7 @@ export function farmPlugin(
                 const response = await apiHandler(request);
 
                 const duration = Date.now() - startTime;
-                logResponse(method, urlPath, response.status, duration, 'API');
+                logResponse(method, urlPath, response.status, duration, "API");
 
                 // Send response
                 res.statusCode = response.status;
@@ -187,8 +192,8 @@ export function farmPlugin(
               } catch (error) {
                 logger.error(`API route error: ${error}`);
                 res.statusCode = 500;
-                res.setHeader('Content-Type', 'application/json');
-                res.end(JSON.stringify({ error: 'Internal server error' }));
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Internal server error" }));
                 return;
               }
             }
@@ -196,39 +201,39 @@ export function farmPlugin(
 
           // Skip internal Vite requests
           if (
-            req.url?.startsWith('/@') ||
-            req.url?.startsWith('/node_modules') ||
-            (req.url?.includes('.') && !req.url?.endsWith('.html'))
+            req.url?.startsWith("/@") ||
+            req.url?.startsWith("/node_modules") ||
+            (req.url?.includes(".") && !req.url?.endsWith(".html"))
           ) {
             return next();
           }
 
           const startTime = Date.now();
-          const method = req.method || 'GET';
-          const urlPath = req.url || '/';
+          const method = req.method || "GET";
+          const urlPath = req.url || "/";
 
           // Log page request
-          logRequest(method, urlPath, 'PAGE');
+          logRequest(method, urlPath, "PAGE");
 
           try {
             if (middlewareManager) {
               const handled = await middlewareManager.execute(req, res);
               if (handled) {
                 const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, 'PAGE');
+                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
                 return; // Middleware handled the response
               }
             }
 
             // Run beforeRequest hooks
             if (pm) {
-              await pm.runHookParallel('beforeRequest', req, res);
+              await pm.runHookParallel("beforeRequest", req, res);
             }
 
             if (res.writableEnded) {
               // Log response if already ended
               const duration = Date.now() - startTime;
-              logResponse(method, urlPath, res.statusCode || 200, duration, 'PAGE');
+              logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
               return;
             }
 
@@ -241,14 +246,16 @@ export function farmPlugin(
                 afterResponseCalled = true;
                 // Log page response
                 const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, 'PAGE');
+                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
                 // Call afterResponse synchronously before actually ending
-                pm.runHookParallel('afterResponse', req, res).then(() => {
-                  originalEnd(...args);
-                }).catch((err) => {
-                  console.error('Error in afterResponse hook:', err);
-                  originalEnd(...args);
-                });
+                pm.runHookParallel("afterResponse", req, res)
+                  .then(() => {
+                    originalEnd(...args);
+                  })
+                  .catch((err) => {
+                    console.error("Error in afterResponse hook:", err);
+                    originalEnd(...args);
+                  });
               } else {
                 originalEnd(...args);
               }
@@ -262,7 +269,7 @@ export function farmPlugin(
           } catch (error) {
             // Log error response
             const duration = Date.now() - startTime;
-            logResponse(method, urlPath, 500, duration, 'PAGE');
+            logResponse(method, urlPath, 500, duration, "PAGE");
             next(error);
           }
         });
@@ -270,27 +277,30 @@ export function farmPlugin(
     },
 
     resolveId(id) {
-      if (id === '/@farm/client' || id === '/@farm/client.js') {
+      if (id === "/@farm/client" || id === "/@farm/client.js") {
         return id;
       }
 
-      if (id === '/@farm/server') {
+      if (id === "/@farm/server") {
         return id;
       }
     },
 
     load(id) {
-      if (id === '/@farm/client' || id === '/@farm/client.js') {
+      if (id === "/@farm/client" || id === "/@farm/client.js") {
         return generateClientCode();
       }
 
-      if (id === '/@farm/server') {
+      if (id === "/@farm/server") {
         return generateServerCode();
       }
     },
 
     transform(code, id) {
-      if (code.trimStart().startsWith("'use client'") || code.trimStart().startsWith('"use client"')) {
+      if (
+        code.trimStart().startsWith("'use client'") ||
+        code.trimStart().startsWith('"use client"')
+      ) {
         const moduleInfo = this.getModuleInfo(id);
         if (moduleInfo) {
           (moduleInfo as any).isClientComponent = true;
@@ -310,55 +320,55 @@ export function farmPlugin(
     generateBundle(options, bundle) {
       const clientManifest = generateClientManifest(bundle);
       this.emitFile({
-        type: 'asset',
-        fileName: 'farm-client-manifest.json',
+        type: "asset",
+        fileName: "farm-client-manifest.json",
         source: JSON.stringify(clientManifest, null, 2),
       });
     },
 
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;
-      if (file.includes('/app/')) {
+      if (file.includes("/app/")) {
         // Hot reload middleware changes
-        if (file.includes('middleware.')) {
+        if (file.includes("middleware.")) {
           if (middlewareManager) {
             await middlewareManager.reload();
-            logger.success('✅ Middleware reloaded!');
+            logger.success("✅ Middleware reloaded!");
           }
 
           return [];
         }
 
         // Auto-generate types when API routes change
-        if (file.includes('/api/') && file.includes('/route.')) {
-          const shortPath = file.split('/app/')[1] || file;
+        if (file.includes("/api/") && file.includes("/route.")) {
+          const shortPath = file.split("/app/")[1] || file;
           logger.event(`API route updated: ${shortPath} - regenerating types...`);
 
           // Dynamically regenerate API types
           try {
-            const { APITypeGenerator } = await import('./type-generator.js');
-            const { join } = await import('path');
-            const { fileURLToPath } = await import('url');
+            const { APITypeGenerator } = await import("./type-generator.js");
+            const { join } = await import("path");
+            const { fileURLToPath } = await import("url");
 
-            const appDir = file.substring(0, file.indexOf('/app/') + 4);
-            const outputPath = join(appDir, '../lib/api.generated.ts');
+            const appDir = file.substring(0, file.indexOf("/app/") + 4);
+            const outputPath = join(appDir, "../lib/api.generated.ts");
 
             const generator = new APITypeGenerator(appDir);
             generator.generateAPIIndex(outputPath);
-            logger.success('✅ API types regenerated!');
+            logger.success("✅ API types regenerated!");
 
             // Regenerate OpenAPI spec if enabled
             if (openAPIManager) {
               await openAPIManager.invalidateCache();
-              logger.success('✅ OpenAPI spec regenerated!');
+              logger.success("✅ OpenAPI spec regenerated!");
             }
           } catch (error) {
             logger.warn(`Failed to regenerate API types: ${error}`);
           }
         }
 
-        if (file.includes('page.') || file.includes('layout.')) {
-          const shortPath = file.split('/app/')[1] || file;
+        if (file.includes("page.") || file.includes("layout.")) {
+          const shortPath = file.split("/app/")[1] || file;
           logger.event(`Updated: ${shortPath}`);
 
           for (const mod of modules) {
@@ -366,8 +376,8 @@ export function farmPlugin(
           }
 
           server.ws.send({
-            type: 'full-reload',
-            path: '*'
+            type: "full-reload",
+            path: "*",
           });
 
           return [];
@@ -469,7 +479,7 @@ function generateClientManifest(bundle: any): Record<string, any> {
   const manifest: Record<string, any> = {};
 
   for (const [fileName, chunk] of Object.entries(bundle)) {
-    if ((chunk as any).type === 'chunk') {
+    if ((chunk as any).type === "chunk") {
       manifest[fileName] = {
         id: fileName,
         chunks: [fileName],
@@ -482,22 +492,22 @@ function generateClientManifest(bundle: any): Record<string, any> {
 }
 
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
-  const tailwindcss = await import('tailwindcss');
-  const autoprefixer = await import('autoprefixer');
+  const tailwindcss = await import("tailwindcss");
+  const autoprefixer = await import("autoprefixer");
 
   return {
     plugins: [farmPlugin(config)],
     optimizeDeps: {
-      include: ['react', 'react-dom'],
+      include: ["react", "react-dom"],
     },
     ssr: {
-      noExternal: ['farm'],
+      noExternal: ["farm"],
     },
     css: {
       postcss: {
         plugins: [
           tailwindcss.default({
-            content: ['./src/**/*.{js,ts,jsx,tsx}'],
+            content: ["./src/**/*.{js,ts,jsx,tsx}"],
             theme: {
               extend: {},
             },
@@ -507,7 +517,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       },
     },
     define: {
-      __FARM_DEV__: JSON.stringify(process.env.NODE_ENV === 'development'),
+      __FARM_DEV__: JSON.stringify(process.env.NODE_ENV === "development"),
     },
   };
 }

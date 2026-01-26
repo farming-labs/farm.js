@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Farm.js! This guide will help you
 
 ### Prerequisites
 
-- Node.js 18+ 
+- Node.js 18+
 - pnpm 8+
 
 ### Getting Started
@@ -157,4 +157,3 @@ Please be respectful and inclusive in all interactions. We follow the [Contribut
 ## License
 
 By contributing to Farm.js, you agree that your contributions will be licensed under the MIT License.
-
