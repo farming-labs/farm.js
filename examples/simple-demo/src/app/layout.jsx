@@ -1,13 +1,21 @@
-import React from 'react'
+import React from "react";
 
 export default function RootLayout({ children }) {
-  return React.createElement('html', { lang: 'en' },
-    React.createElement('head', null,
-      React.createElement('meta', { charSet: 'utf-8' }),
-      React.createElement('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
-      React.createElement('title', null, 'Farm.js Demo'),
-      React.createElement('style', { dangerouslySetInnerHTML: {
-        __html: `
+  return React.createElement(
+    "html",
+    { lang: "en" },
+    React.createElement(
+      "head",
+      null,
+      React.createElement("meta", { charSet: "utf-8" }),
+      React.createElement("meta", {
+        name: "viewport",
+        content: "width=device-width, initial-scale=1",
+      }),
+      React.createElement("title", null, "Farm.js Demo"),
+      React.createElement("style", {
+        dangerouslySetInnerHTML: {
+          __html: `
           body { 
             margin: 0; 
             font-family: system-ui, sans-serif;
@@ -47,10 +55,10 @@ export default function RootLayout({ children }) {
             margin: 0.5rem 0;
             color: #333;
           }
-        `
-      }})
+        `,
+        },
+      }),
     ),
-    React.createElement('body', null, children)
-  )
+    React.createElement("body", null, children),
+  );
 }
-

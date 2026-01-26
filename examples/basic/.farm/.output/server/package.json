@@ -1,8 +1,8 @@
 {
   "name": "traced-node-modules",
   "version": "1.0.0",
-  "type": "module",
   "private": true,
+  "type": "module",
   "dependencies": {
     "react": "19.0.0-rc.1",
     "react-dom": "19.0.0-rc.1"

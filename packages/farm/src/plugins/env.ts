@@ -1,8 +1,8 @@
-import type { FarmPlugin } from '../plugin';
+import type { FarmPlugin } from "../plugin";
 
 export function createEnvPlugin(env: Record<string, string>): FarmPlugin {
   return {
-    name: 'farm:env',
+    name: "farm:env",
 
     config(config, context) {
       // Inject environment variables into the config

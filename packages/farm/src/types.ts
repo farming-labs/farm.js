@@ -1,21 +1,21 @@
-import type { ReactNode, ComponentType } from 'react';
-import type { IncomingMessage, ServerResponse } from 'http';
+import type { ReactNode, ComponentType } from "react";
+import type { IncomingMessage, ServerResponse } from "http";
 
-export type NitroPreset = 
-  | 'node-server'
-  | 'vercel'
-  | 'cloudflare'
-  | 'cloudflare-pages'
-  | 'netlify'
-  | 'netlify-edge'
-  | 'bun'
-  | 'deno'
-  | 'azure'
-  | 'aws-lambda'
-  | 'firebase'
-  | 'custom'
-  | 'self-host'
-  | 'farm'
+export type NitroPreset =
+  | "node-server"
+  | "vercel"
+  | "cloudflare"
+  | "cloudflare-pages"
+  | "netlify"
+  | "netlify-edge"
+  | "bun"
+  | "deno"
+  | "azure"
+  | "aws-lambda"
+  | "firebase"
+  | "custom"
+  | "self-host"
+  | "farm"
   | string;
 
 export interface FarmConfig {
@@ -35,14 +35,14 @@ export interface FarmConfig {
  * Middleware data available in page components
  */
 export interface MiddlewareProps {
-  /** 
+  /**
    * Map containing all data set by middleware via ctx.data.set()
-   * 
+   *
    * @example
    * ```tsx
    * // In middleware.ts
    * ctx.data.set('user', { id: 1, name: 'John' });
-   * 
+   *
    * // In page.tsx
    * const user = props.middleware?.data.get('user');
    * ```
@@ -52,7 +52,7 @@ export interface MiddlewareProps {
 
 /**
  * Page component props
- * 
+ *
  * @param params - Dynamic route parameters (e.g., { id: '123' } for /users/[id])
  * @param searchParams - URL search/query parameters
  * @param path - Current pathname
@@ -62,16 +62,16 @@ export interface PageProps {
   params: Record<string, string>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
   path: string;
-  /** 
+  /**
    * Data from middleware.ts in the same directory or parent directories
    * Access data via props.middleware?.data.get('key')
-   * 
+   *
    * @example
    * ```tsx
    * export default function Page(props: PageProps) {
    *   const user = props.middleware?.data.get('user');
    *   const stats = props.middleware?.data.get('dashboardStats');
-   *   
+   *
    *   return <div>Welcome {user?.name}</div>;
    * }
    * ```
@@ -80,20 +80,20 @@ export interface PageProps {
 }
 /**
  * Helper type to create typed page props with specific middleware data shape
- * 
+ *
  * @example
  * ```tsx
  * interface MyMiddlewareData {
  *   user: { id: number; name: string };
  *   stats: { views: number };
  * }
- * 
+ *
  * type MyPageProps = PagePropsWithMiddleware<MyMiddlewareData>;
- * 
+ *
  * export default function Page(props: MyPageProps) {
  *   const user = props.middleware?.data.get('user');  // Fully typed!
  *   const stats = props.middleware?.data.get('stats');  // Fully typed!
- *   
+ *
  *   return <div>Welcome {user?.name}</div>;
  * }
  * ```
@@ -144,7 +144,7 @@ export interface Metadata {
     type?: string;
   };
   twitter?: {
-    card?: 'summary' | 'summary_large_image' | 'app' | 'player';
+    card?: "summary" | "summary_large_image" | "app" | "player";
     site?: string;
     creator?: string;
     title?: string;
@@ -177,11 +177,11 @@ export interface RouteSegment {
 export interface ParsedRoute {
   segments: RouteSegment[];
   filePath: string;
-  type: 'page' | 'layout' | 'loading' | 'error' | 'not-found';
+  type: "page" | "layout" | "loading" | "error" | "not-found";
 }
 
 export interface BuildOptions {
-  mode: 'development' | 'production';
+  mode: "development" | "production";
   ssr: boolean;
   minify: boolean;
   sourcemap: boolean;

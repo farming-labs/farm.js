@@ -10,7 +10,7 @@ import type {
   RateLimitConfig,
   RateLimitStorage,
   RateLimitStatus,
-} from './types';
+} from "./types";
 
 const defaultStore = new Map<string, any>();
 const defaultRateLimitStorage: RateLimitStorage = {
@@ -71,10 +71,14 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
     const current = await storage.get(key);
 
     if (!current) {
-      await storage.set(key, {
-        count: 1,
-        resetAt: now + windowMs,
-      }, ttlSeconds);
+      await storage.set(
+        key,
+        {
+          count: 1,
+          resetAt: now + windowMs,
+        },
+        ttlSeconds,
+      );
       await next();
       return;
     }
@@ -84,13 +88,13 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
         const result = await config.onLimit(ctx);
         if (result) return;
       }
-      
+
       ctx.json(
         {
-          error: 'Rate limit exceeded',
+          error: "Rate limit exceeded",
           retryAfter: Math.ceil((current.resetAt - now) / 1000),
         },
-        429
+        429,
       );
       return;
     }
@@ -107,10 +111,10 @@ function matchPattern(pattern: string | RegExp, pathname: string): boolean {
   }
 
   const regexPattern = pattern
-    .replace(/\*\*/g, '__DOUBLE_STAR__')
-    .replace(/\*/g, '[^/]+')
-    .replace(/__DOUBLE_STAR__/g, '.*')
-    .replace(/\//g, '\\/');
+    .replace(/\*\*/g, "__DOUBLE_STAR__")
+    .replace(/\*/g, "[^/]+")
+    .replace(/__DOUBLE_STAR__/g, ".*")
+    .replace(/\//g, "\\/");
 
   const regex = new RegExp(`^${regexPattern}$`);
   return regex.test(pathname);
@@ -127,16 +131,16 @@ class MiddlewareChainImpl implements MiddlewareChain {
 
   when(
     condition: string | boolean | ((ctx: MiddlewareContext) => boolean),
-    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void)
+    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void),
   ): MiddlewareChain {
     const conditionalMiddleware: MiddlewareFunction = async (ctx, next) => {
       let shouldRun = false;
 
-      if (typeof condition === 'boolean') {
+      if (typeof condition === "boolean") {
         shouldRun = condition;
-      } else if (typeof condition === 'string') {
+      } else if (typeof condition === "string") {
         shouldRun = matchPattern(condition, ctx.pathname);
-      } else if (typeof condition === 'function') {
+      } else if (typeof condition === "function") {
         shouldRun = condition(ctx);
       }
 
@@ -145,7 +149,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
         return;
       }
 
-      if (typeof fn === 'function' && fn.length === 2) {
+      if (typeof fn === "function" && fn.length === 2) {
         await (fn as MiddlewareFunction)(ctx, next);
       } else {
         const subChain = middleware();
@@ -215,10 +219,10 @@ class MiddlewareChainImpl implements MiddlewareChain {
 export async function getRateLimitStatus(
   key: string,
   limit: number,
-  storage: RateLimitStorage = defaultRateLimitStorage
+  storage: RateLimitStorage = defaultRateLimitStorage,
 ): Promise<RateLimitStatus> {
   const record = await storage.get(key);
-  
+
   if (!record) {
     return {
       requests: 0,
@@ -231,7 +235,7 @@ export async function getRateLimitStatus(
   }
 
   const now = Date.now();
-  
+
   if (record.resetAt && now > record.resetAt) {
     return {
       requests: 0,
@@ -246,10 +250,10 @@ export async function getRateLimitStatus(
   const requests = record.count || 0;
   const remaining = Math.max(0, limit - requests);
   const isLimited = requests >= limit;
-  
+
   let resetIn: number | null = null;
   let resetAt: Date | null = null;
-  
+
   if (record.resetAt) {
     const remainingMs = record.resetAt - now;
     resetIn = remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
@@ -272,4 +276,3 @@ export async function getRateLimitStatus(
 export function middleware(): MiddlewareChain {
   return new MiddlewareChainImpl();
 }
-

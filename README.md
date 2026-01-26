@@ -42,9 +42,9 @@ yarn add farm react react-dom
 Create a `vite.config.ts`:
 
 ```ts
-import { defineConfig } from 'farm/vite'
+import { defineConfig } from "farm/vite";
 
-export default defineConfig()
+export default defineConfig();
 ```
 
 Create your first page in `src/app/page.tsx`:
@@ -53,11 +53,9 @@ Create your first page in `src/app/page.tsx`:
 export default function HomePage() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <h1 className="text-5xl font-bold text-blue-600">
-        Hello from Farm.js!
-      </h1>
+      <h1 className="text-5xl font-bold text-blue-600">Hello from Farm.js!</h1>
     </div>
-  )
+  );
 }
 ```
 
@@ -66,14 +64,14 @@ export default function HomePage() {
 Add a root layout in `src/app/layout.tsx`:
 
 ```tsx
-import type { LayoutProps } from 'farm'
+import type { LayoutProps } from "farm";
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <html>
       <body>{children}</body>
     </html>
-  )
+  );
 }
 ```
 
@@ -106,36 +104,36 @@ my-farm-app/
 Farm.js supports a powerful configuration system via `farm.config.ts`:
 
 ```typescript
-import { defineFarmConfig } from 'farm'
+import { defineFarmConfig } from "farm";
 
 export default defineFarmConfig({
   // Routing
   async redirects() {
-    return [
-      { source: '/old', destination: '/new', permanent: true }
-    ]
+    return [{ source: "/old", destination: "/new", permanent: true }];
   },
 
   // Custom headers
   async headers() {
     return [
       {
-        source: '/:path*',
-        headers: [{ key: 'X-Frame-Options', value: 'DENY' }]
-      }
-    ]
+        source: "/:path*",
+        headers: [{ key: "X-Frame-Options", value: "DENY" }],
+      },
+    ];
   },
 
   // Environment variables
   env: {
-    API_URL: 'https://api.example.com'
+    API_URL: "https://api.example.com",
   },
 
   // Plugins
-  plugins: [/* your plugins */],
+  plugins: [
+    /* your plugins */
+  ],
 
   // And much more...
-})
+});
 ```
 
 See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
@@ -145,20 +143,20 @@ See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
 Extend Farm.js with powerful plugins:
 
 ```typescript
-import { definePlugin } from 'farm'
+import { definePlugin } from "farm";
 
 export const myPlugin = definePlugin({
-  name: 'my-plugin',
-  
+  name: "my-plugin",
+
   async beforeRequest(req, res, context) {
     // Add custom logic before request processing
   },
 
   async transformHTML(html, context) {
     // Modify HTML output
-    return html
-  }
-})
+    return html;
+  },
+});
 ```
 
 See [Plugin System Guide](./PLUGIN_SYSTEM.md) for comprehensive documentation.
@@ -181,14 +179,14 @@ Server Components run on the server and can directly access databases, file syst
 ```tsx
 // This runs on the server
 export default async function BlogPost({ params }: { params: { slug: string } }) {
-  const post = await getPostFromDatabase(params.slug)
-  
+  const post = await getPostFromDatabase(params.slug);
+
   return (
     <article>
       <h1>{post.title}</h1>
       <p>{post.content}</p>
     </article>
-  )
+  );
 }
 ```
 
@@ -197,18 +195,14 @@ export default async function BlogPost({ params }: { params: { slug: string } })
 Use the `'use client'` directive for interactive components:
 
 ```tsx
-'use client'
+"use client";
 
-import { useState } from 'react'
+import { useState } from "react";
 
 export default function Counter() {
-  const [count, setCount] = useState(0)
-  
-  return (
-    <button onClick={() => setCount(count + 1)}>
-      Count: {count}
-    </button>
-  )
+  const [count, setCount] = useState(0);
+
+  return <button onClick={() => setCount(count + 1)}>Count: {count}</button>;
 }
 ```
 
@@ -259,7 +253,7 @@ cd examples/basic && pnpm dev
 farm.js/
 ├── packages/
 │   ├── farm/              # Core framework
-│   ├── farm-cli/          # CLI tools  
+│   ├── farm-cli/          # CLI tools
 │   ├── create-farm-app/   # App creation tool
 │   └── farm-types/        # TypeScript definitions
 ├── examples/

@@ -2,11 +2,11 @@
  * Middleware helper utilities for pages
  */
 
-import type { MiddlewareProps } from '../types';
+import type { MiddlewareProps } from "../types";
 
 /**
  * Unwrap middleware data from PageProps
- * 
+ *
  * @example
  * ```tsx
  * export default async function Page(props: PageProps) {
@@ -14,20 +14,20 @@ import type { MiddlewareProps } from '../types';
  *     user: null,
  *     stats: { views: 0, clicks: 0 }
  *   });
- *   
+ *
  *   return <div>Welcome {user?.name}</div>;
  * }
  * ```
  */
 export function unwrapMiddleware<T extends Record<string, any>>(
   middleware: MiddlewareProps | undefined,
-  defaults?: Partial<T>
+  defaults?: Partial<T>,
 ): Partial<T> {
   if (!middleware) {
     return (defaults || {}) as Partial<T>;
   }
 
-  const result: any = { ...(defaults || {}) };
+  const result: any = { ...defaults };
 
   for (const [key, value] of middleware.data) {
     result[key] = value;
@@ -38,7 +38,7 @@ export function unwrapMiddleware<T extends Record<string, any>>(
 
 /**
  * Get a single value from middleware with a default
- * 
+ *
  * @example
  * ```tsx
  * export default async function Page(props: PageProps) {
@@ -50,7 +50,7 @@ export function unwrapMiddleware<T extends Record<string, any>>(
 export function getFromMiddleware<T = any>(
   middleware: MiddlewareProps | undefined,
   key: string,
-  defaultValue?: T
+  defaultValue?: T,
 ): T | undefined {
   if (!middleware) {
     return defaultValue;
@@ -63,10 +63,7 @@ export function getFromMiddleware<T = any>(
 /**
  * Check if middleware data exists
  */
-export function hasMiddlewareData(
-  middleware: MiddlewareProps | undefined
-): boolean {
+export function hasMiddlewareData(middleware: MiddlewareProps | undefined): boolean {
   if (!middleware) return false;
   return middleware.data.size > 0;
 }
-

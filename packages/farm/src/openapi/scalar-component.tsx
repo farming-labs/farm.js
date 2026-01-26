@@ -1,10 +1,10 @@
-import React from 'react';
+import React from "react";
 
 interface ScalarAPIDocumentationProps {
   spec: any;
   config?: {
-    theme?: 'default' | 'purple' | 'blue' | 'green' | 'red' | 'yellow';
-    layout?: 'modern' | 'classic';
+    theme?: "default" | "purple" | "blue" | "green" | "red" | "yellow";
+    layout?: "modern" | "classic";
     showSidebar?: boolean;
     hideDownloadButton?: boolean;
     hideTryItPanel?: boolean;
@@ -19,18 +19,19 @@ export function ScalarAPIDocumentation({ spec, config = {} }: ScalarAPIDocumenta
     const loadScalar = async () => {
       try {
         // Load Scalar CSS
-        const cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.href = 'https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/style.css';
+        const cssLink = document.createElement("link");
+        cssLink.rel = "stylesheet";
+        cssLink.href = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/style.css";
         document.head.appendChild(cssLink);
 
         // Load Scalar JS
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js';
+        const script = document.createElement("script");
+        script.src =
+          "https://cdn.jsdelivr.net/npm/@scalar/api-reference@latest/dist/browser/standalone.js";
         script.onload = () => setIsLoaded(true);
         document.head.appendChild(script);
       } catch (error) {
-        console.error('Failed to load Scalar:', error);
+        console.error("Failed to load Scalar:", error);
       }
     };
 
@@ -40,12 +41,12 @@ export function ScalarAPIDocumentation({ spec, config = {} }: ScalarAPIDocumenta
   React.useEffect(() => {
     if (isLoaded && window.ScalarApiReference) {
       // Initialize Scalar
-      const container = document.getElementById('scalar-api-reference');
+      const container = document.getElementById("scalar-api-reference");
       if (container) {
         window.ScalarApiReference({
           spec,
-          theme: config.theme || 'default',
-          layout: config.layout || 'modern',
+          theme: config.theme || "default",
+          layout: config.layout || "modern",
           showSidebar: config.showSidebar !== false,
           hideDownloadButton: config.hideDownloadButton || false,
           hideTryItPanel: config.hideTryItPanel || false,
@@ -56,7 +57,7 @@ export function ScalarAPIDocumentation({ spec, config = {} }: ScalarAPIDocumenta
 
   return (
     <div className="scalar-container">
-      <div id="scalar-api-reference" style={{ height: '100vh', width: '100%' }} />
+      <div id="scalar-api-reference" style={{ height: "100vh", width: "100%" }} />
     </div>
   );
 }
@@ -67,5 +68,3 @@ declare global {
     ScalarApiReference: (config: any) => void;
   }
 }
-
-

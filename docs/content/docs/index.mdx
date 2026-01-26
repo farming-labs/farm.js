@@ -58,7 +58,7 @@ my-app/
 Create a new page by adding a `page.tsx` file in the `src/app` directory:
 
 ```tsx title="src/app/hello/page.tsx"
-import type { PageProps } from 'farm'
+import type { PageProps } from "farm";
 
 export default function HelloPage({ params, searchParams }: PageProps) {
   return (
@@ -66,7 +66,7 @@ export default function HelloPage({ params, searchParams }: PageProps) {
       <h1>Hello from Farm.js!</h1>
       <p>This is a new page created with Farm.js.</p>
     </div>
-  )
+  );
 }
 ```
 
@@ -78,4 +78,3 @@ Navigate to `/hello` to see your new page!
 - [Explore layouts](/docs/layouts)
 - [Understand React Server Components](/docs/server-components)
 - [Try Server Actions](/docs/server-actions)
-

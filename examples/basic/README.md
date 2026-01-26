@@ -52,4 +52,3 @@ After exploring this basic example, check out:
 - [With Database Example](../with-database) - Shows data fetching and database integration
 - [E-commerce Example](../e-commerce) - A full-featured e-commerce application
 - [Documentation](../../docs) - Complete Farm.js documentation
-

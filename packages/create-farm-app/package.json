@@ -2,7 +2,19 @@
   "name": "create-farm-app",
   "version": "0.0.3-beta.3",
   "description": "Create a new Farm.js application",
-  "main": "./dist/index.js",
+  "keywords": [
+    "create-app",
+    "farm",
+    "react",
+    "template",
+    "vite"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/create-farm-app"
+  },
   "bin": {
     "create-farm-app": "./bin/create-farm-app.js"
   },
@@ -11,6 +23,7 @@
     "bin",
     "templates"
   ],
+  "main": "./dist/index.js",
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
@@ -30,18 +43,5 @@
     "@types/prompts": "^2.4.9",
     "tsdown": "^0.15.7",
     "typescript": "^5.3.3"
-  },
-  "keywords": [
-    "farm",
-    "create-app",
-    "react",
-    "vite",
-    "template"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/farm-js/farm.js",
-    "directory": "packages/create-farm-app"
-  },
-  "license": "MIT"
+  }
 }

@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import { Button } from 'fumadocs-ui/components/ui/button'
+import Link from "next/link";
+import { Button } from "fumadocs-ui/components/ui/button";
 
 export default function HomePage() {
   return (
@@ -7,19 +7,20 @@ export default function HomePage() {
       <div className="container px-4">
         <div className="mb-8">
           <h1 className="mb-4 text-6xl font-bold">
-            🚜 <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">Farm.js</span>
+            🚜{" "}
+            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+              Farm.js
+            </span>
           </h1>
           <p className="mx-auto max-w-2xl text-xl text-muted-foreground">
-            A modern React meta-framework built on Vite with Next.js-like semantics, 
-            featuring React Server Components and blazing-fast development.
+            A modern React meta-framework built on Vite with Next.js-like semantics, featuring React
+            Server Components and blazing-fast development.
           </p>
         </div>
 
         <div className="flex flex-col gap-4 sm:flex-row sm:justify-center">
           <Button asChild size="lg">
-            <Link href="/docs">
-              Get Started
-            </Link>
+            <Link href="/docs">Get Started</Link>
           </Button>
           <Button variant="outline" size="lg" asChild>
             <Link href="https://github.com/farm-js/farm.js" target="_blank">
@@ -47,17 +48,17 @@ export default function HomePage() {
         </div>
       </div>
     </main>
-  )
+  );
 }
 
 function FeatureCard({
   icon,
   title,
-  description
+  description,
 }: {
-  icon: string
-  title: string
-  description: string
+  icon: string;
+  title: string;
+  description: string;
 }) {
   return (
     <div className="rounded-lg border bg-card p-6 text-card-foreground">
@@ -65,6 +66,5 @@ function FeatureCard({
       <h3 className="mb-2 font-semibold">{title}</h3>
       <p className="text-sm text-muted-foreground">{description}</p>
     </div>
-  )
+  );
 }
-

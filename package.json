@@ -12,9 +12,9 @@
     "build": "turbo build",
     "dev": "turbo dev",
     "test": "turbo test",
-    "lint": "turbo lint",
-    "lint:fix": "turbo lint:fix",
-    "format": "turbo format",
+    "lint": "oxlint . && oxfmt --check .",
+    "format": "oxlint --fix . && oxfmt .",
+    "lint:fix": "oxlint --fix . && oxfmt .",
     "format:check": "biome format .",
     "type-check": "turbo type-check",
     "clean": "turbo clean",
@@ -26,18 +26,6 @@
     "release:beta": "turbo --filter \"./packages/*\" build && bumpp && pnpm -r publish --access public --tag beta --no-git-checks",
     "bump": "bumpp"
   },
-  "devDependencies": {
-    "@biomejs/biome": "^1.4.1",
-    "@changesets/cli": "^2.27.1",
-    "@types/node": "^20.10.5",
-    "turbo": "^1.11.2",
-    "typescript": "^5.3.3"
-  },
-  "packageManager": "pnpm@8.12.1",
-  "engines": {
-    "node": ">=18.0.0",
-    "pnpm": ">=8.0.0"
-  },
   "dependencies": {
     "@rollup/plugin-terser": "^0.4.4",
     "bumpp": "^10.3.1",
@@ -45,5 +33,17 @@
     "nitro": "3.0.0",
     "oxfmt": "^0.27.0",
     "oxlint": "^1.42.0"
-  }
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.4.1",
+    "@changesets/cli": "^2.27.1",
+    "@types/node": "^20.10.5",
+    "turbo": "^1.11.2",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "pnpm": ">=8.0.0"
+  },
+  "packageManager": "pnpm@8.12.1"
 }

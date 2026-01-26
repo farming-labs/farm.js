@@ -1,27 +1,39 @@
-import React from 'react';
-import type { PageProps } from 'farm';
-import { Suspense } from 'react';
+import React from "react";
+import type { PageProps } from "farm";
+import { Suspense } from "react";
 
 // Server Component - demonstrates server-side query state
 async function ServerQueryStateDemo({ searchParams }: PageProps) {
   // Simple server-side parameter reading
   const params = await searchParams;
   const search = params.search || null;
-  const page = parseInt(params.page as string || '1');
+  const page = parseInt((params.page as string) || "1");
   const category = params.category || null;
-  const enabled = params.enabled === 'true';
+  const enabled = params.enabled === "true";
   const tags = params.tags ? (Array.isArray(params.tags) ? params.tags : [params.tags]) : [];
 
   return (
     <div className="bg-gray-100 p-6 rounded-lg mb-6">
       <h3 className="text-lg font-semibold mb-4">Server-Side Query State</h3>
       <div className="space-y-2 text-sm">
-        <p><strong>Search:</strong> {search || 'None'}</p>
-        <p><strong>Page:</strong> {page}</p>
-        <p><strong>Category:</strong> {category || 'All'}</p>
-        <p><strong>Enabled:</strong> {enabled ? 'Yes' : 'No'}</p>
-        <p><strong>Tags:</strong> {tags.length > 0 ? tags.join(', ') : 'None'}</p>
-        <p><strong>All Parameters:</strong></p>
+        <p>
+          <strong>Search:</strong> {search || "None"}
+        </p>
+        <p>
+          <strong>Page:</strong> {page}
+        </p>
+        <p>
+          <strong>Category:</strong> {category || "All"}
+        </p>
+        <p>
+          <strong>Enabled:</strong> {enabled ? "Yes" : "No"}
+        </p>
+        <p>
+          <strong>Tags:</strong> {tags.length > 0 ? tags.join(", ") : "None"}
+        </p>
+        <p>
+          <strong>All Parameters:</strong>
+        </p>
         <pre className="bg-gray-200 p-2 rounded text-xs overflow-x-auto">
           {JSON.stringify(params, null, 2)}
         </pre>
@@ -31,40 +43,40 @@ async function ServerQueryStateDemo({ searchParams }: PageProps) {
 }
 
 // Client Component - demonstrates client-side query state
-'use client';
+("use client");
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect } from "react";
 
 function ClientQueryStateDemo() {
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const [category, setCategory] = useState('');
+  const [category, setCategory] = useState("");
   const [enabled, setEnabled] = useState(false);
   const [tags, setTags] = useState<string[]>([]);
 
   // Load initial values from URL on mount
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    setSearch(urlParams.get('search') || '');
-    setPage(parseInt(urlParams.get('page') || '1'));
-    setCategory(urlParams.get('category') || '');
-    setEnabled(urlParams.get('enabled') === 'true');
-    setTags(urlParams.get('tags')?.split(',').filter(Boolean) || []);
+    setSearch(urlParams.get("search") || "");
+    setPage(parseInt(urlParams.get("page") || "1"));
+    setCategory(urlParams.get("category") || "");
+    setEnabled(urlParams.get("enabled") === "true");
+    setTags(urlParams.get("tags")?.split(",").filter(Boolean) || []);
   }, []);
 
   // Update URL when state changes
   const updateURL = (newParams: Record<string, string | number | boolean | string[]>) => {
     const url = new URL(window.location.href);
     Object.entries(newParams).forEach(([key, value]) => {
-      if (value === '' || value === null || value === undefined) {
+      if (value === "" || value === null || value === undefined) {
         url.searchParams.delete(key);
       } else if (Array.isArray(value)) {
-        url.searchParams.set(key, value.join(','));
+        url.searchParams.set(key, value.join(","));
       } else {
         url.searchParams.set(key, String(value));
       }
     });
-    window.history.pushState({}, '', url.toString());
+    window.history.pushState({}, "", url.toString());
   };
 
   const handleSearchChange = (value: string) => {
@@ -96,24 +108,24 @@ function ClientQueryStateDemo() {
   };
 
   const handleTagRemove = (tagToRemove: string) => {
-    const newTags = tags.filter(tag => tag !== tagToRemove);
+    const newTags = tags.filter((tag) => tag !== tagToRemove);
     setTags(newTags);
     updateURL({ search, page, category, enabled, tags: newTags });
   };
 
   const clearAll = () => {
-    setSearch('');
+    setSearch("");
     setPage(1);
-    setCategory('');
+    setCategory("");
     setEnabled(false);
     setTags([]);
-    window.history.pushState({}, '', window.location.pathname);
+    window.history.pushState({}, "", window.location.pathname);
   };
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
       <h3 className="text-lg font-semibold mb-4">Client-Side Query State</h3>
-      
+
       {/* Search Input */}
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Search:</label>
@@ -189,9 +201,9 @@ function ClientQueryStateDemo() {
           type="text"
           placeholder="Add tag..."
           onKeyPress={(e) => {
-            if (e.key === 'Enter') {
+            if (e.key === "Enter") {
               handleTagAdd(e.currentTarget.value);
-              e.currentTarget.value = '';
+              e.currentTarget.value = "";
             }
           }}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -212,13 +224,17 @@ function ClientQueryStateDemo() {
       <div className="mt-6 p-4 bg-gray-50 rounded-md">
         <h4 className="text-md font-semibold mb-2">Current State:</h4>
         <pre className="text-xs text-gray-600 overflow-x-auto">
-          {JSON.stringify({
-            search,
-            page,
-            category,
-            enabled,
-            tags,
-          }, null, 2)}
+          {JSON.stringify(
+            {
+              search,
+              page,
+              category,
+              enabled,
+              tags,
+            },
+            null,
+            2,
+          )}
         </pre>
       </div>
 
@@ -226,7 +242,7 @@ function ClientQueryStateDemo() {
       <div className="mt-4 p-4 bg-blue-50 rounded-md">
         <h4 className="text-md font-semibold mb-2">Current URL:</h4>
         <p className="text-sm text-blue-700 break-all">
-          {typeof window !== 'undefined' ? window.location.href : 'Loading...'}
+          {typeof window !== "undefined" ? window.location.href : "Loading..."}
         </p>
       </div>
     </div>
@@ -239,9 +255,7 @@ export default async function QueryStateDemoPage({ searchParams }: PageProps) {
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Query State Management Demo
-          </h1>
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">Query State Management Demo</h1>
           <p className="text-gray-600">
             Type-safe URL search parameter state management with Farm.js
           </p>
@@ -262,7 +276,7 @@ export default async function QueryStateDemoPage({ searchParams }: PageProps) {
             <div>
               <h4 className="font-medium">Server Components:</h4>
               <pre className="bg-gray-100 p-3 rounded mt-2 overflow-x-auto">
-{`// In a server component
+                {`// In a server component
 import type { PageProps } from 'farm';
 
 export default async function MyPage({ searchParams }: PageProps) {
@@ -274,11 +288,11 @@ export default async function MyPage({ searchParams }: PageProps) {
 }`}
               </pre>
             </div>
-            
+
             <div>
               <h4 className="font-medium">Client Components:</h4>
               <pre className="bg-gray-100 p-3 rounded mt-2 overflow-x-auto">
-{`'use client';
+                {`'use client';
 import { useState, useEffect } from 'react';
 
 export default function MyComponent() {

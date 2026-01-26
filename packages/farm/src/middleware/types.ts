@@ -1,19 +1,19 @@
 /**
  * Farm.js Middleware System
- * 
+ *
  * Type definitions for the middleware system
  */
 
-import type { IncomingMessage, ServerResponse } from 'http';
-import type { ViteDevServer } from 'vite';
-import type { FarmConfig } from '../types';
+import type { IncomingMessage, ServerResponse } from "http";
+import type { ViteDevServer } from "vite";
+import type { FarmConfig } from "../types";
 
 /**
  * Middleware function signature
  */
 export type MiddlewareFunction = (
   ctx: MiddlewareContext,
-  next: () => Promise<void>
+  next: () => Promise<void>,
 ) => void | Promise<void>;
 
 /**
@@ -26,7 +26,7 @@ export interface CookieOptions {
   domain?: string;
   secure?: boolean;
   httpOnly?: boolean;
-  sameSite?: 'strict' | 'lax' | 'none';
+  sameSite?: "strict" | "lax" | "none";
 }
 
 /**
@@ -69,7 +69,7 @@ export interface RateLimitStatus {
 export interface MiddlewareConfig {
   matcher?: (string | RegExp | ((ctx: MiddlewareContext) => boolean))[];
   exclude?: (string | RegExp)[];
-  runtime?: 'nodejs' | 'edge';
+  runtime?: "nodejs" | "edge";
 }
 
 /**
@@ -128,7 +128,7 @@ export interface MiddlewareChain {
   use(fn: MiddlewareFunction): MiddlewareChain;
   when(
     condition: string | boolean | ((ctx: MiddlewareContext) => boolean),
-    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void)
+    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void),
   ): MiddlewareChain;
   rateLimit(config: RateLimitConfig): MiddlewareChain;
   redirect(source: string, destination: string, permanent?: boolean): MiddlewareChain;
@@ -146,4 +146,3 @@ export interface MiddlewareModule {
   default: MiddlewareChain | MiddlewareFunction;
   config?: MiddlewareConfig;
 }
-

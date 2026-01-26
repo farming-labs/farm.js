@@ -1,6 +1,6 @@
-import React from 'react';
-import type { PageProps } from 'farm';
-import { Link } from 'farm/client';
+import React from "react";
+import type { PageProps } from "farm";
+import { Link } from "farm/client";
 
 export default function AboutPage({ params, searchParams }: PageProps) {
   return (

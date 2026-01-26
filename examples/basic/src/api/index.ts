@@ -4,15 +4,15 @@
  * Generated at: 2025-10-16T11:39:55.558Z
  */
 
-import { GET as GET_auth_login } from '../app/api/auth/login/route';
-import { POST as POST_auth_login } from '../app/api/auth/login/route';
-import { GET as GET_hello } from '../app/api/hello/route';
-import { GET as GET_users } from '../app/api/users/route';
-import { POST as POST_users } from '../app/api/users/route';
+import { GET as GET_auth_login } from "../app/api/auth/login/route";
+import { POST as POST_auth_login } from "../app/api/auth/login/route";
+import { GET as GET_hello } from "../app/api/hello/route";
+import { GET as GET_users } from "../app/api/users/route";
+import { POST as POST_users } from "../app/api/users/route";
 
 // Export all endpoints with their paths for better-call router
 export const api = {
-  'auth/login': {
+  "auth/login": {
     get: GET_auth_login,
     post: POST_auth_login,
   },
@@ -25,7 +25,7 @@ export const api = {
 
 // Export the type for the RPC client
 export type APIRouter = {
-  'auth/login': {
+  "auth/login": {
     get: typeof GET_auth_login;
     post: typeof POST_auth_login;
   };

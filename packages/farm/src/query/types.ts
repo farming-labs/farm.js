@@ -2,12 +2,11 @@
  * Farm.js Query State Types
  */
 
-import type { ComponentType, ReactNode } from 'react';
+import type { ComponentType, ReactNode } from "react";
 
 /**
  * Props for Farm.js page components with search params
  */
-
 
 /**
  * Props for Farm.js layout components
@@ -28,20 +27,20 @@ export interface QueryStateConfig {
    * Default history method for URL updates
    * @default 'push'
    */
-  defaultHistoryMethod?: 'push' | 'replace';
-  
+  defaultHistoryMethod?: "push" | "replace";
+
   /**
    * Default shallow routing behavior
    * @default true
    */
   shallow?: boolean;
-  
+
   /**
    * Default scroll behavior
    * @default true
    */
   scroll?: boolean;
-  
+
   /**
    * Custom serialization options
    */
@@ -50,7 +49,7 @@ export interface QueryStateConfig {
      * Custom URL key mappings
      */
     urlKeys?: Record<string, string>;
-    
+
     /**
      * Custom base URL for serialization
      */
@@ -66,21 +65,24 @@ export interface FarmQueryStateContext {
    * Current search parameters
    */
   searchParams: URLSearchParams;
-  
+
   /**
    * Current pathname
    */
   pathname: string;
-  
+
   /**
    * Update URL with new search parameters
    */
-  updateUrl: (params: Record<string, any>, options?: {
-    method?: 'push' | 'replace';
-    shallow?: boolean;
-    scroll?: boolean;
-  }) => void;
-  
+  updateUrl: (
+    params: Record<string, any>,
+    options?: {
+      method?: "push" | "replace";
+      shallow?: boolean;
+      scroll?: boolean;
+    },
+  ) => void;
+
   /**
    * Clear all search parameters
    */

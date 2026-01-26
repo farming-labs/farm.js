@@ -1,15 +1,17 @@
-import { DocsLayout } from 'fumadocs-ui/layout'
-import type { ReactNode } from 'react'
-import { pageTree } from '@/app/source'
+import { DocsLayout } from "fumadocs-ui/layout";
+import type { ReactNode } from "react";
+import { pageTree } from "@/app/source";
 
 export default function RootDocsLayout({ children }: { children: ReactNode }) {
   return (
-    <DocsLayout tree={pageTree} nav={{
-      title: '🚜 Farm.js',
-      url: '/'
-    }}>
+    <DocsLayout
+      tree={pageTree}
+      nav={{
+        title: "🚜 Farm.js",
+        url: "/",
+      }}
+    >
       {children}
     </DocsLayout>
-  )
+  );
 }
-

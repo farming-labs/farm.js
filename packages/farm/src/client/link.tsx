@@ -1,8 +1,8 @@
-import type React from 'react';
-import { forwardRef, type AnchorHTMLAttributes } from 'react';
-import { useBasePath } from '../provider';
+import type React from "react";
+import { forwardRef, type AnchorHTMLAttributes } from "react";
+import { useBasePath } from "../provider";
 
-interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href'> {
+interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
   href: string;
   prefetch?: boolean;
 }
@@ -25,18 +25,18 @@ export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
         event.preventDefault();
 
         // Use browser's navigation API if available, otherwise fallback to location
-        if (typeof window !== 'undefined') {
-          const url = href.startsWith('/') ? basePath + href : href;
+        if (typeof window !== "undefined") {
+          const url = href.startsWith("/") ? basePath + href : href;
           window.location.href = url;
         }
       }
     };
 
     // Combine base path with href
-    const fullHref = href.startsWith('/') ? basePath + href : href;
+    const fullHref = href.startsWith("/") ? basePath + href : href;
 
     return <a ref={ref} href={fullHref} onClick={handleClick} {...props} />;
-  }
+  },
 );
 
-Link.displayName = 'Link';
+Link.displayName = "Link";

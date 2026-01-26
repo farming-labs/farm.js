@@ -1,7 +1,7 @@
-import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule } from '../types';
-import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from '../utils';
-import path from 'path';
-import type { ViteDevServer } from 'vite';
+import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule } from "../types";
+import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
+import path from "path";
+import type { ViteDevServer } from "vite";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -27,16 +27,16 @@ export class RouteManager {
    * Discover all routes in the app directory
    */
   async discoverRoutes(): Promise<void> {
-    const appDir = resolveAppPath(this.config.root, this.config.srcDir, 'app');
+    const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
 
     // Find all page and layout files
-      const pageFiles = await globFiles('**/page.{ts,tsx,js,jsx}', appDir);
-      const layoutFiles = await globFiles('**/layout.{ts,tsx,js,jsx}', appDir);
+    const pageFiles = await globFiles("**/page.{ts,tsx,js,jsx}", appDir);
+    const layoutFiles = await globFiles("**/layout.{ts,tsx,js,jsx}", appDir);
 
-      // Silent discovery - only log if verbose mode enabled
-      if (process.env.FARM_VERBOSE) {
-        logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`);
-      }
+    // Silent discovery - only log if verbose mode enabled
+    if (process.env.FARM_VERBOSE) {
+      logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`);
+    }
 
     // Process page files
     for (const file of pageFiles) {
@@ -64,10 +64,10 @@ export class RouteManager {
       });
     }
 
-      if (process.env.FARM_VERBOSE) {
-        this.logRoutes();
-      }
+    if (process.env.FARM_VERBOSE) {
+      this.logRoutes();
     }
+  }
 
   /**
    * Find matching route for a given URL path
@@ -78,7 +78,7 @@ export class RouteManager {
     layouts: RouteEntry[];
   } {
     // Remove trailing slash except for root
-    const normalizedPath = pathname === '/' ? '/' : pathname.replace(/\/$/, '');
+    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
@@ -156,10 +156,10 @@ export class RouteManager {
    * Create a route pattern from parsed route
    */
   private createRoutePattern(route: ParsedRoute): string {
-    if (route.segments.length === 0) return '/';
+    if (route.segments.length === 0) return "/";
 
     return (
-      '/' +
+      "/" +
       route.segments
         .map((segment) => {
           if (!segment.isDynamic) return segment.segment;
@@ -170,7 +170,7 @@ export class RouteManager {
 
           return `[${segment.segment}]`;
         })
-        .join('/')
+        .join("/")
     );
   }
 
@@ -179,7 +179,7 @@ export class RouteManager {
    */
   private findMatchingLayouts(pathname: string): RouteEntry[] {
     const matchingLayouts: RouteEntry[] = [];
-    const pathSegments = pathname.split('/').filter(Boolean);
+    const pathSegments = pathname.split("/").filter(Boolean);
 
     const sortedLayouts = Array.from(this.layouts.values()).sort((a, b) => {
       return a.route.segments.length - b.route.segments.length;
@@ -212,14 +212,14 @@ export class RouteManager {
    */
   private logRoutes(): void {
     if (this.routes.size > 0) {
-      logger.info('Registered routes:');
+      logger.info("Registered routes:");
       for (const [pattern, entry] of this.routes) {
         console.log(`  ${pattern} -> ${entry.modulePath}`);
       }
     }
 
     if (this.layouts.size > 0) {
-      logger.info('Registered layouts:');
+      logger.info("Registered layouts:");
       for (const [pattern, entry] of this.layouts) {
         console.log(`  ${pattern} -> ${entry.modulePath}`);
       }

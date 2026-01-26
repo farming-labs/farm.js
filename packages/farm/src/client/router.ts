@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { useBasePath } from '../provider';
+import { useState, useEffect } from "react";
+import { useBasePath } from "../provider";
 
 interface RouterState {
   pathname: string;
@@ -13,9 +13,9 @@ interface RouterState {
 export function useRouter() {
   const basePath = useBasePath();
   const [state, setState] = useState<RouterState>(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === "undefined") {
       return {
-        pathname: '/',
+        pathname: "/",
         searchParams: new URLSearchParams(),
         params: {},
       };
@@ -23,52 +23,52 @@ export function useRouter() {
 
     const url = new URL(window.location.href);
     return {
-      pathname: url.pathname.replace(basePath, '') || '/',
+      pathname: url.pathname.replace(basePath, "") || "/",
       searchParams: url.searchParams,
       params: {}, // This would be populated by the route matcher
     };
   });
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const handlePopState = () => {
       const url = new URL(window.location.href);
       setState({
-        pathname: url.pathname.replace(basePath, '') || '/',
+        pathname: url.pathname.replace(basePath, "") || "/",
         searchParams: url.searchParams,
         params: {}, // This would be populated by the route matcher
       });
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
   }, [basePath]);
 
   const push = (href: string) => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
-    const url = href.startsWith('/') ? basePath + href : href;
-    window.history.pushState(null, '', url);
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    const url = href.startsWith("/") ? basePath + href : href;
+    window.history.pushState(null, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   };
 
   const replace = (href: string) => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
-    const url = href.startsWith('/') ? basePath + href : href;
-    window.history.replaceState(null, '', url);
-    window.dispatchEvent(new PopStateEvent('popstate'));
+    const url = href.startsWith("/") ? basePath + href : href;
+    window.history.replaceState(null, "", url);
+    window.dispatchEvent(new PopStateEvent("popstate"));
   };
 
   const back = () => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       window.history.back();
     }
   };
 
   const forward = () => {
-    if (typeof window !== 'undefined') {
+    if (typeof window !== "undefined") {
       window.history.forward();
     }
   };

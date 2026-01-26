@@ -2,6 +2,27 @@
   "name": "farm",
   "version": "0.0.3-beta.3",
   "description": "Core Farm.js framework - A modern React meta-framework",
+  "keywords": [
+    "farm",
+    "framework",
+    "react",
+    "rsc",
+    "server-components",
+    "ssr",
+    "vite"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm"
+  },
+  "files": [
+    "dist",
+    "client.js",
+    "server.js",
+    "vite.js"
+  ],
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -62,12 +83,6 @@
       "require": "./dist/middleware.js"
     }
   },
-  "files": [
-    "dist",
-    "client.js",
-    "server.js",
-    "vite.js"
-  ],
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
@@ -110,20 +125,5 @@
   "peerDependencies": {
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
-  },
-  "keywords": [
-    "react",
-    "vite",
-    "framework",
-    "rsc",
-    "server-components",
-    "ssr",
-    "farm"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/farm-js/farm.js",
-    "directory": "packages/farm"
-  },
-  "license": "MIT"
+  }
 }

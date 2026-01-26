@@ -1,5 +1,5 @@
-import type { FarmConfig, FarmRequest, FarmResponse } from './types';
-import type { ViteDevServer } from 'vite';
+import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
+import type { ViteDevServer } from "vite";
 
 export interface FarmPluginContext {
   config: FarmConfig;
@@ -11,7 +11,7 @@ export interface FarmPluginContext {
 export interface FarmPlugin {
   name: string;
   version?: string;
-  enforce?: 'pre' | 'post';
+  enforce?: "pre" | "post";
 
   config?: (config: FarmConfig, context: FarmPluginContext) => FarmConfig | Promise<FarmConfig>;
   configResolved?: (config: FarmConfig, context: FarmPluginContext) => void | Promise<void>;
@@ -21,12 +21,12 @@ export interface FarmPlugin {
   beforeRequest?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmPluginContext
+    context: FarmPluginContext,
   ) => void | Promise<void>;
   afterResponse?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmPluginContext
+    context: FarmPluginContext,
   ) => void | Promise<void>;
 
   // Transform hooks
@@ -57,9 +57,9 @@ export class PluginManager {
   }
 
   getSortedPlugins(): FarmPlugin[] {
-    const pre = this.plugins.filter((p) => p.enforce === 'pre');
+    const pre = this.plugins.filter((p) => p.enforce === "pre");
     const normal = this.plugins.filter((p) => !p.enforce);
-    const post = this.plugins.filter((p) => p.enforce === 'post');
+    const post = this.plugins.filter((p) => p.enforce === "post");
     return [...pre, ...normal, ...post];
   }
 
@@ -68,7 +68,7 @@ export class PluginManager {
 
     for (const plugin of plugins) {
       const hook = plugin[hookName];
-      if (typeof hook === 'function') {
+      if (typeof hook === "function") {
         const result = await (hook as any).apply(plugin, [...args, this.context]);
         if (result !== undefined) {
           return result;
@@ -87,7 +87,7 @@ export class PluginManager {
 
     for (const plugin of plugins) {
       const hook = plugin[hookName];
-      if (typeof hook === 'function') {
+      if (typeof hook === "function") {
         const result = await (hook as any).apply(plugin, [value, ...args, this.context]);
         if (result !== undefined) {
           value = result;
@@ -102,12 +102,12 @@ export class PluginManager {
     const plugins = this.getSortedPlugins();
 
     // Run plugins sequentially for request hooks to allow early termination
-    if (hookName === 'beforeRequest' || hookName === 'afterResponse') {
+    if (hookName === "beforeRequest" || hookName === "afterResponse") {
       for (const plugin of plugins) {
         const hook = plugin[hookName];
-        if (typeof hook === 'function') {
+        if (typeof hook === "function") {
           // Check if response is already sent (only for beforeRequest)
-          if (hookName === 'beforeRequest') {
+          if (hookName === "beforeRequest") {
             const res = args[1];
             if (res && res.writableEnded) {
               return true;
@@ -117,7 +117,7 @@ export class PluginManager {
           await (hook as any).apply(plugin, [...args, this.context]);
 
           // Check again after plugin execution (only for beforeRequest)
-          if (hookName === 'beforeRequest') {
+          if (hookName === "beforeRequest") {
             const res = args[1];
             if (res && res.writableEnded) {
               return true;
@@ -130,7 +130,7 @@ export class PluginManager {
       const promises: Promise<any>[] = [];
       for (const plugin of plugins) {
         const hook = plugin[hookName];
-        if (typeof hook === 'function') {
+        if (typeof hook === "function") {
           promises.push((hook as any).apply(plugin, [...args, this.context]));
         }
       }

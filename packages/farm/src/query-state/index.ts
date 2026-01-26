@@ -1,6 +1,6 @@
 /**
  * Farm.js Query State Management
- * 
+ *
  * Type-safe URL search parameter state management using nuqs
  * Provides useState-like API for managing URL query parameters
  */
@@ -21,16 +21,11 @@ export {
   parseAsIsoDateTime,
   createParser,
   type Parser,
-} from 'nuqs';
+} from "nuqs";
 
 // Re-export nuqs server utilities
-export {
-  createLoader,
-  createSerializer,
-  type SearchParams,
-  type UrlKeys,
-} from 'nuqs/server';
+export { createLoader, createSerializer, type SearchParams, type UrlKeys } from "nuqs/server";
 
 // Farm.js specific utilities
-export * from './client';
-export * from './server';
+export * from "./client";
+export * from "./server";

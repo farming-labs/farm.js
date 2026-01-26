@@ -1,13 +1,17 @@
-import { createEndpoint } from "farm"
-import { z } from "zod"
+import { createEndpoint } from "farm";
+import { z } from "zod";
 
-export const GET = createEndpoint('/api/test', {
-    method: 'GET',
+export const GET = createEndpoint(
+  "/api/test",
+  {
+    method: "GET",
     query: z.object({
-        name: z.string().optional(),
-    })
-}, async (ctx) => {
+      name: z.string().optional(),
+    }),
+  },
+  async (ctx) => {
     return {
-        message: 'Hello World',
-    }
-})
+      message: "Hello World",
+    };
+  },
+);

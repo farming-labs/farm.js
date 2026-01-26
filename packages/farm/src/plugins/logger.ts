@@ -1,26 +1,26 @@
-import type { FarmPlugin } from '../plugin';
-import pc from 'picocolors';
+import type { FarmPlugin } from "../plugin";
+import pc from "picocolors";
 
 export function createLoggerPlugin(): FarmPlugin {
   return {
-    name: 'farm:logger',
-    enforce: 'post',
+    name: "farm:logger",
+    enforce: "post",
 
     async beforeRequest(req, res, context) {
       if (!context.isDev) return;
 
       const startTime = Date.now();
-      const method = req.method || 'GET';
-      const url = req.url || '/';
-      const host = req.headers.host || 'localhost:3000';
+      const method = req.method || "GET";
+      const url = req.url || "/";
+      const host = req.headers.host || "localhost:3000";
 
       (req as any).__farmStartTime = startTime;
 
       const log = [
-        pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
-        pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
+        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+        pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
         pc.gray(`http://${host}${url}`),
-      ].join(' ');
+      ].join(" ");
 
       console.log(log);
     },
@@ -31,7 +31,7 @@ export function createLoggerPlugin(): FarmPlugin {
       const startTime = (req as any).__farmStartTime || Date.now();
       const duration = Date.now() - startTime;
       const status = res.statusCode || 200;
-      const url = req.url || '/';
+      const url = req.url || "/";
 
       let statusColor = pc.green;
       if (status >= 500) statusColor = pc.red;
@@ -39,13 +39,13 @@ export function createLoggerPlugin(): FarmPlugin {
       else if (status >= 300) statusColor = pc.cyan;
 
       const log = [
-        pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
-        status >= 400 ? pc.red('✗') : pc.green('✓'),
+        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+        status >= 400 ? pc.red("✗") : pc.green("✓"),
         pc.gray(url),
-        pc.dim('-'),
+        pc.dim("-"),
         statusColor(status.toString()),
         pc.dim(`(${duration}ms)`),
-      ].join(' ');
+      ].join(" ");
 
       console.log(log);
     },

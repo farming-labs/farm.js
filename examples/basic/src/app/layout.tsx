@@ -1,11 +1,11 @@
-import React from 'react'
-import type { LayoutProps, Metadata } from 'farm'
-import './globals.css'
+import React from "react";
+import type { LayoutProps, Metadata } from "farm";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: 'Farm.js Basic Example',
-  description: 'A basic example showcasing Farm.js features'
-}
+  title: "Farm.js Basic Example",
+  description: "A basic example showcasing Farm.js features",
+};
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
@@ -14,46 +14,76 @@ export default function RootLayout({ children }: LayoutProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-8 h-16">
             <div className="text-xl font-bold text-gray-900">🚜 Farm.js</div>
-            <a href="/" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Home
             </a>
-            <a href="/about" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/about"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               About
             </a>
-            <a href="/contact" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/contact"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Contact
             </a>
-            <a href="/users/123" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/users/123"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               User Demo
             </a>
-            <a href="/query-state-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/query-state-demo"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Query State
             </a>
-            <a href="/query-test" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/query-test"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Query Test
             </a>
-            <a href="/farm-query-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/farm-query-demo"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Farm Query
             </a>
-            <a href="/farm-query-client-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/farm-query-client-demo"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               Farm Client
             </a>
-            <a href="/api-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/api-demo"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               API Demo
             </a>
-            <a href="/api-demo-client" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/api-demo-client"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               API Client
             </a>
-            <a href="/docs/reference" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+            <a
+              href="/docs/reference"
+              className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors"
+            >
               API Docs
             </a>
           </div>
         </div>
       </nav>
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {children}
-      </main>
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">{children}</main>
     </div>
-  )
+  );
 }
-

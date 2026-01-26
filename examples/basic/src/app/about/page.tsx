@@ -1,15 +1,15 @@
-import React from 'react'
-import type { PageProps } from 'farm'
+import React from "react";
+import type { PageProps } from "farm";
 
 export default function AboutPage({ params, searchParams }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
         <h1 className="text-4xl font-bold text-gray-900 mb-4">About .js</h1>
-        
+
         <p className="text-lg text-gray-600 leading-relaxed">
-          This basic example showcases the fundamental features of Farm.js without 
-          any complex dependencies or configurations.
+          This basic example showcases the fundamental features of Farm.js without any complex
+          dependencies or configurations.
         </p>
       </div>
 
@@ -42,7 +42,7 @@ export default function AboutPage({ params, searchParams }: PageProps) {
       <div className="bg-gray-900 text-white rounded-lg p-6">
         <h2 className="text-xl font-semibold mb-4">Project Structure</h2>
         <pre className="bg-gray-800 p-4 rounded-md text-sm overflow-auto">
-{`src/
+          {`src/
   app/
     layout.tsx      # Root layout with Tailwind
     globals.css     # Tailwind imports
@@ -58,22 +58,33 @@ export default function AboutPage({ params, searchParams }: PageProps) {
       </div>
 
       <div className="flex gap-4">
-        <a href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+        <a
+          href="/"
+          className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+        >
           ← Back to Home
         </a>
-        <a href="/users/123?tab=profile" className="inline-flex items-center px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium">
+        <a
+          href="/users/123?tab=profile"
+          className="inline-flex items-center px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+        >
           Try Dynamic Route →
         </a>
       </div>
     </div>
-  )
+  );
 }
 
 function Feature({ title, description }: { title: string; description: string }) {
   return (
     <div className="flex items-start gap-3">
       <div className="flex-shrink-0 w-6 h-6 rounded-full bg-green-100 flex items-center justify-center mt-0.5">
-        <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <svg
+          className="w-4 h-4 text-green-600"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
         </svg>
       </div>
@@ -82,6 +93,5 @@ function Feature({ title, description }: { title: string; description: string })
         <p className="text-gray-600 text-sm">{description}</p>
       </div>
     </div>
-  )
+  );
 }
-

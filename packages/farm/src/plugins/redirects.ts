@@ -1,12 +1,12 @@
-import type { FarmPlugin } from '../plugin';
-import type { RedirectConfig } from '../config';
+import type { FarmPlugin } from "../plugin";
+import type { RedirectConfig } from "../config";
 
 export function createRedirectsPlugin(redirects: RedirectConfig[]): FarmPlugin {
   return {
-    name: 'farm:redirects',
-    enforce: 'pre',
+    name: "farm:redirects",
+    enforce: "pre",
     async beforeRequest(req, res, context) {
-      const url = new URL(req.url || '/', `http://${req.headers.host}`);
+      const url = new URL(req.url || "/", `http://${req.headers.host}`);
       const pathname = url.pathname;
 
       for (const redirect of redirects) {
@@ -15,10 +15,10 @@ export function createRedirectsPlugin(redirects: RedirectConfig[]): FarmPlugin {
         // :param* -> (.*)
         // * -> (.*)
         const pattern = redirect.source
-          .replace(/:\w+\*/g, '(.*)') // :param* -> (.*)
-          .replace(/:\w+/g, '([^/]+)') // :param -> ([^/]+)
-          .replace(/\*/g, '(.*)') // * -> (.*)
-          .replace(/\//g, '\\/'); // escape slashes
+          .replace(/:\w+\*/g, "(.*)") // :param* -> (.*)
+          .replace(/:\w+/g, "([^/]+)") // :param -> ([^/]+)
+          .replace(/\*/g, "(.*)") // * -> (.*)
+          .replace(/\//g, "\\/"); // escape slashes
 
         const sourceRegex = new RegExp(`^${pattern}$`);
 
@@ -31,13 +31,13 @@ export function createRedirectsPlugin(redirects: RedirectConfig[]): FarmPlugin {
             // Replace :param or :param* with captured values
             const params = redirect.source.match(/:\w+\*?/g) || [];
             params.forEach((param, index) => {
-              destination = destination.replace(param, matches[index + 1] || '');
+              destination = destination.replace(param, matches[index + 1] || "");
             });
 
             // Also replace plain * with captured values
             const stars = redirect.source.match(/(?<!:)\*/g) || [];
             stars.forEach((_, index) => {
-              destination = destination.replace('*', matches[params.length + index + 1] || '');
+              destination = destination.replace("*", matches[params.length + index + 1] || "");
             });
           }
 

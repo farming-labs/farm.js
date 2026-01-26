@@ -1,9 +1,7 @@
 {
   "page.js": {
     "id": "page.js",
-    "chunks": [
-      "page.js"
-    ],
+    "chunks": ["page.js"],
     "name": "page"
   }
 }

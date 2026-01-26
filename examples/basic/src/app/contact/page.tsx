@@ -1,28 +1,27 @@
-import { getMiddlewareData, getMiddlewareValue } from 'farm/middleware'
-import React from 'react'
-import type { PageProps } from 'farm'
-import { GET as helloGet } from "../api/hello/route"
+import { getMiddlewareData, getMiddlewareValue } from "farm/middleware";
+import React from "react";
+import type { PageProps } from "farm";
+import { GET as helloGet } from "../api/hello/route";
 export default async function ContactPage(props: PageProps) {
   const middlewareData = props.middleware?.data;
-  const demoInfoFromProps = middlewareData?.get('demoInfo');
+  const demoInfoFromProps = middlewareData?.get("demoInfo");
 
   const data = getMiddlewareData<{ demoInfo: { message: string } }>();
-  const demoInfoFromHelper = data.get('demoInfo');
+  const demoInfoFromHelper = data.get("demoInfo");
 
-  const demoInfoDirect = getMiddlewareValue('demoInfo');
-  console.log('📊 Contact page middleware data:', {
+  const demoInfoDirect = getMiddlewareValue("demoInfo");
+  console.log("📊 Contact page middleware data:", {
     fromProps: demoInfoFromProps,
     fromHelper: demoInfoFromHelper,
     fromDirect: demoInfoDirect,
   });
-  const allDataMatches = JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) &&
+  const allDataMatches =
+    JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) &&
     JSON.stringify(demoInfoFromHelper) === JSON.stringify(demoInfoDirect);
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
-        <p className="text-lg text-gray-600">
-          Get in touch h the Farm.js team or community.
-        </p>
+        <p className="text-lg text-gray-600">Get in touch h the Farm.js team or community.</p>
       </div>
 
       <div className="grid md:grid-cols-3 gap-6">
@@ -51,8 +50,8 @@ export default async function ContactPage(props: PageProps) {
       <div className="bg-blue-50 border border-blue-200 rounded-lg p-6">
         <h3 className="text-lg font-semibold mb-2 text-gray-900">💡 Pro Tip</h3>
         <p className="text-gray-700">
-          This page demonstrates how easy it is to create new routes in Farm.js.
-          Just add a <code className="bg-blue-100 px-2 py-1 rounded">page.tsx</code> file in a new directory!
+          This page demonstrates how easy it is to create new routes in Farm.js. Just add a{" "}
+          <code className="bg-blue-100 px-2 py-1 rounded">page.tsx</code> file in a new directory!
         </p>
       </div>
 
@@ -65,28 +64,40 @@ export default async function ContactPage(props: PageProps) {
           {JSON.stringify({ params, searchParams }, null, 2)}
         </pre> */}
         <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md text-sm">
-          <strong>💡 Note:</strong> <code className="bg-yellow-100 px-1.5 py-0.5 rounded">params</code> is empty because this route has no
-          dynamic segments like [id]. Try adding query params:
-          <a href="/contact?subject=bug&priority=high" className="text-blue-600 hover:underline ml-1">
+          <strong>💡 Note:</strong>{" "}
+          <code className="bg-yellow-100 px-1.5 py-0.5 rounded">params</code> is empty because this
+          route has no dynamic segments like [id]. Try adding query params:
+          <a
+            href="/contact?subject=bug&priority=high"
+            className="text-blue-600 hover:underline ml-1"
+          >
             /contact?subject=bug&priority=high
           </a>
         </div>
       </div>
 
       <div>
-        <a href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+        <a
+          href="/"
+          className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+        >
           ← Back to Home
         </a>
       </div>
     </div>
-  )
+  );
 }
 
-function ContactCard({ title, description, link, icon }: {
-  title: string
-  description: string
-  link: string
-  icon: string
+function ContactCard({
+  title,
+  description,
+  link,
+  icon,
+}: {
+  title: string;
+  description: string;
+  link: string;
+  icon: string;
 }) {
   return (
     <div className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg transition-all hover:scale-105">
@@ -103,6 +114,5 @@ function ContactCard({ title, description, link, icon }: {
         </svg>
       </a>
     </div>
-  )
+  );
 }
-

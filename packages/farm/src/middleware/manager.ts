@@ -1,21 +1,21 @@
 /**
  * Middleware Manager
- * 
+ *
  * Discovers and executes middleware files in the file system
  */
 
-import * as fs from 'fs';
-import * as path from 'path';
-import type { ViteDevServer } from 'vite';
-import type { IncomingMessage, ServerResponse } from 'http';
+import * as fs from "fs";
+import * as path from "path";
+import type { ViteDevServer } from "vite";
+import type { IncomingMessage, ServerResponse } from "http";
 import type {
   MiddlewareFunction,
   MiddlewareModule,
   MiddlewareConfig,
   MiddlewareContext,
-} from './types';
-import { createContext } from './context';
-import { logger } from '../utils';
+} from "./types";
+import { createContext } from "./context";
+import { logger } from "../utils";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -33,7 +33,7 @@ export class MiddlewareManager {
 
   constructor(
     private appDir: string,
-    viteServer?: ViteDevServer
+    viteServer?: ViteDevServer,
   ) {
     this.viteServer = viteServer;
   }
@@ -43,12 +43,12 @@ export class MiddlewareManager {
    */
   async discover(): Promise<void> {
     this.middleware = [];
-    await this.discoverInDirectory(this.appDir, '/');
+    await this.discoverInDirectory(this.appDir, "/");
 
     // Sort by path depth (root first, then nested)
     this.middleware.sort((a, b) => {
-      const depthA = a.path.split('/').length;
-      const depthB = b.path.split('/').length;
+      const depthA = a.path.split("/").length;
+      const depthB = b.path.split("/").length;
       return depthA - depthB;
     });
 
@@ -80,7 +80,7 @@ export class MiddlewareManager {
     // Recursively check subdirectories
     const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
-      if (entry.isDirectory() && !entry.name.startsWith('.') && !entry.name.startsWith('_')) {
+      if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
         const subPath = path.join(dir, entry.name);
         const subRoutePath = path.posix.join(routePath, entry.name);
         await this.discoverInDirectory(subPath, subRoutePath);
@@ -92,7 +92,7 @@ export class MiddlewareManager {
    * Find middleware file in directory
    */
   private findMiddlewareFile(dir: string): string | null {
-    const extensions = ['.ts', '.tsx', '.js', '.jsx'];
+    const extensions = [".ts", ".tsx", ".js", ".jsx"];
     for (const ext of extensions) {
       const filePath = path.join(dir, `middleware${ext}`);
       if (fs.existsSync(filePath)) {
@@ -107,7 +107,7 @@ export class MiddlewareManager {
    */
   private async loadMiddleware(
     filePath: string,
-    routePath: string
+    routePath: string,
   ): Promise<DiscoveredMiddleware | null> {
     try {
       // Load the module
@@ -120,7 +120,7 @@ export class MiddlewareManager {
       }
 
       const middlewareModule = module as MiddlewareModule;
-      
+
       if (!middlewareModule.default) {
         logger.warn(`Middleware file ${filePath} does not have a default export`);
         return null;
@@ -130,10 +130,10 @@ export class MiddlewareManager {
       let handlers: MiddlewareFunction[] = [];
 
       // Check if it has a build method (middleware chain object)
-      if (defaultExport && typeof defaultExport === 'object' && 'build' in defaultExport) {
+      if (defaultExport && typeof defaultExport === "object" && "build" in defaultExport) {
         const built = (defaultExport as any).build();
         handlers = built.handlers;
-      } else if (typeof defaultExport === 'function') {
+      } else if (typeof defaultExport === "function") {
         // Plain middleware function
         handlers = [defaultExport as MiddlewareFunction];
       }
@@ -153,18 +153,15 @@ export class MiddlewareManager {
   /**
    * Execute middleware for a request
    */
-  async execute(
-    req: IncomingMessage,
-    res: ServerResponse
-  ): Promise<boolean> {
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  async execute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+    const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = url.pathname;
 
     // Find applicable middleware (cascading from root to specific)
-    const applicable = this.middleware.filter(mw => {
+    const applicable = this.middleware.filter((mw) => {
       // Root middleware (/) applies to everything
-      if (mw.path === '/') return true;
-      
+      if (mw.path === "/") return true;
+
       // Middleware applies to its path and all sub-paths
       return pathname.startsWith(mw.path) || pathname === mw.path;
     });
@@ -174,7 +171,7 @@ export class MiddlewareManager {
     }
 
     // Create root context
-    let parentData: MiddlewareContext['parent'] | undefined;
+    let parentData: MiddlewareContext["parent"] | undefined;
     let ctx = createContext(req, res, this.viteServer);
 
     // Execute middleware in cascade order
@@ -238,11 +235,11 @@ export class MiddlewareManager {
     // Check matchers
     if (config.matcher) {
       for (const matcher of config.matcher) {
-        if (typeof matcher === 'string' || matcher instanceof RegExp) {
+        if (typeof matcher === "string" || matcher instanceof RegExp) {
           if (this.matchPattern(matcher, pathname)) {
             return true;
           }
-        } else if (typeof matcher === 'function') {
+        } else if (typeof matcher === "function") {
           // For function matchers, we'd need the full context
           // For now, allow it through
           return true;
@@ -264,10 +261,10 @@ export class MiddlewareManager {
 
     // Convert glob-style pattern to regex
     const regexPattern = pattern
-      .replace(/\*\*/g, '__DOUBLE_STAR__')
-      .replace(/\*/g, '[^/]+')
-      .replace(/__DOUBLE_STAR__/g, '.*')
-      .replace(/\//g, '\\/');
+      .replace(/\*\*/g, "__DOUBLE_STAR__")
+      .replace(/\*/g, "[^/]+")
+      .replace(/__DOUBLE_STAR__/g, ".*")
+      .replace(/\//g, "\\/");
 
     const regex = new RegExp(`^${regexPattern}$`);
     return regex.test(pathname);
@@ -280,4 +277,3 @@ export class MiddlewareManager {
     await this.discover();
   }
 }
-

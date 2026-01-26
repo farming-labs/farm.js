@@ -1,5 +1,8 @@
-import { startDevServer } from 'farm/server'
+import { startDevServer } from "farm/server";
 
-startDevServer({
-  root: process.cwd()
-}, 3001).catch(console.error)
+startDevServer(
+  {
+    root: process.cwd(),
+  },
+  3001,
+).catch(console.error);

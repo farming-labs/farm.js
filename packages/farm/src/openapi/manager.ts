@@ -1,7 +1,7 @@
-import { OpenAPIGenerator } from './generator';
-import { APITypeGenerator } from '../type-generator';
-import type { OpenAPIConfig } from '../config';
-import type { APIRouteInfo } from '../type-generator';
+import { OpenAPIGenerator } from "./generator";
+import { APITypeGenerator } from "../type-generator";
+import type { OpenAPIConfig } from "../config";
+import type { APIRouteInfo } from "../type-generator";
 
 export class OpenAPIManager {
   private generator: OpenAPIGenerator;
@@ -24,16 +24,16 @@ export class OpenAPIManager {
     try {
       // Get API routes using the existing type generator
       const routes = await this.apiTypeGenerator.scanAPIRoutes(`${this.appDir}/api`);
-      
+
       // Generate OpenAPI spec (now async)
       const spec = await this.generator.generateSpec(routes);
-      
+
       // Cache the spec
       this.specCache = spec;
-      
+
       return spec;
     } catch (error) {
-      console.error('Failed to generate OpenAPI spec:', error);
+      console.error("Failed to generate OpenAPI spec:", error);
       return null;
     }
   }
@@ -45,7 +45,7 @@ export class OpenAPIManager {
     if (this.specCache) {
       return this.specCache;
     }
-    
+
     return await this.generateSpec();
   }
 
@@ -56,11 +56,11 @@ export class OpenAPIManager {
     try {
       const routes = await this.apiTypeGenerator.scanAPIRoutes(`${this.appDir}/api`);
       const outputPath = `${this.appDir}/lib/openapi.spec.json`;
-      
+
       this.generator.generateSpecFile(routes, outputPath);
-      console.log('✅ OpenAPI spec generated at:', outputPath);
+      console.log("✅ OpenAPI spec generated at:", outputPath);
     } catch (error) {
-      console.error('Failed to generate OpenAPI spec file:', error);
+      console.error("Failed to generate OpenAPI spec file:", error);
     }
   }
 
@@ -79,10 +79,10 @@ export class OpenAPIManager {
     return async (req: any, res: any) => {
       try {
         const spec = await this.getSpec();
-        
+
         if (!spec) {
           res.statusCode = 500;
-          res.setHeader('Content-Type', 'text/html');
+          res.setHeader("Content-Type", "text/html");
           res.end(`
             <html>
               <body>
@@ -96,15 +96,15 @@ export class OpenAPIManager {
 
         // Set headers for HTML response
         res.statusCode = 200;
-        res.setHeader('Content-Type', 'text/html');
-        
+        res.setHeader("Content-Type", "text/html");
+
         // Generate HTML with Scalar
         const html = this.generateDocsHTML(spec);
         res.end(html);
       } catch (error) {
-        console.error('Error serving docs route:', error);
+        console.error("Error serving docs route:", error);
         res.statusCode = 500;
-        res.setHeader('Content-Type', 'text/html');
+        res.setHeader("Content-Type", "text/html");
         res.end(`
           <html>
             <body>
@@ -125,14 +125,14 @@ export class OpenAPIManager {
 <!DOCTYPE html>
 <html>
   <head>
-    <title>${this.config.title || 'API Documentation'}</title>
+    <title>${this.config.title || "API Documentation"}</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>
   <body>
     <script
       id="api-reference"
-      data-url="data:application/json;base64,${Buffer.from(JSON.stringify(spec)).toString('base64')}"
+      data-url="data:application/json;base64,${Buffer.from(JSON.stringify(spec)).toString("base64")}"
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
   </body>

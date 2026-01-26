@@ -1,6 +1,6 @@
 /**
  * Farm.js Query State Parsers
- * 
+ *
  * Shared parsers that can be used in both client and server contexts
  */
 
@@ -55,15 +55,15 @@ export const parseAsFloat: Parser<number> = {
 // Boolean parser
 export const parseAsBoolean: Parser<boolean> = {
   parse: (value: string) => {
-    if (value === 'true') return true;
-    if (value === 'false') return false;
+    if (value === "true") return true;
+    if (value === "false") return false;
     return null;
   },
   serialize: (value: boolean) => value.toString(),
   withDefault: (defaultValue: boolean) => ({
     parse: (value: string) => {
-      if (value === 'true') return true;
-      if (value === 'false') return false;
+      if (value === "true") return true;
+      if (value === "false") return false;
       return defaultValue;
     },
     serialize: (value: boolean) => value.toString(),
@@ -75,15 +75,23 @@ export function parseAsArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {
   return {
     parse: (value: string) => {
       if (!value) return null;
-      return value.split(',').filter(Boolean).map(item => itemParser.parse(item.trim())).filter(item => item !== null) as T[];
+      return value
+        .split(",")
+        .filter(Boolean)
+        .map((item) => itemParser.parse(item.trim()))
+        .filter((item) => item !== null) as T[];
     },
-    serialize: (value: T[]) => value.map(item => itemParser.serialize(item)).join(','),
+    serialize: (value: T[]) => value.map((item) => itemParser.serialize(item)).join(","),
     withDefault: (defaultValue: T[]) => ({
       parse: (value: string) => {
         if (!value) return defaultValue;
-        return value.split(',').filter(Boolean).map(item => itemParser.parse(item.trim())).filter(item => item !== null) as T[];
+        return value
+          .split(",")
+          .filter(Boolean)
+          .map((item) => itemParser.parse(item.trim()))
+          .filter((item) => item !== null) as T[];
       },
-      serialize: (value: T[]) => value.map(item => itemParser.serialize(item)).join(','),
+      serialize: (value: T[]) => value.map((item) => itemParser.serialize(item)).join(","),
     }),
   };
 }
@@ -161,4 +169,3 @@ export function createParser<T>(config: {
 
 // Type inference helper
 export type inferParserType<T> = T extends Parser<infer U> ? U : never;
-

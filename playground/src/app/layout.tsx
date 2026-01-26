@@ -1,10 +1,10 @@
-import React from 'react'
-import type { LayoutProps, Metadata } from 'farm'
+import React from "react";
+import type { LayoutProps, Metadata } from "farm";
 
 export const metadata: Metadata = {
-  title: 'Farm.js Playground',
-  description: 'Testing ground for Farm.js features'
-}
+  title: "Farm.js Playground",
+  description: "Testing ground for Farm.js features",
+};
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
@@ -12,8 +12,9 @@ export default function RootLayout({ children }: LayoutProps) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <style dangerouslySetInnerHTML={{
-          __html: `
+        <style
+          dangerouslySetInnerHTML={{
+            __html: `
             * { box-sizing: border-box; }
             body { 
               margin: 0; 
@@ -56,8 +57,9 @@ export default function RootLayout({ children }: LayoutProps) {
               font-weight: bold;
               color: #1e293b;
             }
-          `
-        }} />
+          `,
+          }}
+        />
       </head>
       <body>
         <nav className="nav">
@@ -71,11 +73,8 @@ export default function RootLayout({ children }: LayoutProps) {
             <a href="/blog/hello-world">Blog Post</a>
           </div>
         </nav>
-        <div className="container">
-          {children}
-        </div>
+        <div className="container">{children}</div>
       </body>
     </html>
-  )
+  );
 }
-

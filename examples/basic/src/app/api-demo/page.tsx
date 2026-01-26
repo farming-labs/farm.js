@@ -1,28 +1,27 @@
-import React from 'react';
-import { GET as helloGet } from "../api/hello/route"
+import React from "react";
+import { GET as helloGet } from "../api/hello/route";
 export default async function APIDemo() {
-  const baseURL = 'http://localhost:3000';
-  console.log({process: process.env})
+  const baseURL = "http://localhost:3000";
+  console.log({ process: process.env });
   let helloResponse;
   let usersResponse;
   try {
     const helloRes = await helloGet({
       query: {
-        name: 'wonderfull something'
-      }
-    })
-    console.log({helloRes})
-    helloResponse = helloRes
+        name: "wonderfull something",
+      },
+    });
+    console.log({ helloRes });
+    helloResponse = helloRes;
   } catch (error) {
-    helloResponse = { message: 'Error fetching data', timestamp: new Date().toISOString() };
+    helloResponse = { message: "Error fetching data", timestamp: new Date().toISOString() };
   }
-  
+
   try {
     const usersRes = await fetch(`${baseURL}/api/users`);
     usersResponse = await usersRes.json();
-    console.log({usersResponse})
-} 
-  catch (error) {
+    console.log({ usersResponse });
+  } catch (error) {
     usersResponse = { users: [], total: 0, limit: 10, offset: 0 };
   }
 
@@ -35,37 +34,34 @@ export default async function APIDemo() {
 
         <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-4 mb-8">
           <p className="text-yellow-200 text-sm">
-            ⚡ <strong>Live Data!</strong> This page fetches real data from API endpoints using async server components with streaming SSR.
+            ⚡ <strong>Live Data!</strong> This page fetches real data from API endpoints using
+            async server components with streaming SSR.
           </p>
         </div>
 
         <div className="space-y-6">
           <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700">
-            <h2 className="text-2xl font-semibold mb-4 text-blue-400">
-              GET /api/hello
-            </h2>
+            <h2 className="text-2xl font-semibold mb-4 text-blue-400">GET /api/hello</h2>
             <div className="bg-gray-900 rounded p-4 font-mono text-sm">
-              <pre className="text-green-400">
-                {JSON.stringify(helloResponse, null, 2)}
-              </pre>
+              <pre className="text-green-400">{JSON.stringify(helloResponse, null, 2)}</pre>
             </div>
             <p className="mt-4 text-gray-400 text-sm">
-              ✅ Fetched in async server component: <code className="bg-gray-700 px-2 py-1 rounded">await fetch('/api/hello?name=Farm.js')</code>
+              ✅ Fetched in async server component:{" "}
+              <code className="bg-gray-700 px-2 py-1 rounded">
+                await fetch('/api/hello?name=Farm.js')
+              </code>
             </p>
           </div>
 
           {/* Users API Response */}
           <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700">
-            <h2 className="text-2xl font-semibold mb-4 text-purple-400">
-              GET /api/users
-            </h2>
+            <h2 className="text-2xl font-semibold mb-4 text-purple-400">GET /api/users</h2>
             <div className="bg-gray-900 rounded p-4 font-mono text-sm">
-              <pre className="text-green-400">
-                {JSON.stringify(usersResponse, null, 2)}
-              </pre>
+              <pre className="text-green-400">{JSON.stringify(usersResponse, null, 2)}</pre>
             </div>
             <p className="mt-4 text-gray-400 text-sm">
-              ✅ Fetched in async server component: <code className="bg-gray-700 px-2 py-1 rounded">await fetch('/api/users')</code>
+              ✅ Fetched in async server component:{" "}
+              <code className="bg-gray-700 px-2 py-1 rounded">await fetch('/api/users')</code>
             </p>
           </div>
 
@@ -103,12 +99,10 @@ export default async function APIDemo() {
 
           {/* Code Example */}
           <div className="bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700">
-            <h2 className="text-2xl font-semibold mb-4 text-green-400">
-              Example: POST Request
-            </h2>
+            <h2 className="text-2xl font-semibold mb-4 text-green-400">Example: POST Request</h2>
             <div className="bg-gray-900 rounded p-4 font-mono text-xs">
               <pre className="text-gray-300">
-{`curl -X POST 'http://localhost:3000/api/auth/login' \\
+                {`curl -X POST 'http://localhost:3000/api/auth/login' \\
   -H 'Content-Type: application/json' \\
   -d '{"email":"test@example.com","password":"password123"}'
 
@@ -128,8 +122,8 @@ Response:
 
           {/* Back Link */}
           <div className="text-center pt-8">
-            <a 
-              href="/" 
+            <a
+              href="/"
               className="inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors"
             >
               ← Back to Home
