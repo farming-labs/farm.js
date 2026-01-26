@@ -20,7 +20,6 @@ export default async function APIDemo() {
   try {
     const usersRes = await fetch(`${baseURL}/api/users`);
     usersResponse = await usersRes.json();
-    console.log({usersResponse})
 } 
   catch (error) {
     usersResponse = { users: [], total: 0, limit: 10, offset: 0 };

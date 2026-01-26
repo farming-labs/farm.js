@@ -1,5 +1,5 @@
-import React from 'react';
-import { ScalarAPIDocumentation } from './scalar-component';
+import React from "react";
+import { ScalarAPIDocumentation } from "./scalar-component";
 
 interface DocsRouteProps {
   spec: any;
@@ -12,7 +12,7 @@ export function DocsRoute({ spec, config }: DocsRouteProps) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{config?.title || 'API Documentation'}</title>
+        <title>{config?.title || "API Documentation"}</title>
         <style>{`
           body {
             margin: 0;
@@ -31,4 +31,3 @@ export function DocsRoute({ spec, config }: DocsRouteProps) {
     </html>
   );
 }
-

@@ -1,5 +1,5 @@
-import type { FarmPlugin, FarmPluginContext } from '../plugin';
-import type { FarmRequest, FarmResponse } from '../types';
+import type { FarmPlugin, FarmPluginContext } from "../plugin";
+import type { FarmRequest, FarmResponse } from "../types";
 
 export function createEnvPlugin(
   env: Record<string, string>,
@@ -7,12 +7,20 @@ export function createEnvPlugin(
     beforeRequest: overrideBeforeRequest,
     afterResponse: overrideAfterResponse,
   }: {
-    beforeRequest?: (req: FarmRequest, res: FarmResponse, context: FarmPluginContext) => void | Promise<void>;
-    afterResponse?: (req: FarmRequest, res: FarmResponse, context: FarmPluginContext) => void | Promise<void>;
-  } = {}
+    beforeRequest?: (
+      req: FarmRequest,
+      res: FarmResponse,
+      context: FarmPluginContext,
+    ) => void | Promise<void>;
+    afterResponse?: (
+      req: FarmRequest,
+      res: FarmResponse,
+      context: FarmPluginContext,
+    ) => void | Promise<void>;
+  } = {},
 ): FarmPlugin {
   return {
-    name: 'farm:env',
+    name: "farm:env",
 
     config(config, context) {
       // Inject environment variables into the config

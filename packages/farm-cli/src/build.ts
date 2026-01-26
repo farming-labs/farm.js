@@ -1,4 +1,4 @@
-import { loadConfig, resolveConfig, build, logger } from '@farmjs/core';
+import { loadConfig, resolveConfig, build, logger } from "@farmjs/core";
 
 export interface BuildFarmOptions {
   root?: string;
@@ -10,30 +10,30 @@ export interface BuildFarmOptions {
  */
 export async function buildFarm(options: BuildFarmOptions = {}) {
   const root = options.root || process.cwd();
-  
+
   try {
     // Load config
     const userConfig = await loadConfig(root);
-    const mode = 'production';
-    
+    const mode = "production";
+
     if (!userConfig) {
-      throw new Error('No farm.config.ts found. Please create a configuration file.');
+      throw new Error("No farm.config.ts found. Please create a configuration file.");
     }
-    
+
     const config = await resolveConfig(userConfig, mode);
-    
+
     // Override preset if provided via CLI
     if (options.preset) {
       config.preset = options.preset as any;
     }
-    
+
     // Build
     await build(config, {
       preset: config.preset,
       root,
     });
-    
-    logger.success('✅ Build completed successfully!');
+
+    logger.success("✅ Build completed successfully!");
   } catch (error: any) {
     logger.error(`❌ Build failed: ${error.message}`);
     if (error.stack) {
@@ -42,4 +42,3 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
     process.exit(1);
   }
 }
-

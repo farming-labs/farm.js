@@ -1,5 +1,5 @@
-import React, { createContext, useContext, type ReactNode } from 'react';
-import type { FarmConfig } from './types';
+import React, { createContext, useContext, type ReactNode } from "react";
+import type { FarmConfig } from "./types";
 
 interface FarmContextValue {
   config: FarmConfig;
@@ -19,7 +19,7 @@ interface FarmProviderProps {
 export function FarmProvider({ children, config }: FarmProviderProps) {
   const value: FarmContextValue = {
     config,
-    basePath: config.basePath || '/',
+    basePath: config.basePath || "/",
   };
 
   return <FarmContext.Provider value={value}>{children}</FarmContext.Provider>;
@@ -32,7 +32,7 @@ export function useFarm(): FarmContextValue {
   const context = useContext(FarmContext);
 
   if (!context) {
-    throw new Error('useFarm must be used within a FarmProvider');
+    throw new Error("useFarm must be used within a FarmProvider");
   }
 
   return context;

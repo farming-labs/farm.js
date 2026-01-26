@@ -12,12 +12,12 @@ Layouts allow you to share UI components across multiple pages. Farm.js supports
 Every Farm.js application must have a root layout in `src/app/layout.tsx`:
 
 ```tsx title="src/app/layout.tsx"
-import type { LayoutProps, Metadata } from '@farmjs/core'
+import type { LayoutProps, Metadata } from "@farmjs/core";
 
 export const metadata: Metadata = {
-  title: 'My Farm.js App',
-  description: 'Built with Farm.js'
-}
+  title: "My Farm.js App",
+  description: "Built with Farm.js",
+};
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
@@ -35,7 +35,7 @@ export default function RootLayout({ children }: LayoutProps) {
         </footer>
       </body>
     </html>
-  )
+  );
 }
 ```
 
@@ -44,7 +44,7 @@ export default function RootLayout({ children }: LayoutProps) {
 Create nested layouts by adding `layout.tsx` files in subdirectories:
 
 ```tsx title="src/app/dashboard/layout.tsx"
-import type { LayoutProps } from '@farmjs/core'
+import type { LayoutProps } from "@farmjs/core";
 
 export default function DashboardLayout({ children }: LayoutProps) {
   return (
@@ -56,11 +56,9 @@ export default function DashboardLayout({ children }: LayoutProps) {
           <a href="/dashboard/profile">Profile</a>
         </nav>
       </aside>
-      <div className="content">
-        {children}
-      </div>
+      <div className="content">{children}</div>
     </div>
-  )
+  );
 }
 ```
 
@@ -84,18 +82,18 @@ src/app/
 Layouts receive the following props:
 
 ```tsx
-import type { LayoutProps } from '@farmjs/core'
+import type { LayoutProps } from "@farmjs/core";
 
 export default function MyLayout({ children, params }: LayoutProps) {
   // children: The page content or nested layout
   // params: Route parameters from dynamic segments
-  
+
   return (
     <div>
       <h1>Section: {params.section}</h1>
       {children}
     </div>
-  )
+  );
 }
 ```
 
@@ -104,15 +102,15 @@ export default function MyLayout({ children, params }: LayoutProps) {
 Layouts can export metadata that will be merged with page metadata:
 
 ```tsx title="src/app/blog/layout.tsx"
-import type { LayoutProps, Metadata } from '@farmjs/core'
+import type { LayoutProps, Metadata } from "@farmjs/core";
 
 export const metadata: Metadata = {
   title: {
-    template: '%s | My Blog',
-    default: 'My Blog'
+    template: "%s | My Blog",
+    default: "My Blog",
   },
-  description: 'Welcome to my blog'
-}
+  description: "Welcome to my blog",
+};
 
 export default function BlogLayout({ children }: LayoutProps) {
   return (
@@ -122,7 +120,7 @@ export default function BlogLayout({ children }: LayoutProps) {
       </header>
       {children}
     </div>
-  )
+  );
 }
 ```
 
@@ -138,4 +136,3 @@ Root Layout
 ```
 
 Each layout wraps the content of its children, creating a nested structure that allows for shared UI at different levels of your application.
-

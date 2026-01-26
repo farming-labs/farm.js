@@ -10,7 +10,7 @@ import type {
   RateLimitConfig,
   RateLimitStorage,
   RateLimitStatus,
-} from './types';
+} from "./types";
 
 const defaultStore = new Map<string, any>();
 const defaultRateLimitStorage: RateLimitStorage = {
@@ -71,10 +71,14 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
     const current = await storage.get(key);
 
     if (!current) {
-      await storage.set(key, {
-        count: 1,
-        resetAt: now + windowMs,
-      }, ttlSeconds);
+      await storage.set(
+        key,
+        {
+          count: 1,
+          resetAt: now + windowMs,
+        },
+        ttlSeconds,
+      );
       await next();
       return;
     }
@@ -84,13 +88,13 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
         const result = await config.onLimit(ctx);
         if (result) return;
       }
-      
+
       ctx.json(
         {
-          error: 'Rate limit exceeded',
+          error: "Rate limit exceeded",
           retryAfter: Math.ceil((current.resetAt - now) / 1000),
         },
-        429
+        429,
       );
       return;
     }
@@ -107,10 +111,10 @@ function matchPattern(pattern: string | RegExp, pathname: string): boolean {
   }
 
   const regexPattern = pattern
-    .replace(/\*\*/g, '__DOUBLE_STAR__')
-    .replace(/\*/g, '[^/]+')
-    .replace(/__DOUBLE_STAR__/g, '.*')
-    .replace(/\//g, '\\/');
+    .replace(/\*\*/g, "__DOUBLE_STAR__")
+    .replace(/\*/g, "[^/]+")
+    .replace(/__DOUBLE_STAR__/g, ".*")
+    .replace(/\//g, "\\/");
 
   const regex = new RegExp(`^${regexPattern}$`);
   return regex.test(pathname);
@@ -121,15 +125,16 @@ class MiddlewareChainImpl implements MiddlewareChain {
   public config?: MiddlewareConfig;
   private basePath: string;
 
-  constructor(basePath = '/') {
-    this.basePath = basePath === '/' ? '/' : basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
+  constructor(basePath = "/") {
+    this.basePath =
+      basePath === "/" ? "/" : basePath.endsWith("/") ? basePath.slice(0, -1) : basePath;
   }
 
   /**
    * Set the base path for this middleware chain (called by manager when loading)
    */
   setBasePath(path: string): void {
-    this.basePath = path === '/' ? '/' : path.endsWith('/') ? path.slice(0, -1) : path;
+    this.basePath = path === "/" ? "/" : path.endsWith("/") ? path.slice(0, -1) : path;
   }
 
   use(fn: MiddlewareFunction): MiddlewareChain {
@@ -143,14 +148,14 @@ class MiddlewareChainImpl implements MiddlewareChain {
    */
   private normalizePattern(pattern: string): string {
     // If we're at root middleware, use pattern as-is
-    if (this.basePath === '/') {
+    if (this.basePath === "/") {
       // Ensure it starts with /
-      return pattern.startsWith('/') ? pattern : `/${pattern}`;
+      return pattern.startsWith("/") ? pattern : `/${pattern}`;
     }
-    
+
     // For route-specific middleware, always scope the pattern
     // Remove leading / from pattern if present, then join with basePath
-    const cleanPattern = pattern.startsWith('/') ? pattern.slice(1) : pattern;
+    const cleanPattern = pattern.startsWith("/") ? pattern.slice(1) : pattern;
     return `${this.basePath}/${cleanPattern}`;
   }
 
@@ -158,7 +163,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
    * Conditionally run middleware based on a condition.
    * Only supports boolean values or functions that evaluate to boolean.
    * Route-based string matching has been removed - use function conditions instead.
-   * 
+   *
    * @example
    * .when(true, (ctx, next) => { ... })  // Always run
    * .when((ctx) => ctx.data.get('flag'), (ctx, next) => { ... })  // Conditional
@@ -166,18 +171,18 @@ class MiddlewareChainImpl implements MiddlewareChain {
    */
   when(
     condition: boolean | ((ctx: MiddlewareContext) => boolean),
-    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void)
+    fn: MiddlewareFunction | ((chain: MiddlewareChain) => void),
   ): MiddlewareChain {
     const conditionalMiddleware: MiddlewareFunction = async (ctx, next) => {
       // Evaluate condition - boolean or function
-      const shouldRun = typeof condition === 'function' ? condition(ctx) : condition;
+      const shouldRun = typeof condition === "function" ? condition(ctx) : condition;
 
       if (!shouldRun) {
         await next();
         return;
       }
 
-      if (typeof fn === 'function' && fn.length === 2) {
+      if (typeof fn === "function" && fn.length === 2) {
         await (fn as MiddlewareFunction)(ctx, next);
       } else {
         const subChain = middleware(this.basePath);
@@ -225,12 +230,12 @@ class MiddlewareChainImpl implements MiddlewareChain {
    * Rewrite the current middleware route to a new destination.
    * Since each middleware file is route-specific, the source is automatically
    * the middleware's route, so you only need to specify the destination.
-   * 
+   *
    * @param destination - The destination path to rewrite to
-   * @param condition - Optional boolean or function that evaluates to boolean. 
+   * @param condition - Optional boolean or function that evaluates to boolean.
    *                    If provided and evaluates to false, rewrite is skipped.
    *                    If not provided, rewrite always happens.
-   * 
+   *
    * @example
    * // In /contact/middleware.ts
    * .rewrite('/about')  // Always rewrites /contact to /about
@@ -240,27 +245,27 @@ class MiddlewareChainImpl implements MiddlewareChain {
    */
   rewrite(
     destination: string,
-    condition?: boolean | ((ctx: MiddlewareContext) => boolean)
+    condition?: boolean | ((ctx: MiddlewareContext) => boolean),
   ): MiddlewareChain {
     const rewriteMiddleware: MiddlewareFunction = async (ctx, next) => {
       // Check condition if provided
       if (condition !== undefined) {
-        const shouldRewrite = typeof condition === 'function' ? condition(ctx) : condition;
+        const shouldRewrite = typeof condition === "function" ? condition(ctx) : condition;
         if (!shouldRewrite) {
           await next();
           return;
         }
       }
-      
+
       // If this middleware is route-specific (not root)
-      if (this.basePath !== '/') {
+      if (this.basePath !== "/") {
         // Rewrite when the pathname exactly matches this middleware's route
         // This rewrites the entire route (e.g., /contact -> /about)
         if (ctx.pathname === this.basePath) {
           ctx.rewrite(destination);
         }
         // Also handle sub-routes: rewrite /contact/something to /destination/something
-        else if (ctx.pathname.startsWith(this.basePath + '/')) {
+        else if (ctx.pathname.startsWith(this.basePath + "/")) {
           const subPath = ctx.pathname.slice(this.basePath.length);
           const newPath = destination + subPath;
           ctx.rewrite(newPath);
@@ -293,10 +298,10 @@ class MiddlewareChainImpl implements MiddlewareChain {
 export async function getRateLimitStatus(
   key: string,
   limit: number,
-  storage: RateLimitStorage = defaultRateLimitStorage
+  storage: RateLimitStorage = defaultRateLimitStorage,
 ): Promise<RateLimitStatus> {
   const record = await storage.get(key);
-  
+
   if (!record) {
     return {
       requests: 0,
@@ -309,7 +314,7 @@ export async function getRateLimitStatus(
   }
 
   const now = Date.now();
-  
+
   if (record.resetAt && now > record.resetAt) {
     return {
       requests: 0,
@@ -324,10 +329,10 @@ export async function getRateLimitStatus(
   const requests = record.count || 0;
   const remaining = Math.max(0, limit - requests);
   const isLimited = requests >= limit;
-  
+
   let resetIn: number | null = null;
   let resetAt: Date | null = null;
-  
+
   if (record.resetAt) {
     const remainingMs = record.resetAt - now;
     resetIn = remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
@@ -347,7 +352,6 @@ export async function getRateLimitStatus(
   };
 }
 
-export function middleware(basePath = '/'): MiddlewareChain {
+export function middleware(basePath = "/"): MiddlewareChain {
   return new MiddlewareChainImpl(basePath);
 }
-

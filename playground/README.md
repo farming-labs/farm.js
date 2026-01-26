@@ -49,4 +49,3 @@ When testing the playground, verify:
 ## Notes
 
 This playground is for development and testing purposes only. It helps verify that the Farm.js framework is working correctly and provides examples of how to structure a Farm.js application.
-

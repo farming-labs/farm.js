@@ -1,9 +1,9 @@
-import type { FarmConfig } from './types';
-import { resolveAppPath, fileExists, logger } from './utils';
-import { RouteManager } from './routing/route-manager';
-import { ServerRenderer } from './server/renderer';
-import path from 'path';
-import type { ViteDevServer } from 'vite';
+import type { FarmConfig } from "./types";
+import { resolveAppPath, fileExists, logger } from "./utils";
+import { RouteManager } from "./routing/route-manager";
+import { ServerRenderer } from "./server/renderer";
+import path from "path";
+import type { ViteDevServer } from "vite";
 
 export class FarmApp {
   private config: Required<FarmConfig>;
@@ -21,7 +21,7 @@ export class FarmApp {
   async initialize(): Promise<void> {
     // Silent initialization unless verbose mode
     if (process.env.FARM_VERBOSE) {
-      logger.info('Initializing Farm.js application...');
+      logger.info("Initializing Farm.js application...");
     }
 
     // Verify app directory structure
@@ -31,7 +31,7 @@ export class FarmApp {
     await this.routeManager.discoverRoutes();
 
     if (process.env.FARM_VERBOSE) {
-      logger.success('Farm.js application initialized successfully!');
+      logger.success("Farm.js application initialized successfully!");
     }
   }
 
@@ -52,9 +52,9 @@ export class FarmApp {
 
     return {
       root,
-      srcDir: config.srcDir || 'src',
-      outDir: config.outDir || 'dist',
-      basePath: config.basePath || '/',
+      srcDir: config.srcDir || "src",
+      outDir: config.outDir || "dist",
+      basePath: config.basePath || "/",
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? true,
         serverActions: config.experimental?.serverActions ?? true,
@@ -65,29 +65,29 @@ export class FarmApp {
   }
 
   private async verifyAppStructure(): Promise<void> {
-    const appDir = resolveAppPath(this.config.root, this.config.srcDir, 'app');
+    const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
 
     if (!(await fileExists(appDir))) {
       throw new Error(
         `App directory not found at ${appDir}. ` +
-          'Please create a src/app directory with your pages and layouts.'
+          "Please create a src/app directory with your pages and layouts.",
       );
     }
 
     const rootLayoutPaths = [
-      path.join(appDir, 'layout.tsx'),
-      path.join(appDir, 'layout.ts'),
-      path.join(appDir, 'layout.jsx'),
-      path.join(appDir, 'layout.js'),
+      path.join(appDir, "layout.tsx"),
+      path.join(appDir, "layout.ts"),
+      path.join(appDir, "layout.jsx"),
+      path.join(appDir, "layout.js"),
     ];
 
     const hasRootLayout = await Promise.all(rootLayoutPaths.map((p) => fileExists(p))).then(
-      (results) => results.some(Boolean)
+      (results) => results.some(Boolean),
     );
 
     if (!hasRootLayout) {
       logger.warn(
-        'No root layout found. Consider creating src/app/layout.tsx for consistent page structure.'
+        "No root layout found. Consider creating src/app/layout.tsx for consistent page structure.",
       );
     }
   }

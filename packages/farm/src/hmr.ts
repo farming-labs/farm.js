@@ -1,5 +1,5 @@
-import type { ViteDevServer, ModuleNode } from 'vite';
-import { logger } from './utils';
+import type { ViteDevServer, ModuleNode } from "vite";
+import { logger } from "./utils";
 
 export class HMRManager {
   private server: ViteDevServer;
@@ -20,8 +20,8 @@ export class HMRManager {
    */
   async reloadPage() {
     this.server.ws.send({
-      type: 'full-reload',
-      path: '*',
+      type: "full-reload",
+      path: "*",
     });
   }
 
@@ -30,7 +30,7 @@ export class HMRManager {
    */
   async handleFileChange(file: string) {
     const module = await this.server.moduleGraph.getModuleByUrl(file);
-    
+
     if (!module) {
       return;
     }
@@ -45,20 +45,20 @@ export class HMRManager {
       return;
     }
 
-    if (file.includes('/app/') && (file.endsWith('page.tsx') || file.endsWith('page.ts'))) {
+    if (file.includes("/app/") && (file.endsWith("page.tsx") || file.endsWith("page.ts"))) {
       await this.reloadPage();
       return;
     }
 
-    if (file.includes('/app/') && (file.endsWith('layout.tsx') || file.endsWith('layout.ts'))) {
+    if (file.includes("/app/") && (file.endsWith("layout.tsx") || file.endsWith("layout.ts"))) {
       await this.reloadPage();
       return;
     }
     // Send update for other files
     this.send({
-      type: 'update',
-      updates: Array.from(affectedModules).map(m => ({
-        type: m.type === 'css' ? 'css-update' : 'js-update',
+      type: "update",
+      updates: Array.from(affectedModules).map((m) => ({
+        type: m.type === "css" ? "css-update" : "js-update",
         path: m.url,
         acceptedPath: m.url,
         timestamp: Date.now(),
@@ -135,4 +135,3 @@ if (import.meta.hot) {
 }
 `;
 }
-

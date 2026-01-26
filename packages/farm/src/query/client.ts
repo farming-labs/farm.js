@@ -1,19 +1,15 @@
 /**
  * Farm.js Client-Side Query State Management
- * 
+ *
  * Type-safe URL search parameter state management - Like useState, but stored in the URL query string.
  * Client-only hooks for managing query parameters in the browser.
  * Inspired by nuqs implementation patterns.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { emitter } from './sync';
+import { useState, useEffect, useCallback, useRef } from "react";
+import { emitter } from "./sync";
 
-import {
-  asString as asStringClient,
-  asInteger as asIntegerClient,
-  type Parser,
-} from './parsers';
+import { asString as asStringClient, asInteger as asIntegerClient, type Parser } from "./parsers";
 
 export {
   asString,
@@ -24,13 +20,13 @@ export {
   asJson,
   asIsoDate,
   asIsoDateTime,
-  createParser ,
+  createParser,
   type Parser,
   type inferParserType,
-} from './parsers';
+} from "./parsers";
 
-export type UrlUpdateType = 'push' | 'replace';
-export type HistoryMethod = 'pushState' | 'replaceState';
+export type UrlUpdateType = "push" | "replace";
+export type HistoryMethod = "pushState" | "replaceState";
 
 export interface Options {
   history?: HistoryMethod;
@@ -40,7 +36,7 @@ export interface Options {
 }
 
 const getCurrentSearchParams = (): URLSearchParams => {
-  if (typeof window === 'undefined') return new URLSearchParams();
+  if (typeof window === "undefined") return new URLSearchParams();
   return new URLSearchParams(window.location.search);
 };
 
@@ -49,14 +45,12 @@ const throttleTimers = new Map<string, NodeJS.Timeout>();
 const applyChange = (
   searchParams: URLSearchParams,
   updates: Record<string, string | null>,
-  keepExisting = true
+  keepExisting = true,
 ): URLSearchParams => {
-  const newParams = keepExisting
-    ? new URLSearchParams(searchParams)
-    : new URLSearchParams();
+  const newParams = keepExisting ? new URLSearchParams(searchParams) : new URLSearchParams();
 
   Object.entries(updates).forEach(([key, value]) => {
-    if (value === null || value === undefined || value === '') {
+    if (value === null || value === undefined || value === "") {
       newParams.delete(key);
     } else {
       newParams.set(key, value);
@@ -69,24 +63,25 @@ const applyChange = (
 const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
-  emitUpdate = true
+  emitUpdate = true,
 ) => {
-  if (typeof window === 'undefined') return;
+  if (typeof window === "undefined") return;
 
-  const { history = 'pushState', shallow = true, scroll = false, throttleMs } = options;
+  const { history = "pushState", shallow = true, scroll = false, throttleMs } = options;
   const url = new URL(window.location.href);
 
   const newSearchParams = applyChange(new URLSearchParams(url.search), updates);
   const newSearch = newSearchParams.toString();
-  const newUrl = url.pathname + (newSearch ? `?${newSearch}` : '') + url.hash;
-  const currentUrl = window.location.pathname + (window.location.search || '') + window.location.hash;
+  const newUrl = url.pathname + (newSearch ? `?${newSearch}` : "") + url.hash;
+  const currentUrl =
+    window.location.pathname + (window.location.search || "") + window.location.hash;
 
   if (newUrl !== currentUrl) {
     const update = () => {
-      if (history === 'replaceState') {
-        window.history.replaceState(null, '', newUrl);
+      if (history === "replaceState") {
+        window.history.replaceState(null, "", newUrl);
       } else {
-        window.history.pushState(null, '', newUrl);
+        window.history.pushState(null, "", newUrl);
       }
 
       if (emitUpdate) {
@@ -96,7 +91,7 @@ const updateURL = (
 
       if (shallow) {
         setTimeout(() => {
-          window.dispatchEvent(new PopStateEvent('popstate'));
+          window.dispatchEvent(new PopStateEvent("popstate"));
         }, 0);
       }
 
@@ -106,7 +101,7 @@ const updateURL = (
     };
 
     if (throttleMs && throttleMs > 0) {
-      const throttleKey = Object.keys(updates).sort().join(',');
+      const throttleKey = Object.keys(updates).sort().join(",");
 
       const existingTimeout = throttleTimers.get(throttleKey);
       if (existingTimeout) {
@@ -128,24 +123,30 @@ const updateURL = (
 export function useQueryState<TParser extends Parser<any>>(
   key: string,
   parser: TParser,
-  options?: Options
-): [NonNullable<ReturnType<TParser['parse']>> | null, (value: NonNullable<ReturnType<TParser['parse']>> | null) => void];
+  options?: Options,
+): [
+  NonNullable<ReturnType<TParser["parse"]>> | null,
+  (value: NonNullable<ReturnType<TParser["parse"]>> | null) => void,
+];
 export function useQueryState<T>(
   key: string,
   parser: Parser<T>,
-  options?: Options
+  options?: Options,
 ): [T | null, (value: T | null) => void];
 export function useQueryState<TParser extends Parser<any>>(
   key: string,
   parser: TParser,
-  options?: Options
-): [NonNullable<ReturnType<TParser['parse']>> | null, (value: NonNullable<ReturnType<TParser['parse']>> | null) => void] {
-  type T = NonNullable<ReturnType<TParser['parse']>>;
+  options?: Options,
+): [
+  NonNullable<ReturnType<TParser["parse"]>> | null,
+  (value: NonNullable<ReturnType<TParser["parse"]>> | null) => void,
+] {
+  type T = NonNullable<ReturnType<TParser["parse"]>>;
   const [state, setState] = useState<T | null>(() => {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === "undefined") return null;
     const searchParams = getCurrentSearchParams();
     const value = searchParams.get(key);
-    const parsed = parser.parse(value ?? '');
+    const parsed = parser.parse(value ?? "");
     return parsed;
   });
 
@@ -153,30 +154,33 @@ export function useQueryState<TParser extends Parser<any>>(
   const isInternalUpdateRef = useRef(false);
   stateRef.current = state;
 
-  const setValue = useCallback((value: T | null) => {
-    isInternalUpdateRef.current = true;
-    
-    setState(value);
-    stateRef.current = value;
+  const setValue = useCallback(
+    (value: T | null) => {
+      isInternalUpdateRef.current = true;
 
-    const serialized = value === null ? null : parser.serialize(value);
+      setState(value);
+      stateRef.current = value;
 
-    emitter.emitKey(key, { state: value, query: serialized });
+      const serialized = value === null ? null : parser.serialize(value);
 
-    updateURL({ [key]: serialized }, options, true);
-    
-    setTimeout(() => {
-      isInternalUpdateRef.current = false;
-    }, 10);
-  }, [key, parser, options]);
+      emitter.emitKey(key, { state: value, query: serialized });
+
+      updateURL({ [key]: serialized }, options, true);
+
+      setTimeout(() => {
+        isInternalUpdateRef.current = false;
+      }, 10);
+    },
+    [key, parser, options],
+  );
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const onPopState = () => {
       const searchParams = getCurrentSearchParams();
       const value = searchParams.get(key);
-      const parsed = parser.parse(value ?? '');
+      const parsed = parser.parse(value ?? "");
       if (!Object.is(stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
@@ -187,9 +191,9 @@ export function useQueryState<TParser extends Parser<any>>(
       if (isInternalUpdateRef.current) {
         return;
       }
-      
+
       const value = searchParams.get(key);
-      const parsed = parser.parse(value ?? '');
+      const parsed = parser.parse(value ?? "");
       if (!Object.is(stateRef.current, parsed)) {
         setState(parsed);
         stateRef.current = parsed;
@@ -200,20 +204,20 @@ export function useQueryState<TParser extends Parser<any>>(
       if (isInternalUpdateRef.current) {
         return;
       }
-      
+
       if (!Object.is(stateRef.current, payload.state)) {
         setState(payload.state);
         stateRef.current = payload.state;
       }
     };
 
-    window.addEventListener('popstate', onPopState);
-    emitter.on('update', onEmitterUpdate);
+    window.addEventListener("popstate", onPopState);
+    emitter.on("update", onEmitterUpdate);
     emitter.onKey(key, onKeyUpdate);
 
     return () => {
-      window.removeEventListener('popstate', onPopState);
-      emitter.off('update', onEmitterUpdate);
+      window.removeEventListener("popstate", onPopState);
+      emitter.off("update", onEmitterUpdate);
       emitter.offKey(key, onKeyUpdate);
     };
   }, [key, parser]);
@@ -223,25 +227,25 @@ export function useQueryState<TParser extends Parser<any>>(
 
 export function useQueryStates<T extends Record<string, Parser<any>>>(
   parsers: T,
-  options: Options = {}
+  options: Options = {},
 ): [
-    { [K in keyof T]: ReturnType<T[K]['parse']> },
-    (updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>) => void
-  ] {
+  { [K in keyof T]: ReturnType<T[K]["parse"]> },
+  (updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>) => void,
+] {
   const keys = Object.keys(parsers);
-  const watchKeys = keys.join('&');
+  const watchKeys = keys.join("&");
 
-  const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]['parse']> }>(() => {
-    if (typeof window === 'undefined') {
-      return {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
+  const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]["parse"]> }>(() => {
+    if (typeof window === "undefined") {
+      return {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
     }
 
     const searchParams = getCurrentSearchParams();
-    const result = {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
+    const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
     Object.entries(parsers).forEach(([key, parser]) => {
       const value = searchParams.get(key);
-      result[key as keyof T] = parser.parse(value ?? '');
+      result[key as keyof T] = parser.parse(value ?? "");
     });
 
     return result;
@@ -250,41 +254,44 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   const stateRef = useRef(state);
   stateRef.current = state;
 
-  const setValues = useCallback((updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>) => {
-    const newState = { ...stateRef.current, ...updates };
-    setState(newState);
-    stateRef.current = newState;
+  const setValues = useCallback(
+    (updates: Partial<{ [K in keyof T]: ReturnType<T[K]["parse"]> | null }>) => {
+      const newState = { ...stateRef.current, ...updates };
+      setState(newState);
+      stateRef.current = newState;
 
-    Object.entries(updates).forEach(([key, value]) => {
-      const parser = parsers[key];
-      if (parser) {
-        const serialized = value === null ? null : parser.serialize(value);
-        emitter.emitKey(key, { state: value, query: serialized });
-      }
-    });
+      Object.entries(updates).forEach(([key, value]) => {
+        const parser = parsers[key];
+        if (parser) {
+          const serialized = value === null ? null : parser.serialize(value);
+          emitter.emitKey(key, { state: value, query: serialized });
+        }
+      });
 
-    const urlUpdates: Record<string, string | null> = {};
-    Object.entries(updates).forEach(([key, value]) => {
-      const parser = parsers[key];
-      if (parser) {
-        const serialized = value === null ? null : parser.serialize(value);
-        urlUpdates[key] = serialized;
-      }
-    });
+      const urlUpdates: Record<string, string | null> = {};
+      Object.entries(updates).forEach(([key, value]) => {
+        const parser = parsers[key];
+        if (parser) {
+          const serialized = value === null ? null : parser.serialize(value);
+          urlUpdates[key] = serialized;
+        }
+      });
 
-    updateURL(urlUpdates, options, true);
-  }, [parsers, options]);
+      updateURL(urlUpdates, options, true);
+    },
+    [parsers, options],
+  );
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (typeof window === "undefined") return;
 
     const applyChange = (searchParams: URLSearchParams, fromEmitter = false) => {
-      const result = {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
+      const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
       let hasChanged = false;
 
       Object.entries(parsers).forEach(([key, parser]) => {
         const value = searchParams.get(key);
-        const parsed = parser.parse(value ?? '');
+        const parsed = parser.parse(value ?? "");
         const currentValue = stateRef.current[key as keyof T];
 
         if (!Object.is(currentValue, parsed)) {
@@ -308,12 +315,12 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
       applyChange(searchParams, true);
     };
 
-    window.addEventListener('popstate', onPopState);
-    emitter.on('update', onEmitterUpdate);
+    window.addEventListener("popstate", onPopState);
+    emitter.on("update", onEmitterUpdate);
 
     return () => {
-      window.removeEventListener('popstate', onPopState);
-      emitter.off('update', onEmitterUpdate);
+      window.removeEventListener("popstate", onPopState);
+      emitter.off("update", onEmitterUpdate);
     };
   }, [watchKeys, parsers]);
 
@@ -329,8 +336,8 @@ export function usePagination(options?: {
   const {
     defaultPage = 1,
     defaultLimit = 10,
-    pageKey = 'page',
-    limitKey = 'limit',
+    pageKey = "page",
+    limitKey = "limit",
   } = options || {};
 
   const [page, setPage] = useQueryState(pageKey, asIntegerClient.withDefault!(defaultPage));
@@ -338,7 +345,7 @@ export function usePagination(options?: {
 
   const currentPage = page ?? defaultPage;
   const currentLimit = limit ?? defaultLimit;
-  const offset = (currentPage as number - 1) * (currentLimit as number);
+  const offset = ((currentPage as number) - 1) * (currentLimit as number);
 
   return {
     page: currentPage,
@@ -359,26 +366,32 @@ export function useSearchFilters<T extends Record<string, any>>(options?: {
   filterKeys?: (keyof T)[];
 }) {
   const {
-    searchKey = 'search',
+    searchKey = "search",
     defaultFilters = {} as T,
     filterKeys = Object.keys(defaultFilters) as (keyof T)[],
   } = options || {};
 
   const [search, setSearch] = useQueryState(searchKey, asStringClient);
 
-  const filterParsers = filterKeys.reduce((acc, key) => {
-    acc[key as string] = asStringClient;
-    return acc;
-  }, {} as Record<string, Parser<string>>);
+  const filterParsers = filterKeys.reduce(
+    (acc, key) => {
+      acc[key as string] = asStringClient;
+      return acc;
+    },
+    {} as Record<string, Parser<string>>,
+  );
 
   const [filters, setFilters] = useQueryStates(filterParsers);
 
   const clearFilters = () => {
     setSearch(null);
-    const clearedFilters = filterKeys.reduce((acc, key) => {
-      acc[key as string] = null;
-      return acc;
-    }, {} as Record<string, null>);
+    const clearedFilters = filterKeys.reduce(
+      (acc, key) => {
+        acc[key as string] = null;
+        return acc;
+      },
+      {} as Record<string, null>,
+    );
     setFilters(clearedFilters);
   };
 

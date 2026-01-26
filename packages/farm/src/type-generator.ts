@@ -1,5 +1,5 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync } from 'fs';
-import { join, relative, dirname } from 'path';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
+import { join, relative, dirname } from "path";
 
 export interface APIRouteInfo {
   path: string;
@@ -14,7 +14,7 @@ export class APITypeGenerator {
 
   constructor(appDir: string) {
     this.appDir = appDir;
-    this.apiDir = join(appDir, 'api');
+    this.apiDir = join(appDir, "api");
   }
 
   /**
@@ -22,7 +22,7 @@ export class APITypeGenerator {
    */
   scanAPIRoutes(): APIRouteInfo[] {
     const routes: APIRouteInfo[] = [];
-    
+
     if (!existsSync(this.apiDir)) {
       return routes;
     }
@@ -31,16 +31,16 @@ export class APITypeGenerator {
     return routes;
   }
 
-  private scanDirectory(dir: string, routes: APIRouteInfo[], basePath = '') {
+  private scanDirectory(dir: string, routes: APIRouteInfo[], basePath = "") {
     const items = readdirSync(dir, { withFileTypes: true });
-    
+
     for (const item of items) {
       const fullPath = join(dir, item.name);
-      
+
       if (item.isDirectory()) {
         const newBasePath = basePath ? `${basePath}/${item.name}` : item.name;
         this.scanDirectory(fullPath, routes, newBasePath);
-      } else if (item.name === 'route.ts' || item.name === 'route.tsx') {
+      } else if (item.name === "route.ts" || item.name === "route.tsx") {
         const routeInfo = this.extractRouteInfo(fullPath, basePath);
         if (routeInfo) {
           routes.push(routeInfo);
@@ -51,21 +51,21 @@ export class APITypeGenerator {
 
   private extractRouteInfo(filePath: string, basePath: string): APIRouteInfo | null {
     try {
-      const content = readFileSync(filePath, 'utf-8');
+      const content = readFileSync(filePath, "utf-8");
       const methods = this.extractExportedMethods(content);
-      
+
       if (methods.length === 0) {
         return null;
       }
 
       const relativePath = relative(this.appDir, filePath);
-      const apiPath = basePath ? `/api/${basePath}` : '/api';
+      const apiPath = basePath ? `/api/${basePath}` : "/api";
 
       return {
         path: apiPath,
         methods,
         filePath,
-        relativePath
+        relativePath,
       };
     } catch (error) {
       console.warn(`Failed to read route file ${filePath}:`, error);
@@ -75,16 +75,16 @@ export class APITypeGenerator {
 
   private extractExportedMethods(content: string): string[] {
     const methods: string[] = [];
-    const httpMethods = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS', 'HEAD'];
-    
+    const httpMethods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"];
+
     for (const method of httpMethods) {
       // Look for export const METHOD = or export { METHOD }
       const patterns = [
-        new RegExp(`export\\s+const\\s+${method}\\s*=`, 'g'),
-        new RegExp(`export\\s*{\\s*${method}\\s*}`, 'g'),
-        new RegExp(`export\\s*{\\s*${method}\\s*as\\s+\\w+\\s*}`, 'g')
+        new RegExp(`export\\s+const\\s+${method}\\s*=`, "g"),
+        new RegExp(`export\\s*{\\s*${method}\\s*}`, "g"),
+        new RegExp(`export\\s*{\\s*${method}\\s*as\\s+\\w+\\s*}`, "g"),
       ];
-      
+
       for (const pattern of patterns) {
         if (pattern.test(content)) {
           methods.push(method);
@@ -92,7 +92,7 @@ export class APITypeGenerator {
         }
       }
     }
-    
+
     return methods;
   }
 
@@ -101,10 +101,10 @@ export class APITypeGenerator {
    */
   generateAPIRouter(routes: APIRouteInfo[]): string {
     const imports: string[] = [];
-    
+
     // Group routes by path to handle multiple methods
     const routeGroups = new Map<string, APIRouteInfo[]>();
-    
+
     for (const route of routes) {
       const key = route.path;
       if (!routeGroups.has(key)) {
@@ -115,23 +115,23 @@ export class APITypeGenerator {
 
     // Build nested structure
     const nestedStructure: any = {};
-    
+
     for (const [path, routeList] of routeGroups) {
       const route = routeList[0];
-      const importPath = route.relativePath.replace(/\\/g, '/').replace(/\.(ts|tsx)$/, '');
+      const importPath = route.relativePath.replace(/\\/g, "/").replace(/\.(ts|tsx)$/, "");
       const routeName = this.pathToRouteName(route.path);
-      const cleanPath = path.replace(/^\/api\//, '');
-      const parts = cleanPath ? cleanPath.split('/') : [];
-      
+      const cleanPath = path.replace(/^\/api\//, "");
+      const parts = cleanPath ? cleanPath.split("/") : [];
+
       // Collect all methods for this route
-      const allMethods = routeList.flatMap(r => r.methods);
-      
+      const allMethods = routeList.flatMap((r) => r.methods);
+
       // Generate imports
       for (const method of allMethods) {
         const importName = `${method}_${routeName}`;
         imports.push(`import type { ${method} as ${importName} } from '../app/${importPath}';`);
       }
-      
+
       // Build nested object
       let current = nestedStructure;
       for (let i = 0; i < parts.length; i++) {
@@ -153,7 +153,7 @@ export class APITypeGenerator {
         }
       }
     }
-    
+
     // Convert nested structure to TypeScript code
     const typeExports = this.structureToTypeString(nestedStructure, 1);
 
@@ -166,7 +166,7 @@ export class APITypeGenerator {
  * Runtime imports are used only at the type level.
  */
 
-${imports.join('\n')}
+${imports.join("\n")}
 
 // Type-only representation of your API routes
 export type APIRouter = {
@@ -177,58 +177,58 @@ ${typeExports}
 
   private pathToRouteName(path: string): string {
     return path
-      .replace(/^\/api\//, '')
-      .replace(/\//g, '_')
-      .replace(/[^a-zA-Z0-9_]/g, '');
+      .replace(/^\/api\//, "")
+      .replace(/\//g, "_")
+      .replace(/[^a-zA-Z0-9_]/g, "");
   }
 
   private structureToTypeString(obj: any, indent: number): string {
-    const spaces = '  '.repeat(indent);
+    const spaces = "  ".repeat(indent);
     const lines: string[] = [];
-    
+
     for (const [key, value] of Object.entries(obj)) {
-      if (typeof value === 'string') {
+      if (typeof value === "string") {
         // It's a type reference
         lines.push(`${spaces}${key}: ${value};`);
-      } else if (typeof value === 'object') {
+      } else if (typeof value === "object") {
         // It's a nested object
         lines.push(`${spaces}${key}: {`);
         lines.push(this.structureToTypeString(value, indent + 1));
         lines.push(`${spaces}};`);
       }
     }
-    
-    return lines.join('\n');
+
+    return lines.join("\n");
   }
 
   private getBaseExportName(path: string): string {
-    const cleanPath = path.replace(/^\/api\//, '');
-    
-    if (cleanPath === '') {
-      return 'api';
+    const cleanPath = path.replace(/^\/api\//, "");
+
+    if (cleanPath === "") {
+      return "api";
     }
-    
+
     // Convert path to nested structure
     // /api/auth/login -> ['auth', 'login']
     return cleanPath;
   }
 
   private getExportName(path: string, method: string): string {
-    const cleanPath = path.replace(/^\/api\//, '');
-    
-    if (cleanPath === '') {
+    const cleanPath = path.replace(/^\/api\//, "");
+
+    if (cleanPath === "") {
       return method.toLowerCase();
     }
-    
-    const parts = cleanPath.split('/');
+
+    const parts = cleanPath.split("/");
     if (parts.length === 1) {
       // For single-level paths like /api/hello, just use the path name
       return parts[0];
     }
-    
+
     // For nested paths like /api/auth/login, create nested structure
     // This matches the expected API client usage: api.auth.login()
-    return parts.join('.');
+    return parts.join(".");
   }
 
   /**
@@ -237,8 +237,8 @@ ${typeExports}
   generateAPIIndex(outputPath: string): void {
     const routes = this.scanAPIRoutes();
     const content = this.generateAPIRouter(routes);
-    
-    writeFileSync(outputPath, content, 'utf-8');
+
+    writeFileSync(outputPath, content, "utf-8");
     console.log(`✅ Generated API types for ${routes.length} routes`);
   }
 }
