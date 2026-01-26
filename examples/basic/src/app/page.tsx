@@ -1,5 +1,5 @@
 import React from 'react'
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function HomePage({ params, searchParams }: PageProps) {
   return (
@@ -83,6 +83,9 @@ export default function HomePage({ params, searchParams }: PageProps) {
           </a>
           <a href="/api-demo-client" className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors">
             API Demo (Client)
+          </a>
+          <a href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
+            Query State Demo
           </a>
           <a href="/docs/reference" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
             📚 API Documentation

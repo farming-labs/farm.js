@@ -1,156 +1,72 @@
-import React from 'react';
-import type { PagePropsSafe } from 'farm/query';
-import { 
-  loadSearchParams,
-  parseAsString,
-  parseAsInteger,
-  parseAsBoolean,
-  parseAsArrayOf,
-  type SearchParams
-} from 'farm/query/server';
-
-
-// Server Component - demonstrates Farm.js server-side query state
-async function FarmServerQueryDemo({ searchParams }: PagePropsSafe) {
-  const params = await loadSearchParams(searchParams, {
-    search: parseAsString.withDefault!(''),
-    page: parseAsInteger.withDefault!(1),
-    category: parseAsString.withDefault!('all'),
-    enabled: parseAsBoolean.withDefault!(false),
-    tags: parseAsArrayOf(parseAsString).withDefault!([]),
-    sortBy: parseAsString.withDefault!('date'),
-    sortOrder: parseAsString.withDefault!('desc'),
-  });
-  console.log({params})
-  return (
-    <div className="bg-blue-50 border border-blue-200 p-6 rounded-lg mb-6">
-      <h3 className="text-lg font-semibold mb-4 text-blue-800">Farm.js Server-Side Query State</h3>
-      <div className="space-y-2 text-sm">
-        <p><strong>Search:</strong> {params.search || 'None'}</p>
-        <p><strong>Page:</strong> {params.page}</p>
-        <p><strong>Category:</strong> {params.category}</p>
-        <p><strong>Enabled:</strong> {params.enabled ? 'Yes' : 'No'}</p>
-        <p><strong>Tags:</strong> {params.tags.length > 0 ? params.tags.join(', ') : 'None'}</p>
-        <p><strong>Sort By:</strong> {params.sortBy}</p>
-        <p><strong>Sort Order:</strong> {params.sortOrder}</p>
-        
-        <div className="mt-4">
-          <p><strong>Type-Safe Parsed Parameters:</strong></p>
-          <pre className="bg-blue-100 p-3 rounded text-xs overflow-x-auto mt-2">
-            {JSON.stringify(params, null, 2)}
-          </pre>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Client Component - demonstrates Farm.js client-side query state
 'use client';
 
-import { useState, useEffect } from 'react';
+import React from 'react';
+import {
+  useQueryState,
+  asString ,
+  asArrayOf ,
+  asInteger,
+  asBoolean,
+} from '@farmjs/core/query/client';
 
 function FarmClientQueryDemo() {
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const [category, setCategory] = useState('all');
-  const [enabled, setEnabled] = useState(false);
-  const [tags, setTags] = useState<string[]>([]);
-  const [sortBy, setSortBy] = useState('date');
-  const [sortOrder, setSortOrder] = useState('desc');
-
-  // Load initial values from URL on mount
-  useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    setSearch(urlParams.get('search') || '');
-    setPage(parseInt(urlParams.get('page') || '1'));
-    setCategory(urlParams.get('category') || 'all');
-    setEnabled(urlParams.get('enabled') === 'true');
-    setTags(urlParams.get('tags')?.split(',').filter(Boolean) || []);
-    setSortBy(urlParams.get('sortBy') || 'date');
-    setSortOrder(urlParams.get('sortOrder') || 'desc');
-  }, []);
-
-  // Update URL when state changes
-  const updateURL = (newParams: Record<string, string | number | boolean | string[]>) => {
-    const url = new URL(window.location.href);
-    Object.entries(newParams).forEach(([key, value]) => {
-      if (value === '' || value === null || value === undefined) {
-        url.searchParams.delete(key);
-      } else if (Array.isArray(value)) {
-        url.searchParams.set(key, value.join(','));
-      } else {
-        url.searchParams.set(key, String(value));
-      }
-    });
-    window.history.pushState({}, '', url.toString());
-  };
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    updateURL({ search: value, page, category, enabled, tags, sortBy, sortOrder });
-  };
-
-  const handlePageChange = (value: number) => {
-    setPage(value);
-    updateURL({ search, page: value, category, enabled, tags, sortBy, sortOrder });
-  };
-
-  const handleCategoryChange = (value: string) => {
-    setCategory(value);
-    updateURL({ search, page, category: value, enabled, tags, sortBy, sortOrder });
-  };
-
-  const handleEnabledChange = (value: boolean) => {
-    setEnabled(value);
-    updateURL({ search, page, category, enabled: value, tags, sortBy, sortOrder });
-  };
+  // For search input: Use replaceState to update URL immediately without cluttering history
+  // This gives instant feedback while typing
+  const [search, setSearch] = useQueryState('search', asString, { 
+    history: 'replaceState',
+    throttleMs: 150 // Small throttle to avoid too many updates, but still feels instant
+  });
+  
+  // Other fields update immediately
+  const [page, setPage] = useQueryState('page', asInteger.withDefault!(1));
+  const [category, setCategory] = useQueryState('category', asString.withDefault!('all'));
+  const [enabled, setEnabled] = useQueryState('enabled', asBoolean.withDefault!(false));
+  const [tags, setTags] = useQueryState('tags', asArrayOf(asString).withDefault!([]));
+  const [sortBy, setSortBy] = useQueryState('sortBy', asString.withDefault!('date'));
+  const [sortOrder, setSortOrder] = useQueryState('sortOrder', asString.withDefault!('desc'));
 
   const handleTagAdd = (tag: string) => {
-    if (tag && !tags.includes(tag)) {
-      const newTags = [...tags, tag];
-      setTags(newTags);
-      updateURL({ search, page, category, enabled, tags: newTags, sortBy, sortOrder });
+    if (tag && !(tags || []).includes(tag)) {
+      setTags([...(tags || []), tag]);
     }
   };
 
   const handleTagRemove = (tagToRemove: string) => {
-    const newTags = tags.filter(tag => tag !== tagToRemove);
-    setTags(newTags);
-    updateURL({ search, page, category, enabled, tags: newTags, sortBy, sortOrder });
-  };
-
-  const handleSortChange = (by: string, order: string) => {
-    setSortBy(by);
-    setSortOrder(order);
-    updateURL({ search, page, category, enabled, tags, sortBy: by, sortOrder: order });
+    setTags((tags || []).filter(tag => tag !== tagToRemove));
   };
 
   const clearAll = () => {
-    setSearch('');
+    setSearch(null);
     setPage(1);
     setCategory('all');
     setEnabled(false);
     setTags([]);
     setSortBy('date');
     setSortOrder('desc');
-    window.history.pushState({}, '', window.location.pathname);
   };
 
   return (
     <div className="bg-white p-6 rounded-lg shadow">
-      <h3 className="text-lg font-semibold mb-4">Farm.js Client-Side Query State</h3>
+      <h3 className="text-lg font-semibold mb-4">Farm.js Client-Side Query State (nuqs-style)</h3>
       
-      {/* Search Input */}
+      {/* Search Input - Auto-updates URL with throttling */}
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Search:</label>
         <input
           type="text"
-          value={search}
-          onChange={(e) => handleSearchChange(e.target.value)}
-          placeholder="Enter search term..."
+          value={search || ''}
+          onChange={(e) => {
+            console.log({val: e.target.value})
+            const newValue = e.target.value || null;
+            setSearch(newValue);
+          }}
+          placeholder="Type to search... (UI updates instantly, URL updates after 300ms)"
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
+        <p className="text-xs text-gray-500 mt-1">
+          ✨ UI updates instantly • URL updates after you stop typing (300ms delay)
+        </p>
       </div>
 
       {/* Page Input */}
@@ -158,8 +74,8 @@ function FarmClientQueryDemo() {
         <label className="block text-sm font-medium mb-2">Page:</label>
         <input
           type="number"
-          value={page}
-          onChange={(e) => handlePageChange(parseInt(e.target.value) || 1)}
+          value={page || 1}
+          onChange={(e) => setPage(e.target.value ? parseInt(e.target.value) || 1 : 1)}
           min="1"
           className="w-20 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
@@ -169,8 +85,8 @@ function FarmClientQueryDemo() {
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Category:</label>
         <select
-          value={category}
-          onChange={(e) => handleCategoryChange(e.target.value)}
+          value={category || 'all'}
+          onChange={(e) => setCategory(e.target.value || null)}
           className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
         >
           <option value="all">All Categories</option>
@@ -185,8 +101,8 @@ function FarmClientQueryDemo() {
         <label className="flex items-center">
           <input
             type="checkbox"
-            checked={enabled}
-            onChange={(e) => handleEnabledChange(e.target.checked)}
+            checked={enabled || false}
+            onChange={(e) => setEnabled(e.target.checked)}
             className="mr-2"
           />
           <span className="text-sm font-medium">Enabled</span>
@@ -198,8 +114,8 @@ function FarmClientQueryDemo() {
         <label className="block text-sm font-medium mb-2">Sort:</label>
         <div className="flex gap-2">
           <select
-            value={sortBy}
-            onChange={(e) => handleSortChange(e.target.value, sortOrder)}
+            value={sortBy || 'date'}
+            onChange={(e) => setSortBy(e.target.value || null)}
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="date">Date</option>
@@ -207,8 +123,8 @@ function FarmClientQueryDemo() {
             <option value="price">Price</option>
           </select>
           <select
-            value={sortOrder}
-            onChange={(e) => handleSortChange(sortBy, e.target.value)}
+            value={sortOrder || 'desc'}
+            onChange={(e) => setSortOrder(e.target.value || null)}
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="asc">Ascending</option>
@@ -221,7 +137,7 @@ function FarmClientQueryDemo() {
       <div className="mb-4">
         <label className="block text-sm font-medium mb-2">Tags:</label>
         <div className="flex flex-wrap gap-2 mb-2">
-          {tags.map((tag) => (
+          {(tags || []).map((tag) => (
             <span
               key={tag}
               className="inline-flex items-center px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded-full"
@@ -238,11 +154,14 @@ function FarmClientQueryDemo() {
         </div>
         <input
           type="text"
-          placeholder="Add tag..."
-          onKeyPress={(e) => {
+          placeholder="Add tag (press Enter)..."
+          onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              handleTagAdd(e.currentTarget.value);
-              e.currentTarget.value = '';
+              const newTag = e.currentTarget.value.trim();
+              if (newTag) {
+                handleTagAdd(newTag);
+                e.currentTarget.value = '';
+              }
             }
           }}
           className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -264,22 +183,29 @@ function FarmClientQueryDemo() {
         <h4 className="text-md font-semibold mb-2">Current State:</h4>
         <pre className="text-xs text-gray-600 overflow-x-auto">
           {JSON.stringify({
-            search,
-            page,
-            category,
-            enabled,
-            tags,
-            sortBy,
-            sortOrder,
+            search: search || null,
+            page: page || 1,
+            category: category || 'all',
+            enabled: enabled || false,
+            tags: tags || [],
+            sortBy: sortBy || 'date',
+            sortOrder: sortOrder || 'desc',
           }, null, 2)}
         </pre>
+        <div className="mt-2">
+          <p className="text-xs text-gray-500">Current URL:</p>
+          <code className="text-xs text-blue-600 break-all">
+            {typeof window !== 'undefined' ? window.location.href : ''}
+          </code>
+        </div>
       </div>
     </div>
   );
 }
 
 // Main page component
-export default async function FarmQueryDemoPage(props: PageProps) {
+export default function FarmQueryDemoPage(props) {
+  console.log({props})
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4">
@@ -293,11 +219,10 @@ export default async function FarmQueryDemoPage(props: PageProps) {
         </div>
 
         {/* Middleware Data Demo */}
-        <MiddlewareDataDemo middleware={props.middleware} />
+        {/* <MiddlewareDataDemo middleware={props.middleware} />
 
         {/* Server Component Demo */}
-        <FarmServerQueryDemo {...props} />
-
+        {/* <FarmServerQueryDemo {...props} /> */}
         {/* Client Component Demo */}
         <FarmClientQueryDemo />
 

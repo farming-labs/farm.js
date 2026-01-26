@@ -80,7 +80,6 @@ export async function createNitroAPIHandlers(
                         error: error.message || 'Internal Server Error',
                     };
                 }
-            };
         }
     }
 

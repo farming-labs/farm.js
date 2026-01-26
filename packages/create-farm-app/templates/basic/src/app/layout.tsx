@@ -1,5 +1,5 @@
 import React from 'react';
-import type { LayoutProps, Metadata } from 'farm';
+import type { LayoutProps, Metadata } from '@farmjs/core';
 import './globals.css';
 
 export const metadata: Metadata = {

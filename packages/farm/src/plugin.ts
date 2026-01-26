@@ -1,6 +1,5 @@
 import type { FarmConfig, FarmRequest, FarmResponse } from './types';
 import type { ViteDevServer } from 'vite';
-
 export interface FarmPluginContext {
   config: FarmConfig;
   viteServer?: ViteDevServer;
@@ -148,3 +147,4 @@ export class PluginManager {
 export function definePlugin(plugin: FarmPlugin): FarmPlugin {
   return plugin;
 }
+export { farmPlugin } from './vite';

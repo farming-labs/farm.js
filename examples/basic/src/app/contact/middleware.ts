@@ -1,9 +1,11 @@
 /**
  * Farm Query Demo middleware - demonstrates page-specific middleware
  */
-import { middleware, MiddlewareContext } from 'farm/middleware';
+import { middleware } from '@farmjs/core/middleware';
+import type { MiddlewareContext } from '@farmjs/core/middleware';
 
 const authRequest = async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+    console.log('authRequest');
     const authHeader = ctx.request.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
         const token = authHeader.substring(7);
@@ -24,14 +26,12 @@ export default middleware()
             'Content-Type': 'text/html',
             'X-Powered-By': 'Farm.js',
         });
-        // modify the request 
-        await ctx.request
-        await ctx.response.end('Hello World');
         await next();
     })
     .use(authRequest)
     .use(otherCheck)
-    .when("/api" , (ctx , next) => {
+    // Conditional middleware - only run when pathname includes /api
+    .when((ctx) => ctx.pathname.includes('/api'), (ctx, next) => {
         ctx.json({
             message: 'Hello World',
         }, 200);
@@ -57,9 +57,9 @@ export default middleware()
             }, 429);
         },
     })
-    .when('/docs-old', async (ctx, next) => {
+    .when((ctx) => ctx.pathname.includes('/docs-old'), async (ctx, next) => {
         ctx.redirect('/docs');
         await next();
     })
-    .rewrite('/docs-old', '/docs')
+    .rewrite('/about', (ctx) => ctx.data.get('shouldRewrite') !== false)
     .redirect('/contact-us', '/contact', false) // 307 temporary redirect

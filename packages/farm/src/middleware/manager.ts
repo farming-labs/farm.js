@@ -120,7 +120,7 @@ export class MiddlewareManager {
       }
 
       const middlewareModule = module as MiddlewareModule;
-      
+
       if (!middlewareModule.default) {
         logger.warn(`Middleware file ${filePath} does not have a default export`);
         return null;
@@ -131,6 +131,10 @@ export class MiddlewareManager {
 
       // Check if it has a build method (middleware chain object)
       if (defaultExport && typeof defaultExport === 'object' && 'build' in defaultExport) {
+        // Set the base path for route-scoped middleware (when/rewrite auto-scoping)
+        if (typeof (defaultExport as any).setBasePath === 'function') {
+          (defaultExport as any).setBasePath(routePath);
+        }
         const built = (defaultExport as any).build();
         handlers = built.handlers;
       } else if (typeof defaultExport === 'function') {
@@ -159,12 +163,13 @@ export class MiddlewareManager {
   ): Promise<boolean> {
     const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
     const pathname = url.pathname;
-
+    const method = req.method || 'GET';
+    const startTime = Date.now();
     // Find applicable middleware (cascading from root to specific)
     const applicable = this.middleware.filter(mw => {
       // Root middleware (/) applies to everything
       if (mw.path === '/') return true;
-      
+
       // Middleware applies to its path and all sub-paths
       return pathname.startsWith(mw.path) || pathname === mw.path;
     });
@@ -172,7 +177,21 @@ export class MiddlewareManager {
     if (applicable.length === 0) {
       return false; // No middleware to run
     }
-
+    try {
+      const pc = require('picocolors');
+      const middlewarePaths = applicable.map(mw => mw.path).join(', ');
+      const log = [
+        pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
+        pc.dim('[') + pc.bold(pc.magenta('MIDDLEWARE')) + pc.dim(']'),
+        pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
+        pc.gray('Executing middleware: '),
+        pc.gray(pathname),
+        pc.dim(` (${(Date.now() - startTime).toFixed(2)}ms)`),
+      ].join(' ');
+      console.log(log);
+    } catch {
+      console.log(`[FARM] [MIDDLEWARE] [${method}] Executing ${pathname} (${applicable.length} middleware)`);
+    }
     // Create root context
     let parentData: MiddlewareContext['parent'] | undefined;
     let ctx = createContext(req, res, this.viteServer);
@@ -200,21 +219,24 @@ export class MiddlewareManager {
 
       await executeNext();
 
-      // If response was handled, stop
-      if (ctx._handled) {
+      // Check if response has been sent (auto-detect, no need for ctx._handled)
+      if (res.headersSent || res.writableEnded) {
         return true;
       }
 
-      // Prepare parent data for next middleware level
       parentData = {
         data: new Map(ctx.data),
         headers: Object.fromEntries(ctx.headers),
       };
     }
 
-    // Apply headers from middleware context to response
-    for (const [key, value] of ctx.headers) {
-      res.setHeader(key, value);
+    if (!res.headersSent && !res.writableEnded) {
+      for (const [key, value] of ctx.headers) {
+        try {
+          res.setHeader(key, value);
+        } catch (error) {
+        }
+      }
     }
 
     (req as any).__FARM_MIDDLEWARE_DATA__ = Object.fromEntries(ctx.data);

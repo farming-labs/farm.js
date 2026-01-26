@@ -1,7 +1,7 @@
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import path from 'path';
-import { logger } from 'farm';
+import { logger } from '@farmjs/core';
 import { buildFarm } from './build';
 
 export interface DeployFarmOptions {

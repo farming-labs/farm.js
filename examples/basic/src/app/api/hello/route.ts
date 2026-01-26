@@ -1,4 +1,4 @@
-import { createEndpoint } from 'farm';
+import { createEndpoint } from '@farmjs/core';
 import { z } from 'zod';
 
 export const GET = createEndpoint('/api/hello', {

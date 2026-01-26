@@ -196,6 +196,10 @@ export async function loadConfig(
   rootDir?: string,
   configPath?: string
 ): Promise<FarmUserConfig | undefined> {
+  const path = await import('path');
+  const { pathToFileURL } = await import('url');
+  const { existsSync } = await import('fs');
+  
   const root = rootDir || process.cwd();
   const searchPaths = [configPath, 'farm.config.ts', 'farm.config.js', 'farm.config.mjs'].filter(
     Boolean
@@ -203,19 +207,31 @@ export async function loadConfig(
 
   for (const relativePath of searchPaths) {
     try {
-      // Resolve absolute path
-      const absolutePath = relativePath.startsWith('/') ? relativePath : `${root}/${relativePath}`;
+      // Use path.join for proper path construction
+      const absolutePath = relativePath.startsWith('/') 
+        ? relativePath 
+        : path.join(root, relativePath);
+      
+      // Normalize the path to handle any issues
+      const normalizedPath = path.resolve(absolutePath);
 
-      // Add timestamp to avoid caching during dev
-      const moduleUrl = `file://${absolutePath}?t=${Date.now()}`;
+      // Check if file exists before trying to import
+      if (!existsSync(normalizedPath)) {
+        continue;
+      }
+
+      // Use pathToFileURL for proper file:// URL conversion
+      const moduleUrl = pathToFileURL(normalizedPath).href + `?t=${Date.now()}`;
       const config = await import(/* @vite-ignore */ moduleUrl);
 
       return config.default || config;
-    } catch (error) {
-      // Config file not found or error loading, continue
+    } catch (error: any) {
+      // Log error for debugging but continue searching
+      if (process.env.FARM_VERBOSE) {
+        console.warn(`Failed to load config from ${relativePath}:`, error.message);
+      }
       continue;
     }
   }
-
   return undefined;
 }

@@ -1,75 +1,77 @@
 {
-  "name": "farm",
+  "name": "@farmjs/core",
   "version": "0.0.3-beta.3",
   "description": "Core Farm.js framework - A modern React meta-framework",
-  "main": "./dist/index.js",
+  "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
+  "types": "./dist/index.d.mts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.cjs"
     },
     "./server": {
-      "types": "./dist/server.d.ts",
+      "types": "./dist/server.d.mts",
       "import": "./dist/server.mjs",
-      "require": "./dist/server.js"
+      "require": "./dist/server.cjs"
     },
     "./client": {
-      "types": "./dist/client.d.ts",
+      "types": "./dist/client.d.mts",
       "import": "./dist/client.mjs",
-      "require": "./dist/client.js"
+      "require": "./dist/client.cjs"
     },
     "./vite": {
-      "types": "./dist/vite.d.ts",
+      "types": "./dist/vite.d.mts",
       "import": "./dist/vite.mjs",
-      "require": "./dist/vite.js"
+      "require": "./dist/vite.cjs"
+    },
+    "./plugin": {
+      "types": "./dist/plugin.d.mts",
+      "import": "./dist/plugin.mjs",
+      "require": "./dist/plugin.cjs"
     },
     "./plugin/server": {
-      "types": "./dist/server-plugins.d.ts",
+      "types": "./dist/server-plugins.d.mts",
       "import": "./dist/server-plugins.mjs",
-      "require": "./dist/server-plugins.js"
+      "require": "./dist/server-plugins.cjs"
     },
     "./plugin/client": {
-      "types": "./dist/client-plugins.d.ts",
+      "types": "./dist/client-plugins.d.mts",
       "import": "./dist/client-plugins.mjs",
-      "require": "./dist/client-plugins.js"
+      "require": "./dist/client-plugins.cjs"
     },
     "./query": {
-      "types": "./dist/query/index.d.ts",
+      "types": "./dist/query/index.d.mts",
       "import": "./dist/query/index.mjs",
-      "require": "./dist/query/index.js"
+      "require": "./dist/query/index.cjs"
     },
     "./query/parsers": {
-      "types": "./dist/query/parsers.d.ts",
+      "types": "./dist/query/parsers.d.mts",
       "import": "./dist/query/parsers.mjs",
-      "require": "./dist/query/parsers.js"
+      "require": "./dist/query/parsers.cjs"
     },
     "./query/client": {
-      "types": "./dist/query/client.d.ts",
+      "types": "./dist/query/client.d.mts",
       "import": "./dist/query/client.mjs",
-      "require": "./dist/query/client.js"
+      "require": "./dist/query/client.cjs"
     },
     "./query/server": {
-      "types": "./dist/query/server.d.ts",
+      "types": "./dist/query/server.d.mts",
       "import": "./dist/query/server.mjs",
-      "require": "./dist/query/server.js"
+      "require": "./dist/query/server.cjs"
     },
     "./middleware": {
-      "types": "./dist/middleware.d.ts",
+      "types": "./dist/middleware.d.mts",
       "import": "./dist/middleware.mjs",
-      "require": "./dist/middleware.js"
+      "require": "./dist/middleware.cjs"
     }
   },
   "files": [
-    "dist",
-    "client.js",
-    "server.js",
-    "vite.js"
+    "dist"
   ],
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && node scripts/post-build.js",
     "dev": "tsdown --watch",
     "test": "vitest",
     "test:coverage": "vitest --coverage",
@@ -118,7 +120,7 @@
     "rsc",
     "server-components",
     "ssr",
-    "farm"
+    "@farmjs/core"
   ],
   "repository": {
     "type": "git",

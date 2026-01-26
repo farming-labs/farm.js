@@ -119,26 +119,58 @@ function matchPattern(pattern: string | RegExp, pathname: string): boolean {
 class MiddlewareChainImpl implements MiddlewareChain {
   private handlers: MiddlewareFunction[] = [];
   public config?: MiddlewareConfig;
+  private basePath: string;
+
+  constructor(basePath: string = '/') {
+    this.basePath = basePath === '/' ? '/' : basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
+  }
+
+  /**
+   * Set the base path for this middleware chain (called by manager when loading)
+   */
+  setBasePath(path: string): void {
+    this.basePath = path === '/' ? '/' : path.endsWith('/') ? path.slice(0, -1) : path;
+  }
 
   use(fn: MiddlewareFunction): MiddlewareChain {
     this.handlers.push(fn);
     return this;
   }
 
+  /**
+   * Normalize a path pattern - auto-scope to middleware route
+   * If middleware is in /contact, then "/api" becomes "/contact/api"
+   */
+  private normalizePattern(pattern: string): string {
+    // If we're at root middleware, use pattern as-is
+    if (this.basePath === '/') {
+      // Ensure it starts with /
+      return pattern.startsWith('/') ? pattern : `/${pattern}`;
+    }
+    
+    // For route-specific middleware, always scope the pattern
+    // Remove leading / from pattern if present, then join with basePath
+    const cleanPattern = pattern.startsWith('/') ? pattern.slice(1) : pattern;
+    return `${this.basePath}/${cleanPattern}`;
+  }
+
+  /**
+   * Conditionally run middleware based on a condition.
+   * Only supports boolean values or functions that evaluate to boolean.
+   * Route-based string matching has been removed - use function conditions instead.
+   * 
+   * @example
+   * .when(true, (ctx, next) => { ... })  // Always run
+   * .when((ctx) => ctx.data.get('flag'), (ctx, next) => { ... })  // Conditional
+   * .when((ctx) => ctx.pathname === '/contact', (ctx, next) => { ... })  // Path-based condition
+   */
   when(
-    condition: string | boolean | ((ctx: MiddlewareContext) => boolean),
+    condition: boolean | ((ctx: MiddlewareContext) => boolean),
     fn: MiddlewareFunction | ((chain: MiddlewareChain) => void)
   ): MiddlewareChain {
     const conditionalMiddleware: MiddlewareFunction = async (ctx, next) => {
-      let shouldRun = false;
-
-      if (typeof condition === 'boolean') {
-        shouldRun = condition;
-      } else if (typeof condition === 'string') {
-        shouldRun = matchPattern(condition, ctx.pathname);
-      } else if (typeof condition === 'function') {
-        shouldRun = condition(ctx);
-      }
+      // Evaluate condition - boolean or function
+      const shouldRun = typeof condition === 'function' ? condition(ctx) : condition;
 
       if (!shouldRun) {
         await next();
@@ -148,7 +180,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
       if (typeof fn === 'function' && fn.length === 2) {
         await (fn as MiddlewareFunction)(ctx, next);
       } else {
-        const subChain = middleware();
+        const subChain = middleware(this.basePath);
         (fn as (chain: MiddlewareChain) => void)(subChain);
         const { handlers } = subChain.build();
 
@@ -176,7 +208,9 @@ class MiddlewareChainImpl implements MiddlewareChain {
 
   redirect(source: string, destination: string, permanent = false): MiddlewareChain {
     const redirectMiddleware: MiddlewareFunction = async (ctx, next) => {
-      if (matchPattern(source, ctx.pathname)) {
+      // Auto-scope source pattern to the middleware route
+      const normalizedSource = this.normalizePattern(source);
+      if (matchPattern(normalizedSource, ctx.pathname)) {
         ctx.redirect(destination, permanent ? 308 : 307);
         return;
       }
@@ -187,9 +221,53 @@ class MiddlewareChainImpl implements MiddlewareChain {
     return this;
   }
 
-  rewrite(source: string, destination: string): MiddlewareChain {
+  /**
+   * Rewrite the current middleware route to a new destination.
+   * Since each middleware file is route-specific, the source is automatically
+   * the middleware's route, so you only need to specify the destination.
+   * 
+   * @param destination - The destination path to rewrite to
+   * @param condition - Optional boolean or function that evaluates to boolean. 
+   *                    If provided and evaluates to false, rewrite is skipped.
+   *                    If not provided, rewrite always happens.
+   * 
+   * @example
+   * // In /contact/middleware.ts
+   * .rewrite('/about')  // Always rewrites /contact to /about
+   * .rewrite('/about', true)  // Always rewrites
+   * .rewrite('/about', false)  // Never rewrites
+   * .rewrite('/about', (ctx) => ctx.data.get('shouldRewrite'))  // Conditional rewrite
+   */
+  rewrite(
+    destination: string,
+    condition?: boolean | ((ctx: MiddlewareContext) => boolean)
+  ): MiddlewareChain {
     const rewriteMiddleware: MiddlewareFunction = async (ctx, next) => {
-      if (matchPattern(source, ctx.pathname)) {
+      // Check condition if provided
+      if (condition !== undefined) {
+        const shouldRewrite = typeof condition === 'function' ? condition(ctx) : condition;
+        if (!shouldRewrite) {
+          await next();
+          return;
+        }
+      }
+      
+      // If this middleware is route-specific (not root)
+      if (this.basePath !== '/') {
+        // Rewrite when the pathname exactly matches this middleware's route
+        // This rewrites the entire route (e.g., /contact -> /about)
+        if (ctx.pathname === this.basePath) {
+          ctx.rewrite(destination);
+        }
+        // Also handle sub-routes: rewrite /contact/something to /destination/something
+        else if (ctx.pathname.startsWith(this.basePath + '/')) {
+          const subPath = ctx.pathname.slice(this.basePath.length);
+          const newPath = destination + subPath;
+          ctx.rewrite(newPath);
+        }
+      } else {
+        // For root middleware, this is less common
+        // Only rewrite if pathname matches exactly (edge case)
         ctx.rewrite(destination);
       }
       await next();
@@ -269,7 +347,7 @@ export async function getRateLimitStatus(
   };
 }
 
-export function middleware(): MiddlewareChain {
-  return new MiddlewareChainImpl();
+export function middleware(basePath: string = '/'): MiddlewareChain {
+  return new MiddlewareChainImpl(basePath);
 }
 

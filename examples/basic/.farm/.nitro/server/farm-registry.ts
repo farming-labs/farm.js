@@ -10,14 +10,12 @@ export const farmRegistry: {
 } = {
   routePaths: {
   "/": "page.js",
-  "/api-demo": "api-demo/page.js",
-  "/api-demo-client": "api-demo-client/page.js",
   "/about": "about/page.js",
-  "/farm-query-client-demo": "farm-query-client-demo/page.js",
+  "/api-demo": "api-demo/page.js",
   "/farm-query-demo": "farm-query-demo/page.js",
+  "/api-demo-client": "api-demo-client/page.js",
   "/contact": "contact/page.js",
-  "/query-state-demo": "query-state-demo/page.js",
-  "/query-test": "query-test/page.js",
+  "/query-demo": "query-demo/page.js",
   "/users/[id]": "users/[id]/page.js"
 },
 };

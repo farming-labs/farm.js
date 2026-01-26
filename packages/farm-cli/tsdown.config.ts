@@ -4,10 +4,10 @@ export default defineConfig({
   entry: {
     index: 'src/index.ts',
   },
-  format: ['cjs'],
+  format: ['cjs' , 'esm'],
   dts: true,
   clean: true,
-  external: ['farm', 'commander'],
+  external: ['@farmjs/core', 'commander'],
   splitting: false,
   sourcemap: true,
 });

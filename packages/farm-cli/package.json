@@ -1,6 +1,6 @@
 {
-  "name": "farm-cli",
-  "version": "0.0.3-beta.3",
+  "name": "@farmjs/cli",
+  "version": "0.0.1",
   "description": "CLI for Farm.js framework",
   "main": "./dist/index.js",
   "bin": {
@@ -20,7 +20,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "farm": "workspace:*",
+    "@farmjs/core": "workspace:*",
     "commander": "^11.1.0",
     "picocolors": "^1.0.0"
   },
@@ -30,7 +30,7 @@
     "typescript": "^5.3.3"
   },
   "keywords": [
-    "farm",
+    "@farmjs/cli",
     "cli",
     "react",
     "vite"

@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "better-call": "^1.0.19",
-    "farm": "workspace:*",
+    "@farmjs/core": "workspace:*",
     "react": "19.0.0-rc.1",
     "react-dom": "19.0.0-rc.1",
     "zod": "^4.1.12"
@@ -21,7 +21,7 @@
   "devDependencies": {
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
-    "farm-cli": "workspace:*",
+    "@farmjs/cli": "workspace:*",
     "typescript": "^5.3.3"
   }
 }

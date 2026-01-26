@@ -43,7 +43,7 @@ src/app/
 Use square brackets to create dynamic routes:
 
 ```tsx title="src/app/users/[id]/page.tsx"
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function UserPage({ params }: PageProps) {
   const { id } = params
@@ -59,7 +59,7 @@ This matches `/users/123`, `/users/abc`, etc.
 Use `[...slug]` for catch-all routes:
 
 ```tsx title="src/app/blog/[...slug]/page.tsx"
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function BlogPost({ params }: PageProps) {
   const { slug } = params // slug is a string like "2024/01/hello-world"
@@ -75,7 +75,7 @@ This matches `/blog/2024`, `/blog/2024/01`, `/blog/2024/01/hello-world`, etc.
 Use `[[...slug]]` for optional catch-all routes:
 
 ```tsx title="src/app/docs/[[...slug]]/page.tsx"
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function DocsPage({ params }: PageProps) {
   const { slug } = params
@@ -97,7 +97,7 @@ This matches `/docs`, `/docs/getting-started`, `/docs/api/reference`, etc.
 Route parameters are available in the `params` object:
 
 ```tsx title="src/app/products/[category]/[id]/page.tsx"
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function ProductPage({ params }: PageProps) {
   const { category, id } = params
@@ -116,7 +116,7 @@ export default function ProductPage({ params }: PageProps) {
 URL search parameters are available in the `searchParams` object:
 
 ```tsx title="src/app/search/page.tsx"
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function SearchPage({ searchParams }: PageProps) {
   const { q, filter } = searchParams

@@ -1,5 +1,5 @@
 import React from 'react'
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default async function UserPage({ params, searchParams }: PageProps) {
   const { id } = params
@@ -40,7 +40,7 @@ export default async function UserPage({ params, searchParams }: PageProps) {
           <div>
             <p className="font-semibold mb-2">1. Import the type:</p>
             <pre className="bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200">
-{`import type { PageProps } from 'farm'`}
+        {`import type { PageProps } from '@farmjs/core'`}
             </pre>
           </div>
 

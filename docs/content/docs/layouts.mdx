@@ -12,7 +12,7 @@ Layouts allow you to share UI components across multiple pages. Farm.js supports
 Every Farm.js application must have a root layout in `src/app/layout.tsx`:
 
 ```tsx title="src/app/layout.tsx"
-import type { LayoutProps, Metadata } from 'farm'
+import type { LayoutProps, Metadata } from '@farmjs/core'
 
 export const metadata: Metadata = {
   title: 'My Farm.js App',
@@ -44,7 +44,7 @@ export default function RootLayout({ children }: LayoutProps) {
 Create nested layouts by adding `layout.tsx` files in subdirectories:
 
 ```tsx title="src/app/dashboard/layout.tsx"
-import type { LayoutProps } from 'farm'
+import type { LayoutProps } from '@farmjs/core'
 
 export default function DashboardLayout({ children }: LayoutProps) {
   return (
@@ -84,7 +84,7 @@ src/app/
 Layouts receive the following props:
 
 ```tsx
-import type { LayoutProps } from 'farm'
+import type { LayoutProps } from '@farmjs/core'
 
 export default function MyLayout({ children, params }: LayoutProps) {
   // children: The page content or nested layout
@@ -104,7 +104,7 @@ export default function MyLayout({ children, params }: LayoutProps) {
 Layouts can export metadata that will be merged with page metadata:
 
 ```tsx title="src/app/blog/layout.tsx"
-import type { LayoutProps, Metadata } from 'farm'
+import type { LayoutProps, Metadata } from '@farmjs/core'
 
 export const metadata: Metadata = {
   title: {

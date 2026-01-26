@@ -1,4 +1,4 @@
-import { defineConfig } from 'farm/vite'
+import { defineConfig } from '@farmjs/core/vite'
 
 export default defineConfig()
 

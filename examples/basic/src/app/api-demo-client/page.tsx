@@ -14,8 +14,8 @@ export default function APIClientDemo() {
     setLoading('hello');
     setError(null);
     try {
-       const data = await api.hello.post({
-            body: { name: 'something' }
+      const data = await api.hello.post({
+        body: { name: 'something' }
       });
       setHelloResponse(data);
     } catch (err) {
@@ -49,10 +49,10 @@ export default function APIClientDemo() {
     try {
       const data = await api.auth.login.post({
         body: {
-            hint: "login post",
-            email: "test@example.com",
-            password: "password123"
-        } 
+          hint: "login post",
+          email: "test@example.com",
+          password: "password123"
+        }
       });
       setLoginResponse(data);
     } catch (err) {
@@ -69,6 +69,10 @@ export default function APIClientDemo() {
     try {
       // Nested API call: api.users.post()
       const data = await api.users.post({
+        body: {
+          email: "test@example.com",
+          name: "test user"
+        }
       });
       alert('User created! ' + JSON.stringify(data));
       // Refresh users list
@@ -86,7 +90,7 @@ export default function APIClientDemo() {
         <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-pink-400 to-yellow-400 bg-clip-text text-transparent">
           Client Component API Demo 🎨
         </h1>
-        
+
         <div className="bg-pink-900/30 border border-pink-500/50 rounded-lg p-4 mb-8">
           <p className="text-pink-200 text-sm">
             <strong>'use client'</strong> - This is a client component! All API calls happen in the browser.
@@ -112,7 +116,7 @@ export default function APIClientDemo() {
             >
               {loading === 'hello' ? 'Loading...' : 'Fetch'}
             </button>
-            
+
             {helloResponse && (
               <div className="bg-gray-900 rounded p-4 font-mono text-sm">
                 <pre className="text-green-400">
@@ -134,7 +138,7 @@ export default function APIClientDemo() {
             >
               {loading === 'users' ? 'Loading...' : 'Fetch Users'}
             </button>
-            
+
             {usersResponse && (
               <div className="bg-gray-900 rounded p-4 font-mono text-sm">
                 <pre className="text-green-400">
@@ -156,7 +160,7 @@ export default function APIClientDemo() {
             >
               {loading === 'login' ? 'Logging in...' : 'Login'}
             </button>
-            
+
             {loginResponse && (
               <div className="bg-gray-900 rounded p-4 font-mono text-sm">
                 <pre className="text-green-400">
@@ -164,9 +168,9 @@ export default function APIClientDemo() {
                 </pre>
               </div>
             )}
-            
+
             <p className="text-sm text-gray-400 mt-2">
-              Credentials: email: <code className="bg-gray-700 px-1">test@example.com</code>, 
+              Credentials: email: <code className="bg-gray-700 px-1">test@example.com</code>,
               password: <code className="bg-gray-700 px-1">password123</code>
             </p>
           </div>
@@ -183,7 +187,7 @@ export default function APIClientDemo() {
             >
               {loading === 'create' ? 'Creating...' : 'Create New User'}
             </button>
-            
+
             <p className="text-sm text-gray-400">
               Creates a new user and refreshes the users list
             </p>
@@ -198,23 +202,23 @@ export default function APIClientDemo() {
               <div>
                 <p className="text-gray-500 mb-2">// Import the typed client</p>
                 <pre className="text-gray-300">
-{`import { client, api } from '@/lib/api-client';`}
+                  {`import { client, api } from '@/lib/api-client';`}
                 </pre>
               </div>
-              
+
               <div>
                 <p className="text-gray-500 mb-2">// Option 1: Direct client call</p>
                 <pre className="text-gray-300">
-{`const result = await client('/api/hello', {
+                  {`const result = await client('/api/hello', {
   query: { name: 'World' }
 });`}
                 </pre>
               </div>
-              
+
               <div>
                 <p className="text-gray-500 mb-2">// Option 2: Nested API syntax (recommended!)</p>
                 <pre className="text-yellow-300">
-{`const result = await api.auth.login({
+                  {`const result = await api.auth.login({
   body: {
     email: 'test@example.com',
     password: 'password123'
@@ -230,14 +234,14 @@ console.log(result.user);  // ✅ Autocomplete works!`}
 
           {/* Navigation */}
           <div className="flex gap-4 justify-center pt-8">
-            <a 
-              href="/api-demo" 
+            <a
+              href="/api-demo"
               className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
             >
               Server Component Demo
             </a>
-            <a 
-              href="/" 
+            <a
+              href="/"
               className="inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors"
             >
               ← Back to Home

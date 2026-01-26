@@ -124,11 +124,11 @@ describe('Middleware Chain', () => {
     const executed: string[] = [];
     
     const chain = middleware()
-      .when('/admin/*', async (ctx, next) => {
+      .when((ctx) => ctx.pathname.startsWith('/admin'), async (ctx, next) => {
         executed.push('admin');
         await next();
       })
-      .when('/user/*', async (ctx, next) => {
+      .when((ctx) => ctx.pathname.startsWith('/user'), async (ctx, next) => {
         executed.push('user');
         await next();
       })
@@ -220,9 +220,10 @@ describe('Middleware Chain', () => {
     expect(res.writeHead).toHaveBeenCalledWith(308, expect.any(Object));
   });
 
-  it('should support rewrite helper', async () => {
-    const chain = middleware()
-      .rewrite('/old-url', '/new-url');
+  it('should support rewrite helper for route-specific middleware', async () => {
+    // Simulate route-specific middleware at /old-url
+    const chain = middleware('/old-url')
+      .rewrite('/new-url');
 
     const { handlers } = chain.build();
     const req = createMockRequest('/old-url');
@@ -243,6 +244,104 @@ describe('Middleware Chain', () => {
 
     expect(ctx._rewriteUrl).toBe('/new-url');
     expect(ctx.pathname).toBe('/new-url');
+  });
+
+  it('should support rewrite helper for sub-routes', async () => {
+    // Simulate route-specific middleware at /contact
+    const chain = middleware('/contact')
+      .rewrite('/about');
+
+    const { handlers } = chain.build();
+    const req = createMockRequest('/contact/sub-page');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    let index = 0;
+    const executeNext = async (): Promise<void> => {
+      if (index < handlers.length) {
+        const handler = handlers[index++];
+        await handler(ctx, executeNext);
+      }
+    };
+
+    await executeNext();
+
+    // Should rewrite /contact/sub-page to /about/sub-page
+    expect(ctx._rewriteUrl).toBe('/about/sub-page');
+    expect(ctx.pathname).toBe('/about/sub-page');
+  });
+
+  it('should support conditional rewrite', async () => {
+    // Simulate route-specific middleware at /contact
+    const chain = middleware('/contact')
+      .rewrite('/about', true)  // Always rewrite
+      .rewrite('/other', false);  // Never rewrite
+
+    const { handlers } = chain.build();
+    const req = createMockRequest('/contact');
+    const res = createMockResponse();
+    const ctx = createContext(req, res);
+
+    let index = 0;
+    const executeNext = async (): Promise<void> => {
+      if (index < handlers.length) {
+        const handler = handlers[index++];
+        await handler(ctx, executeNext);
+      }
+    };
+
+    await executeNext();
+
+    // Should rewrite to /about (first rewrite with true condition)
+    expect(ctx._rewriteUrl).toBe('/about');
+    expect(ctx.pathname).toBe('/about');
+  });
+
+  it('should support function-based conditional rewrite', async () => {
+    // Simulate route-specific middleware at /contact
+    const chain = middleware('/contact')
+      .rewrite('/about', (ctx) => ctx.data.get('shouldRewrite') === true);
+
+    const { handlers } = chain.build();
+    
+    // Test with condition true
+    {
+      const req = createMockRequest('/contact');
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      ctx.data.set('shouldRewrite', true);
+
+      let index = 0;
+      const executeNext = async (): Promise<void> => {
+        if (index < handlers.length) {
+          const handler = handlers[index++];
+          await handler(ctx, executeNext);
+        }
+      };
+
+      await executeNext();
+      expect(ctx._rewriteUrl).toBe('/about');
+    }
+
+    // Test with condition false
+    {
+      const req = createMockRequest('/contact');
+      const res = createMockResponse();
+      const ctx = createContext(req, res);
+      ctx.data.set('shouldRewrite', false);
+
+      let index = 0;
+      const executeNext = async (): Promise<void> => {
+        if (index < handlers.length) {
+          const handler = handlers[index++];
+          await handler(ctx, executeNext);
+        }
+      };
+
+      await executeNext();
+      // Should not rewrite
+      expect(ctx._rewriteUrl).toBeUndefined();
+    }
   });
 
   it('should support rate limiting with default in-memory storage', async () => {
@@ -903,15 +1002,15 @@ describe('Middleware Context', () => {
 });
 
 describe('Pattern Matching', () => {
-  it('should match glob patterns', async () => {
+  it('should match patterns using function conditions', async () => {
     const executed: string[] = [];
     
     const chain = middleware()
-      .when('/api/*', async (ctx, next) => {
+      .when((ctx) => ctx.pathname.startsWith('/api'), async (ctx, next) => {
         executed.push('api');
         await next();
       })
-      .when('/admin/**/*', async (ctx, next) => {
+      .when((ctx) => ctx.pathname.startsWith('/admin'), async (ctx, next) => {
         executed.push('admin-deep');
         await next();
       });
@@ -1063,7 +1162,7 @@ describe('Pattern Matching', () => {
     const executed: string[] = [];
     
     const chain = middleware()
-      .when('/protected', (subChain) => {
+      .when((ctx) => ctx.pathname === '/protected', (subChain) => {
         subChain
           .use(async (ctx, next) => {
             executed.push('auth-check');

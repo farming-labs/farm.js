@@ -1,21 +1,21 @@
 /**
  * Root middleware - runs for all routes
  */
-import { middleware } from 'farm/middleware';
+import { middleware } from '@farmjs/core/middleware';
 
 export default middleware()
   // Log all requests
   .use(async (ctx, next) => {
     const startTime = Date.now();
-    console.log(`[${new Date().toISOString()}] ${ctx.method} ${ctx.pathname}`);
+    // console.log(`[${new Date().toISOString()}] ${ctx.method} ${ctx.pathname}`);
     
-    // Store start time for duration tracking
-    ctx.data.set('startTime', startTime);
+    // // Store start time for duration tracking
+    // ctx.data.set('startTime', startTime);
     
-    await next();
+    // await next();
     
-    const duration = Date.now() - startTime;
-    console.log(`[${new Date().toISOString()}] Completed ${ctx.pathname} in ${duration}ms`);
+    // const duration = Date.now() - startTime;
+    // console.log(`[${new Date().toISOString()}] Completed ${ctx.pathname} in ${duration}ms`);
   })
 
   // Add security headers
@@ -32,7 +32,7 @@ export default middleware()
   .redirect('/old-contact', '/contact', true) // permanent redirect
 
   // Demo: Add custom header for API routes
-  .when('/api/*', async (ctx, next) => {
+  .when((ctx) => ctx.pathname.startsWith('/api'), async (ctx, next) => {
     ctx.headers.set('X-API-Version', '1.0.0');
     await next();
   });
