@@ -24,7 +24,7 @@ export {
   asJson,
   asIsoDate,
   asIsoDateTime,
-  createParser as createParser,
+  createParser ,
   type Parser,
   type inferParserType,
 } from './parsers';
@@ -49,7 +49,7 @@ const throttleTimers = new Map<string, NodeJS.Timeout>();
 const applyChange = (
   searchParams: URLSearchParams,
   updates: Record<string, string | null>,
-  keepExisting: boolean = true
+  keepExisting = true
 ): URLSearchParams => {
   const newParams = keepExisting
     ? new URLSearchParams(searchParams)
@@ -69,7 +69,7 @@ const applyChange = (
 const updateURL = (
   updates: Record<string, string | null>,
   options: Options = {},
-  emitUpdate: boolean = true
+  emitUpdate = true
 ) => {
   if (typeof window === 'undefined') return;
 
@@ -278,7 +278,7 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const applyChange = (searchParams: URLSearchParams, fromEmitter: boolean = false) => {
+    const applyChange = (searchParams: URLSearchParams, fromEmitter = false) => {
       const result = {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
       let hasChanged = false;
 

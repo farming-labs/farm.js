@@ -121,7 +121,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
   public config?: MiddlewareConfig;
   private basePath: string;
 
-  constructor(basePath: string = '/') {
+  constructor(basePath = '/') {
     this.basePath = basePath === '/' ? '/' : basePath.endsWith('/') ? basePath.slice(0, -1) : basePath;
   }
 
@@ -347,7 +347,7 @@ export async function getRateLimitStatus(
   };
 }
 
-export function middleware(basePath: string = '/'): MiddlewareChain {
+export function middleware(basePath = '/'): MiddlewareChain {
   return new MiddlewareChainImpl(basePath);
 }
 

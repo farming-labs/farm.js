@@ -19,7 +19,7 @@ export {
   asJson,
   asIsoDate,
   asIsoDateTime,
-  createParser as createParser,
+  createParser ,
   type Parser,
   type inferParserType,
 } from './parsers';
