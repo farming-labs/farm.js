@@ -5,11 +5,6 @@
   },
   "ignorePatterns": [
     "dist/**",
-    "frontend/dist/**",
-    "public/**",
-    "test/snapshots/**",
-    "data/**",
-    "scripts/**",
     "examples/basic/.farm"
   ]
 }
