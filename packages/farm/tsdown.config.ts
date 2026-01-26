@@ -6,7 +6,6 @@ export default defineConfig({
     server: "src/server.ts",
     client: "src/client.ts",
     vite: "src/vite.ts",
-    build: "src/build/index.ts",
     "server-plugins": "src/server-plugins.ts",
     "client-plugins": "src/client-plugins.ts",
     "query/index": "src/query/index.ts",
