@@ -142,7 +142,7 @@ export function farmPlugin(
               const urlPath = req.url || "/";
 
               // Log API request
-              logRequest(method, urlPath, "API");
+              // logRequest(method, urlPath, "API");
 
               try {
                 // Convert Node.js request to Web Request
@@ -212,8 +212,7 @@ export function farmPlugin(
           const method = req.method || "GET";
           const urlPath = req.url || "/";
 
-          // Log page request
-          logRequest(method, urlPath, "PAGE");
+          // logRequest(method, urlPath, "PAGE");
 
           try {
             if (middlewareManager) {
