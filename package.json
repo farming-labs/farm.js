@@ -26,7 +26,6 @@
     "bump": "bumpp"
   },
   "devDependencies": {
-    "@biomejs/biome": "^1.4.1",
     "@changesets/cli": "^2.27.1",
     "@types/node": "^20.10.5",
     "turbo": "^1.11.2",
