@@ -5,6 +5,6 @@
   },
   "ignorePatterns": [
     "dist/**",
-    "examples/basic/.farm"
+    "examples/**"
   ]
 }
