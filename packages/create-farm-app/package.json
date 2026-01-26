@@ -1,5 +1,5 @@
 {
-  "name": "create-farm-app",
+  "name": "@farmjs/create-app",
   "version": "0.0.3-beta.3",
   "description": "Create a new Farm.js application",
   "main": "./dist/index.js",
@@ -32,7 +32,7 @@
     "typescript": "^5.3.3"
   },
   "keywords": [
-    "farm",
+    "@farmjs/create-app",
     "create-app",
     "react",
     "vite",

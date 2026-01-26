@@ -78,6 +78,46 @@ export function farmPlugin(
         logger.success('✅ OpenAPI documentation enabled');
       }
 
+      // Built-in terminal logging (always enabled in development, independent of logger plugin)
+      const logRequest = (method: string, urlPath: string, tag: 'API' | 'PAGE') => {
+        try {
+          const pc = require('picocolors');
+          const log = [
+            pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
+            pc.dim('[') + pc.bold(pc.cyan(tag)) + pc.dim(']'),
+            pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
+            tag === 'API' ? pc.gray("Requesting "): pc.gray("Loading "), 
+            pc.gray(urlPath),
+          ].join(' ');
+          console.log(log);
+        } catch {
+          console.log(`[FARM] [${tag}] [${method}] ${urlPath}`);
+        }
+      };
+
+      const logResponse = (method: string, urlPath: string, status: number, duration: number, tag: 'API' | 'PAGE') => {
+        try {
+          const pc = require('picocolors');
+          let statusColor = pc.green;
+          if (status >= 500) statusColor = pc.red;
+          else if (status >= 400) statusColor = pc.yellow;
+          else if (status >= 300) statusColor = pc.cyan;
+
+          const log = [
+            pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
+            pc.dim('[') + pc.bold(pc.cyan(tag)) + pc.dim(']'),
+            pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
+            pc.gray(urlPath),
+            pc.dim('-'),
+            statusColor(status.toString()),
+            pc.dim(`(${duration}ms)`),
+          ].join(' ');
+          console.log(log);
+        } catch {
+          console.log(`[FARM] [${tag}] [${method}] ${urlPath} - ${status} (${duration}ms)`);
+        }
+      };
+
       // Register middleware directly (not in return function) to ensure it runs early
       if (pm) {
         server.middlewares.use(async (req, res, next) => {
@@ -92,6 +132,13 @@ export function farmPlugin(
           if (req.url?.startsWith('/api/')) {
             const apiHandler = apiRouteManager.getHandler();
             if (apiHandler) {
+              const startTime = Date.now();
+              const method = req.method || 'GET';
+              const urlPath = req.url || '/';
+
+              // Log API request
+              logRequest(method, urlPath, 'API');
+
               try {
                 // Convert Node.js request to Web Request
                 const url = `http://${req.headers.host || 'localhost:3000'}${req.url}`;
@@ -125,6 +172,9 @@ export function farmPlugin(
                 // Call better-call handler
                 const response = await apiHandler(request);
 
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, response.status, duration, 'API');
+
                 // Send response
                 res.statusCode = response.status;
                 response.headers.forEach((value, key) => {
@@ -153,10 +203,19 @@ export function farmPlugin(
             return next();
           }
 
+          const startTime = Date.now();
+          const method = req.method || 'GET';
+          const urlPath = req.url || '/';
+
+          // Log page request
+          logRequest(method, urlPath, 'PAGE');
+
           try {
             if (middlewareManager) {
               const handled = await middlewareManager.execute(req, res);
               if (handled) {
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, 'PAGE');
                 return; // Middleware handled the response
               }
             }
@@ -167,16 +226,22 @@ export function farmPlugin(
             }
 
             if (res.writableEnded) {
+              // Log response if already ended
+              const duration = Date.now() - startTime;
+              logResponse(method, urlPath, res.statusCode || 200, duration, 'PAGE');
               return;
             }
 
-            // Intercept res.end to call afterResponse hooks before response is fully sent
+            // Intercept res.end to call afterResponse hooks and log response before response is fully sent
             const originalEnd = res.end.bind(res);
             let afterResponseCalled = false;
 
             res.end = ((...args: any[]) => {
               if (!afterResponseCalled && pm) {
                 afterResponseCalled = true;
+                // Log page response
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, 'PAGE');
                 // Call afterResponse synchronously before actually ending
                 pm.runHookParallel('afterResponse', req, res).then(() => {
                   originalEnd(...args);
@@ -195,6 +260,9 @@ export function farmPlugin(
             const renderer = farmApp.getServerRenderer();
             await renderer.renderPage(req as any, res as any);
           } catch (error) {
+            // Log error response
+            const duration = Date.now() - startTime;
+            logResponse(method, urlPath, 500, duration, 'PAGE');
             next(error);
           }
         });

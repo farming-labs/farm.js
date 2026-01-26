@@ -13,7 +13,7 @@ export * from './query';
 export * from './middleware';
 export * from './build';
 export type { FarmPlugin, FarmPluginContext } from './plugin';
-export type { MiddlewareProps, PagePropsWithMiddleware } from './types';
+export type { MiddlewareProps, PagePropsWithMiddleware , PageProps } from './types';
 export type {
   FarmUserConfig,
   ResolvedFarmConfig,

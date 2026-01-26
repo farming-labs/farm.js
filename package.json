@@ -1,6 +1,6 @@
 {
   "name": "farm.js",
-  "version": "0.0.6",
+  "private": true,
   "description": "A modern React meta-framework that human and ai could understand",
   "workspaces": [
     "packages/*",
@@ -9,21 +9,20 @@
     "playground"
   ],
   "scripts": {
-    "build": "turbo build",
-    "dev": "turbo dev",
-    "test": "turbo test",
+    "build": "turbo --filter \"./packages/*\" build",
+    "dev": "turbo --filter \"./packages/*\" dev",
+    "test": "turbo --filter \"./packages/*\" test",
     "lint": "turbo lint",
     "lint:fix": "turbo lint:fix",
     "format": "turbo format",
     "format:check": "biome format .",
     "type-check": "turbo type-check",
     "clean": "turbo clean",
-    "changeset": "changeset",
+    "release:beta:farm": "turbo --filter \"./packages/*\" build && pnpm publish -r --filter \"./packages/*\" --access public --tag beta --no-git-checks",
     "version-packages": "changeset version",
-    "release": "turbo --filter \"./packages/*\" build && bumpp && pnpm -r publish --access public --no-git-checks",
+    "release:beta": "turbo --filter \"./packages/*\" build && bumpp \"packages/*/package.json\" && pnpm -r --filter ./packages/* publish --access public --tag beta --no-git-checks",
     "release:no-build": "bumpp && pnpm -r publish --access public --no-git-checks --tag next",
     "release:canary": "turbo --filter \"./packages/*\" build && bumpp && pnpm -r publish --access public --tag canary --no-git-checks",
-    "release:beta": "turbo --filter \"./packages/*\" build && bumpp && pnpm -r publish --access public --tag beta --no-git-checks",
     "bump": "bumpp"
   },
   "devDependencies": {

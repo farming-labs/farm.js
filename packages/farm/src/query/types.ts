@@ -18,7 +18,7 @@ export interface LayoutPropsSafe {
 }
 export interface PagePropsSafe {
   params: Record<string, string>;
-  searchParams: Promise<URLSearchParams>;
+  searchParams: Promise<URLSearchParams | Record<string, string | string[] | undefined>>;
 }
 /**
  * Query state configuration for Farm.js

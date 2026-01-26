@@ -11,17 +11,17 @@ export interface Parser<T> {
 }
 
 // String parser
-export const parseAsString: Parser<string> = {
-  parse: (value: string) => value || null,
+export const asString: Parser<string> = {
+  parse: (value: string) => (value && value.trim()) || null,
   serialize: (value: string) => value,
   withDefault: (defaultValue: string) => ({
-    parse: (value: string) => value || defaultValue,
+    parse: (value: string) => (value && value.trim()) || defaultValue,
     serialize: (value: string) => value || defaultValue,
   }),
 };
 
 // Integer parser
-export const parseAsInteger: Parser<number> = {
+export const asInteger: Parser<number> = {
   parse: (value: string) => {
     const parsed = Number.parseInt(value, 10);
     return isNaN(parsed) ? null : parsed;
@@ -37,7 +37,7 @@ export const parseAsInteger: Parser<number> = {
 };
 
 // Float parser
-export const parseAsFloat: Parser<number> = {
+export const asFloat: Parser<number> = {
   parse: (value: string) => {
     const parsed = Number.parseFloat(value);
     return isNaN(parsed) ? null : parsed;
@@ -53,7 +53,7 @@ export const parseAsFloat: Parser<number> = {
 };
 
 // Boolean parser
-export const parseAsBoolean: Parser<boolean> = {
+export const asBoolean: Parser<boolean> = {
   parse: (value: string) => {
     if (value === 'true') return true;
     if (value === 'false') return false;
@@ -71,7 +71,7 @@ export const parseAsBoolean: Parser<boolean> = {
 };
 
 // Array parser
-export function parseAsArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {
+export function asArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {
   return {
     parse: (value: string) => {
       if (!value) return null;
@@ -89,7 +89,7 @@ export function parseAsArrayOf<T>(itemParser: Parser<T>): Parser<T[]> {
 }
 
 // JSON parser
-export function parseAsJson<T>(): Parser<T> {
+export function asJson<T>(): Parser<T> {
   return {
     parse: (value: string) => {
       try {
@@ -113,7 +113,7 @@ export function parseAsJson<T>(): Parser<T> {
 }
 
 // ISO Date parser
-export const parseAsIsoDate: Parser<Date> = {
+export const asIsoDate: Parser<Date> = {
   parse: (value: string) => {
     const date = new Date(value);
     return isNaN(date.getTime()) ? null : date;
@@ -129,7 +129,7 @@ export const parseAsIsoDate: Parser<Date> = {
 };
 
 // ISO DateTime parser
-export const parseAsIsoDateTime: Parser<Date> = {
+export const asIsoDateTime: Parser<Date> = {
   parse: (value: string) => {
     const date = new Date(value);
     return isNaN(date.getTime()) ? null : date;

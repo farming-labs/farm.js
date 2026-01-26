@@ -1,11 +1,24 @@
-import type { FarmPlugin } from '../plugin';
+import type { FarmPlugin, FarmPluginContext } from '../plugin';
 import type { RedirectConfig } from '../config';
+import type { FarmRequest, FarmResponse } from '../types';
 
-export function createRedirectsPlugin(redirects: RedirectConfig[]): FarmPlugin {
+export function createRedirectsPlugin(
+  redirects: RedirectConfig[],
+  {
+    beforeRequest: overrideBeforeRequest,
+    afterResponse: overrideAfterResponse,
+  }: {
+    beforeRequest?: (req: FarmRequest, res: FarmResponse, context: FarmPluginContext) => void | Promise<void>;
+    afterResponse?: (req: FarmRequest, res: FarmResponse, context: FarmPluginContext) => void | Promise<void>;
+  } = {}
+): FarmPlugin {
   return {
     name: 'farm:redirects',
     enforce: 'pre',
     async beforeRequest(req, res, context) {
+      if (overrideBeforeRequest) {
+        await overrideBeforeRequest(req, res, context);
+      }
       const url = new URL(req.url || '/', `http://${req.headers.host}`);
       const pathname = url.pathname;
 
@@ -49,6 +62,12 @@ export function createRedirectsPlugin(redirects: RedirectConfig[]): FarmPlugin {
           res.end();
           return;
         }
+      }
+    },
+
+    async afterResponse(req, res, context) {
+      if (overrideAfterResponse) {
+        await overrideAfterResponse(req, res, context);
       }
     },
   };

@@ -1,5 +1,5 @@
 import React from 'react'
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 
 export default function UserPage({ params, searchParams }: PageProps) {
   const userId = params.id

@@ -38,6 +38,27 @@ export default defineEventHandler(async (event: H3Event) => {
     return { error: 'API route manager not initialized. Please check server logs.' };
   }
   
+  const startTime = Date.now();
+  const method = event.method || 'GET';
+  const host = url.host || 'localhost';
+  
+  // Log API request (only in development)
+  if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
+    try {
+      const pc = await import('picocolors');
+      const log = [
+        pc.default.dim('[') + pc.default.bold(pc.default.blue('FARM')) + pc.default.dim(']'),
+        pc.default.dim('[') + pc.default.bold(pc.default.white(method.padEnd(3))) + pc.default.dim(']'),
+        pc.default.cyan('[API]'),
+        pc.default.gray(`${url.protocol}//${host}${urlPath}`),
+      ].join(' ');
+      console.log(log);
+    } catch {
+      // picocolors not available, use simple log
+      console.log(`[FARM] [${method}] [API] ${urlPath}`);
+    }
+  }
+  
   try {
     // Convert H3 event to Web Request using H3 abstractions
     const protocol = url.protocol.replace(':', '') || 'http';
@@ -78,6 +99,33 @@ export default defineEventHandler(async (event: H3Event) => {
     }
     
     const response = await betterCallHandler(request);
+    
+    // Log API response (only in development)
+    if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
+      const duration = Date.now() - startTime;
+      const status = response.status;
+      try {
+        const pc = await import('picocolors');
+        let statusColor = pc.default.green;
+        if (status >= 500) statusColor = pc.default.red;
+        else if (status >= 400) statusColor = pc.default.yellow;
+        else if (status >= 300) statusColor = pc.default.cyan;
+
+        const log = [
+          pc.default.dim('[') + pc.default.bold(pc.default.blue('FARM')) + pc.default.dim(']'),
+          status >= 400 ? pc.default.red('✗') : pc.default.green('✓'),
+          pc.default.cyan('[API]'),
+          pc.default.gray(urlPath),
+          pc.default.dim('-'),
+          statusColor(status.toString()),
+          pc.default.dim(`(${duration}ms)`),
+        ].join(' ');
+        console.log(log);
+      } catch {
+        // picocolors not available, use simple log
+        console.log(`[FARM] [${method}] [API] ${urlPath} - ${response.status} (${duration}ms)`);
+      }
+    }
     
     // Convert Response to H3 response
     const responseBody = await response.text();

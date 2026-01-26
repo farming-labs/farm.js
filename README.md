@@ -32,17 +32,17 @@ Your app will be running at `http://localhost:3000`!
 ### Manual Installation
 
 ```bash
-npm install farm react react-dom
+npm install @farmjs/core react react-dom
 # or
-pnpm add farm react react-dom
+pnpm add @farmjs/core react react-dom
 # or
-yarn add farm react react-dom
+yarn add @farmjs/core react react-dom
 ```
 
 Create a `vite.config.ts`:
 
 ```ts
-import { defineConfig } from 'farm/vite'
+import { defineConfig } from '@farmjs/core/vite'
 
 export default defineConfig()
 ```
@@ -66,7 +66,7 @@ export default function HomePage() {
 Add a root layout in `src/app/layout.tsx`:
 
 ```tsx
-import type { LayoutProps } from 'farm'
+import type { LayoutProps } from '@farmjs/core'
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
@@ -106,7 +106,7 @@ my-farm-app/
 Farm.js supports a powerful configuration system via `farm.config.ts`:
 
 ```typescript
-import { defineFarmConfig } from 'farm'
+import { defineFarmConfig } from '@farmjs/core'
 
 export default defineFarmConfig({
   // Routing
@@ -145,7 +145,7 @@ See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
 Extend Farm.js with powerful plugins:
 
 ```typescript
-import { definePlugin } from 'farm'
+import { definePlugin } from '@farmjs/core'
 
 export const myPlugin = definePlugin({
   name: 'my-plugin',
@@ -259,7 +259,7 @@ cd examples/basic && pnpm dev
 farm.js/
 ├── packages/
 │   ├── farm/              # Core framework
-│   ├── farm-cli/          # CLI tools  
+│   ├── farm-cli/          # @farmjs/cli tools  
 │   ├── create-farm-app/   # App creation tool
 │   └── farm-types/        # TypeScript definitions
 ├── examples/

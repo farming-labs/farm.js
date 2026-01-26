@@ -1,6 +1,5 @@
 import React from 'react'
-import type { PageProps } from 'farm'
-
+import { PageProps } from "@farmjs/core"
 export default function AboutPage({ params, searchParams }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-8">

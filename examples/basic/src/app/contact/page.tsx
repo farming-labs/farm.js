@@ -1,6 +1,6 @@
-import { getMiddlewareData, getMiddlewareValue } from 'farm/middleware'
+import { getMiddlewareData, getMiddlewareValue } from '@farmjs/core/middleware'
 import React from 'react'
-import type { PageProps } from 'farm'
+import type { PageProps } from '@farmjs/core'
 import { GET as helloGet } from "../api/hello/route"
 export default async function ContactPage(props: PageProps) {
   const middlewareData = props.middleware?.data;

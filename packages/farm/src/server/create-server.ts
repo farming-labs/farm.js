@@ -90,6 +90,15 @@ export async function createServer(config: FarmConfig = {}) {
       ssr: {
         noExternal: ['farm'],
       },
+      customLogger: {
+        info: () => {},
+        warn: () => {},
+        warnOnce: () => {},
+        error: (msg) => logger.error(String(msg)),
+        clearScreen: () => {},
+        hasErrorLogged: () => false,
+        hasWarned: false,
+      },
       ...(resolvedConfig?.vite || {}),
     });
 

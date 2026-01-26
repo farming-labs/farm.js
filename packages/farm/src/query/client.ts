@@ -3,27 +3,32 @@
  * 
  * Type-safe URL search parameter state management - Like useState, but stored in the URL query string.
  * Client-only hooks for managing query parameters in the browser.
+ * Inspired by nuqs implementation patterns.
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import type { Parser } from './parsers';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { emitter } from './sync';
 
-// Re-export parsers for convenience
+import {
+  asString as asStringClient,
+  asInteger as asIntegerClient,
+  type Parser,
+} from './parsers';
+
 export {
-  parseAsString,
-  parseAsInteger,
-  parseAsFloat,
-  parseAsBoolean,
-  parseAsArrayOf,
-  parseAsJson,
-  parseAsIsoDate,
-  parseAsIsoDateTime,
-  createParser,
+  asString,
+  asInteger,
+  asFloat,
+  asBoolean,
+  asArrayOf,
+  asJson,
+  asIsoDate,
+  asIsoDateTime,
+  createParser ,
   type Parser,
   type inferParserType,
 } from './parsers';
 
-// Client-specific types
 export type UrlUpdateType = 'push' | 'replace';
 export type HistoryMethod = 'pushState' | 'replaceState';
 
@@ -34,69 +39,183 @@ export interface Options {
   throttleMs?: number;
 }
 
-// Utility functions
 const getCurrentSearchParams = (): URLSearchParams => {
   if (typeof window === 'undefined') return new URLSearchParams();
   return new URLSearchParams(window.location.search);
 };
 
-const updateURL = (updates: Record<string, string | null>, options: Options = {}) => {
-  if (typeof window === 'undefined') return;
-  
-  const { history = 'pushState', shallow = true, scroll = false } = options;
-  const url = new URL(window.location.href);
-  
+const throttleTimers = new Map<string, NodeJS.Timeout>();
+
+const applyChange = (
+  searchParams: URLSearchParams,
+  updates: Record<string, string | null>,
+  keepExisting = true
+): URLSearchParams => {
+  const newParams = keepExisting
+    ? new URLSearchParams(searchParams)
+    : new URLSearchParams();
+
   Object.entries(updates).forEach(([key, value]) => {
-    if (value === null || value === undefined) {
-      url.searchParams.delete(key);
+    if (value === null || value === undefined || value === '') {
+      newParams.delete(key);
     } else {
-      url.searchParams.set(key, value);
+      newParams.set(key, value);
     }
   });
-  
-  const newUrl = url.toString();
-  if (newUrl !== window.location.href) {
-    window.history[history]({ scroll }, '', newUrl);
-    
-    // Dispatch custom event for shallow routing
-    if (shallow) {
-      window.dispatchEvent(new PopStateEvent('popstate'));
+
+  return newParams;
+};
+
+const updateURL = (
+  updates: Record<string, string | null>,
+  options: Options = {},
+  emitUpdate = true
+) => {
+  if (typeof window === 'undefined') return;
+
+  const { history = 'pushState', shallow = true, scroll = false, throttleMs } = options;
+  const url = new URL(window.location.href);
+
+  const newSearchParams = applyChange(new URLSearchParams(url.search), updates);
+  const newSearch = newSearchParams.toString();
+  const newUrl = url.pathname + (newSearch ? `?${newSearch}` : '') + url.hash;
+  const currentUrl = window.location.pathname + (window.location.search || '') + window.location.hash;
+
+  if (newUrl !== currentUrl) {
+    const update = () => {
+      if (history === 'replaceState') {
+        window.history.replaceState(null, '', newUrl);
+      } else {
+        window.history.pushState(null, '', newUrl);
+      }
+
+      if (emitUpdate) {
+        const actualSearchParams = new URLSearchParams(window.location.search);
+        emitter.emitUpdate(actualSearchParams);
+      }
+
+      if (shallow) {
+        setTimeout(() => {
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }, 0);
+      }
+
+      if (scroll) {
+        window.scrollTo(0, 0);
+      }
+    };
+
+    if (throttleMs && throttleMs > 0) {
+      const throttleKey = Object.keys(updates).sort().join(',');
+
+      const existingTimeout = throttleTimers.get(throttleKey);
+      if (existingTimeout) {
+        clearTimeout(existingTimeout);
+      }
+
+      const timeout = setTimeout(() => {
+        update();
+        throttleTimers.delete(throttleKey);
+      }, throttleMs);
+
+      throttleTimers.set(throttleKey, timeout);
+    } else {
+      update();
     }
   }
 };
 
-// Main hooks
+export function useQueryState<TParser extends Parser<any>>(
+  key: string,
+  parser: TParser,
+  options?: Options
+): [NonNullable<ReturnType<TParser['parse']>> | null, (value: NonNullable<ReturnType<TParser['parse']>> | null) => void];
 export function useQueryState<T>(
   key: string,
   parser: Parser<T>,
-  options: Options = {}
-): [T | null, (value: T | null) => void] {
+  options?: Options
+): [T | null, (value: T | null) => void];
+export function useQueryState<TParser extends Parser<any>>(
+  key: string,
+  parser: TParser,
+  options?: Options
+): [NonNullable<ReturnType<TParser['parse']>> | null, (value: NonNullable<ReturnType<TParser['parse']>> | null) => void] {
+  type T = NonNullable<ReturnType<TParser['parse']>>;
   const [state, setState] = useState<T | null>(() => {
     if (typeof window === 'undefined') return null;
     const searchParams = getCurrentSearchParams();
     const value = searchParams.get(key);
-    return value ? parser.parse(value) : null;
+    const parsed = parser.parse(value ?? '');
+    return parsed;
   });
 
+  const stateRef = useRef(state);
+  const isInternalUpdateRef = useRef(false);
+  stateRef.current = state;
+
   const setValue = useCallback((value: T | null) => {
+    isInternalUpdateRef.current = true;
+    
     setState(value);
+    stateRef.current = value;
+
     const serialized = value === null ? null : parser.serialize(value);
-    updateURL({ [key]: serialized }, options);
+
+    emitter.emitKey(key, { state: value, query: serialized });
+
+    updateURL({ [key]: serialized }, options, true);
+    
+    setTimeout(() => {
+      isInternalUpdateRef.current = false;
+    }, 10);
   }, [key, parser, options]);
 
-  // Listen for URL changes (browser back/forward)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const handlePopState = () => {
+    const onPopState = () => {
       const searchParams = getCurrentSearchParams();
       const value = searchParams.get(key);
-      const parsed = value ? parser.parse(value) : null;
-      setState(parsed);
+      const parsed = parser.parse(value ?? '');
+      if (!Object.is(stateRef.current, parsed)) {
+        setState(parsed);
+        stateRef.current = parsed;
+      }
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
+    const onEmitterUpdate = (searchParams: URLSearchParams) => {
+      if (isInternalUpdateRef.current) {
+        return;
+      }
+      
+      const value = searchParams.get(key);
+      const parsed = parser.parse(value ?? '');
+      if (!Object.is(stateRef.current, parsed)) {
+        setState(parsed);
+        stateRef.current = parsed;
+      }
+    };
+
+    const onKeyUpdate = (payload: { state: any; query: string | null }) => {
+      if (isInternalUpdateRef.current) {
+        return;
+      }
+      
+      if (!Object.is(stateRef.current, payload.state)) {
+        setState(payload.state);
+        stateRef.current = payload.state;
+      }
+    };
+
+    window.addEventListener('popstate', onPopState);
+    emitter.on('update', onEmitterUpdate);
+    emitter.onKey(key, onKeyUpdate);
+
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      emitter.off('update', onEmitterUpdate);
+      emitter.offKey(key, onKeyUpdate);
+    };
   }, [key, parser]);
 
   return [state, setValue];
@@ -106,62 +225,101 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   parsers: T,
   options: Options = {}
 ): [
-  { [K in keyof T]: ReturnType<T[K]['parse']> },
-  (updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>) => void
-] {
+    { [K in keyof T]: ReturnType<T[K]['parse']> },
+    (updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>) => void
+  ] {
+  const keys = Object.keys(parsers);
+  const watchKeys = keys.join('&');
+
   const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]['parse']> }>(() => {
     if (typeof window === 'undefined') {
       return {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
     }
-    
+
     const searchParams = getCurrentSearchParams();
     const result = {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
-    
+
     Object.entries(parsers).forEach(([key, parser]) => {
       const value = searchParams.get(key);
-      result[key as keyof T] = value ? parser.parse(value) : null;
+      result[key as keyof T] = parser.parse(value ?? '');
     });
-    
+
     return result;
   });
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
   const setValues = useCallback((updates: Partial<{ [K in keyof T]: ReturnType<T[K]['parse']> | null }>) => {
-    setState(prev => ({ ...prev, ...updates }));
-    
+    const newState = { ...stateRef.current, ...updates };
+    setState(newState);
+    stateRef.current = newState;
+
+    Object.entries(updates).forEach(([key, value]) => {
+      const parser = parsers[key];
+      if (parser) {
+        const serialized = value === null ? null : parser.serialize(value);
+        emitter.emitKey(key, { state: value, query: serialized });
+      }
+    });
+
     const urlUpdates: Record<string, string | null> = {};
     Object.entries(updates).forEach(([key, value]) => {
       const parser = parsers[key];
-      const serialized = value === null ? null : parser.serialize(value);
-      urlUpdates[key] = serialized;
+      if (parser) {
+        const serialized = value === null ? null : parser.serialize(value);
+        urlUpdates[key] = serialized;
+      }
     });
-    
-    updateURL(urlUpdates, options);
+
+    updateURL(urlUpdates, options, true);
   }, [parsers, options]);
 
-  // Listen for URL changes (browser back/forward)
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    const handlePopState = () => {
-      const searchParams = getCurrentSearchParams();
+    const applyChange = (searchParams: URLSearchParams, fromEmitter = false) => {
       const result = {} as { [K in keyof T]: ReturnType<T[K]['parse']> };
-      
+      let hasChanged = false;
+
       Object.entries(parsers).forEach(([key, parser]) => {
         const value = searchParams.get(key);
-        result[key as keyof T] = value ? parser.parse(value) : null;
+        const parsed = parser.parse(value ?? '');
+        const currentValue = stateRef.current[key as keyof T];
+
+        if (!Object.is(currentValue, parsed)) {
+          hasChanged = true;
+        }
+        result[key as keyof T] = parsed;
       });
-      
-      setState(result);
+
+      if (hasChanged) {
+        setState(result);
+        stateRef.current = result;
+      }
     };
 
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, [parsers]);
+    const onPopState = () => {
+      const searchParams = getCurrentSearchParams();
+      applyChange(searchParams, false);
+    };
+
+    const onEmitterUpdate = (searchParams: URLSearchParams) => {
+      applyChange(searchParams, true);
+    };
+
+    window.addEventListener('popstate', onPopState);
+    emitter.on('update', onEmitterUpdate);
+
+    return () => {
+      window.removeEventListener('popstate', onPopState);
+      emitter.off('update', onEmitterUpdate);
+    };
+  }, [watchKeys, parsers]);
 
   return [state, setValues];
 }
 
-// Convenience hooks
 export function usePagination(options?: {
   defaultPage?: number;
   defaultLimit?: number;
@@ -175,11 +333,8 @@ export function usePagination(options?: {
     limitKey = 'limit',
   } = options || {};
 
-  // Import parsers dynamically to avoid circular dependency
-  const { parseAsInteger } = require('./parsers');
-
-  const [page, setPage] = useQueryState(pageKey, parseAsInteger.withDefault!(defaultPage));
-  const [limit, setLimit] = useQueryState(limitKey, parseAsInteger.withDefault!(defaultLimit));
+  const [page, setPage] = useQueryState(pageKey, asIntegerClient.withDefault!(defaultPage));
+  const [limit, setLimit] = useQueryState(limitKey, asIntegerClient.withDefault!(defaultLimit));
 
   const currentPage = page ?? defaultPage;
   const currentLimit = limit ?? defaultLimit;
@@ -209,14 +364,10 @@ export function useSearchFilters<T extends Record<string, any>>(options?: {
     filterKeys = Object.keys(defaultFilters) as (keyof T)[],
   } = options || {};
 
-  // Import parsers dynamically to avoid circular dependency
-  const { parseAsString } = require('./parsers');
+  const [search, setSearch] = useQueryState(searchKey, asStringClient);
 
-  const [search, setSearch] = useQueryState(searchKey, parseAsString);
-
-  // Create parsers for each filter
   const filterParsers = filterKeys.reduce((acc, key) => {
-    acc[key as string] = parseAsString;
+    acc[key as string] = asStringClient;
     return acc;
   }, {} as Record<string, Parser<string>>);
 

@@ -9,7 +9,7 @@ Farm.js is built as a monorepo containing multiple packages that work together t
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
 │   Developer     │    │   Farm.js CLI   │    │   Vite Plugin   │
-│   Experience    │◄──►│   (farm-cli)    │◄──►│   (farm/vite)   │
+│   Experience    │◄──►│   (@farmjs/cli)    │◄──►│   (farmjs/vite)   │
 └─────────────────┘    └─────────────────┘    └─────────────────┘
          │                       │                       │
          ▼                       ▼                       ▼
@@ -38,13 +38,13 @@ The main framework package containing:
 - **Vite Plugin** (`src/vite.ts`) - Integration with Vite build system
 - **Utilities** (`src/utils.ts`) - Shared utility functions
 
-#### `packages/farm-cli/`
+#### `packages/farm-cli/` (@farmjs/cli)
 Command-line interface for development:
 - Development server (`farm dev`)
 - Production builds (`farm build`)
 - Project scaffolding integration
 
-#### `packages/create-farm-app/`
+#### `packages/create-farm-app/` (@farmjs/create-farm-app)
 Project creation tool:
 - Interactive project setup
 - Template system

@@ -81,6 +81,7 @@ function HomePage({ params, searchParams }) {
         /* @__PURE__ */ jsx("a", { href: "/users/123?tab=profile", className: "inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors", children: "Dynamic Route Demo" }),
         /* @__PURE__ */ jsx("a", { href: "/api-demo", className: "inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors", children: "API Demo (Server)" }),
         /* @__PURE__ */ jsx("a", { href: "/api-demo-client", className: "inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors", children: "API Demo (Client)" }),
+        /* @__PURE__ */ jsx("a", { href: "/query-demo", className: "inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors", children: "Query State Demo" }),
         /* @__PURE__ */ jsx("a", { href: "/docs/reference", className: "inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors", children: "📚 API Documentation" })
       ] })
     ] })

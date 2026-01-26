@@ -126,13 +126,38 @@ export interface MiddlewareContext {
  */
 export interface MiddlewareChain {
   use(fn: MiddlewareFunction): MiddlewareChain;
+  /**
+   * Conditionally run middleware based on a condition.
+   * Supports boolean values or functions that evaluate to boolean.
+   * 
+   * @example
+   * .when(true, (ctx, next) => { ... })  // Always run
+   * .when((ctx) => ctx.data.get('flag'), (ctx, next) => { ... })  // Conditional
+   */
   when(
-    condition: string | boolean | ((ctx: MiddlewareContext) => boolean),
+    condition: boolean | ((ctx: MiddlewareContext) => boolean),
     fn: MiddlewareFunction | ((chain: MiddlewareChain) => void)
   ): MiddlewareChain;
   rateLimit(config: RateLimitConfig): MiddlewareChain;
   redirect(source: string, destination: string, permanent?: boolean): MiddlewareChain;
-  rewrite(source: string, destination: string): MiddlewareChain;
+  /**
+   * Rewrite the current route to a new destination.
+   * In route-specific middleware, this rewrites the middleware's route.
+   * 
+   * @param destination - The destination path to rewrite to
+   * @param condition - Optional boolean or function that evaluates to boolean. If false, rewrite is skipped.
+   * 
+   * @example
+   * // In /contact/middleware.ts
+   * .rewrite('/about')  // Always rewrites /contact to /about
+   * .rewrite('/about', true)  // Always rewrites
+   * .rewrite('/about', false)  // Never rewrites
+   * .rewrite('/about', (ctx) => ctx.data.get('shouldRewrite'))  // Conditional rewrite
+   */
+  rewrite(
+    destination: string,
+    condition?: boolean | ((ctx: MiddlewareContext) => boolean)
+  ): MiddlewareChain;
   build(): {
     handlers: MiddlewareFunction[];
     config?: MiddlewareConfig;
