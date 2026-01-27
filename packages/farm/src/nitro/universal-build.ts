@@ -142,9 +142,17 @@ async function buildSSRInMemory(
   } catch {
     // Last resort: use relative path from source structure
     // This assumes the file structure: packages/farm/src/nitro/server-entry.ts
-    serverEntryPath = path.resolve(root, "node_modules", "@farmjs", "core", "src", "nitro", "server-entry.ts");
+    serverEntryPath = path.resolve(
+      root,
+      "node_modules",
+      "@farmjs",
+      "core",
+      "src",
+      "nitro",
+      "server-entry.ts",
+    );
   }
-  
+
   const finalEntryPath = serverEntryPath;
 
   await viteBuild({

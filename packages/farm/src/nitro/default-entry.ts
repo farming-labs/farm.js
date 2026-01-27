@@ -6,11 +6,13 @@ import type { ServerRenderer } from "../server/renderer";
 
 // Global registry for runtime access (populated at build time)
 declare global {
-  var __FARM_REGISTRY__: {
-    routeManager?: RouteManager;
-    apiRouteManager?: APIRouteManager;
-    serverRenderer?: ServerRenderer;
-  } | undefined;
+  var __FARM_REGISTRY__:
+    | {
+        routeManager?: RouteManager;
+        apiRouteManager?: APIRouteManager;
+        serverRenderer?: ServerRenderer;
+      }
+    | undefined;
 }
 
 /**

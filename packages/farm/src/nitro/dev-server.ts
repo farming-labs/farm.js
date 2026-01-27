@@ -10,7 +10,7 @@ import { fromWebHandler } from "h3";
 function nodeToWebRequest(req: IncomingMessage, baseUrl: string): Request {
   const url = new URL(req.url || "/", baseUrl);
   const headers = new Headers();
-  
+
   // Copy headers
   for (const [key, value] of Object.entries(req.headers)) {
     if (value) {
@@ -34,10 +34,7 @@ function nodeToWebRequest(req: IncomingMessage, baseUrl: string): Request {
 /**
  * Convert Web Standard Response to Node.js response
  */
-async function webToNodeResponse(
-  res: ServerResponse,
-  webRes: Response,
-): Promise<void> {
+async function webToNodeResponse(res: ServerResponse, webRes: Response): Promise<void> {
   // Set status
   res.statusCode = webRes.status;
 
@@ -95,7 +92,15 @@ export function devServerPlugin(): PluginOption {
           } catch {
             // Fallback: try to load from actual file
             const { join } = await import("path");
-            const actualPath = join(viteDevServer.config.root, "node_modules", "@farmjs", "core", "src", "nitro", "server-entry.ts");
+            const actualPath = join(
+              viteDevServer.config.root,
+              "node_modules",
+              "@farmjs",
+              "core",
+              "src",
+              "nitro",
+              "server-entry.ts",
+            );
             serverEntry = await viteDevServer.ssrLoadModule(actualPath);
           }
 
