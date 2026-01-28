@@ -1,5 +1,6 @@
 import React from 'react'
 import type { PageProps } from '@farmjs/core'
+import { Link } from '@farmjs/core/client'
 
 export default async function UserPage({ params, searchParams }: PageProps) {
   const { id } = params
@@ -77,9 +78,9 @@ export default async function UserPage({ params, searchParams }: PageProps) {
       </div>
 
       <div>
-        <a href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+        <Link href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
           ← Back to Home
-        </a>
+        </Link>
       </div>
     </div>
   )
@@ -118,12 +119,12 @@ function UrlDemo({ href, description }: { href: string; description: string }) {
         <code className="text-sm font-mono text-blue-600">{href}</code>
         <p className="text-xs text-gray-500 mt-1">{description}</p>
       </div>
-      <a 
+      <Link 
         href={href}
         className="px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors"
       >
         Visit
-      </a>
+      </Link>
     </div>
   )
 }

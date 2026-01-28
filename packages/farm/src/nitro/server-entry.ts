@@ -9,6 +9,9 @@ import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
 
+// Managers will be available via globalThis.__FARM_REGISTRY__
+// They are injected via Nitro hooks (ready hook) or set during build
+
 // Global registry for runtime access (populated at build time)
 declare global {
   var __FARM_REGISTRY__:
@@ -23,22 +26,32 @@ declare global {
 /**
  * Initialize managers from global registry if not already initialized
  * This ensures managers are available even in serverless environments
+ * 
+ * In serverless, managers are stored in globalThis.__FARM_REGISTRY__ during build
+ * and should be available at runtime. If not, we return undefined and the handler
+ * will return appropriate error responses.
  */
 function getManagers() {
-  if (!globalThis.__FARM_REGISTRY__) {
-    // Try to initialize from build-time registry
-    // In serverless, we might need to recreate managers from bundled data
+  // Check global registry (populated at build time or via Nitro hooks)
+  if (typeof globalThis !== "undefined" && globalThis.__FARM_REGISTRY__) {
+    const registry = globalThis.__FARM_REGISTRY__;
     return {
-      routeManager: undefined,
-      apiRouteManager: undefined,
-      serverRenderer: undefined,
+      routeManager: registry.routeManager,
+      apiRouteManager: registry.apiRouteManager,
+      serverRenderer: registry.serverRenderer,
     };
   }
 
+  // Managers not available - this should not happen in production
+  // but we handle it gracefully
+  // This can happen if:
+  // 1. Build didn't properly set globalThis.__FARM_REGISTRY__
+  // 2. Serverless function's global scope was reset
+  // 3. Managers weren't injected via Nitro hooks
   return {
-    routeManager: globalThis.__FARM_REGISTRY__?.routeManager,
-    apiRouteManager: globalThis.__FARM_REGISTRY__?.apiRouteManager,
-    serverRenderer: globalThis.__FARM_REGISTRY__?.serverRenderer,
+    routeManager: undefined,
+    apiRouteManager: undefined,
+    serverRenderer: undefined,
   };
 }
 
@@ -71,10 +84,20 @@ async function defaultHandler({
     if (handler) {
       return await handler(request);
     }
-    return new Response(JSON.stringify({ error: "API handler not found" }), {
-      status: 404,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ 
+        error: "API handler not found",
+        debug: {
+          hasApiRouteManager: !!arm,
+          hasHandler: !!handler,
+          registryAvailable: typeof globalThis !== "undefined" && !!globalThis.__FARM_REGISTRY__,
+        }
+      }),
+      {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      },
+    );
   }
 
   // Handle SSR routes
@@ -125,8 +148,23 @@ async function defaultHandler({
     }
   }
 
-  // Fallback 404
-  return new Response("Not Found", { status: 404 });
+  // Fallback 404 - managers not available
+  return new Response(
+    JSON.stringify({
+      error: "Not Found",
+      debug: {
+        pathname,
+        hasRouteManager: !!rm,
+        hasServerRenderer: !!sr,
+        hasApiRouteManager: !!arm,
+        registryAvailable: typeof globalThis !== "undefined" && !!globalThis.__FARM_REGISTRY__,
+      },
+    }),
+    {
+      status: 404,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
 }
 
 // Create the handler (context will be populated at build time via global registry)

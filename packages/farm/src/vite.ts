@@ -311,6 +311,26 @@ export function farmPlugin(
         const clientComponents = (farmApp as any).__clientComponents__ || new Set();
         clientComponents.add(id);
         (farmApp as any).__clientComponents__ = clientComponents;
+
+        // Add HMR support for client components
+        // This ensures React re-renders when the component updates
+        const hmrCode = `
+if (import.meta.hot) {
+  import.meta.hot.accept((newModule) => {
+    if (newModule && newModule.default && window.__FARM_REACT_ROOT__) {
+      // Re-render with the new component
+      const React = window.__FARM_REACT__;
+      const props = window.__FARM_PROPS__ || {};
+      window.__FARM_REACT_ROOT__.render(React.createElement(newModule.default, props));
+      console.log('[Farm.js] ⚡ HMR update applied');
+    }
+  });
+}
+`;
+        return {
+          code: code + "\n" + hmrCode,
+          map: null,
+        };
       }
 
       return null;
@@ -391,7 +411,15 @@ export function farmPlugin(
 function generateClientCode(): string {
   return `
 import React from 'react'
-import { hydrateRoot } from 'react-dom/client'
+import { hydrateRoot, createRoot } from 'react-dom/client'
+
+// ⭐ Farm.js Dev Mode Client Runtime
+// Handles hydration in development
+
+// Expose React for HMR
+window.__FARM_REACT__ = React;
+
+let reactRoot = null;
 
 async function hydrate() {
   const container = document.getElementById('root')
@@ -402,46 +430,45 @@ async function hydrate() {
   }
 
   try {
-    const fullPath = window.__FARM_PAGE_PATH__
+    // Check if this is a client component (set by SSR)
+    const isClientComponent = window.__FARM_IS_CLIENT__ === true;
     
-    if (!fullPath) {
-      console.error('[Farm.js] No page path found')
-      return
-    }
-
-    const relativePath = fullPath.includes('/src/app/') 
-      ? fullPath.substring(fullPath.indexOf('/src/app/'))
-      : fullPath;
-
-    // First, try to fetch the raw file content to check if it's a client component
-    let isClientComponent = false;
-    try {
-      const response = await fetch(relativePath);
-      const content = await response.text();
-      isClientComponent = content.trimStart().startsWith("'use client'") || 
-                         content.trimStart().startsWith('"use client"');
-    } catch (error) {
-      console.log('[Farm.js] Could not check client component status, assuming server component')
-      return
-    }
-
     if (!isClientComponent) {
-      console.log('[Farm.js] Skipping hydration for server component:', relativePath)
+      console.log('[Farm.js] Server component - no hydration needed')
       return
     }
 
-    const pageModule = await import(/* @vite-ignore */ relativePath)
+    const modulePath = window.__FARM_PAGE_MODULE__;
+    if (!modulePath) {
+      console.error('[Farm.js] No page module path found')
+      return
+    }
+
+    // Import the page module dynamically
+    const pageModule = await import(/* @vite-ignore */ modulePath)
     const PageComponent = pageModule.default
     
     if (!PageComponent) {
-      console.error('[Farm.js] No default export found in', relativePath)
+      console.error('[Farm.js] No default export found in', modulePath)
       return
     }
 
     const props = window.__FARM_PROPS__ || {}
     
-    hydrateRoot(container, React.createElement(PageComponent, props))
-    console.log('[Farm.js] ✅ Hydrated client component:', relativePath)
+    // Use hydrateRoot to attach event handlers to server-rendered HTML
+    // There may be a mismatch warning since server renders Layout+Page
+    // but we only hydrate Page - this is expected in dev mode
+    try {
+      reactRoot = hydrateRoot(container, React.createElement(PageComponent, props));
+      window.__FARM_REACT_ROOT__ = reactRoot;
+      console.log('[Farm.js] ✅ Hydrated client component:', modulePath);
+    } catch (error) {
+      // If hydration fails, fall back to createRoot
+      console.log('[Farm.js] Hydration failed, using createRoot');
+      reactRoot = createRoot(container);
+      reactRoot.render(React.createElement(PageComponent, props));
+      window.__FARM_REACT_ROOT__ = reactRoot;
+    }
   } catch (error) {
     console.error('[Farm.js] Hydration error:', error)
   }
@@ -454,10 +481,6 @@ if (document.readyState === 'loading') {
 }
 
 if (import.meta.hot) {
-  import.meta.hot.accept(() => {
-    window.location.reload()
-  })
-  
   import.meta.hot.on('vite:beforeUpdate', () => {
     console.log('[Farm.js] ⚡ Update detected')
   })

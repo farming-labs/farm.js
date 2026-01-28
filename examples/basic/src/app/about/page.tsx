@@ -1,5 +1,6 @@
 import React from 'react'
-import { PageProps } from "@farmjs/core"
+import type { PageProps } from "@farmjs/core"
+import { Link } from "@farmjs/core/client"
 export default function AboutPage({ params, searchParams }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
@@ -57,12 +58,12 @@ export default function AboutPage({ params, searchParams }: PageProps) {
       </div>
 
       <div className="flex gap-4">
-        <a href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+        <Link href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
           ← Back to Home
-        </a>
-        <a href="/users/123?tab=profile" className="inline-flex items-center px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium">
+        </Link>
+        <Link href="/users/123?tab=profile" className="inline-flex items-center px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium">
           Try Dynamic Route →
-        </a>
+        </Link>
       </div>
     </div>
   )

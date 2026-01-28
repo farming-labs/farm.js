@@ -1,22 +1,9 @@
-import { getMiddlewareData, getMiddlewareValue } from '@farmjs/core/middleware'
 import React from 'react'
-import type { PageProps } from '@farmjs/core'
-import { GET as helloGet } from "../api/hello/route"
-export default async function ContactPage(props: PageProps) {
-  const middlewareData = props.middleware?.data;
-  const demoInfoFromProps = middlewareData?.get('demoInfo');
+import { Link } from '@farmjs/core/client'
 
-  const data = getMiddlewareData<{ demoInfo: { message: string } }>();
-  const demoInfoFromHelper = data.get('demoInfo');
-
-  const demoInfoDirect = getMiddlewareValue('demoInfo');
-  console.log('📊 Contact page middleware data:', {
-    fromProps: demoInfoFromProps,
-    fromHelper: demoInfoFromHelper,
-    fromDirect: demoInfoDirect,
-  });
-  const allDataMatches = JSON.stringify(demoInfoFromProps) === JSON.stringify(demoInfoFromHelper) &&
-    JSON.stringify(demoInfoFromHelper) === JSON.stringify(demoInfoDirect);
+// Note: Middleware data is server-side only and cannot be accessed in client components
+// If you need middleware data, use a server component or pass data via props
+export default function ContactPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
       <div>
@@ -74,9 +61,9 @@ export default async function ContactPage(props: PageProps) {
       </div>
 
       <div>
-        <a href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+        <Link href="/" className="inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
           ← Back to Home
-        </a>
+        </Link>
       </div>
     </div>
   )

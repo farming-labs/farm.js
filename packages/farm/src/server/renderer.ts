@@ -122,15 +122,19 @@ export class ServerRenderer {
 
       // Get the page path for client-side hydration
       const pagePath = (req as any).__FARM_PAGE_PATH__;
+      const isClientComponent = (req as any).__FARM_IS_CLIENT_COMPONENT__ === true;
       const relativePath = pagePath
         ? pagePath.substring(pagePath.indexOf("/src/app/"))
         : "/src/app/page.tsx";
 
-      // Inject page props and component path for client-side hydration
+      // Inject page props and component info for client-side hydration
+      // __FARM_IS_CLIENT__ tells the client code whether to hydrate
+      // __FARM_PAGE_MODULE__ is the module path for dynamic import
       const propsScript = `<script>
 window.__FARM_PROPS__ = ${JSON.stringify((req as any).__FARM_PROPS__ || {})};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
-window.__FARM_PAGE_PATH__ = ${JSON.stringify(relativePath)};
+window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
+window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 </script>`;
 
       const { pipe, abort } = renderToPipeableStream(element, {

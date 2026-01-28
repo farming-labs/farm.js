@@ -1,9 +1,9 @@
 {
-  "assets/page-wbYjx1yQ.js": {
-    "id": "assets/page-wbYjx1yQ.js",
+  "farm-client.js": {
+    "id": "farm-client.js",
     "chunks": [
-      "assets/page-wbYjx1yQ.js"
+      "farm-client.js"
     ],
-    "name": "page"
+    "name": "farm-client"
   }
 }

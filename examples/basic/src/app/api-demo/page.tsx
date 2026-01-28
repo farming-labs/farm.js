@@ -1,4 +1,7 @@
+"use client";
+
 import React from 'react';
+import { Link } from '@farmjs/core/client';
 import { GET as helloGet } from "../api/hello/route"
 export default async function APIDemo() {
   const baseURL = 'http://localhost:3000';
@@ -127,12 +130,12 @@ Response:
 
           {/* Back Link */}
           <div className="text-center pt-8">
-            <a 
+            <Link 
               href="/" 
               className="inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors"
             >
               ← Back to Home
-            </a>
+            </Link>
           </div>
         </div>
       </div>

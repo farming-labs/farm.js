@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+// import { Link } from '@farmjs/core/client';
 import { api } from '../../lib/api-client';
 
 export default function APIClientDemo() {
@@ -13,6 +14,7 @@ export default function APIClientDemo() {
   const fetchHello = async () => {
     setLoading('hello');
     setError(null);
+
     try {
       const data = await api.hello.post({
         body: { name: 'something' }
@@ -30,6 +32,7 @@ export default function APIClientDemo() {
     setLoading('users');
     setError(null);
     try {
+
       // Nested API call: api.users.get()
       const data = await api.users.get({
         query: { limit: '5' }
@@ -88,7 +91,7 @@ export default function APIClientDemo() {
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-indigo-800 to-black text-white p-8">
       <div className="max-w-4xl mx-auto">
         <h1 className="text-5xl font-bold mb-4 bg-gradient-to-r from-pink-400 to-yellow-400 bg-clip-text text-transparent">
-          Client Component API Demo 🎨
+          Clients Component API Demo 🎨
         </h1>
 
         <div className="bg-pink-900/30 border border-pink-500/50 rounded-lg p-4 mb-8">
@@ -234,18 +237,18 @@ console.log(result.user);  // ✅ Autocomplete works!`}
 
           {/* Navigation */}
           <div className="flex gap-4 justify-center pt-8">
-            <a
+            {/* <Link
               href="/api-demo"
               className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
             >
               Server Component Demo
-            </a>
-            <a
+            </Link>
+            <Link
               href="/"
               className="inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors"
             >
               ← Back to Home
-            </a>
+            </Link> */}
           </div>
         </div>
       </div>
