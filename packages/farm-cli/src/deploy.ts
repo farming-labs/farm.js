@@ -41,9 +41,10 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
 
   // For Vercel, output goes to .vercel/output (Build Output API v3)
   // For other presets, output goes to .farm/.output
-  const nitroOutput = platform === "vercel"
-    ? path.join(root, ".vercel", "output")
-    : path.join(root, ".farm", ".output");
+  const nitroOutput =
+    platform === "vercel"
+      ? path.join(root, ".vercel", "output")
+      : path.join(root, ".farm", ".output");
 
   if (!existsSync(nitroOutput)) {
     logger.error(`Build output not found at ${nitroOutput}. Please run 'farm build' first.`);
@@ -106,7 +107,7 @@ async function deployVercel(root: string, outputDir: string) {
     // Verify output structure before deploying
     const fs = await import("fs");
     const { existsSync, statSync, readdirSync } = fs;
-    
+
     // Vercel Build Output API v3 expects:
     // - functions/__nitro.func/ for serverless functions
     // - static/ for static files
@@ -239,9 +240,9 @@ async function deployVercel(root: string, outputDir: string) {
     // For Vercel Build Output API v3, we need to deploy from the project root
     // with the --prebuilt flag to tell Vercel to use the .vercel/output directory
     // See: https://vercel.com/docs/build-output-api/v3
-    
+
     logger.info("📤 Uploading to Vercel...");
-    
+
     // Deploy using --prebuilt flag which tells Vercel to use the Build Output API
     // The .vercel/output directory contains the pre-built deployment structure
     execSync("vercel deploy --prebuilt --yes", {

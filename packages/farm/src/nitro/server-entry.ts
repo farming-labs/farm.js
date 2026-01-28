@@ -26,7 +26,7 @@ declare global {
 /**
  * Initialize managers from global registry if not already initialized
  * This ensures managers are available even in serverless environments
- * 
+ *
  * In serverless, managers are stored in globalThis.__FARM_REGISTRY__ during build
  * and should be available at runtime. If not, we return undefined and the handler
  * will return appropriate error responses.
@@ -85,13 +85,13 @@ async function defaultHandler({
       return await handler(request);
     }
     return new Response(
-      JSON.stringify({ 
+      JSON.stringify({
         error: "API handler not found",
         debug: {
           hasApiRouteManager: !!arm,
           hasHandler: !!handler,
           registryAvailable: typeof globalThis !== "undefined" && !!globalThis.__FARM_REGISTRY__,
-        }
+        },
       }),
       {
         status: 404,

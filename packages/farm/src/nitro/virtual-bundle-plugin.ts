@@ -36,7 +36,7 @@ export function virtualBundlePlugin(bundle: OutputBundle): Plugin {
         _modules.set(fileName, virtualModule);
         _modules.set(`./${fileName}`, virtualModule);
         _modules.set(resolve(fileName), virtualModule);
-        
+
         // Also store without extension for flexibility
         const baseName = fileName.replace(/\.[^.]+$/, "");
         _modules.set(baseName, virtualModule);
@@ -71,7 +71,7 @@ export function virtualBundlePlugin(bundle: OutputBundle): Plugin {
         if (modules.has(resolved)) {
           return { id: resolved, moduleSideEffects: false };
         }
-        
+
         // Try basename match
         const base = basename(id);
         if (modules.has(base)) {
@@ -83,15 +83,10 @@ export function virtualBundlePlugin(bundle: OutputBundle): Plugin {
     },
     load(id) {
       const modules = getModules();
-      
+
       // Try multiple variations
-      const variations = [
-        id,
-        basename(id),
-        `./${basename(id)}`,
-        id.replace(/^.*\//, ""),
-      ];
-      
+      const variations = [id, basename(id), `./${basename(id)}`, id.replace(/^.*\//, "")];
+
       for (const variant of variations) {
         const m = modules.get(variant);
         if (m) {

@@ -14,9 +14,7 @@ import type { NitroConfig } from "nitro/config";
 type OutputBundle = Rollup.OutputBundle;
 
 // Get __dirname equivalent for ESM
-const _filename = typeof import.meta.url !== "undefined" 
-  ? fileURLToPath(import.meta.url) 
-  : "";
+const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
 const _dirname = path.dirname(_filename);
 
 /**
@@ -61,14 +59,7 @@ export async function buildUniversal(
       // Client build (to disk)
       buildClient(config, root, srcDir, clientOutputDir, pageRoutes),
       // SSR build (in memory)
-      buildSSRInMemory(
-        config,
-        root,
-        srcDir,
-        routeManager,
-        apiRouteManager,
-        serverRenderer,
-      ),
+      buildSSRInMemory(config, root, srcDir, routeManager, apiRouteManager, serverRenderer),
     ]);
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile } = ssrResult;
@@ -118,16 +109,17 @@ async function buildClient(
 
   // Detect which pages are "use client" components
   const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
-  
+
   for (const route of pageRoutes) {
     try {
       const content = await fs.readFile(route.modulePath, "utf-8");
       // Check for "use client" directive (can be at the start or after whitespace/comments)
       const trimmedContent = content.trimStart();
-      const isClient = trimmedContent.startsWith("'use client'") || 
-                       trimmedContent.startsWith('"use client"') ||
-                       trimmedContent.startsWith("'use client';") ||
-                       trimmedContent.startsWith('"use client";');
+      const isClient =
+        trimmedContent.startsWith("'use client'") ||
+        trimmedContent.startsWith('"use client"') ||
+        trimmedContent.startsWith("'use client';") ||
+        trimmedContent.startsWith('"use client";');
       if (isClient) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
         clientPages.push({ ...route, relativePath });
@@ -138,12 +130,14 @@ async function buildClient(
       logger.warn(`⚠️  Could not read route file ${route.modulePath}: ${error}`);
     }
   }
-  
-  logger.info(`📱 Total client components detected: ${clientPages.length} out of ${pageRoutes.length} pages`);
+
+  logger.info(
+    `📱 Total client components detected: ${clientPages.length} out of ${pageRoutes.length} pages`,
+  );
 
   // Generate client hydration entry code
   const clientHydrationCode = generateClientHydrationEntry(clientPages, root, srcDir);
-  
+
   // Write the client entry to a temporary file
   const clientEntryPath = path.join(root, srcDir, ".farm-client-entry.tsx");
   await fs.writeFile(clientEntryPath, clientHydrationCode);
@@ -173,7 +167,27 @@ async function buildClient(
           // Externalize Node.js built-ins and server-side modules for client build
           external: (id) => {
             // Externalize Node.js built-ins
-            if (id.startsWith("node:") || ["path", "url", "fs", "fs/promises", "os", "crypto", "http", "https", "net", "stream", "util", "events", "child_process", "module", "tty", "dns"].includes(id)) {
+            if (
+              id.startsWith("node:") ||
+              [
+                "path",
+                "url",
+                "fs",
+                "fs/promises",
+                "os",
+                "crypto",
+                "http",
+                "https",
+                "net",
+                "stream",
+                "util",
+                "events",
+                "child_process",
+                "module",
+                "tty",
+                "dns",
+              ].includes(id)
+            ) {
               return true;
             }
             // Externalize native modules that can't be bundled for browser
@@ -208,8 +222,8 @@ async function buildClient(
             }
             // Block problematic node modules
             if (
-              id === "fsevents" || 
-              id.includes("fsevents") || 
+              id === "fsevents" ||
+              id.includes("fsevents") ||
               id.endsWith(".node") ||
               id === "nitro" ||
               id === "vite" ||
@@ -274,7 +288,7 @@ function generateClientHydrationEntry(
 ): string {
   // Always import global CSS for Tailwind
   const cssImport = `import "./app/globals.css";`;
-  
+
   if (clientPages.length === 0) {
     // No client pages - just basic runtime with CSS
     return `
@@ -541,11 +555,7 @@ async function buildSSRInMemory(
       rollupOptions: {
         input: virtualEntryId,
         // Externalize native modules and Node.js built-ins
-        external: [
-          "fsevents",
-          /\.node$/,
-          /^node:/,
-        ],
+        external: ["fsevents", /\.node$/, /^node:/],
         // Optimize tree-shaking
         treeshake: {
           moduleSideEffects: false,
@@ -581,13 +591,7 @@ async function buildSSRInMemory(
       ],
       // Don't externalize these - bundle them into the SSR output
       // Keep this list minimal for faster builds
-      noExternal: [
-        "@farmjs/core",
-        "better-call",
-        "react",
-        "react-dom",
-        "react-dom/server",
-      ],
+      noExternal: ["@farmjs/core", "better-call", "react", "react-dom", "react-dom/server"],
     },
     plugins: [
       farmPlugin(config, pluginManager),
@@ -649,7 +653,7 @@ function generateVirtualEntryCode(
   // Generate imports for all API routes
   const apiImports: string[] = [];
   const apiRegistrations: string[] = [];
-  
+
   apiRoutes.forEach((route, index) => {
     const varName = `apiRoute${index}`;
     apiImports.push(`import * as ${varName} from "${route.filePath}";`);
@@ -664,7 +668,7 @@ function generateVirtualEntryCode(
   // Generate imports for all page routes
   const pageImports: string[] = [];
   const pageRegistrations: string[] = [];
-  
+
   pageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
     pageImports.push(`import * as ${varName} from "${route.modulePath}";`);
@@ -879,11 +883,11 @@ async function buildNitroUniversal(
   clientOutputDir: string,
 ) {
   const fs = await import("fs/promises");
-  
+
   // For Vercel preset, output to .vercel/output/ (Vercel Build Output API)
   // For other presets, output to .farm/.output/
   const isVercel = preset === "vercel" || preset === "vercel-edge";
-  const outputDir = isVercel 
+  const outputDir = isVercel
     ? path.join(root, ".vercel", "output")
     : path.join(root, distDir, ".output");
   const ssrOutputDir = path.join(root, distDir, "ssr");
@@ -894,7 +898,7 @@ async function buildNitroUniversal(
 
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });
-  
+
   for (const [fileName, content] of Object.entries(ssrBundle)) {
     const chunk = content as Rollup.OutputChunk | Rollup.OutputAsset;
     if (chunk.type === "chunk") {
@@ -908,7 +912,7 @@ async function buildNitroUniversal(
 
   // Create entry that wraps the SSR handler with h3's fromWebHandler
   const nitroEntryPath = path.join(ssrOutputDir, "nitro-entry.mjs");
-  
+
   const nitroEntryCode = `
 // Farm.js Nitro Entry
 // This file imports h3 and the SSR handler, wrapping it for Nitro
@@ -919,7 +923,7 @@ import handler from './${ssrEntryFile}'
 // Export the wrapped handler for Nitro
 export default fromWebHandler(handler.fetch)
   `.trim();
-  
+
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
 
   const nitroConfig: NitroConfig = {
@@ -985,10 +989,7 @@ export default fromWebHandler(handler.fetch)
  * Post-process Vercel output to match Build Output API v3
  * Moves server/ to functions/__nitro.func/ and updates routes
  */
-async function postProcessVercelOutput(
-  outputDir: string,
-  fs: typeof import("fs/promises"),
-) {
+async function postProcessVercelOutput(outputDir: string, fs: typeof import("fs/promises")) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
   const nitroFuncDir = path.join(functionsDir, "__nitro.func");

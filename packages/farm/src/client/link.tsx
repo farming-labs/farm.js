@@ -25,7 +25,7 @@ function isExternalUrl(href: string): boolean {
 
 /**
  * Next.js-style Link component for client-side SPA navigation
- * 
+ *
  * Features:
  * - Prevents full page reload for internal links
  * - Uses History API for smooth SPA navigation

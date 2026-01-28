@@ -84,19 +84,19 @@ export class ServerRenderer {
 
       // Collect metadata from layouts and page (page metadata overrides layout metadata)
       let mergedMetadata: Record<string, any> = {};
-      
+
       // First, collect metadata from layouts (in order, so nested layouts can override)
       for (const layoutModule of layoutModules) {
         if (layoutModule.metadata) {
           mergedMetadata = { ...mergedMetadata, ...layoutModule.metadata };
         }
       }
-      
+
       // Then, page metadata overrides everything
       if (routeModule.metadata) {
         mergedMetadata = { ...mergedMetadata, ...routeModule.metadata };
       }
-      
+
       // Store metadata on request for renderWithSSR
       (req as any).__FARM_METADATA__ = mergedMetadata;
 
@@ -159,27 +159,34 @@ window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
       const metadata = (req as any).__FARM_METADATA__ || {};
       const title = metadata.title || "Farm.js App";
       const description = metadata.description || "";
-      
+
       // Build meta tags
       let metaTags = "";
       if (description) {
-        metaTags += `\n  <meta name="description" content="${description.replace(/"/g, '&quot;')}">`;
+        metaTags += `\n  <meta name="description" content="${description.replace(/"/g, "&quot;")}">`;
       }
       if (metadata.keywords) {
-        const keywords = Array.isArray(metadata.keywords) ? metadata.keywords.join(", ") : metadata.keywords;
-        metaTags += `\n  <meta name="keywords" content="${keywords.replace(/"/g, '&quot;')}">`;
+        const keywords = Array.isArray(metadata.keywords)
+          ? metadata.keywords.join(", ")
+          : metadata.keywords;
+        metaTags += `\n  <meta name="keywords" content="${keywords.replace(/"/g, "&quot;")}">`;
       }
       if (metadata.author) {
-        metaTags += `\n  <meta name="author" content="${metadata.author.replace(/"/g, '&quot;')}">`;
+        metaTags += `\n  <meta name="author" content="${metadata.author.replace(/"/g, "&quot;")}">`;
       }
       // Open Graph tags
       if (metadata.openGraph) {
         const og = metadata.openGraph;
-        if (og.title) metaTags += `\n  <meta property="og:title" content="${og.title.replace(/"/g, '&quot;')}">`;
-        if (og.description) metaTags += `\n  <meta property="og:description" content="${og.description.replace(/"/g, '&quot;')}">`;
-        if (og.image) metaTags += `\n  <meta property="og:image" content="${og.image.replace(/"/g, '&quot;')}">`;
-        if (og.url) metaTags += `\n  <meta property="og:url" content="${og.url.replace(/"/g, '&quot;')}">`;
-        if (og.type) metaTags += `\n  <meta property="og:type" content="${og.type.replace(/"/g, '&quot;')}">`;
+        if (og.title)
+          metaTags += `\n  <meta property="og:title" content="${og.title.replace(/"/g, "&quot;")}">`;
+        if (og.description)
+          metaTags += `\n  <meta property="og:description" content="${og.description.replace(/"/g, "&quot;")}">`;
+        if (og.image)
+          metaTags += `\n  <meta property="og:image" content="${og.image.replace(/"/g, "&quot;")}">`;
+        if (og.url)
+          metaTags += `\n  <meta property="og:url" content="${og.url.replace(/"/g, "&quot;")}">`;
+        if (og.type)
+          metaTags += `\n  <meta property="og:type" content="${og.type.replace(/"/g, "&quot;")}">`;
       }
 
       const { pipe, abort } = renderToPipeableStream(element, {
