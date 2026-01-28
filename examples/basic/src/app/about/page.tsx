@@ -1,6 +1,12 @@
 import React from 'react'
-import type { PageProps } from "@farmjs/core"
+import type { PageProps, Metadata } from "@farmjs/core"
 import { Link } from "@farmjs/core/client"
+
+export const metadata: Metadata = {
+  title: "About | Farm.js",
+  description: "Learn about Farm.js - a modern React meta-framework built on Vite",
+};
+
 export default function AboutPage({ params, searchParams }: PageProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-8">
