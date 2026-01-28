@@ -1,6 +1,12 @@
 import React from 'react'
-import type { PageProps } from '@farmjs/core'
+import type { PageProps, Metadata } from '@farmjs/core'
 import { Link } from '@farmjs/core/client'
+
+export const metadata: Metadata = {
+  title: "Home | Farm.js",
+  description: "A modern React meta-framework built on Vite with Next.js-like semantics",
+  keywords: ["react", "vite", "meta-framework", "ssr", "farm.js"],
+};
 
 export default function HomePage({ params, searchParams }: PageProps) {
   return (
