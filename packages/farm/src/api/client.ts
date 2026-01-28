@@ -1,4 +1,4 @@
-import type { TypedEndpoint } from "..";
+import type { TypedEndpoint } from "./endpoint";
 
 export type APIClientOptions = {
   baseURL?: string;

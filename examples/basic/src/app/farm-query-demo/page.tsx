@@ -1,4 +1,3 @@
-// Client Component - demonstrates Farm.js client-side query state
 'use client';
 
 import React from 'react';

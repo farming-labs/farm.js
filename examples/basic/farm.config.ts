@@ -20,7 +20,7 @@ export default defineFarmConfig({
   srcDir: 'src',
   outDir: 'dist',
   basePath: '/',
-
+  preset: "vercel",
   experimental: {
     serverComponents: true,
     serverActions: true,
@@ -132,7 +132,6 @@ export default defineFarmConfig({
 
   // Plugins
   plugins: [
-    myCustomPlugin,
     createLoggerPlugin({}),
     createEnvPlugin({
         FARM_API_URL: 'https://api.example-to-something.com',

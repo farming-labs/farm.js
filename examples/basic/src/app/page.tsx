@@ -1,5 +1,6 @@
 import React from 'react'
 import type { PageProps } from '@farmjs/core'
+import { Link } from '@farmjs/core/client'
 
 export default function HomePage({ params, searchParams }: PageProps) {
   return (
@@ -62,34 +63,34 @@ export default function HomePage({ params, searchParams }: PageProps) {
           {JSON.stringify({ params, searchParams }, null, 2)}
         </pre>
         <p className="text-xs text-gray-500 mt-3">
-          Try adding query params: <a href="/?name=John&framework=Farm.js" className="text-blue-600 hover:underline">/?name=John&framework=Farm.js</a>
+          Try adding query params: <Link href="/?name=John&framework=Farm.js" className="text-blue-600 hover:underline">/?name=John&framework=Farm.js</Link>
         </p>
       </div>
 
       <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-6 border border-blue-200">
         <h3 className="text-lg font-semibold mb-2 text-gray-900">🚀 Quick Links</h3>
         <div className="flex flex-wrap gap-3">
-          <a href="/about" className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
+          <Link href="/about" className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors">
             About Page
-          </a>
-          <a href="/contact" className="inline-flex items-center px-4 py-2 bg-white text-blue-600 border border-blue-600 rounded-md hover:bg-blue-50 transition-colors">
+          </Link>
+          <Link href="/contact" className="inline-flex items-center px-4 py-2 bg-white text-blue-600 border border-blue-600 rounded-md hover:bg-blue-50 transition-colors">
             Contact
-          </a>
-          <a href="/users/123?tab=profile" className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
+          </Link>
+          <Link href="/users/123?tab=profile" className="inline-flex items-center px-4 py-2 bg-purple-600 text-white rounded-md hover:bg-purple-700 transition-colors">
             Dynamic Route Demo
-          </a>
-          <a href="/api-demo" className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
+          </Link>
+          <Link href="/api-demo" className="inline-flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition-colors">
             API Demo (Server)
-          </a>
-          <a href="/api-demo-client" className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors">
+          </Link>
+          <Link href="/api-demo-client" className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors">
             API Demo (Client)
-          </a>
-          <a href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
+          </Link>
+          <Link href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
             Query State Demo
-          </a>
-          <a href="/docs/reference" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+          </Link>
+          <Link href="/docs/reference" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
             📚 API Documentation
-          </a>
+          </Link>
         </div>
       </div>
     </div>
@@ -112,9 +113,9 @@ function FeatureCard({ icon, title, description, href }: {
 
   if (href) {
     return (
-      <a href={href} className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg hover:border-blue-400 transition-all block">
+      <Link href={href} className="bg-white rounded-lg p-6 shadow-md border border-gray-200 hover:shadow-lg hover:border-blue-400 transition-all block">
         {content}
-      </a>
+      </Link>
     );
   }
 

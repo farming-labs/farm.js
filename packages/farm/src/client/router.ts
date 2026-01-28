@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { useBasePath } from "../provider";
 
 interface RouterState {
   pathname: string;
@@ -11,7 +10,9 @@ interface RouterState {
  * Hook for accessing router state and navigation
  */
 export function useRouter() {
-  const basePath = useBasePath();
+  // Base path is typically "/" for most apps
+  // TODO: Support configurable base path via context
+  const basePath = "";
   const [state, setState] = useState<RouterState>(() => {
     if (typeof window === "undefined") {
       return {

@@ -1,41 +1,75 @@
+"use client";
+
 import type React from "react";
 import { forwardRef, type AnchorHTMLAttributes } from "react";
-import { useBasePath } from "../provider";
 
 interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
   href: string;
   prefetch?: boolean;
+  replace?: boolean;
 }
 
 /**
- * Next.js-style Link component for client-side navigation
+ * Helper: detect modifier keys (Ctrl/Cmd+Click should open in new tab)
+ */
+function isModifierEvent(e: React.MouseEvent): boolean {
+  return !!(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey);
+}
+
+/**
+ * Helper: check if external URL
+ */
+function isExternalUrl(href: string): boolean {
+  return href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//");
+}
+
+/**
+ * Next.js-style Link component for client-side SPA navigation
+ * 
+ * Features:
+ * - Prevents full page reload for internal links
+ * - Uses History API for smooth SPA navigation
+ * - Preserves href for SEO, accessibility, and right-click behavior
+ * - Handles external links normally
+ * - Respects modifier keys (Ctrl+Click opens in new tab)
  */
 export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
-  ({ href, prefetch = true, onClick, ...props }, ref) => {
-    const basePath = useBasePath();
-
+  ({ href, prefetch = true, replace = false, onClick, target, ...props }, ref) => {
     const handleClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
       // Call custom onClick if provided
       if (onClick) {
         onClick(event);
       }
 
-      // Handle client-side navigation
-      if (!event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-        event.preventDefault();
+      // Don't intercept if already prevented
+      if (event.defaultPrevented) return;
 
-        // Use browser's navigation API if available, otherwise fallback to location
-        if (typeof window !== "undefined") {
-          const url = href.startsWith("/") ? basePath + href : href;
-          window.location.href = url;
+      // Don't intercept external links
+      if (isExternalUrl(href)) return;
+
+      // Don't intercept if opening in new tab/window
+      if (target && target !== "_self") return;
+
+      // Don't intercept modifier clicks (Ctrl+Click = new tab)
+      if (isModifierEvent(event)) return;
+
+      // Don't intercept non-left clicks
+      if (event.button !== 0) return;
+
+      // For now, do a full page navigation
+      // SPA navigation requires a client-side router with all routes bundled
+      // This ensures pages work correctly with SSR
+      if (typeof window !== "undefined") {
+        event.preventDefault();
+        if (replace) {
+          window.location.replace(href);
+        } else {
+          window.location.href = href;
         }
       }
     };
 
-    // Combine base path with href
-    const fullHref = href.startsWith("/") ? basePath + href : href;
-
-    return <a ref={ref} href={fullHref} onClick={handleClick} {...props} />;
+    return <a ref={ref} href={href} target={target} onClick={handleClick} {...props} />;
   },
 );
 

@@ -39,9 +39,11 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
   logger.info(`🚀 Building with ${preset} preset...`);
   await buildFarm({ root, preset });
 
-  // Nitro outputs to .farm/.output (NOT .nitro/.output)
-  // This is configured in the Nitro config via output.dir
-  const nitroOutput = path.join(root, ".farm", ".output");
+  // For Vercel, output goes to .vercel/output (Build Output API v3)
+  // For other presets, output goes to .farm/.output
+  const nitroOutput = platform === "vercel"
+    ? path.join(root, ".vercel", "output")
+    : path.join(root, ".farm", ".output");
 
   if (!existsSync(nitroOutput)) {
     logger.error(`Build output not found at ${nitroOutput}. Please run 'farm build' first.`);
@@ -104,27 +106,31 @@ async function deployVercel(root: string, outputDir: string) {
     // Verify output structure before deploying
     const fs = await import("fs");
     const { existsSync, statSync, readdirSync } = fs;
-    const serverDir = path.join(outputDir, "server");
-    const publicDir = path.join(outputDir, "public");
+    
+    // Vercel Build Output API v3 expects:
+    // - functions/__nitro.func/ for serverless functions
+    // - static/ for static files
+    const functionsDir = path.join(outputDir, "functions", "__nitro.func");
+    const staticDir = path.join(outputDir, "static");
     const configFile = path.join(outputDir, "config.json");
-    const serverIndex = path.join(serverDir, "index.mjs");
+    const serverIndex = path.join(functionsDir, "index.mjs");
 
     logger.info("🔍 Verifying deployment structure...");
 
-    // Check server directory
-    if (!existsSync(serverDir)) {
-      logger.error(`❌ Server directory not found at ${serverDir}`);
+    // Check functions directory
+    if (!existsSync(functionsDir)) {
+      logger.error(`❌ Functions directory not found at ${functionsDir}`);
       process.exit(1);
     }
     if (!existsSync(serverIndex)) {
       logger.error(`❌ Server entry point not found at ${serverIndex}`);
       process.exit(1);
     }
-    logger.info(`✅ Server directory: ${serverDir}`);
+    logger.info(`✅ Functions directory: ${functionsDir}`);
 
-    // Check public directory
-    if (!existsSync(publicDir)) {
-      logger.warn(`⚠️  Public directory not found at ${publicDir}`);
+    // Check static directory
+    if (!existsSync(staticDir)) {
+      logger.warn(`⚠️  Static directory not found at ${staticDir}`);
     } else {
       // Count files recursively
       const countFiles = (dir: string): number => {
@@ -145,13 +151,13 @@ async function deployVercel(root: string, outputDir: string) {
         return count;
       };
 
-      const fileCount = countFiles(publicDir);
-      logger.info(`✅ Public directory: ${publicDir} (${fileCount} files)`);
+      const fileCount = countFiles(staticDir);
+      logger.info(`✅ Static directory: ${staticDir} (${fileCount} files)`);
 
       // List important files
       const importantFiles = ["farm-client-manifest.json", "assets"];
       for (const file of importantFiles) {
-        const filePath = path.join(publicDir, file);
+        const filePath = path.join(staticDir, file);
         if (existsSync(filePath)) {
           logger.info(`   ✓ ${file}`);
         } else {
@@ -160,7 +166,7 @@ async function deployVercel(root: string, outputDir: string) {
       }
 
       if (fileCount === 0) {
-        logger.warn("⚠️  Public directory is empty - static assets may not be served");
+        logger.warn("⚠️  Static directory is empty - static assets may not be served");
       }
     }
 
@@ -200,19 +206,20 @@ async function deployVercel(root: string, outputDir: string) {
       return totalSize;
     };
 
-    const serverSize = calculateDirSize(serverDir);
-    const publicSize = calculateDirSize(publicDir);
+    const functionsSize = calculateDirSize(functionsDir);
+    const staticSize = calculateDirSize(staticDir);
     logger.info(
-      `📦 Deployment size: Server ${(serverSize / 1024 / 1024).toFixed(2)}MB, Public ${(publicSize / 1024).toFixed(1)}KB`,
+      `📦 Deployment size: Functions ${(functionsSize / 1024 / 1024).toFixed(2)}MB, Static ${(staticSize / 1024).toFixed(1)}KB`,
     );
 
     // Verify critical files
     logger.info("🔍 Verifying critical files:");
     const criticalFiles = [
       { path: serverIndex, name: "Server entry point" },
-      { path: path.join(serverDir, "package.json"), name: "Server package.json" },
-      { path: path.join(publicDir, "farm-client-manifest.json"), name: "Client manifest" },
-      { path: path.join(publicDir, "assets"), name: "Client assets directory" },
+      { path: path.join(functionsDir, "package.json"), name: "Function package.json" },
+      { path: path.join(functionsDir, ".vc-config.json"), name: "Vercel config" },
+      { path: path.join(staticDir, "farm-client-manifest.json"), name: "Client manifest" },
+      { path: path.join(staticDir, "assets"), name: "Client assets directory" },
     ];
 
     for (const file of criticalFiles) {
@@ -224,35 +231,24 @@ async function deployVercel(root: string, outputDir: string) {
     }
 
     logger.info("🚀 Deploying to Vercel...");
-    logger.info(`   Deploying from: ${outputDir}`);
-    logger.info(`   Server: ${serverDir}`);
-    logger.info(`   Public: ${publicDir}`);
+    logger.info(`   Deploying from: ${root}`);
+    logger.info(`   Functions: ${functionsDir}`);
+    logger.info(`   Static: ${staticDir}`);
     logger.info(`   Config: ${configFile}`);
 
-    // According to Nitro docs: https://nitro.build/deploy/providers/vercel
-    // Vercel automatically detects the Build Output API structure when deploying
-    // from the .output directory. The structure should be:
-    // - server/index.mjs (serverless function handler)
-    // - public/ (static assets, served via filesystem handler)
-    // - config.json (routing rules for Vercel)
-    // - .vercel/ (Vercel project configuration)
-
-    const originalCwd = process.cwd();
-    process.chdir(outputDir);
-
-    // Deploy using Vercel CLI
-    // Vercel will automatically detect:
-    // 1. server/index.mjs as the serverless function
-    // 2. public/ directory for static assets
-    // 3. config.json for routing rules
-    // 4. .vercel/ for project configuration
+    // For Vercel Build Output API v3, we need to deploy from the project root
+    // with the --prebuilt flag to tell Vercel to use the .vercel/output directory
+    // See: https://vercel.com/docs/build-output-api/v3
+    
     logger.info("📤 Uploading to Vercel...");
-    execSync("vercel --yes", {
+    
+    // Deploy using --prebuilt flag which tells Vercel to use the Build Output API
+    // The .vercel/output directory contains the pre-built deployment structure
+    execSync("vercel deploy --prebuilt --yes", {
       stdio: "inherit",
-      cwd: outputDir,
+      cwd: root,
     });
 
-    process.chdir(originalCwd);
     logger.success("✅ Deployed to Vercel successfully!");
   } catch (error: any) {
     logger.error(`❌ Failed to deploy to Vercel: ${error.message}`);
