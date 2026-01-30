@@ -220,6 +220,10 @@ async function buildClient(
             ) {
               return { id: "\0empty-module", external: false };
             }
+            // Block API route imports (they come from type-only imports in api.generated.ts)
+            if (id.includes("/api/") && id.includes("/route")) {
+              return { id: "\0empty-api-route", external: false };
+            }
             // Block problematic node modules
             if (
               id === "fsevents" ||
@@ -241,11 +245,15 @@ async function buildClient(
             if (id === "\0empty-module") {
               return "export default {}; export const getMiddlewareData = () => ({}); export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
             }
+           if (id === "\0empty-api-route") {
+              // Stub for API routes - only used in type context, provide empty exports
+              return "export const GET = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export default {};";
+            }
             if (id === "\0farm-client-exports") {
               // Only export client-safe parts (no type exports - they're erased at compile time)
               return [
                 "// Farm.js Client Exports - Safe for browser bundling",
-                'export { Link } from "@farmjs/core/client";',
+                'export { Link } frodm "@farmjs/core/client";',
                 'export { useRouter } from "@farmjs/core/client";',
                 'export { createAPIClient } from "@farmjs/core/client";',
               ].join("\n");

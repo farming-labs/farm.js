@@ -1,8 +1,7 @@
+'use client';
 import React from 'react'
 import { Link } from '@farmjs/core/client'
 
-// Note: Middleware data is server-side only and cannot be accessed in client components
-// If you need middleware data, use a server component or pass data via props
 export default function ContactPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-8">

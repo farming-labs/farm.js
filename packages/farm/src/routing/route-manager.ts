@@ -117,6 +117,47 @@ export class RouteManager {
   }
 
   /**
+   * Generate a client-side route manifest for SPA navigation
+   * This eliminates the need for server requests during navigation
+   */
+  generateClientManifest(projectRoot: string): {
+    routes: Array<{
+      pattern: string;
+      modulePath: string;
+      segments: Array<{ segment: string; isDynamic: boolean; isCatchAll?: boolean; isOptional?: boolean }>;
+    }>;
+    layouts: Array<{
+      pattern: string;
+      modulePath: string;
+    }>;
+  } {
+    const toUrlPath = (absolutePath: string) => {
+      if (absolutePath.startsWith(projectRoot)) {
+        return absolutePath.slice(projectRoot.length);
+      }
+      return absolutePath;
+    };
+
+    const routes = Array.from(this.routes.values()).map((entry) => ({
+      pattern: entry.pattern,
+      modulePath: toUrlPath(entry.modulePath),
+      segments: entry.route.segments.map((seg) => ({
+        segment: seg.segment,
+        isDynamic: seg.isDynamic,
+        isCatchAll: seg.isCatchAll,
+        isOptional: seg.isOptional,
+      })),
+    }));
+
+    const layouts = Array.from(this.layouts.values()).map((entry) => ({
+      pattern: entry.pattern,
+      modulePath: toUrlPath(entry.modulePath),
+    }));
+
+    return { routes, layouts };
+  }
+
+  /**
    * Load a route module dynamically
    */
   async loadRouteModule(modulePath: string): Promise<RouteModule> {

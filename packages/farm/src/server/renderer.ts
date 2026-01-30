@@ -1,5 +1,6 @@
 import React from "react";
 import { renderToPipeableStream } from "react-dom/server";
+import * as fs from "fs";
 import type { FarmConfig, FarmRequest, FarmResponse, PageProps } from "../types";
 import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
@@ -87,14 +88,14 @@ export class ServerRenderer {
 
       // First, collect metadata from layouts (in order, so nested layouts can override)
       for (const layoutModule of layoutModules) {
-        if (layoutModule.metadata) {
-          mergedMetadata = { ...mergedMetadata, ...layoutModule.metadata };
+        if ((layoutModule as any).metadata) {
+          mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
         }
       }
 
       // Then, page metadata overrides everything
-      if (routeModule.metadata) {
-        mergedMetadata = { ...mergedMetadata, ...routeModule.metadata };
+      if ((routeModule as any).metadata) {
+        mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
       }
 
       // Store metadata on request for renderWithSSR
@@ -104,8 +105,17 @@ export class ServerRenderer {
       const middlewareDataForContext = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
-        const PageComponent = routeModule.default;
-        const pageElement = React.createElement(PageComponent, pageProps);
+        const PageComponent = routeModule.default!;
+        let pageElement = React.createElement(PageComponent as any, pageProps);
+
+        // For client components, wrap in a container div for targeted hydration
+        if (isClientComponent) {
+          pageElement = React.createElement(
+            "div",
+            { id: "__farm_page__", "data-farm-client": "true" },
+            pageElement
+          );
+        }
 
         let wrappedElement: React.ReactElement = pageElement;
         for (let i = layoutModules.length - 1; i >= 0; i--) {
@@ -145,14 +155,60 @@ export class ServerRenderer {
         ? pagePath.substring(pagePath.indexOf("/src/app/"))
         : "/src/app/page.tsx";
 
-      // Inject page props and component info for client-side hydration
-      // __FARM_IS_CLIENT__ tells the client code whether to hydrate
-      // __FARM_PAGE_MODULE__ is the module path for dynamic import
+      // Generate manifest for client-side SPA navigation (TanStack Start pattern)
+      // This manifest is inlined in HTML - no separate file or API endpoint
+      const manifest = this.routeManager.generateClientManifest(this.config.root);
+      
+      // Convert to object format for client
+      const clientManifest = {
+        clientEntry: "/@farm/client.js",
+        routes: {} as Record<string, any>,
+        layouts: {} as Record<string, any>,
+        sharedAssets: [
+          { tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } }
+        ]
+      };
+      
+      // Convert routes array to object keyed by pattern
+      for (const routeEntry of manifest.routes) {
+        let isClient = false;
+        try {
+          const absolutePath = routeEntry.modulePath.startsWith("/")
+            ? this.config.root + routeEntry.modulePath
+            : routeEntry.modulePath;
+          const content = fs.readFileSync(absolutePath, "utf-8");
+          isClient = content.trimStart().startsWith("'use client'") || 
+                     content.trimStart().startsWith('"use client"');
+        } catch { isClient = false; }
+        
+        clientManifest.routes[routeEntry.pattern] = {
+          modulePath: routeEntry.modulePath,
+          pattern: routeEntry.pattern,
+          segments: routeEntry.segments,
+          isClientComponent: isClient,
+          preloads: [routeEntry.modulePath],
+          assets: []
+        };
+      }
+      
+      // Convert layouts array to object
+      for (const layoutEntry of manifest.layouts) {
+        clientManifest.layouts[layoutEntry.pattern] = {
+          modulePath: layoutEntry.modulePath,
+          pattern: layoutEntry.pattern,
+          preloads: [layoutEntry.modulePath],
+          assets: []
+        };
+      }
+
+      // Inject page props, component info, and MANIFEST for client-side SPA
+      // __FARM_MANIFEST__ contains the full route manifest (TanStack Start pattern)
       const propsScript = `<script>
 window.__FARM_PROPS__ = ${JSON.stringify((req as any).__FARM_PROPS__ || {})};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
+window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 </script>`;
 
       // Get metadata from request
@@ -212,14 +268,11 @@ window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
               callback();
             },
             final(callback) {
-              // Close the root div and conditionally add client hydration script
-              const isClientComponent = (req as any).__FARM_IS_CLIENT_COMPONENT__;
-              const clientScript = isClientComponent
-                ? `  <script type="module" src="/@farm/client.js"></script>`
-                : "";
-
+              // Close the root div and ALWAYS add client script for SPA navigation
+              // The client script contains the SPA router that handles Link clicks
+              // For client components, it also handles hydration
               res.write(`</div>
-${clientScript}
+  <script type="module" src="/@farm/client.js"></script>
 </body>
 </html>`);
               res.end();
