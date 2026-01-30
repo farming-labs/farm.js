@@ -378,26 +378,74 @@ function createPageProps(params) {
 }
 
 /**
- * Navigate to a new route (client-side SPA navigation)
- * Called when popstate event fires (back/forward buttons or Link clicks)
+ * Fetch HTML from server and swap the #root content
+ * Used for server-only routes that aren't in the client bundle
  */
-function navigateTo(pathname) {
-  // Skip if same path (prevents unnecessary re-renders)
-  if (pathname === currentPathname) return;
-
-  const matched = matchRoute(pathname);
-
-  if (!matched) {
-    // Route not found in client bundle - fall back to full page navigation
-    // This handles server-only routes or routes not bundled for client
-    console.log("[Farm.js] Route not in client bundle, falling back to server navigation:", pathname);
+async function fetchAndSwapHTML(pathname) {
+  const container = document.getElementById("root");
+  if (!container) {
+    console.error("[Farm.js] Root container not found");
     window.location.href = pathname + window.location.search;
     return;
   }
 
+  try {
+    const url = pathname + window.location.search;
+    const response = await fetch(url, {
+      headers: { "Accept": "text/html" }
+    });
+    
+    if (!response.ok) {
+      throw new Error("HTTP " + response.status);
+    }
+    
+    const html = await response.text();
+    
+    // Parse the HTML and extract the #root content
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const newRoot = doc.getElementById("root");
+    
+    if (newRoot) {
+      // Swap the content
+      container.innerHTML = newRoot.innerHTML;
+      
+      // Update document title from the response
+      const newTitle = doc.querySelector("title");
+      if (newTitle) {
+        document.title = newTitle.textContent || "Farm.js App";
+      }
+      
+      // Update meta description
+      const newDesc = doc.querySelector('meta[name="description"]');
+      const oldDesc = document.querySelector('meta[name="description"]');
+      if (newDesc && oldDesc) {
+        oldDesc.setAttribute("content", newDesc.getAttribute("content") || "");
+      } else if (newDesc && !oldDesc) {
+        document.head.appendChild(newDesc.cloneNode(true));
+      }
+      
+      console.log("[Farm.js] SPA navigated (HTML swap) to:", pathname);
+    } else {
+      throw new Error("No #root found in response");
+    }
+  } catch (error) {
+    console.error("[Farm.js] HTML swap failed:", error);
+    // Fallback to full page navigation
+    window.location.href = pathname + window.location.search;
+  }
+}
+
+/**
+ * Navigate to a new route (client-side SPA navigation)
+ * Called when popstate event fires (back/forward buttons or Link clicks)
+ */
+async function navigateTo(pathname) {
+  // Skip if same path (prevents unnecessary re-renders)
+  if (pathname === currentPathname) return;
+
   currentPathname = pathname;
-  const { route, params } = matched;
-  const pageProps = createPageProps(params);
+  const matched = matchRoute(pathname);
 
   // Ensure we have a container
   const container = document.getElementById("root");
@@ -407,12 +455,23 @@ function navigateTo(pathname) {
     return;
   }
 
+  if (!matched) {
+    // Route not found in client bundle - fetch HTML from server (SPA style)
+    // This handles server-only routes (RSC) without full page reload
+    console.log("[Farm.js] Server route, fetching HTML:", pathname);
+    await fetchAndSwapHTML(pathname);
+    return;
+  }
+
+  const { route, params } = matched;
+  const pageProps = createPageProps(params);
+
   // ⭐ Re-render with new component (smooth SPA transition!)
   try {
     if (reactRoot) {
       // Use render method for navigation (works with both hydrateRoot and createRoot)
       reactRoot.render(React.createElement(route.Component, pageProps));
-      console.log("[Farm.js] SPA navigated to:", pathname);
+      console.log("[Farm.js] SPA navigated (React) to:", pathname);
     } else {
       // If root doesn't exist yet, create it and render
       reactRoot = createRoot(container);
@@ -424,8 +483,8 @@ function navigateTo(pathname) {
     window.scrollTo(0, 0);
   } catch (error) {
     console.error("[Farm.js] Failed to navigate:", error);
-    // Fallback to full page navigation
-    window.location.href = pathname + window.location.search;
+    // Fallback to HTML swap
+    await fetchAndSwapHTML(pathname);
   }
 }
 
@@ -483,9 +542,73 @@ async function hydrate() {
   }
 }
 
-// ⭐ Listen for navigation events (back/forward buttons + Link clicks)
+// ⭐ Listen for navigation events (back/forward buttons)
 window.addEventListener("popstate", () => {
+  currentPathname = null; // Reset to allow navigation
   navigateTo(window.location.pathname);
+});
+
+// ⭐ Expose SPA router for Link component (matches dev mode API)
+window.__FARM_SPA_ROUTER__ = {
+  navigate: async (href, options = {}) => {
+    const url = new URL(href, window.location.origin);
+    const pathname = url.pathname;
+    const fullHref = pathname + url.search + url.hash;
+    
+    // Update history
+    if (options.replace) {
+      window.history.replaceState({}, "", fullHref);
+    } else {
+      window.history.pushState({}, "", fullHref);
+    }
+    
+    // Navigate to the new route and wait for it to complete
+    await navigateTo(pathname);
+    
+    // Scroll to top AFTER content swap (default: true)
+    if (options.scroll !== false) {
+      window.scrollTo(0, 0);
+    }
+  },
+  prefetch: (href) => {
+    // In production, modules are already bundled, no prefetch needed
+    // Could add preload links here if desired
+  },
+  observeForPrefetch: () => {},
+  unobserveForPrefetch: () => {},
+};
+
+// ⭐ Global click handler for SPA navigation
+// This intercepts ALL link clicks, even on server-rendered pages where Link isn't hydrated
+document.addEventListener("click", (e) => {
+  // Find the closest anchor element
+  const anchor = e.target.closest("a");
+  if (!anchor) return;
+  
+  const href = anchor.getAttribute("href");
+  if (!href) return;
+  
+  // Skip external links
+  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
+  
+  // Skip hash-only links
+  if (href.startsWith("#")) return;
+  
+  // Skip if opening in new tab
+  if (anchor.target && anchor.target !== "_self") return;
+  
+  // Skip if modifier keys pressed (Ctrl+Click = new tab)
+  if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+  
+  // Skip non-left clicks
+  if (e.button !== 0) return;
+  
+  // Skip if default was prevented (e.g., by hydrated Link component)
+  if (e.defaultPrevented) return;
+  
+  // Intercept and use SPA navigation
+  e.preventDefault();
+  window.__FARM_SPA_ROUTER__.navigate(href);
 });
 
 // Hydrate when DOM is ready
@@ -788,8 +911,9 @@ async function handleRequest(request) {
     const { route, params } = matchedRoute;
     
     try {
-      // Get the page component
+      // Get the page component and metadata
       const PageComponent = route.module.default;
+      const metadata = route.module.metadata || {};
       
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
@@ -829,14 +953,33 @@ async function handleRequest(request) {
           html = ReactDOMServer.renderToString(element);
         }
         
+        // Build page title and meta tags from metadata
+        const title = metadata.title || "Farm.js App";
+        const description = metadata.description || "";
+        
+        let metaTags = "";
+        if (description) {
+          metaTags += \`\\n  <meta name="description" content="\${description.replace(/"/g, '&quot;')}">\`;
+        }
+        if (metadata.keywords) {
+          const keywords = Array.isArray(metadata.keywords) ? metadata.keywords.join(", ") : metadata.keywords;
+          metaTags += \`\\n  <meta name="keywords" content="\${keywords.replace(/"/g, '&quot;')}">\`;
+        }
+        if (metadata.openGraph) {
+          const og = metadata.openGraph;
+          if (og.title) metaTags += \`\\n  <meta property="og:title" content="\${og.title.replace(/"/g, '&quot;')}">\`;
+          if (og.description) metaTags += \`\\n  <meta property="og:description" content="\${og.description.replace(/"/g, '&quot;')}">\`;
+          if (og.image) metaTags += \`\\n  <meta property="og:image" content="\${og.image}">\`;
+        }
+        
         // Include client CSS and hydration script
         return new Response(
           \`<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Farm.js App</title>
+  <title>\${title}</title>\${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
 </head>
 <body>

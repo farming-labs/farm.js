@@ -6236,6 +6236,111 @@ const pageRoute1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.definePr
   default: AboutPage,
   metadata
 }, Symbol.toStringTag, { value: "Module" }));
+async function APIDemo() {
+  const baseURL = "http://localhost:3000";
+  console.log({ process: process.env });
+  let helloResponse;
+  let usersResponse;
+  try {
+    const helloRes = await GET$2({
+      query: {
+        name: "wonderfull something"
+      }
+    });
+    console.log({ helloRes });
+    helloResponse = helloRes;
+  } catch (error) {
+    helloResponse = { message: "Error fetching data", timestamp: (/* @__PURE__ */ new Date()).toISOString() };
+  }
+  try {
+    const usersRes = await fetch(`${baseURL}/api/users`);
+    usersResponse = await usersRes.json();
+  } catch (error) {
+    usersResponse = { users: [], total: 0, limit: 10, offset: 0 };
+  }
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl mx-auto", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-5xl font-bold mb-8 bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent", children: "API Routes Demo 🚀" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-4 mb-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-yellow-200 text-sm", children: [
+      "⚡ ",
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Live Data!" }),
+      " This page fetches real data from API endpoints using async server components with streaming SSR."
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-blue-400", children: "GET /api/hello" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(helloResponse, null, 2) }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-4 text-gray-400 text-sm", children: [
+          "✅ Fetched in async server component: ",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-2 py-1 rounded", children: "await fetch('/api/hello?name=Farm.js')" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-purple-400", children: "GET /api/users" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(usersResponse, null, 2) }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-4 text-gray-400 text-sm", children: [
+          "✅ Fetched in async server component: ",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-2 py-1 rounded", children: "await fetch('/api/users')" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-yellow-400", children: "Available HTTP Endpoints" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 text-sm", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-green-600 px-2 py-1 rounded font-mono text-xs", children: "GET" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/hello?name=YourName" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-green-600 px-2 py-1 rounded font-mono text-xs", children: "GET" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/users" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-blue-600 px-2 py-1 rounded font-mono text-xs", children: "POST" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/users" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-green-600 px-2 py-1 rounded font-mono text-xs", children: "GET" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/auth/login?token=xxx" })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-blue-600 px-2 py-1 rounded font-mono text-xs", children: "POST" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/auth/login" })
+          ] })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-4 text-gray-400 text-sm", children: "💡 Test these endpoints with curl or from your browser!" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-green-400", children: "Example: POST Request" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-xs", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-gray-300", children: `curl -X POST 'http://localhost:3000/api/auth/login' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"email":"test@example.com","password":"password123"}'
+
+Response:
+{
+  "success": true,
+  "token": "mock-jwt-token-1760530386770",
+  "user": {
+    "id": "1",
+    "email": "test@example.com",
+    "name": "Test User"
+  }
+}` }) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center pt-8", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
+        Link,
+        {
+          href: "/",
+          className: "inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors",
+          children: "← Back to Home"
+        }
+      ) })
+    ] })
+  ] }) });
+}
+__name(APIDemo, "APIDemo");
+const pageRoute2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: APIDemo
+}, Symbol.toStringTag, { value: "Module" }));
 function ContactPage() {
   return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl mx-auto space-y-8", children: [
     /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-lg text-gray-600", children: "Get in touch h the Farm.js team or community." }) }),
@@ -6314,7 +6419,7 @@ function ContactCard({ title, description, link, icon }) {
   ] });
 }
 __name(ContactCard, "ContactCard");
-const pageRoute2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const pageRoute3 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: ContactPage
 }, Symbol.toStringTag, { value: "Module" }));
@@ -6814,290 +6919,9 @@ function FarmClientQueryDemo$1() {
   ] });
 }
 __name(FarmClientQueryDemo$1, "FarmClientQueryDemo$1");
-const pageRoute3 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  default: FarmClientQueryDemo$1
-}, Symbol.toStringTag, { value: "Module" }));
-async function APIDemo() {
-  const baseURL = "http://localhost:3000";
-  console.log({ process: process.env });
-  let helloResponse;
-  let usersResponse;
-  try {
-    const helloRes = await GET$2({
-      query: {
-        name: "wonderfull something"
-      }
-    });
-    console.log({ helloRes });
-    helloResponse = helloRes;
-  } catch (error) {
-    helloResponse = { message: "Error fetching data", timestamp: (/* @__PURE__ */ new Date()).toISOString() };
-  }
-  try {
-    const usersRes = await fetch(`${baseURL}/api/users`);
-    usersResponse = await usersRes.json();
-  } catch (error) {
-    usersResponse = { users: [], total: 0, limit: 10, offset: 0 };
-  }
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-black text-white p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl mx-auto", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-5xl font-bold mb-8 bg-gradient-to-r from-blue-400 to-purple-600 bg-clip-text text-transparent", children: "API Routes Demo 🚀" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-4 mb-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-yellow-200 text-sm", children: [
-      "⚡ ",
-      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "Live Data!" }),
-      " This page fetches real data from API endpoints using async server components with streaming SSR."
-    ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-blue-400", children: "GET /api/hello" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(helloResponse, null, 2) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-4 text-gray-400 text-sm", children: [
-          "✅ Fetched in async server component: ",
-          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-2 py-1 rounded", children: "await fetch('/api/hello?name=Farm.js')" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-purple-400", children: "GET /api/users" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(usersResponse, null, 2) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "mt-4 text-gray-400 text-sm", children: [
-          "✅ Fetched in async server component: ",
-          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-2 py-1 rounded", children: "await fetch('/api/users')" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-yellow-400", children: "Available HTTP Endpoints" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2 text-sm", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-green-600 px-2 py-1 rounded font-mono text-xs", children: "GET" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/hello?name=YourName" })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-green-600 px-2 py-1 rounded font-mono text-xs", children: "GET" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/users" })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-blue-600 px-2 py-1 rounded font-mono text-xs", children: "POST" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/users" })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-green-600 px-2 py-1 rounded font-mono text-xs", children: "GET" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/auth/login?token=xxx" })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "bg-blue-600 px-2 py-1 rounded font-mono text-xs", children: "POST" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-gray-300", children: "/api/auth/login" })
-          ] })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "mt-4 text-gray-400 text-sm", children: "💡 Test these endpoints with curl or from your browser!" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-green-400", children: "Example: POST Request" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-xs", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-gray-300", children: `curl -X POST 'http://localhost:3000/api/auth/login' \\
-  -H 'Content-Type: application/json' \\
-  -d '{"email":"test@example.com","password":"password123"}'
-
-Response:
-{
-  "success": true,
-  "token": "mock-jwt-token-1760530386770",
-  "user": {
-    "id": "1",
-    "email": "test@example.com",
-    "name": "Test User"
-  }
-}` }) })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-center pt-8", children: /* @__PURE__ */ jsxRuntimeExports.jsx(
-        Link,
-        {
-          href: "/",
-          className: "inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors",
-          children: "← Back to Home"
-        }
-      ) })
-    ] })
-  ] }) });
-}
-__name(APIDemo, "APIDemo");
 const pageRoute4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  default: APIDemo
-}, Symbol.toStringTag, { value: "Module" }));
-const api = createAPIClient();
-function APIClientDemo() {
-  const [helloResponse, setHelloResponse] = reactExports.useState(null);
-  const [usersResponse, setUsersResponse] = reactExports.useState(null);
-  const [loginResponse, setLoginResponse] = reactExports.useState(null);
-  const [loading, setLoading] = reactExports.useState(null);
-  const [error, setError] = reactExports.useState(null);
-  const fetchHello = /* @__PURE__ */ __name(async () => {
-    setLoading("hello");
-    setError(null);
-    try {
-      const data = await api.hello.post({
-        body: { name: "something" }
-      });
-      setHelloResponse(data);
-    } catch (err) {
-      setError("Failed to fetch hello endpoint: " + err);
-    } finally {
-      setLoading(null);
-    }
-  }, "fetchHello");
-  const fetchUsers = /* @__PURE__ */ __name(async () => {
-    setLoading("users");
-    setError(null);
-    try {
-      const data = await api.users.get({
-        query: { limit: "5" }
-      });
-      setUsersResponse(data);
-    } catch (err) {
-      setError("Failed to fetch users: " + err);
-    } finally {
-      setLoading(null);
-    }
-  }, "fetchUsers");
-  const handleLogin = /* @__PURE__ */ __name(async () => {
-    setLoading("login");
-    setError(null);
-    try {
-      const data = await api.auth.login.post({
-        body: {
-          hint: "login post",
-          email: "test@example.com",
-          password: "password123"
-        }
-      });
-      setLoginResponse(data);
-    } catch (err) {
-      setError("Failed to login: " + err);
-    } finally {
-      setLoading(null);
-    }
-  }, "handleLogin");
-  const createUser = /* @__PURE__ */ __name(async () => {
-    setLoading("create");
-    setError(null);
-    try {
-      const data = await api.users.post({
-        body: {
-          email: "test@example.com",
-          name: "test user"
-        }
-      });
-      alert("User created! " + JSON.stringify(data));
-      await fetchUsers();
-    } catch (err) {
-      setError("Failed to create user: " + err);
-    } finally {
-      setLoading(null);
-    }
-  }, "createUser");
-  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-gradient-to-br from-purple-900 via-indigo-800 to-black text-white p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl mx-auto", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-5xl font-bold mb-4 bg-gradient-to-r from-pink-400 to-yellow-400 bg-clip-text text-transparent", children: "Clients Component API Demo 🎨" }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-pink-900/30 border border-pink-500/50 rounded-lg p-4 mb-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-pink-200 text-sm", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "'use client'" }),
-      " - This is a client component! All API calls happen in the browser."
-    ] }) }),
-    error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-red-900/50 border border-red-500 rounded-lg p-4 mb-6", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-red-200", children: [
-      "❌ ",
-      error
-    ] }) }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-blue-400", children: "GET /api/hello" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            onClick: fetchHello,
-            disabled: loading === "hello",
-            className: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
-            children: loading === "hello" ? "Loading..." : "Fetch"
-          }
-        ),
-        helloResponse && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(helloResponse, null, 2) }) })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-purple-400", children: "GET /api/users" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            onClick: fetchUsers,
-            disabled: loading === "users",
-            className: "px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
-            children: loading === "users" ? "Loading..." : "Fetch Users"
-          }
-        ),
-        usersResponse && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(usersResponse, null, 2) }) })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-yellow-400", children: "POST /api/auth/login" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            onClick: handleLogin,
-            disabled: loading === "login",
-            className: "px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
-            children: loading === "login" ? "Logging in..." : "Login"
-          }
-        ),
-        loginResponse && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(loginResponse, null, 2) }) }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-gray-400 mt-2", children: [
-          "Credentials: email: ",
-          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-1", children: "test@example.com" }),
-          ", password: ",
-          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-1", children: "password123" })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-green-400", children: "POST /api/users" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            onClick: createUser,
-            disabled: loading === "create",
-            className: "px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
-            children: loading === "create" ? "Creating..." : "Create New User"
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-gray-400", children: "Creates a new user and refreshes the users list" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-cyan-400", children: "Type-Safe API Client Examples" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-900 rounded p-4 font-mono text-xs space-y-4", children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500 mb-2", children: "// Import the typed client" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-gray-300", children: `import { client, api } from '@/lib/api-client';` })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500 mb-2", children: "// Option 1: Direct client call" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-gray-300", children: `const result = await client('/api/hello', {
-  query: { name: 'World' }
-});` })
-          ] }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500 mb-2", children: "// Option 2: Nested API syntax (recommended!)" }),
-            /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-yellow-300", children: `const result = await api.auth.login({
-  body: {
-    email: 'test@example.com',
-    password: 'password123'
-  }
-});
-
-console.log(result.token); // ✅ Fully typed!
-console.log(result.user);  // ✅ Autocomplete works!` })
-          ] })
-        ] })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex gap-4 justify-center pt-8" })
-    ] })
-  ] }) });
-}
-__name(APIClientDemo, "APIClientDemo");
-const pageRoute5 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  default: APIClientDemo
+  default: FarmClientQueryDemo$1
 }, Symbol.toStringTag, { value: "Module" }));
 function FarmClientQueryDemo() {
   const [search, setSearch] = useQueryState("search", asString, {
@@ -7347,9 +7171,301 @@ export default async function MyPage({ searchParams }: PageProps) {
   ] }) });
 }
 __name(FarmQueryDemoPage, "FarmQueryDemoPage");
-const pageRoute6 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const pageRoute5 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: FarmQueryDemoPage
+}, Symbol.toStringTag, { value: "Module" }));
+const api = createAPIClient();
+function APIClientDemo() {
+  const [helloResponse, setHelloResponse] = reactExports.useState(null);
+  const [usersResponse, setUsersResponse] = reactExports.useState(null);
+  const [loginResponse, setLoginResponse] = reactExports.useState(null);
+  const [loading, setLoading] = reactExports.useState(null);
+  const [error, setError] = reactExports.useState(null);
+  const fetchHello = /* @__PURE__ */ __name(async () => {
+    setLoading("hello");
+    setError(null);
+    try {
+      const data = await api.hello.post({
+        body: { name: "something" }
+      });
+      setHelloResponse(data);
+    } catch (err) {
+      setError("Failed to fetch hello endpoint: " + err);
+    } finally {
+      setLoading(null);
+    }
+  }, "fetchHello");
+  const fetchUsers = /* @__PURE__ */ __name(async () => {
+    setLoading("users");
+    setError(null);
+    try {
+      const data = await api.users.get({
+        query: { limit: "5" }
+      });
+      setUsersResponse(data);
+    } catch (err) {
+      setError("Failed to fetch users: " + err);
+    } finally {
+      setLoading(null);
+    }
+  }, "fetchUsers");
+  const handleLogin = /* @__PURE__ */ __name(async () => {
+    setLoading("login");
+    setError(null);
+    try {
+      const data = await api.auth.login.post({
+        body: {
+          hint: "login post",
+          email: "test@example.com",
+          password: "password123"
+        }
+      });
+      setLoginResponse(data);
+    } catch (err) {
+      setError("Failed to login: " + err);
+    } finally {
+      setLoading(null);
+    }
+  }, "handleLogin");
+  const createUser = /* @__PURE__ */ __name(async () => {
+    setLoading("create");
+    setError(null);
+    try {
+      const data = await api.users.post({
+        body: {
+          email: "test@example.com",
+          name: "test user"
+        }
+      });
+      alert("User created! " + JSON.stringify(data));
+      await fetchUsers();
+    } catch (err) {
+      setError("Failed to create user: " + err);
+    } finally {
+      setLoading(null);
+    }
+  }, "createUser");
+  return /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "min-h-screen bg-gradient-to-br from-purple-900 via-indigo-800 to-black text-white p-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-4xl mx-auto", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-5xl font-bold mb-4 bg-gradient-to-r from-pink-400 to-yellow-400 bg-clip-text text-transparent", children: "Clients Component API Demo 🎨" }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-pink-900/30 border border-pink-500/50 rounded-lg p-4 mb-8", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-pink-200 text-sm", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "'use client'" }),
+      " - This is a client component! All API calls happen in the browser."
+    ] }) }),
+    error && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-red-900/50 border border-red-500 rounded-lg p-4 mb-6", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-red-200", children: [
+      "❌ ",
+      error
+    ] }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-blue-400", children: "GET /api/hello" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: fetchHello,
+            disabled: loading === "hello",
+            className: "px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
+            children: loading === "hello" ? "Loading..." : "Fetch"
+          }
+        ),
+        helloResponse && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(helloResponse, null, 2) }) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-purple-400", children: "GET /api/users" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: fetchUsers,
+            disabled: loading === "users",
+            className: "px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
+            children: loading === "users" ? "Loading..." : "Fetch Users"
+          }
+        ),
+        usersResponse && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(usersResponse, null, 2) }) })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-yellow-400", children: "POST /api/auth/login" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: handleLogin,
+            disabled: loading === "login",
+            className: "px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
+            children: loading === "login" ? "Logging in..." : "Login"
+          }
+        ),
+        loginResponse && /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-900 rounded p-4 font-mono text-sm", children: /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-green-400", children: JSON.stringify(loginResponse, null, 2) }) }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-gray-400 mt-2", children: [
+          "Credentials: email: ",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-1", children: "test@example.com" }),
+          ", password: ",
+          /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-700 px-1", children: "password123" })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-green-400", children: "POST /api/users" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: createUser,
+            disabled: loading === "create",
+            className: "px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed mb-4",
+            children: loading === "create" ? "Creating..." : "Create New User"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-sm text-gray-400", children: "Creates a new user and refreshes the users list" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-800/50 backdrop-blur-sm rounded-lg p-6 border border-gray-700", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-2xl font-semibold mb-4 text-cyan-400", children: "Type-Safe API Client Examples" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-900 rounded p-4 font-mono text-xs space-y-4", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500 mb-2", children: "// Import the typed client" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-gray-300", children: `import { client, api } from '@/lib/api-client';` })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500 mb-2", children: "// Option 1: Direct client call" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-gray-300", children: `const result = await client('/api/hello', {
+  query: { name: 'World' }
+});` })
+          ] }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-500 mb-2", children: "// Option 2: Nested API syntax (recommended!)" }),
+            /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "text-yellow-300", children: `const result = await api.auth.login({
+  body: {
+    email: 'test@example.com',
+    password: 'password123'
+  }
+});
+
+console.log(result.token); // ✅ Fully typed!
+console.log(result.user);  // ✅ Autocomplete works!` })
+          ] })
+        ] })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "flex gap-4 justify-center pt-8" })
+    ] })
+  ] }) });
+}
+__name(APIClientDemo, "APIClientDemo");
+const pageRoute6 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: APIClientDemo
+}, Symbol.toStringTag, { value: "Module" }));
+async function UserPage({ params, searchParams }) {
+  const { id } = params;
+  const search = await searchParams;
+  const tab = search == null ? void 0 : search.tab;
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-5xl mx-auto space-y-8", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-4xl font-bold text-gray-900 mb-2", children: [
+        "User Profile: ",
+        id
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600", children: "This is a dynamic route example showing how params and searchParams work." })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid md:grid-cols-2 gap-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        InfoCard,
+        {
+          title: "Dynamic Route Params",
+          description: "These come from the URL path segments like [id]",
+          data: params,
+          example: "/users/123 → { id: '123' }"
+        }
+      ),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        InfoCard,
+        {
+          title: "Search/Query Params",
+          description: "These come from the query string (?key=value)",
+          data: search || {},
+          example: "/users/123?tab=profile&sort=asc → { tab: 'profile', sort: 'asc' }"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-blue-50 border border-blue-200 rounded-lg p-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold mb-4 text-gray-900", children: "💡 How to Use PageProps" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-2", children: "1. Import the type:" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200", children: `import type { PageProps } from '@farmjs/core'` })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-2", children: "2. Use in your component:" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200", children: `export default async function MyPage({ params, searchParams }: PageProps) {
+  const { id } = params
+  const search = await searchParams  // searchParams is a Promise!
+  const tab = search?.tab
+  
+  return <div>User {id}, Tab: {tab}</div>
+}` })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-2", children: "3. Current values:" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsxs("ul", { className: "space-y-1 text-sm", children: [
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-blue-100 px-2 py-1 rounded", children: "params.id" }),
+              ' = "',
+              id,
+              '"'
+            ] }),
+            /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
+              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-blue-100 px-2 py-1 rounded", children: "searchParams.tab" }),
+              ' = "',
+              tab || "not set",
+              '"'
+            ] })
+          ] })
+        ] })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6 border border-gray-200", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-lg font-semibold mb-4 text-gray-900", children: "🧪 Try These URLs:" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(UrlDemo, { href: "/users/123", description: "Basic dynamic route" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(UrlDemo, { href: "/users/456?tab=settings", description: "With search params" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(UrlDemo, { href: "/users/john-doe?tab=profile&sort=desc", description: "String ID with multiple params" })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(Link, { href: "/", className: "inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium", children: "← Back to Home" }) })
+  ] });
+}
+__name(UserPage, "UserPage");
+function InfoCard({ title, description, data, example }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg p-6 shadow-md border border-gray-200", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-semibold mb-2 text-gray-900", children: title }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 text-sm mb-4", children: description }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-50 p-4 rounded-md mb-4 border border-gray-200", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { className: "text-sm text-gray-700", children: "Current values:" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "mt-2 text-sm text-gray-900 overflow-auto", children: JSON.stringify(data, null, 2) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-yellow-50 p-3 rounded-md border border-yellow-200", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { className: "text-sm text-gray-700", children: "Example:" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-sm ml-2 text-gray-900", children: example })
+    ] })
+  ] });
+}
+__name(InfoCard, "InfoCard");
+function UrlDemo({ href, description }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between p-3 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-sm font-mono text-blue-600", children: href }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mt-1", children: description })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx(
+      Link,
+      {
+        href,
+        className: "px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors",
+        children: "Visit"
+      }
+    )
+  ] });
+}
+__name(UrlDemo, "UrlDemo");
+const pageRoute7 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: UserPage
 }, Symbol.toStringTag, { value: "Module" }));
 async function loadSearchParams(searchParams, parsers) {
   const params = await searchParams;
@@ -7926,125 +8042,9 @@ export default function Page() {
   ] }) });
 }
 __name(ServerQueryDemo, "ServerQueryDemo");
-const pageRoute7 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  default: ServerQueryDemo
-}, Symbol.toStringTag, { value: "Module" }));
-async function UserPage({ params, searchParams }) {
-  const { id } = params;
-  const search = await searchParams;
-  const tab = search == null ? void 0 : search.tab;
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "max-w-5xl mx-auto space-y-8", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("h1", { className: "text-4xl font-bold text-gray-900 mb-2", children: [
-        "User Profile: ",
-        id
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600", children: "This is a dynamic route example showing how params and searchParams work." })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid md:grid-cols-2 gap-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        InfoCard,
-        {
-          title: "Dynamic Route Params",
-          description: "These come from the URL path segments like [id]",
-          data: params,
-          example: "/users/123 → { id: '123' }"
-        }
-      ),
-      /* @__PURE__ */ jsxRuntimeExports.jsx(
-        InfoCard,
-        {
-          title: "Search/Query Params",
-          description: "These come from the query string (?key=value)",
-          data: search || {},
-          example: "/users/123?tab=profile&sort=asc → { tab: 'profile', sort: 'asc' }"
-        }
-      )
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-blue-50 border border-blue-200 rounded-lg p-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-xl font-semibold mb-4 text-gray-900", children: "💡 How to Use PageProps" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-4", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-2", children: "1. Import the type:" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200", children: `import type { PageProps } from '@farmjs/core'` })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-2", children: "2. Use in your component:" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200", children: `export default async function MyPage({ params, searchParams }: PageProps) {
-  const { id } = params
-  const search = await searchParams  // searchParams is a Promise!
-  const tab = search?.tab
-  
-  return <div>User {id}, Tab: {tab}</div>
-}` })
-        ] }),
-        /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-          /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "font-semibold mb-2", children: "3. Current values:" }),
-          /* @__PURE__ */ jsxRuntimeExports.jsxs("ul", { className: "space-y-1 text-sm", children: [
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-blue-100 px-2 py-1 rounded", children: "params.id" }),
-              ' = "',
-              id,
-              '"'
-            ] }),
-            /* @__PURE__ */ jsxRuntimeExports.jsxs("li", { children: [
-              /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-blue-100 px-2 py-1 rounded", children: "searchParams.tab" }),
-              ' = "',
-              tab || "not set",
-              '"'
-            ] })
-          ] })
-        ] })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6 border border-gray-200", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h3", { className: "text-lg font-semibold mb-4 text-gray-900", children: "🧪 Try These URLs:" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-2", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(UrlDemo, { href: "/users/123", description: "Basic dynamic route" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(UrlDemo, { href: "/users/456?tab=settings", description: "With search params" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(UrlDemo, { href: "/users/john-doe?tab=profile&sort=desc", description: "String ID with multiple params" })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("div", { children: /* @__PURE__ */ jsxRuntimeExports.jsx(Link, { href: "/", className: "inline-flex items-center px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium", children: "← Back to Home" }) })
-  ] });
-}
-__name(UserPage, "UserPage");
-function InfoCard({ title, description, data, example }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg p-6 shadow-md border border-gray-200", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-semibold mb-2 text-gray-900", children: title }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 text-sm mb-4", children: description }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-gray-50 p-4 rounded-md mb-4 border border-gray-200", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { className: "text-sm text-gray-700", children: "Current values:" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "mt-2 text-sm text-gray-900 overflow-auto", children: JSON.stringify(data, null, 2) })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-yellow-50 p-3 rounded-md border border-yellow-200", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { className: "text-sm text-gray-700", children: "Example:" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-sm ml-2 text-gray-900", children: example })
-    ] })
-  ] });
-}
-__name(InfoCard, "InfoCard");
-function UrlDemo({ href, description }) {
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between p-3 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "text-sm font-mono text-blue-600", children: href }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-xs text-gray-500 mt-1", children: description })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsx(
-      Link,
-      {
-        href,
-        className: "px-3 py-1 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 transition-colors",
-        children: "Visit"
-      }
-    )
-  ] });
-}
-__name(UrlDemo, "UrlDemo");
 const pageRoute8 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
-  default: UserPage
+  default: ServerQueryDemo
 }, Symbol.toStringTag, { value: "Module" }));
 const apiRoutes = [
   {
@@ -8078,31 +8078,31 @@ const pageRoutes = [
     module: pageRoute1
   },
   {
-    pattern: "/contact",
+    pattern: "/api-demo",
     module: pageRoute2
   },
   {
-    pattern: "/farm-query-client-demo",
+    pattern: "/contact",
     module: pageRoute3
   },
   {
-    pattern: "/api-demo",
+    pattern: "/farm-query-client-demo",
     module: pageRoute4
   },
   {
-    pattern: "/api-demo-client",
+    pattern: "/farm-query-demo",
     module: pageRoute5
   },
   {
-    pattern: "/farm-query-demo",
+    pattern: "/api-demo-client",
     module: pageRoute6
   },
   {
-    pattern: "/query-demo",
+    pattern: "/users/[id]",
     module: pageRoute7
   },
   {
-    pattern: "/users/[id]",
+    pattern: "/query-demo",
     module: pageRoute8
   }
 ];
@@ -8165,6 +8165,7 @@ async function handleRequest(request) {
     const { route, params } = matchedRoute;
     try {
       const PageComponent = route.module.default;
+      const metadata2 = route.module.metadata || {};
       if (PageComponent) {
         const searchParamsObj = Object.fromEntries(url.searchParams.entries());
         const ReactDOMServer = await import("./assets/server.node-foUdVVCD.js").then((n) => n.s);
@@ -8188,13 +8189,34 @@ async function handleRequest(request) {
           const element = React2.createElement(PageComponent, pageProps);
           html = ReactDOMServer.renderToString(element);
         }
+        const title = metadata2.title || "Farm.js App";
+        const description = metadata2.description || "";
+        let metaTags = "";
+        if (description) {
+          metaTags += `
+  <meta name="description" content="${description.replace(/"/g, "&quot;")}">`;
+        }
+        if (metadata2.keywords) {
+          const keywords = Array.isArray(metadata2.keywords) ? metadata2.keywords.join(", ") : metadata2.keywords;
+          metaTags += `
+  <meta name="keywords" content="${keywords.replace(/"/g, "&quot;")}">`;
+        }
+        if (metadata2.openGraph) {
+          const og = metadata2.openGraph;
+          if (og.title) metaTags += `
+  <meta property="og:title" content="${og.title.replace(/"/g, "&quot;")}">`;
+          if (og.description) metaTags += `
+  <meta property="og:description" content="${og.description.replace(/"/g, "&quot;")}">`;
+          if (og.image) metaTags += `
+  <meta property="og:image" content="${og.image}">`;
+        }
         return new Response(
           `<!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Farm.js App</title>
+  <title>${title}</title>${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
 </head>
 <body>
