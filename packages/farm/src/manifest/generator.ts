@@ -5,7 +5,12 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import type { AppManifest, RouteManifestEntry, LayoutManifestEntry, RouterManagedTag } from "./types";
+import type {
+  AppManifest,
+  RouteManifestEntry,
+  LayoutManifestEntry,
+  RouterManagedTag,
+} from "./types";
 
 interface RouteInfo {
   pattern: string;
@@ -25,7 +30,10 @@ interface ChunkInfo {
 function isClientComponent(filePath: string): boolean {
   try {
     const content = fs.readFileSync(filePath, "utf-8");
-    return content.trimStart().startsWith("'use client'") || content.trimStart().startsWith('"use client"');
+    return (
+      content.trimStart().startsWith("'use client'") ||
+      content.trimStart().startsWith('"use client"')
+    );
   } catch {
     return false;
   }
@@ -34,7 +42,10 @@ function isClientComponent(filePath: string): boolean {
 /**
  * Parse route path from file path
  */
-function parseRoutePath(filePath: string): { segments: RouteManifestEntry["segments"]; pattern: string } {
+function parseRoutePath(filePath: string): {
+  segments: RouteManifestEntry["segments"];
+  pattern: string;
+} {
   // Remove page.tsx or layout.tsx from path
   const routePath = filePath
     .replace(/\/page\.(tsx?|jsx?)$/, "")
@@ -97,7 +108,9 @@ function parseRoutePath(filePath: string): { segments: RouteManifestEntry["segme
 /**
  * Discover routes and layouts in app directory
  */
-async function discoverRoutes(appDir: string): Promise<{ routes: RouteInfo[]; layouts: RouteInfo[] }> {
+async function discoverRoutes(
+  appDir: string,
+): Promise<{ routes: RouteInfo[]; layouts: RouteInfo[] }> {
   const routes: RouteInfo[] = [];
   const layouts: RouteInfo[] = [];
 
@@ -138,7 +151,10 @@ async function discoverRoutes(appDir: string): Promise<{ routes: RouteInfo[]; la
  * Generate manifest for development mode
  * In dev, we don't have chunk info, so we use module paths directly
  */
-export async function generateDevManifest(appDir: string, projectRoot: string): Promise<AppManifest> {
+export async function generateDevManifest(
+  appDir: string,
+  projectRoot: string,
+): Promise<AppManifest> {
   const { routes, layouts } = await discoverRoutes(appDir);
 
   const toUrlPath = (absolutePath: string): string => {
@@ -222,12 +238,12 @@ export async function generateProdManifest(
     if (chunk) {
       // Add the chunk itself
       preloads.push(`/assets/${chunk.fileName}`);
-      
+
       // Add imports
       if (chunk.imports) {
         preloads.push(...chunk.imports.map((i) => `/assets/${i}`));
       }
-      
+
       // Add CSS
       if (chunk.css) {
         for (const css of chunk.css) {

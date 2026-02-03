@@ -54,7 +54,20 @@ function getRouter() {
  * - Scroll restoration
  */
 export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
-  ({ href, prefetch = true, replace = false, scroll = true, onClick, target, onMouseEnter, onMouseLeave, ...props }, ref) => {
+  (
+    {
+      href,
+      prefetch = true,
+      replace = false,
+      scroll = true,
+      onClick,
+      target,
+      onMouseEnter,
+      onMouseLeave,
+      ...props
+    },
+    ref,
+  ) => {
     const elementRef = useRef<HTMLAnchorElement | null>(null);
     const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const hasPrefetched = useRef(false);
@@ -97,7 +110,7 @@ export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
           hasPrefetched.current = true;
         }, 65);
       },
-      [href, prefetchOnHover, isExternal, onMouseEnter]
+      [href, prefetchOnHover, isExternal, onMouseEnter],
     );
 
     // Handle mouse leave to cancel pending prefetch
@@ -112,7 +125,7 @@ export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
           hoverTimeoutRef.current = null;
         }
       },
-      [onMouseLeave]
+      [onMouseLeave],
     );
 
     // Handle click for SPA navigation
@@ -155,7 +168,7 @@ export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
           }
         }
       },
-      [href, replace, scroll, target, isExternal, onClick]
+      [href, replace, scroll, target, isExternal, onClick],
     );
 
     // Combine refs
@@ -168,7 +181,7 @@ export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
           ref.current = node;
         }
       },
-      [ref]
+      [ref],
     );
 
     return (
@@ -182,7 +195,7 @@ export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
         {...props}
       />
     );
-  }
+  },
 );
 
 Link.displayName = "Link";

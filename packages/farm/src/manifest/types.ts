@@ -72,7 +72,10 @@ export interface DehydratedManifest {
   /** Current layouts */
   layouts: LayoutManifestEntry[];
   /** All routes (for client-side matching, minimal info) */
-  routes: Record<string, Pick<RouteManifestEntry, "modulePath" | "pattern" | "segments" | "isClientComponent">>;
+  routes: Record<
+    string,
+    Pick<RouteManifestEntry, "modulePath" | "pattern" | "segments" | "isClientComponent">
+  >;
   /** All layouts (for navigation) */
   allLayouts: Record<string, Pick<LayoutManifestEntry, "modulePath" | "pattern">>;
   /** Shared assets */

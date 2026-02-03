@@ -86,7 +86,7 @@ async function defaultHandler({
   // Handle SPA page-data requests for client-side navigation
   if (pathname === "/__farm/page-data") {
     const targetPath = url.searchParams.get("path") || "/";
-    
+
     if (!rm) {
       return new Response(JSON.stringify({ error: "Route manager not available" }), {
         status: 500,
@@ -98,7 +98,7 @@ async function defaultHandler({
       // Parse the target path
       const targetUrl = new URL(targetPath, url.origin);
       const targetPathname = targetUrl.pathname;
-      
+
       // Find the route
       const match = rm.matchRoute(targetPathname);
       if (!match) {
@@ -112,7 +112,7 @@ async function defaultHandler({
 
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
-      
+
       // Check if client component
       let isClientComponent = false;
       try {
@@ -128,15 +128,15 @@ async function defaultHandler({
       // Collect metadata from layouts and page
       let mergedMetadata: Record<string, any> = {};
       const layoutModules = await Promise.all(
-        layouts.map((layout) => rm.loadLayoutModule(layout.modulePath))
+        layouts.map((layout) => rm.loadLayoutModule(layout.modulePath)),
       );
-      
+
       for (const layoutModule of layoutModules) {
         if (layoutModule.metadata) {
           mergedMetadata = { ...mergedMetadata, ...layoutModule.metadata };
         }
       }
-      
+
       if (routeModule.metadata) {
         mergedMetadata = { ...mergedMetadata, ...routeModule.metadata };
       }
@@ -164,20 +164,23 @@ async function defaultHandler({
 
       return new Response(JSON.stringify(pageData), {
         status: 200,
-        headers: { 
+        headers: {
           "Content-Type": "application/json",
           "Cache-Control": "private, max-age=0",
         },
       });
     } catch (error) {
       console.error("[Farm.js] Page data error:", error);
-      return new Response(JSON.stringify({ 
-        error: "Failed to load page data",
-        message: error instanceof Error ? error.message : "Unknown error"
-      }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      });
+      return new Response(
+        JSON.stringify({
+          error: "Failed to load page data",
+          message: error instanceof Error ? error.message : "Unknown error",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
     }
   }
 

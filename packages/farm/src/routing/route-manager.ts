@@ -124,7 +124,12 @@ export class RouteManager {
     routes: Array<{
       pattern: string;
       modulePath: string;
-      segments: Array<{ segment: string; isDynamic: boolean; isCatchAll?: boolean; isOptional?: boolean }>;
+      segments: Array<{
+        segment: string;
+        isDynamic: boolean;
+        isCatchAll?: boolean;
+        isOptional?: boolean;
+      }>;
     }>;
     layouts: Array<{
       pattern: string;

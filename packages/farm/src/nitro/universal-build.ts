@@ -245,7 +245,7 @@ async function buildClient(
             if (id === "\0empty-module") {
               return "export default {}; export const getMiddlewareData = () => ({}); export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
             }
-           if (id === "\0empty-api-route") {
+            if (id === "\0empty-api-route") {
               // Stub for API routes - only used in type context, provide empty exports
               return "export const GET = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export default {};";
             }

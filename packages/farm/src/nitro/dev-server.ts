@@ -72,12 +72,12 @@ export function devServerPlugin(): PluginOption {
         try {
           // Always handle Farm.js internal routes
           const isFarmRoute = req.url?.startsWith("/__farm/");
-          
+
           // Debug logging
           if (isFarmRoute) {
             console.log("[Farm.js] [DEV-SERVER] Farm route detected:", req.url);
           }
-          
+
           // Skip Vite internal requests (but not Farm routes)
           if (
             !isFarmRoute &&

@@ -212,11 +212,11 @@ export function farmPlugin(
           if (req.url?.startsWith("/__farm/page-data")) {
             const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
             const targetPath = urlObj.searchParams.get("path") || "/";
-            
+
             try {
               const routeManager = farmApp.getRouteManager();
               const match = routeManager.matchRoute(targetPath);
-              
+
               if (!match) {
                 res.statusCode = 404;
                 res.setHeader("Content-Type", "application/json");
@@ -236,7 +236,7 @@ export function farmPlugin(
 
               // Load route module to get metadata
               const routeModule = await routeManager.loadRouteModule(route.modulePath);
-              
+
               // Check if client component
               let isClientComponent = false;
               try {
@@ -251,15 +251,15 @@ export function farmPlugin(
               // Collect metadata from layouts and page
               let mergedMetadata: Record<string, any> = {};
               const layoutModules = await Promise.all(
-                layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath))
+                layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
               );
-              
+
               for (const layoutModule of layoutModules) {
                 if ((layoutModule as any).metadata) {
                   mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
                 }
               }
-              
+
               if ((routeModule as any).metadata) {
                 mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
               }
@@ -301,10 +301,12 @@ export function farmPlugin(
               console.error("[Farm.js] Page data error:", error);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ 
-                error: "Failed to load page data",
-                message: error instanceof Error ? error.message : "Unknown error"
-              }));
+              res.end(
+                JSON.stringify({
+                  error: "Failed to load page data",
+                  message: error instanceof Error ? error.message : "Unknown error",
+                }),
+              );
               return;
             }
           }
@@ -414,50 +416,54 @@ export const getManifest = () => ({
 });
 `;
         }
-        
+
         const manifest = routeManager.generateClientManifest(server.config.root);
-        
+
         // Convert to full manifest format
         const fullManifest = {
           clientEntry: "/@farm/client.js",
           routes: {} as Record<string, any>,
           layouts: {} as Record<string, any>,
           sharedAssets: [
-            { tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } }
-          ]
+            { tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } },
+          ],
         };
-        
+
         // Convert routes array to object keyed by pattern
         for (const route of manifest.routes) {
           const isClient = (() => {
             try {
               const absolutePath = path.join(server.config.root, route.modulePath);
               const content = fs.readFileSync(absolutePath, "utf-8");
-              return content.trimStart().startsWith("'use client'") || 
-                     content.trimStart().startsWith('"use client"');
-            } catch { return false; }
+              return (
+                content.trimStart().startsWith("'use client'") ||
+                content.trimStart().startsWith('"use client"')
+              );
+            } catch {
+              return false;
+            }
           })();
-          
+
           fullManifest.routes[route.pattern] = {
             modulePath: route.modulePath,
             pattern: route.pattern,
             segments: route.segments,
             isClientComponent: isClient,
             preloads: [route.modulePath], // In dev, preload is just the module
-            assets: []
+            assets: [],
           };
         }
-        
+
         // Convert layouts array to object keyed by pattern
         for (const layout of manifest.layouts) {
           fullManifest.layouts[layout.pattern] = {
             modulePath: layout.modulePath,
             pattern: layout.pattern,
             preloads: [layout.modulePath],
-            assets: []
+            assets: [],
           };
         }
-        
+
         return `
 // Auto-generated manifest for SPA navigation (TanStack Start pattern)
 // This manifest is inlined in the server bundle - no file on disk

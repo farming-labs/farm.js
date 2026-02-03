@@ -2,7 +2,7 @@
 
 /**
  * Farm.js SPA Router
- * 
+ *
  * Provides client-side navigation without full page reloads.
  * Features:
  * - Prefetch on viewport intersection
@@ -51,7 +51,7 @@ export class SPARouter {
     if (typeof window !== "undefined") {
       // Listen for popstate (back/forward navigation)
       window.addEventListener("popstate", this.handlePopState.bind(this));
-      
+
       // Save scroll position before unload
       window.addEventListener("beforeunload", () => {
         this.saveScrollPosition(window.location.pathname);
@@ -69,7 +69,10 @@ export class SPARouter {
   /**
    * Navigate to a new URL
    */
-  async navigate(href: string, options: { replace?: boolean; scroll?: boolean } = {}): Promise<void> {
+  async navigate(
+    href: string,
+    options: { replace?: boolean; scroll?: boolean } = {},
+  ): Promise<void> {
     const { replace = false, scroll = true } = options;
 
     // Parse the URL
@@ -183,14 +186,14 @@ export class SPARouter {
             setTimeout(() => {
               this.prefetch(href);
             }, this.options.prefetchTimeout);
-            
+
             // Stop observing after first intersection
             observer.unobserve(element);
             this.observers.delete(element);
           }
         }
       },
-      { rootMargin: "200px" } // Start prefetching when 200px from viewport
+      { rootMargin: "200px" }, // Start prefetching when 200px from viewport
     );
 
     observer.observe(element);
@@ -221,7 +224,7 @@ export class SPARouter {
     // Fetch from server
     const response = await fetch(`/__farm/page-data?path=${encodeURIComponent(path)}`, {
       headers: {
-        "Accept": "application/json",
+        Accept: "application/json",
         "X-Farm-SPA": "1",
       },
     });
@@ -291,7 +294,7 @@ export class SPARouter {
     try {
       sessionStorage.setItem(
         `farm-scroll-${path}`,
-        JSON.stringify({ x: window.scrollX, y: window.scrollY })
+        JSON.stringify({ x: window.scrollX, y: window.scrollY }),
       );
     } catch {
       // Ignore storage errors
@@ -340,7 +343,10 @@ export function getRouter(): SPARouter {
 /**
  * Navigate to a URL using the SPA router
  */
-export function navigateTo(href: string, options?: { replace?: boolean; scroll?: boolean }): Promise<void> {
+export function navigateTo(
+  href: string,
+  options?: { replace?: boolean; scroll?: boolean },
+): Promise<void> {
   return getRouter().navigate(href, options);
 }
 

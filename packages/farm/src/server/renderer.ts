@@ -113,7 +113,7 @@ export class ServerRenderer {
           pageElement = React.createElement(
             "div",
             { id: "__farm_page__", "data-farm-client": "true" },
-            pageElement
+            pageElement,
           );
         }
 
@@ -158,17 +158,15 @@ export class ServerRenderer {
       // Generate manifest for client-side SPA navigation (TanStack Start pattern)
       // This manifest is inlined in HTML - no separate file or API endpoint
       const manifest = this.routeManager.generateClientManifest(this.config.root);
-      
+
       // Convert to object format for client
       const clientManifest = {
         clientEntry: "/@farm/client.js",
         routes: {} as Record<string, any>,
         layouts: {} as Record<string, any>,
-        sharedAssets: [
-          { tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } }
-        ]
+        sharedAssets: [{ tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } }],
       };
-      
+
       // Convert routes array to object keyed by pattern
       for (const routeEntry of manifest.routes) {
         let isClient = false;
@@ -177,27 +175,30 @@ export class ServerRenderer {
             ? this.config.root + routeEntry.modulePath
             : routeEntry.modulePath;
           const content = fs.readFileSync(absolutePath, "utf-8");
-          isClient = content.trimStart().startsWith("'use client'") || 
-                     content.trimStart().startsWith('"use client"');
-        } catch { isClient = false; }
-        
+          isClient =
+            content.trimStart().startsWith("'use client'") ||
+            content.trimStart().startsWith('"use client"');
+        } catch {
+          isClient = false;
+        }
+
         clientManifest.routes[routeEntry.pattern] = {
           modulePath: routeEntry.modulePath,
           pattern: routeEntry.pattern,
           segments: routeEntry.segments,
           isClientComponent: isClient,
           preloads: [routeEntry.modulePath],
-          assets: []
+          assets: [],
         };
       }
-      
+
       // Convert layouts array to object
       for (const layoutEntry of manifest.layouts) {
         clientManifest.layouts[layoutEntry.pattern] = {
           modulePath: layoutEntry.modulePath,
           pattern: layoutEntry.pattern,
           preloads: [layoutEntry.modulePath],
-          assets: []
+          assets: [],
         };
       }
 
