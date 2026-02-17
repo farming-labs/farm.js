@@ -113,6 +113,8 @@ export async function renderHTML(rscStream, options = {}) {
   // PLACEHOLDER_STR is never patched so indexOf(PLACEHOLDER_STR) < 0 means CLIENT_ENTRY_HREF was patched to the real URL
   const PLACEHOLDER_STR = "__FARM_CLIENT_ENTRY_HREF__";
   const CLIENT_ENTRY_HREF = "__FARM_CLIENT_ENTRY_HREF__";
+  // Only inject client script in production when the placeholder was replaced with a real URL
+  const injectClientScriptInStream = typeof CLIENT_ENTRY_HREF === "string" && CLIENT_ENTRY_HREF.length > 0 && CLIENT_ENTRY_HREF.indexOf(PLACEHOLDER_STR) < 0;
   let clientBuffer = "";
   let clientScriptInjected = false;
   const injectClientScriptStream = new TransformStream({
