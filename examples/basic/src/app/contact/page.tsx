@@ -1,6 +1,10 @@
-'use client';
 import React from 'react'
 import { Link } from '@farmjs/core/client'
+
+export const metadata = {
+  title: "Contact | Farm.js",
+  description: "Get in touch with the Farm.js team or community",
+};
 
 export default function ContactPage() {
   return (

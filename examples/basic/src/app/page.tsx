@@ -2,6 +2,10 @@ import React from 'react'
 import type { PageProps, Metadata } from '@farmjs/core'
 import { Link } from '@farmjs/core/client'
 
+// Note: This page uses Link components which require hydration
+// SSG is better suited for pages without client-side interactivity
+// export const prerender = true;
+
 export const metadata: Metadata = {
   title: "Home | Farm.js",
   description: "A modern React meta-framework built on Vite with Next.js-like semantics",

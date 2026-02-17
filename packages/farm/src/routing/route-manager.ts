@@ -1,5 +1,6 @@
-import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule } from "../types";
+import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule, SSGPage, SSGCollectionResult } from "../types";
 import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
+import { collectSSGPages, isSSGModule, hasISR, getRevalidateInterval } from "../ssg";
 import path from "path";
 import type { ViteDevServer } from "vite";
 
@@ -269,6 +270,59 @@ export class RouteManager {
       for (const [pattern, entry] of this.layouts) {
         console.log(`  ${pattern} -> ${entry.modulePath}`);
       }
+    }
+  }
+
+  /**
+   * Collect SSG pages for static generation
+   * 
+   * Returns all pages marked with `export const ssg = true` along with
+   * their pre-computed paths (for dynamic routes using getStaticPaths)
+   */
+  async collectSSGPages(): Promise<SSGCollectionResult> {
+    const routes = Array.from(this.routes.values()).map((entry) => ({
+      path: entry.pattern,
+      filePath: entry.modulePath,
+      isDynamic: entry.route.segments.some((seg) => seg.isDynamic),
+      pattern: entry.pattern,
+    }));
+
+    return collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath));
+  }
+
+  /**
+   * Check if a route is SSG
+   */
+  async isRouteSSG(modulePath: string): Promise<boolean> {
+    try {
+      const mod = await this.loadRouteModule(modulePath);
+      return isSSGModule(mod);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if a route has ISR (Incremental Static Regeneration)
+   */
+  async hasRouteISR(modulePath: string): Promise<boolean> {
+    try {
+      const mod = await this.loadRouteModule(modulePath);
+      return hasISR(mod);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get revalidation interval for a route
+   */
+  async getRouteRevalidateInterval(modulePath: string): Promise<number | undefined> {
+    try {
+      const mod = await this.loadRouteModule(modulePath);
+      return getRevalidateInterval(mod);
+    } catch {
+      return undefined;
     }
   }
 }

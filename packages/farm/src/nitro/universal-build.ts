@@ -6,6 +6,7 @@ import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createRequire } from "module";
 import { logger } from "../utils";
 import { virtualBundlePlugin } from "./virtual-bundle-plugin";
 import type { NitroConfig } from "nitro/config";
@@ -142,6 +143,17 @@ async function buildClient(
   const clientEntryPath = path.join(root, srcDir, ".farm-client-entry.tsx");
   await fs.writeFile(clientEntryPath, clientHydrationCode);
 
+  // Tailwind v4 via @tailwindcss/vite (no PostCSS or tailwind.config)
+  let tailwindVitePlugin: any = undefined;
+  try {
+    const farmPkgRoot = path.join(_dirname, "..", "..");
+    const requireFromFarm = createRequire(path.join(farmPkgRoot, "package.json"));
+    const tailwindVite = requireFromFarm("@tailwindcss/vite");
+    tailwindVitePlugin = (tailwindVite.default ?? tailwindVite)();
+  } catch {
+    // @tailwindcss/vite not available; CSS may be unprocessed
+  }
+
   try {
     await viteBuild({
       root,
@@ -199,6 +211,7 @@ async function buildClient(
         },
       },
       plugins: [
+        ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         // Plugin to redirect @farmjs/core imports to client-only exports
         {
           name: "farm-client-only-imports",
@@ -253,7 +266,7 @@ async function buildClient(
               // Only export client-safe parts (no type exports - they're erased at compile time)
               return [
                 "// Farm.js Client Exports - Safe for browser bundling",
-                'export { Link } frodm "@farmjs/core/client";',
+                'export { Link } from "@farmjs/core/client";',
                 'export { useRouter } from "@farmjs/core/client";',
                 'export { createAPIClient } from "@farmjs/core/client";',
               ].join("\n");
@@ -298,11 +311,137 @@ function generateClientHydrationEntry(
   const cssImport = `import "./app/globals.css";`;
 
   if (clientPages.length === 0) {
-    // No client pages - just basic runtime with CSS
+    // No client pages - just basic runtime with CSS and SPA navigation
     return `
 // Farm.js Client Runtime (no client components)
 ${cssImport}
+import React from "react";
+import { createRoot, hydrateRoot } from "react-dom/client";
+
 console.log("[Farm.js] Client loaded (server-only mode)");
+
+// SPA Router for server-rendered pages (HTML swap)
+const spaRouter = {
+  prefetchCache: new Map(),
+  
+  navigate: async function(href) {
+    const url = new URL(href, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      window.location.href = href;
+      return;
+    }
+    
+    try {
+      const html = await this.fetchPage(url.pathname + url.search);
+      this.swapContent(html);
+      window.history.pushState({}, "", href);
+    } catch (error) {
+      console.error("[Farm.js] Navigation error:", error);
+      window.location.href = href;
+    }
+  },
+  
+  fetchPage: async function(url) {
+    const cached = this.prefetchCache.get(url);
+    if (cached) return cached;
+    
+    const response = await fetch(url, {
+      headers: { "Accept": "text/html" }
+    });
+    if (!response.ok) throw new Error("Failed to fetch page");
+    return response.text();
+  },
+  
+  swapContent: function(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    
+    // Update title
+    const newTitle = doc.querySelector("title");
+    if (newTitle) document.title = newTitle.textContent || "";
+    
+    // Update meta tags
+    const newMetas = doc.querySelectorAll("meta[name]");
+    newMetas.forEach(function(meta) {
+      const name = meta.getAttribute("name");
+      if (name) {
+        const existing = document.querySelector("meta[name=\\"" + name + "\\"]");
+        if (existing) {
+          existing.setAttribute("content", meta.getAttribute("content") || "");
+        } else {
+          document.head.appendChild(meta.cloneNode(true));
+        }
+      }
+    });
+    
+    // Swap root content
+    const newRoot = doc.getElementById("root");
+    const currentRoot = document.getElementById("root");
+    if (newRoot && currentRoot) {
+      currentRoot.innerHTML = newRoot.innerHTML;
+    }
+  },
+  
+  prefetch: function(href) {
+    const url = new URL(href, window.location.origin);
+    if (url.origin !== window.location.origin) return;
+    
+    const pathname = url.pathname + url.search;
+    if (this.prefetchCache.has(pathname)) return;
+    
+    this.fetchPage(pathname)
+      .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
+      .catch(function() {});
+  },
+  
+  observeForPrefetch: function(element, href) {
+    if (!("IntersectionObserver" in window)) return;
+    
+    const observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          spaRouter.prefetch(href);
+          observer.disconnect();
+        }
+      });
+    }, { rootMargin: "50px" });
+    
+    observer.observe(element);
+  },
+  
+  unobserveForPrefetch: function() {}
+};
+
+// Expose router globally
+window.__FARM_SPA_ROUTER__ = spaRouter;
+
+// Handle popstate (back/forward)
+window.addEventListener("popstate", function() {
+  spaRouter.fetchPage(window.location.pathname + window.location.search)
+    .then(function(html) { spaRouter.swapContent(html); })
+    .catch(function() { window.location.reload(); });
+});
+
+// Intercept link clicks
+document.addEventListener("click", function(e) {
+  const target = e.target;
+  const anchor = target.closest ? target.closest("a") : null;
+  if (!anchor) return;
+  
+  const href = anchor.getAttribute("href");
+  if (!href) return;
+  if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
+  if (href.startsWith("#")) return;
+  if (anchor.target && anchor.target !== "_self") return;
+  if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
+  if (e.button !== 0) return;
+  if (e.defaultPrevented) return;
+  
+  e.preventDefault();
+  spaRouter.navigate(href);
+});
+
+console.log("[Farm.js] SPA router ready");
 `.trim();
   }
 
@@ -319,304 +458,283 @@ console.log("[Farm.js] Client loaded (server-only mode)");
     // Convert to forward-slash path for cross-platform compatibility and ensure it starts with ./
     const importPath = "./" + relativePath.replace(/\\/g, "/");
     imports.push(`import Page${index} from "${importPath}";`);
-    routeEntries.push(`  { pattern: ${JSON.stringify(page.pattern)}, Component: Page${index} },`);
+    routeEntries.push(`  { pattern: ${JSON.stringify(page.pattern)}, Component: Page${index} }`);
   });
 
+  // Full SPA client with hydration for client components
   return `
-// Import global CSS for Tailwind
-import "./app/globals.css";
-
+// Farm.js Client Runtime - SPA with Hydration
+${cssImport}
 import React from "react";
-import { hydrateRoot, createRoot } from "react-dom/client";
+import { createRoot, hydrateRoot } from "react-dom/client";
 
-// Import client components
 ${imports.join("\n")}
 
-// Client page routes
+// Client component routes
 const clientRoutes = [
-${routeEntries.join("\n")}
+${routeEntries.join(",\n")}
 ];
 
-// ⭐ Keep reference to React root for SPA navigation
-let reactRoot = null;
-let currentPathname = null;
-let isHydrated = false;
+console.log("[Farm.js] Client bundle loaded with", clientRoutes.length, "client routes");
 
-/**
- * Match pathname to route pattern
- */
+// Match pathname to client route
 function matchRoute(pathname) {
   for (const route of clientRoutes) {
-    // Convert pattern to regex for matching
-    // Handle both [param] and :param syntax
-    let regexPattern = route.pattern
-      .replace(new RegExp("\\\\[([^\\\\]]+)\\\\]", "g"), "(?<$1>[^/]+)")  // [id] -> (?<id>[^/]+)
-      .replace(new RegExp("\\\\/:([^/]+)", "g"), "/(?<$1>[^/]+)")     // /:id -> /(?<id>[^/]+)
-      .replace(new RegExp("/", "g"), "\\\\/");                      // Escape forward slashes
+    // Convert pattern to regex
+    let regexPattern = route.pattern;
     
-    const regex = new RegExp("^" + regexPattern + "$");
-    const match = pathname.match(regex);
+    // Handle [param] format - convert to named group
+    while (regexPattern.includes("[")) {
+      const start = regexPattern.indexOf("[");
+      const end = regexPattern.indexOf("]");
+      if (start === -1 || end === -1) break;
+      const paramName = regexPattern.substring(start + 1, end);
+      regexPattern = regexPattern.substring(0, start) + "(?<" + paramName + ">[^/]+)" + regexPattern.substring(end + 1);
+    }
     
-    if (match) {
-      return { route, params: match.groups || {} };
+    // Escape forward slashes
+    regexPattern = regexPattern.split("/").join("\\\\/");
+    
+    try {
+      const regex = new RegExp("^" + regexPattern + "$");
+      const match = pathname.match(regex);
+      if (match) {
+        return { route: route, params: match.groups || {} };
+      }
+    } catch (e) {
+      console.warn("[Farm.js] Invalid route pattern:", route.pattern);
     }
   }
   return null;
 }
 
-/**
- * Create page props from current URL
- */
-function createPageProps(params) {
-  const searchParams = Object.fromEntries(
-    new URLSearchParams(window.location.search).entries()
-  );
-  return {
-    params: params || {},
-    searchParams: Promise.resolve(searchParams),
-  };
-}
+// State
+let reactRoot = null;
+let currentPathname = null;
+let isHydrated = false;
 
-/**
- * Fetch HTML from server and swap the #root content
- * Used for server-only routes that aren't in the client bundle
- */
-async function fetchAndSwapHTML(pathname) {
-  const container = document.getElementById("root");
-  if (!container) {
-    console.error("[Farm.js] Root container not found");
-    window.location.href = pathname + window.location.search;
+// Hydrate client components
+function hydrate() {
+  const pathname = window.location.pathname;
+  const matched = matchRoute(pathname);
+  
+  if (!matched) {
+    console.log("[Farm.js] Server-rendered page, no hydration needed:", pathname);
     return;
   }
-
+  
+  const container = document.getElementById("root");
+  if (!container) {
+    console.error("[Farm.js] No root element found");
+    return;
+  }
+  
+  const Component = matched.route.Component;
+  const params = matched.params;
+  const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+  
+  const props = { params: params, searchParams: Promise.resolve(searchParams) };
+  
   try {
-    const url = pathname + window.location.search;
+    if (!isHydrated && container.innerHTML.trim()) {
+      reactRoot = hydrateRoot(container, React.createElement(Component, props));
+      isHydrated = true;
+      console.log("[Farm.js] Hydrated:", pathname);
+    } else {
+      if (!reactRoot) {
+        reactRoot = createRoot(container);
+      }
+      reactRoot.render(React.createElement(Component, props));
+      console.log("[Farm.js] Rendered:", pathname);
+    }
+    currentPathname = pathname;
+  } catch (error) {
+    console.error("[Farm.js] Hydration error:", error);
+  }
+}
+
+// SPA Router
+const spaRouter = {
+  prefetchCache: new Map(),
+  
+  navigate: async function(href) {
+    const url = new URL(href, window.location.origin);
+    if (url.origin !== window.location.origin) {
+      window.location.href = href;
+      return;
+    }
+    
+    const pathname = url.pathname;
+    const matched = matchRoute(pathname);
+    
+    if (matched) {
+      // Client component - render directly
+      window.history.pushState({}, "", href);
+      const Component = matched.route.Component;
+      const params = matched.params;
+      const searchParams = Object.fromEntries(url.searchParams);
+      const props = { params: params, searchParams: Promise.resolve(searchParams) };
+      
+      const container = document.getElementById("root");
+      if (container) {
+        if (!reactRoot) {
+          reactRoot = createRoot(container);
+        }
+        reactRoot.render(React.createElement(Component, props));
+        currentPathname = pathname;
+        console.log("[Farm.js] SPA navigated to client route:", pathname);
+      }
+      return;
+    }
+    
+    // Server component - fetch HTML
+    try {
+      const html = await this.fetchPage(url.pathname + url.search);
+      this.swapContent(html);
+      window.history.pushState({}, "", href);
+      currentPathname = pathname;
+    } catch (error) {
+      console.error("[Farm.js] Navigation error:", error);
+      window.location.href = href;
+    }
+  },
+  
+  fetchPage: async function(url) {
+    const cached = this.prefetchCache.get(url);
+    if (cached) return cached;
+    
     const response = await fetch(url, {
       headers: { "Accept": "text/html" }
     });
-    
-    if (!response.ok) {
-      throw new Error("HTTP " + response.status);
-    }
-    
-    const html = await response.text();
-    
-    // Parse the HTML and extract the #root content
+    if (!response.ok) throw new Error("Failed to fetch page");
+    return response.text();
+  },
+  
+  swapContent: function(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
+    
+    // Update title
+    const newTitle = doc.querySelector("title");
+    if (newTitle) document.title = newTitle.textContent || "";
+    
+    // Update meta tags
+    const newMetas = doc.querySelectorAll("meta[name]");
+    newMetas.forEach(function(meta) {
+      const name = meta.getAttribute("name");
+      if (name) {
+        const existing = document.querySelector("meta[name=\\"" + name + "\\"]");
+        if (existing) {
+          existing.setAttribute("content", meta.getAttribute("content") || "");
+        } else {
+          document.head.appendChild(meta.cloneNode(true));
+        }
+      }
+    });
+    
+    // Swap root content
     const newRoot = doc.getElementById("root");
-    
-    if (newRoot) {
-      // Swap the content
-      container.innerHTML = newRoot.innerHTML;
+    const currentRoot = document.getElementById("root");
+    if (newRoot && currentRoot) {
+      currentRoot.innerHTML = newRoot.innerHTML;
       
-      // Update document title from the response
-      const newTitle = doc.querySelector("title");
-      if (newTitle) {
-        document.title = newTitle.textContent || "Farm.js App";
+      // Check if new page has a client component
+      const newPathname = window.location.pathname;
+      const matched = matchRoute(newPathname);
+      if (matched) {
+        // Re-hydrate the client component
+        const Component = matched.route.Component;
+        const params = matched.params;
+        const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+        const props = { params: params, searchParams: Promise.resolve(searchParams) };
+        
+        if (!reactRoot) {
+          reactRoot = createRoot(currentRoot);
+        }
+        reactRoot.render(React.createElement(Component, props));
       }
-      
-      // Update meta description
-      const newDesc = doc.querySelector('meta[name="description"]');
-      const oldDesc = document.querySelector('meta[name="description"]');
-      if (newDesc && oldDesc) {
-        oldDesc.setAttribute("content", newDesc.getAttribute("content") || "");
-      } else if (newDesc && !oldDesc) {
-        document.head.appendChild(newDesc.cloneNode(true));
-      }
-      
-      console.log("[Farm.js] SPA navigated (HTML swap) to:", pathname);
-    } else {
-      throw new Error("No #root found in response");
     }
-  } catch (error) {
-    console.error("[Farm.js] HTML swap failed:", error);
-    // Fallback to full page navigation
-    window.location.href = pathname + window.location.search;
-  }
-}
-
-/**
- * Navigate to a new route (client-side SPA navigation)
- * Called when popstate event fires (back/forward buttons or Link clicks)
- */
-async function navigateTo(pathname) {
-  // Skip if same path (prevents unnecessary re-renders)
-  if (pathname === currentPathname) return;
-
-  currentPathname = pathname;
-  const matched = matchRoute(pathname);
-
-  // Ensure we have a container
-  const container = document.getElementById("root");
-  if (!container) {
-    console.error("[Farm.js] Root container not found during navigation");
-    window.location.href = pathname + window.location.search;
-    return;
-  }
-
-  if (!matched) {
-    // Route not found in client bundle - fetch HTML from server (SPA style)
-    // This handles server-only routes (RSC) without full page reload
-    console.log("[Farm.js] Server route, fetching HTML:", pathname);
-    await fetchAndSwapHTML(pathname);
-    return;
-  }
-
-  const { route, params } = matched;
-  const pageProps = createPageProps(params);
-
-  // ⭐ Re-render with new component (smooth SPA transition!)
-  try {
-    if (reactRoot) {
-      // Use render method for navigation (works with both hydrateRoot and createRoot)
-      reactRoot.render(React.createElement(route.Component, pageProps));
-      console.log("[Farm.js] SPA navigated (React) to:", pathname);
-    } else {
-      // If root doesn't exist yet, create it and render
-      reactRoot = createRoot(container);
-      reactRoot.render(React.createElement(route.Component, pageProps));
-      console.log("[Farm.js] Created root and navigated to:", pathname);
-    }
-    
-    // Scroll to top on navigation (like traditional page loads)
-    window.scrollTo(0, 0);
-  } catch (error) {
-    console.error("[Farm.js] Failed to navigate:", error);
-    // Fallback to HTML swap
-    await fetchAndSwapHTML(pathname);
-  }
-}
-
-/**
- * Initial hydration - attaches React to server-rendered HTML
- */
-async function hydrate() {
-  if (isHydrated) return;
-  isHydrated = true;
-
-  const container = document.getElementById("root");
-  if (!container) {
-    console.error("[Farm.js] Root container not found");
-    return;
-  }
-
-  const pathname = window.location.pathname;
-  currentPathname = pathname;
-  const matched = matchRoute(pathname);
-
-  if (!matched) {
-    console.log("[Farm.js] No client component for this route (server-rendered only):", pathname);
-    // ⭐ Still create a root for future navigation to client routes
-    // This ensures SPA navigation works even when starting from a server-only route
-    try {
-      reactRoot = createRoot(container);
-      // Keep the existing server-rendered content, don't replace it
-      console.log("[Farm.js] Set up root for future client navigation");
-    } catch (error) {
-      console.error("[Farm.js] Failed to create root:", error);
-    }
-    return;
-  }
-
-  const { route, params } = matched;
-  const pageProps = createPageProps(params);
-
-  try {
-    // ⭐ Use hydrateRoot for initial hydration (attaches to existing DOM)
-    reactRoot = hydrateRoot(
-      container,
-      React.createElement(route.Component, pageProps)
-    );
-    console.log("[Farm.js] Hydrated:", pathname);
-  } catch (error) {
-    console.error("[Farm.js] Hydration error:", error);
-    // Fallback: try client-side render if hydration fails
-    try {
-      reactRoot = createRoot(container);
-      reactRoot.render(React.createElement(route.Component, pageProps));
-      console.log("[Farm.js] Client-side rendered (hydration fallback):", pathname);
-    } catch (renderError) {
-      console.error("[Farm.js] Render error:", renderError);
-    }
-  }
-}
-
-// ⭐ Listen for navigation events (back/forward buttons)
-window.addEventListener("popstate", () => {
-  currentPathname = null; // Reset to allow navigation
-  navigateTo(window.location.pathname);
-});
-
-// ⭐ Expose SPA router for Link component (matches dev mode API)
-window.__FARM_SPA_ROUTER__ = {
-  navigate: async (href, options = {}) => {
+  },
+  
+  prefetch: function(href) {
     const url = new URL(href, window.location.origin);
-    const pathname = url.pathname;
-    const fullHref = pathname + url.search + url.hash;
+    if (url.origin !== window.location.origin) return;
     
-    // Update history
-    if (options.replace) {
-      window.history.replaceState({}, "", fullHref);
-    } else {
-      window.history.pushState({}, "", fullHref);
-    }
+    const pathname = url.pathname + url.search;
+    if (this.prefetchCache.has(pathname)) return;
     
-    // Navigate to the new route and wait for it to complete
-    await navigateTo(pathname);
-    
-    // Scroll to top AFTER content swap (default: true)
-    if (options.scroll !== false) {
-      window.scrollTo(0, 0);
-    }
+    this.fetchPage(pathname)
+      .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
+      .catch(function() {});
   },
-  prefetch: (href) => {
-    // In production, modules are already bundled, no prefetch needed
-    // Could add preload links here if desired
+  
+  observeForPrefetch: function(element, href) {
+    if (!("IntersectionObserver" in window)) return;
+    
+    const observer = new IntersectionObserver(function(entries) {
+      entries.forEach(function(entry) {
+        if (entry.isIntersecting) {
+          spaRouter.prefetch(href);
+          observer.disconnect();
+        }
+      });
+    }, { rootMargin: "50px" });
+    
+    observer.observe(element);
   },
-  observeForPrefetch: () => {},
-  unobserveForPrefetch: () => {},
+  
+  unobserveForPrefetch: function() {}
 };
 
-// ⭐ Global click handler for SPA navigation
-// This intercepts ALL link clicks, even on server-rendered pages where Link isn't hydrated
-document.addEventListener("click", (e) => {
-  // Find the closest anchor element
-  const anchor = e.target.closest("a");
+// Expose router globally
+window.__FARM_SPA_ROUTER__ = spaRouter;
+
+// Handle popstate (back/forward)
+window.addEventListener("popstate", function() {
+  const pathname = window.location.pathname;
+  const matched = matchRoute(pathname);
+  
+  if (matched) {
+    const Component = matched.route.Component;
+    const params = matched.params;
+    const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+    const props = { params: params, searchParams: Promise.resolve(searchParams) };
+    
+    const container = document.getElementById("root");
+    if (container && reactRoot) {
+      reactRoot.render(React.createElement(Component, props));
+      currentPathname = pathname;
+    }
+  } else {
+    spaRouter.fetchPage(pathname + window.location.search)
+      .then(function(html) { spaRouter.swapContent(html); })
+      .catch(function() { window.location.reload(); });
+  }
+});
+
+// Intercept link clicks
+document.addEventListener("click", function(e) {
+  const target = e.target;
+  const anchor = target.closest ? target.closest("a") : null;
   if (!anchor) return;
   
   const href = anchor.getAttribute("href");
   if (!href) return;
-  
-  // Skip external links
   if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
-  
-  // Skip hash-only links
   if (href.startsWith("#")) return;
-  
-  // Skip if opening in new tab
   if (anchor.target && anchor.target !== "_self") return;
-  
-  // Skip if modifier keys pressed (Ctrl+Click = new tab)
   if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
-  
-  // Skip non-left clicks
   if (e.button !== 0) return;
-  
-  // Skip if default was prevented (e.g., by hydrated Link component)
   if (e.defaultPrevented) return;
   
-  // Intercept and use SPA navigation
   e.preventDefault();
-  window.__FARM_SPA_ROUTER__.navigate(href);
+  spaRouter.navigate(href);
 });
 
-// Hydrate when DOM is ready
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", hydrate);
-} else {
-  hydrate();
-}
+// Initial hydration
+hydrate();
+
+console.log("[Farm.js] SPA router ready");
 `.trim();
 }
 
@@ -973,6 +1091,8 @@ async function handleRequest(request) {
         }
         
         // Include client CSS and hydration script
+        // Add caching headers for edge caching (Vercel, Cloudflare, etc.)
+        // s-maxage: cache at edge for 60s, stale-while-revalidate: serve stale while updating
         return new Response(
           \`<!DOCTYPE html>
 <html lang="en">
@@ -987,7 +1107,13 @@ async function handleRequest(request) {
   <script type="module" src="/farm-client.js"></script>
 </body>
 </html>\`,
-          { status: 200, headers: { "Content-Type": "text/html; charset=utf-8" } }
+          { 
+            status: 200, 
+            headers: { 
+              "Content-Type": "text/html; charset=utf-8",
+              "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+            } 
+          }
         );
       }
     } catch (error) {

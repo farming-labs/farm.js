@@ -1,12 +1,38 @@
-import React from 'react'
-import type { PageProps } from '@farmjs/core'
+"use client";
+
+import React, { useState, useEffect } from 'react'
+import type { PageProps } from '@farmjs/core/client'
 import { Link } from '@farmjs/core/client'
 
-export default async function UserPage({ params, searchParams }: PageProps) {
-  const { id } = params
+export default function UserPage({ params = {} }: PageProps) {
+  const { id = '' } = params
   
-  // searchParams is a Promise, need to await it!
-  const search = await searchParams
+  // For client components, read searchParams from URL on client side
+  const [search, setSearch] = useState<Record<string, string>>({})
+  
+  useEffect(() => {
+    // Parse current URL search params
+    const parseSearchParams = () => {
+      const urlParams = new URLSearchParams(window.location.search)
+      const paramsObj: Record<string, string> = {}
+      urlParams.forEach((value, key) => {
+        paramsObj[key] = value
+      })
+      setSearch(paramsObj)
+    }
+    
+    // Parse on mount
+    parseSearchParams()
+    
+    // Re-parse on popstate (back/forward navigation)
+    const handlePopState = () => parseSearchParams()
+    window.addEventListener('popstate', handlePopState)
+    
+    return () => {
+      window.removeEventListener('popstate', handlePopState)
+    }
+  }, [id]) // Re-run when id changes (SPA navigation to different user)
+  
   const tab = search?.tab as string | undefined
   
   return (

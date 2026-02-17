@@ -1,0 +1,69 @@
+{
+  "name": "@farmjs/plugin",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Official plugins for Farm.js framework",
+  "author": "Farm.js Team",
+  "license": "MIT",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./rsc": {
+      "import": "./dist/rsc/index.js",
+      "types": "./dist/rsc/index.d.ts"
+    },
+    "./rsc/vite-plugin-nitro": {
+      "import": "./dist/rsc/vite-plugin-nitro.js",
+      "types": "./dist/rsc/vite-plugin-nitro.d.ts"
+    },
+    "./middleware": {
+      "import": "./dist/middleware/index.js",
+      "types": "./dist/middleware/index.d.ts"
+    },
+    "./api": {
+      "import": "./dist/api/index.js",
+      "types": "./dist/api/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "scripts"
+  ],
+  "scripts": {
+    "build": "tsc && node scripts/build.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*",
+    "better-call": "^1.0.19",
+    "rsc-html-stream": "^0.0.4",
+    "nitro": "3.0.1-alpha.0"
+  },
+  "peerDependencies": {
+    "@farmjs/core": "workspace:*",
+    "@vitejs/plugin-rsc": ">=0.5.0",
+    "react": ">=19.0.0",
+    "react-dom": ">=19.0.0",
+    "vite": ">=6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@vitejs/plugin-rsc": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.21",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-rsc": "^0.5.18",
+    "tsdown": "^0.15.7",
+    "typescript": "^5.5.3",
+    "vite": "^6.0.0"
+  }
+}

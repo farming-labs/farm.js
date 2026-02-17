@@ -125,8 +125,7 @@ export function farmPlugin(
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
-      if (pm) {
-        server.middlewares.use(async (req, res, next) => {
+      server.middlewares.use(async (req, res, next) => {
           // Handle OpenAPI docs route
           if (openAPIManager && req.url === options.openapi?.route) {
             const docsHandler = openAPIManager.getDocsRouteHandler();
@@ -363,8 +362,7 @@ export function farmPlugin(
               }
             }) as any;
 
-            // Store props on request for hydration
-            (req as any).__FARM_PROPS__ = {};
+            // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
 
             const renderer = farmApp.getServerRenderer();
             await renderer.renderPage(req as any, res as any);
@@ -375,7 +373,6 @@ export function farmPlugin(
             next(error);
           }
         });
-      }
     },
 
     resolveId(id) {
@@ -522,6 +519,117 @@ if (import.meta.hot) {
         fileName: "farm-client-manifest.json",
         source: JSON.stringify(clientManifest, null, 2),
       });
+    },
+
+    async closeBundle() {
+      // SSG: Pre-render static pages at build time
+      if (!farmApp) return;
+
+      try {
+        const routeManager = farmApp.getRouteManager();
+        if (!routeManager) return;
+
+        const { ssg: ssgPages, ssr: ssrRoutes } = await routeManager.collectSSGPages();
+
+        if (ssgPages.length === 0) {
+          logger.info("No SSG pages found - all pages will use SSR");
+          return;
+        }
+
+        logger.info(`Found ${ssgPages.length} SSG pages, ${ssrRoutes.length} SSR routes`);
+        logger.info("Pre-rendering SSG pages...");
+
+        const outDir = path.join(server?.config.root || process.cwd(), options.outDir || "dist");
+        const clientDir = path.join(outDir, "client");
+
+        // Pre-render each SSG page
+        for (const page of ssgPages) {
+          try {
+            // Load the route module
+            const mod = await routeManager.loadRouteModule(page.filePath);
+            if (!mod?.default) continue;
+
+            // Find matching layouts
+            const { layouts } = routeManager.matchRoute(page.urlPath);
+            const layoutModules = await Promise.all(
+              layouts.map((l) => routeManager.loadLayoutModule(l.modulePath)),
+            );
+
+            // Render the page
+            const React = await import("react");
+            const { renderToString } = await import("react-dom/server");
+
+            const PageComponent = mod.default;
+            const pageProps = {
+              params: page.params,
+              searchParams: Promise.resolve({}),
+              path: page.urlPath,
+            };
+
+            let pageElement = React.createElement(PageComponent as any, pageProps);
+
+            // Wrap with layouts
+            for (let i = layoutModules.length - 1; i >= 0; i--) {
+              const layoutModule = layoutModules[i];
+              const LayoutComponent = layoutModule.default;
+              pageElement = React.createElement(LayoutComponent, {
+                children: pageElement,
+                params: page.params,
+              } as any);
+            }
+
+            const html = renderToString(pageElement);
+
+            // Generate full HTML with proper structure
+            const fullHtml = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="/assets/globals.css">
+  ${page.revalidate ? `<meta name="x-farm-revalidate" content="${page.revalidate}">` : ""}
+</head>
+<body>
+  <div id="root">${html}</div>
+  <script type="module" src="/assets/client.js"></script>
+</body>
+</html>`;
+
+            // Write to output directory
+            const outputPath =
+              page.urlPath === "/"
+                ? path.join(clientDir, "index.html")
+                : path.join(clientDir, page.urlPath + ".html");
+
+            fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+            fs.writeFileSync(outputPath, fullHtml);
+
+            const revalidateInfo = page.revalidate ? ` (revalidate: ${page.revalidate}s)` : "";
+            logger.success(`  ✓ ${page.urlPath}${revalidateInfo}`);
+          } catch (error) {
+            logger.error(`  ✗ ${page.urlPath}: ${error}`);
+          }
+        }
+
+        // Write SSG manifest for server to know which pages are pre-rendered
+        const manifestPath = path.join(outDir, "__ssg_manifest.json");
+        fs.writeFileSync(
+          manifestPath,
+          JSON.stringify(
+            ssgPages.map((p) => ({
+              urlPath: p.urlPath,
+              params: p.params,
+              revalidate: p.revalidate,
+            })),
+            null,
+            2,
+          ),
+        );
+
+        logger.success(`SSG complete: ${ssgPages.length} pages pre-rendered`);
+      } catch (error) {
+        logger.error(`SSG build failed: ${error}`);
+      }
     },
 
     async handleHotUpdate(ctx: HmrContext) {
@@ -1121,7 +1229,24 @@ async function hydrate() {
     }
 
     currentPageComponent = PageComponent;
-    currentPageProps = window.__FARM_PROPS__ || {};
+    
+    // Get props - either from server-injected props or by matching the current URL
+    let pageProps = window.__FARM_PROPS__;
+    if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
+      // Extract params from URL using manifest route matching (fallback)
+      const pathname = window.location.pathname;
+      const foundRoute = findRoute(pathname);
+      const searchParams = {};
+      new URLSearchParams(window.location.search).forEach((value, key) => {
+        searchParams[key] = value;
+      });
+      pageProps = {
+        params: foundRoute?.params || {},
+        searchParams: searchParams,
+        path: pathname,
+      };
+    }
+    currentPageProps = pageProps;
     
     // Use hydrateRoot for initial hydration to preserve server-rendered content
     try {
@@ -1234,11 +1359,152 @@ function generateClientManifest(bundle: any): Record<string, any> {
 }
 
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
-  const tailwindcss = await import("tailwindcss");
-  const autoprefixer = await import("autoprefixer");
+  const tailwindcss = (await import("@tailwindcss/vite")).default;
+
+  // Node.js built-in module stubs for browser
+  const nodeBuiltinStubs: Record<string, string> = {
+    "node:string_decoder": "data:text/javascript,export class StringDecoder { write(buf) { return ''; } end() { return ''; } }; export default StringDecoder;",
+    "node:buffer": "data:text/javascript,export const Buffer = { from: () => ({}), alloc: () => ({}), isBuffer: () => false }; export default { Buffer };",
+    "node:stream": "data:text/javascript,export class Readable {}; export class Writable {}; export class Transform {}; export default { Readable, Writable, Transform };",
+    "node:util": "data:text/javascript,export const promisify = (fn) => fn; export const inspect = (obj) => String(obj); export default { promisify, inspect };",
+    "node:events": "data:text/javascript,export class EventEmitter { on() {} off() {} emit() {} }; export default EventEmitter;",
+    "node:path": "data:text/javascript,export const join = (...args) => args.join('/'); export const resolve = (...args) => args.join('/'); export default { join, resolve };",
+    "node:fs": "data:text/javascript,export default {};",
+    "node:url": "data:text/javascript,export const URL = globalThis.URL; export const URLSearchParams = globalThis.URLSearchParams; export default { URL, URLSearchParams };",
+    "node:crypto": "data:text/javascript,export const randomUUID = () => crypto.randomUUID(); export default { randomUUID };",
+    "node:os": "data:text/javascript,export const platform = () => 'browser'; export const homedir = () => '/'; export default { platform, homedir };",
+    "node:child_process": "data:text/javascript,export default {};",
+    "node:http": "data:text/javascript,export default {};",
+    "node:https": "data:text/javascript,export default {};",
+    "node:net": "data:text/javascript,export default {};",
+    "node:tls": "data:text/javascript,export default {};",
+    "node:zlib": "data:text/javascript,export default {};",
+    "node:async_hooks": "data:text/javascript,export const AsyncLocalStorage = class {}; export default { AsyncLocalStorage };",
+    "node:worker_threads": "data:text/javascript,export default {};",
+    "node:perf_hooks": "data:text/javascript,export const performance = globalThis.performance; export default { performance };",
+    "string_decoder": "data:text/javascript,export class StringDecoder { write(buf) { return ''; } end() { return ''; } }; export default StringDecoder;",
+    "buffer": "data:text/javascript,export const Buffer = { from: () => ({}), alloc: () => ({}), isBuffer: () => false }; export default { Buffer };",
+    "stream": "data:text/javascript,export class Readable {}; export class Writable {}; export class Transform {}; export default { Readable, Writable, Transform };",
+    "util": "data:text/javascript,export const promisify = (fn) => fn; export const inspect = (obj) => String(obj); export default { promisify, inspect };",
+    "events": "data:text/javascript,export class EventEmitter { on() {} off() {} emit() {} }; export default EventEmitter;",
+    "path": "data:text/javascript,export const join = (...args) => args.join('/'); export const resolve = (...args) => args.join('/'); export default { join, resolve };",
+    "fs": "data:text/javascript,export default {};",
+    "url": "data:text/javascript,export const URL = globalThis.URL; export const URLSearchParams = globalThis.URLSearchParams; export default { URL, URLSearchParams };",
+    "crypto": "data:text/javascript,export const randomUUID = () => crypto.randomUUID(); export default { randomUUID };",
+    "os": "data:text/javascript,export const platform = () => 'browser'; export const homedir = () => '/'; export default { platform, homedir };",
+    "child_process": "data:text/javascript,export default {};",
+    "http": "data:text/javascript,export default {};",
+    "https": "data:text/javascript,export default {};",
+    "net": "data:text/javascript,export default {};",
+    "tls": "data:text/javascript,export default {};",
+    "zlib": "data:text/javascript,export default {};",
+    "async_hooks": "data:text/javascript,export const AsyncLocalStorage = class {}; export default { AsyncLocalStorage };",
+    "worker_threads": "data:text/javascript,export default {};",
+    "perf_hooks": "data:text/javascript,export const performance = globalThis.performance; export default { performance };",
+  };
+
+  // Plugin to intercept __vite-browser-external requests
+  const viteBrowserExternalPlugin = {
+    name: "farm:browser-external-stub",
+    enforce: "pre" as const,
+    resolveId(id: string) {
+      // Handle Vite's browser external markers
+      if (id.includes("__vite-browser-external:")) {
+        const moduleName = id.replace(/__vite-browser-external:/, "");
+        const stub = nodeBuiltinStubs[moduleName];
+        if (stub) return stub;
+        // Generic stub for unknown node modules
+        return "data:text/javascript,export default {};";
+      }
+      // Handle direct node: imports
+      if (id.startsWith("node:")) {
+        const stub = nodeBuiltinStubs[id];
+        if (stub) return stub;
+        return "data:text/javascript,export default {};";
+      }
+      return null;
+    },
+  };
+
+  // Custom logger to replace Vite's default logs with Farm.js branding
+  const pc = await import("picocolors").then((m) => m.default);
+  let serverStarted = false;
+  let startTime = Date.now();
+
+  const farmLogger = {
+    info: (msg: string) => {
+      // Suppress ALL Vite startup messages - we print our own Farm.js branded output
+      if (
+        msg.includes("VITE") ||
+        msg.includes("vite") ||
+        msg.includes("ready in") ||
+        msg.includes("Local:") ||
+        msg.includes("Network:") ||
+        msg.includes("➜") ||
+        msg.includes("Port") ||
+        msg.includes("trying another")
+      ) {
+        return;
+      }
+      // Pass through other info messages
+      console.log(msg);
+    },
+    warn: (msg: string) => console.warn(pc.yellow(msg)),
+    warnOnce: (msg: string) => console.warn(pc.yellow(msg)),
+    error: (msg: string) => console.error(pc.red(msg)),
+    clearScreen: () => {},
+    hasErrorLogged: () => false,
+    hasWarned: false,
+  };
+
+  // Plugin to print Farm.js branding after server starts
+  const farmBrandingPlugin = {
+    name: "farm:branding",
+    enforce: "pre" as const,
+    configureServer(server: ViteDevServer) {
+      startTime = Date.now();
+      
+      const originalListen = server.listen.bind(server);
+      server.listen = async (port?: number, ...args: any[]) => {
+        const result = await originalListen(port, ...args);
+        if (!serverStarted) {
+          serverStarted = true;
+          const elapsed = Date.now() - startTime;
+          const address = server.httpServer?.address();
+          const resolvedPort = typeof address === "object" && address ? address.port : (server.config.server.port || port || 3000);
+          const hostConfig = server.config.server.host;
+          const isExposed = hostConfig === true || hostConfig === "0.0.0.0";
+
+          console.log("");
+          console.log(`  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`);
+          console.log("");
+          console.log(`  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`);
+          if (isExposed) {
+            // Get actual network address
+            const os = require("os");
+            const interfaces = os.networkInterfaces();
+            for (const name of Object.keys(interfaces)) {
+              for (const iface of interfaces[name] || []) {
+                if (iface.family === "IPv4" && !iface.internal) {
+                  console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.cyan(`http://${iface.address}:${resolvedPort}/`)}`);
+                  break;
+                }
+              }
+            }
+          } else {
+            console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`);
+          }
+          console.log("");
+        }
+        return result;
+      };
+    },
+  };
 
   return {
-    plugins: [farmPlugin(config)],
+    plugins: [tailwindcss(), viteBrowserExternalPlugin, farmPlugin(config), farmBrandingPlugin],
+    customLogger: farmLogger,
+    clearScreen: false,
     optimizeDeps: {
       include: ["react", "react-dom"],
       // Exclude server-side packages from browser bundling
@@ -1265,23 +1531,23 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       ],
     },
     ssr: {
-      noExternal: ["farm"],
+      noExternal: ["farm", "@farmjs/core"],
+      // Externalize React to prevent multiple instances during SSR
+      external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
     },
     resolve: {
       // Ensure single React instance across all modules (critical for hooks!)
       dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
-    },
-    css: {
-      postcss: {
-        plugins: [
-          tailwindcss.default({
-            content: ["./src/**/*.{js,ts,jsx,tsx}"],
-            theme: {
-              extend: {},
-            },
-          }),
-          autoprefixer.default,
-        ],
+      // Stub out problematic server-only modules during dev mode
+      alias: {
+        // Nitro internals that should not be resolved in browser
+        "supports-color": "data:text/javascript,export default false; export const supportsColor = false; export const stdout = false; export const stderr = false;",
+        "@poppinss/dumper": "data:text/javascript,export default {};",
+        "@poppinss/dumper/html": "data:text/javascript,export const createScript = () => ''; export const createStyleSheet = () => '';",
+        "consola/basic": "data:text/javascript,export default { log: console.log, info: console.info, warn: console.warn, error: console.error };",
+        "youch": "data:text/javascript,export default class Youch { toJSON() { return {}; } toHTML() { return ''; } };",
+        // Add all node stubs to alias as well
+        ...nodeBuiltinStubs,
       },
     },
     define: {

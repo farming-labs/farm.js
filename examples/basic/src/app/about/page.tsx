@@ -2,6 +2,10 @@ import React from 'react'
 import type { PageProps, Metadata } from "@farmjs/core"
 import { Link } from "@farmjs/core/client"
 
+// Note: This page uses Link components which require client-side hydration
+// SSG for pages with client components needs proper hydration support
+// export const prerender = true;
+
 export const metadata: Metadata = {
   title: "About | Farm.js",
   description: "Learn about Farm.js - a modern React meta-framework built on Vite",

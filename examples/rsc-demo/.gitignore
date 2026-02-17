@@ -1,0 +1,5 @@
+.farm
+dist
+node_modules
+.vercel
+.env*.local

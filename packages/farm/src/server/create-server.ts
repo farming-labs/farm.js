@@ -1,4 +1,4 @@
-import { createServer as createViteServer } from "vite";
+import { createServer as createViteServer, type ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
 import { farmPlugin } from "../vite";
 import { logger } from "../utils";
@@ -12,6 +12,47 @@ import {
   createCompressionPlugin,
   createLoggerPlugin,
 } from "../plugins";
+
+// Farm.js branding plugin for createServer
+function createBrandingPlugin() {
+  let serverStarted = false;
+  let startTime = Date.now();
+
+  return {
+    name: "farm:branding",
+    enforce: "pre" as const,
+    configureServer(server: ViteDevServer) {
+      startTime = Date.now();
+
+      const originalListen = server.listen.bind(server);
+      server.listen = async (port?: number, ...args: any[]) => {
+        const result = await originalListen(port, ...args);
+        if (!serverStarted) {
+          serverStarted = true;
+          const elapsed = Date.now() - startTime;
+          const address = server.httpServer?.address();
+          const resolvedPort =
+            typeof address === "object" && address
+              ? address.port
+              : server.config.server.port || port || 3000;
+
+          const pc = require("picocolors");
+          console.log("");
+          console.log(
+            `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`,
+          );
+          console.log("");
+          console.log(
+            `  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`,
+          );
+          console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`);
+          console.log("");
+        }
+        return result;
+      };
+    },
+  };
+}
 
 /**
  * Create a Vite development server with Farm.js integration
@@ -77,7 +118,7 @@ export async function createServer(config: FarmConfig = {}) {
 
     const server = await createViteServer({
       root: finalConfig.root || process.cwd(),
-      plugins: [farmPlugin(finalConfig, pluginManager)],
+      plugins: [farmPlugin(finalConfig, pluginManager), createBrandingPlugin()],
       server: {
         middlewareMode: false,
         hmr: {
@@ -124,13 +165,6 @@ export async function createServer(config: FarmConfig = {}) {
 export async function startDevServer(config: FarmConfig = {}, port = 3000) {
   const server = await createServer(config);
   await server.listen(port);
-
-  console.log("");
-  logger.ready(` Farm.js 0.0.1`);
-  console.log("");
-  logger.event(`- Local:        http://localhost:${port}`);
-  logger.event(`- Network:      use --host to expose`);
-  console.log("");
-
+  // Branding is handled by farmBrandingPlugin in vite.ts
   return server;
 }

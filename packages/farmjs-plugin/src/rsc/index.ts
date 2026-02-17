@@ -1,0 +1,976 @@
+/**
+ * Farm.js RSC Plugin
+ *
+ * Provides React Server Components support for Farm.js.
+ * When enabled, this plugin:
+ * - Configures three build environments (rsc, ssr, client)
+ * - Generates virtual entry files for routing, rendering, and hydration
+ * - Supports server actions when experimental.serverActions is true
+ * - Integrates with @vitejs/plugin-rsc for core RSC transforms
+ *
+ * @example
+ * ```ts
+ * import { defineConfig } from '@farmjs/plugin/rsc'
+ *
+ * export default defineConfig({
+ *   srcDir: 'src',
+ *   experimental: {
+ *     serverComponents: true,
+ *     serverActions: true,
+ *   },
+ * })
+ * ```
+ */
+
+import type { Plugin, UserConfig, ViteDevServer } from "vite";
+import type { FarmRscPluginOptions, EntryContext } from "./types.js";
+import { generateRscEntry } from "./entries/rsc.js";
+import { generateSsrEntry } from "./entries/ssr.js";
+import { generateClientEntry } from "./entries/client.js";
+import fs from "fs/promises";
+import path from "path";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+// Use API and middleware plugins from @farmjs/core (require so CJS build resolves when ESM .mjs is missing)
+const require_ = createRequire(import.meta.url);
+const { farmApiPlugin, farmMiddlewarePlugin } = require_("@farmjs/core") as typeof import("@farmjs/core");
+
+export type { FarmRscPluginOptions, EntryContext };
+export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
+export type { BuildRscNitroOptions } from "./nitro-build.js";
+export { default as nitro } from "./vite-plugin-nitro.js";
+export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
+
+// Extended config type for Farm.js RSC
+export interface FarmRscConfig {
+  srcDir?: string;
+  outDir?: string;
+  basePath?: string;
+  port?: number;
+  experimental?: {
+    serverComponents?: boolean;
+    serverActions?: boolean;
+  };
+  debug?: boolean;
+  encryptActions?: boolean;
+  routesDir?: string;
+  entries?: {
+    rsc?: string;
+    ssr?: string;
+    client?: string;
+  };
+  /** Extra Vite plugins (e.g. rsc() with entries so client build resolves virtual:vite-rsc/client-references). */
+  plugins?: any[];
+}
+
+/**
+ * Define a Farm.js RSC configuration
+ * This is the recommended way to configure your RSC app
+ */
+export function defineConfig(config: FarmRscConfig = {}): UserConfig {
+  const port = config.port ?? 3000;
+  const debug = config.debug ?? false;
+
+  return {
+    // Core Farm RSC settings
+    experimental: {
+      serverComponents: config.experimental?.serverComponents ?? true,
+      serverActions: config.experimental?.serverActions ?? true,
+    },
+    srcDir: config.srcDir ?? "src",
+    outDir: config.outDir ?? "dist",
+    basePath: config.basePath ?? "/",
+
+    // Vite server configuration
+    server: {
+      port,
+      strictPort: false,
+    },
+
+    // Custom logger to hide Vite's default startup banner
+    customLogger: createFarmLogger(port, debug),
+
+    // Configure esbuild for JSX transformation
+    esbuild: {
+      jsx: "automatic",
+      jsxImportSource: "react",
+    },
+
+    // Add plugins: middleware, API, RSC, then any user plugins (e.g. rsc() with entries for client build).
+    plugins: [
+      farmMiddlewarePlugin({ srcDir: config.srcDir ?? "src", debug }),
+      farmApiPlugin({ srcDir: config.srcDir ?? "src", debug }),
+      farmRsc({
+        debug,
+        encryptActions: config.encryptActions,
+        routesDir: config.routesDir,
+        entries: config.entries,
+      }),
+      ...(Array.isArray(config.plugins) ? config.plugins : []),
+    ],
+  } as any;
+}
+
+/**
+ * Create a custom logger that shows Farm.js styled startup messages
+ */
+function createFarmLogger(port: number, debug: boolean) {
+  const noop = (s: string) => s;
+  let pc: any;
+  try {
+    pc = require("picocolors");
+    if (typeof pc?.red !== "function") pc = null;
+  } catch {
+    pc = null;
+  }
+  if (!pc) {
+    pc = {
+      dim: noop,
+      bold: noop,
+      blue: noop,
+      cyan: noop,
+      green: noop,
+      yellow: noop,
+      red: noop,
+      gray: noop,
+    };
+  }
+
+  return {
+    hasWarned: false,
+    info(msg: string) {
+      // Suppress Vite's startup banner (ready in, Local:, Network:, etc.)
+      if (msg.includes("VITE v") || msg.includes("ready in") || msg.includes("Local:") || msg.includes("Network:") || msg.includes("press h")) {
+        return;
+      }
+      // Pass through other messages only in debug mode
+      if (debug) {
+        console.log(msg);
+      }
+    },
+    warn(msg: string) {
+      this.hasWarned = true;
+      const prefix = pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]");
+      console.warn(`${prefix} ${pc.yellow("⚠")} ${msg}`);
+    },
+    warnOnce(msg: string) {
+      this.warn(msg);
+    },
+    error(msg: string) {
+      const prefix = pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]");
+      console.error(`${prefix} ${pc.bold(pc.red("✖"))} ${msg}`);
+    },
+    clearScreen() {
+      // Don't clear screen
+    },
+    hasErrorLogged() {
+      return false;
+    },
+  };
+}
+
+// Virtual module prefix (Vite convention)
+const VIRTUAL_PREFIX = "\0";
+const VIRTUAL_RSC_ENTRY = "virtual:@farmjs/rsc/entry-rsc";
+const VIRTUAL_SSR_ENTRY = "virtual:@farmjs/rsc/entry-ssr";
+const VIRTUAL_CLIENT_ENTRY = "virtual:@farmjs/rsc/entry-client";
+const VIRTUAL_HYDRATE_ENTRY = "virtual:@farmjs/rsc/hydrate";
+
+/**
+ * Farm.js RSC Plugin
+ *
+ * @param options - Plugin configuration options
+ * @returns Array of Vite plugins
+ */
+export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
+  // Track whether RSC is enabled (read from user's config)
+  let rscEnabled = false;
+  let actionsEnabled = false;
+
+  // Context passed to entry generators
+  let entryContext: EntryContext;
+  /** Set in config when RSC enabled; used by build plugin to run Nitro after client writeBundle. */
+  let rscBuildRoot: string | undefined;
+
+  // Store for debugging
+  const debug = options.debug ?? false;
+
+  // Logger with [FARM] [TAG] [METHOD] format - matches @farmjs/core style
+  const logResponse = (method: string, urlPath: string, status: number, duration: number, tag: "PAGE" | "API" = "PAGE") => {
+    try {
+      const pc = require("picocolors");
+      let statusColor = pc.green;
+      if (status >= 500) statusColor = pc.red;
+      else if (status >= 400) statusColor = pc.yellow;
+      else if (status >= 300) statusColor = pc.cyan;
+
+      const log = [
+        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+        pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+        pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+        pc.gray(urlPath),
+        pc.dim("-"),
+        statusColor(status.toString()),
+        pc.dim(`(${duration}ms)`),
+      ].join(" ");
+      console.log(log);
+    } catch {
+      console.log(`[FARM] [${tag}] [${method}] ${urlPath} - ${status} (${duration}ms)`);
+    }
+  };
+
+  // No verbose info logs; only [FARM] [PAGE] / [MIDDLEWARE] / [API] are shown
+  const logInfo = (_message: string) => {};
+
+  return [
+    // ────────────────────────────────────────────────────────
+    // CONFIG PLUGIN
+    // Reads Farm's experimental flags and generates environment config
+    // ────────────────────────────────────────────────────────
+    {
+      name: "@farmjs/plugin/rsc:config",
+      enforce: "pre",
+
+      async config(config: UserConfig) {
+        const c = config as UserConfig & {
+          experimental?: { serverComponents?: boolean; serverActions?: boolean };
+          srcDir?: string;
+          outDir?: string;
+          basePath?: string;
+          root?: string;
+        };
+        // Check if user enabled RSC in their config
+        rscEnabled = c.experimental?.serverComponents === true;
+        actionsEnabled = c.experimental?.serverActions === true;
+
+        logInfo(`RSC enabled: ${rscEnabled}`);
+        logInfo(`Actions enabled: ${actionsEnabled}`);
+
+        // If RSC not enabled, don't add environment config
+        if (!rscEnabled) {
+          return;
+        }
+
+        // Read user's directory configuration
+        const srcDir = c.srcDir ?? "src";
+        const outDir = c.outDir ?? "dist";
+        const root = c.root ?? process.cwd();
+        rscBuildRoot = root;
+        // Build context for entry generators
+        entryContext = {
+          srcDir,
+          outDir,
+          basePath: c.basePath ?? "/",
+          routesDir: options.routesDir ?? "",
+          actionsEnabled,
+          debug,
+        };
+
+        logInfo(`srcDir: ${entryContext.srcDir}, outDir: ${entryContext.outDir}`);
+
+        // Write real entry files so @vitejs/plugin-rsc can use file-based entries.
+        // This ensures the RSC plugin runs for every environment (rsc, ssr, client) and client build/deploy works.
+        const entriesDir = path.join(root, ".farm", "rsc-entries");
+        await fs.mkdir(entriesDir, { recursive: true });
+        const entryRscPath = path.join(entriesDir, "entry.rsc.tsx");
+        const entrySsrPath = path.join(entriesDir, "entry.ssr.tsx");
+        const entryClientPath = path.join(entriesDir, "entry.browser.tsx");
+        await fs.writeFile(entryRscPath, generateRscEntry(entryContext));
+        await fs.writeFile(entrySsrPath, generateSsrEntry(entryContext));
+        await fs.writeFile(entryClientPath, generateClientEntry(entryContext));
+        logInfo(`Wrote RSC entries to ${entriesDir}`);
+
+        // User must add rsc({ entries: { rsc, ssr, client } }) to config.plugins so the RSC plugin
+        // runs for every environment and client build can resolve virtual:vite-rsc/client-references.
+
+        // Entry paths (relative to root) so Vite runs rsc/ssr/client builds (not index.html).
+        const entryRsc = "./.farm/rsc-entries/entry.rsc.tsx";
+        const entrySsr = "./.farm/rsc-entries/entry.ssr.tsx";
+        const entryClient = "./.farm/rsc-entries/entry.browser.tsx";
+
+        // Resolve @farmjs/core so Vite (and rsc/ssr envs) can load it when app code imports it (fixes "Failed to resolve entry" in dev).
+        let farmCorePath: string | null = null;
+        try {
+          farmCorePath = path.dirname(require_.resolve("@farmjs/core/package.json"));
+        } catch {
+          // @farmjs/core not installed or not built; alias not added
+        }
+
+        // Return shared config and environments. RSC plugin (in plugins) needs to run in same
+        // pipeline for client build to resolve virtual:vite-rsc/client-references.
+        return {
+          appType: "custom" as const,
+          builder: { sharedConfigBuild: true } as any,
+          ssr: {
+            external: [
+              "react",
+              "react-dom",
+              "react-dom/server",
+              "react/jsx-runtime",
+              "react/jsx-dev-runtime",
+            ],
+          },
+          resolve: {
+            dedupe: ["react", "react-dom"],
+            ...(farmCorePath
+              ? {
+                  alias: [
+                    { find: "@farmjs/core", replacement: farmCorePath },
+                    { find: "@farmjs/core/middleware", replacement: path.join(farmCorePath, "dist/middleware.mjs") },
+                    { find: "@farmjs/core/api", replacement: path.join(farmCorePath, "dist/api.mjs") },
+                  ],
+                }
+              : {}),
+          },
+          esbuild: {
+            jsx: "automatic",
+            jsxImportSource: "react",
+          },
+          environments: {
+            rsc: {
+              build: {
+                outDir: `${outDir}/rsc`,
+                copyPublicDir: false,
+                rollupOptions: { input: { index: entryRsc } },
+              },
+              resolve: { conditions: ["react-server", "node", "import"] },
+            },
+            ssr: {
+              build: {
+                outDir: `${outDir}/ssr`,
+                copyPublicDir: false,
+                rollupOptions: { input: { index: entrySsr } },
+              },
+              resolve: { conditions: ["node", "import"] },
+            },
+            client: {
+              build: {
+                outDir: `${outDir}/client`,
+                rollupOptions: { input: { index: entryClient } },
+              },
+              resolve: { conditions: ["browser", "import"] },
+            },
+          },
+        };
+      },
+    },
+
+    // Nitro: run after all environments (like @hiogawa/vite-plugin-nitro). If the runtime supports
+    // plugin buildApp order "post", this runs automatically; else use build script (see comment below).
+    {
+      name: "@farmjs/plugin/rsc:nitro-build",
+      apply: "build",
+      buildApp: {
+        order: "post",
+        handler: async (builder: {
+          environments: Record<
+            string,
+            { config: { build: { outDir: string; assetsDir?: string } } }
+          >;
+        }) => {
+          if (!rscEnabled || !rscBuildRoot || !entryContext) return;
+          if ((globalThis as any).__FARM_NITRO_PLUGIN_RAN) return;
+          const root = path.resolve(rscBuildRoot);
+          if ((globalThis as any).__FARM_NITRO_PATHS) {
+            const { runNitroFromBuildApp } = await import("./vite-plugin-nitro.js");
+            await runNitroFromBuildApp();
+            return;
+          }
+          const rscEnv = builder.environments?.rsc;
+          const ssrEnv = builder.environments?.ssr;
+          const clientEnv = builder.environments?.client;
+          if (!rscEnv || !ssrEnv || !clientEnv) return;
+          const { buildRscNitro } = await import("./nitro-build.js");
+          await buildRscNitro({
+            root,
+            rendererPath: path.join(root, rscEnv.config.build.outDir, "index.js"),
+            publicDir: path.join(root, clientEnv.config.build.outDir),
+            ssrPath: path.join(root, ssrEnv.config.build.outDir, "index.js"),
+            assetsDir: clientEnv.config.build.assetsDir,
+            preset: process.env.NITRO_PRESET || "vercel",
+          });
+        },
+      },
+    } as Plugin,
+
+    // ────────────────────────────────────────────────────────
+    // VIRTUAL ENTRIES PLUGIN
+    // Generates entry files dynamically based on user's project structure
+    // ────────────────────────────────────────────────────────
+    {
+      name: "@farmjs/plugin/rsc:virtual-entries",
+      enforce: "pre",
+
+      resolveId(source: string) {
+        // Mark our virtual modules with \0 prefix (Vite convention)
+        if (source === VIRTUAL_RSC_ENTRY) {
+          return VIRTUAL_PREFIX + VIRTUAL_RSC_ENTRY;
+        }
+        if (source === VIRTUAL_SSR_ENTRY) {
+          return VIRTUAL_PREFIX + VIRTUAL_SSR_ENTRY;
+        }
+        if (source === VIRTUAL_CLIENT_ENTRY) {
+          return VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY;
+        }
+        // Resolve file-based entry paths to virtual entries so we always serve generated content
+        // (avoids stale .farm/rsc-entries/* on disk causing duplicate content / wrong rootContent fallback)
+        if (source.includes("rsc-entries") && source.includes("entry.browser.tsx")) {
+          return VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY;
+        }
+        if (source.includes("rsc-entries") && source.includes("entry.rsc.tsx")) {
+          return VIRTUAL_PREFIX + VIRTUAL_RSC_ENTRY;
+        }
+        if (source.includes("rsc-entries") && source.includes("entry.ssr.tsx")) {
+          return VIRTUAL_PREFIX + VIRTUAL_SSR_ENTRY;
+        }
+        // Handle dynamic hydration entries like /@rsc-hydrate/counter
+        if (source.startsWith("/@rsc-hydrate/")) {
+          return VIRTUAL_PREFIX + source;
+        }
+        return null;
+      },
+
+      load(id: string) {
+        // Only generate entries if RSC is enabled
+        if (!rscEnabled) {
+          return null;
+        }
+
+        // Generate the appropriate entry based on the virtual module ID
+        if (id === VIRTUAL_PREFIX + VIRTUAL_RSC_ENTRY) {
+          logInfo("Generating RSC entry");
+          return generateRscEntry(entryContext);
+        }
+
+        if (id === VIRTUAL_PREFIX + VIRTUAL_SSR_ENTRY) {
+          logInfo("Generating SSR entry");
+          return generateSsrEntry(entryContext);
+        }
+
+        if (id === VIRTUAL_PREFIX + VIRTUAL_CLIENT_ENTRY) {
+          logInfo("Generating client entry");
+          return generateClientEntry(entryContext);
+        }
+
+        // Handle dynamic hydration entries
+        if (id.startsWith(VIRTUAL_PREFIX + "/@rsc-hydrate/")) {
+          const pagePath = id.replace(VIRTUAL_PREFIX + "/@rsc-hydrate", "");
+          const srcDir = entryContext.srcDir;
+          const pageImportPath = pagePath === "/" ? `/${srcDir}/page.tsx` : `/${srcDir}${pagePath}/page.tsx`;
+          const layoutImportPath = `/${srcDir}/layout.tsx`;
+          const actionBlock = entryContext.actionsEnabled
+            ? `
+import { setServerCallback, encodeReply, createTemporaryReferenceSet, createFromReadableStream } from '@vitejs/plugin-rsc/browser';
+setServerCallback(async (id, args) => {
+  const refs = createTemporaryReferenceSet();
+  const body = await encodeReply(args, { temporaryReferences: refs });
+  const headers = { 'x-farm-action-id': id, 'Accept': 'text/x-component' };
+  if (typeof body === 'string') headers['Content-Type'] = 'text/plain; charset=utf-8';
+  else if (!(body instanceof FormData)) headers['Content-Type'] = 'application/octet-stream';
+  const res = await fetch(location.href, { method: 'POST', headers, body });
+  if (!res.ok) throw new Error('Server action failed: ' + res.status);
+  const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
+  if (p?.returnValue?.ok) return p.returnValue.data;
+  throw p?.returnValue?.data;
+});
+`
+            : "";
+          // Generate a hydration entry for this page
+          return `${actionBlock}
+import React from 'react';
+import { hydrateRoot } from 'react-dom/client';
+
+// Import page and layout using absolute paths
+import Page from '${pageImportPath}';
+import Layout from '${layoutImportPath}';
+
+// Hydrate when DOM is ready
+function hydrate() {
+  const root = document.getElementById('root');
+  if (root) {
+    const pageContent = React.createElement(Page, window.__PAGE_PROPS__ || {});
+    const app = React.createElement(Layout, null, pageContent);
+    hydrateRoot(root, app);
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', hydrate);
+} else {
+  hydrate();
+}
+`;
+        }
+
+        return null;
+      },
+    },
+
+    // ────────────────────────────────────────────────────────
+    // DEV SERVER PLUGIN
+    // Handles page rendering during development
+    // Middleware and API routes are handled by standalone plugins
+    // ────────────────────────────────────────────────────────
+    {
+      name: "@farmjs/plugin/rsc:dev-server",
+
+      configureServer(server) {
+        if (!rscEnabled) {
+          return;
+        }
+
+        logInfo("Dev server middleware ready");
+
+        const pageCache = new Map<string, any>();
+
+        // Add middleware to handle page requests
+        return () => {
+          server.middlewares.use(async (req, res, next) => {
+            const url = req.url || "/";
+            const pathname = url.split("?")[0];
+            const method = req.method || "GET";
+
+            // Skip Vite internal requests, static files, and API routes
+            if (
+              pathname.startsWith("/@") ||
+              pathname.startsWith("/__") ||
+              pathname.startsWith("/node_modules") ||
+              pathname.startsWith("/src/") ||
+              pathname.startsWith("/api/") ||
+              (pathname.includes(".") && !pathname.endsWith("/"))
+            ) {
+              return next();
+            }
+
+            const startTime = Date.now();
+
+            try {
+              // Use RSC pipeline in dev so client components hydrate (counter, forms, etc.).
+              // Set globals so the RSC entry can load SSR and the SSR entry can get bootstrap script.
+              const clientEntryUrl = "/.farm/rsc-entries/entry.browser.tsx";
+              const ssrEnv = (server as any).environments?.ssr;
+              (globalThis as any).__VITE_RSC_LOAD_SSR__ = async () => {
+                if (ssrEnv) {
+                  const ssrSource =
+                    (ssrEnv.config?.build as any)?.rollupOptions?.input?.index ??
+                    path.join(server.config.root, ".farm/rsc-entries/entry.ssr.tsx");
+                  const resolved = await ssrEnv.pluginContainer.resolveId(ssrSource, undefined, { ssr: true });
+                  if (resolved?.id) return ssrEnv.runner.import(resolved.id);
+                }
+                return server.ssrLoadModule("./.farm/rsc-entries/entry.ssr.tsx");
+              };
+              // When server actions are enabled, prepend an inline assignment so __viteRscCallServer
+              // is always a function before any chunk runs (avoids "globalThis.__viteRscCallServer is not a function").
+              const bootstrapPrefix = actionsEnabled
+                ? `(function(){if(typeof globalThis.__viteRscCallServer!=='function'){globalThis.__viteRscCallServer=function(){return Promise.reject(new Error('Farm.js: server actions not ready'));}}})();\n`
+                : "";
+              (globalThis as any).__FARM_VITE_RSC_LOAD_BOOTSTRAP__ = async () =>
+                bootstrapPrefix + `import("/@react-refresh").then(m=>{m.default.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;return import("/@vite/client");}).then(()=>import(${JSON.stringify(clientEntryUrl)}));`;
+
+              const base = `http://${req.headers.host || "localhost:3000"}`;
+              let body: Buffer | undefined;
+              if (method === "POST") {
+                const chunks: Buffer[] = [];
+                for await (const chunk of req) chunks.push(chunk as Buffer);
+                body = Buffer.concat(chunks);
+                // Keep as buffer so request.formData() / request.text() in RSC handler work (multipart must not be UTF-8 decoded)
+              }
+              const request = new Request(new URL(url, base), {
+                method,
+                headers: req.headers as HeadersInit,
+                body: method === "POST" && body && body.length > 0 ? (body as unknown as BodyInit) : undefined,
+              });
+
+              // Load the RSC entry in the "rsc" environment so @vitejs/plugin-rsc transforms run with this.environment.name === "rsc".
+              const rscEnv = (server as any).environments?.rsc;
+              let rscEntry: any = null;
+              if (rscEnv) {
+                const rscSource =
+                  (rscEnv.config?.build as any)?.rollupOptions?.input?.index ??
+                  "./.farm/rsc-entries/entry.rsc.tsx";
+                const root = server.config.root;
+                const importer = path.join(root, "vite.config.ts");
+                const absoluteRscEntry = path.resolve(root, ".farm", "rsc-entries", "entry.rsc.tsx");
+                const resolved =
+                  (await rscEnv.pluginContainer.resolveId(rscSource, importer, { ssr: true })) ??
+                  (await rscEnv.pluginContainer.resolveId(rscSource, undefined, { ssr: true })) ??
+                  (await rscEnv.pluginContainer.resolveId(absoluteRscEntry, undefined, { ssr: true }));
+                const id = resolved?.id ?? pathToFileURL(absoluteRscEntry).href;
+                rscEntry = await rscEnv.runner.import(id);
+              }
+              if (!rscEntry?.default?.fetch) throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
+              const response = await rscEntry.default.fetch(request);
+
+              res.statusCode = response.status;
+              response.headers.forEach((value: string, key: string) => {
+                if (key.toLowerCase() !== "transfer-encoding") res.setHeader(key, value);
+              });
+              if (response.body) {
+                const reader = response.body.getReader();
+                const pump = async () => {
+                  while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    res.write(Buffer.from(value));
+                  }
+                  res.end();
+                };
+                await pump();
+              } else {
+                res.end();
+              }
+              const duration = Date.now() - startTime;
+              logResponse(method, pathname, response.status, duration);
+              return;
+            } catch (rscError: any) {
+              // RSC pipeline failed; fall back to legacy SSR for GET only
+              if (method !== "GET") {
+                const duration = Date.now() - startTime;
+                logResponse(method, pathname, 500, duration);
+                console.error("[Farm.js] RSC dev handler error:", rscError);
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "text/html");
+                res.end(`<!DOCTYPE html><html><head><title>Error</title></head><body><pre>${(rscError as Error).message}</pre></body></html>`);
+                return;
+              }
+            }
+
+            try {
+              if (method !== "GET") return next();
+              // Get middleware data from standalone middleware plugin
+              const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
+
+              // Build the glob pattern for discovering routes
+              const srcDir = entryContext.srcDir;
+              const glob = entryContext.routesDir
+                ? `/${srcDir}/${entryContext.routesDir}`
+                : `/${srcDir}`;
+
+              // Find matching page file
+              const normalized = pathname.replace(/\/$/, "") || "/";
+              
+              // Common page file patterns
+              const possiblePaths = [
+                `${glob}${normalized === "/" ? "" : normalized}/page.tsx`,
+                `${glob}${normalized === "/" ? "" : normalized}/page.jsx`,
+                `${glob}/page.tsx`,
+                `${glob}/page.jsx`,
+              ];
+
+              // Also check for dynamic routes by walking up the path
+              const parts = normalized.split("/").filter(Boolean);
+              for (let i = parts.length; i >= 0; i--) {
+                const base = parts.slice(0, i).join("/");
+                possiblePaths.push(`${glob}/${base}/page.tsx`);
+                possiblePaths.push(`${glob}/${base}/page.jsx`);
+              }
+
+              let pageModule: any = null;
+              let matchedPath = "";
+              let layoutModule: any = null;
+
+              // Try to find and load the page
+              for (const pagePath of possiblePaths) {
+                try {
+                  // Convert glob path to actual file path
+                  const actualPath = pagePath.startsWith("/") ? `.${pagePath}` : pagePath;
+                  
+                  if (pageCache.has(pagePath)) {
+                    pageModule = pageCache.get(pagePath);
+                    matchedPath = pagePath;
+                    break;
+                  }
+
+                  pageModule = await server.ssrLoadModule(actualPath);
+                  if (pageModule?.default) {
+                    pageCache.set(pagePath, pageModule);
+                    matchedPath = pagePath;
+                    // Page loaded successfully
+                    break;
+                  }
+                } catch (e) {
+                  // Page not found at this path, continue
+                }
+              }
+
+              if (!pageModule?.default) {
+                // No page found, pass to next middleware
+                return next();
+              }
+
+              // Try to load layout
+              try {
+                const layoutPath = `./${srcDir}/layout.tsx`;
+                layoutModule = await server.ssrLoadModule(layoutPath);
+              } catch (e) {
+                // No layout, that's fine
+              }
+
+              // Import React and ReactDOM using native Node.js imports
+              // This avoids Vite's ESM evaluator which doesn't support CommonJS
+              const React = await import("react");
+              const ReactDOMServer = await import("react-dom/server");
+
+              const Page = pageModule.default;
+              const metadata = pageModule.metadata || {};
+              const Layout = layoutModule?.default;
+
+              // Parse URL params (basic dynamic route support)
+              const params: Record<string, string> = {};
+              const searchParams = Object.fromEntries(new URLSearchParams(url.split("?")[1] || ""));
+
+              // Render the page with middleware data
+              const pageProps = { 
+                params, 
+                searchParams,
+                // Middleware shared data is available to pages
+                middlewareData,
+              };
+              
+              // Helper to check if a function is async or returns a Promise
+              // We need to actually call the function to detect this reliably
+              // since transpiled async functions may not be detectable by constructor
+              const isAsyncFunction = (fn: any): boolean => {
+                if (!fn) return false;
+                // Check if it's an AsyncFunction
+                if (fn.constructor?.name === "AsyncFunction") return true;
+                // Check if function.toString() contains async
+                try {
+                  const str = fn.toString();
+                  // Check for "async function" or "async (" patterns
+                  if (/^async\s/.test(str) || /^async\s*\(/.test(str)) return true;
+                } catch {}
+                return false;
+              };
+              
+              // Try to render the page - if it returns a Promise, it's async
+              let pageContent;
+              let isAsyncPage = isAsyncFunction(Page);
+              
+              try {
+                const result = Page(pageProps);
+                // Check if result is a Promise (thenable)
+                if (result && typeof result.then === "function") {
+                  isAsyncPage = true;
+                  pageContent = await result;
+                } else {
+                  // If it's not a Promise, it's a React element or we need to use createElement
+                  if (React.default.isValidElement(result)) {
+                    pageContent = result;
+                  } else {
+                    pageContent = React.default.createElement(Page, pageProps);
+                  }
+                }
+              } catch (e: any) {
+                // If calling directly failed, use createElement
+                pageContent = React.default.createElement(Page, pageProps);
+              }
+
+              // Check if Layout is async
+              let isAsyncLayout = isAsyncFunction(Layout);
+
+              // Wrap in layout if available
+              let content = pageContent;
+              if (Layout) {
+                try {
+                  const layoutResult = Layout({ children: pageContent });
+                  if (layoutResult && typeof layoutResult.then === "function") {
+                    isAsyncLayout = true;
+                    content = await layoutResult;
+                  } else if (React.default.isValidElement(layoutResult)) {
+                    content = layoutResult;
+                  } else {
+                    content = React.default.createElement(Layout, null, pageContent);
+                  }
+                } catch (e) {
+                  content = React.default.createElement(Layout, null, pageContent);
+                }
+              }
+
+              // Create full HTML page
+              const h = React.default.createElement;
+              const isSyncPage = !isAsyncPage && !isAsyncLayout;
+              // For sync pages we load preamble + vite client + hydrate in one script below; do not load vite-client in head so order is guaranteed.
+              const headElements = [
+                h("meta", { key: "charset", charSet: "utf-8" }),
+                h("meta", { key: "viewport", name: "viewport", content: "width=device-width, initial-scale=1" }),
+                metadata.title ? h("title", { key: "title" }, metadata.title) : h("title", { key: "title" }, "Farm.js"),
+                metadata.description ? h("meta", { key: "description", name: "description", content: metadata.description }) : null,
+                h("link", { key: "globals-css", rel: "stylesheet", href: `/${srcDir}/globals.css` }),
+                ...(isSyncPage ? [] : [h("script", { key: "vite-client", type: "module", src: "/@vite/client" })]),
+              ].filter(Boolean);
+
+              // Create body elements
+              // For async (server) pages, we don't hydrate the page itself - only client components within
+              // For sync pages, we can hydrate the whole thing
+              const bodyElements: any[] = [
+                h("div", { key: "root", id: "root" }, content),
+              ];
+              
+              // Only add hydration script for sync pages (non-async)
+              // When server actions are enabled, set __viteRscCallServer first so form submission works.
+              if (actionsEnabled) {
+                bodyElements.push(
+                  h("script", {
+                    key: "rsc-call-server",
+                    dangerouslySetInnerHTML: {
+                      __html: `(function(){if(typeof globalThis.__viteRscCallServer!=='function'){globalThis.__viteRscCallServer=function(){return Promise.reject(new Error('Farm.js: server actions not ready'));}}})();`,
+                    },
+                  }),
+                );
+              }
+              // Set React refresh preamble synchronously first so "use client" components don't throw when they load.
+              if (!isAsyncPage && !isAsyncLayout) {
+                bodyElements.push(
+                  h("script", {
+                    key: "preamble-sync",
+                    dangerouslySetInnerHTML: {
+                      __html: `window.__vite_plugin_react_preamble_installed__=true;window.$RefreshReg$=function(){};window.$RefreshSig$=function(){return function(t){return t;}};`,
+                    },
+                  }),
+                  h("script", {
+                    key: "page-props",
+                    dangerouslySetInnerHTML: { __html: `window.__PAGE_PROPS__ = ${JSON.stringify(pageProps)};` },
+                  }),
+                  h("script", {
+                    key: "hydrate",
+                    type: "module",
+                    dangerouslySetInnerHTML: {
+                      __html: `import("/@react-refresh").then(m=>{m.default.injectIntoGlobalHook(window);return import("/@vite/client");}).then(()=>import(${JSON.stringify(`/@rsc-hydrate${normalized}`)}));`,
+                    },
+                  }),
+                );
+              } else {
+                // For async pages, we need to hydrate client component islands
+                // Load a minimal script that finds and hydrates "use client" components
+                bodyElements.push(
+                  h("script", { 
+                    key: "client-islands", 
+                    type: "module", 
+                    dangerouslySetInnerHTML: { 
+                      __html: `
+// Hydrate client component islands
+import '/@vite/client';
+
+// Find all client components and hydrate them
+// The actual hydration is handled by @vitejs/plugin-rsc transforms
+` 
+                    } 
+                  }),
+                );
+              }
+
+              const fullPage = h("html", { lang: "en" },
+                h("head", null, ...headElements),
+                h("body", null, ...bodyElements)
+              );
+
+              const html = "<!DOCTYPE html>" + ReactDOMServer.renderToString(fullPage);
+
+              res.statusCode = 200;
+              res.setHeader("Content-Type", "text/html");
+              res.end(html);
+              
+              const duration = Date.now() - startTime;
+              logResponse("GET", pathname, 200, duration);
+            } catch (error: any) {
+              const duration = Date.now() - startTime;
+              logResponse("GET", pathname, 500, duration);
+              console.error(error);
+
+              // Return error page
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "text/html");
+              res.end(`
+                <!DOCTYPE html>
+                <html>
+                <head><title>Error</title></head>
+                <body style="font-family: system-ui; padding: 2rem; background: #1a1a2e; color: #eee;">
+                  <h1 style="color: #ff6b6b;">Error</h1>
+                  <pre style="background: #16213e; padding: 1rem; border-radius: 8px; overflow: auto;">${error.stack || error.message}</pre>
+                </body>
+                </html>
+              `);
+            }
+          });
+        };
+      },
+    },
+
+    // ────────────────────────────────────────────────────────
+    // RSC CORE TRANSFORMS PLUGIN (placeholder for any configResolved logic)
+    // @vitejs/plugin-rsc is now injected in the config hook above so its
+    // virtual modules (e.g. virtual:vite-rsc/client-references) run in all environments.
+    // ────────────────────────────────────────────────────────
+    {
+      name: "@farmjs/plugin/rsc:core-loader",
+      enforce: "pre",
+    },
+
+    // ────────────────────────────────────────────────────────
+    // HMR PLUGIN
+    // Sends HMR updates when server components, middleware, or API routes change
+    // ────────────────────────────────────────────────────────
+    {
+      name: "@farmjs/plugin/rsc:hmr",
+
+      handleHotUpdate({ file, server, modules }) {
+        if (!rscEnabled) {
+          return;
+        }
+
+        const srcDir = entryContext?.srcDir || "src";
+        const fileName = file.split("/").pop() || "";
+
+        // Handle middleware changes
+        if (fileName.startsWith("middleware.")) {
+          logInfo(`Middleware updated: ${fileName}`);
+          // Full reload for middleware changes
+          server.ws.send({ type: "full-reload", path: "*" });
+          return [];
+        }
+
+        // Handle API route changes
+        if (file.includes("/api/") && fileName.startsWith("route.")) {
+          const shortPath = file.split("/api/")[1] || file;
+          logInfo(`API route updated: ${shortPath}`);
+          // Invalidate modules and reload
+          for (const mod of modules) {
+            server.moduleGraph.invalidateModule(mod);
+          }
+          return [];
+        }
+
+        // Handle page/layout changes
+        if (
+          file.includes(srcDir) &&
+          (file.endsWith(".tsx") || file.endsWith(".jsx"))
+        ) {
+          if (fileName.startsWith("page.") || fileName.startsWith("layout.")) {
+            const shortPath = file.split(`/${srcDir}/`)[1] || file;
+            logInfo(`Updated: ${shortPath}`);
+
+            // Invalidate modules
+            for (const mod of modules) {
+              server.moduleGraph.invalidateModule(mod);
+            }
+
+            // Full reload for page/layout changes
+            server.ws.send({ type: "full-reload", path: "*" });
+            return [];
+          }
+
+          // Component changes - send HMR update
+          logInfo(`HMR update: ${fileName}`);
+          server.ws.send({
+            type: "custom",
+            event: "rsc:update",
+            data: { file },
+          });
+        }
+
+        return modules;
+      },
+    },
+  ];
+}

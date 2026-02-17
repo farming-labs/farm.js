@@ -9,6 +9,7 @@ export { createContext } from "./context";
 export { MiddlewareManager } from "./manager";
 export { getMiddlewareData, getMiddlewareValue } from "./server";
 export { unwrapMiddleware, getFromMiddleware, hasMiddlewareData } from "./helpers";
+export * from "./vite-plugin";
 
 export type {
   MiddlewareContext,
