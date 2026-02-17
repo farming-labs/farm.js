@@ -41,20 +41,138 @@ import {
   code += `} from '@vitejs/plugin-rsc/rsc';
 `;
 
-  // Auto-discover pages and layouts using Vite's glob import
+  // Auto-discover pages, layouts, and middleware using Vite's glob import
   code += `
 // Debug logging helper
 function debug(...args) {
   ${debugLog}
 }
 
-// Auto-discover all page and layout files
+// Auto-discover all page, layout, and middleware files
 // eager: true means they're imported at startup, not lazily
 const pages = import.meta.glob('${glob}/**/page.{tsx,jsx,ts,js}', { eager: true });
 const layouts = import.meta.glob('${glob}/**/layout.{tsx,jsx,ts,js}', { eager: true });
+const middlewares = import.meta.glob('${glob}/**/middleware.{tsx,jsx,ts,js}', { eager: true });
 
 debug('Discovered pages:', Object.keys(pages));
 debug('Discovered layouts:', Object.keys(layouts));
+debug('Discovered middlewares:', Object.keys(middlewares));
+
+/**
+ * Convert middleware file path to route path
+ * e.g., '/src/middleware.ts' -> '/'
+ * e.g., '/src/counter/middleware.ts' -> '/counter'
+ */
+function middlewarePathToRoute(filePath) {
+  let route = filePath
+    .replace('${glob}', '')
+    .replace(/\\/middleware\\.[tj]sx?$/, '') || '/';
+  return route;
+}
+
+/**
+ * Get all applicable middleware for a pathname (from root to most specific)
+ */
+function getApplicableMiddleware(pathname) {
+  const applicable = [];
+  const normalizedPath = pathname.replace(/\\/$/, '') || '/';
+  
+  for (const [filePath, module] of Object.entries(middlewares)) {
+    const mwPath = middlewarePathToRoute(filePath);
+    
+    // Root middleware (/) applies to everything
+    // Other middleware applies to their path and sub-paths
+    if (mwPath === '/' || normalizedPath.startsWith(mwPath) || normalizedPath === mwPath) {
+      applicable.push({
+        path: mwPath,
+        filePath,
+        module,
+        config: module.config,
+      });
+    }
+  }
+  
+  // Sort by path depth (root first, then nested)
+  applicable.sort((a, b) => {
+    const depthA = a.path.split('/').filter(Boolean).length;
+    const depthB = b.path.split('/').filter(Boolean).length;
+    return depthA - depthB;
+  });
+  
+  return applicable;
+}
+
+/**
+ * Create a middleware context
+ */
+function createMiddlewareContext(request, url) {
+  return {
+    method: request.method,
+    url: url.href,
+    pathname: url.pathname,
+    searchParams: url.searchParams,
+    headers: new Map(),
+    data: new Map(),
+    request,
+  };
+}
+
+/**
+ * Execute middleware chain for a request
+ * Returns { handled: boolean, ctx: context } 
+ */
+async function executeMiddleware(request, url) {
+  const applicable = getApplicableMiddleware(url.pathname);
+  
+  if (applicable.length === 0) {
+    return { handled: false, ctx: createMiddlewareContext(request, url) };
+  }
+  
+  debug('Executing middleware for', url.pathname, '- count:', applicable.length);
+  
+  let ctx = createMiddlewareContext(request, url);
+  
+  for (const mw of applicable) {
+    const module = mw.module;
+    let handlers = [];
+    
+    // Get handlers from the middleware module
+    if (module.default) {
+      const defaultExport = module.default;
+      
+      // Check if it has a build method (middleware chain object)
+      if (typeof defaultExport === 'object' && 'build' in defaultExport) {
+        if (typeof defaultExport.setBasePath === 'function') {
+          defaultExport.setBasePath(mw.path);
+        }
+        const built = defaultExport.build();
+        handlers = built.handlers || [];
+      } else if (typeof defaultExport === 'function') {
+        handlers = [defaultExport];
+      }
+    }
+    
+    // Execute handlers in sequence
+    for (const handler of handlers) {
+      let nextCalled = false;
+      const next = async () => { nextCalled = true; };
+      
+      try {
+        await handler(ctx, next);
+      } catch (err) {
+        console.error('[Middleware] Error in', mw.path, err);
+        throw err;
+      }
+      
+      // If next() was not called, middleware handled the request
+      if (!nextCalled && ctx._response) {
+        return { handled: true, ctx, response: ctx._response };
+      }
+    }
+  }
+  
+  return { handled: false, ctx };
+}
 
 /**
  * Convert file path to route pattern
@@ -196,6 +314,21 @@ async function handler(request) {
   try {
   const url = new URL(request.url);
   debug('Handling request:', request.method, url.pathname);
+
+  // Execute middleware first
+  const middlewareResult = await executeMiddleware(request, url);
+  
+  // If middleware handled the request (e.g., redirect, auth), return the response
+  if (middlewareResult.handled && middlewareResult.response) {
+    return middlewareResult.response;
+  }
+  
+  // Extract middleware data and headers for page rendering
+  const middlewareData = Object.fromEntries(middlewareResult.ctx.data);
+  const middlewareHeaders = new Headers();
+  for (const [key, value] of middlewareResult.ctx.headers) {
+    middlewareHeaders.set(key, value);
+  }
 `;
 
   // If actions enabled, add action handling before rendering
@@ -261,8 +394,8 @@ async function handler(request) {
   // Parse search params
   const searchParams = Object.fromEntries(url.searchParams);
   
-  // Page props passed to components
-  const pageProps = { params, searchParams };
+  // Page props passed to components (includes middleware shared data)
+  const pageProps = { params, searchParams, middlewareData };
   
   debug('Rendering page:', pattern, 'with props:', pageProps);
   
@@ -325,9 +458,10 @@ async function handler(request) {
     
     if (acceptHeader.includes('text/x-component')) {
       debug('Returning RSC stream for client navigation');
-      return new Response(rscStream, {
-        headers: { 'content-type': 'text/x-component' },
-      });
+      // Merge middleware headers with response headers
+      const responseHeaders = new Headers(middlewareHeaders);
+      responseHeaders.set('content-type', 'text/x-component');
+      return new Response(rscStream, { headers: responseHeaders });
     }
 
     // For initial page load, delegate to SSR to produce HTML
@@ -342,9 +476,10 @@ async function handler(request) {
     }
     if (ssr) {
       const html = await ssr.renderHTML(rscStream${ctx.actionsEnabled ? ", { formState }" : ""});
-      return new Response(html, {
-        headers: { 'content-type': 'text/html' },
-      });
+      // Merge middleware headers with response headers
+      const responseHeaders = new Headers(middlewareHeaders);
+      responseHeaders.set('content-type', 'text/html');
+      return new Response(html, { headers: responseHeaders });
     }
   }
   
@@ -365,9 +500,10 @@ async function handler(request) {
   );
   const renderToString = (await import('react-dom/server')).renderToString;
   const html = '<!DOCTYPE html>' + renderToString(pageWithScript);
-  return new Response(html, {
-    headers: { 'content-type': 'text/html' },
-  });
+  // Merge middleware headers with response headers
+  const responseHeaders = new Headers(middlewareHeaders);
+  responseHeaders.set('content-type', 'text/html');
+  return new Response(html, { headers: responseHeaders });
   } catch (err) {
     console.error('[RSC] Handler error:', err);
     const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Server Error';

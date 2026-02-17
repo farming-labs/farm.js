@@ -5404,7 +5404,7 @@ async function getCurrentTime() {
   return (/* @__PURE__ */ new Date()).toISOString();
 }
 __name(getCurrentTime, "getCurrentTime");
-const metadata$4 = {
+const metadata$5 = {
   title: "Home - SSR Demo",
   description: "This page is server-rendered on each request"
 };
@@ -5457,10 +5457,10 @@ __name(HomePage, "HomePage");
 const pageRoute0 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: HomePage,
-  metadata: metadata$4
+  metadata: metadata$5
 }, Symbol.toStringTag, { value: "Module" }));
 const ssg$3 = true;
-const metadata$3 = {
+const metadata$4 = {
   title: "About - SSG Demo",
   description: "This page is pre-rendered at build time"
 };
@@ -5539,103 +5539,10 @@ __name(AboutPage, "AboutPage");
 const pageRoute1 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: AboutPage,
-  metadata: metadata$3,
+  metadata: metadata$4,
   ssg: ssg$3
 }, Symbol.toStringTag, { value: "Module" }));
-function DashboardPage() {
-  const [count, setCount] = reactExports.useState(0);
-  const [lastUpdated, setLastUpdated] = reactExports.useState("");
-  reactExports.useEffect(() => {
-    setLastUpdated((/* @__PURE__ */ new Date()).toISOString());
-  }, []);
-  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-8", children: [
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 mb-4", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium", children: "SSR" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium", children: "Client Interactive" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-3xl font-bold text-gray-900 mb-4", children: "Dashboard" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-gray-600 mb-4", children: [
-        "This page demonstrates ",
-        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "SSR with client-side interactivity" }),
-        ". The page is server-rendered, then hydrated on the client for interactivity."
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-100 rounded-lg p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-gray-500", children: [
-        "Client-side time: ",
-        lastUpdated
-      ] }) })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm text-gray-500 mb-2", children: "Total Users" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-gray-900", children: "1,234" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-green-600 text-sm", children: "+12% from last week" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm text-gray-500 mb-2", children: "Page Views" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-gray-900", children: "45.2K" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-green-600 text-sm", children: "+8% from last week" })
-      ] }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm text-gray-500 mb-2", children: "Conversion Rate" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-gray-900", children: "3.2%" }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-red-600 text-sm", children: "-0.5% from last week" })
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-bold text-gray-900 mb-4", children: "Interactive Counter (Client-Side)" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mb-4", children: "This counter demonstrates client-side interactivity after hydration." }),
-      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4", children: [
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            onClick: /* @__PURE__ */ __name(() => setCount((c) => c - 1), "onClick"),
-            className: "px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-bold",
-            children: "-"
-          }
-        ),
-        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-4xl font-bold text-gray-900 w-20 text-center", children: count }),
-        /* @__PURE__ */ jsxRuntimeExports.jsx(
-          "button",
-          {
-            onClick: /* @__PURE__ */ __name(() => setCount((c) => c + 1), "onClick"),
-            className: "px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold",
-            children: "+"
-          }
-        )
-      ] })
-    ] }),
-    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
-      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-bold text-gray-900 mb-4", children: "Code Example" }),
-      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "bg-gray-100 rounded p-4 text-sm overflow-x-auto", children: `"use client";
-
-// No ssg export = SSR (default)
-// "use client" enables interactivity
-
-import { useState } from "react";
-
-export default function DashboardPage() {
-  const [count, setCount] = useState(0);
-
-  return (
-    <div>
-      <h1>Dashboard</h1>
-      <p>Count: {count}</p>
-      <button onClick={() => setCount(c => c + 1)}>
-        Increment
-      </button>
-    </div>
-  );
-}` })
-    ] })
-  ] });
-}
-__name(DashboardPage, "DashboardPage");
-const pageRoute2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
-  __proto__: null,
-  default: DashboardPage
-}, Symbol.toStringTag, { value: "Module" }));
-const metadata$2 = {
+const metadata$3 = {
   title: "API Demo - Farm.js",
   description: "Demonstrating API routes with typed endpoints"
 };
@@ -5774,14 +5681,107 @@ export const GET = createEndpoint({
   ] });
 }
 __name(ApiDemoPage, "ApiDemoPage");
-const pageRoute3 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+const pageRoute2 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: ApiDemoPage,
-  metadata: metadata$2
+  metadata: metadata$3
+}, Symbol.toStringTag, { value: "Module" }));
+function DashboardPage() {
+  const [count, setCount] = reactExports.useState(0);
+  const [lastUpdated, setLastUpdated] = reactExports.useState("");
+  reactExports.useEffect(() => {
+    setLastUpdated((/* @__PURE__ */ new Date()).toISOString());
+  }, []);
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-8", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-2 mb-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium", children: "SSR" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium", children: "Client Interactive" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-3xl font-bold text-gray-900 mb-4", children: "Dashboard" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-gray-600 mb-4", children: [
+        "This page demonstrates ",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("strong", { children: "SSR with client-side interactivity" }),
+        ". The page is server-rendered, then hydrated on the client for interactivity."
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "bg-gray-100 rounded-lg p-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("p", { className: "text-sm text-gray-500", children: [
+        "Client-side time: ",
+        lastUpdated
+      ] }) })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm text-gray-500 mb-2", children: "Total Users" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-gray-900", children: "1,234" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-green-600 text-sm", children: "+12% from last week" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm text-gray-500 mb-2", children: "Page Views" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-gray-900", children: "45.2K" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-green-600 text-sm", children: "+8% from last week" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-sm text-gray-500 mb-2", children: "Conversion Rate" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-3xl font-bold text-gray-900", children: "3.2%" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-red-600 text-sm", children: "-0.5% from last week" })
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-bold text-gray-900 mb-4", children: "Interactive Counter (Client-Side)" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mb-4", children: "This counter demonstrates client-side interactivity after hydration." }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center gap-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: /* @__PURE__ */ __name(() => setCount((c) => c - 1), "onClick"),
+            className: "px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-bold",
+            children: "-"
+          }
+        ),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-4xl font-bold text-gray-900 w-20 text-center", children: count }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx(
+          "button",
+          {
+            onClick: /* @__PURE__ */ __name(() => setCount((c) => c + 1), "onClick"),
+            className: "px-4 py-2 bg-green-500 hover:bg-green-600 text-white rounded-lg font-bold",
+            children: "+"
+          }
+        )
+      ] })
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-bold text-gray-900 mb-4", children: "Code Example" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("pre", { className: "bg-gray-100 rounded p-4 text-sm overflow-x-auto", children: `"use client";
+
+// No ssg export = SSR (default)
+// "use client" enables interactivity
+
+import { useState } from "react";
+
+export default function DashboardPage() {
+  const [count, setCount] = useState(0);
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Count: {count}</p>
+      <button onClick={() => setCount(c => c + 1)}>
+        Increment
+      </button>
+    </div>
+  );
+}` })
+    ] })
+  ] });
+}
+__name(DashboardPage, "DashboardPage");
+const pageRoute3 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: DashboardPage
 }, Symbol.toStringTag, { value: "Module" }));
 const ssg$2 = true;
 const revalidate = 60;
-const metadata$1 = {
+const metadata$2 = {
   title: "Products - ISR Demo",
   description: "Static page that regenerates every 60 seconds"
 };
@@ -5880,12 +5880,12 @@ __name(ProductsPage, "ProductsPage");
 const pageRoute4 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: ProductsPage,
-  metadata: metadata$1,
+  metadata: metadata$2,
   revalidate,
   ssg: ssg$2
 }, Symbol.toStringTag, { value: "Module" }));
 const ssg$1 = true;
-const metadata = {
+const metadata$1 = {
   title: "Team - SSG with Data",
   description: "Static page with data fetched at build time"
 };
@@ -5953,7 +5953,7 @@ __name(TeamPage, "TeamPage");
 const pageRoute5 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
   __proto__: null,
   default: TeamPage,
-  metadata,
+  metadata: metadata$1,
   ssg: ssg$1
 }, Symbol.toStringTag, { value: "Module" }));
 const ssg = true;
@@ -6097,6 +6097,33 @@ const pageRoute6 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.definePr
   getStaticPaths,
   ssg
 }, Symbol.toStringTag, { value: "Module" }));
+const metadata = {
+  title: "Farm.js SSR/SSG Demo",
+  description: "Demonstrating SSR and SSG capabilities in Farm.js"
+};
+function RootLayout({ children }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "min-h-screen bg-gray-50", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsx("nav", { className: "bg-white shadow-sm border-b", children: /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "max-w-6xl mx-auto px-4 py-4", children: /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-between", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/", className: "text-xl font-bold text-green-600", children: "Farm.js SSR/SSG Demo" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex gap-4 flex-wrap", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/", className: "text-gray-600 hover:text-green-600", children: "Home (SSR)" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/about", className: "text-gray-600 hover:text-green-600", children: "About (SSG)" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/team", className: "text-gray-600 hover:text-green-600", children: "Team (SSG)" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/products", className: "text-gray-600 hover:text-green-600", children: "Products (ISR)" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/dashboard", className: "text-gray-600 hover:text-green-600", children: "Dashboard" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/blog/hello-world", className: "text-gray-600 hover:text-green-600", children: "Blog" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("a", { href: "/api-demo", className: "text-gray-600 hover:text-green-600", children: "API Demo" })
+      ] })
+    ] }) }) }),
+    /* @__PURE__ */ jsxRuntimeExports.jsx("main", { className: "max-w-6xl mx-auto px-4 py-8", children })
+  ] });
+}
+__name(RootLayout, "RootLayout");
+const layoutRoute0 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: RootLayout,
+  metadata
+}, Symbol.toStringTag, { value: "Module" }));
 const apiRoutes = [
   {
     path: "/api/hello",
@@ -6119,11 +6146,11 @@ const pageRoutes = [
     module: pageRoute1
   },
   {
-    pattern: "/dashboard",
+    pattern: "/api-demo",
     module: pageRoute2
   },
   {
-    pattern: "/api-demo",
+    pattern: "/dashboard",
     module: pageRoute3
   },
   {
@@ -6137,6 +6164,12 @@ const pageRoutes = [
   {
     pattern: "/blog/[slug]",
     module: pageRoute6
+  }
+];
+const layoutRoutes = [
+  {
+    pattern: "/",
+    module: layoutRoute0
   }
 ];
 function createAPIHandler() {
@@ -6174,6 +6207,22 @@ function matchPageRoute(pathname) {
   return null;
 }
 __name(matchPageRoute, "matchPageRoute");
+function getApplicableLayouts(pathname) {
+  const applicable = [];
+  const normalizedPath = pathname.replace(/\/$/, "") || "/";
+  for (const layout of layoutRoutes) {
+    if (layout.pattern === "/" || normalizedPath === layout.pattern || normalizedPath.startsWith(layout.pattern + "/")) {
+      applicable.push(layout);
+    }
+  }
+  applicable.sort((a, b) => {
+    const depthA = a.pattern.split("/").filter(Boolean).length;
+    const depthB = b.pattern.split("/").filter(Boolean).length;
+    return depthA - depthB;
+  });
+  return applicable;
+}
+__name(getApplicableLayouts, "getApplicableLayouts");
 async function handleRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -6198,44 +6247,59 @@ async function handleRequest(request) {
     const { route, params } = matchedRoute;
     try {
       const PageComponent = route.module.default;
-      const metadata2 = route.module.metadata || {};
+      const pageMetadata = route.module.metadata || {};
+      const applicableLayouts = getApplicableLayouts(pathname);
       if (PageComponent) {
         const searchParamsObj = Object.fromEntries(url.searchParams.entries());
         const ReactDOMServer = await import("./assets/server.node-pKixXoe3.js").then((n) => n.s);
         const React2 = await Promise.resolve().then(() => index);
         const searchParams = Promise.resolve(searchParamsObj);
         const pageProps = { params, searchParams };
-        let html = "";
+        let pageElement;
         if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
           try {
             const result = await PageComponent(pageProps);
             if (React2.isValidElement(result)) {
-              html = ReactDOMServer.renderToString(result);
+              pageElement = result;
             } else {
-              html = ReactDOMServer.renderToString(React2.createElement("div", null, String(result)));
+              pageElement = React2.createElement("div", null, String(result));
             }
           } catch (asyncError) {
-            const element = React2.createElement(PageComponent, pageProps);
-            html = ReactDOMServer.renderToString(element);
+            pageElement = React2.createElement(PageComponent, pageProps);
           }
         } else {
-          const element = React2.createElement(PageComponent, pageProps);
-          html = ReactDOMServer.renderToString(element);
+          pageElement = React2.createElement(PageComponent, pageProps);
         }
-        const title = metadata2.title || "Farm.js App";
-        const description = metadata2.description || "";
+        let wrappedElement = pageElement;
+        for (let i = applicableLayouts.length - 1; i >= 0; i--) {
+          const layout = applicableLayouts[i];
+          const LayoutComponent = layout.module.default;
+          if (LayoutComponent) {
+            wrappedElement = React2.createElement(LayoutComponent, { children: wrappedElement, params });
+          }
+        }
+        const html = ReactDOMServer.renderToString(wrappedElement);
+        let mergedMetadata = {};
+        for (const layout of applicableLayouts) {
+          if (layout.module.metadata) {
+            mergedMetadata = { ...mergedMetadata, ...layout.module.metadata };
+          }
+        }
+        mergedMetadata = { ...mergedMetadata, ...pageMetadata };
+        const title = mergedMetadata.title || "Farm.js App";
+        const description = mergedMetadata.description || "";
         let metaTags = "";
         if (description) {
           metaTags += `
   <meta name="description" content="${description.replace(/"/g, "&quot;")}">`;
         }
-        if (metadata2.keywords) {
-          const keywords = Array.isArray(metadata2.keywords) ? metadata2.keywords.join(", ") : metadata2.keywords;
+        if (mergedMetadata.keywords) {
+          const keywords = Array.isArray(mergedMetadata.keywords) ? mergedMetadata.keywords.join(", ") : mergedMetadata.keywords;
           metaTags += `
   <meta name="keywords" content="${keywords.replace(/"/g, "&quot;")}">`;
         }
-        if (metadata2.openGraph) {
-          const og = metadata2.openGraph;
+        if (mergedMetadata.openGraph) {
+          const og = mergedMetadata.openGraph;
           if (og.title) metaTags += `
   <meta property="og:title" content="${og.title.replace(/"/g, "&quot;")}">`;
           if (og.description) metaTags += `
@@ -6243,8 +6307,23 @@ async function handleRequest(request) {
           if (og.image) metaTags += `
   <meta property="og:image" content="${og.image}">`;
         }
-        return new Response(
-          `<!DOCTYPE html>
+        const trimmedHtml = html.trim();
+        const hasFullDocument = trimmedHtml.startsWith("<html") || trimmedHtml.startsWith("<!DOCTYPE");
+        let fullHtml;
+        if (hasFullDocument) {
+          fullHtml = html.replace(/<head([^>]*)>/i, '<head$1>\n  <link rel="stylesheet" href="/farm-client.css">').replace(/<head([^>]*)>([\s\S]*?)<\/head>/i, (match, attrs, headContent) => {
+            if (!headContent.includes("<title>") && title !== "Farm.js App") {
+              return `<head${attrs}>${headContent}
+  <title>${title}</title>
+</head>`;
+            }
+            return match;
+          }).replace(/<\/body>/i, '  <script type="module" src="/farm-client.js"><\/script>\n</body>');
+          if (!fullHtml.trim().startsWith("<!DOCTYPE")) {
+            fullHtml = "<!DOCTYPE html>\n" + fullHtml;
+          }
+        } else {
+          fullHtml = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -6256,7 +6335,10 @@ async function handleRequest(request) {
   <div id="root">${html}</div>
   <script type="module" src="/farm-client.js"><\/script>
 </body>
-</html>`,
+</html>`;
+        }
+        return new Response(
+          fullHtml,
           {
             status: 200,
             headers: {

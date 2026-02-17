@@ -52,13 +52,39 @@ export async function buildUniversal(
     }
     logger.info(`📋 Found ${pageRoutes.length} page routes`);
 
+    // Discover layout files early (needed for client CSS scanning)
+    const fs = await import("fs/promises");
+    const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
+    const appDir = path.join(root, srcDir, "app");
+    
+    async function findLayoutsForClient(dir: string, routePrefix: string = "/"): Promise<void> {
+      try {
+        const entries = await fs.readdir(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?)$/)) {
+            layoutRoutes.push({
+              pattern: routePrefix,
+              modulePath: path.join(dir, entry.name),
+            });
+          } else if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
+            const childPrefix = routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
+            await findLayoutsForClient(path.join(dir, entry.name), childPrefix);
+          }
+        }
+      } catch {
+        // Directory doesn't exist or can't be read
+      }
+    }
+    await findLayoutsForClient(appDir);
+    logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
+
     const clientOutputDir = path.join(root, distDir, "client");
 
     // Step 1 & 2: Build client and SSR bundles IN PARALLEL for faster builds
     logger.info("📦 Building client and SSR bundles in parallel...");
     const [_, ssrResult] = await Promise.all([
       // Client build (to disk)
-      buildClient(config, root, srcDir, clientOutputDir, pageRoutes),
+      buildClient(config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
       // SSR build (in memory)
       buildSSRInMemory(config, root, srcDir, routeManager, apiRouteManager, serverRenderer),
     ]);
@@ -97,6 +123,7 @@ async function buildClient(
   srcDir: string,
   outputDir: string,
   pageRoutes: Array<{ pattern: string; modulePath: string }>,
+  layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
 ) {
   const { farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
@@ -137,21 +164,35 @@ async function buildClient(
   );
 
   // Generate client hydration entry code
-  const clientHydrationCode = generateClientHydrationEntry(clientPages, root, srcDir);
+  const clientHydrationCode = generateClientHydrationEntry(clientPages, layoutRoutes, root, srcDir);
 
   // Write the client entry to a temporary file
   const clientEntryPath = path.join(root, srcDir, ".farm-client-entry.tsx");
   await fs.writeFile(clientEntryPath, clientHydrationCode);
 
-  // Tailwind v4 via @tailwindcss/vite (no PostCSS or tailwind.config)
+  // Tailwind v4 via @tailwindcss/vite (only if the PROJECT has it in dependencies)
+  // Otherwise, rely on the project's PostCSS/Tailwind v3 setup
   let tailwindVitePlugin: any = undefined;
   try {
-    const farmPkgRoot = path.join(_dirname, "..", "..");
-    const requireFromFarm = createRequire(path.join(farmPkgRoot, "package.json"));
-    const tailwindVite = requireFromFarm("@tailwindcss/vite");
-    tailwindVitePlugin = (tailwindVite.default ?? tailwindVite)();
-  } catch {
-    // @tailwindcss/vite not available; CSS may be unprocessed
+    // Check if the project's package.json has @tailwindcss/vite as a dependency
+    const projectPkgPath = path.join(root, "package.json");
+    const projectPkg = JSON.parse(await fs.readFile(projectPkgPath, "utf-8"));
+    const hasTailwindVite = 
+      projectPkg.dependencies?.["@tailwindcss/vite"] ||
+      projectPkg.devDependencies?.["@tailwindcss/vite"];
+    
+    if (hasTailwindVite) {
+      // Try to require from the project's node_modules
+      const projectRequire = createRequire(projectPkgPath);
+      const tailwindVite = projectRequire("@tailwindcss/vite");
+      tailwindVitePlugin = (tailwindVite.default ?? tailwindVite)();
+      logger.info("📦 Using Tailwind v4 (@tailwindcss/vite) from project");
+    } else {
+      logger.info("📦 Using project's PostCSS/Tailwind setup (no @tailwindcss/vite in project deps)");
+    }
+  } catch (err) {
+    // Error reading package.json or loading the plugin
+    logger.info("📦 Using project's PostCSS/Tailwind setup (fallback)");
   }
 
   try {
@@ -304,17 +345,32 @@ async function buildClient(
  */
 function generateClientHydrationEntry(
   clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }>,
+  layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   root: string,
   srcDir: string,
 ): string {
   // Always import global CSS for Tailwind
   const cssImport = `import "./app/globals.css";`;
+  
+  // Import layouts for wrapping client components
+  const layoutImportStatements: string[] = [];
+  const layoutRegistrations: string[] = [];
+  
+  layoutRoutes.forEach((layout, index) => {
+    // Create relative import path from srcDir
+    const relativePath = layout.modulePath.replace(path.join(root, srcDir) + "/", "./");
+    layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
+    layoutRegistrations.push(`  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`);
+  });
+  
+  const layoutImports = layoutImportStatements.join("\n");
 
   if (clientPages.length === 0) {
     // No client pages - just basic runtime with CSS and SPA navigation
     return `
 // Farm.js Client Runtime (no client components)
 ${cssImport}
+${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 
@@ -465,6 +521,7 @@ console.log("[Farm.js] SPA router ready");
   return `
 // Farm.js Client Runtime - SPA with Hydration
 ${cssImport}
+${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 
@@ -475,7 +532,51 @@ const clientRoutes = [
 ${routeEntries.join(",\n")}
 ];
 
-console.log("[Farm.js] Client bundle loaded with", clientRoutes.length, "client routes");
+// Layout routes for wrapping client components
+const layoutRoutes = [
+${layoutRegistrations.join(",\n")}
+];
+
+console.log("[Farm.js] Client bundle loaded with", clientRoutes.length, "client routes and", layoutRoutes.length, "layouts");
+
+// Get applicable layouts for a pathname (sorted by depth, root first)
+function getApplicableLayouts(pathname) {
+  const applicable = [];
+  const normalizedPath = pathname.replace(/\\/$/, '') || '/';
+  
+  for (const layout of layoutRoutes) {
+    if (layout.pattern === '/' || 
+        normalizedPath === layout.pattern || 
+        normalizedPath.startsWith(layout.pattern + '/')) {
+      applicable.push(layout);
+    }
+  }
+  
+  // Sort by depth (root first)
+  applicable.sort(function(a, b) {
+    const depthA = a.pattern.split('/').filter(Boolean).length;
+    const depthB = b.pattern.split('/').filter(Boolean).length;
+    return depthA - depthB;
+  });
+  
+  return applicable;
+}
+
+// Wrap a page element with applicable layouts
+function wrapWithLayouts(pageElement, pathname, params) {
+  const layouts = getApplicableLayouts(pathname);
+  let wrapped = pageElement;
+  
+  // Wrap from innermost to outermost (reverse order since layouts are root-first)
+  for (let i = layouts.length - 1; i >= 0; i--) {
+    const LayoutComponent = layouts[i].Component;
+    if (LayoutComponent) {
+      wrapped = React.createElement(LayoutComponent, { children: wrapped, params: params });
+    }
+  }
+  
+  return wrapped;
+}
 
 // Match pathname to client route
 function matchRoute(pathname) {
@@ -535,16 +636,20 @@ function hydrate() {
   
   const props = { params: params, searchParams: Promise.resolve(searchParams) };
   
+  // Create page element and wrap with layouts
+  const pageElement = React.createElement(Component, props);
+  const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
+  
   try {
     if (!isHydrated && container.innerHTML.trim()) {
-      reactRoot = hydrateRoot(container, React.createElement(Component, props));
+      reactRoot = hydrateRoot(container, wrappedElement);
       isHydrated = true;
       console.log("[Farm.js] Hydrated:", pathname);
     } else {
       if (!reactRoot) {
         reactRoot = createRoot(container);
       }
-      reactRoot.render(React.createElement(Component, props));
+      reactRoot.render(wrappedElement);
       console.log("[Farm.js] Rendered:", pathname);
     }
     currentPathname = pathname;
@@ -568,19 +673,23 @@ const spaRouter = {
     const matched = matchRoute(pathname);
     
     if (matched) {
-      // Client component - render directly
+      // Client component - render with layout wrapper
       window.history.pushState({}, "", href);
       const Component = matched.route.Component;
       const params = matched.params;
       const searchParams = Object.fromEntries(url.searchParams);
       const props = { params: params, searchParams: Promise.resolve(searchParams) };
       
+      // Create page element and wrap with layouts
+      const pageElement = React.createElement(Component, props);
+      const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
+      
       const container = document.getElementById("root");
       if (container) {
         if (!reactRoot) {
           reactRoot = createRoot(container);
         }
-        reactRoot.render(React.createElement(Component, props));
+        reactRoot.render(wrappedElement);
         currentPathname = pathname;
         console.log("[Farm.js] SPA navigated to client route:", pathname);
       }
@@ -784,11 +893,44 @@ async function buildSSRInMemory(
     });
   }
 
-  logger.info(`📋 Found ${pageRoutes.length} page routes and ${apiRoutes.length} API routes`);
+  // Discover layout files by scanning the source directory
+  const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
+  const fsSync = await import("fs");
+  const appDir = path.join(root, srcDir, "app");
+  
+  async function findLayouts(dir: string, routePrefix: string = "/"): Promise<void> {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?)$/)) {
+          layoutRoutes.push({
+            pattern: routePrefix,
+            modulePath: path.join(dir, entry.name),
+          });
+        } else if (entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".")) {
+          const subRoute = routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
+          await findLayouts(path.join(dir, entry.name), subRoute);
+        }
+      }
+    } catch {
+      // Directory doesn't exist or can't be read
+    }
+  }
+  
+  await findLayouts(appDir);
+  
+  // Sort layouts by depth (root first)
+  layoutRoutes.sort((a, b) => {
+    const depthA = a.pattern.split("/").filter(Boolean).length;
+    const depthB = b.pattern.split("/").filter(Boolean).length;
+    return depthA - depthB;
+  });
+
+  logger.info(`📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, and ${apiRoutes.length} API routes`);
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
-  const virtualEntryCode = generateVirtualEntryCode(apiRoutes, pageRoutes, config);
+  const virtualEntryCode = generateVirtualEntryCode(apiRoutes, pageRoutes, layoutRoutes, config);
 
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
@@ -897,6 +1039,7 @@ async function buildSSRInMemory(
 function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: Array<{ pattern: string; modulePath: string }>,
+  layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   config: ResolvedFarmConfig,
 ): string {
   // Generate imports for all API routes
@@ -928,12 +1071,27 @@ function generateVirtualEntryCode(
   }`);
   });
 
+  // Generate imports for all layouts
+  const layoutImports: string[] = [];
+  const layoutRegistrations: string[] = [];
+
+  layoutRoutes.forEach((layout, index) => {
+    const varName = `layoutRoute${index}`;
+    layoutImports.push(`import * as ${varName} from "${layout.modulePath}";`);
+    layoutRegistrations.push(`
+  {
+    pattern: ${JSON.stringify(layout.pattern)},
+    module: ${varName},
+  }`);
+  });
+
   return `
 // Farm.js SSR Entry - Generated at build time
 // All routes are bundled here, managers are created at runtime
 
 ${apiImports.join("\n")}
 ${pageImports.join("\n")}
+${layoutImports.join("\n")}
 
 // API routes bundled at build time
 const apiRoutes = [${apiRegistrations.join(",")}
@@ -941,6 +1099,10 @@ const apiRoutes = [${apiRegistrations.join(",")}
 
 // Page routes bundled at build time
 const pageRoutes = [${pageRegistrations.join(",")}
+];
+
+// Layout routes bundled at build time (sorted by depth, root first)
+const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
 
 // Create better-call router at runtime from bundled handlers
@@ -998,6 +1160,33 @@ function matchPageRoute(pathname) {
 }
 
 /**
+ * Get applicable layouts for a page path (from root to most specific)
+ */
+function getApplicableLayouts(pathname) {
+  const applicable = [];
+  const normalizedPath = pathname.replace(/\\/$/, '') || '/';
+  
+  for (const layout of layoutRoutes) {
+    // Root layout (/) applies to everything
+    // Other layouts apply to their path and sub-paths
+    if (layout.pattern === '/' || 
+        normalizedPath === layout.pattern || 
+        normalizedPath.startsWith(layout.pattern + '/')) {
+      applicable.push(layout);
+    }
+  }
+  
+  // Sort by depth (root first, then nested)
+  applicable.sort((a, b) => {
+    const depthA = a.pattern.split('/').filter(Boolean).length;
+    const depthB = b.pattern.split('/').filter(Boolean).length;
+    return depthA - depthB;
+  });
+  
+  return applicable;
+}
+
+/**
  * Main request handler - created at runtime with bundled routes
  */
 async function handleRequest(request) {
@@ -1031,7 +1220,10 @@ async function handleRequest(request) {
     try {
       // Get the page component and metadata
       const PageComponent = route.module.default;
-      const metadata = route.module.metadata || {};
+      const pageMetadata = route.module.metadata || {};
+      
+      // Get applicable layouts for this page
+      const applicableLayouts = getApplicableLayouts(pathname);
       
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
@@ -1047,54 +1239,97 @@ async function handleRequest(request) {
         // Render the page component
         const pageProps = { params, searchParams };
         
-        let html = "";
+        // First, render the page content
+        let pageElement;
         
         // Check if the component is async
         if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
-          // For async components, we need to render them differently
-          // First, execute the async component to get the element
+          // For async components, execute to get the element
           try {
             const result = await PageComponent(pageProps);
             if (React.isValidElement(result)) {
-              html = ReactDOMServer.renderToString(result);
+              pageElement = result;
             } else {
-              html = ReactDOMServer.renderToString(React.createElement("div", null, String(result)));
+              pageElement = React.createElement("div", null, String(result));
             }
           } catch (asyncError) {
             // If async rendering fails, try sync rendering as fallback
-            const element = React.createElement(PageComponent, pageProps);
-            html = ReactDOMServer.renderToString(element);
+            pageElement = React.createElement(PageComponent, pageProps);
           }
         } else {
-          // Sync component - use standard renderToString
-          const element = React.createElement(PageComponent, pageProps);
-          html = ReactDOMServer.renderToString(element);
+          // Sync component - create element directly
+          pageElement = React.createElement(PageComponent, pageProps);
         }
         
-        // Build page title and meta tags from metadata
-        const title = metadata.title || "Farm.js App";
-        const description = metadata.description || "";
+        // Wrap with layouts (from innermost to outermost)
+        // Layouts are sorted by depth (root first), so we process in reverse
+        let wrappedElement = pageElement;
+        for (let i = applicableLayouts.length - 1; i >= 0; i--) {
+          const layout = applicableLayouts[i];
+          const LayoutComponent = layout.module.default;
+          if (LayoutComponent) {
+            wrappedElement = React.createElement(LayoutComponent, { children: wrappedElement, params });
+          }
+        }
+        
+        // Render to string
+        const html = ReactDOMServer.renderToString(wrappedElement);
+        
+        // Collect metadata from layouts and page (page overrides layouts)
+        let mergedMetadata = {};
+        for (const layout of applicableLayouts) {
+          if (layout.module.metadata) {
+            mergedMetadata = { ...mergedMetadata, ...layout.module.metadata };
+          }
+        }
+        mergedMetadata = { ...mergedMetadata, ...pageMetadata };
+        
+        // Build page title and meta tags from merged metadata
+        const title = mergedMetadata.title || "Farm.js App";
+        const description = mergedMetadata.description || "";
         
         let metaTags = "";
         if (description) {
           metaTags += \`\\n  <meta name="description" content="\${description.replace(/"/g, '&quot;')}">\`;
         }
-        if (metadata.keywords) {
-          const keywords = Array.isArray(metadata.keywords) ? metadata.keywords.join(", ") : metadata.keywords;
+        if (mergedMetadata.keywords) {
+          const keywords = Array.isArray(mergedMetadata.keywords) ? mergedMetadata.keywords.join(", ") : mergedMetadata.keywords;
           metaTags += \`\\n  <meta name="keywords" content="\${keywords.replace(/"/g, '&quot;')}">\`;
         }
-        if (metadata.openGraph) {
-          const og = metadata.openGraph;
+        if (mergedMetadata.openGraph) {
+          const og = mergedMetadata.openGraph;
           if (og.title) metaTags += \`\\n  <meta property="og:title" content="\${og.title.replace(/"/g, '&quot;')}">\`;
           if (og.description) metaTags += \`\\n  <meta property="og:description" content="\${og.description.replace(/"/g, '&quot;')}">\`;
           if (og.image) metaTags += \`\\n  <meta property="og:image" content="\${og.image}">\`;
         }
         
-        // Include client CSS and hydration script
-        // Add caching headers for edge caching (Vercel, Cloudflare, etc.)
-        // s-maxage: cache at edge for 60s, stale-while-revalidate: serve stale while updating
-        return new Response(
-          \`<!DOCTYPE html>
+        // Check if the layout already rendered a full HTML document
+        const trimmedHtml = html.trim();
+        const hasFullDocument = trimmedHtml.startsWith('<html') || trimmedHtml.startsWith('<!DOCTYPE');
+        
+        let fullHtml;
+        if (hasFullDocument) {
+          // Layout provides full HTML structure - inject CSS and client script
+          fullHtml = html
+            // Inject CSS link after opening head tag or first meta tag
+            .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+            // Inject title if not present and we have one
+            .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
+              if (!headContent.includes('<title>') && title !== "Farm.js App") {
+                return \`<head\${attrs}>\${headContent}\\n  <title>\${title}</title>\\n</head>\`;
+              }
+              return match;
+            })
+            // Inject client script before closing body tag
+            .replace(/<\\/body>/i, '  <script type="module" src="/farm-client.js"></script>\\n</body>');
+          
+          // Add DOCTYPE if not present
+          if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
+            fullHtml = '<!DOCTYPE html>\\n' + fullHtml;
+          }
+        } else {
+          // No layout with full document - wrap in HTML structure
+          fullHtml = \`<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -1106,7 +1341,14 @@ async function handleRequest(request) {
   <div id="root">\${html}</div>
   <script type="module" src="/farm-client.js"></script>
 </body>
-</html>\`,
+</html>\`;
+        }
+        
+        // Include client CSS and hydration script
+        // Add caching headers for edge caching (Vercel, Cloudflare, etc.)
+        // s-maxage: cache at edge for 60s, stale-while-revalidate: serve stale while updating
+        return new Response(
+          fullHtml,
           { 
             status: 200, 
             headers: { 

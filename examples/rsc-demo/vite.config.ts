@@ -10,10 +10,8 @@ export default defineConfig({
   outDir: "dist",
   port: 3000,
   debug: false,
-  experimental: {
-    serverComponents: true,
-    serverActions: true,
-  },
+  // RSC is enabled by default - no need to explicitly set experimental.serverComponents
+  // experimental: { serverComponents: true, serverActions: true }, // Defaults to true
   plugins: [
     rsc({
       serverHandler: false,
