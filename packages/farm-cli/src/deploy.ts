@@ -9,6 +9,7 @@ export interface DeployFarmOptions {
   vercel?: boolean;
   cloudflare?: boolean;
   netlify?: boolean;
+  prod?: boolean;
 }
 
 /**
@@ -52,7 +53,7 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
   }
 
   // Deploy using platform CLI (always uses user's credentials)
-  await deployPlatform(platform, root, nitroOutput);
+  await deployPlatform(platform, root, nitroOutput, options.prod);
 }
 
 /**
@@ -62,10 +63,11 @@ async function deployPlatform(
   platform: "vercel" | "cloudflare" | "netlify",
   root: string,
   outputDir: string,
+  prod?: boolean,
 ) {
   switch (platform) {
     case "vercel":
-      await deployVercel(root, outputDir);
+      await deployVercel(root, outputDir, prod);
       break;
     case "cloudflare":
       await deployCloudflare(root, outputDir);
@@ -79,7 +81,7 @@ async function deployPlatform(
 /**
  * Deploy to Vercel using Vercel CLI
  */
-async function deployVercel(root: string, outputDir: string) {
+async function deployVercel(root: string, outputDir: string, prod?: boolean) {
   logger.info("🚀 Deploying to Vercel...");
 
   try {
@@ -155,8 +157,8 @@ async function deployVercel(root: string, outputDir: string) {
       const fileCount = countFiles(staticDir);
       logger.info(`✅ Static directory: ${staticDir} (${fileCount} files)`);
 
-      // List important files
-      const importantFiles = ["farm-client-manifest.json", "assets"];
+      // List important files (farm-client.js = main client bundle; assets/ optional)
+      const importantFiles = ["farm-client-manifest.json", "farm-client.js", "assets"];
       for (const file of importantFiles) {
         const filePath = path.join(staticDir, file);
         if (existsSync(filePath)) {
@@ -213,14 +215,13 @@ async function deployVercel(root: string, outputDir: string) {
       `📦 Deployment size: Functions ${(functionsSize / 1024 / 1024).toFixed(2)}MB, Static ${(staticSize / 1024).toFixed(1)}KB`,
     );
 
-    // Verify critical files
+    // Verify critical files (farm-client.js or assets/ both valid for client bundle)
     logger.info("🔍 Verifying critical files:");
     const criticalFiles = [
       { path: serverIndex, name: "Server entry point" },
       { path: path.join(functionsDir, "package.json"), name: "Function package.json" },
       { path: path.join(functionsDir, ".vc-config.json"), name: "Vercel config" },
       { path: path.join(staticDir, "farm-client-manifest.json"), name: "Client manifest" },
-      { path: path.join(staticDir, "assets"), name: "Client assets directory" },
     ];
 
     for (const file of criticalFiles) {
@@ -229,6 +230,15 @@ async function deployVercel(root: string, outputDir: string) {
       } else {
         logger.warn(`   ⚠️  ${file.name} (missing)`);
       }
+    }
+
+    const hasClientAssets =
+      existsSync(path.join(staticDir, "farm-client.js")) ||
+      existsSync(path.join(staticDir, "assets"));
+    if (hasClientAssets) {
+      logger.info("   ✅ Client assets (farm-client.js or assets/)");
+    } else {
+      logger.warn("   ⚠️  Client assets directory (missing)");
     }
 
     logger.info("🚀 Deploying to Vercel...");
@@ -243,9 +253,10 @@ async function deployVercel(root: string, outputDir: string) {
 
     logger.info("📤 Uploading to Vercel...");
 
-    // Deploy using --prebuilt flag which tells Vercel to use the Build Output API
-    // The .vercel/output directory contains the pre-built deployment structure
-    execSync("vercel deploy --prebuilt --yes", {
+    // Deploy using --prebuilt flag so Vercel uses our build (required for monorepos;
+    // building on Vercel would run pnpm install in the example folder and fail on workspace deps)
+    const prodFlag = prod ? " --prod" : "";
+    execSync(`vercel deploy --prebuilt --yes${prodFlag}`, {
       stdio: "inherit",
       cwd: root,
     });

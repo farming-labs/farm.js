@@ -49,6 +49,7 @@ program
   .option("--vercel", "Deploy to Vercel")
   .option("--cloudflare", "Deploy to Cloudflare")
   .option("--netlify", "Deploy to Netlify")
+  .option("--prod", "Deploy to production (Vercel: uses prebuilt output)")
   .option("--custom", "Use your own credentials (not Farm.js managed)")
   .action(async (options) => {
     try {

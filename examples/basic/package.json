@@ -7,6 +7,7 @@
     "dev": "farm dev",
     "build": "farm build",
     "deploy:vercel": "farm deploy --vercel",
+    "deploy:vercel:prod": "farm deploy --vercel --prod",
     "deploy:cloudflare": "farm deploy --cloudflare",
     "deploy:netlify": "farm deploy --netlify",
     "type-check": "tsc --noEmit"
@@ -14,14 +15,16 @@
   "dependencies": {
     "better-call": "^1.0.19",
     "@farmjs/core": "workspace:*",
-    "react": "19.0.0-rc.1",
-    "react-dom": "19.0.0-rc.1",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@farmjs/cli": "workspace:*",
-    "typescript": "^5.3.3"
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
   }
 }

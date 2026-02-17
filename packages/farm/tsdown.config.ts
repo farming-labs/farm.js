@@ -13,6 +13,7 @@ export default defineConfig({
     "query/client": "src/query/client.ts",
     "query/server": "src/query/server.ts",
     middleware: "src/middleware/index.ts",
+    api: "src/api/index.ts",
     plugin: "src/plugin.ts",
   },
   format: ["cjs", "esm"],

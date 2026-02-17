@@ -78,6 +78,112 @@ async function defaultHandler({
   const arm = apiRouteManager || managers.apiRouteManager;
   const sr = serverRenderer || managers.serverRenderer;
 
+  // Debug logging for page-data endpoint
+  if (pathname.includes("__farm")) {
+    console.log("[Farm.js] [DEBUG] page-data request:", pathname, "rm:", !!rm);
+  }
+
+  // Handle SPA page-data requests for client-side navigation
+  if (pathname === "/__farm/page-data") {
+    const targetPath = url.searchParams.get("path") || "/";
+
+    if (!rm) {
+      return new Response(JSON.stringify({ error: "Route manager not available" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    try {
+      // Parse the target path
+      const targetUrl = new URL(targetPath, url.origin);
+      const targetPathname = targetUrl.pathname;
+
+      // Find the route
+      const match = rm.matchRoute(targetPathname);
+      if (!match) {
+        return new Response(JSON.stringify({ error: "Route not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      const { route, params, layouts } = match;
+
+      // Load route module to get metadata
+      const routeModule = await rm.loadRouteModule(route.modulePath);
+
+      // Check if client component
+      let isClientComponent = false;
+      try {
+        const fs = await import("fs");
+        const content = fs.readFileSync(route.modulePath, "utf-8");
+        isClientComponent =
+          content.trimStart().startsWith("'use client'") ||
+          content.trimStart().startsWith('"use client"');
+      } catch {
+        isClientComponent = false;
+      }
+
+      // Collect metadata from layouts and page
+      let mergedMetadata: Record<string, any> = {};
+      const layoutModules = await Promise.all(
+        layouts.map((layout) => rm.loadLayoutModule(layout.modulePath)),
+      );
+
+      for (const layoutModule of layoutModules) {
+        if (layoutModule.metadata) {
+          mergedMetadata = { ...mergedMetadata, ...layoutModule.metadata };
+        }
+      }
+
+      if (routeModule.metadata) {
+        mergedMetadata = { ...mergedMetadata, ...routeModule.metadata };
+      }
+
+      // Build search params
+      const searchParams: Record<string, string> = {};
+      targetUrl.searchParams.forEach((value, key) => {
+        searchParams[key] = value;
+      });
+
+      // Return page data for SPA navigation
+      const pageData = {
+        props: {
+          params,
+          searchParams,
+        },
+        modulePath: route.modulePath,
+        isClientComponent,
+        metadata: {
+          title: mergedMetadata.title,
+          description: mergedMetadata.description,
+        },
+        layoutModules: layouts.map((l) => l.modulePath),
+      };
+
+      return new Response(JSON.stringify(pageData), {
+        status: 200,
+        headers: {
+          "Content-Type": "application/json",
+          "Cache-Control": "private, max-age=0",
+        },
+      });
+    } catch (error) {
+      console.error("[Farm.js] Page data error:", error);
+      return new Response(
+        JSON.stringify({
+          error: "Failed to load page data",
+          message: error instanceof Error ? error.message : "Unknown error",
+        }),
+        {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+  }
+
   // Handle API routes
   if (pathname.startsWith("/api/") && arm) {
     const handler = arm.getHandler();

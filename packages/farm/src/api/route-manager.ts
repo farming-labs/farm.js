@@ -1,4 +1,3 @@
-import { createRouter } from "better-call";
 import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
@@ -13,7 +12,6 @@ export interface APIRoute {
 
 export class APIRouteManager {
   private routes: Map<string, APIRoute> = new Map();
-  private router: any;
   private viteServer?: ViteDevServer;
 
   constructor(
@@ -48,8 +46,6 @@ export class APIRouteManager {
     for (const filePath of routeFiles) {
       await this.loadRoute(filePath);
     }
-
-    this.createRouter();
 
     if (process.env.FARM_VERBOSE) {
       logger.success(`Discovered ${this.routes.size} API routes`);
@@ -134,47 +130,92 @@ export class APIRouteManager {
   }
 
   /**
-   * Create better-call router with all discovered endpoints
-   */
-  private createRouter(): void {
-    const allEndpoints: Record<string, any> = {};
-
-    for (const [routePath, route] of this.routes) {
-      for (const method of route.methods) {
-        const endpoint = route.endpoints[method];
-
-        // Check if endpoint already has path set, if not set it
-        if (!(endpoint as any).__path) {
-          // Update the endpoint path
-          (endpoint as any).__path = routePath;
-        }
-
-        // Create unique key for better-call
-        const key = `${method.toLowerCase()}_${routePath.replace(/\//g, "_").replace(/-/g, "_")}`;
-
-        allEndpoints[key] = endpoint;
-      }
-    }
-
-    if (Object.keys(allEndpoints).length > 0) {
-      this.router = createRouter(allEndpoints, {
-        basePath: "",
-      });
-    }
-  }
-
-  /**
-   * Get the better-call router handler
+   * Get the handler that directly invokes endpoint handlers
    */
   getHandler(): ((req: Request) => Promise<Response>) | null {
-    return this.router?.handler || null;
+    if (this.routes.size === 0) {
+      return null;
+    }
+
+    return async (request: Request): Promise<Response> => {
+      const url = new URL(request.url);
+      const pathname = url.pathname;
+      const method = request.method.toUpperCase();
+
+      // Find matching route
+      const route = this.routes.get(pathname);
+      if (!route) {
+        return new Response(JSON.stringify({ error: "Not Found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      // Check if method is supported
+      const endpoint = route.endpoints[method];
+      if (!endpoint) {
+        return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+          status: 405,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
+      try {
+        // Get the handler function
+        const handler = endpoint.__handler || endpoint;
+        
+        // Parse query parameters
+        const query: Record<string, string> = {};
+        url.searchParams.forEach((value, key) => {
+          query[key] = value;
+        });
+
+        // Parse body for POST/PUT/PATCH
+        let body: any = undefined;
+        if (["POST", "PUT", "PATCH"].includes(method)) {
+          try {
+            const text = await request.text();
+            if (text) {
+              body = JSON.parse(text);
+            }
+          } catch {
+            // Body might not be JSON
+          }
+        }
+
+        // Call the handler
+        const result = await handler({
+          query,
+          body,
+          headers: Object.fromEntries(request.headers.entries()),
+          request,
+          context: {},
+          params: {},
+        });
+
+        // Return the response
+        return new Response(JSON.stringify(result), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (error: any) {
+        console.error(`[API Error] ${pathname}:`, error);
+        return new Response(
+          JSON.stringify({ error: error.message || "Internal Server Error" }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+    };
   }
 
   /**
    * Check if a path is an API route
    */
-  isAPIRoute(path: string): boolean {
-    return path.startsWith("/api/");
+  isAPIRoute(pathname: string): boolean {
+    return pathname.startsWith("/api/");
   }
 
   /**
@@ -182,12 +223,5 @@ export class APIRouteManager {
    */
   getRoutes(): Map<string, APIRoute> {
     return this.routes;
-  }
-
-  /**
-   * Get router for type export
-   */
-  getRouter() {
-    return this.router;
   }
 }

@@ -111,8 +111,75 @@ export interface LayoutProps {
 
 export type Page = ComponentType<PageProps>;
 export type Layout = ComponentType<LayoutProps>;
+/**
+ * Route module exports for pages
+ *
+ * SSR is the default - pages render on each request
+ * SSG is opt-in via `export const ssg = true`
+ *
+ * @example SSR Page (default):
+ * ```tsx
+ * export default async function Page() {
+ *   const data = await fetchData();
+ *   return <div>{data.title}</div>;
+ * }
+ * ```
+ *
+ * @example SSG Page:
+ * ```tsx
+ * export const ssg = true;
+ *
+ * export default function AboutPage() {
+ *   return <h1>About Us</h1>;
+ * }
+ * ```
+ *
+ * @example SSG with Revalidation (ISR):
+ * ```tsx
+ * export const ssg = true;
+ * export const revalidate = 60; // Regenerate every 60 seconds
+ *
+ * export default async function ProductsPage() {
+ *   const products = await fetchProducts();
+ *   return <ProductList products={products} />;
+ * }
+ * ```
+ *
+ * @example Dynamic SSG Route:
+ * ```tsx
+ * export const ssg = true;
+ *
+ * export async function getStaticPaths() {
+ *   const posts = await fetchPosts();
+ *   return posts.map(post => ({ slug: post.slug }));
+ * }
+ *
+ * export default async function BlogPost({ params }) {
+ *   const post = await fetchPost(params.slug);
+ *   return <article>{post.title}</article>;
+ * }
+ * ```
+ */
 export interface RouteModule {
   default?: Page;
+  /**
+   * Mark this page for Static Site Generation (SSG)
+   * When true, the page will be pre-rendered at build time
+   */
+  ssg?: boolean;
+  /**
+   * Revalidate interval in seconds for Incremental Static Regeneration (ISR)
+   * Only applicable when ssg = true
+   */
+  revalidate?: number;
+  /**
+   * Return all paths to pre-render for dynamic SSG routes
+   * Required for dynamic routes (e.g., [slug]) when ssg = true
+   */
+  getStaticPaths?: () => Promise<Record<string, string>[]> | Record<string, string>[];
+  /**
+   * @deprecated Use getStaticPaths instead
+   */
   generateStaticParams?: () => Promise<Record<string, string>[]> | Record<string, string>[];
   generateMetadata?: (props: PageProps) => Promise<Metadata> | Metadata;
 }
@@ -185,6 +252,30 @@ export interface BuildOptions {
   ssr: boolean;
   minify: boolean;
   sourcemap: boolean;
+}
+
+/**
+ * Represents a page to be pre-rendered at build time (SSG)
+ */
+export interface SSGPage {
+  /** The URL path for this page */
+  urlPath: string;
+  /** The file path to the page module */
+  filePath: string;
+  /** Route parameters for dynamic routes */
+  params: Record<string, string>;
+  /** Revalidation interval in seconds (ISR) */
+  revalidate?: number;
+}
+
+/**
+ * Result of SSG page collection
+ */
+export interface SSGCollectionResult {
+  /** Pages to pre-render at build time */
+  ssg: SSGPage[];
+  /** Routes that will be server-rendered on each request */
+  ssr: string[];
 }
 
 export interface FarmPlugin {

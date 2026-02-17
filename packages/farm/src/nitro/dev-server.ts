@@ -70,11 +70,20 @@ export function devServerPlugin(): PluginOption {
     configureServer(viteDevServer: ViteDevServer) {
       viteDevServer.middlewares.use(async (req, res, next) => {
         try {
-          // Skip Vite internal requests
+          // Always handle Farm.js internal routes
+          const isFarmRoute = req.url?.startsWith("/__farm/");
+
+          // Debug logging
+          if (isFarmRoute) {
+            console.log("[Farm.js] [DEV-SERVER] Farm route detected:", req.url);
+          }
+
+          // Skip Vite internal requests (but not Farm routes)
           if (
-            req.url?.startsWith("/@") ||
-            req.url?.startsWith("/node_modules") ||
-            (req.url?.includes(".") && !req.url?.endsWith(".html"))
+            !isFarmRoute &&
+            (req.url?.startsWith("/@") ||
+              req.url?.startsWith("/node_modules") ||
+              (req.url?.includes(".") && !req.url?.endsWith(".html")))
           ) {
             return next();
           }

@@ -1,0 +1,31 @@
+{
+  "name": "farm-ssr-ssg-demo",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "deploy:vercel": "farm deploy --vercel",
+    "deploy:vercel:prod": "farm deploy --vercel --prod",
+    "deploy:cloudflare": "farm deploy --cloudflare",
+    "deploy:netlify": "farm deploy --netlify"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*",
+    "better-call": "^1.0.19",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@farmjs/cli": "workspace:*",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.5.3",
+    "vite": "^5.0.10"
+  }
+}
