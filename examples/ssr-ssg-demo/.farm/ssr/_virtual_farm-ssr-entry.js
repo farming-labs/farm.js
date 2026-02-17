@@ -6124,6 +6124,66 @@ const layoutRoute0 = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.define
   default: RootLayout,
   metadata
 }, Symbol.toStringTag, { value: "Module" }));
+function NotFound({ pathname }) {
+  return /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "space-y-8", children: [
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-8 text-center", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "flex items-center justify-center gap-2 mb-6", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium", children: "404" }),
+        /* @__PURE__ */ jsxRuntimeExports.jsx("span", { className: "text-gray-500", children: "Page Not Found" })
+      ] }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h1", { className: "text-4xl font-bold text-gray-900 mb-4", children: "Oops! Page Not Found" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx("p", { className: "text-gray-600 mb-6 max-w-md mx-auto", children: pathname ? /* @__PURE__ */ jsxRuntimeExports.jsxs(jsxRuntimeExports.Fragment, { children: [
+        "The page ",
+        /* @__PURE__ */ jsxRuntimeExports.jsx("code", { className: "bg-gray-100 px-2 py-1 rounded text-sm", children: pathname }),
+        " doesn't exist."
+      ] }) : "The page you're looking for doesn't exist or has been moved." }),
+      /* @__PURE__ */ jsxRuntimeExports.jsx(
+        "a",
+        {
+          href: "/",
+          className: "inline-block bg-green-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-green-700 transition-colors",
+          children: "Go to Home"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "bg-white rounded-lg shadow-md p-6", children: [
+      /* @__PURE__ */ jsxRuntimeExports.jsx("h2", { className: "text-xl font-bold text-gray-900 mb-4", children: "Available Pages" }),
+      /* @__PURE__ */ jsxRuntimeExports.jsxs("div", { className: "grid grid-cols-2 md:grid-cols-3 gap-4", children: [
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("a", { href: "/", className: "p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-gray-900", children: "Home" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-gray-500", children: "SSR Page" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("a", { href: "/about", className: "p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-gray-900", children: "About" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-gray-500", children: "SSG Page" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("a", { href: "/team", className: "p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-gray-900", children: "Team" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-gray-500", children: "SSG Page" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("a", { href: "/products", className: "p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-gray-900", children: "Products" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-gray-500", children: "ISR Page" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("a", { href: "/dashboard", className: "p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-gray-900", children: "Dashboard" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-gray-500", children: "Client Page" })
+        ] }),
+        /* @__PURE__ */ jsxRuntimeExports.jsxs("a", { href: "/api-demo", className: "p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors", children: [
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "font-medium text-gray-900", children: "API Demo" }),
+          /* @__PURE__ */ jsxRuntimeExports.jsx("div", { className: "text-sm text-gray-500", children: "Client Page" })
+        ] })
+      ] })
+    ] })
+  ] });
+}
+__name(NotFound, "NotFound");
+const CustomNotFound = /* @__PURE__ */ Object.freeze(/* @__PURE__ */ Object.defineProperty({
+  __proto__: null,
+  default: NotFound
+}, Symbol.toStringTag, { value: "Module" }));
+const hasCustomNotFound = true;
+const CustomNotFoundComponent = NotFound || CustomNotFound;
 const apiRoutes = [
   {
     path: "/api/hello",
@@ -6356,15 +6416,131 @@ async function handleRequest(request) {
       );
     }
   }
-  return new Response(
-    JSON.stringify({
-      error: "Not Found",
-      pathname,
-      availableRoutes: pageRoutes.map((r) => r.pattern),
-      availableAPIRoutes: apiRoutes.map((r) => r.path)
-    }),
-    { status: 404, headers: { "Content-Type": "application/json" } }
-  );
+  try {
+    let Default404Page = function() {
+      return React2.createElement(
+        "div",
+        {
+          style: {
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: "100vh",
+            fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            backgroundColor: "#f9fafb",
+            padding: "20px",
+            textAlign: "center"
+          }
+        },
+        React2.createElement(
+          "div",
+          {
+            style: {
+              backgroundColor: "white",
+              borderRadius: "12px",
+              padding: "48px",
+              boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+              maxWidth: "500px",
+              width: "100%"
+            }
+          },
+          React2.createElement("h1", {
+            style: {
+              fontSize: "96px",
+              fontWeight: "bold",
+              color: "#22c55e",
+              margin: "0 0 16px 0",
+              lineHeight: "1"
+            }
+          }, "404"),
+          React2.createElement("h2", {
+            style: {
+              fontSize: "24px",
+              fontWeight: "600",
+              color: "#1f2937",
+              margin: "0 0 16px 0"
+            }
+          }, "Page Not Found"),
+          React2.createElement("p", {
+            style: {
+              fontSize: "16px",
+              color: "#6b7280",
+              margin: "0 0 24px 0"
+            }
+          }, "The page ", React2.createElement("code", {
+            style: { backgroundColor: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }
+          }, pathname), " doesn't exist."),
+          React2.createElement("a", {
+            href: "/",
+            style: {
+              display: "inline-block",
+              backgroundColor: "#22c55e",
+              color: "white",
+              padding: "12px 24px",
+              borderRadius: "8px",
+              textDecoration: "none",
+              fontWeight: "500"
+            }
+          }, "Go Home")
+        ),
+        React2.createElement("p", {
+          style: {
+            marginTop: "24px",
+            fontSize: "14px",
+            color: "#9ca3af"
+          }
+        }, "Powered by Farm.js")
+      );
+    };
+    __name(Default404Page, "Default404Page");
+    const ReactDOMServer = await import("./assets/server.node-pKixXoe3.js").then((n) => n.s);
+    const React2 = await Promise.resolve().then(() => index);
+    const NotFoundPage = hasCustomNotFound && CustomNotFoundComponent ? CustomNotFoundComponent : Default404Page;
+    let notFoundElement = React2.createElement(NotFoundPage, { pathname });
+    const applicableLayouts = getApplicableLayouts("/");
+    for (let i = applicableLayouts.length - 1; i >= 0; i--) {
+      const layout = applicableLayouts[i];
+      const LayoutComponent = layout.module.default;
+      if (LayoutComponent) {
+        notFoundElement = React2.createElement(LayoutComponent, { children: notFoundElement, params: {} });
+      }
+    }
+    const html = ReactDOMServer.renderToString(notFoundElement);
+    const trimmedHtml = html.trim();
+    const hasFullDocument = trimmedHtml.startsWith("<html") || trimmedHtml.startsWith("<!DOCTYPE");
+    let fullHtml;
+    if (hasFullDocument) {
+      fullHtml = html.replace(/<head([^>]*)>/i, '<head$1>\n  <link rel="stylesheet" href="/farm-client.css">').replace(/<\/body>/i, '  <script type="module" src="/farm-client.js"><\/script>\n</body>');
+      if (!fullHtml.trim().startsWith("<!DOCTYPE")) {
+        fullHtml = "<!DOCTYPE html>\n" + fullHtml;
+      }
+    } else {
+      fullHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/farm-client.css">
+  <title>404 - Page Not Found</title>
+</head>
+<body>
+  <div id="root">${html}</div>
+  <script type="module" src="/farm-client.js"><\/script>
+</body>
+</html>`;
+    }
+    return new Response(fullHtml, {
+      status: 404,
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  } catch (error) {
+    console.error("404 render error:", error);
+    return new Response(
+      `<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page ${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>`,
+      { status: 404, headers: { "Content-Type": "text/html" } }
+    );
+  }
 }
 __name(handleRequest, "handleRequest");
 const fetch$1 = handleRequest;

@@ -464,8 +464,83 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 
   private async render404(req: FarmRequest, res: FarmResponse): Promise<void> {
     res.statusCode = 404;
-
-    const html = this.createFullHTML("<h1>404 - Page Not Found</h1>");
+    
+    const pathname = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`).pathname;
+    
+    try {
+      // Look for custom not-found page
+      const appDir = path.join(this.config.root, this.config.srcDir, "app");
+      const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
+      let notFoundPath: string | null = null;
+      
+      for (const ext of notFoundExtensions) {
+        const checkPath = path.join(appDir, `not-found${ext}`);
+        if (fs.existsSync(checkPath)) {
+          notFoundPath = checkPath;
+          break;
+        }
+      }
+      
+      if (notFoundPath) {
+        // Use routeManager to load the module (uses Vite's ssrLoadModule in dev)
+        const notFoundModule = await this.routeManager.loadRouteModule(notFoundPath);
+        const NotFoundComponent = notFoundModule.default;
+        
+        if (NotFoundComponent) {
+          // Look for root layout
+          let LayoutComponent: React.ComponentType<{ children: React.ReactNode }> | null = null;
+          for (const ext of notFoundExtensions) {
+            const layoutPath = path.join(appDir, `layout${ext}`);
+            if (fs.existsSync(layoutPath)) {
+              try {
+                const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
+                LayoutComponent = layoutModule.default;
+              } catch {
+                // Layout import failed, continue without it
+              }
+              break;
+            }
+          }
+          
+          // Render the 404 page
+          let element = React.createElement(NotFoundComponent as any, { pathname });
+          
+          // Wrap with layout if available
+          if (LayoutComponent) {
+            element = React.createElement(LayoutComponent, { children: element });
+          }
+          
+          // Render to string
+          const ReactDOMServer = await import("react-dom/server");
+          const content = ReactDOMServer.renderToString(element);
+          
+          const html = this.createFullHTML(content);
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          res.write(html);
+          res.end();
+          return;
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to render custom 404 page: ${error}`);
+    }
+    
+    // Fallback to default styled 404 page
+    const defaultContent = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;background:#f9fafb;padding:20px;text-align:center;">
+        <div style="background:white;border-radius:12px;padding:48px;box-shadow:0 4px 6px rgba(0,0,0,0.1);max-width:500px;width:100%;">
+          <h1 style="font-size:96px;font-weight:bold;color:#22c55e;margin:0 0 16px;line-height:1;">404</h1>
+          <h2 style="font-size:24px;font-weight:600;color:#1f2937;margin:0 0 16px;">Page Not Found</h2>
+          <p style="font-size:16px;color:#6b7280;margin:0 0 24px;">
+            The page <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;">${pathname}</code> doesn't exist.
+          </p>
+          <a href="/" style="display:inline-block;background:#22c55e;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;">Go Home</a>
+        </div>
+        <p style="margin-top:24px;font-size:14px;color:#9ca3af;">Powered by Farm.js</p>
+      </div>
+    `;
+    
+    const html = this.createFullHTML(defaultContent);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.write(html);
     res.end();

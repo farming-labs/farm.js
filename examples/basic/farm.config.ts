@@ -28,6 +28,13 @@ export default defineFarmConfig({
 
   trailingSlash: false,
 
+  // Custom 404 Not Found page
+  // The framework will automatically detect src/app/not-found.tsx
+  // You can also explicitly specify a custom component path:
+  // notFound: {
+  //   component: "./src/app/not-found.tsx",
+  // },
+
   async redirects() {
     return [
       {

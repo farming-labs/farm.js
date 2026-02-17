@@ -919,6 +919,21 @@ async function buildSSRInMemory(
   
   await findLayouts(appDir);
   
+  // Check for custom not-found page
+  let notFoundPath: string | null = null;
+  const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
+  for (const ext of notFoundExtensions) {
+    const checkPath = path.join(appDir, `not-found${ext}`);
+    try {
+      await fs.access(checkPath);
+      notFoundPath = checkPath;
+      logger.info(`📋 Found custom 404 page: ${checkPath}`);
+      break;
+    } catch {
+      // File doesn't exist, continue checking
+    }
+  }
+  
   // Sort layouts by depth (root first)
   layoutRoutes.sort((a, b) => {
     const depthA = a.pattern.split("/").filter(Boolean).length;
@@ -930,7 +945,7 @@ async function buildSSRInMemory(
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
-  const virtualEntryCode = generateVirtualEntryCode(apiRoutes, pageRoutes, layoutRoutes, config);
+  const virtualEntryCode = generateVirtualEntryCode(apiRoutes, pageRoutes, layoutRoutes, notFoundPath, config);
 
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
@@ -1040,6 +1055,7 @@ function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: Array<{ pattern: string; modulePath: string }>,
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
+  notFoundPath: string | null,
   config: ResolvedFarmConfig,
 ): string {
   // Generate imports for all API routes
@@ -1085,6 +1101,11 @@ function generateVirtualEntryCode(
   }`);
   });
 
+  // Generate import for custom not-found page if exists
+  const notFoundImport = notFoundPath 
+    ? `import * as CustomNotFound from "${notFoundPath}";`
+    : "";
+
   return `
 // Farm.js SSR Entry - Generated at build time
 // All routes are bundled here, managers are created at runtime
@@ -1092,6 +1113,11 @@ function generateVirtualEntryCode(
 ${apiImports.join("\n")}
 ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
+${notFoundImport}
+
+// Custom 404 page component (if provided)
+const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
+const CustomNotFoundComponent = ${notFoundPath ? "CustomNotFound.default || CustomNotFound" : "null"};
 
 // API routes bundled at build time
 const apiRoutes = [${apiRegistrations.join(",")}
@@ -1367,16 +1393,142 @@ async function handleRequest(request) {
     }
   }
 
-  // 404 fallback
-  return new Response(
-    JSON.stringify({
-      error: "Not Found",
-      pathname,
-      availableRoutes: pageRoutes.map(r => r.pattern),
-      availableAPIRoutes: apiRoutes.map(r => r.path),
-    }),
-    { status: 404, headers: { "Content-Type": "application/json" } }
-  );
+  // 404 fallback - render proper HTML page
+  try {
+    const ReactDOMServer = await import("react-dom/server");
+    const React = await import("react");
+    
+    // Default 404 page component
+    function Default404Page() {
+      return React.createElement("div", {
+        style: {
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+          backgroundColor: "#f9fafb",
+          padding: "20px",
+          textAlign: "center",
+        }
+      },
+        React.createElement("div", {
+          style: {
+            backgroundColor: "white",
+            borderRadius: "12px",
+            padding: "48px",
+            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
+            maxWidth: "500px",
+            width: "100%",
+          }
+        },
+          React.createElement("h1", {
+            style: {
+              fontSize: "96px",
+              fontWeight: "bold",
+              color: "#22c55e",
+              margin: "0 0 16px 0",
+              lineHeight: "1",
+            }
+          }, "404"),
+          React.createElement("h2", {
+            style: {
+              fontSize: "24px",
+              fontWeight: "600",
+              color: "#1f2937",
+              margin: "0 0 16px 0",
+            }
+          }, "Page Not Found"),
+          React.createElement("p", {
+            style: {
+              fontSize: "16px",
+              color: "#6b7280",
+              margin: "0 0 24px 0",
+            }
+          }, "The page ", React.createElement("code", {
+            style: { backgroundColor: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }
+          }, pathname), " doesn't exist."),
+          React.createElement("a", {
+            href: "/",
+            style: {
+              display: "inline-block",
+              backgroundColor: "#22c55e",
+              color: "white",
+              padding: "12px 24px",
+              borderRadius: "8px",
+              textDecoration: "none",
+              fontWeight: "500",
+            }
+          }, "Go Home")
+        ),
+        React.createElement("p", {
+          style: {
+            marginTop: "24px",
+            fontSize: "14px",
+            color: "#9ca3af",
+          }
+        }, "Powered by Farm.js")
+      );
+    }
+    
+    // Use custom 404 page if provided, otherwise use default
+    const NotFoundPage = hasCustomNotFound && CustomNotFoundComponent ? CustomNotFoundComponent : Default404Page;
+    
+    // Wrap 404 page with root layout if available
+    let notFoundElement = React.createElement(NotFoundPage, { pathname: pathname });
+    const applicableLayouts = getApplicableLayouts("/");
+    
+    // Wrap with layouts (from innermost to outermost)
+    for (let i = applicableLayouts.length - 1; i >= 0; i--) {
+      const layout = applicableLayouts[i];
+      const LayoutComponent = layout.module.default;
+      if (LayoutComponent) {
+        notFoundElement = React.createElement(LayoutComponent, { children: notFoundElement, params: {} });
+      }
+    }
+    
+    const html = ReactDOMServer.renderToString(notFoundElement);
+    
+    // Check if layout provides full HTML document
+    const trimmedHtml = html.trim();
+    const hasFullDocument = trimmedHtml.startsWith('<html') || trimmedHtml.startsWith('<!DOCTYPE');
+    
+    let fullHtml;
+    if (hasFullDocument) {
+      fullHtml = html
+        .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+        .replace(/<\\/body>/i, '  <script type="module" src="/farm-client.js"></script>\\n</body>');
+      if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
+        fullHtml = '<!DOCTYPE html>\\n' + fullHtml;
+      }
+    } else {
+      fullHtml = \`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="/farm-client.css">
+  <title>404 - Page Not Found</title>
+</head>
+<body>
+  <div id="root">\${html}</div>
+  <script type="module" src="/farm-client.js"></script>
+</body>
+</html>\`;
+    }
+    
+    return new Response(fullHtml, {
+      status: 404,
+      headers: { "Content-Type": "text/html; charset=utf-8" }
+    });
+  } catch (error) {
+    console.error("404 render error:", error);
+    return new Response(
+      \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
+      { status: 404, headers: { "Content-Type": "text/html" } }
+    );
+  }
 }
 
 // Export as Web Standard fetch API

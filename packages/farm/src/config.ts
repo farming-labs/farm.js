@@ -61,6 +61,11 @@ export interface MiddlewareConfig {
   matcher?: string | string[];
 }
 
+export interface NotFoundConfig {
+  /** Path to a custom 404 page component (e.g., "./src/app/not-found.tsx") */
+  component?: string;
+}
+
 export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
   plugins?: FarmPlugin[];
   preset?: BaseFarmConfig["preset"];
@@ -77,6 +82,9 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
   openapi?: OpenAPIConfig;
 
   middleware?: MiddlewareConfig;
+
+  /** Custom 404 Not Found page configuration */
+  notFound?: NotFoundConfig;
 
   output?: "standalone" | "static" | "export";
   distDir?: string;
@@ -169,6 +177,7 @@ export async function resolveConfig(
       ...userConfig.openapi,
     },
     middleware: userConfig.middleware || {},
+    notFound: userConfig.notFound || {},
     output: userConfig.output || "standalone",
     distDir: userConfig.distDir || ".farm",
     generateBuildId: userConfig.generateBuildId || (() => `build-${Date.now()}`),
