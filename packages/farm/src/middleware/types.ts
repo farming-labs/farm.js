@@ -9,11 +9,16 @@ import type { ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
 
 /**
+ * Next function type for middleware chain
+ */
+export type NextFunction = () => Promise<void>;
+
+/**
  * Middleware function signature
  */
 export type MiddlewareFunction = (
   ctx: MiddlewareContext,
-  next: () => Promise<void>,
+  next: NextFunction,
 ) => void | Promise<void>;
 
 /**

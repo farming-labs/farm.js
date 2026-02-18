@@ -1,15 +1,8 @@
 /**
  * Root middleware - runs for all routes
+ * Logging is handled by the framework - no need for manual logging here
  */
 import { middleware } from '@farmjs/core/middleware';
-import pc from 'picocolors';
-
-// Helper for styled logging
-const log = (tag: string, message: string) => {
-  const prefix = pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]");
-  const tagStr = pc.dim("[") + pc.bold(pc.magenta(tag)) + pc.dim("]");
-  console.log(`${prefix} ${tagStr} ${message}`);
-};
 
 export default middleware()
   // Add security headers
@@ -18,7 +11,6 @@ export default middleware()
     ctx.headers.set('X-Content-Type-Options', 'nosniff');
     ctx.headers.set('X-XSS-Protection', '1; mode=block');
     ctx.headers.set('X-Powered-By', 'Farm.js RSC');
-    log("MW", `${pc.cyan(ctx.method)} ${pc.gray(ctx.pathname)}`);
     await next();
   })
 

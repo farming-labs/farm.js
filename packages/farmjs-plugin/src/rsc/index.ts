@@ -195,32 +195,54 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   // Store for debugging
   const debug = options.debug ?? false;
 
+  // Get picocolors with forced color support (to handle NO_COLOR env being set)
+  // Uses require_ which is defined at module level via createRequire for ESM compatibility
+  const getColors = () => {
+    try {
+      const pico = require_("picocolors");
+      // Use createColors(true) to force colors, overriding NO_COLOR env
+      if (typeof pico?.createColors === "function") {
+        return pico.createColors(true);
+      }
+      if (typeof pico?.green === "function") return pico;
+    } catch {}
+    const id = (s: string) => s;
+    return { bold: id, green: id, dim: id, cyan: id, red: id, yellow: id, blue: id, white: id, gray: id };
+  };
+
   // Logger with [FARM] [TAG] [METHOD] format - matches @farmjs/core style
   const logResponse = (method: string, urlPath: string, status: number, duration: number, tag: "PAGE" | "API" = "PAGE") => {
-    try {
-      const pc = require("picocolors");
-      let statusColor = pc.green;
-      if (status >= 500) statusColor = pc.red;
-      else if (status >= 400) statusColor = pc.yellow;
-      else if (status >= 300) statusColor = pc.cyan;
+    const pc = getColors();
+    let statusColor = pc.green;
+    if (status >= 500) statusColor = pc.red;
+    else if (status >= 400) statusColor = pc.yellow;
+    else if (status >= 300) statusColor = pc.cyan;
 
-      const log = [
-        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-        pc.gray(urlPath),
-        pc.dim("-"),
-        statusColor(status.toString()),
-        pc.dim(`(${duration}ms)`),
-      ].join(" ");
-      console.log(log);
-    } catch {
-      console.log(`[FARM] [${tag}] [${method}] ${urlPath} - ${status} (${duration}ms)`);
-    }
+    const log = [
+      pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+      pc.gray(urlPath),
+      pc.dim("-"),
+      statusColor(status.toString()),
+      pc.dim(`(${duration}ms)`),
+    ].join(" ");
+    console.log(log);
   };
 
   // No verbose info logs; only [FARM] [PAGE] / [MIDDLEWARE] / [API] are shown
   const logInfo = (_message: string) => {};
+  
+  // Intercept console.warn to filter known warnings
+  const originalWarn = console.warn;
+  console.warn = (...args: any[]) => {
+    const msg = args[0]?.toString?.() ?? '';
+    // Suppress known dynamic import warnings
+    if (msg.includes('[FARM] ⚠ warning') || msg.includes('registryPath') || msg.includes('farm-registry')) {
+      return;
+    }
+    originalWarn.apply(console, args);
+  };
 
   return [
     // ────────────────────────────────────────────────────────
@@ -513,15 +535,39 @@ if (document.readyState === 'loading') {
     // ────────────────────────────────────────────────────────
     {
       name: "@farmjs/plugin/rsc:dev-server",
-
+      
       configureServer(server) {
         if (!rscEnabled) {
           return;
         }
 
         logInfo("Dev server middleware ready");
+        
+        // Track server start time for startup banner
+        const serverStartTime = Date.now();
+        let bannerPrinted = false;
 
         const pageCache = new Map<string, any>();
+        
+        // Print startup banner after server is listening
+        server.httpServer?.once("listening", () => {
+          if (bannerPrinted) return;
+          bannerPrinted = true;
+          
+          const elapsed = Date.now() - serverStartTime;
+          const address = server.httpServer?.address();
+          const port = typeof address === "object" && address ? address.port : 3000;
+          
+          // Get colors with forced color support (to handle NO_COLOR env being set)
+          const colors = getColors();
+          
+          console.log("");
+          console.log(`  ${colors.bold(colors.green("Farm.js"))} ${colors.dim("v1.0.0")} ${colors.dim(`ready in ${elapsed}ms`)}`);
+          console.log("");
+          console.log(`  ${colors.dim("➜")}  ${colors.bold("Local:")}   ${colors.cyan(`http://localhost:${port}/`)}`);
+          console.log(`  ${colors.dim("➜")}  ${colors.bold("Network:")} ${colors.dim("use --host to expose")}`);
+          console.log("");
+        });
 
         // Add middleware to handle page requests
         return () => {

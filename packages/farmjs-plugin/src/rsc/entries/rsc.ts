@@ -128,7 +128,26 @@ async function executeMiddleware(request, url) {
     return { handled: false, ctx: createMiddlewareContext(request, url) };
   }
   
-  debug('Executing middleware for', url.pathname, '- count:', applicable.length);
+  const startTime = Date.now();
+  const method = request.method || 'GET';
+  
+  // Log middleware execution in [FARM] [MIDDLEWARE] [METHOD] format
+  try {
+    const picoModule = await import('picocolors');
+    const pico = picoModule.default || picoModule;
+    const pc = typeof pico.createColors === 'function' ? pico.createColors(true) : pico;
+    const logMsg = [
+      pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
+      pc.dim('[') + pc.bold(pc.magenta('MIDDLEWARE')) + pc.dim(']'),
+      pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
+      pc.gray('Executing middleware: '),
+      pc.gray(url.pathname),
+      pc.dim(' (' + applicable.length + ' middleware)'),
+    ].join(' ');
+    console.log(logMsg);
+  } catch {
+    console.log('[FARM] [MIDDLEWARE] [' + method + '] Executing middleware: ' + url.pathname + ' (' + applicable.length + ' middleware)');
+  }
   
   let ctx = createMiddlewareContext(request, url);
   
@@ -166,9 +185,46 @@ async function executeMiddleware(request, url) {
       
       // If next() was not called, middleware handled the request
       if (!nextCalled && ctx._response) {
+        // Log middleware completion
+        const duration = Date.now() - startTime;
+        try {
+          const picoModule2 = await import('picocolors');
+          const pico2 = picoModule2.default || picoModule2;
+          const pc2 = typeof pico2.createColors === 'function' ? pico2.createColors(true) : pico2;
+          const logMsg = [
+            pc2.dim('[') + pc2.bold(pc2.blue('FARM')) + pc2.dim(']'),
+            pc2.dim('[') + pc2.bold(pc2.magenta('MIDDLEWARE')) + pc2.dim(']'),
+            pc2.dim('[') + pc2.bold(pc2.white(method.padEnd(3))) + pc2.dim(']'),
+            pc2.gray('Completed'),
+            pc2.gray(url.pathname),
+            pc2.dim('(' + duration + 'ms)'),
+          ].join(' ');
+          console.log(logMsg);
+        } catch {
+          console.log('[FARM] [MIDDLEWARE] [' + method + '] Completed ' + url.pathname + ' (' + duration + 'ms)');
+        }
         return { handled: true, ctx, response: ctx._response };
       }
     }
+  }
+  
+  // Log middleware completion
+  const duration = Date.now() - startTime;
+  try {
+    const picoModule3 = await import('picocolors');
+    const pico3 = picoModule3.default || picoModule3;
+    const pc3 = typeof pico3.createColors === 'function' ? pico3.createColors(true) : pico3;
+    const logMsg = [
+      pc3.dim('[') + pc3.bold(pc3.blue('FARM')) + pc3.dim(']'),
+      pc3.dim('[') + pc3.bold(pc3.magenta('MIDDLEWARE')) + pc3.dim(']'),
+      pc3.dim('[') + pc3.bold(pc3.white(method.padEnd(3))) + pc3.dim(']'),
+      pc3.gray('Completed'),
+      pc3.gray(url.pathname),
+      pc3.dim('(' + duration + 'ms)'),
+    ].join(' ');
+    console.log(logMsg);
+  } catch {
+    console.log('[FARM] [MIDDLEWARE] [' + method + '] Completed ' + url.pathname + ' (' + duration + 'ms)');
   }
   
   return { handled: false, ctx };

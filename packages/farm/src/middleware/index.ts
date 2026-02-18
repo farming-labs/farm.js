@@ -21,4 +21,5 @@ export type {
   RateLimitConfig,
   RateLimitStorage,
   RateLimitStatus,
+  NextFunction,
 } from "./types";

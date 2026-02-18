@@ -540,7 +540,7 @@ export default defineEventHandler(async (event: H3Event) => {
       "build:before": async (nitro: any) => {
         // Import and populate the registry at build time
         const registryPath = path.join(serverDir, "farm-registry.ts");
-        const { farmRegistry } = await import(registryPath);
+        const { farmRegistry } = await import(/* @vite-ignore */ registryPath);
 
         // Store route paths (serializable)
         const routePaths: Record<string, string> = {};

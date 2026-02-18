@@ -16,6 +16,23 @@
 
 import type { Plugin, ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
+import { createRequire } from "node:module";
+
+// Create require for ESM compatibility
+const require_ = createRequire(import.meta.url);
+
+// Get picocolors with forced color support (to handle NO_COLOR env being set)
+const getColors = () => {
+  try {
+    const pico = require_("picocolors");
+    if (typeof pico?.createColors === "function") {
+      return pico.createColors(true);
+    }
+    if (typeof pico?.green === "function") return pico;
+  } catch {}
+  const id = (s: string) => s;
+  return { bold: id, dim: id, cyan: id, red: id, yellow: id, blue: id, white: id, gray: id, green: id, magenta: id };
+};
 
 export interface FarmMiddlewareOptions {
   /** Source directory containing middleware files (default: 'src') */
@@ -414,6 +431,21 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
         if (applicable.length === 0) return false;
 
+        const startTime = Date.now();
+        const method = req.method || "GET";
+        
+        // Log middleware execution in the same format as @farmjs/core
+        const pc = getColors();
+        const logMsg = [
+          pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+          pc.dim("[") + pc.bold(pc.magenta("MIDDLEWARE")) + pc.dim("]"),
+          pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+          pc.gray("Executing middleware: "),
+          pc.gray(pathname),
+          pc.dim(` (${applicable.length} middleware)`),
+        ].join(" ");
+        console.log(logMsg);
+
         // Create full middleware context
         const ctx = createContext(req, res, server);
         
@@ -464,6 +496,19 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
         // Store middleware data on request for pages to access
         (req as any).__FARM_MIDDLEWARE_DATA__ = Object.fromEntries(ctx.data);
+
+        // Log middleware completion
+        const duration = Date.now() - startTime;
+        const pc2 = getColors();
+        const completeLogMsg = [
+          pc2.dim("[") + pc2.bold(pc2.blue("FARM")) + pc2.dim("]"),
+          pc2.dim("[") + pc2.bold(pc2.magenta("MIDDLEWARE")) + pc2.dim("]"),
+          pc2.dim("[") + pc2.bold(pc2.white(method.padEnd(3))) + pc2.dim("]"),
+          pc2.gray("Completed"),
+          pc2.gray(pathname),
+          pc2.dim(`(${duration}ms)`),
+        ].join(" ");
+        console.log(completeLogMsg);
 
         return false;
       };
