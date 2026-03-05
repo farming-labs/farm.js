@@ -15,7 +15,17 @@ export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none"
 /** @internal Legacy prefetch mode for backward compatibility */
 type PrefetchLegacy = boolean | "hover" | "viewport" | "none";
 
-export interface LinkProps<TRoute extends string = string>
+/**
+ * Augment this interface via your generated farm-routes.d.ts so Link href is typed
+ * without passing a generic. Defaults to string when not augmented.
+ */
+export interface LinkDefaultRoute {
+  _: string;
+}
+
+export type DefaultRoutePath = LinkDefaultRoute["_"];
+
+export interface LinkProps<TRoute extends string = DefaultRoutePath>
   extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
   /** Destination path (typed when TRoute is a union of route strings) */
   href: TRoute;
@@ -71,7 +81,7 @@ function normalizePrefetch(
   return { intent: false, viewport: false, render: false };
 }
 
-function LinkInner<TRoute extends string = string>(
+function LinkInner<TRoute extends string = DefaultRoutePath>(
   {
     href,
     prefetch = true,
@@ -209,7 +219,7 @@ function LinkInner<TRoute extends string = string>(
 const LinkWithRef = forwardRef(LinkInner);
 LinkWithRef.displayName = "Link";
 
-type LinkComponentType = <TRoute extends string = string>(
+type LinkComponentType = <TRoute extends string = DefaultRoutePath>(
   props: LinkProps<TRoute> & { ref?: React.ForwardedRef<HTMLAnchorElement> },
 ) => React.ReactElement;
 

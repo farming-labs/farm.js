@@ -11,6 +11,8 @@ export { APITypeGenerator } from "./type-generator";
 export * from "./openapi";
 export * from "./query";
 export * from "./middleware";
+export { generateRouteTypes } from "./routing/generate-route-types";
+export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
 export * from "./client";
 export * from "./ssg";

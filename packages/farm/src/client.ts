@@ -4,3 +4,4 @@ export type { APIClientOptions } from "./api/client";
 // SPA Navigation exports
 export { Link } from "./client/link";
 export { useRouter } from "./client/router";
+export type { LinkProps, PrefetchBehavior, LinkDefaultRoute, DefaultRoutePath } from "./client/link";

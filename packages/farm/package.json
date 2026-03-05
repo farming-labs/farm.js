@@ -28,7 +28,7 @@
     "*": {
       "middleware": ["./types/middleware.d.ts", "./dist/middleware.d.mts"],
       "api": ["./types/api.d.ts", "./dist/api.d.mts"],
-      "client": ["./dist/client.d.mts"],
+      "client": ["./types/client.d.ts", "./dist/client.d.mts"],
       "server": ["./dist/server.d.mts"],
       "vite": ["./dist/vite.d.mts"],
       "plugin": ["./dist/plugin.d.mts"],
@@ -48,7 +48,7 @@
       "require": "./dist/server.cjs"
     },
     "./client": {
-      "types": "./dist/client.d.mts",
+      "types": "./types/client.d.ts",
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
     },
