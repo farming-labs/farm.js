@@ -44,10 +44,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   let discoveryComplete = false;
   let discoveryPromise: Promise<void> | null = null;
 
-  // No discovery/info logs; only [FARM] [API] request logs (logResponse)
   const log = (_message: string) => {};
-
-  // Log API request/response
   const logResponse = (method: string, urlPath: string, status: number, duration: number) => {
     try {
       const pc = require("picocolors");

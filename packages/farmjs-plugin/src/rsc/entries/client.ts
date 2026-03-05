@@ -12,16 +12,9 @@ import type { EntryContext } from "../types.js";
  * - Listens for HMR updates from server components
  */
 export function generateClientEntry(ctx: EntryContext): string {
-  // No verbose logs; only [FARM] [PAGE] / [MIDDLEWARE] / [API] from the plugin
   const debugLog = `// Debug disabled`;
-
-  // Build imports based on features enabled
-  // Import globals.css so Vite processes it and injects styles when the client bundle loads
   const globalsCssPath = `/${ctx.srcDir}/globals.css`;
   let imports = `
-// Auto-generated client entry by @farmjs/plugin/rsc
-// This file handles hydration and client-side navigation
-
 import ${JSON.stringify(globalsCssPath)};
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';

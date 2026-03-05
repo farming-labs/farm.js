@@ -1,6 +1,3 @@
-// About page - Server Component
-// No "use client" means this runs on the server
-
 import React from "react";
 
 export const metadata = {

@@ -16,15 +16,8 @@ export function generateRscEntry(ctx: EntryContext): string {
     ? `/${ctx.srcDir}/${ctx.routesDir}`
     : `/${ctx.srcDir}`;
 
-  // No verbose logs; only [FARM] [PAGE] / [MIDDLEWARE] / [API] from the plugin
   const debugLog = `// Debug disabled`;
-
-  // Start building the generated code. RSC environment uses react-server condition;
-  // renderToReadableStream must come from @vitejs/plugin-rsc/rsc (not react-dom/server).
   let code = `
-// Auto-generated RSC entry by @farmjs/plugin/rsc
-// This file handles server component rendering and routing
-
 import React from 'react';
 import {
   renderToReadableStream,

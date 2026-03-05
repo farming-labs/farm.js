@@ -96,7 +96,6 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       jsxImportSource: "react",
     },
 
-    // Add plugins: middleware, API, RSC, then any user plugins (e.g. rsc() with entries for client build).
     plugins: [
       farmMiddlewarePlugin({ srcDir: config.srcDir ?? "src", debug }),
       farmApiPlugin({ srcDir: config.srcDir ?? "src", debug }),
@@ -160,16 +159,13 @@ function createFarmLogger(port: number, debug: boolean) {
       const prefix = pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]");
       console.error(`${prefix} ${pc.bold(pc.red("✖"))} ${msg}`);
     },
-    clearScreen() {
-      // Don't clear screen
-    },
+    clearScreen() {},
     hasErrorLogged() {
       return false;
     },
   };
 }
 
-// Virtual module prefix (Vite convention)
 const VIRTUAL_PREFIX = "\0";
 const VIRTUAL_RSC_ENTRY = "virtual:@farmjs/rsc/entry-rsc";
 const VIRTUAL_SSR_ENTRY = "virtual:@farmjs/rsc/entry-ssr";
@@ -183,7 +179,6 @@ const VIRTUAL_HYDRATE_ENTRY = "virtual:@farmjs/rsc/hydrate";
  * @returns Array of Vite plugins
  */
 export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
-  // Track whether RSC is enabled (read from user's config)
   let rscEnabled = false;
   let actionsEnabled = false;
 
@@ -195,8 +190,6 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   // Store for debugging
   const debug = options.debug ?? false;
 
-  // Get picocolors with forced color support (to handle NO_COLOR env being set)
-  // Uses require_ which is defined at module level via createRequire for ESM compatibility
   const getColors = () => {
     try {
       const pico = require_("picocolors");
@@ -210,7 +203,6 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     return { bold: id, green: id, dim: id, cyan: id, red: id, yellow: id, blue: id, white: id, gray: id };
   };
 
-  // Logger with [FARM] [TAG] [METHOD] format - matches @farmjs/core style
   const logResponse = (method: string, urlPath: string, status: number, duration: number, tag: "PAGE" | "API" = "PAGE") => {
     const pc = getColors();
     let statusColor = pc.green;
@@ -230,14 +222,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     console.log(log);
   };
 
-  // No verbose info logs; only [FARM] [PAGE] / [MIDDLEWARE] / [API] are shown
   const logInfo = (_message: string) => {};
-  
-  // Intercept console.warn to filter known warnings
   const originalWarn = console.warn;
   console.warn = (...args: any[]) => {
     const msg = args[0]?.toString?.() ?? '';
-    // Suppress known dynamic import warnings
     if (msg.includes('[FARM] ⚠ warning') || msg.includes('registryPath') || msg.includes('farm-registry')) {
       return;
     }
@@ -245,10 +233,6 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   };
 
   return [
-    // ────────────────────────────────────────────────────────
-    // CONFIG PLUGIN
-    // Reads Farm's experimental flags and generates environment config
-    // ────────────────────────────────────────────────────────
     {
       name: "@farmjs/plugin/rsc:config",
       enforce: "pre",
@@ -542,23 +526,16 @@ if (document.readyState === 'loading') {
         }
 
         logInfo("Dev server middleware ready");
-        
-        // Track server start time for startup banner
         const serverStartTime = Date.now();
         let bannerPrinted = false;
-
         const pageCache = new Map<string, any>();
-        
-        // Print startup banner after server is listening
+
         server.httpServer?.once("listening", () => {
           if (bannerPrinted) return;
           bannerPrinted = true;
-          
           const elapsed = Date.now() - serverStartTime;
           const address = server.httpServer?.address();
           const port = typeof address === "object" && address ? address.port : 3000;
-          
-          // Get colors with forced color support (to handle NO_COLOR env being set)
           const colors = getColors();
           
           console.log("");
@@ -569,14 +546,12 @@ if (document.readyState === 'loading') {
           console.log("");
         });
 
-        // Add middleware to handle page requests
         return () => {
           server.middlewares.use(async (req, res, next) => {
             const url = req.url || "/";
             const pathname = url.split("?")[0];
             const method = req.method || "GET";
 
-            // Skip Vite internal requests, static files, and API routes
             if (
               pathname.startsWith("/@") ||
               pathname.startsWith("/__") ||
@@ -591,8 +566,6 @@ if (document.readyState === 'loading') {
             const startTime = Date.now();
 
             try {
-              // Use RSC pipeline in dev so client components hydrate (counter, forms, etc.).
-              // Set globals so the RSC entry can load SSR and the SSR entry can get bootstrap script.
               const clientEntryUrl = "/.farm/rsc-entries/entry.browser.tsx";
               const ssrEnv = (server as any).environments?.ssr;
               (globalThis as any).__VITE_RSC_LOAD_SSR__ = async () => {
@@ -740,20 +713,15 @@ if (document.readyState === 'loading') {
               }
 
               if (!pageModule?.default) {
-                // No page found, pass to next middleware
                 return next();
               }
 
-              // Try to load layout
               try {
                 const layoutPath = `./${srcDir}/layout.tsx`;
                 layoutModule = await server.ssrLoadModule(layoutPath);
-              } catch (e) {
-                // No layout, that's fine
+              } catch {
               }
 
-              // Import React and ReactDOM using native Node.js imports
-              // This avoids Vite's ESM evaluator which doesn't support CommonJS
               const React = await import("react");
               const ReactDOMServer = await import("react-dom/server");
 

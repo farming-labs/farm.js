@@ -41,7 +41,6 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
   let discoveryComplete = false;
   let discoveryPromise: Promise<void> | null = null;
 
-  // No discovery/info logs; only [FARM] [MIDDLEWARE] request logs from manager
   const log = (_message: string) => {};
 
   return {
@@ -49,7 +48,6 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
     enforce: "pre",
 
     configureServer(server: ViteDevServer) {
-      // Discover middleware files
       const discoverMiddleware = async (): Promise<void> => {
         const fs = await import("fs");
         const path = await import("path");
@@ -69,7 +67,6 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
             const fullPath = path.join(dir, entry.name);
 
             if (entry.isDirectory()) {
-              // Skip api directory - API routes have their own handling
               if (entry.name === "api") continue;
               
               const newBasePath = basePath ? `${basePath}/${entry.name}` : entry.name;

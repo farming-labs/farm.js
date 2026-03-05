@@ -4,9 +4,6 @@ interface NotFoundProps {
   pathname?: string;
 }
 
-/**
- * Custom 404 Page for the SSR/SSG Demo
- */
 export default function NotFound({ pathname }: NotFoundProps) {
   return (
     <div className="space-y-8">

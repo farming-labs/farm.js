@@ -4,10 +4,6 @@ interface NotFoundProps {
   pathname?: string;
 }
 
-/**
- * Custom 404 Page for the Basic Example
- * This demonstrates how to create a custom not-found page
- */
 export default function NotFound({ pathname }: NotFoundProps) {
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-50 to-white flex items-center justify-center p-4">

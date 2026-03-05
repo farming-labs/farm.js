@@ -11,19 +11,14 @@ import type { EntryContext } from "../types.js";
  * - Injects the RSC payload into the HTML so the client can hydrate
  */
 export function generateSsrEntry(ctx: EntryContext): string {
-  // No verbose logs; only [FARM] [PAGE] / [MIDDLEWARE] / [API] from the plugin
   const debugLog = `// Debug disabled`;
 
   return `
-// Auto-generated SSR entry by @farmjs/plugin/rsc
-// This file converts RSC stream to HTML for initial page loads
-
 import React from 'react';
 import { createFromReadableStream } from '@vitejs/plugin-rsc/ssr';
 import { injectRSCPayload } from 'rsc-html-stream/server';
 import { renderToPipeableStream } from 'react-dom/server';
 
-// Debug logging helper
 function debug(...args) {
   ${debugLog}
 }
