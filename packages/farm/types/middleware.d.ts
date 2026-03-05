@@ -1,6 +1,6 @@
 /**
  * Type declarations for @farmjs/core/middleware
- * 
+ *
  * These provide stable type definitions that don't depend on build hashes.
  */
 
@@ -67,7 +67,7 @@ declare module "@farmjs/core/middleware" {
    */
   export type MiddlewareFunction = (
     ctx: MiddlewareContext,
-    next: NextFunction
+    next: NextFunction,
   ) => void | Promise<void>;
 
   /**
@@ -117,25 +117,25 @@ declare module "@farmjs/core/middleware" {
      * Add a middleware function to the chain
      */
     use(handler: MiddlewareFunction): MiddlewareChain;
-    
+
     /**
      * Conditionally run middleware when the predicate returns true
      */
     when(
       predicate: (ctx: MiddlewareContext) => boolean,
-      handler: MiddlewareFunction
+      handler: MiddlewareFunction,
     ): MiddlewareChain;
-    
+
     /**
      * Add rate limiting middleware
      */
     rateLimit(config: RateLimitConfig): MiddlewareChain;
-    
+
     /**
      * Set the base path for this middleware chain
      */
     setBasePath(path: string): void;
-    
+
     /**
      * Build the middleware chain into executable form
      */
@@ -160,17 +160,26 @@ declare module "@farmjs/core/middleware" {
   /**
    * Get middleware data from context
    */
-  export function getMiddlewareData<T = unknown>(ctx: MiddlewareContext, key: string): T | undefined;
+  export function getMiddlewareData<T = unknown>(
+    ctx: MiddlewareContext,
+    key: string,
+  ): T | undefined;
 
   /**
    * Get middleware value (alias for getMiddlewareData)
    */
-  export function getMiddlewareValue<T = unknown>(ctx: MiddlewareContext, key: string): T | undefined;
+  export function getMiddlewareValue<T = unknown>(
+    ctx: MiddlewareContext,
+    key: string,
+  ): T | undefined;
 
   /**
    * Get data from middleware context
    */
-  export function getFromMiddleware<T = unknown>(ctx: MiddlewareContext, key: string): T | undefined;
+  export function getFromMiddleware<T = unknown>(
+    ctx: MiddlewareContext,
+    key: string,
+  ): T | undefined;
 
   /**
    * Check if middleware has data for a key

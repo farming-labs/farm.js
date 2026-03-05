@@ -69,7 +69,8 @@ export function farmPlugin(
           suppressLintOnLink: farmConfig.suppressLintOnLink,
         });
       } catch (e) {
-        if (process.env.FARM_VERBOSE) logger.warn("Route type generation failed: " + (e as Error).message);
+        if (process.env.FARM_VERBOSE)
+          logger.warn("Route type generation failed: " + (e as Error).message);
       }
 
       const appDirSlug = path.join(farmConfig.root, farmConfig.srcDir, "app").replace(/\\/g, "/");
@@ -82,7 +83,11 @@ export function farmPlugin(
         if (routeTypeGenScheduled) return;
         routeTypeGenScheduled = setTimeout(() => {
           routeTypeGenScheduled = null;
-          generateRouteTypes({ root: farmConfig.root, srcDir: farmConfig.srcDir, suppressLintOnLink: farmConfig.suppressLintOnLink }).catch(() => {});
+          generateRouteTypes({
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            suppressLintOnLink: farmConfig.suppressLintOnLink,
+          }).catch(() => {});
         }, 100);
       };
       ["add", "change", "unlink"].forEach((ev) => {
@@ -157,253 +162,253 @@ export function farmPlugin(
 
       // Register middleware directly (not in return function) to ensure it runs early
       server.middlewares.use(async (req, res, next) => {
-          // Handle OpenAPI docs route
-          if (openAPIManager && req.url === options.openapi?.route) {
-            const docsHandler = openAPIManager.getDocsRouteHandler();
-            return docsHandler(req, res);
-          }
+        // Handle OpenAPI docs route
+        if (openAPIManager && req.url === options.openapi?.route) {
+          const docsHandler = openAPIManager.getDocsRouteHandler();
+          return docsHandler(req, res);
+        }
 
-          // Handle API routes first
-          if (req.url?.startsWith("/api/")) {
-            const apiHandler = apiRouteManager.getHandler();
-            if (apiHandler) {
-              const startTime = Date.now();
-              const method = req.method || "GET";
-              const urlPath = req.url || "/";
+        // Handle API routes first
+        if (req.url?.startsWith("/api/")) {
+          const apiHandler = apiRouteManager.getHandler();
+          if (apiHandler) {
+            const startTime = Date.now();
+            const method = req.method || "GET";
+            const urlPath = req.url || "/";
 
-              // Log API request
-              // logRequest(method, urlPath, "API");
-
-              try {
-                // Convert Node.js request to Web Request
-                const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
-                const headers = new Headers();
-                for (const [key, value] of Object.entries(req.headers)) {
-                  if (value) {
-                    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                  }
-                }
-
-                // Get body for POST/PUT/PATCH
-                let body: string | undefined;
-                if (req.method !== "GET" && req.method !== "HEAD") {
-                  body = await new Promise<string>((resolve) => {
-                    let data = "";
-                    req.on("data", (chunk) => {
-                      data += chunk;
-                    });
-                    req.on("end", () => {
-                      resolve(data);
-                    });
-                  });
-                }
-
-                const request = new Request(url, {
-                  method: req.method,
-                  headers,
-                  body: body || undefined,
-                });
-
-                // Call better-call handler
-                const response = await apiHandler(request);
-
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, response.status, duration, "API");
-
-                // Send response
-                res.statusCode = response.status;
-                response.headers.forEach((value, key) => {
-                  res.setHeader(key, value);
-                });
-
-                const responseBody = await response.text();
-                res.end(responseBody);
-                return;
-              } catch (error) {
-                logger.error(`API route error: ${error}`);
-                res.statusCode = 500;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Internal server error" }));
-                return;
-              }
-            }
-          }
-
-          // Skip internal Vite requests
-          if (
-            req.url?.startsWith("/@") ||
-            req.url?.startsWith("/node_modules") ||
-            (req.url?.includes(".") && !req.url?.endsWith(".html"))
-          ) {
-            return next();
-          }
-
-          // Handle SPA page-data requests for client-side navigation
-          if (req.url?.startsWith("/__farm/page-data")) {
-            const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
-            const targetPath = urlObj.searchParams.get("path") || "/";
+            // Log API request
+            // logRequest(method, urlPath, "API");
 
             try {
-              const routeManager = farmApp.getRouteManager();
-              const match = routeManager.matchRoute(targetPath);
-
-              if (!match) {
-                res.statusCode = 404;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Route not found" }));
-                return;
-              }
-
-              const { route, params, layouts } = match;
-
-              // Check if route was found
-              if (!route) {
-                res.statusCode = 404;
-                res.setHeader("Content-Type", "application/json");
-                res.end(JSON.stringify({ error: "Route not found" }));
-                return;
-              }
-
-              // Load route module to get metadata
-              const routeModule = await routeManager.loadRouteModule(route.modulePath);
-
-              // Check if client component
-              let isClientComponent = false;
-              try {
-                const content = fs.readFileSync(route.modulePath, "utf-8");
-                isClientComponent =
-                  content.trimStart().startsWith("'use client'") ||
-                  content.trimStart().startsWith('"use client"');
-              } catch {
-                isClientComponent = false;
-              }
-
-              // Collect metadata from layouts and page
-              let mergedMetadata: Record<string, any> = {};
-              const layoutModules = await Promise.all(
-                layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
-              );
-
-              for (const layoutModule of layoutModules) {
-                if ((layoutModule as any).metadata) {
-                  mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
+              // Convert Node.js request to Web Request
+              const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(req.headers)) {
+                if (value) {
+                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
                 }
               }
 
-              if ((routeModule as any).metadata) {
-                mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
+              // Get body for POST/PUT/PATCH
+              let body: string | undefined;
+              if (req.method !== "GET" && req.method !== "HEAD") {
+                body = await new Promise<string>((resolve) => {
+                  let data = "";
+                  req.on("data", (chunk) => {
+                    data += chunk;
+                  });
+                  req.on("end", () => {
+                    resolve(data);
+                  });
+                });
               }
 
-              // Build search params
-              const targetUrl = new URL(targetPath, "http://localhost");
-              const searchParams: Record<string, string> = {};
-              targetUrl.searchParams.forEach((value, key) => {
-                searchParams[key] = value;
+              const request = new Request(url, {
+                method: req.method,
+                headers,
+                body: body || undefined,
               });
 
-              // Convert absolute paths to URL paths (relative to project root)
-              const projectRoot = server.config.root;
-              const toUrlPath = (absolutePath: string) => {
-                if (absolutePath.startsWith(projectRoot)) {
-                  return absolutePath.slice(projectRoot.length);
-                }
-                return absolutePath;
-              };
+              // Call better-call handler
+              const response = await apiHandler(request);
 
-              // Return page data for SPA navigation
-              const pageData = {
-                props: { params, searchParams },
-                modulePath: toUrlPath(route.modulePath),
-                isClientComponent,
-                metadata: {
-                  title: mergedMetadata.title,
-                  description: mergedMetadata.description,
-                },
-                layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
-              };
+              const duration = Date.now() - startTime;
+              logResponse(method, urlPath, response.status, duration, "API");
 
-              res.statusCode = 200;
-              res.setHeader("Content-Type", "application/json");
-              res.setHeader("Cache-Control", "private, max-age=0");
-              res.end(JSON.stringify(pageData));
+              // Send response
+              res.statusCode = response.status;
+              response.headers.forEach((value, key) => {
+                res.setHeader(key, value);
+              });
+
+              const responseBody = await response.text();
+              res.end(responseBody);
               return;
             } catch (error) {
-              console.error("[Farm.js] Page data error:", error);
+              logger.error(`API route error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
-              res.end(
-                JSON.stringify({
-                  error: "Failed to load page data",
-                  message: error instanceof Error ? error.message : "Unknown error",
-                }),
-              );
+              res.end(JSON.stringify({ error: "Internal server error" }));
               return;
             }
           }
+        }
 
-          const startTime = Date.now();
-          const method = req.method || "GET";
-          const urlPath = req.url || "/";
+        // Skip internal Vite requests
+        if (
+          req.url?.startsWith("/@") ||
+          req.url?.startsWith("/node_modules") ||
+          (req.url?.includes(".") && !req.url?.endsWith(".html"))
+        ) {
+          return next();
+        }
 
-          // logRequest(method, urlPath, "PAGE");
+        // Handle SPA page-data requests for client-side navigation
+        if (req.url?.startsWith("/__farm/page-data")) {
+          const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
+          const targetPath = urlObj.searchParams.get("path") || "/";
 
           try {
-            if (middlewareManager) {
-              const handled = await middlewareManager.execute(req, res);
-              if (handled) {
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-                return; // Middleware handled the response
-              }
-            }
+            const routeManager = farmApp.getRouteManager();
+            const match = routeManager.matchRoute(targetPath);
 
-            // Run beforeRequest hooks
-            if (pm) {
-              await pm.runHookParallel("beforeRequest", req, res);
-            }
-
-            if (res.writableEnded) {
-              // Log response if already ended
-              const duration = Date.now() - startTime;
-              logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+            if (!match) {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Route not found" }));
               return;
             }
 
-            // Intercept res.end to call afterResponse hooks and log response before response is fully sent
-            const originalEnd = res.end.bind(res);
-            let afterResponseCalled = false;
+            const { route, params, layouts } = match;
 
-            res.end = ((...args: any[]) => {
-              if (!afterResponseCalled && pm) {
-                afterResponseCalled = true;
-                // Log page response
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-                // Call afterResponse synchronously before actually ending
-                pm.runHookParallel("afterResponse", req, res)
-                  .then(() => {
-                    originalEnd(...args);
-                  })
-                  .catch((err) => {
-                    console.error("Error in afterResponse hook:", err);
-                    originalEnd(...args);
-                  });
-              } else {
-                originalEnd(...args);
+            // Check if route was found
+            if (!route) {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Route not found" }));
+              return;
+            }
+
+            // Load route module to get metadata
+            const routeModule = await routeManager.loadRouteModule(route.modulePath);
+
+            // Check if client component
+            let isClientComponent = false;
+            try {
+              const content = fs.readFileSync(route.modulePath, "utf-8");
+              isClientComponent =
+                content.trimStart().startsWith("'use client'") ||
+                content.trimStart().startsWith('"use client"');
+            } catch {
+              isClientComponent = false;
+            }
+
+            // Collect metadata from layouts and page
+            let mergedMetadata: Record<string, any> = {};
+            const layoutModules = await Promise.all(
+              layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
+            );
+
+            for (const layoutModule of layoutModules) {
+              if ((layoutModule as any).metadata) {
+                mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
               }
-            }) as any;
+            }
 
-            // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
+            if ((routeModule as any).metadata) {
+              mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
+            }
 
-            const renderer = farmApp.getServerRenderer();
-            await renderer.renderPage(req as any, res as any);
+            // Build search params
+            const targetUrl = new URL(targetPath, "http://localhost");
+            const searchParams: Record<string, string> = {};
+            targetUrl.searchParams.forEach((value, key) => {
+              searchParams[key] = value;
+            });
+
+            // Convert absolute paths to URL paths (relative to project root)
+            const projectRoot = server.config.root;
+            const toUrlPath = (absolutePath: string) => {
+              if (absolutePath.startsWith(projectRoot)) {
+                return absolutePath.slice(projectRoot.length);
+              }
+              return absolutePath;
+            };
+
+            // Return page data for SPA navigation
+            const pageData = {
+              props: { params, searchParams },
+              modulePath: toUrlPath(route.modulePath),
+              isClientComponent,
+              metadata: {
+                title: mergedMetadata.title,
+                description: mergedMetadata.description,
+              },
+              layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
+            };
+
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json");
+            res.setHeader("Cache-Control", "private, max-age=0");
+            res.end(JSON.stringify(pageData));
+            return;
           } catch (error) {
-            // Log error response
-            const duration = Date.now() - startTime;
-            logResponse(method, urlPath, 500, duration, "PAGE");
-            next(error);
+            console.error("[Farm.js] Page data error:", error);
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(
+              JSON.stringify({
+                error: "Failed to load page data",
+                message: error instanceof Error ? error.message : "Unknown error",
+              }),
+            );
+            return;
           }
-        });
+        }
+
+        const startTime = Date.now();
+        const method = req.method || "GET";
+        const urlPath = req.url || "/";
+
+        // logRequest(method, urlPath, "PAGE");
+
+        try {
+          if (middlewareManager) {
+            const handled = await middlewareManager.execute(req, res);
+            if (handled) {
+              const duration = Date.now() - startTime;
+              logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+              return; // Middleware handled the response
+            }
+          }
+
+          // Run beforeRequest hooks
+          if (pm) {
+            await pm.runHookParallel("beforeRequest", req, res);
+          }
+
+          if (res.writableEnded) {
+            // Log response if already ended
+            const duration = Date.now() - startTime;
+            logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+            return;
+          }
+
+          // Intercept res.end to call afterResponse hooks and log response before response is fully sent
+          const originalEnd = res.end.bind(res);
+          let afterResponseCalled = false;
+
+          res.end = ((...args: any[]) => {
+            if (!afterResponseCalled && pm) {
+              afterResponseCalled = true;
+              // Log page response
+              const duration = Date.now() - startTime;
+              logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+              // Call afterResponse synchronously before actually ending
+              pm.runHookParallel("afterResponse", req, res)
+                .then(() => {
+                  originalEnd(...args);
+                })
+                .catch((err) => {
+                  console.error("Error in afterResponse hook:", err);
+                  originalEnd(...args);
+                });
+            } else {
+              originalEnd(...args);
+            }
+          }) as any;
+
+          // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
+
+          const renderer = farmApp.getServerRenderer();
+          await renderer.renderPage(req as any, res as any);
+        } catch (error) {
+          // Log error response
+          const duration = Date.now() - startTime;
+          logResponse(method, urlPath, 500, duration, "PAGE");
+          next(error);
+        }
+      });
     },
 
     resolveId(id) {
@@ -1394,44 +1399,62 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
 
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
-    "node:string_decoder": "data:text/javascript,export class StringDecoder { write(buf) { return ''; } end() { return ''; } }; export default StringDecoder;",
-    "node:buffer": "data:text/javascript,export const Buffer = { from: () => ({}), alloc: () => ({}), isBuffer: () => false }; export default { Buffer };",
-    "node:stream": "data:text/javascript,export class Readable {}; export class Writable {}; export class Transform {}; export default { Readable, Writable, Transform };",
-    "node:util": "data:text/javascript,export const promisify = (fn) => fn; export const inspect = (obj) => String(obj); export default { promisify, inspect };",
-    "node:events": "data:text/javascript,export class EventEmitter { on() {} off() {} emit() {} }; export default EventEmitter;",
-    "node:path": "data:text/javascript,export const join = (...args) => args.join('/'); export const resolve = (...args) => args.join('/'); export default { join, resolve };",
+    "node:string_decoder":
+      "data:text/javascript,export class StringDecoder { write(buf) { return ''; } end() { return ''; } }; export default StringDecoder;",
+    "node:buffer":
+      "data:text/javascript,export const Buffer = { from: () => ({}), alloc: () => ({}), isBuffer: () => false }; export default { Buffer };",
+    "node:stream":
+      "data:text/javascript,export class Readable {}; export class Writable {}; export class Transform {}; export default { Readable, Writable, Transform };",
+    "node:util":
+      "data:text/javascript,export const promisify = (fn) => fn; export const inspect = (obj) => String(obj); export default { promisify, inspect };",
+    "node:events":
+      "data:text/javascript,export class EventEmitter { on() {} off() {} emit() {} }; export default EventEmitter;",
+    "node:path":
+      "data:text/javascript,export const join = (...args) => args.join('/'); export const resolve = (...args) => args.join('/'); export default { join, resolve };",
     "node:fs": "data:text/javascript,export default {};",
-    "node:url": "data:text/javascript,export const URL = globalThis.URL; export const URLSearchParams = globalThis.URLSearchParams; export default { URL, URLSearchParams };",
-    "node:crypto": "data:text/javascript,export const randomUUID = () => crypto.randomUUID(); export default { randomUUID };",
-    "node:os": "data:text/javascript,export const platform = () => 'browser'; export const homedir = () => '/'; export default { platform, homedir };",
+    "node:url":
+      "data:text/javascript,export const URL = globalThis.URL; export const URLSearchParams = globalThis.URLSearchParams; export default { URL, URLSearchParams };",
+    "node:crypto":
+      "data:text/javascript,export const randomUUID = () => crypto.randomUUID(); export default { randomUUID };",
+    "node:os":
+      "data:text/javascript,export const platform = () => 'browser'; export const homedir = () => '/'; export default { platform, homedir };",
     "node:child_process": "data:text/javascript,export default {};",
     "node:http": "data:text/javascript,export default {};",
     "node:https": "data:text/javascript,export default {};",
     "node:net": "data:text/javascript,export default {};",
     "node:tls": "data:text/javascript,export default {};",
     "node:zlib": "data:text/javascript,export default {};",
-    "node:async_hooks": "data:text/javascript,export const AsyncLocalStorage = class {}; export default { AsyncLocalStorage };",
+    "node:async_hooks":
+      "data:text/javascript,export const AsyncLocalStorage = class {}; export default { AsyncLocalStorage };",
     "node:worker_threads": "data:text/javascript,export default {};",
-    "node:perf_hooks": "data:text/javascript,export const performance = globalThis.performance; export default { performance };",
-    "string_decoder": "data:text/javascript,export class StringDecoder { write(buf) { return ''; } end() { return ''; } }; export default StringDecoder;",
-    "buffer": "data:text/javascript,export const Buffer = { from: () => ({}), alloc: () => ({}), isBuffer: () => false }; export default { Buffer };",
-    "stream": "data:text/javascript,export class Readable {}; export class Writable {}; export class Transform {}; export default { Readable, Writable, Transform };",
-    "util": "data:text/javascript,export const promisify = (fn) => fn; export const inspect = (obj) => String(obj); export default { promisify, inspect };",
-    "events": "data:text/javascript,export class EventEmitter { on() {} off() {} emit() {} }; export default EventEmitter;",
-    "path": "data:text/javascript,export const join = (...args) => args.join('/'); export const resolve = (...args) => args.join('/'); export default { join, resolve };",
-    "fs": "data:text/javascript,export default {};",
-    "url": "data:text/javascript,export const URL = globalThis.URL; export const URLSearchParams = globalThis.URLSearchParams; export default { URL, URLSearchParams };",
-    "crypto": "data:text/javascript,export const randomUUID = () => crypto.randomUUID(); export default { randomUUID };",
-    "os": "data:text/javascript,export const platform = () => 'browser'; export const homedir = () => '/'; export default { platform, homedir };",
-    "child_process": "data:text/javascript,export default {};",
-    "http": "data:text/javascript,export default {};",
-    "https": "data:text/javascript,export default {};",
-    "net": "data:text/javascript,export default {};",
-    "tls": "data:text/javascript,export default {};",
-    "zlib": "data:text/javascript,export default {};",
-    "async_hooks": "data:text/javascript,export const AsyncLocalStorage = class {}; export default { AsyncLocalStorage };",
-    "worker_threads": "data:text/javascript,export default {};",
-    "perf_hooks": "data:text/javascript,export const performance = globalThis.performance; export default { performance };",
+    "node:perf_hooks":
+      "data:text/javascript,export const performance = globalThis.performance; export default { performance };",
+    string_decoder:
+      "data:text/javascript,export class StringDecoder { write(buf) { return ''; } end() { return ''; } }; export default StringDecoder;",
+    buffer:
+      "data:text/javascript,export const Buffer = { from: () => ({}), alloc: () => ({}), isBuffer: () => false }; export default { Buffer };",
+    stream:
+      "data:text/javascript,export class Readable {}; export class Writable {}; export class Transform {}; export default { Readable, Writable, Transform };",
+    util: "data:text/javascript,export const promisify = (fn) => fn; export const inspect = (obj) => String(obj); export default { promisify, inspect };",
+    events:
+      "data:text/javascript,export class EventEmitter { on() {} off() {} emit() {} }; export default EventEmitter;",
+    path: "data:text/javascript,export const join = (...args) => args.join('/'); export const resolve = (...args) => args.join('/'); export default { join, resolve };",
+    fs: "data:text/javascript,export default {};",
+    url: "data:text/javascript,export const URL = globalThis.URL; export const URLSearchParams = globalThis.URLSearchParams; export default { URL, URLSearchParams };",
+    crypto:
+      "data:text/javascript,export const randomUUID = () => crypto.randomUUID(); export default { randomUUID };",
+    os: "data:text/javascript,export const platform = () => 'browser'; export const homedir = () => '/'; export default { platform, homedir };",
+    child_process: "data:text/javascript,export default {};",
+    http: "data:text/javascript,export default {};",
+    https: "data:text/javascript,export default {};",
+    net: "data:text/javascript,export default {};",
+    tls: "data:text/javascript,export default {};",
+    zlib: "data:text/javascript,export default {};",
+    async_hooks:
+      "data:text/javascript,export const AsyncLocalStorage = class {}; export default { AsyncLocalStorage };",
+    worker_threads: "data:text/javascript,export default {};",
+    perf_hooks:
+      "data:text/javascript,export const performance = globalThis.performance; export default { performance };",
   };
 
   // Plugin to intercept __vite-browser-external requests
@@ -1494,7 +1517,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     enforce: "pre" as const,
     configureServer(server: ViteDevServer) {
       startTime = Date.now();
-      
+
       const originalListen = server.listen.bind(server);
       server.listen = async (port?: number, ...args: any[]) => {
         const result = await originalListen(port, ...args);
@@ -1502,14 +1525,21 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
           serverStarted = true;
           const elapsed = Date.now() - startTime;
           const address = server.httpServer?.address();
-          const resolvedPort = typeof address === "object" && address ? address.port : (server.config.server.port || port || 3000);
+          const resolvedPort =
+            typeof address === "object" && address
+              ? address.port
+              : server.config.server.port || port || 3000;
           const hostConfig = server.config.server.host;
           const isExposed = hostConfig === true || hostConfig === "0.0.0.0";
 
           console.log("");
-          console.log(`  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`);
+          console.log(
+            `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`,
+          );
           console.log("");
-          console.log(`  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`);
+          console.log(
+            `  ${pc.dim("➜")}  ${pc.bold("Local:")}   ${pc.cyan(`http://localhost:${resolvedPort}/`)}`,
+          );
           if (isExposed) {
             // Get actual network address
             const os = require("os");
@@ -1517,13 +1547,17 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
             for (const name of Object.keys(interfaces)) {
               for (const iface of interfaces[name] || []) {
                 if (iface.family === "IPv4" && !iface.internal) {
-                  console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.cyan(`http://${iface.address}:${resolvedPort}/`)}`);
+                  console.log(
+                    `  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.cyan(`http://${iface.address}:${resolvedPort}/`)}`,
+                  );
                   break;
                 }
               }
             }
           } else {
-            console.log(`  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`);
+            console.log(
+              `  ${pc.dim("➜")}  ${pc.bold("Network:")} ${pc.dim("use --host to expose")}`,
+            );
           }
           console.log("");
         }
@@ -1572,11 +1606,15 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       // Stub out problematic server-only modules during dev mode
       alias: {
         // Nitro internals that should not be resolved in browser
-        "supports-color": "data:text/javascript,export default false; export const supportsColor = false; export const stdout = false; export const stderr = false;",
+        "supports-color":
+          "data:text/javascript,export default false; export const supportsColor = false; export const stdout = false; export const stderr = false;",
         "@poppinss/dumper": "data:text/javascript,export default {};",
-        "@poppinss/dumper/html": "data:text/javascript,export const createScript = () => ''; export const createStyleSheet = () => '';",
-        "consola/basic": "data:text/javascript,export default { log: console.log, info: console.info, warn: console.warn, error: console.error };",
-        "youch": "data:text/javascript,export default class Youch { toJSON() { return {}; } toHTML() { return ''; } };",
+        "@poppinss/dumper/html":
+          "data:text/javascript,export const createScript = () => ''; export const createStyleSheet = () => '';",
+        "consola/basic":
+          "data:text/javascript,export default { log: console.log, info: console.info, warn: console.warn, error: console.error };",
+        youch:
+          "data:text/javascript,export default class Youch { toJSON() { return {}; } toHTML() { return ''; } };",
         // Add all node stubs to alias as well
         ...nodeBuiltinStubs,
       },

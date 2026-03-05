@@ -1,4 +1,4 @@
-import { Link } from '@farmjs/core/client';
+import { Link } from "@farmjs/core/client";
 
 interface NotFoundProps {
   pathname?: string;
@@ -14,7 +14,9 @@ export default function NotFound({ pathname }: NotFoundProps) {
       <p className="mt-2 text-slate-600">
         {pathname ? (
           <>
-            The page <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">{pathname}</code> doesn't exist.
+            The page{" "}
+            <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">{pathname}</code>{" "}
+            doesn't exist.
           </>
         ) : (
           "The page you're looking for doesn't exist or has been moved."

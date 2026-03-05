@@ -168,10 +168,7 @@ export function generateSSGManifest(pages: SSGPage[]): string {
 /**
  * Check if a URL path matches an SSG page
  */
-export function matchSSGPage(
-  urlPath: string,
-  ssgPages: SSGPage[],
-): SSGPage | undefined {
+export function matchSSGPage(urlPath: string, ssgPages: SSGPage[]): SSGPage | undefined {
   const normalizedPath = urlPath === "/" ? "/" : urlPath.replace(/\/$/, "");
   return ssgPages.find((page) => page.urlPath === normalizedPath);
 }

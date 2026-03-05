@@ -1,9 +1,9 @@
-import type { PageProps } from '@farmjs/core';
-import { Link } from '@farmjs/core/client';
+import type { PageProps } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 
 export const metadata = {
-  title: 'Docs - Farm.js',
-  description: 'Farm.js documentation - Getting started, routing, layouts, and more.',
+  title: "Docs - Farm.js",
+  description: "Farm.js documentation - Getting started, routing, layouts, and more.",
 };
 
 export default function DocsIndexPage(_props: PageProps) {
@@ -46,9 +46,7 @@ export default function DocsIndexPage(_props: PageProps) {
           <h2 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-600">
             Layouts
           </h2>
-          <p className="mt-2 text-sm text-slate-600">
-            Root and nested layouts to wrap your pages.
-          </p>
+          <p className="mt-2 text-sm text-slate-600">Root and nested layouts to wrap your pages.</p>
         </Link>
       </div>
     </div>

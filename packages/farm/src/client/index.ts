@@ -6,7 +6,13 @@
  */
 
 export { Link } from "./link";
-export type { LinkProps, PrefetchBehavior, LinkDefaultRoute, DefaultRoutePath, ExternalHref } from "./link";
+export type {
+  LinkProps,
+  PrefetchBehavior,
+  LinkDefaultRoute,
+  DefaultRoutePath,
+  ExternalHref,
+} from "./link";
 export { useRouter } from "./router";
 export { createAPIClient } from "../api/client";
 export { getRouter, navigateTo, prefetch, SPARouter } from "./spa-router";

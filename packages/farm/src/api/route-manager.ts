@@ -163,7 +163,7 @@ export class APIRouteManager {
       try {
         // Get the handler function
         const handler = endpoint.__handler || endpoint;
-        
+
         // Parse query parameters
         const query: Record<string, string> = {};
         url.searchParams.forEach((value, key) => {
@@ -200,13 +200,10 @@ export class APIRouteManager {
         });
       } catch (error: any) {
         console.error(`[API Error] ${pathname}:`, error);
-        return new Response(
-          JSON.stringify({ error: error.message || "Internal Server Error" }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
+        return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
       }
     };
   }

@@ -12,9 +12,7 @@ import type { EntryContext } from "../types.js";
  */
 export function generateRscEntry(ctx: EntryContext): string {
   // Build the glob pattern for discovering routes
-  const glob = ctx.routesDir
-    ? `/${ctx.srcDir}/${ctx.routesDir}`
-    : `/${ctx.srcDir}`;
+  const glob = ctx.routesDir ? `/${ctx.srcDir}/${ctx.routesDir}` : `/${ctx.srcDir}`;
 
   const debugLog = `// Debug disabled`;
   let code = `

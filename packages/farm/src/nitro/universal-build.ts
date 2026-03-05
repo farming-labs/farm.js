@@ -56,7 +56,7 @@ export async function buildUniversal(
     const fs = await import("fs/promises");
     const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
     const appDir = path.join(root, srcDir, "app");
-    
+
     async function findLayoutsForClient(dir: string, routePrefix: string = "/"): Promise<void> {
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -66,8 +66,13 @@ export async function buildUniversal(
               pattern: routePrefix,
               modulePath: path.join(dir, entry.name),
             });
-          } else if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
-            const childPrefix = routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
+          } else if (
+            entry.isDirectory() &&
+            !entry.name.startsWith(".") &&
+            !entry.name.startsWith("_")
+          ) {
+            const childPrefix =
+              routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
             await findLayoutsForClient(path.join(dir, entry.name), childPrefix);
           }
         }
@@ -177,10 +182,10 @@ async function buildClient(
     // Check if the project's package.json has @tailwindcss/vite as a dependency
     const projectPkgPath = path.join(root, "package.json");
     const projectPkg = JSON.parse(await fs.readFile(projectPkgPath, "utf-8"));
-    const hasTailwindVite = 
+    const hasTailwindVite =
       projectPkg.dependencies?.["@tailwindcss/vite"] ||
       projectPkg.devDependencies?.["@tailwindcss/vite"];
-    
+
     if (hasTailwindVite) {
       // Try to require from the project's node_modules
       const projectRequire = createRequire(projectPkgPath);
@@ -188,7 +193,9 @@ async function buildClient(
       tailwindVitePlugin = (tailwindVite.default ?? tailwindVite)();
       logger.info("📦 Using Tailwind v4 (@tailwindcss/vite) from project");
     } else {
-      logger.info("📦 Using project's PostCSS/Tailwind setup (no @tailwindcss/vite in project deps)");
+      logger.info(
+        "📦 Using project's PostCSS/Tailwind setup (no @tailwindcss/vite in project deps)",
+      );
     }
   } catch (err) {
     // Error reading package.json or loading the plugin
@@ -351,18 +358,20 @@ function generateClientHydrationEntry(
 ): string {
   // Always import global CSS for Tailwind
   const cssImport = `import "./app/globals.css";`;
-  
+
   // Import layouts for wrapping client components
   const layoutImportStatements: string[] = [];
   const layoutRegistrations: string[] = [];
-  
+
   layoutRoutes.forEach((layout, index) => {
     // Create relative import path from srcDir
     const relativePath = layout.modulePath.replace(path.join(root, srcDir) + "/", "./");
     layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
-    layoutRegistrations.push(`  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`);
+    layoutRegistrations.push(
+      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`,
+    );
   });
-  
+
   const layoutImports = layoutImportStatements.join("\n");
 
   if (clientPages.length === 0) {
@@ -897,7 +906,7 @@ async function buildSSRInMemory(
   const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
   const fsSync = await import("fs");
   const appDir = path.join(root, srcDir, "app");
-  
+
   async function findLayouts(dir: string, routePrefix: string = "/"): Promise<void> {
     try {
       const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -907,7 +916,11 @@ async function buildSSRInMemory(
             pattern: routePrefix,
             modulePath: path.join(dir, entry.name),
           });
-        } else if (entry.isDirectory() && !entry.name.startsWith("_") && !entry.name.startsWith(".")) {
+        } else if (
+          entry.isDirectory() &&
+          !entry.name.startsWith("_") &&
+          !entry.name.startsWith(".")
+        ) {
           const subRoute = routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
           await findLayouts(path.join(dir, entry.name), subRoute);
         }
@@ -916,9 +929,9 @@ async function buildSSRInMemory(
       // Directory doesn't exist or can't be read
     }
   }
-  
+
   await findLayouts(appDir);
-  
+
   // Check for custom not-found page
   let notFoundPath: string | null = null;
   const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
@@ -933,7 +946,7 @@ async function buildSSRInMemory(
       // File doesn't exist, continue checking
     }
   }
-  
+
   // Sort layouts by depth (root first)
   layoutRoutes.sort((a, b) => {
     const depthA = a.pattern.split("/").filter(Boolean).length;
@@ -941,11 +954,19 @@ async function buildSSRInMemory(
     return depthA - depthB;
   });
 
-  logger.info(`📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, and ${apiRoutes.length} API routes`);
+  logger.info(
+    `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, and ${apiRoutes.length} API routes`,
+  );
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
-  const virtualEntryCode = generateVirtualEntryCode(apiRoutes, pageRoutes, layoutRoutes, notFoundPath, config);
+  const virtualEntryCode = generateVirtualEntryCode(
+    apiRoutes,
+    pageRoutes,
+    layoutRoutes,
+    notFoundPath,
+    config,
+  );
 
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
@@ -1102,9 +1123,7 @@ function generateVirtualEntryCode(
   });
 
   // Generate import for custom not-found page if exists
-  const notFoundImport = notFoundPath 
-    ? `import * as CustomNotFound from "${notFoundPath}";`
-    : "";
+  const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
 
   return `
 // Farm.js SSR Entry - Generated at build time

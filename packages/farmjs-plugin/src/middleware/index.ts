@@ -1,13 +1,13 @@
 /**
  * Farm.js Middleware Plugin
- * 
+ *
  * Standalone middleware support that works with or without RSC.
  * Discovers and executes middleware.ts files in the source directory.
- * 
+ *
  * @example
  * ```ts
  * import { farmMiddleware } from '@farmjs/plugin/middleware'
- * 
+ *
  * export default defineConfig({
  *   plugins: [farmMiddleware({ srcDir: 'src' })],
  * })
@@ -31,7 +31,18 @@ const getColors = () => {
     if (typeof pico?.green === "function") return pico;
   } catch {}
   const id = (s: string) => s;
-  return { bold: id, dim: id, cyan: id, red: id, yellow: id, blue: id, white: id, gray: id, green: id, magenta: id };
+  return {
+    bold: id,
+    dim: id,
+    cyan: id,
+    red: id,
+    yellow: id,
+    blue: id,
+    white: id,
+    gray: id,
+    green: id,
+    magenta: id,
+  };
 };
 
 export interface FarmMiddlewareOptions {
@@ -115,13 +126,15 @@ export interface MiddlewareContext {
 
 export type MiddlewareHandler = (
   ctx: MiddlewareContext,
-  next: () => Promise<void>
+  next: () => Promise<void>,
 ) => Promise<void> | void;
 
 export interface DiscoveredMiddleware {
   path: string;
   filePath: string;
-  module: MiddlewareHandler | { build: () => { handlers: MiddlewareHandler[] }; setBasePath?: (path: string) => void };
+  module:
+    | MiddlewareHandler
+    | { build: () => { handlers: MiddlewareHandler[] }; setBasePath?: (path: string) => void };
   config?: { matcher?: string[] };
 }
 
@@ -389,9 +402,15 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
         // Recursively check subdirectories
         const entries = fs.readdirSync(dir, { withFileTypes: true });
         for (const entry of entries) {
-          if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_") && entry.name !== "api") {
+          if (
+            entry.isDirectory() &&
+            !entry.name.startsWith(".") &&
+            !entry.name.startsWith("_") &&
+            entry.name !== "api"
+          ) {
             const subDir = path.join(dir, entry.name);
-            const subRoutePath = routePath === "/" ? `/${entry.name}` : `${routePath}/${entry.name}`;
+            const subRoutePath =
+              routePath === "/" ? `/${entry.name}` : `${routePath}/${entry.name}`;
             await discoverMiddleware(subDir, subRoutePath);
           }
         }
@@ -414,7 +433,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
         req: IncomingMessage,
         res: ServerResponse,
         pathname: string,
-        sharedData?: Map<string, any>
+        sharedData?: Map<string, any>,
       ): Promise<boolean> => {
         // Wait for discovery
         if (discoveryPromise && !discoveryComplete) {
@@ -433,7 +452,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
         const startTime = Date.now();
         const method = req.method || "GET";
-        
+
         // Log middleware execution in the same format as @farmjs/core
         const pc = getColors();
         const logMsg = [
@@ -448,7 +467,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
         // Create full middleware context
         const ctx = createContext(req, res, server);
-        
+
         // Use shared data if provided
         if (sharedData) {
           for (const [key, value] of sharedData) {
@@ -540,7 +559,12 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
           try {
             // Execute middleware
             const middlewareData = new Map<string, any>();
-            const handled = await executeMiddleware(req as IncomingMessage, res as ServerResponse, pathname, middlewareData);
+            const handled = await executeMiddleware(
+              req as IncomingMessage,
+              res as ServerResponse,
+              pathname,
+              middlewareData,
+            );
             if (handled) {
               return;
             }
@@ -557,12 +581,12 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
       const fileName = file.split("/").pop() || "";
       if (fileName.startsWith("middleware.")) {
         log(`Middleware updated: ${fileName}`);
-        
+
         // Invalidate the module in Vite's module graph
         for (const mod of modules) {
           server.moduleGraph.invalidateModule(mod);
         }
-        
+
         // Find and update the cached middleware
         for (const [routePath, mw] of middlewareCache.entries()) {
           if (mw.filePath === file) {
@@ -584,15 +608,17 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
             break;
           }
         }
-        
+
         // Also check if this is a new middleware file not yet in cache
-        if (!Array.from(middlewareCache.values()).some(mw => mw.filePath === file)) {
+        if (!Array.from(middlewareCache.values()).some((mw) => mw.filePath === file)) {
           try {
             const path = await import("path");
             const srcPath = path.join(server.config.root, srcDir);
-            const relativePath = file.replace(srcPath, "").replace(/\/middleware\.(ts|tsx|js|jsx)$/, "");
+            const relativePath = file
+              .replace(srcPath, "")
+              .replace(/\/middleware\.(ts|tsx|js|jsx)$/, "");
             const routePath = relativePath === "" ? "/" : relativePath;
-            
+
             const module = await server.ssrLoadModule(file);
             if (module.default) {
               middlewareCache.set(routePath, {
@@ -607,7 +633,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
             log(`New middleware load failed: ${e.message}`);
           }
         }
-        
+
         server.ws.send({ type: "full-reload", path: "*" });
         return [];
       }

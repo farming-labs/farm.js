@@ -75,15 +75,12 @@ export type RoutePath = string;
     }
   }
 
-  const typeLiterals = Array.from(patterns)
-    .sort()
-    .map(routePatternToTsTypeLiteral);
+  const typeLiterals = Array.from(patterns).sort().map(routePatternToTsTypeLiteral);
 
   const routePathType = suppressLintOnLink ? "string" : typeLiterals.join(" | ");
-  const augmentationBlock =
-    suppressLintOnLink
-      ? ""
-      : `
+  const augmentationBlock = suppressLintOnLink
+    ? ""
+    : `
 declare module "@farmjs/core/client" {
   interface LinkDefaultRoute {
     _: RoutePath;

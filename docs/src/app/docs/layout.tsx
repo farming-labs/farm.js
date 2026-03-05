@@ -1,11 +1,11 @@
-import type { LayoutProps } from '@farmjs/core';
-import { Link } from '@farmjs/core/client';
+import type { LayoutProps } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 
 const docLinks = [
-  { href: '/docs', label: 'Introduction' },
-  { href: '/docs/getting-started', label: 'Getting Started' },
-  { href: '/docs/routing', label: 'Routing' },
-  { href: '/docs/layouts', label: 'Layouts' },
+  { href: "/docs", label: "Introduction" },
+  { href: "/docs/getting-started", label: "Getting Started" },
+  { href: "/docs/routing", label: "Routing" },
+  { href: "/docs/layouts", label: "Layouts" },
 ];
 
 export default function DocsLayout({ children }: LayoutProps) {

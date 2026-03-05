@@ -1,21 +1,21 @@
 /**
  * Farm.js API Routes Plugin
- * 
+ *
  * Standalone API route support that works with or without RSC.
- * 
+ *
  * Supports two patterns:
  * 1. File-based routing: /src/api/hello/route.ts -> /api/hello
  *    The path is auto-inferred from file location
- * 
+ *
  * 2. Root routes.ts file: /src/routes.ts with explicit paths
  *    createEndpoint('/api/custom', { method: 'GET' }, handler)
- * 
+ *
  * Uses better-call's createRouter for proper Zod validation and parsing.
- * 
+ *
  * @example
  * ```ts
  * import { farmApi } from '@farmjs/plugin/api'
- * 
+ *
  * export default defineConfig({
  *   plugins: [farmApi({ srcDir: 'src' })],
  * })
@@ -91,9 +91,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
   // We use direct invocation for better control over path matching
   const createBetterCallRouter = async (): Promise<void> => {
     const totalEndpoints = Array.from(apiRoutesCache.values()).reduce(
-      (sum, route) => sum + route.methods.length, 0
+      (sum, route) => sum + route.methods.length,
+      0,
     );
-    
+
     if (totalEndpoints > 0) {
       // Create a handler that matches routes and invokes endpoints
       apiRouterHandler = async (request: Request): Promise<Response> => {
@@ -153,13 +154,16 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             try {
               validatedQuery = types.query.parse(queryObj);
             } catch (e: any) {
-              return new Response(JSON.stringify({ 
-                error: "Invalid query parameters", 
-                details: e.errors || e.message 
-              }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" },
-              });
+              return new Response(
+                JSON.stringify({
+                  error: "Invalid query parameters",
+                  details: e.errors || e.message,
+                }),
+                {
+                  status: 400,
+                  headers: { "Content-Type": "application/json" },
+                },
+              );
             }
           }
 
@@ -167,13 +171,16 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             try {
               validatedBody = types.body.parse(bodyObj);
             } catch (e: any) {
-              return new Response(JSON.stringify({ 
-                error: "Invalid request body", 
-                details: e.errors || e.message 
-              }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" },
-              });
+              return new Response(
+                JSON.stringify({
+                  error: "Invalid request body",
+                  details: e.errors || e.message,
+                }),
+                {
+                  status: 400,
+                  headers: { "Content-Type": "application/json" },
+                },
+              );
             }
           }
 
@@ -190,7 +197,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
           // Call the handler (use __handler if available, otherwise the endpoint itself)
           const handlerFn = endpoint.__handler || endpoint;
           const result = await handlerFn(ctx);
-          
+
           // If result is already a Response, return it
           if (result instanceof Response) {
             return result;
@@ -202,16 +209,13 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             headers: { "Content-Type": "application/json" },
           });
         } catch (error: any) {
-          return new Response(
-            JSON.stringify({ error: error.message || "Internal Server Error" }),
-            {
-              status: 500,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
+          return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
         }
       };
-      
+
       log(`better-call router created with ${totalEndpoints} endpoints`);
     }
   };
@@ -250,13 +254,10 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
           headers: { "Content-Type": "application/json" },
         });
       } catch (error: any) {
-        return new Response(
-          JSON.stringify({ error: error.message || "Internal Server Error" }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
+        return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        });
       }
     };
   };
@@ -306,7 +307,8 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         for (const filePath of routeFiles) {
           try {
             const relativePath = path.relative(apiDir, path.dirname(filePath));
-            const routePath = "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
+            const routePath =
+              "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(filePath);
             const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
@@ -356,7 +358,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
               for (const [exportName, exportValue] of Object.entries(routesModule)) {
                 // Check both object and function exports (better-call returns functions)
                 const endpoint = exportValue as any;
-                
+
                 if (endpoint && endpoint.__path) {
                   const routePath = endpoint.__path;
                   const method = endpoint.__method || "GET";
@@ -500,11 +502,11 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
     async handleHotUpdate({ file, server, modules }) {
       const fileName = file.split("/").pop() || "";
-      
+
       // Handle root routes.ts updates
       if (fileName === "routes.ts" || fileName === "routes.tsx" || fileName === "routes.js") {
         log(`Root routes file updated: ${fileName}`);
-        
+
         // Invalidate all affected modules
         for (const mod of modules) {
           server.moduleGraph.invalidateModule(mod);
@@ -519,12 +521,12 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
         try {
           const routesModule = await server.ssrLoadModule(file);
-          
+
           // Look for exported endpoints with explicit paths
           // Endpoints can be functions (from better-call) or objects
           for (const [exportName, exportValue] of Object.entries(routesModule)) {
             const endpoint = exportValue as any;
-            
+
             if (endpoint && endpoint.__path) {
               const routePath = endpoint.__path;
               const method = endpoint.__method || "GET";
@@ -555,7 +557,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
         return [];
       }
-      
+
       if (file.includes("/api/") && fileName.startsWith("route.")) {
         const shortPath = file.split("/api/")[1] || file;
         log(`API route updated: ${shortPath}`);
@@ -611,7 +613,8 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             const path = await import("path");
             const apiDir = path.join(server.config.root, srcDir, "api");
             const relativePath = path.relative(apiDir, path.dirname(file));
-            const routePath = "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
+            const routePath =
+              "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(file);
             const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];

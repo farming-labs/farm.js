@@ -89,13 +89,17 @@ export async function renderHTML(rscStream, options = {}) {
   if (shouldInjectCss && fullHtml.includes("</head>")) {
     fullHtml = fullHtml.replace("</head>", '<link rel="stylesheet" href="' + CLIENT_CSS_HREF + '"></head>');
   }
-  ${ctx.actionsEnabled ? `// Ensure __viteRscCallServer is set before any module runs (fixes "is not a function" when form submits)
+  ${
+    ctx.actionsEnabled
+      ? `// Ensure __viteRscCallServer is set before any module runs (fixes "is not a function" when form submits)
   if (fullHtml.includes("<body")) {
     fullHtml = fullHtml.replace(/<body[^>]*>/, function(m) {
       return m + "<script>(function(){if(typeof globalThis.__viteRscCallServer!=='function'){globalThis.__viteRscCallServer=function(){return Promise.reject(new Error('Farm.js: server actions not ready'));}}})();</script>";
     });
   }
-  ` : ""}
+  `
+      : ""
+  }
   debug('Injecting RSC payload into HTML');
   
   const streamFromHtml = new ReadableStream({

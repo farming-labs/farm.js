@@ -64,7 +64,11 @@ export function DefaultNotFoundPage({ pathname }: NotFoundPageProps) {
         >
           {pathname ? (
             <>
-              The page <code style={{ backgroundColor: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }}>{pathname}</code> doesn't exist.
+              The page{" "}
+              <code style={{ backgroundColor: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }}>
+                {pathname}
+              </code>{" "}
+              doesn't exist.
             </>
           ) : (
             "The page you're looking for doesn't exist or has been moved."
@@ -96,10 +100,7 @@ export function DefaultNotFoundPage({ pathname }: NotFoundPageProps) {
         }}
       >
         Powered by{" "}
-        <a
-          href="https://farmjs.dev"
-          style={{ color: "#22c55e", textDecoration: "none" }}
-        >
+        <a href="https://farmjs.dev" style={{ color: "#22c55e", textDecoration: "none" }}>
           Farm.js
         </a>
       </p>

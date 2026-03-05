@@ -33,7 +33,9 @@ import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 // Use API and middleware plugins from @farmjs/core (require so CJS build resolves when ESM .mjs is missing)
 const require_ = createRequire(import.meta.url);
-const { farmApiPlugin, farmMiddlewarePlugin } = require_("@farmjs/core") as typeof import("@farmjs/core");
+const { farmApiPlugin, farmMiddlewarePlugin } = require_(
+  "@farmjs/core",
+) as typeof import("@farmjs/core");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -139,7 +141,13 @@ function createFarmLogger(port: number, debug: boolean) {
     hasWarned: false,
     info(msg: string) {
       // Suppress Vite's startup banner (ready in, Local:, Network:, etc.)
-      if (msg.includes("VITE v") || msg.includes("ready in") || msg.includes("Local:") || msg.includes("Network:") || msg.includes("press h")) {
+      if (
+        msg.includes("VITE v") ||
+        msg.includes("ready in") ||
+        msg.includes("Local:") ||
+        msg.includes("Network:") ||
+        msg.includes("press h")
+      ) {
         return;
       }
       // Pass through other messages only in debug mode
@@ -200,10 +208,26 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       if (typeof pico?.green === "function") return pico;
     } catch {}
     const id = (s: string) => s;
-    return { bold: id, green: id, dim: id, cyan: id, red: id, yellow: id, blue: id, white: id, gray: id };
+    return {
+      bold: id,
+      green: id,
+      dim: id,
+      cyan: id,
+      red: id,
+      yellow: id,
+      blue: id,
+      white: id,
+      gray: id,
+    };
   };
 
-  const logResponse = (method: string, urlPath: string, status: number, duration: number, tag: "PAGE" | "API" = "PAGE") => {
+  const logResponse = (
+    method: string,
+    urlPath: string,
+    status: number,
+    duration: number,
+    tag: "PAGE" | "API" = "PAGE",
+  ) => {
     const pc = getColors();
     let statusColor = pc.green;
     if (status >= 500) statusColor = pc.red;
@@ -225,8 +249,12 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   const logInfo = (_message: string) => {};
   const originalWarn = console.warn;
   console.warn = (...args: any[]) => {
-    const msg = args[0]?.toString?.() ?? '';
-    if (msg.includes('[FARM] ⚠ warning') || msg.includes('registryPath') || msg.includes('farm-registry')) {
+    const msg = args[0]?.toString?.() ?? "";
+    if (
+      msg.includes("[FARM] ⚠ warning") ||
+      msg.includes("registryPath") ||
+      msg.includes("farm-registry")
+    ) {
       return;
     }
     originalWarn.apply(console, args);
@@ -322,8 +350,14 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               ? {
                   alias: [
                     { find: "@farmjs/core", replacement: farmCorePath },
-                    { find: "@farmjs/core/middleware", replacement: path.join(farmCorePath, "dist/middleware.mjs") },
-                    { find: "@farmjs/core/api", replacement: path.join(farmCorePath, "dist/api.mjs") },
+                    {
+                      find: "@farmjs/core/middleware",
+                      replacement: path.join(farmCorePath, "dist/middleware.mjs"),
+                    },
+                    {
+                      find: "@farmjs/core/api",
+                      replacement: path.join(farmCorePath, "dist/api.mjs"),
+                    },
                   ],
                 }
               : {}),
@@ -462,7 +496,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (id.startsWith(VIRTUAL_PREFIX + "/@rsc-hydrate/")) {
           const pagePath = id.replace(VIRTUAL_PREFIX + "/@rsc-hydrate", "");
           const srcDir = entryContext.srcDir;
-          const pageImportPath = pagePath === "/" ? `/${srcDir}/page.tsx` : `/${srcDir}${pagePath}/page.tsx`;
+          const pageImportPath =
+            pagePath === "/" ? `/${srcDir}/page.tsx` : `/${srcDir}${pagePath}/page.tsx`;
           const layoutImportPath = `/${srcDir}/layout.tsx`;
           const actionBlock = entryContext.actionsEnabled
             ? `
@@ -519,7 +554,7 @@ if (document.readyState === 'loading') {
     // ────────────────────────────────────────────────────────
     {
       name: "@farmjs/plugin/rsc:dev-server",
-      
+
       configureServer(server) {
         if (!rscEnabled) {
           return;
@@ -537,12 +572,18 @@ if (document.readyState === 'loading') {
           const address = server.httpServer?.address();
           const port = typeof address === "object" && address ? address.port : 3000;
           const colors = getColors();
-          
+
           console.log("");
-          console.log(`  ${colors.bold(colors.green("Farm.js"))} ${colors.dim("v1.0.0")} ${colors.dim(`ready in ${elapsed}ms`)}`);
+          console.log(
+            `  ${colors.bold(colors.green("Farm.js"))} ${colors.dim("v1.0.0")} ${colors.dim(`ready in ${elapsed}ms`)}`,
+          );
           console.log("");
-          console.log(`  ${colors.dim("➜")}  ${colors.bold("Local:")}   ${colors.cyan(`http://localhost:${port}/`)}`);
-          console.log(`  ${colors.dim("➜")}  ${colors.bold("Network:")} ${colors.dim("use --host to expose")}`);
+          console.log(
+            `  ${colors.dim("➜")}  ${colors.bold("Local:")}   ${colors.cyan(`http://localhost:${port}/`)}`,
+          );
+          console.log(
+            `  ${colors.dim("➜")}  ${colors.bold("Network:")} ${colors.dim("use --host to expose")}`,
+          );
           console.log("");
         });
 
@@ -573,7 +614,9 @@ if (document.readyState === 'loading') {
                   const ssrSource =
                     (ssrEnv.config?.build as any)?.rollupOptions?.input?.index ??
                     path.join(server.config.root, ".farm/rsc-entries/entry.ssr.tsx");
-                  const resolved = await ssrEnv.pluginContainer.resolveId(ssrSource, undefined, { ssr: true });
+                  const resolved = await ssrEnv.pluginContainer.resolveId(ssrSource, undefined, {
+                    ssr: true,
+                  });
                   if (resolved?.id) return ssrEnv.runner.import(resolved.id);
                 }
                 return server.ssrLoadModule("./.farm/rsc-entries/entry.ssr.tsx");
@@ -584,7 +627,8 @@ if (document.readyState === 'loading') {
                 ? `(function(){if(typeof globalThis.__viteRscCallServer!=='function'){globalThis.__viteRscCallServer=function(){return Promise.reject(new Error('Farm.js: server actions not ready'));}}})();\n`
                 : "";
               (globalThis as any).__FARM_VITE_RSC_LOAD_BOOTSTRAP__ = async () =>
-                bootstrapPrefix + `import("/@react-refresh").then(m=>{m.default.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;return import("/@vite/client");}).then(()=>import(${JSON.stringify(clientEntryUrl)}));`;
+                bootstrapPrefix +
+                `import("/@react-refresh").then(m=>{m.default.injectIntoGlobalHook(window);window.$RefreshReg$=()=>{};window.$RefreshSig$=()=>type=>type;window.__vite_plugin_react_preamble_installed__=true;return import("/@vite/client");}).then(()=>import(${JSON.stringify(clientEntryUrl)}));`;
 
               const base = `http://${req.headers.host || "localhost:3000"}`;
               let body: Buffer | undefined;
@@ -597,7 +641,10 @@ if (document.readyState === 'loading') {
               const request = new Request(new URL(url, base), {
                 method,
                 headers: req.headers as HeadersInit,
-                body: method === "POST" && body && body.length > 0 ? (body as unknown as BodyInit) : undefined,
+                body:
+                  method === "POST" && body && body.length > 0
+                    ? (body as unknown as BodyInit)
+                    : undefined,
               });
 
               // Load the RSC entry in the "rsc" environment so @vitejs/plugin-rsc transforms run with this.environment.name === "rsc".
@@ -609,15 +656,23 @@ if (document.readyState === 'loading') {
                   "./.farm/rsc-entries/entry.rsc.tsx";
                 const root = server.config.root;
                 const importer = path.join(root, "vite.config.ts");
-                const absoluteRscEntry = path.resolve(root, ".farm", "rsc-entries", "entry.rsc.tsx");
+                const absoluteRscEntry = path.resolve(
+                  root,
+                  ".farm",
+                  "rsc-entries",
+                  "entry.rsc.tsx",
+                );
                 const resolved =
                   (await rscEnv.pluginContainer.resolveId(rscSource, importer, { ssr: true })) ??
                   (await rscEnv.pluginContainer.resolveId(rscSource, undefined, { ssr: true })) ??
-                  (await rscEnv.pluginContainer.resolveId(absoluteRscEntry, undefined, { ssr: true }));
+                  (await rscEnv.pluginContainer.resolveId(absoluteRscEntry, undefined, {
+                    ssr: true,
+                  }));
                 const id = resolved?.id ?? pathToFileURL(absoluteRscEntry).href;
                 rscEntry = await rscEnv.runner.import(id);
               }
-              if (!rscEntry?.default?.fetch) throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
+              if (!rscEntry?.default?.fetch)
+                throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
               const response = await rscEntry.default.fetch(request);
 
               res.statusCode = response.status;
@@ -649,7 +704,9 @@ if (document.readyState === 'loading') {
                 console.error("[Farm.js] RSC dev handler error:", rscError);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "text/html");
-                res.end(`<!DOCTYPE html><html><head><title>Error</title></head><body><pre>${(rscError as Error).message}</pre></body></html>`);
+                res.end(
+                  `<!DOCTYPE html><html><head><title>Error</title></head><body><pre>${(rscError as Error).message}</pre></body></html>`,
+                );
                 return;
               }
             }
@@ -667,7 +724,7 @@ if (document.readyState === 'loading') {
 
               // Find matching page file
               const normalized = pathname.replace(/\/$/, "") || "/";
-              
+
               // Common page file patterns
               const possiblePaths = [
                 `${glob}${normalized === "/" ? "" : normalized}/page.tsx`,
@@ -693,7 +750,7 @@ if (document.readyState === 'loading') {
                 try {
                   // Convert glob path to actual file path
                   const actualPath = pagePath.startsWith("/") ? `.${pagePath}` : pagePath;
-                  
+
                   if (pageCache.has(pagePath)) {
                     pageModule = pageCache.get(pagePath);
                     matchedPath = pagePath;
@@ -719,8 +776,7 @@ if (document.readyState === 'loading') {
               try {
                 const layoutPath = `./${srcDir}/layout.tsx`;
                 layoutModule = await server.ssrLoadModule(layoutPath);
-              } catch {
-              }
+              } catch {}
 
               const React = await import("react");
               const ReactDOMServer = await import("react-dom/server");
@@ -734,13 +790,13 @@ if (document.readyState === 'loading') {
               const searchParams = Object.fromEntries(new URLSearchParams(url.split("?")[1] || ""));
 
               // Render the page with middleware data
-              const pageProps = { 
-                params, 
+              const pageProps = {
+                params,
                 searchParams,
                 // Middleware shared data is available to pages
                 middlewareData,
               };
-              
+
               // Helper to check if a function is async or returns a Promise
               // We need to actually call the function to detect this reliably
               // since transpiled async functions may not be detectable by constructor
@@ -756,11 +812,11 @@ if (document.readyState === 'loading') {
                 } catch {}
                 return false;
               };
-              
+
               // Try to render the page - if it returns a Promise, it's async
               let pageContent;
               let isAsyncPage = isAsyncFunction(Page);
-              
+
               try {
                 const result = Page(pageProps);
                 // Check if result is a Promise (thenable)
@@ -807,20 +863,36 @@ if (document.readyState === 'loading') {
               // For sync pages we load preamble + vite client + hydrate in one script below; do not load vite-client in head so order is guaranteed.
               const headElements = [
                 h("meta", { key: "charset", charSet: "utf-8" }),
-                h("meta", { key: "viewport", name: "viewport", content: "width=device-width, initial-scale=1" }),
-                metadata.title ? h("title", { key: "title" }, metadata.title) : h("title", { key: "title" }, "Farm.js"),
-                metadata.description ? h("meta", { key: "description", name: "description", content: metadata.description }) : null,
-                h("link", { key: "globals-css", rel: "stylesheet", href: `/${srcDir}/globals.css` }),
-                ...(isSyncPage ? [] : [h("script", { key: "vite-client", type: "module", src: "/@vite/client" })]),
+                h("meta", {
+                  key: "viewport",
+                  name: "viewport",
+                  content: "width=device-width, initial-scale=1",
+                }),
+                metadata.title
+                  ? h("title", { key: "title" }, metadata.title)
+                  : h("title", { key: "title" }, "Farm.js"),
+                metadata.description
+                  ? h("meta", {
+                      key: "description",
+                      name: "description",
+                      content: metadata.description,
+                    })
+                  : null,
+                h("link", {
+                  key: "globals-css",
+                  rel: "stylesheet",
+                  href: `/${srcDir}/globals.css`,
+                }),
+                ...(isSyncPage
+                  ? []
+                  : [h("script", { key: "vite-client", type: "module", src: "/@vite/client" })]),
               ].filter(Boolean);
 
               // Create body elements
               // For async (server) pages, we don't hydrate the page itself - only client components within
               // For sync pages, we can hydrate the whole thing
-              const bodyElements: any[] = [
-                h("div", { key: "root", id: "root" }, content),
-              ];
-              
+              const bodyElements: any[] = [h("div", { key: "root", id: "root" }, content)];
+
               // Only add hydration script for sync pages (non-async)
               // When server actions are enabled, set __viteRscCallServer first so form submission works.
               if (actionsEnabled) {
@@ -844,7 +916,9 @@ if (document.readyState === 'loading') {
                   }),
                   h("script", {
                     key: "page-props",
-                    dangerouslySetInnerHTML: { __html: `window.__PAGE_PROPS__ = ${JSON.stringify(pageProps)};` },
+                    dangerouslySetInnerHTML: {
+                      __html: `window.__PAGE_PROPS__ = ${JSON.stringify(pageProps)};`,
+                    },
                   }),
                   h("script", {
                     key: "hydrate",
@@ -858,25 +932,27 @@ if (document.readyState === 'loading') {
                 // For async pages, we need to hydrate client component islands
                 // Load a minimal script that finds and hydrates "use client" components
                 bodyElements.push(
-                  h("script", { 
-                    key: "client-islands", 
-                    type: "module", 
-                    dangerouslySetInnerHTML: { 
+                  h("script", {
+                    key: "client-islands",
+                    type: "module",
+                    dangerouslySetInnerHTML: {
                       __html: `
 // Hydrate client component islands
 import '/@vite/client';
 
 // Find all client components and hydrate them
 // The actual hydration is handled by @vitejs/plugin-rsc transforms
-` 
-                    } 
+`,
+                    },
                   }),
                 );
               }
 
-              const fullPage = h("html", { lang: "en" },
+              const fullPage = h(
+                "html",
+                { lang: "en" },
                 h("head", null, ...headElements),
-                h("body", null, ...bodyElements)
+                h("body", null, ...bodyElements),
               );
 
               const html = "<!DOCTYPE html>" + ReactDOMServer.renderToString(fullPage);
@@ -884,7 +960,7 @@ import '/@vite/client';
               res.statusCode = 200;
               res.setHeader("Content-Type", "text/html");
               res.end(html);
-              
+
               const duration = Date.now() - startTime;
               logResponse("GET", pathname, 200, duration);
             } catch (error: any) {
@@ -956,10 +1032,7 @@ import '/@vite/client';
         }
 
         // Handle page/layout changes
-        if (
-          file.includes(srcDir) &&
-          (file.endsWith(".tsx") || file.endsWith(".jsx"))
-        ) {
+        if (file.includes(srcDir) && (file.endsWith(".tsx") || file.endsWith(".jsx"))) {
           if (fileName.startsWith("page.") || fileName.startsWith("layout.")) {
             const shortPath = file.split(`/${srcDir}/`)[1] || file;
             logInfo(`Updated: ${shortPath}`);

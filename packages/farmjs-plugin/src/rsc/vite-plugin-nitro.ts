@@ -44,7 +44,10 @@ export interface NitroPluginOptions {
 
 let nitroRunScheduled = false;
 /** Stored RSC (server) bundle from writeBundle so we can find the entry chunk. */
-let serverBundle: Record<string, { type: string; fileName?: string; isEntry?: boolean; name?: string }> | null = null;
+let serverBundle: Record<
+  string,
+  { type: string; fileName?: string; isEntry?: boolean; name?: string }
+> | null = null;
 
 const NITRO_VITE_DIST = ".nitro/vite/dist";
 
@@ -169,7 +172,14 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
 /** Called by RSC plugin buildApp (post) to run Nitro with the captured bundle. */
 export async function runNitroFromBuildApp(): Promise<void> {
   const paths = (globalThis as any).__FARM_NITRO_PATHS as
-    | { root: string; rscOutDir: string; ssrOutDir: string; clientOutDir: string; serverEntryName: string; preset: string }
+    | {
+        root: string;
+        rscOutDir: string;
+        ssrOutDir: string;
+        clientOutDir: string;
+        serverEntryName: string;
+        preset: string;
+      }
     | undefined;
   const bundle = (globalThis as any).__FARM_NITRO_SERVER_BUNDLE as Record<
     string,

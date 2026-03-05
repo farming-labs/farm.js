@@ -26,14 +26,33 @@
   "types": "./dist/index.d.mts",
   "typesVersions": {
     "*": {
-      "middleware": ["./types/middleware.d.ts", "./dist/middleware.d.mts"],
-      "api": ["./types/api.d.ts", "./dist/api.d.mts"],
-      "client": ["./types/client.d.ts", "./dist/client.d.mts"],
-      "server": ["./dist/server.d.mts"],
-      "vite": ["./dist/vite.d.mts"],
-      "plugin": ["./dist/plugin.d.mts"],
-      "query": ["./dist/query/index.d.mts"],
-      "*": ["./dist/*.d.mts"]
+      "middleware": [
+        "./types/middleware.d.ts",
+        "./dist/middleware.d.mts"
+      ],
+      "api": [
+        "./types/api.d.ts",
+        "./dist/api.d.mts"
+      ],
+      "client": [
+        "./types/client.d.ts",
+        "./dist/client.d.mts"
+      ],
+      "server": [
+        "./dist/server.d.mts"
+      ],
+      "vite": [
+        "./dist/vite.d.mts"
+      ],
+      "plugin": [
+        "./dist/plugin.d.mts"
+      ],
+      "query": [
+        "./dist/query/index.d.mts"
+      ],
+      "*": [
+        "./dist/*.d.mts"
+      ]
     }
   },
   "exports": {
@@ -117,9 +136,8 @@
   "dependencies": {
     "@scalar/api-reference": "^1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
-    "@vitejs/plugin-react": "^4.2.1",
     "@tailwindcss/vite": "^4.1.0",
-    "tailwindcss": "^4.0.0",
+    "@vitejs/plugin-react": "^4.2.1",
     "better-call": "^1.0.19",
     "esbuild": "^0.19.11",
     "fast-glob": "^3.3.2",
@@ -130,6 +148,7 @@
     "react-dom": "^19.0.0",
     "react-server-dom-webpack": "^18.3.0-canary-670c8dfb8-20231204",
     "sirv": "^2.0.4",
+    "tailwindcss": "^4.0.0",
     "vite": "^5.0.10",
     "zod": "^4.1.12"
   },

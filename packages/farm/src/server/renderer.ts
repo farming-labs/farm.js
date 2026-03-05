@@ -112,11 +112,7 @@ export class ServerRenderer {
   /**
    * Serve a pre-rendered SSG page
    */
-  private async serveSSGPage(
-    req: FarmRequest,
-    res: FarmResponse,
-    page: SSGPage,
-  ): Promise<boolean> {
+  private async serveSSGPage(req: FarmRequest, res: FarmResponse, page: SSGPage): Promise<boolean> {
     // Check cache first (for ISR)
     const cached = this.ssgCache.get(page.urlPath);
     if (cached) {
@@ -464,15 +460,15 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 
   private async render404(req: FarmRequest, res: FarmResponse): Promise<void> {
     res.statusCode = 404;
-    
+
     const pathname = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`).pathname;
-    
+
     try {
       // Look for custom not-found page
       const appDir = path.join(this.config.root, this.config.srcDir, "app");
       const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
       let notFoundPath: string | null = null;
-      
+
       for (const ext of notFoundExtensions) {
         const checkPath = path.join(appDir, `not-found${ext}`);
         if (fs.existsSync(checkPath)) {
@@ -480,12 +476,12 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
           break;
         }
       }
-      
+
       if (notFoundPath) {
         // Use routeManager to load the module (uses Vite's ssrLoadModule in dev)
         const notFoundModule = await this.routeManager.loadRouteModule(notFoundPath);
         const NotFoundComponent = notFoundModule.default;
-        
+
         if (NotFoundComponent) {
           // Look for root layout
           let LayoutComponent: React.ComponentType<{ children: React.ReactNode }> | null = null;
@@ -501,19 +497,19 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
               break;
             }
           }
-          
+
           // Render the 404 page
           let element = React.createElement(NotFoundComponent as any, { pathname });
-          
+
           // Wrap with layout if available
           if (LayoutComponent) {
             element = React.createElement(LayoutComponent, { children: element });
           }
-          
+
           // Render to string
           const ReactDOMServer = await import("react-dom/server");
           const content = ReactDOMServer.renderToString(element);
-          
+
           const html = this.createFullHTML(content);
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.write(html);
@@ -524,7 +520,7 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
     } catch (error) {
       logger.warn(`Failed to render custom 404 page: ${error}`);
     }
-    
+
     // Fallback to default styled 404 page
     const defaultContent = `
       <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;background:#f9fafb;padding:20px;text-align:center;">
@@ -539,7 +535,7 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
         <p style="margin-top:24px;font-size:14px;color:#9ca3af;">Powered by Farm.js</p>
       </div>
     `;
-    
+
     const html = this.createFullHTML(defaultContent);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.write(html);

@@ -1,14 +1,14 @@
 /**
  * Farm.js API Routes Vite Plugin
- * 
+ *
  * Standalone API route support that works with any Vite setup.
  * Discovers and handles route.ts files in the api directory.
  * Also supports root routes.ts for custom route definitions.
- * 
+ *
  * @example
  * ```ts
  * import { farmApiPlugin } from '@farmjs/core'
- * 
+ *
  * export default defineConfig({
  *   plugins: [farmApiPlugin({ srcDir: 'src' })],
  * })
@@ -71,9 +71,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   // Create API router handler
   const createRouter = async (): Promise<void> => {
     const totalEndpoints = Array.from(apiRoutesCache.values()).reduce(
-      (sum, route) => sum + route.methods.length, 0
+      (sum, route) => sum + route.methods.length,
+      0,
     );
-    
+
     if (totalEndpoints > 0) {
       apiRouterHandler = async (request: Request): Promise<Response> => {
         const url = new URL(request.url);
@@ -131,13 +132,16 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             try {
               validatedQuery = types.query.parse(queryObj);
             } catch (e: any) {
-              return new Response(JSON.stringify({ 
-                error: "Invalid query parameters", 
-                details: e.errors || e.message 
-              }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" },
-              });
+              return new Response(
+                JSON.stringify({
+                  error: "Invalid query parameters",
+                  details: e.errors || e.message,
+                }),
+                {
+                  status: 400,
+                  headers: { "Content-Type": "application/json" },
+                },
+              );
             }
           }
 
@@ -145,13 +149,16 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             try {
               validatedBody = types.body.parse(bodyObj);
             } catch (e: any) {
-              return new Response(JSON.stringify({ 
-                error: "Invalid request body", 
-                details: e.errors || e.message 
-              }), {
-                status: 400,
-                headers: { "Content-Type": "application/json" },
-              });
+              return new Response(
+                JSON.stringify({
+                  error: "Invalid request body",
+                  details: e.errors || e.message,
+                }),
+                {
+                  status: 400,
+                  headers: { "Content-Type": "application/json" },
+                },
+              );
             }
           }
 
@@ -166,7 +173,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
           const handlerFn = endpoint.__handler || endpoint;
           const result = await handlerFn(ctx);
-          
+
           if (result instanceof Response) {
             return result;
           }
@@ -176,16 +183,13 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             headers: { "Content-Type": "application/json" },
           });
         } catch (error: any) {
-          return new Response(
-            JSON.stringify({ error: error.message || "Internal Server Error" }),
-            {
-              status: 500,
-              headers: { "Content-Type": "application/json" },
-            }
-          );
+          return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
         }
       };
-      
+
       log(`API router created with ${totalEndpoints} endpoints`);
     }
   };
@@ -231,7 +235,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         for (const filePath of routeFiles) {
           try {
             const relativePath = path.relative(apiDir, path.dirname(filePath));
-            const routePath = "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
+            const routePath =
+              "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(filePath);
             const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
@@ -278,7 +283,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
               for (const [exportName, exportValue] of Object.entries(routesModule)) {
                 const endpoint = exportValue as any;
-                
+
                 if (endpoint && endpoint.__path) {
                   const routePath = endpoint.__path;
                   const method = endpoint.__method || "GET";
@@ -311,11 +316,11 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         const path = await import("path");
         const apiDir = path.join(server.config.root, srcDir, "api");
         log(`Discovering API routes in: ${apiDir}`);
-        
+
         await discoverFileRoutes(apiDir);
         await discoverRootRoutes();
         await createRouter();
-        
+
         discoveryComplete = true;
         log(`API discovery complete: ${apiRoutesCache.size} routes found`);
       };
@@ -421,11 +426,11 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
     async handleHotUpdate({ file, server, modules }) {
       const fileName = file.split("/").pop() || "";
-      
+
       // Handle root routes.ts updates
       if (fileName === "routes.ts" || fileName === "routes.tsx" || fileName === "routes.js") {
         log(`Root routes file updated: ${fileName}`);
-        
+
         for (const mod of modules) {
           server.moduleGraph.invalidateModule(mod);
         }
@@ -439,10 +444,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
         try {
           const routesModule = await server.ssrLoadModule(file);
-          
+
           for (const [exportName, exportValue] of Object.entries(routesModule)) {
             const endpoint = exportValue as any;
-            
+
             if (endpoint && endpoint.__path) {
               const routePath = endpoint.__path;
               const method = endpoint.__method || "GET";
@@ -471,7 +476,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
         return [];
       }
-      
+
       // Handle file-based route updates
       if (file.includes("/api/") && fileName.startsWith("route.")) {
         const shortPath = file.split("/api/")[1] || file;
@@ -523,7 +528,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             const path = await import("path");
             const apiDir = path.join(server.config.root, srcDir, "api");
             const relativePath = path.relative(apiDir, path.dirname(file));
-            const routePath = "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
+            const routePath =
+              "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(file);
             const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];

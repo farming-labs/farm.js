@@ -12,9 +12,18 @@ describe("generateRouteTypes", () => {
     const appDir = path.join(tmpDir, "src", "app");
     await fs.promises.mkdir(path.join(appDir, "about"), { recursive: true });
     await fs.promises.mkdir(path.join(appDir, "users", "[id]"), { recursive: true });
-    await fs.promises.writeFile(path.join(appDir, "page.tsx"), "export default function Home() { return null; }");
-    await fs.promises.writeFile(path.join(appDir, "about", "page.tsx"), "export default function About() { return null; }");
-    await fs.promises.writeFile(path.join(appDir, "users", "[id]", "page.tsx"), "export default function User() { return null; }");
+    await fs.promises.writeFile(
+      path.join(appDir, "page.tsx"),
+      "export default function Home() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(appDir, "about", "page.tsx"),
+      "export default function About() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(appDir, "users", "[id]", "page.tsx"),
+      "export default function User() { return null; }",
+    );
   });
 
   afterEach(async () => {
@@ -35,7 +44,11 @@ describe("generateRouteTypes", () => {
   });
 
   it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and RoutePath is string", async () => {
-    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src", suppressLintOnLink: true });
+    const outPath = await generateRouteTypes({
+      root: tmpDir,
+      srcDir: "src",
+      suppressLintOnLink: true,
+    });
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain("export type RoutePath = string");
     expect(content).not.toContain("declare module");
@@ -48,7 +61,10 @@ describe("generateRouteTypes", () => {
     expect(content).not.toContain("/blog");
 
     await fs.promises.mkdir(path.join(tmpDir, "src", "app", "blog"), { recursive: true });
-    await fs.promises.writeFile(path.join(tmpDir, "src", "app", "blog", "page.tsx"), "export default function Blog() { return null; }");
+    await fs.promises.writeFile(
+      path.join(tmpDir, "src", "app", "blog", "page.tsx"),
+      "export default function Blog() { return null; }",
+    );
     await generateRouteTypes({ root: tmpDir, srcDir: "src" });
     content = fs.readFileSync(path.join(tmpDir, "src", "farm-routes.d.ts"), "utf8");
     expect(content).toContain('"/blog"');

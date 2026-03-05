@@ -5,7 +5,11 @@ import { createEndpoint as betterCallEndpoint } from "better-call";
 type AnySchema = { _output?: any; _input?: any; parse?: (data: unknown) => any } | any;
 
 // Infer output type from schema (works with Zod v3 and v4)
-type InferOutput<T> = T extends { _output: infer O } ? O : T extends { parse: (data: unknown) => infer R } ? R : unknown;
+type InferOutput<T> = T extends { _output: infer O }
+  ? O
+  : T extends { parse: (data: unknown) => infer R }
+    ? R
+    : unknown;
 
 export type EndpointOptions<
   TBody extends AnySchema = any,
@@ -46,11 +50,11 @@ export type TypedEndpoint<TBody = never, TQuery = never, TResponse = any> = {
 
 /**
  * Create a Farm.js API endpoint
- * 
+ *
  * Supports two patterns:
  * 1. File-based routing (path auto-inferred from file location):
  *    `createEndpoint({ method: 'GET', query: z.object({...}) }, handler)`
- * 
+ *
  * 2. Explicit path (for routes.ts at project root):
  *    `createEndpoint('/api/hello', { method: 'GET', query: z.object({...}) }, handler)`
  */
@@ -61,13 +65,11 @@ export function createEndpoint<
   TResponse = any,
 >(
   pathOrOptions: string | EndpointOptions<TBody, TQuery, THeaders>,
-  optionsOrHandler: EndpointOptions<TBody, TQuery, THeaders> | EndpointHandler<TBody, TQuery, THeaders, TResponse>,
+  optionsOrHandler:
+    | EndpointOptions<TBody, TQuery, THeaders>
+    | EndpointHandler<TBody, TQuery, THeaders, TResponse>,
   maybeHandler?: EndpointHandler<TBody, TQuery, THeaders, TResponse>,
-): TypedEndpoint<
-  InferOutput<TBody>,
-  InferOutput<TQuery>,
-  TResponse
-> {
+): TypedEndpoint<InferOutput<TBody>, InferOutput<TQuery>, TResponse> {
   // Determine if first arg is path or options
   let path: string;
   let options: EndpointOptions<TBody, TQuery, THeaders>;
@@ -87,7 +89,11 @@ export function createEndpoint<
 
   // Create the endpoint - path will be set later by API plugin if not provided
   // We use a temporary path that will be replaced when the router is created
-  const endpoint = betterCallEndpoint(path || "/__farm_auto_path__", options as any, handler as any) as any;
+  const endpoint = betterCallEndpoint(
+    path || "/__farm_auto_path__",
+    options as any,
+    handler as any,
+  ) as any;
 
   // Store the path and type information on the endpoint for later access
   // Empty/undefined path means it will be inferred from file location by the API plugin

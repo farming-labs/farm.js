@@ -1,4 +1,11 @@
-import type { FarmConfig, ParsedRoute, RouteModule, LayoutModule, SSGPage, SSGCollectionResult } from "../types";
+import type {
+  FarmConfig,
+  ParsedRoute,
+  RouteModule,
+  LayoutModule,
+  SSGPage,
+  SSGCollectionResult,
+} from "../types";
 import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
 import { collectSSGPages, isSSGModule, hasISR, getRevalidateInterval } from "../ssg";
 import path from "path";
@@ -275,7 +282,7 @@ export class RouteManager {
 
   /**
    * Collect SSG pages for static generation
-   * 
+   *
    * Returns all pages marked with `export const ssg = true` along with
    * their pre-computed paths (for dynamic routes using getStaticPaths)
    */

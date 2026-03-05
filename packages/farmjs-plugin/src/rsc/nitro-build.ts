@@ -5,7 +5,15 @@
  */
 
 import path from "path";
-import { writeFileSync, readFileSync, mkdirSync, copyFileSync, existsSync, readdirSync, statSync } from "fs";
+import {
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  copyFileSync,
+  existsSync,
+  readdirSync,
+  statSync,
+} from "fs";
 import type { NitroConfig } from "nitro/config";
 
 const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
@@ -91,11 +99,7 @@ export function waitForRscOutputs(
 }
 
 /** Write a physical entry file. Use relative imports so we can externalize and copy dist into output. */
-function writeRscEntryFile(
-  buildDir: string,
-  rendererPath: string,
-  ssrPath?: string,
-): string {
+function writeRscEntryFile(buildDir: string, rendererPath: string, ssrPath?: string): string {
   const resolvedRenderer = path.resolve(rendererPath);
   const resolvedSsr = ssrPath ? path.resolve(ssrPath) : null;
   // Relative to buildDir (.nitro) -> e.g. ../dist/rsc/index.js
@@ -182,7 +186,8 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     renderer: { entry: entryPath },
     // Externalize rsc/ssr so we don't bundle (they reference Vite-generated manifest). We copy dist into server output after build.
     rollupConfig: {
-      external: (id: string) => id.includes("../dist/") || id.includes("dist/rsc") || id.includes("dist/ssr"),
+      external: (id: string) =>
+        id.includes("../dist/") || id.includes("dist/rsc") || id.includes("dist/ssr"),
     },
     compatibilityDate: "2024-12-01",
     minify: true,
@@ -241,23 +246,29 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   let bootstrapScriptContent = "";
   let clientEntryHref = "";
   const RSC_CALL_SERVER_PLACEHOLDER =
-    '(function(){if(typeof globalThis.__viteRscCallServer!==\'function\'){globalThis.__viteRscCallServer=function(){return Promise.reject(new Error("Farm.js: server actions not ready"));}}})();\n';
+    "(function(){if(typeof globalThis.__viteRscCallServer!=='function'){globalThis.__viteRscCallServer=function(){return Promise.reject(new Error(\"Farm.js: server actions not ready\"));}}})();\n";
   if (existsSync(manifestPath)) {
     try {
       const manifestContent = readFileSync(manifestPath, "utf-8");
       const start = manifestContent.indexOf("{");
       const end = manifestContent.lastIndexOf("}") + 1;
       if (start >= 0 && end > start) {
-        const manifest = JSON.parse(manifestContent.slice(start, end)) as { bootstrapScriptContent?: string };
+        const manifest = JSON.parse(manifestContent.slice(start, end)) as {
+          bootstrapScriptContent?: string;
+        };
         bootstrapScriptContent = manifest.bootstrapScriptContent || "";
-        const importMatch = bootstrapScriptContent.match(/^import\s*\(\s*["']([^"']+)["']\s*\)\s*$/);
+        const importMatch = bootstrapScriptContent.match(
+          /^import\s*\(\s*["']([^"']+)["']\s*\)\s*$/,
+        );
         if (importMatch) clientEntryHref = importMatch[1];
       }
     } catch {
       // ignore
     }
   }
-  const fullBootstrap = bootstrapScriptContent ? RSC_CALL_SERVER_PLACEHOLDER + bootstrapScriptContent : "";
+  const fullBootstrap = bootstrapScriptContent
+    ? RSC_CALL_SERVER_PLACEHOLDER + bootstrapScriptContent
+    : "";
   // Patch manifest so production SSR gets bootstrap with __viteRscCallServer placeholder (SSR reads assetsManifest.bootstrapScriptContent)
   if (fullBootstrap && existsSync(manifestPath)) {
     try {

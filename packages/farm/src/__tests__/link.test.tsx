@@ -131,9 +131,7 @@ describe("Link", () => {
     });
 
     it("external href has correct attribute and is not intercepted", () => {
-      const el = render(
-        createElement(Link, { href: "https://example.com" }),
-      ) as HTMLAnchorElement;
+      const el = render(createElement(Link, { href: "https://example.com" })) as HTMLAnchorElement;
       expect(el.getAttribute("href")).toBe("https://example.com");
       const clickEvent = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
       el.dispatchEvent(clickEvent);

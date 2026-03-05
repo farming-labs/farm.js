@@ -1,6 +1,6 @@
 /**
  * Type declarations for @farmjs/core/api
- * 
+ *
  * These provide stable type definitions that don't depend on build hashes.
  */
 
@@ -31,9 +31,10 @@ declare module "@farmjs/core/api" {
   /**
    * API endpoint handler
    */
-  export type EndpointHandler<TContext extends EndpointContext = EndpointContext, TResponse = unknown> = (
-    ctx: TContext
-  ) => TResponse | Promise<TResponse>;
+  export type EndpointHandler<
+    TContext extends EndpointContext = EndpointContext,
+    TResponse = unknown,
+  > = (ctx: TContext) => TResponse | Promise<TResponse>;
 
   /**
    * API endpoint configuration
@@ -42,7 +43,7 @@ declare module "@farmjs/core/api" {
     TBody = unknown,
     TQuery = unknown,
     TParams = unknown,
-    TResponse = unknown
+    TResponse = unknown,
   > {
     /** HTTP method */
     method?: HttpMethod;
@@ -65,9 +66,9 @@ declare module "@farmjs/core/api" {
     TBody = unknown,
     TQuery = unknown,
     TParams = unknown,
-    TResponse = unknown
+    TResponse = unknown,
   >(
-    config: EndpointConfig<TBody, TQuery, TParams, TResponse>
+    config: EndpointConfig<TBody, TQuery, TParams, TResponse>,
   ): EndpointConfig<TBody, TQuery, TParams, TResponse>;
 
   /**
@@ -83,8 +84,5 @@ declare module "@farmjs/core/api" {
   /**
    * Farm API plugin for Vite
    */
-  export function farmApiPlugin(options?: {
-    srcDir?: string;
-    debug?: boolean;
-  }): unknown;
+  export function farmApiPlugin(options?: { srcDir?: string; debug?: boolean }): unknown;
 }

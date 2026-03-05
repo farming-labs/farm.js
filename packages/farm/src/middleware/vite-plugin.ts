@@ -1,13 +1,13 @@
 /**
  * Farm.js Middleware Vite Plugin
- * 
+ *
  * Standalone middleware support that works with any Vite setup.
  * Discovers and executes middleware.ts files at various path levels.
- * 
+ *
  * @example
  * ```ts
  * import { farmMiddlewarePlugin } from '@farmjs/core'
- * 
+ *
  * export default defineConfig({
  *   plugins: [farmMiddlewarePlugin({ srcDir: 'src' })],
  * })
@@ -68,7 +68,7 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
 
             if (entry.isDirectory()) {
               if (entry.name === "api") continue;
-              
+
               const newBasePath = basePath ? `${basePath}/${entry.name}` : entry.name;
               files.push(...findMiddlewareFiles(fullPath, newBasePath));
             } else if (
@@ -115,7 +115,7 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
         req: any,
         res: any,
         pathname: string,
-        middlewareData: Map<string, any>
+        middlewareData: Map<string, any>,
       ): Promise<boolean> => {
         const middlewaresToRun: MiddlewareEntry[] = [];
 
@@ -187,11 +187,13 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
       };
 
       // Initialize discovery
-      discoveryPromise = discoverMiddleware().then(() => {
-        discoveryComplete = true;
-      }).catch((e) => {
-        console.error("[FARM] Middleware discovery error:", e);
-      });
+      discoveryPromise = discoverMiddleware()
+        .then(() => {
+          discoveryComplete = true;
+        })
+        .catch((e) => {
+          console.error("[FARM] Middleware discovery error:", e);
+        });
 
       // Expose middleware API for other plugins
       (server as any).__farmMiddleware__ = {

@@ -1,10 +1,10 @@
-import type { PageProps } from '@farmjs/core';
-import { Link } from '@farmjs/core/client';
+import type { PageProps } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 
 export const metadata = {
-  title: 'Farm.js - Modern React meta-framework',
+  title: "Farm.js - Modern React meta-framework",
   description:
-    'A modern React meta-framework built on Vite with Next.js-like semantics, React Server Components, and blazing-fast development.',
+    "A modern React meta-framework built on Vite with Next.js-like semantics, React Server Components, and blazing-fast development.",
 };
 
 export default function HomePage(_props: PageProps) {
@@ -86,9 +86,7 @@ export default function HomePage(_props: PageProps) {
 
       <section className="border-t border-slate-200 bg-white py-16 sm:py-24">
         <div className="mx-auto max-w-6xl px-4 text-center sm:px-6">
-          <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-            Ready to get started?
-          </h2>
+          <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">Ready to get started?</h2>
           <p className="mx-auto mt-4 max-w-xl text-slate-600">
             Create a new Farm.js app in seconds and start building.
           </p>

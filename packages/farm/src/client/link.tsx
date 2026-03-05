@@ -26,10 +26,16 @@ export interface LinkDefaultRoute {
 export type DefaultRoutePath = LinkDefaultRoute["_"];
 
 /** External URLs; these are never type-checked as routes. */
-export type ExternalHref = `http://${string}` | `https://${string}` | `//${string}` | `mailto:${string}`;
+export type ExternalHref =
+  | `http://${string}`
+  | `https://${string}`
+  | `//${string}`
+  | `mailto:${string}`;
 
-export interface LinkProps<TRoute extends string = DefaultRoutePath>
-  extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
+export interface LinkProps<TRoute extends string = DefaultRoutePath> extends Omit<
+  AnchorHTMLAttributes<HTMLAnchorElement>,
+  "href"
+> {
   /** Internal route path (typed when route types are generated) or external URL. */
   href: TRoute | ExternalHref;
   /**
@@ -53,16 +59,23 @@ function isExternalUrl(href: string): boolean {
   return href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//");
 }
 
-function getRouter(): { prefetch(href: string): Promise<void>; observeForPrefetch(el: HTMLAnchorElement): void; unobserveForPrefetch(el: HTMLAnchorElement): void; navigate(href: string, opts: { replace?: boolean; scroll?: boolean }): void } | null {
+function getRouter(): {
+  prefetch(href: string): Promise<void>;
+  observeForPrefetch(el: HTMLAnchorElement): void;
+  unobserveForPrefetch(el: HTMLAnchorElement): void;
+  navigate(href: string, opts: { replace?: boolean; scroll?: boolean }): void;
+} | null {
   if (typeof window !== "undefined" && (window as any).__FARM_SPA_ROUTER__) {
     return (window as any).__FARM_SPA_ROUTER__;
   }
   return null;
 }
 
-function normalizePrefetch(
-  prefetch: LinkProps["prefetch"],
-): { intent: boolean; viewport: boolean; render: boolean } {
+function normalizePrefetch(prefetch: LinkProps["prefetch"]): {
+  intent: boolean;
+  viewport: boolean;
+  render: boolean;
+} {
   if (prefetch === false || prefetch === "none") {
     return { intent: false, viewport: false, render: false };
   }

@@ -1,39 +1,39 @@
 {
   "name": "@farmjs/plugin",
   "version": "0.0.1",
-  "type": "module",
   "description": "Official plugins for Farm.js framework",
-  "author": "Farm.js Team",
   "license": "MIT",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./rsc": {
-      "import": "./dist/rsc/index.js",
-      "types": "./dist/rsc/index.d.ts"
-    },
-    "./rsc/vite-plugin-nitro": {
-      "import": "./dist/rsc/vite-plugin-nitro.js",
-      "types": "./dist/rsc/vite-plugin-nitro.d.ts"
-    },
-    "./middleware": {
-      "import": "./dist/middleware/index.js",
-      "types": "./dist/middleware/index.d.ts"
-    },
-    "./api": {
-      "import": "./dist/api/index.js",
-      "types": "./dist/api/index.d.ts"
-    }
-  },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "author": "Farm.js Team",
   "files": [
     "dist",
     "scripts"
   ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./rsc": {
+      "types": "./dist/rsc/index.d.ts",
+      "import": "./dist/rsc/index.js"
+    },
+    "./rsc/vite-plugin-nitro": {
+      "types": "./dist/rsc/vite-plugin-nitro.d.ts",
+      "import": "./dist/rsc/vite-plugin-nitro.js"
+    },
+    "./middleware": {
+      "types": "./dist/middleware/index.d.ts",
+      "import": "./dist/middleware/index.js"
+    },
+    "./api": {
+      "types": "./dist/api/index.d.ts",
+      "import": "./dist/api/index.js"
+    }
+  },
   "scripts": {
     "build": "tsc && node scripts/build.js",
     "dev": "tsc --watch",
@@ -47,6 +47,15 @@
     "picocolors": "^1.0.0",
     "rsc-html-stream": "^0.0.4"
   },
+  "devDependencies": {
+    "@types/node": "^20.19.21",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-rsc": "^0.5.18",
+    "tsdown": "^0.15.7",
+    "typescript": "^5.5.3",
+    "vite": "^6.0.0"
+  },
   "peerDependencies": {
     "@farmjs/core": "workspace:*",
     "@vitejs/plugin-rsc": ">=0.5.0",
@@ -58,14 +67,5 @@
     "@vitejs/plugin-rsc": {
       "optional": true
     }
-  },
-  "devDependencies": {
-    "@types/node": "^20.19.21",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@vitejs/plugin-rsc": "^0.5.18",
-    "tsdown": "^0.15.7",
-    "typescript": "^5.5.3",
-    "vite": "^6.0.0"
   }
 }
