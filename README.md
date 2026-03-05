@@ -8,6 +8,7 @@ A modern React meta-framework built on Vite with Next.js-like semantics, featuri
 ## ✨ Features
 
 - 🚀 **Blazing Fast**: Built on Vite for instant server start and lightning-fast HMR
+- 🧪 Plugin Ecosystem like logging and infra related.
 - ⚛️ **React Server Components**: Full RSC support with streaming SSR
 - 🎯 **Next.js-like API**: Familiar file-based routing and app directory structure
 - 🔄 **Server Actions**: Seamless server-client data mutations
