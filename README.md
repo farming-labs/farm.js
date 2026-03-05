@@ -261,7 +261,7 @@ farm.js/
 │   ├── basic/             # Basic example
 │   ├── with-database/     # Database integration
 │   └── e-commerce/        # E-commerce example
-├── docs/                  # Documentation (fumadocs)
+├── docs/                  # Documentation (Farm.js)
 ├── playground/            # Development testing
 └── tests/                 # Integration tests
 ```
