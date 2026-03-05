@@ -29,6 +29,7 @@
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
     "type-check": "tsc --noEmit",
+    "test": "echo 'No tests in this package'",
     "clean": "rm -rf dist"
   },
   "dependencies": {

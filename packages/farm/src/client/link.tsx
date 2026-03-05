@@ -3,199 +3,227 @@
 import type React from "react";
 import { forwardRef, useEffect, useRef, useCallback, type AnchorHTMLAttributes } from "react";
 
-type PrefetchMode = boolean | "hover" | "viewport" | "none";
+/**
+ * Prefetch strategy (TanStack Router–style):
+ * - "intent": prefetch on hover and touchstart (with prefetchDelay)
+ * - "viewport": prefetch when link enters viewport (IntersectionObserver)
+ * - "render": prefetch as soon as the link is mounted
+ * - "none" | false: no prefetch
+ */
+export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
-interface LinkProps extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
-  /** The URL to navigate to */
-  href: string;
-  /** Prefetch strategy: true (viewport+hover), "hover", "viewport", "none", or false */
-  prefetch?: PrefetchMode;
+/** @internal Legacy prefetch mode for backward compatibility */
+type PrefetchLegacy = boolean | "hover" | "viewport" | "none";
+
+/**
+ * Augment this interface via your generated farm-routes.d.ts so Link href is typed
+ * without passing a generic. Defaults to string when not augmented.
+ */
+export interface LinkDefaultRoute {
+  _: string;
+}
+
+export type DefaultRoutePath = LinkDefaultRoute["_"];
+
+/** External URLs; these are never type-checked as routes. */
+export type ExternalHref = `http://${string}` | `https://${string}` | `//${string}` | `mailto:${string}`;
+
+export interface LinkProps<TRoute extends string = DefaultRoutePath>
+  extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
+  /** Internal route path (typed when route types are generated) or external URL. */
+  href: TRoute | ExternalHref;
+  /**
+   * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
+   * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".
+   */
+  prefetch?: PrefetchBehavior | PrefetchLegacy;
+  /** Delay in ms before intent-based prefetch (hover/touch). Default 50. */
+  prefetchDelay?: number;
   /** Replace current history entry instead of pushing */
   replace?: boolean;
   /** Scroll to top after navigation (default: true) */
   scroll?: boolean;
 }
 
-/**
- * Helper: detect modifier keys (Ctrl/Cmd+Click should open in new tab)
- */
 function isModifierEvent(e: React.MouseEvent): boolean {
   return !!(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey);
 }
 
-/**
- * Helper: check if external URL
- */
 function isExternalUrl(href: string): boolean {
   return href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//");
 }
 
-/**
- * Get the SPA router instance
- */
-function getRouter() {
+function getRouter(): { prefetch(href: string): Promise<void>; observeForPrefetch(el: HTMLAnchorElement): void; unobserveForPrefetch(el: HTMLAnchorElement): void; navigate(href: string, opts: { replace?: boolean; scroll?: boolean }): void } | null {
   if (typeof window !== "undefined" && (window as any).__FARM_SPA_ROUTER__) {
     return (window as any).__FARM_SPA_ROUTER__;
   }
   return null;
 }
 
-/**
- * Next.js-style Link component for client-side SPA navigation
- *
- * Features:
- * - Prevents full page reload for internal links
- * - Uses History API for smooth SPA navigation
- * - Prefetch on viewport intersection (IntersectionObserver)
- * - Prefetch on hover
- * - Preserves href for SEO, accessibility, and right-click behavior
- * - Handles external links normally
- * - Respects modifier keys (Ctrl+Click opens in new tab)
- * - Scroll restoration
- */
-export const Link = forwardRef<HTMLAnchorElement, LinkProps>(
-  (
-    {
-      href,
-      prefetch = true,
-      replace = false,
-      scroll = true,
-      onClick,
-      target,
-      onMouseEnter,
-      onMouseLeave,
-      ...props
-    },
-    ref,
-  ) => {
-    const elementRef = useRef<HTMLAnchorElement | null>(null);
-    const hoverTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const hasPrefetched = useRef(false);
+function normalizePrefetch(
+  prefetch: LinkProps["prefetch"],
+): { intent: boolean; viewport: boolean; render: boolean } {
+  if (prefetch === false || prefetch === "none") {
+    return { intent: false, viewport: false, render: false };
+  }
+  if (prefetch === true) {
+    return { intent: true, viewport: true, render: false };
+  }
+  if (prefetch === "hover") {
+    return { intent: true, viewport: false, render: false };
+  }
+  if (prefetch === "intent") {
+    return { intent: true, viewport: false, render: false };
+  }
+  if (prefetch === "viewport") {
+    return { intent: false, viewport: true, render: false };
+  }
+  if (prefetch === "render") {
+    return { intent: false, viewport: false, render: true };
+  }
+  return { intent: false, viewport: false, render: false };
+}
 
-    // Determine prefetch modes
-    const prefetchOnViewport = prefetch === true || prefetch === "viewport";
-    const prefetchOnHover = prefetch === true || prefetch === "hover";
-    const isExternal = isExternalUrl(href);
+function LinkInner<TRoute extends string = DefaultRoutePath>(
+  {
+    href,
+    prefetch = true,
+    prefetchDelay = 50,
+    replace = false,
+    scroll = true,
+    onClick,
+    target,
+    onMouseEnter,
+    onMouseLeave,
+    onTouchStart,
+    ...props
+  }: LinkProps<TRoute>,
+  ref: React.ForwardedRef<HTMLAnchorElement>,
+) {
+  const elementRef = useRef<HTMLAnchorElement | null>(null);
+  const intentTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hasPrefetched = useRef(false);
 
-    // Set up intersection observer for viewport prefetching
-    useEffect(() => {
-      const element = elementRef.current;
-      if (!element || isExternal || !prefetchOnViewport) return;
+  const { intent, viewport, render } = normalizePrefetch(prefetch);
+  const isExternal = isExternalUrl(href);
 
-      const router = getRouter();
-      if (!router) return;
+  const doPrefetch = useCallback(() => {
+    if (isExternal || hasPrefetched.current) return;
+    const router = getRouter();
+    if (!router) return;
+    hasPrefetched.current = true;
+    router.prefetch(href);
+  }, [href, isExternal]);
 
+  useEffect(() => {
+    const element = elementRef.current;
+    if (!element || isExternal) return;
+
+    const router = getRouter();
+    if (!router) return;
+
+    if (viewport) {
       router.observeForPrefetch(element);
+      return () => router.unobserveForPrefetch(element);
+    }
+  }, [href, viewport, isExternal]);
 
-      return () => {
-        router.unobserveForPrefetch(element);
-      };
-    }, [href, prefetchOnViewport, isExternal]);
+  useEffect(() => {
+    if (!render || isExternal) return;
+    doPrefetch();
+  }, [render, isExternal, doPrefetch]);
 
-    // Handle mouse enter for hover prefetching
-    const handleMouseEnter = useCallback(
-      (event: React.MouseEvent<HTMLAnchorElement>) => {
-        if (onMouseEnter) {
-          onMouseEnter(event);
-        }
+  const cancelIntent = useCallback(() => {
+    if (intentTimeoutRef.current) {
+      clearTimeout(intentTimeoutRef.current);
+      intentTimeoutRef.current = null;
+    }
+  }, []);
 
-        if (isExternal || !prefetchOnHover || hasPrefetched.current) return;
+  const scheduleIntentPrefetch = useCallback(() => {
+    if (isExternal || !intent || hasPrefetched.current) return;
+    cancelIntent();
+    intentTimeoutRef.current = setTimeout(() => {
+      intentTimeoutRef.current = null;
+      doPrefetch();
+    }, prefetchDelay);
+  }, [intent, isExternal, prefetchDelay, doPrefetch, cancelIntent]);
 
+  const handleMouseEnter = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      onMouseEnter?.(event);
+      scheduleIntentPrefetch();
+    },
+    [onMouseEnter, scheduleIntentPrefetch],
+  );
+
+  const handleMouseLeave = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      onMouseLeave?.(event);
+      cancelIntent();
+    },
+    [onMouseLeave, cancelIntent],
+  );
+
+  const handleTouchStart = useCallback(
+    (event: React.TouchEvent<HTMLAnchorElement>) => {
+      onTouchStart?.(event);
+      scheduleIntentPrefetch();
+    },
+    [onTouchStart, scheduleIntentPrefetch],
+  );
+
+  const handleClick = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>) => {
+      onClick?.(event);
+      if (event.defaultPrevented) return;
+      if (isExternal) return;
+      if (target && target !== "_self") return;
+      if (isModifierEvent(event)) return;
+      if (event.button !== 0) return;
+
+      if (typeof window !== "undefined") {
+        event.preventDefault();
         const router = getRouter();
-        if (!router) return;
-
-        // Delay prefetch slightly to avoid prefetching on quick scroll-by
-        hoverTimeoutRef.current = setTimeout(() => {
-          router.prefetch(href);
-          hasPrefetched.current = true;
-        }, 65);
-      },
-      [href, prefetchOnHover, isExternal, onMouseEnter],
-    );
-
-    // Handle mouse leave to cancel pending prefetch
-    const handleMouseLeave = useCallback(
-      (event: React.MouseEvent<HTMLAnchorElement>) => {
-        if (onMouseLeave) {
-          onMouseLeave(event);
+        if (router) {
+          router.navigate(href, { replace, scroll });
+        } else {
+          if (replace) window.location.replace(href);
+          else window.location.href = href;
         }
+      }
+    },
+    [href, replace, scroll, target, isExternal, onClick],
+  );
 
-        if (hoverTimeoutRef.current) {
-          clearTimeout(hoverTimeoutRef.current);
-          hoverTimeoutRef.current = null;
-        }
-      },
-      [onMouseLeave],
-    );
+  const setRefs = useCallback(
+    (node: HTMLAnchorElement | null) => {
+      elementRef.current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) (ref as React.MutableRefObject<HTMLAnchorElement | null>).current = node;
+    },
+    [ref],
+  );
 
-    // Handle click for SPA navigation
-    const handleClick = useCallback(
-      (event: React.MouseEvent<HTMLAnchorElement>) => {
-        // Call custom onClick if provided
-        if (onClick) {
-          onClick(event);
-        }
+  return (
+    <a
+      ref={setRefs}
+      href={href}
+      target={target}
+      onClick={handleClick}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+      onTouchStart={handleTouchStart}
+      {...props}
+    />
+  );
+}
 
-        // Don't intercept if already prevented
-        if (event.defaultPrevented) return;
+const LinkWithRef = forwardRef(LinkInner);
+LinkWithRef.displayName = "Link";
 
-        // Don't intercept external links
-        if (isExternal) return;
+type LinkComponentType = <TRoute extends string = DefaultRoutePath>(
+  props: LinkProps<TRoute> & { ref?: React.ForwardedRef<HTMLAnchorElement> },
+) => React.ReactElement;
 
-        // Don't intercept if opening in new tab/window
-        if (target && target !== "_self") return;
-
-        // Don't intercept modifier clicks (Ctrl+Click = new tab)
-        if (isModifierEvent(event)) return;
-
-        // Don't intercept non-left clicks
-        if (event.button !== 0) return;
-
-        // Use SPA router if available
-        if (typeof window !== "undefined") {
-          event.preventDefault();
-
-          const router = getRouter();
-          if (router) {
-            router.navigate(href, { replace, scroll });
-          } else {
-            // Fallback to full page navigation
-            if (replace) {
-              window.location.replace(href);
-            } else {
-              window.location.href = href;
-            }
-          }
-        }
-      },
-      [href, replace, scroll, target, isExternal, onClick],
-    );
-
-    // Combine refs
-    const setRefs = useCallback(
-      (node: HTMLAnchorElement | null) => {
-        elementRef.current = node;
-        if (typeof ref === "function") {
-          ref(node);
-        } else if (ref) {
-          ref.current = node;
-        }
-      },
-      [ref],
-    );
-
-    return (
-      <a
-        ref={setRefs}
-        href={href}
-        target={target}
-        onClick={handleClick}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
-        {...props}
-      />
-    );
-  },
-);
-
-Link.displayName = "Link";
+export const Link = LinkWithRef as unknown as LinkComponentType;

@@ -235,8 +235,15 @@ pnpm install
 # Build all packages
 pnpm build
 
-# Run tests
+# Run tests (from root: runs tests in all packages; @farmjs/core runs Vitest)
 pnpm test
+
+# Run only @farmjs/core tests
+pnpm run test:farm
+
+# Run tests and save output to test-run.log
+pnpm run test:ci
+# then: cat test-run.log
 
 # Start playground
 cd playground && pnpm dev

@@ -13,10 +13,9 @@ export default function RootLayout({ children }: LayoutProps) {
     <div className="min-h-screen bg-slate-50 text-slate-900">
       <header className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-2 font-semibold text-slate-900 hover:text-emerald-600">
+          <Link href="/docs" className="flex items-center gap-2 font-semibold text-slate-900 hover:text-emerald-600">
             <span className="text-2xl" aria-hidden>🚜</span>
-            <span>Farm.js</span>
-          </Link>
+            <span>Farm.js</span> </Link>
           <nav className="flex items-center gap-6">
             <Link
               href="/docs"

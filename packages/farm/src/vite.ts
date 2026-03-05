@@ -8,6 +8,7 @@ import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
+import { generateRouteTypes } from "./routing/generate-route-types";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -59,6 +60,36 @@ export function farmPlugin(
       }
 
       await farmApp.initialize();
+
+      const farmConfig = farmApp.getConfig();
+      try {
+        await generateRouteTypes({
+          root: farmConfig.root,
+          srcDir: farmConfig.srcDir,
+          suppressLintOnLink: farmConfig.suppressLintOnLink,
+        });
+      } catch (e) {
+        if (process.env.FARM_VERBOSE) logger.warn("Route type generation failed: " + (e as Error).message);
+      }
+
+      const appDirSlug = path.join(farmConfig.root, farmConfig.srcDir, "app").replace(/\\/g, "/");
+      const isPageFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx)$/.test(normalized);
+      };
+      let routeTypeGenScheduled: ReturnType<typeof setTimeout> | null = null;
+      const scheduleRouteTypeGen = () => {
+        if (routeTypeGenScheduled) return;
+        routeTypeGenScheduled = setTimeout(() => {
+          routeTypeGenScheduled = null;
+          generateRouteTypes({ root: farmConfig.root, srcDir: farmConfig.srcDir, suppressLintOnLink: farmConfig.suppressLintOnLink }).catch(() => {});
+        }, 100);
+      };
+      ["add", "change", "unlink"].forEach((ev) => {
+        server.watcher.on(ev as "add", (file: string) => {
+          if (isPageFile(file)) scheduleRouteTypeGen();
+        });
+      });
 
       // Initialize HMR manager
       hmrManager = new HMRManager(server);
