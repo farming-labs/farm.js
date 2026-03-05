@@ -24,6 +24,11 @@ export interface FarmConfig {
   outDir?: string;
   basePath?: string;
   preset?: NitroPreset;
+  /**
+   * When true, Link href is not strictly typed (accepts any string).
+   * Use when you want to skip route-type errors on Link or don't use generated route types.
+   */
+  suppressLintOnLink?: boolean;
   experimental?: {
     serverComponents?: boolean;
     serverActions?: boolean;

@@ -34,6 +34,8 @@ export interface GenerateRouteTypesOptions {
   root: string;
   srcDir?: string;
   outFile?: string;
+  /** When true, do not augment LinkDefaultRoute so Link href accepts any string (no route-type errors). */
+  suppressLintOnLink?: boolean;
 }
 
 const DEFAULT_OUT_FILE = "farm-routes.d.ts";
@@ -43,11 +45,22 @@ const DEFAULT_OUT_FILE = "farm-routes.d.ts";
  * and write a .d.ts file for typed Link href.
  */
 export async function generateRouteTypes(options: GenerateRouteTypesOptions): Promise<string> {
-  const { root, srcDir = "src", outFile = DEFAULT_OUT_FILE } = options;
+  const { root, srcDir = "src", outFile = DEFAULT_OUT_FILE, suppressLintOnLink = false } = options;
   const appDir = path.join(root, srcDir, "app");
 
+  const outPath = path.join(root, srcDir, outFile);
+
   if (!fs.existsSync(appDir)) {
-    return path.join(root, srcDir, outFile);
+    if (suppressLintOnLink) {
+      const permissiveContent = `/**
+ * Auto-generated (suppressLintOnLink: true). Link href accepts any string.
+ */
+export type RoutePath = string;
+`;
+      fs.mkdirSync(path.dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, permissiveContent, "utf8");
+    }
+    return outPath;
   }
 
   const glob = await import("fast-glob");
@@ -66,12 +79,11 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
     .sort()
     .map(routePatternToTsTypeLiteral);
 
-  const content = `/**
- * Auto-generated route types from src/app.
- * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
- */
-export type RoutePath = ${typeLiterals.join(" | ")};
-
+  const routePathType = suppressLintOnLink ? "string" : typeLiterals.join(" | ");
+  const augmentationBlock =
+    suppressLintOnLink
+      ? ""
+      : `
 declare module "@farmjs/core/client" {
   interface LinkDefaultRoute {
     _: RoutePath;
@@ -79,7 +91,14 @@ declare module "@farmjs/core/client" {
 }
 `;
 
-  const outPath = path.join(root, srcDir, outFile);
+  const content = `/**
+ * Auto-generated route types from src/app.
+ * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
+ * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
+ */
+export type RoutePath = ${routePathType};${augmentationBlock}
+`;
+
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, content, "utf8");
 

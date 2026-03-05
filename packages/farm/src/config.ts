@@ -146,6 +146,7 @@ export async function resolveConfig(
     outDir: userConfig.outDir || "dist",
     basePath: userConfig.basePath || "/",
     preset: userConfig.preset || "node-server",
+    suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
       serverComponents: true,
       serverActions: true,

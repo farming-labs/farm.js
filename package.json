@@ -11,7 +11,9 @@
   "scripts": {
     "build": "turbo --filter \"./packages/*\" build",
     "dev": "turbo --filter \"./packages/*\" dev",
-    "test": "turbo --filter \"./packages/*\" test",
+    "test": "turbo run test",
+    "test:farm": "pnpm --filter @farmjs/core test",
+    "test:ci": "node scripts/run-tests.js",
     "lint": "oxlint . && oxfmt --check .",
     "format": "oxlint --fix . && oxfmt .",
     "lint:fix": "oxlint --fix . && oxfmt .",

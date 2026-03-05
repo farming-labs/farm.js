@@ -106,7 +106,7 @@
   "scripts": {
     "build": "tsdown && node scripts/post-build.js",
     "dev": "tsdown --watch",
-    "test": "vitest",
+    "test": "vitest run",
     "test:coverage": "vitest --coverage",
     "lint": "biome lint .",
     "lint:fix": "biome lint --write .",

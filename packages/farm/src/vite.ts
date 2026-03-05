@@ -66,6 +66,7 @@ export function farmPlugin(
         await generateRouteTypes({
           root: farmConfig.root,
           srcDir: farmConfig.srcDir,
+          suppressLintOnLink: farmConfig.suppressLintOnLink,
         });
       } catch (e) {
         if (process.env.FARM_VERBOSE) logger.warn("Route type generation failed: " + (e as Error).message);
@@ -81,7 +82,7 @@ export function farmPlugin(
         if (routeTypeGenScheduled) return;
         routeTypeGenScheduled = setTimeout(() => {
           routeTypeGenScheduled = null;
-          generateRouteTypes({ root: farmConfig.root, srcDir: farmConfig.srcDir }).catch(() => {});
+          generateRouteTypes({ root: farmConfig.root, srcDir: farmConfig.srcDir, suppressLintOnLink: farmConfig.suppressLintOnLink }).catch(() => {});
         }, 100);
       };
       ["add", "change", "unlink"].forEach((ev) => {

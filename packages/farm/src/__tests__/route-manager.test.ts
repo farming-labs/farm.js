@@ -28,6 +28,7 @@ describe("RouteManager", () => {
       srcDir: "src",
       outDir: "dist",
       basePath: "/",
+      suppressLintOnLink: false,
       experimental: {
         serverComponents: true,
         serverActions: true,

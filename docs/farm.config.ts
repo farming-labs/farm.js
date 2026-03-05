@@ -4,6 +4,7 @@ import { createLoggerPlugin } from '@farmjs/core/plugin/server';
 export default defineFarmConfig({
   srcDir: 'src',
   preset: 'vercel',
+  // suppressLintOnLink: true, // set to true to allow any string on <Link href="..."> (no route-type errors)
   notFound: {
     component: './src/app/not-found.tsx',
   },

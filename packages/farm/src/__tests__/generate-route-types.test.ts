@@ -34,6 +34,14 @@ describe("generateRouteTypes", () => {
     expect(content).toContain("_: RoutePath");
   });
 
+  it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and RoutePath is string", async () => {
+    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src", suppressLintOnLink: true });
+    const content = fs.readFileSync(outPath, "utf8");
+    expect(content).toContain("export type RoutePath = string");
+    expect(content).not.toContain("declare module");
+    expect(content).not.toContain("LinkDefaultRoute");
+  });
+
   it("regenerates when a new page is added", async () => {
     await generateRouteTypes({ root: tmpDir, srcDir: "src" });
     let content = fs.readFileSync(path.join(tmpDir, "src", "farm-routes.d.ts"), "utf8");

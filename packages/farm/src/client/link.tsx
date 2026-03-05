@@ -25,10 +25,13 @@ export interface LinkDefaultRoute {
 
 export type DefaultRoutePath = LinkDefaultRoute["_"];
 
+/** External URLs; these are never type-checked as routes. */
+export type ExternalHref = `http://${string}` | `https://${string}` | `//${string}` | `mailto:${string}`;
+
 export interface LinkProps<TRoute extends string = DefaultRoutePath>
   extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
-  /** Destination path (typed when TRoute is a union of route strings) */
-  href: TRoute;
+  /** Internal route path (typed when route types are generated) or external URL. */
+  href: TRoute | ExternalHref;
   /**
    * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
    * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".

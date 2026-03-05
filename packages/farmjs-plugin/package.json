@@ -37,7 +37,8 @@
   "scripts": {
     "build": "tsc && node scripts/build.js",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "echo 'No tests in this package'"
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",

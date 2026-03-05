@@ -11,6 +11,9 @@ import type { AnchorHTMLAttributes, ForwardRefExoticComponent, RefAttributes } f
 declare module "@farmjs/core/client" {
   export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
+  /** External URLs are never type-checked as routes; use for http/https/mailto etc. */
+  export type ExternalHref = `http://${string}` | `https://${string}` | `//${string}` | `mailto:${string}`;
+
   export interface LinkDefaultRoute {
     _: string;
   }
@@ -19,7 +22,8 @@ declare module "@farmjs/core/client" {
 
   export interface LinkProps<TRoute extends string = DefaultRoutePath>
     extends Omit<AnchorHTMLAttributes<HTMLAnchorElement>, "href"> {
-    href: TRoute;
+    /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
+    href: TRoute | ExternalHref;
     prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
     prefetchDelay?: number;
     replace?: boolean;
