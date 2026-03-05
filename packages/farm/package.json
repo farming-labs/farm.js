@@ -18,11 +18,24 @@
     "directory": "packages/farm"
   },
   "files": [
-    "dist"
+    "dist",
+    "types"
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.mts",
+  "typesVersions": {
+    "*": {
+      "middleware": ["./types/middleware.d.ts", "./dist/middleware.d.mts"],
+      "api": ["./types/api.d.ts", "./dist/api.d.mts"],
+      "client": ["./dist/client.d.mts"],
+      "server": ["./dist/server.d.mts"],
+      "vite": ["./dist/vite.d.mts"],
+      "plugin": ["./dist/plugin.d.mts"],
+      "query": ["./dist/query/index.d.mts"],
+      "*": ["./dist/*.d.mts"]
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.mts",

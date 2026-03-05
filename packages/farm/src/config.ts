@@ -83,7 +83,6 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
 
   middleware?: MiddlewareConfig;
 
-  /** Custom 404 Not Found page configuration */
   notFound?: NotFoundConfig;
 
   output?: "standalone" | "static" | "export";
