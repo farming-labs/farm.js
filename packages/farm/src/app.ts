@@ -55,6 +55,7 @@ export class FarmApp {
       srcDir: config.srcDir || "src",
       outDir: config.outDir || "dist",
       basePath: config.basePath || "/",
+      preset: config.preset ?? "node-server",
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? true,

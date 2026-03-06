@@ -19,10 +19,10 @@ declare module "@farmjs/core/client" {
     | `mailto:${string}`;
 
   export interface LinkDefaultRoute {
-    _: string;
   }
 
-  export type DefaultRoutePath = LinkDefaultRoute["_"];
+  export type DefaultRoutePath =
+    LinkDefaultRoute extends { _: infer TRoute extends string } ? TRoute : string;
 
   export interface LinkProps<TRoute extends string = DefaultRoutePath> extends Omit<
     AnchorHTMLAttributes<HTMLAnchorElement>,

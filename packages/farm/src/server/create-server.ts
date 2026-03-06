@@ -121,12 +121,34 @@ export async function createServer(config: FarmConfig = {}) {
       plugins: [farmPlugin(finalConfig, pluginManager), createBrandingPlugin()],
       server: {
         middlewareMode: false,
-        hmr: {
-          port: 24678,
-        },
       },
       optimizeDeps: {
+        // Avoid Vite scanning server/native-only deps from framework internals.
+        noDiscovery: true,
         include: ["react", "react-dom"],
+        exclude: [
+          "@farmjs/core/server",
+          "@farmjs/core/api",
+          "@farmjs/core/middleware",
+          "@farmjs/core/config",
+          "nitro",
+          "h3",
+          "vite",
+          "esbuild",
+          "rollup",
+          "fsevents",
+          "nf3",
+          "better-call",
+          "zod",
+          "supports-color",
+          "node-fetch",
+          "consola",
+          "mock-aws-s3",
+          "aws-sdk",
+          "nock",
+          "lightningcss",
+          "@tailwindcss/oxide",
+        ],
       },
       ssr: {
         noExternal: ["farm"],

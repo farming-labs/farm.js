@@ -1,5 +1,5 @@
 import type { PageProps } from "@farmjs/core";
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farmjs/core";
 
 export const metadata = {
   title: "Getting Started - Farm.js",

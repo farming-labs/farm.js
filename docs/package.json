@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "preview": "farm preview"
+    "preview": "farm preview",
+    "predev": "pnpm --filter @farmjs/core build",
+    "prebuild": "pnpm --filter @farmjs/core build"
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",

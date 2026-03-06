@@ -20,10 +20,10 @@ type PrefetchLegacy = boolean | "hover" | "viewport" | "none";
  * without passing a generic. Defaults to string when not augmented.
  */
 export interface LinkDefaultRoute {
-  _: string;
 }
 
-export type DefaultRoutePath = LinkDefaultRoute["_"];
+export type DefaultRoutePath =
+  LinkDefaultRoute extends { _: infer TRoute extends string } ? TRoute : string;
 
 /** External URLs; these are never type-checked as routes. */
 export type ExternalHref =

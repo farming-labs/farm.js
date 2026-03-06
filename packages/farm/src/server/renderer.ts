@@ -82,15 +82,15 @@ export class ServerRenderer {
             path: page.urlPath,
           };
 
-          let pageElement = React.createElement(PageComponent as any, pageProps);
+          let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
 
           for (let i = layoutModules.length - 1; i >= 0; i--) {
             const layoutModule = layoutModules[i];
             const LayoutComponent = layoutModule.default;
-            pageElement = React.createElement(LayoutComponent, {
+            pageElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
               children: pageElement,
               params: page.params,
-            } as any);
+            } as React.Attributes);
           }
 
           const { renderToString } = await import("react-dom/server");
@@ -256,7 +256,7 @@ export class ServerRenderer {
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         const PageComponent = routeModule.default!;
-        let pageElement = React.createElement(PageComponent as any, pageProps);
+        let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
 
         // For client components, wrap in a container div for targeted hydration
         if (isClientComponent) {
@@ -271,10 +271,10 @@ export class ServerRenderer {
         for (let i = layoutModules.length - 1; i >= 0; i--) {
           const layoutModule = layoutModules[i];
           const LayoutComponent = layoutModule.default;
-          wrappedElement = React.createElement(LayoutComponent, {
+          wrappedElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
             children: wrappedElement,
             params,
-          } as any);
+          } as React.Attributes);
         }
 
         // Render with middleware data available
@@ -484,13 +484,13 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 
         if (NotFoundComponent) {
           // Look for root layout
-          let LayoutComponent: React.ComponentType<{ children: React.ReactNode }> | null = null;
+          let LayoutComponent: React.ComponentType<unknown> | null = null;
           for (const ext of notFoundExtensions) {
             const layoutPath = path.join(appDir, `layout${ext}`);
             if (fs.existsSync(layoutPath)) {
               try {
                 const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
-                LayoutComponent = layoutModule.default;
+                LayoutComponent = layoutModule.default as React.ComponentType<unknown>;
               } catch {
                 // Layout import failed, continue without it
               }
@@ -499,11 +499,11 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
           }
 
           // Render the 404 page
-          let element = React.createElement(NotFoundComponent as any, { pathname });
+          let element = React.createElement(NotFoundComponent as React.ComponentType<unknown>, { pathname } as React.Attributes);
 
           // Wrap with layout if available
           if (LayoutComponent) {
-            element = React.createElement(LayoutComponent, { children: element });
+            element = React.createElement(LayoutComponent as React.ComponentType<unknown>, { children: element } as React.Attributes);
           }
 
           // Render to string

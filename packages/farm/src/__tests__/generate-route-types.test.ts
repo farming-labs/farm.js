@@ -40,7 +40,9 @@ describe("generateRouteTypes", () => {
     expect(content).toContain('"/about"');
     expect(content).toContain("LinkDefaultRoute");
     expect(content).toContain('declare module "@farmjs/core/client"');
-    expect(content).toContain("_: RoutePath");
+    expect(content).toContain('declare module "@farmjs/core"');
+    expect(content).toContain('declare module "@farmjs/core/dist/client.js"');
+    expect(content).toContain('_: import("./farm-routes").RoutePath');
   });
 
   it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and RoutePath is string", async () => {

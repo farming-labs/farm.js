@@ -446,7 +446,7 @@ export class OpenAPIGenerator {
       if (handler && handler._type && handler._type.query) {
         const querySchema = handler._type.query;
 
-        if (queryShema instanceof z.ZodObject) {
+        if (querySchema instanceof z.ZodObject) {
           Object.entries((querySchema as any).shape).forEach(([key, value]) => {
             if (value instanceof z.ZodType) {
               parameters.push({
@@ -550,8 +550,8 @@ export class OpenAPIGenerator {
   /**
    * Generate OpenAPI spec file
    */
-  generateSpecFile(routes: APIRouteInfo[], outputPath: string): void {
-    const spec = this.generateSpec(routes);
+  async generateSpecFile(routes: APIRouteInfo[], outputPath: string): Promise<void> {
+    const spec = await this.generateSpec(routes);
     const fs = require("fs");
     const path = require("path");
 

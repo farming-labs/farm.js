@@ -1,5 +1,5 @@
 import type { LayoutProps } from "@farmjs/core";
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farmjs/core";
 import "./globals.css";
 
 export const metadata = {
@@ -34,6 +34,12 @@ export default function RootLayout({ children }: LayoutProps) {
               className="text-sm font-medium text-slate-600 hover:text-emerald-600 transition-colors"
             >
               Get Started
+            </Link>
+            <Link
+              href="/docs/plugins"
+              className="text-sm font-medium text-slate-600 hover:text-emerald-600 transition-colors"
+            >
+              Plugins
             </Link>
             <a
               href="https://github.com/farm-js/farm.js"

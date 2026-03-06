@@ -23,46 +23,47 @@
   ],
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
-  "types": "./dist/index.d.mts",
+  "types": "./dist/index.d.ts",
   "typesVersions": {
     "*": {
       "middleware": [
         "./types/middleware.d.ts",
-        "./dist/middleware.d.mts"
+        "./dist/middleware.d.ts"
       ],
       "api": [
         "./types/api.d.ts",
-        "./dist/api.d.mts"
+        "./dist/api.d.ts"
       ],
       "client": [
         "./types/client.d.ts",
-        "./dist/client.d.mts"
+        "./dist/client.d.ts"
       ],
       "server": [
-        "./dist/server.d.mts"
+        "./dist/server.d.ts"
       ],
       "vite": [
-        "./dist/vite.d.mts"
+        "./dist/vite.d.ts"
       ],
       "plugin": [
-        "./dist/plugin.d.mts"
+        "./dist/plugin.d.ts"
       ],
       "query": [
-        "./dist/query/index.d.mts"
+        "./dist/query/index.d.ts"
       ],
       "*": [
-        "./dist/*.d.mts"
+        "./dist/*.d.ts"
       ]
     }
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.mts",
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.cjs"
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.mjs"
     },
     "./server": {
-      "types": "./dist/server.d.mts",
+      "types": "./dist/server.d.ts",
       "import": "./dist/server.mjs",
       "require": "./dist/server.cjs"
     },
@@ -72,59 +73,59 @@
       "require": "./dist/client.cjs"
     },
     "./vite": {
-      "types": "./dist/vite.d.mts",
+      "types": "./dist/vite.d.ts",
       "import": "./dist/vite.mjs",
       "require": "./dist/vite.cjs"
     },
     "./plugin": {
-      "types": "./dist/plugin.d.mts",
+      "types": "./dist/plugin.d.ts",
       "import": "./dist/plugin.mjs",
       "require": "./dist/plugin.cjs"
     },
     "./plugin/server": {
-      "types": "./dist/server-plugins.d.mts",
+      "types": "./dist/server-plugins.d.ts",
       "import": "./dist/server-plugins.mjs",
       "require": "./dist/server-plugins.cjs"
     },
     "./plugin/client": {
-      "types": "./dist/client-plugins.d.mts",
+      "types": "./dist/client-plugins.d.ts",
       "import": "./dist/client-plugins.mjs",
       "require": "./dist/client-plugins.cjs"
     },
     "./query": {
-      "types": "./dist/query/index.d.mts",
+      "types": "./dist/query/index.d.ts",
       "import": "./dist/query/index.mjs",
       "require": "./dist/query/index.cjs"
     },
     "./query/parsers": {
-      "types": "./dist/query/parsers.d.mts",
+      "types": "./dist/query/parsers.d.ts",
       "import": "./dist/query/parsers.mjs",
       "require": "./dist/query/parsers.cjs"
     },
     "./query/client": {
-      "types": "./dist/query/client.d.mts",
+      "types": "./dist/query/client.d.ts",
       "import": "./dist/query/client.mjs",
       "require": "./dist/query/client.cjs"
     },
     "./query/server": {
-      "types": "./dist/query/server.d.mts",
+      "types": "./dist/query/server.d.ts",
       "import": "./dist/query/server.mjs",
       "require": "./dist/query/server.cjs"
     },
     "./middleware": {
-      "types": "./dist/middleware.d.mts",
+      "types": "./dist/middleware.d.ts",
       "import": "./dist/middleware.mjs",
       "require": "./dist/middleware.cjs"
     },
     "./api": {
-      "types": "./dist/api.d.mts",
+      "types": "./dist/api.d.ts",
       "import": "./dist/api.mjs",
       "require": "./dist/api.cjs"
     }
   },
   "scripts": {
-    "build": "tsdown && node scripts/post-build.js",
-    "dev": "tsdown --watch",
+    "build": "tsup",
+    "dev": "tsup --watch",
     "test": "vitest run",
     "test:coverage": "vitest --coverage",
     "lint": "biome lint .",
@@ -157,7 +158,7 @@
     "@types/react-dom": "^18.2.18",
     "@vitest/coverage-v8": "^1.1.0",
     "jsdom": "^25.0.0",
-    "tsdown": "^0.15.7",
+    "tsup": "^8.3.5",
     "typescript": "^5.3.3",
     "vitest": "^1.1.0"
   },

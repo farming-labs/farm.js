@@ -12,12 +12,17 @@ const path = require("path");
 const distDir = path.join(__dirname, "..", "dist");
 const queryDir = path.join(distDir, "query");
 
+if (!fs.existsSync(distDir)) {
+  console.warn("⚠️ dist/ not found; run tsdown first. Skipping post-build.");
+  process.exit(0);
+}
+
 /**
- * Helper function to find and copy a file matching a pattern
+ * Helper function to find and copy a file matching a pattern (hashed or clean name)
  */
 function fixTypeFile(pattern, target, checkContent, extraExports) {
   const files = fs.readdirSync(distDir);
-  const match = files.find((file) => {
+  let match = files.find((file) => {
     if (!pattern.test(file)) return false;
     if (checkContent) {
       const content = fs.readFileSync(path.join(distDir, file), "utf8");
@@ -25,6 +30,9 @@ function fixTypeFile(pattern, target, checkContent, extraExports) {
     }
     return true;
   });
+  if (!match && files.includes(target)) {
+    match = target;
+  }
 
   if (match) {
     let content = fs.readFileSync(path.join(distDir, match), "utf8");
@@ -45,8 +53,9 @@ function fixQueryFiles() {
 
   const queryFiles = fs.readdirSync(queryDir);
 
-  // Fix query/index.d.mts
-  const indexMatch = queryFiles.find((file) => /^index-.*\.d\.mts$/.test(file));
+  const indexMatch =
+    queryFiles.find((file) => /^index-.*\.d\.mts$/.test(file)) ||
+    (queryFiles.includes("index.d.mts") ? "index.d.mts" : null);
   if (indexMatch) {
     let content = fs.readFileSync(path.join(queryDir, indexMatch), "utf8");
     content = content.replace(
@@ -56,19 +65,14 @@ function fixQueryFiles() {
     fs.writeFileSync(path.join(queryDir, "index.d.mts"), content);
   }
 
-  // Fix query/client.d.mts
-  // Use the same approach as server.d.mts - import from root parsers file
-  const clientMatch = queryFiles.find((file) => /^client-.*\.d\.mts$/.test(file));
+  const clientMatch =
+    queryFiles.find((file) => /^client-.*\.d\.mts$/.test(file)) ||
+    (queryFiles.includes("client.d.mts") ? "client.d.mts" : null);
   if (clientMatch) {
     let content = fs.readFileSync(path.join(queryDir, clientMatch), "utf8");
-    // Find the root parsers file to import from (same as server does)
-    const rootParsersMatch = fs
-      .readdirSync(distDir)
-      .find((file) => /^parsers-.*\.d\.mts$/.test(file));
+    const rootParsersMatch = queryFiles.find((file) => /^parsers-.*\.d\.mts$/.test(file));
     if (rootParsersMatch) {
-      // Replace import to use root parsers file (like server does)
-      // This ensures type resolution works the same way as server module
-      const rootParsersPath = `../${rootParsersMatch.replace(".d.mts", ".mjs")}`;
+      const rootParsersPath = `./${rootParsersMatch.replace(".d.mts", ".mjs")}`;
       content = content.replace(/from ["']\.\/parsers["']/g, `from "${rootParsersPath}"`);
       content = content.replace(/from ["']\.\.\/parsers-[^"']+["']/g, `from "${rootParsersPath}"`);
       // Remove any explicit declarations we added before - let TypeScript resolve from imports
@@ -80,21 +84,17 @@ function fixQueryFiles() {
     fs.writeFileSync(path.join(queryDir, "client.d.mts"), content);
   }
 
-  // Fix query/server.d.mts
-  const serverMatch = queryFiles.find((file) => /^server-.*\.d\.mts$/.test(file));
+  const serverMatch =
+    queryFiles.find((file) => /^server-.*\.d\.mts$/.test(file)) ||
+    (queryFiles.includes("server.d.mts") ? "server.d.mts" : null);
   if (serverMatch) {
     const content = fs.readFileSync(path.join(queryDir, serverMatch), "utf8");
     fs.writeFileSync(path.join(queryDir, "server.d.mts"), content);
   }
 
-  // Fix query/parsers.d.mts
-  // Extract type definitions from root parsers file to avoid broken imports
-  // This ensures TypeScript can properly infer types for asString, useQueryState, etc.
-  const rootParsersMatch = fs
-    .readdirSync(distDir)
-    .find((file) => /^parsers-.*\.d\.mts$/.test(file));
+  const rootParsersMatch = queryFiles.find((file) => /^parsers-.*\.d\.mts$/.test(file));
   if (rootParsersMatch) {
-    const rootContent = fs.readFileSync(path.join(distDir, rootParsersMatch), "utf8");
+    const rootContent = fs.readFileSync(path.join(queryDir, rootParsersMatch), "utf8");
     // Extract the type definitions (the //#region section)
     const regionMatch = rootContent.match(/\/\/#region[\s\S]*?\/\/#endregion/);
     if (regionMatch) {
@@ -108,12 +108,23 @@ function fixQueryFiles() {
   }
 }
 
-// Fix main dist files
+const requiredTargets = [
+  "index.d.mts",
+  "client.d.mts",
+  "server.d.mts",
+  "vite.d.mts",
+  "plugin.d.mts",
+  "server-plugins.d.mts",
+  "client-plugins.d.mts",
+  "middleware.d.mts",
+  "api.d.mts",
+];
+
 fixTypeFile(/^index-.*\.d\.mts$/, "index.d.mts", "loadConfig");
 fixTypeFile(
   /^client-.*\.d\.mts$/,
   "client.d.mts",
-  "declare function createAPIClient",
+  "createAPIClient",
   "export { createAPIClient, createServerAPIClient };\nexport type { APIClientOptions };",
 );
 fixTypeFile(/^server-.*\.d\.mts$/, "server.d.mts");
@@ -121,7 +132,7 @@ fixTypeFile(/^vite-.*\.d\.mts$/, "vite.d.mts");
 fixTypeFile(
   /^plugin-.*\.d\.mts$/,
   "plugin.d.mts",
-  "interface FarmPlugin",
+  "FarmPlugin",
   "export type { FarmPlugin, FarmPluginContext };\nexport { PluginManager, definePlugin };",
 );
 fixTypeFile(/^server-plugins-.*\.d\.mts$/, "server-plugins.d.mts");
@@ -132,8 +143,14 @@ fixTypeFile(
   "MiddlewareContext",
   "export { middleware, getRateLimitStatus, createContext, MiddlewareManager, getMiddlewareData, getMiddlewareValue, unwrapMiddleware, getFromMiddleware, hasMiddlewareData };\nexport type { MiddlewareContext, MiddlewareFunction, MiddlewareChain, MiddlewareConfig, CookieJar, CookieOptions, RateLimitConfig, RateLimitStorage, RateLimitStatus, NextFunction };",
 );
+fixTypeFile(/^api-.*\.d\.mts$/, "api.d.mts");
 
-// Fix query directory files
 fixQueryFiles();
 
+const missing = requiredTargets.filter((t) => !fs.existsSync(path.join(distDir, t)));
+if (missing.length > 0) {
+  console.error("❌ Post-build failed: missing type files after fix:", missing.join(", "));
+  console.error("   Ensure tsdown produced .d.mts files in dist/ (hashed or clean names).");
+  process.exit(1);
+}
 console.log("✅ Post-build type definitions fixed");

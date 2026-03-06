@@ -138,6 +138,17 @@ export function farmPlugin(
         duration: number,
         tag: "API" | "PAGE",
       ) => {
+        // In dev, browsers can trigger bursts of identical requests (reload/prefetch).
+        // Collapse near-identical page logs to keep terminal output readable.
+        const now = Date.now();
+        const dedupeKey = `${tag}:${method}:${urlPath}:${status}`;
+        const dedupeWindowMs = 250;
+        const last = (logResponse as any).__last as { key: string; ts: number } | undefined;
+        if (tag === "PAGE" && last && last.key === dedupeKey && now - last.ts < dedupeWindowMs) {
+          return;
+        }
+        (logResponse as any).__last = { key: dedupeKey, ts: now };
+
         try {
           const pc = require("picocolors");
           let statusColor = pc.green;
@@ -602,16 +613,16 @@ if (import.meta.hot) {
               path: page.urlPath,
             };
 
-            let pageElement = React.createElement(PageComponent as any, pageProps);
+            let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
 
             // Wrap with layouts
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
               const LayoutComponent = layoutModule.default;
-              pageElement = React.createElement(LayoutComponent, {
+              pageElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
                 children: pageElement,
                 params: page.params,
-              } as any);
+              } as React.Attributes);
             }
 
             const html = renderToString(pageElement);

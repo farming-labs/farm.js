@@ -1,4 +1,4 @@
-import { defineConfig } from "tsdown";
+import { defineConfig } from "tsup";
 
 export default defineConfig({
   entry: {
@@ -20,13 +20,14 @@ export default defineConfig({
   dts: true,
   clean: true,
   external: ["react", "react-dom", "vite"],
-  splitting: false,
   sourcemap: true,
-  minify: false,
-  fixedExtension: true,
+  splitting: false,
   treeshake: false,
   esbuildOptions(options) {
     options.keepNames = true;
     return options;
+  },
+  outExtension({ format }) {
+    return { js: format === "cjs" ? ".cjs" : ".mjs" };
   },
 });

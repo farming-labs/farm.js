@@ -325,9 +325,6 @@ async function buildClient(
         farmPlugin(config, pluginManager),
       ],
       mode: "production",
-      define: {
-        "process.env.NODE_ENV": JSON.stringify("production"),
-      },
       // Ensure React is bundled for client
       resolve: {
         dedupe: ["react", "react-dom"],

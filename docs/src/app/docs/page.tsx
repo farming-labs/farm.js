@@ -1,5 +1,5 @@
 import type { PageProps } from "@farmjs/core";
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farmjs/core";
 
 export const metadata = {
   title: "Docs - Farm.js",
@@ -47,6 +47,28 @@ export default function DocsIndexPage(_props: PageProps) {
             Layouts
           </h2>
           <p className="mt-2 text-sm text-slate-600">Root and nested layouts to wrap your pages.</p>
+        </Link>
+        <Link
+          href="/docs/plugins"
+          className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
+        >
+          <h2 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-600">
+            Plugin Ecosystem
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Built-in plugins: logger, compression, redirects, headers, rewrites, env.
+          </p>
+        </Link>
+        <Link
+          href="/docs/plugins/create-plugin"
+          className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
+        >
+          <h2 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-600">
+            Create a Plugin
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Guide to building your own plugin with definePlugin and lifecycle hooks.
+          </p>
         </Link>
       </div>
     </div>

@@ -1,7 +1,6 @@
 import { OpenAPIGenerator } from "./generator";
 import { APITypeGenerator } from "../type-generator";
 import type { OpenAPIConfig } from "../config";
-import type { APIRouteInfo } from "../type-generator";
 
 export class OpenAPIManager {
   private generator: OpenAPIGenerator;
@@ -23,7 +22,7 @@ export class OpenAPIManager {
   async generateSpec(): Promise<any> {
     try {
       // Get API routes using the existing type generator
-      const routes = await this.apiTypeGenerator.scanAPIRoutes(`${this.appDir}/api`);
+      const routes = this.apiTypeGenerator.scanAPIRoutes();
 
       // Generate OpenAPI spec (now async)
       const spec = await this.generator.generateSpec(routes);
@@ -54,10 +53,10 @@ export class OpenAPIManager {
    */
   async generateSpecFile(): Promise<void> {
     try {
-      const routes = await this.apiTypeGenerator.scanAPIRoutes(`${this.appDir}/api`);
+      const routes = this.apiTypeGenerator.scanAPIRoutes();
       const outputPath = `${this.appDir}/lib/openapi.spec.json`;
 
-      this.generator.generateSpecFile(routes, outputPath);
+      await this.generator.generateSpecFile(routes, outputPath);
       console.log("✅ OpenAPI spec generated at:", outputPath);
     } catch (error) {
       console.error("Failed to generate OpenAPI spec file:", error);
