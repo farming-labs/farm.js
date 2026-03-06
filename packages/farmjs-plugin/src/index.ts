@@ -8,6 +8,7 @@
  * - @farmjs/plugin/middleware - Standalone middleware support
  * - @farmjs/plugin/api - Standalone API routes support
  * - @farmjs/plugin/observability - request/render/build observability lifecycle hooks
+ * - @farmjs/plugin/context - example request context exposure plugin
  *
  * @example
  * ```ts
@@ -46,4 +47,5 @@ export const version = "0.0.1";
 // - @farmjs/plugin/middleware
 // - @farmjs/plugin/api
 // - @farmjs/plugin/observability
+// - @farmjs/plugin/context
 // This avoids bundling unused code

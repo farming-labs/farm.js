@@ -2,32 +2,32 @@
  * Server-side middleware utilities for accessing middleware data in pages
  */
 
-/**
- * Global storage for current request's middleware data
- * This is a simple global variable that works across ALL module instances
- * Safe because Node.js is single-threaded and rendering is synchronous
- */
-declare global {
-  var __FARM_CURRENT_MIDDLEWARE__: Map<string, any> | undefined;
-}
+import { AsyncLocalStorage } from "async_hooks";
 
-if (typeof globalThis.__FARM_CURRENT_MIDDLEWARE__ === "undefined") {
-  globalThis.__FARM_CURRENT_MIDDLEWARE__ = new Map();
+type MiddlewareStoreInput = Record<string, any> | Map<string, any>;
+const middlewareStore = new AsyncLocalStorage<Map<string, any>>();
+
+function toMiddlewareMap(data: MiddlewareStoreInput): Map<string, any> {
+  if (data instanceof Map) {
+    return new Map(data);
+  }
+  return new Map(Object.entries(data));
 }
 
 /**
  * Internal: Set middleware data for the current request
- * This is called by the server renderer BEFORE rendering starts
+ * This is called by the server renderer before rendering starts.
+ * Prefer _runWithMiddlewareData for request-scoped async flows.
  */
-export function _setCurrentMiddlewareData(data: Record<string, any>): void {
-  globalThis.__FARM_CURRENT_MIDDLEWARE__ = new Map(Object.entries(data));
+export function _setCurrentMiddlewareData(data: MiddlewareStoreInput): void {
+  middlewareStore.enterWith(toMiddlewareMap(data));
 }
 
 /**
  * Internal: Clear middleware data after request completes
  */
 export function _clearCurrentMiddlewareData(): void {
-  globalThis.__FARM_CURRENT_MIDDLEWARE__ = new Map();
+  middlewareStore.enterWith(new Map());
 }
 
 /**
@@ -35,16 +35,10 @@ export function _clearCurrentMiddlewareData(): void {
  * This is called by the server renderer
  */
 export async function _runWithMiddlewareData<T>(
-  data: Record<string, any>,
+  data: MiddlewareStoreInput,
   fn: () => T | Promise<T>,
 ): Promise<T> {
-  _setCurrentMiddlewareData(data);
-  try {
-    const result = await fn();
-    return result;
-  } finally {
-    _clearCurrentMiddlewareData();
-  }
+  return middlewareStore.run(toMiddlewareMap(data), fn);
 }
 
 /**
@@ -68,12 +62,12 @@ export function getMiddlewareData<T extends Record<string, any> = Record<string,
   keyof T,
   T[keyof T]
 > {
-  return (globalThis.__FARM_CURRENT_MIDDLEWARE__ || new Map()) as Map<keyof T, T[keyof T]>;
+  return (middlewareStore.getStore() || new Map()) as Map<keyof T, T[keyof T]>;
 }
 
 /**
  * Get a specific value from middleware data (synchronous)
- * Uses AsyncLocalStorage for automatic request-scoping - no props needed!
+ * Uses AsyncLocalStorage for request scoping - no props needed.
  *
  * @example
  * ```tsx

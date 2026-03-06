@@ -1,10 +1,37 @@
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
+import {
+  clearRequestContext,
+  deleteRequestContext,
+  getRequestContext,
+  getRequestContextSnapshot,
+  hasRequestContext,
+  setRequestContext,
+} from "./request-context";
+
+export interface PluginRequestContext {
+  set: (
+    target: FarmRequest | Request,
+    key: string,
+    value: any,
+    options?: { exposeToPage?: boolean },
+  ) => void;
+  get: <T = any>(target: FarmRequest | Request, key: string) => T | undefined;
+  has: (target: FarmRequest | Request, key: string) => boolean;
+  delete: (target: FarmRequest | Request, key: string) => boolean;
+  clear: (target: FarmRequest | Request) => void;
+  getAll: (
+    target: FarmRequest | Request,
+    options?: { exposedOnly?: boolean },
+  ) => Map<string, any>;
+}
+
 export interface FarmPluginContext {
   config: FarmConfig;
   viteServer?: ViteDevServer;
   isDev: boolean;
   isProd: boolean;
+  requestContext: PluginRequestContext;
 }
 
 export interface RouteDiscoveredPayload {
@@ -184,8 +211,30 @@ export class PluginManager {
   private plugins: FarmPlugin[] = [];
   private context: FarmPluginContext;
 
-  constructor(context: FarmPluginContext) {
-    this.context = context;
+  constructor(context: Omit<FarmPluginContext, "requestContext">) {
+    this.context = {
+      ...context,
+      requestContext: {
+        set(target, key, value, options) {
+          setRequestContext(target as object, key, value, options);
+        },
+        get(target, key) {
+          return getRequestContext(target as object, key);
+        },
+        has(target, key) {
+          return hasRequestContext(target as object, key);
+        },
+        delete(target, key) {
+          return deleteRequestContext(target as object, key);
+        },
+        clear(target) {
+          clearRequestContext(target as object);
+        },
+        getAll(target, options) {
+          return getRequestContextSnapshot(target as object, options);
+        },
+      },
+    };
   }
 
   addPlugin(plugin: FarmPlugin) {
@@ -298,7 +347,11 @@ export class PluginManager {
   }
 
   updateContext(updates: Partial<FarmPluginContext>) {
-    this.context = { ...this.context, ...updates };
+    this.context = {
+      ...this.context,
+      ...updates,
+      requestContext: this.context.requestContext,
+    };
   }
 }
 

@@ -6,7 +6,11 @@ export const metadata = {
   description: "Built-in plugins and how to use them in your Farm.js application.",
 };
 
-export default function PluginsPage(_props: PageProps) {
+export default function PluginsPage(props: PageProps) {
+  const demoRequestId = props.context?.data.get("demo.requestId") as string | undefined;
+  const demoPath = props.context?.data.get("demo.path") as string | undefined;
+  const demoUser = props.context?.data.get("demo.user") as string | undefined;
+
   return (
     <div className="space-y-8">
       <div>
@@ -39,6 +43,57 @@ export default defineFarmConfig({
     createCompressionPlugin({}),
   ],
 });`}
+        </pre>
+      </section>
+
+      <section className="rounded-lg border border-blue-200 bg-blue-50/40 p-6">
+        <h2 className="text-xl font-semibold text-slate-900">Live Request Context Demo</h2>
+        <p className="mt-2 text-slate-600">
+          This page is currently using a custom plugin from <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">docs/farm.config.ts</code>{" "}
+          that writes request-scoped values into <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">props.context</code>.
+        </p>
+        <div className="mt-4 grid gap-3 text-sm sm:grid-cols-3">
+          <div className="rounded border border-blue-200 bg-white p-3">
+            <p className="font-medium text-slate-700">demo.requestId</p>
+            <p className="mt-1 font-mono text-slate-900">{demoRequestId || "N/A"}</p>
+          </div>
+          <div className="rounded border border-blue-200 bg-white p-3">
+            <p className="font-medium text-slate-700">demo.path</p>
+            <p className="mt-1 font-mono text-slate-900">{demoPath || "N/A"}</p>
+          </div>
+          <div className="rounded border border-blue-200 bg-white p-3">
+            <p className="font-medium text-slate-700">demo.user</p>
+            <p className="mt-1 font-mono text-slate-900">{demoUser || "N/A"}</p>
+          </div>
+        </div>
+        <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
+          {`import { defineFarmConfig, definePlugin } from "@farmjs/core";
+import { randomUUID } from "crypto";
+
+function createDocsContextDemoPlugin(options = {}) {
+  const userHeader = (options.userHeader || "x-docs-user").toLowerCase();
+  const defaultUser = options.defaultUser || "guest";
+  const log = options.log ?? true;
+
+  return definePlugin({
+    name: "docs-context-demo",
+    beforeRequest(req, _res, context) {
+      const pathname = req.url ? req.url.split("?")[0] : "/";
+      const headerUser = req.headers[userHeader];
+      const user = (Array.isArray(headerUser) ? headerUser[0] : headerUser) || defaultUser;
+      const requestId = randomUUID();
+
+      context.requestContext.set(req, "demo.requestId", requestId, { exposeToPage: true });
+      context.requestContext.set(req, "demo.path", pathname, { exposeToPage: true });
+      context.requestContext.set(req, "demo.user", user, { exposeToPage: true });
+      context.requestContext.set(req, "internal.startTs", Date.now());
+
+      if (log) {
+        console.log(\`[docs-context-demo] \${req.method || "GET"} \${pathname} user=\${user} id=\${requestId}\`);
+      }
+    },
+  });
+}`}
         </pre>
       </section>
 

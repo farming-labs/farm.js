@@ -7,7 +7,18 @@ import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
 import { Writable } from "stream";
 import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
+import { getRequestContextSnapshot } from "../request-context";
 import { isSSGModule, matchSSGPage } from "../ssg";
+
+function toMiddlewareMap(input: unknown): Map<string, any> {
+  if (input instanceof Map) {
+    return new Map(input as Map<string, any>);
+  }
+  if (input && typeof input === "object") {
+    return new Map(Object.entries(input as Record<string, any>));
+  }
+  return new Map<string, any>();
+}
 
 export class ServerRenderer {
   private config: Required<FarmConfig>;
@@ -173,8 +184,8 @@ export class ServerRenderer {
         return;
       }
 
-      const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
-      const middlewareMap = new Map(Object.entries(middlewareData));
+      const middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
+      const pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
 
       const searchParamsObject: Record<string, string | string[] | undefined> = {};
       url.searchParams.forEach((value, key) => {
@@ -197,6 +208,7 @@ export class ServerRenderer {
         searchParams: Promise.resolve(searchParamsObject),
         path: pathname,
         middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+        context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
       };
 
       // Load route module
@@ -226,6 +238,18 @@ export class ServerRenderer {
         params,
         searchParams: searchParamsObject,
         path: pathname,
+        middleware:
+          middlewareMap.size > 0
+            ? {
+                data: Object.fromEntries(middlewareMap),
+              }
+            : undefined,
+        context:
+          pluginExposedContext.size > 0
+            ? {
+                data: Object.fromEntries(pluginExposedContext),
+              }
+            : undefined,
       };
 
       // Load layout modules
@@ -252,7 +276,7 @@ export class ServerRenderer {
       (req as any).__FARM_METADATA__ = mergedMetadata;
 
       // Get middleware data for AsyncLocalStorage
-      const middlewareDataForContext = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
+      const middlewareDataForContext = middlewareMap;
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         const PageComponent = routeModule.default!;

@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PluginManager, definePlugin } from "../plugin";
+import { getRequestContextSnapshot } from "../request-context";
+import type { PageProps } from "../types";
 
 function createManager() {
   return new PluginManager({
@@ -259,5 +261,54 @@ describe("plugin lifecycle hooks", () => {
     expect(ended).toBe(true);
     expect(first).toHaveBeenCalledTimes(1);
     expect(second).toHaveBeenCalledTimes(0);
+  });
+
+  it("allows plugins to set and read request context with explicit page exposure", async () => {
+    const manager = createManager();
+    const observed: Array<string | undefined> = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "setter",
+        beforeRequest(req, _res, context) {
+          context.requestContext.set(req, "traceId", "trace-123", { exposeToPage: true });
+          context.requestContext.set(req, "internalToken", "secret-token");
+        },
+      }),
+    );
+
+    manager.addPlugin(
+      definePlugin({
+        name: "reader",
+        beforeRequest(req, _res, context) {
+          observed.push(context.requestContext.get(req, "traceId"));
+          observed.push(context.requestContext.get(req, "internalToken"));
+          const exposed = context.requestContext.getAll(req, { exposedOnly: true });
+          observed.push(exposed.get("traceId"));
+          observed.push(exposed.get("internalToken"));
+        },
+      }),
+    );
+
+    const req: any = {};
+    const res: any = { writableEnded: false };
+    await manager.runHookParallel("beforeRequest", req, res);
+
+    expect(observed).toEqual(["trace-123", "secret-token", "trace-123", undefined]);
+
+    const exposedFromStore = getRequestContextSnapshot(req, { exposedOnly: true });
+    expect(exposedFromStore.get("traceId")).toBe("trace-123");
+    expect(exposedFromStore.get("internalToken")).toBeUndefined();
+  });
+
+  it("uses props.context for plugin-exposed values on page props", () => {
+    const props: PageProps = {
+      params: {},
+      searchParams: Promise.resolve({}),
+      path: "/",
+      context: { data: new Map([["traceId", "trace-123"]]) },
+    };
+
+    expect(props.context?.data.get("traceId")).toBe("trace-123");
   });
 });

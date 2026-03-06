@@ -494,8 +494,24 @@ export function farmPlugin(
           }
 
           // Intercept res.end to call afterResponse hooks and log response before response is fully sent
+          const originalWrite = res.write.bind(res);
           const originalEnd = res.end.bind(res);
           let afterResponseCalled = false;
+          const htmlChunks: Buffer[] = [];
+
+          res.write = ((chunk: any, ...args: any[]) => {
+            const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+            const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+            const isHtmlResponse = contentType.includes("text/html");
+
+            if (isHtmlResponse && chunk !== undefined && chunk !== null) {
+              const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+              htmlChunks.push(bufferChunk);
+              return true;
+            }
+
+            return originalWrite(chunk, ...args);
+          }) as any;
 
           res.end = ((...args: any[]) => {
             if (!afterResponseCalled && pm) {
@@ -506,13 +522,28 @@ export function farmPlugin(
               // Call lifecycle hooks before actually ending the response.
               Promise.resolve()
                 .then(async () => {
-                  if (args.length > 0) {
+                  const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+                  const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+                  const isHtmlResponse = contentType.includes("text/html");
+                  if (isHtmlResponse) {
                     const firstArg = args[0];
                     if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
-                      let html = Buffer.isBuffer(firstArg) ? firstArg.toString("utf-8") : firstArg;
-                      html = await pm.runHookSerial("transformHTML", html);
-                      html = await pm.runHookSerial("afterRender", html, renderPayload);
-                      args[0] = html;
+                      const bufferChunk = Buffer.isBuffer(firstArg)
+                        ? firstArg
+                        : Buffer.from(firstArg, "utf-8");
+                      htmlChunks.push(bufferChunk);
+                    }
+
+                    let html = Buffer.concat(htmlChunks).toString("utf-8");
+                    html = await pm.runHookSerial("transformHTML", html);
+                    html = await pm.runHookSerial("afterRender", html, renderPayload);
+
+                    const callback =
+                      typeof args[args.length - 1] === "function" ? args[args.length - 1] : undefined;
+                    args.length = 0;
+                    args.push(html);
+                    if (callback) {
+                      args.push(callback);
                     }
                   }
                 })
@@ -1220,6 +1251,17 @@ let LayoutComponent = null;
 // Track if we've taken over rendering from SSR
 let hasClientTakenOver = false;
 
+function normalizeServerProps(rawProps) {
+  const props = rawProps && typeof rawProps === 'object' ? { ...rawProps } : {};
+  if (props.middleware && props.middleware.data && !(props.middleware.data instanceof Map)) {
+    props.middleware = { ...props.middleware, data: new Map(Object.entries(props.middleware.data)) };
+  }
+  if (props.context && props.context.data && !(props.context.data instanceof Map)) {
+    props.context = { ...props.context, data: new Map(Object.entries(props.context.data)) };
+  }
+  return props;
+}
+
 // ====== CHUNK-BASED NAVIGATION (TanStack Start pattern) ======
 // NO HTML fetching! Uses manifest to dynamically import page chunks
 async function renderPage(pageData) {
@@ -1433,7 +1475,7 @@ async function hydrate() {
     currentPageComponent = PageComponent;
     
     // Get props - either from server-injected props or by matching the current URL
-    let pageProps = window.__FARM_PROPS__;
+    let pageProps = normalizeServerProps(window.__FARM_PROPS__);
     if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
       // Extract params from URL using manifest route matching (fallback)
       const pathname = window.location.pathname;
@@ -1442,11 +1484,11 @@ async function hydrate() {
       new URLSearchParams(window.location.search).forEach((value, key) => {
         searchParams[key] = value;
       });
-      pageProps = {
+      pageProps = normalizeServerProps({
         params: foundRoute?.params || {},
         searchParams: searchParams,
         path: pathname,
-      };
+      });
     }
     currentPageProps = pageProps;
     

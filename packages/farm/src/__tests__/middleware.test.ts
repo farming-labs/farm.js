@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { middleware, getRateLimitStatus } from "../middleware/chain";
 import { createContext } from "../middleware/context";
+import { MiddlewareManager } from "../middleware/manager";
 import {
   _setCurrentMiddlewareData,
   _clearCurrentMiddlewareData,
   getMiddlewareData,
   getMiddlewareValue,
+  _runWithMiddlewareData,
 } from "../middleware/server";
 import type { MiddlewareContext, RateLimitStorage } from "../middleware/types";
 import { IncomingMessage, ServerResponse } from "http";
@@ -958,6 +960,28 @@ describe("Middleware Context", () => {
     expect(ctx.data.get("user")).toEqual({ id: 1, name: "John" });
   });
 
+  it("should inherit parent middleware data", () => {
+    const req = createMockRequest("/test");
+    const res = createMockResponse();
+    const parentData = new Map<string, any>([
+      ["requestId", "req-123"],
+      ["user", { id: 1 }],
+    ]);
+    const parentHeaders = { "x-request-id": "req-123" };
+
+    const ctx = createContext(req, res, undefined, {
+      data: parentData,
+      headers: parentHeaders,
+    });
+
+    expect(ctx.data.get("requestId")).toBe("req-123");
+    expect(ctx.data.get("user")).toEqual({ id: 1 });
+    expect(ctx.headers.get("x-request-id")).toBe("req-123");
+
+    ctx.data.set("childOnly", true);
+    expect(parentData.has("childOnly")).toBe(false);
+  });
+
   it("should handle redirects", () => {
     const req = createMockRequest("/test");
     const res = createMockResponse();
@@ -1596,6 +1620,61 @@ describe("Middleware Data Access (getMiddlewareData)", () => {
     expect(data2.get("req2")).toBe("data2");
     expect(data2.get("req1")).toBeUndefined();
     _clearCurrentMiddlewareData();
+  });
+
+  it("should isolate middleware data across concurrent async contexts", async () => {
+    const [req1, req2] = await Promise.all([
+      _runWithMiddlewareData({ requestId: "req-1" }, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        return getMiddlewareValue("requestId");
+      }),
+      _runWithMiddlewareData({ requestId: "req-2" }, async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        return getMiddlewareValue("requestId");
+      }),
+    ]);
+
+    expect(req1).toBe("req-1");
+    expect(req2).toBe("req-2");
+  });
+});
+
+describe("Middleware Manager Data Flow", () => {
+  it("should share middleware context across middleware chain and expose to page request data", async () => {
+    const req = createMockRequest("/docs/getting-started");
+    const res = createMockResponse();
+
+    const manager = new MiddlewareManager("/tmp");
+    (manager as any).middleware = [
+      {
+        path: "/",
+        filePath: "/tmp/app/middleware.ts",
+        handlers: [
+          async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+            ctx.data.set("requestId", "req-abc");
+            await next();
+          },
+        ],
+      },
+      {
+        path: "/docs",
+        filePath: "/tmp/app/docs/middleware.ts",
+        handlers: [
+          async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+            ctx.data.set("seenRequestId", ctx.data.get("requestId"));
+            await next();
+          },
+        ],
+      },
+    ];
+
+    const handled = await manager.execute(req, res);
+    expect(handled).toBe(false);
+
+    const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__;
+    expect(middlewareData).toBeInstanceOf(Map);
+    expect(middlewareData.get("requestId")).toBe("req-abc");
+    expect(middlewareData.get("seenRequestId")).toBe("req-abc");
   });
 });
 

@@ -117,7 +117,7 @@ export function createContext(
 ): MiddlewareContext {
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const headers = new Map<string, string>();
-  const data = new Map<string, any>();
+  const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
   const cookies = new CookieJarImpl(req, res);
 
   // Copy existing headers
@@ -128,6 +128,12 @@ export function createContext(
       headers.set(key, value.join(", "));
     }
   });
+
+  if (parent?.headers) {
+    for (const [key, value] of Object.entries(parent.headers)) {
+      headers.set(key, value);
+    }
+  }
 
   let handled = false;
 
