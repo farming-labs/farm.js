@@ -16,7 +16,24 @@ export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
 export * from "./client";
 export * from "./ssg";
-export type { FarmPlugin, FarmPluginContext } from "./plugin";
+export type {
+  FarmPlugin,
+  FarmPluginContext,
+  RouteDiscoveredPayload,
+  RoutesGeneratedPayload,
+  MiddlewareDiscoveredPayload,
+  APIRouteDiscoveredPayload,
+  RouteMatchPayload,
+  RouteMatchResultPayload,
+  RenderLifecyclePayload,
+  APIHandlerLifecyclePayload,
+  ErrorLifecyclePayload,
+  HMRUpdatePayload,
+  BundleLifecyclePayload,
+  BundleResultPayload,
+  NitroBuildLifecyclePayload,
+  ShutdownPayload,
+} from "./plugin";
 export type { MiddlewareProps, PagePropsWithMiddleware, PageProps } from "./types";
 export type {
   FarmUserConfig,

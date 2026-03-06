@@ -32,6 +32,10 @@
     "./api": {
       "types": "./dist/api/index.d.ts",
       "import": "./dist/api/index.js"
+    },
+    "./observability": {
+      "types": "./dist/observability/index.d.ts",
+      "import": "./dist/observability/index.js"
     }
   },
   "scripts": {

@@ -58,6 +58,7 @@ function createBrandingPlugin() {
  * Create a Vite development server with Farm.js integration
  */
 export async function createServer(config: FarmConfig = {}) {
+  let pluginManager: PluginManager | null = null;
   try {
     const root = config.root || process.cwd();
 
@@ -68,7 +69,7 @@ export async function createServer(config: FarmConfig = {}) {
     const resolvedConfig = userConfig ? await resolveConfig(userConfig, mode) : null;
 
     // Initialize plugin manager
-    const pluginManager = new PluginManager({
+    pluginManager = new PluginManager({
       config: resolvedConfig || config,
       isDev: mode === "development",
       isProd: mode === "production",
@@ -113,6 +114,8 @@ export async function createServer(config: FarmConfig = {}) {
     }
 
     // Run config hooks
+    await pluginManager.runHookParallel("init");
+
     let finalConfig = resolvedConfig || config;
     finalConfig = await pluginManager.runHookSerial("config", finalConfig);
 
@@ -165,8 +168,11 @@ export async function createServer(config: FarmConfig = {}) {
       ...resolvedConfig?.vite,
     });
 
+    (server as any).__farmPluginManager = pluginManager;
+
     // Update plugin manager with vite server
     pluginManager.updateContext({ viteServer: server });
+    await pluginManager.runHookParallel("devServerCreated", server);
 
     // Run configResolved hooks
     await pluginManager.runHookParallel("configResolved", finalConfig);
@@ -176,6 +182,12 @@ export async function createServer(config: FarmConfig = {}) {
 
     return server;
   } catch (error) {
+    if (pluginManager) {
+      await pluginManager.runHookParallel("onError", {
+        phase: "createServer",
+        error,
+      });
+    }
     logger.error(`Failed to create server: ${error}`);
     throw error;
   }
@@ -187,6 +199,15 @@ export async function createServer(config: FarmConfig = {}) {
 export async function startDevServer(config: FarmConfig = {}, port = 3000) {
   const server = await createServer(config);
   await server.listen(port);
+  const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;
+  if (pluginManager) {
+    await pluginManager.runHookParallel("ready");
+    server.httpServer?.once("close", () => {
+      pluginManager
+        .runHookParallel("shutdown", { reason: "dev-server-closed" })
+        .catch(() => {});
+    });
+  }
   // Branding is handled by farmBrandingPlugin in vite.ts
   return server;
 }

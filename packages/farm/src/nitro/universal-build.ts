@@ -2,6 +2,7 @@ import type { ResolvedFarmConfig } from "../config";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
+import type { PluginManager } from "../plugin";
 import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import path from "path";
@@ -32,12 +33,14 @@ export async function buildUniversal(
   options: {
     preset?: string;
     root?: string;
+    pluginManager?: PluginManager;
   } = {},
 ): Promise<void> {
   const root = options.root || config.root || process.cwd();
   const preset = options.preset || config.preset || "node-server";
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
+  const lifecyclePluginManager = options.pluginManager;
 
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
 
@@ -109,11 +112,22 @@ export async function buildUniversal(
       ssrBundle,
       ssrEntryFile,
       clientOutputDir,
+      lifecyclePluginManager,
     );
 
     logger.success("✅ Build completed successfully!");
     logger.info(`📁 Output directory: ${path.join(root, distDir, ".output")}`);
   } catch (error) {
+    if (lifecyclePluginManager) {
+      await lifecyclePluginManager.runHookParallel("onError", {
+        phase: "buildUniversal",
+        error,
+        meta: {
+          root,
+          preset,
+        },
+      });
+    }
     logger.error(`❌ Build failed: ${error}`);
     throw error;
   }
@@ -139,6 +153,7 @@ async function buildClient(
     isDev: false,
     isProd: true,
   });
+  pluginManager.addPlugins(config.plugins || []);
 
   // Detect which pages are "use client" components
   const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
@@ -875,6 +890,7 @@ async function buildSSRInMemory(
     isDev: false,
     isProd: true,
   });
+  pluginManager.addPlugins(config.plugins || []);
 
   let ssrBundle: OutputBundle;
   let ssrEntryFile: string;
@@ -1568,6 +1584,7 @@ async function buildNitroUniversal(
   ssrBundle: OutputBundle,
   ssrEntryFile: string,
   clientOutputDir: string,
+  pluginManager?: PluginManager,
 ) {
   const fs = await import("fs/promises");
 
@@ -1613,7 +1630,7 @@ export default fromWebHandler(handler.fetch)
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
 
-  const nitroConfig: NitroConfig = {
+  let nitroConfig: NitroConfig = {
     preset,
     rootDir: root,
     srcDir: root,
@@ -1656,12 +1673,25 @@ export default fromWebHandler(handler.fetch)
     sourceMap: false, // Skip sourcemaps for faster build
   };
 
+  if (pluginManager) {
+    nitroConfig = await pluginManager.runHookSerial("beforeNitroBuild", nitroConfig);
+  }
+
   // Build with Nitro
   const nitroInstance = await nitro.createNitro(nitroConfig);
   await nitro.prepare(nitroInstance);
   await nitro.copyPublicAssets(nitroInstance);
   await nitro.build(nitroInstance);
   await nitroInstance.close();
+
+  if (pluginManager) {
+    await pluginManager.runHookParallel("afterNitroBuild", {
+      root,
+      preset,
+      distDir,
+      outputDir,
+    });
+  }
 
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json

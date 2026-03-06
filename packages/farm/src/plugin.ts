@@ -7,15 +7,162 @@ export interface FarmPluginContext {
   isProd: boolean;
 }
 
+export interface RouteDiscoveredPayload {
+  kind: "page" | "layout";
+  pattern: string;
+  modulePath: string;
+}
+
+export interface RoutesGeneratedPayload {
+  routes: RouteDiscoveredPayload[];
+  pageCount: number;
+  layoutCount: number;
+}
+
+export interface MiddlewareDiscoveredPayload {
+  path: string;
+  filePath: string;
+  handlerCount: number;
+}
+
+export interface APIRouteDiscoveredPayload {
+  path: string;
+  filePath: string;
+  methods: string[];
+}
+
+export interface RouteMatchPayload {
+  pathname: string;
+  method?: string;
+}
+
+export interface RouteMatchResultPayload {
+  pathname: string;
+  matched: boolean;
+  routePattern: string | null;
+  params: Record<string, string>;
+  layoutPatterns: string[];
+}
+
+export interface RenderLifecyclePayload {
+  pathname: string;
+  method: string;
+  routePattern: string | null;
+  params: Record<string, string>;
+}
+
+export interface APIHandlerLifecyclePayload {
+  pathname: string;
+  method: string;
+  routePath?: string;
+}
+
+export interface ErrorLifecyclePayload {
+  phase: string;
+  error: unknown;
+  meta?: Record<string, unknown>;
+}
+
+export interface HMRUpdatePayload {
+  file: string;
+  modules: string[];
+}
+
+export interface BundleLifecyclePayload {
+  root: string;
+  preset: string;
+  universal: boolean;
+  distDir: string;
+}
+
+export interface BundleResultPayload extends BundleLifecyclePayload {
+  success: boolean;
+}
+
+export interface NitroBuildLifecyclePayload {
+  root: string;
+  preset: string;
+  distDir: string;
+  outputDir: string;
+}
+
+export interface ShutdownPayload {
+  reason: string;
+}
+
 export interface FarmPlugin {
   name: string;
   version?: string;
   enforce?: "pre" | "post";
 
+  init?: (context: FarmPluginContext) => void | Promise<void>;
+  ready?: (context: FarmPluginContext) => void | Promise<void>;
+  devServerCreated?: (viteServer: ViteDevServer, context: FarmPluginContext) => void | Promise<void>;
+
   config?: (config: FarmConfig, context: FarmPluginContext) => FarmConfig | Promise<FarmConfig>;
   configResolved?: (config: FarmConfig, context: FarmPluginContext) => void | Promise<void>;
   buildStart?: (context: FarmPluginContext) => void | Promise<void>;
   buildEnd?: (context: FarmPluginContext) => void | Promise<void>;
+
+  routeDiscovered?: (
+    route: RouteDiscoveredPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  routesGenerated?: (
+    routes: RoutesGeneratedPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  middlewareDiscovered?: (
+    middleware: MiddlewareDiscoveredPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  apiRouteDiscovered?: (
+    route: APIRouteDiscoveredPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  beforeRouteMatch?: (
+    route: RouteMatchPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  afterRouteMatch?: (
+    result: RouteMatchResultPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  beforeRender?: (
+    render: RenderLifecyclePayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  afterRender?: (
+    html: string,
+    render: RenderLifecyclePayload,
+    context: FarmPluginContext,
+  ) => string | Promise<string> | void | Promise<void>;
+  beforeApiHandler?: (
+    request: Request,
+    api: APIHandlerLifecyclePayload,
+    context: FarmPluginContext,
+  ) => Request | Promise<Request> | void | Promise<void>;
+  afterApiHandler?: (
+    response: Response,
+    api: APIHandlerLifecyclePayload,
+    context: FarmPluginContext,
+  ) => Response | Promise<Response> | void | Promise<void>;
+  onError?: (error: ErrorLifecyclePayload, context: FarmPluginContext) => void | Promise<void>;
+  hmrUpdate?: (update: HMRUpdatePayload, context: FarmPluginContext) => void | Promise<void>;
+  beforeBundle?: (
+    bundle: BundleLifecyclePayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  afterBundle?: (
+    result: BundleResultPayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  beforeNitroBuild?: (nitroConfig: any, context: FarmPluginContext) => any | Promise<any>;
+  afterNitroBuild?: (
+    payload: NitroBuildLifecyclePayload,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
+  shutdown?: (payload: ShutdownPayload, context: FarmPluginContext) => void | Promise<void>;
 
   beforeRequest?: (
     req: FarmRequest,
@@ -100,8 +247,19 @@ export class PluginManager {
   async runHookParallel<K extends keyof FarmPlugin>(hookName: K, ...args: any[]): Promise<boolean> {
     const plugins = this.getSortedPlugins();
 
-    // Run plugins sequentially for request hooks to allow early termination
-    if (hookName === "beforeRequest" || hookName === "afterResponse") {
+    // Run selected hooks sequentially for deterministic execution and short-circuiting.
+    const sequentialHooks = new Set<keyof FarmPlugin>([
+      "beforeRequest",
+      "afterResponse",
+      "beforeApiHandler",
+      "afterApiHandler",
+      "beforeRouteMatch",
+      "afterRouteMatch",
+      "beforeRender",
+      "afterRender",
+    ]);
+
+    if (sequentialHooks.has(hookName)) {
       for (const plugin of plugins) {
         const hook = plugin[hookName];
         if (typeof hook === "function") {

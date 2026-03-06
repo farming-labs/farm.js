@@ -299,4 +299,8 @@ export class MiddlewareManager {
   async reload(): Promise<void> {
     await this.discover();
   }
+
+  getMiddlewares(): DiscoveredMiddleware[] {
+    return [...this.middleware];
+  }
 }

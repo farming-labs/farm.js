@@ -7,6 +7,7 @@
  * - @farmjs/plugin/rsc - React Server Components support
  * - @farmjs/plugin/middleware - Standalone middleware support
  * - @farmjs/plugin/api - Standalone API routes support
+ * - @farmjs/plugin/observability - request/render/build observability lifecycle hooks
  *
  * @example
  * ```ts
@@ -44,4 +45,5 @@ export const version = "0.0.1";
 // - @farmjs/plugin/rsc
 // - @farmjs/plugin/middleware
 // - @farmjs/plugin/api
+// - @farmjs/plugin/observability
 // This avoids bundling unused code
