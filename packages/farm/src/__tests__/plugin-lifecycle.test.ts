@@ -128,16 +128,12 @@ describe("plugin lifecycle hooks", () => {
       params: {},
     });
 
-    const html = await manager.runHookSerial(
-      "afterRender",
-      "<html><body>ok</body></html>",
-      {
-        pathname: "/docs",
-        method: "GET",
-        routePattern: "/docs",
-        params: {},
-      },
-    );
+    const html = await manager.runHookSerial("afterRender", "<html><body>ok</body></html>", {
+      pathname: "/docs",
+      method: "GET",
+      routePattern: "/docs",
+      params: {},
+    });
     expect(html).toContain("after-render");
 
     const request = new Request("http://localhost/api/health");

@@ -114,8 +114,11 @@ export function farmPlugin(
       // Initialize API route manager
       const appDir = path.join(server.config.root, "src/app");
       const routeManager = farmApp.getRouteManager();
-      const discoveredRoutes: Array<{ kind: "page" | "layout"; pattern: string; modulePath: string }> =
-        [];
+      const discoveredRoutes: Array<{
+        kind: "page" | "layout";
+        pattern: string;
+        modulePath: string;
+      }> = [];
       for (const [pattern, entry] of routeManager.getRoutes()) {
         discoveredRoutes.push({ kind: "page", pattern, modulePath: entry.modulePath });
       }
@@ -441,10 +444,8 @@ export function farmPlugin(
         const startTime = Date.now();
         const method = req.method || "GET";
         const urlPath = req.url || "/";
-        const pathname = new URL(
-          urlPath,
-          `http://${req.headers.host || "localhost:3000"}`,
-        ).pathname;
+        const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
+          .pathname;
         const routeManager = farmApp.getRouteManager();
         if (pm) {
           await pm.runHookParallel("beforeRouteMatch", {
@@ -500,7 +501,8 @@ export function farmPlugin(
           const htmlChunks: Buffer[] = [];
 
           res.write = ((chunk: any, ...args: any[]) => {
-            const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
+            const contentTypeHeader =
+              res.getHeader("content-type") || res.getHeader("Content-Type");
             const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
             const isHtmlResponse = contentType.includes("text/html");
 
@@ -522,8 +524,10 @@ export function farmPlugin(
               // Call lifecycle hooks before actually ending the response.
               Promise.resolve()
                 .then(async () => {
-                  const contentTypeHeader = res.getHeader("content-type") || res.getHeader("Content-Type");
-                  const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+                  const contentTypeHeader =
+                    res.getHeader("content-type") || res.getHeader("Content-Type");
+                  const contentType =
+                    typeof contentTypeHeader === "string" ? contentTypeHeader : "";
                   const isHtmlResponse = contentType.includes("text/html");
                   if (isHtmlResponse) {
                     const firstArg = args[0];
@@ -539,7 +543,9 @@ export function farmPlugin(
                     html = await pm.runHookSerial("afterRender", html, renderPayload);
 
                     const callback =
-                      typeof args[args.length - 1] === "function" ? args[args.length - 1] : undefined;
+                      typeof args[args.length - 1] === "function"
+                        ? args[args.length - 1]
+                        : undefined;
                     args.length = 0;
                     args.push(html);
                     if (callback) {
@@ -769,16 +775,22 @@ if (import.meta.hot) {
               path: page.urlPath,
             };
 
-            let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
+            let pageElement = React.createElement(
+              PageComponent as React.ComponentType<unknown>,
+              pageProps as React.Attributes,
+            );
 
             // Wrap with layouts
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
               const LayoutComponent = layoutModule.default;
-              pageElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
-                children: pageElement,
-                params: page.params,
-              } as React.Attributes);
+              pageElement = React.createElement(
+                LayoutComponent as React.ComponentType<unknown>,
+                {
+                  children: pageElement,
+                  params: page.params,
+                } as React.Attributes,
+              );
             }
 
             const html = renderToString(pageElement);

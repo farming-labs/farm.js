@@ -73,7 +73,9 @@ export function observabilityPlugin(options: ObservabilityPluginOptions = {}): O
 
     afterRender(html, render) {
       const marker = `<!-- observability:path=${render.pathname} route=${render.routePattern ?? "unmatched"} -->`;
-      return html.includes("</body>") ? html.replace("</body>", `${marker}\n</body>`) : `${html}\n${marker}`;
+      return html.includes("</body>")
+        ? html.replace("</body>", `${marker}\n</body>`)
+        : `${html}\n${marker}`;
     },
 
     onError(error) {

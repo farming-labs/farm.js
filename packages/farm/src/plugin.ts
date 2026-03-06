@@ -20,10 +20,7 @@ export interface PluginRequestContext {
   has: (target: FarmRequest | Request, key: string) => boolean;
   delete: (target: FarmRequest | Request, key: string) => boolean;
   clear: (target: FarmRequest | Request) => void;
-  getAll: (
-    target: FarmRequest | Request,
-    options?: { exposedOnly?: boolean },
-  ) => Map<string, any>;
+  getAll: (target: FarmRequest | Request, options?: { exposedOnly?: boolean }) => Map<string, any>;
 }
 
 export interface FarmPluginContext {
@@ -124,7 +121,10 @@ export interface FarmPlugin {
 
   init?: (context: FarmPluginContext) => void | Promise<void>;
   ready?: (context: FarmPluginContext) => void | Promise<void>;
-  devServerCreated?: (viteServer: ViteDevServer, context: FarmPluginContext) => void | Promise<void>;
+  devServerCreated?: (
+    viteServer: ViteDevServer,
+    context: FarmPluginContext,
+  ) => void | Promise<void>;
 
   config?: (config: FarmConfig, context: FarmPluginContext) => FarmConfig | Promise<FarmConfig>;
   configResolved?: (config: FarmConfig, context: FarmPluginContext) => void | Promise<void>;
@@ -147,10 +147,7 @@ export interface FarmPlugin {
     route: APIRouteDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
-  beforeRouteMatch?: (
-    route: RouteMatchPayload,
-    context: FarmPluginContext,
-  ) => void | Promise<void>;
+  beforeRouteMatch?: (route: RouteMatchPayload, context: FarmPluginContext) => void | Promise<void>;
   afterRouteMatch?: (
     result: RouteMatchResultPayload,
     context: FarmPluginContext,
@@ -180,10 +177,7 @@ export interface FarmPlugin {
     bundle: BundleLifecyclePayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
-  afterBundle?: (
-    result: BundleResultPayload,
-    context: FarmPluginContext,
-  ) => void | Promise<void>;
+  afterBundle?: (result: BundleResultPayload, context: FarmPluginContext) => void | Promise<void>;
   beforeNitroBuild?: (nitroConfig: any, context: FarmPluginContext) => any | Promise<any>;
   afterNitroBuild?: (
     payload: NitroBuildLifecyclePayload,

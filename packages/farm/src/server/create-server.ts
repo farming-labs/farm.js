@@ -203,9 +203,7 @@ export async function startDevServer(config: FarmConfig = {}, port = 3000) {
   if (pluginManager) {
     await pluginManager.runHookParallel("ready");
     server.httpServer?.once("close", () => {
-      pluginManager
-        .runHookParallel("shutdown", { reason: "dev-server-closed" })
-        .catch(() => {});
+      pluginManager.runHookParallel("shutdown", { reason: "dev-server-closed" }).catch(() => {});
     });
   }
   // Branding is handled by farmBrandingPlugin in vite.ts

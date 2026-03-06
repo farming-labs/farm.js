@@ -2,21 +2,23 @@ import { defineFarmConfig, definePlugin } from "@farmjs/core";
 import { createLoggerPlugin } from "@farmjs/core/plugin/server";
 import { randomUUID } from "crypto";
 
-function createDocsContextDemoPlugin(options: {
-  userHeader?: string;
-  defaultUser?: string;
-  log?: boolean;
-  logLifecycle?: boolean;
-  onInit?: () => void;
-  onReady?: () => void;
-  onBeforeRequest?: (payload: { pathname: string; user: string; requestId: string }) => void;
-  onAfterResponse?: (payload: {
-    pathname: string;
-    user: string;
-    requestId: string;
-    statusCode: number;
-  }) => void;
-} = {}) {
+function createDocsContextDemoPlugin(
+  options: {
+    userHeader?: string;
+    defaultUser?: string;
+    log?: boolean;
+    logLifecycle?: boolean;
+    onInit?: () => void;
+    onReady?: () => void;
+    onBeforeRequest?: (payload: { pathname: string; user: string; requestId: string }) => void;
+    onAfterResponse?: (payload: {
+      pathname: string;
+      user: string;
+      requestId: string;
+      statusCode: number;
+    }) => void;
+  } = {},
+) {
   const userHeader = (options.userHeader || "x-docs-user").toLowerCase();
   const defaultUser = options.defaultUser || "guest";
   const log = options.log ?? true;
@@ -43,7 +45,8 @@ function createDocsContextDemoPlugin(options: {
       if (logLifecycle) console.log("[docs-context-demo] buildEnd");
     },
     routeDiscovered(route) {
-      if (logLifecycle) console.log(`[docs-context-demo] routeDiscovered ${route.kind} ${route.pattern}`);
+      if (logLifecycle)
+        console.log(`[docs-context-demo] routeDiscovered ${route.kind} ${route.pattern}`);
     },
     routesGenerated(payload) {
       if (logLifecycle) {
@@ -90,7 +93,8 @@ function createDocsContextDemoPlugin(options: {
       if (logLifecycle) console.log(`[docs-context-demo] afterBundle success=${payload.success}`);
     },
     beforeNitroBuild(payload) {
-      if (logLifecycle) console.log(`[docs-context-demo] beforeNitroBuild preset=${payload.preset}`);
+      if (logLifecycle)
+        console.log(`[docs-context-demo] beforeNitroBuild preset=${payload.preset}`);
       return payload;
     },
     afterNitroBuild(payload) {
@@ -118,7 +122,9 @@ function createDocsContextDemoPlugin(options: {
       options.onBeforeRequest?.({ pathname, user, requestId });
 
       if (log) {
-        console.log(`[docs-context-demo] ${req.method || "GET"} ${pathname} user=${user} id=${requestId}`);
+        console.log(
+          `[docs-context-demo] ${req.method || "GET"} ${pathname} user=${user} id=${requestId}`,
+        );
       }
     },
     afterResponse(req, res, context) {
@@ -128,7 +134,9 @@ function createDocsContextDemoPlugin(options: {
       const statusCode = res.statusCode || 200;
       options.onAfterResponse?.({ pathname, user, requestId, statusCode });
       if (log) {
-        console.log(`[docs-context-demo] done ${statusCode} ${pathname} user=${user} id=${requestId}`);
+        console.log(
+          `[docs-context-demo] done ${statusCode} ${pathname} user=${user} id=${requestId}`,
+        );
       }
     },
   });
