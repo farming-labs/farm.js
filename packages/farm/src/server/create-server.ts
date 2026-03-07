@@ -4,6 +4,8 @@ import { farmPlugin } from "../vite";
 import { logger } from "../utils";
 import { loadConfig, resolveConfig } from "../config";
 import { PluginManager } from "../plugin";
+import fs from "fs";
+import path from "path";
 import {
   createRedirectsPlugin,
   createHeadersPlugin,
@@ -52,6 +54,24 @@ function createBrandingPlugin() {
       };
     },
   };
+}
+
+function hasProjectPostcssConfig(root: string): boolean {
+  const candidates = [
+    "postcss.config.js",
+    "postcss.config.cjs",
+    "postcss.config.mjs",
+    "postcss.config.ts",
+    "postcss.config.json",
+    ".postcssrc",
+    ".postcssrc.json",
+    ".postcssrc.js",
+    ".postcssrc.cjs",
+    ".postcssrc.mjs",
+    ".postcssrc.ts",
+  ];
+
+  return candidates.some((file) => fs.existsSync(path.join(root, file)));
 }
 
 /**
@@ -118,10 +138,30 @@ export async function createServer(config: FarmConfig = {}) {
 
     let finalConfig = resolvedConfig || config;
     finalConfig = await pluginManager.runHookSerial("config", finalConfig);
+    const projectRoot = finalConfig.root || process.cwd();
+
+    let tailwindVitePlugin: any = undefined;
+    if (hasProjectPostcssConfig(projectRoot)) {
+      logger.info("📦 Using project PostCSS/Tailwind configuration");
+    } else {
+      try {
+        const tailwindcss = (await import("@tailwindcss/vite")).default;
+        tailwindVitePlugin = tailwindcss();
+        logger.info("📦 Enabled built-in Tailwind support (@tailwindcss/vite)");
+      } catch (error) {
+        logger.warn(
+          `Tailwind plugin auto-enable failed; continuing without it: ${(error as Error).message}`,
+        );
+      }
+    }
 
     const server = await createViteServer({
-      root: finalConfig.root || process.cwd(),
-      plugins: [farmPlugin(finalConfig, pluginManager), createBrandingPlugin()],
+      root: projectRoot,
+      plugins: [
+        ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        farmPlugin(finalConfig, pluginManager),
+        createBrandingPlugin(),
+      ],
       server: {
         middlewareMode: false,
       },

@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { emitter } from "./sync";
+export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
 import { asString as asStringClient, asInteger as asIntegerClient, type Parser } from "./parsers";
 

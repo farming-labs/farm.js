@@ -40,6 +40,17 @@ export default function DocsIndexPage(_props: PageProps) {
           </p>
         </Link>
         <Link
+          href="/docs/query"
+          className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
+        >
+          <h2 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-600">
+            Query
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Parse search params and route params with type-safe helpers.
+          </p>
+        </Link>
+        <Link
           href="/docs/layouts"
           className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
         >

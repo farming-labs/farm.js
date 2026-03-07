@@ -8,7 +8,7 @@ program
   .description("Create a new Farm.js application")
   .version("0.1.0")
   .argument("[project-name]", "Name of the project")
-  .option("-t, --template <template>", "Template to use", "basic")
+  .option("-t, --template <template>", "Template to use")
   .option("--typescript", "Use TypeScript template")
   .action(async (projectName, options) => {
     try {

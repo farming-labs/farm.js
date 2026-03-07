@@ -224,16 +224,18 @@ export class ServerRenderer {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
       }
 
-      // Check if this is a client component by reading the file content
       let isClientComponent = false;
-      try {
-        const fs = await import("fs");
-        const content = fs.readFileSync(route.modulePath, "utf-8");
-        isClientComponent =
-          content.trimStart().startsWith("'use client'") ||
-          content.trimStart().startsWith('"use client"');
-      } catch (error) {
-        isClientComponent = false;
+      const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
+      if (serverComponentsEnabled) {
+        try {
+          const fs = await import("fs");
+          const content = fs.readFileSync(route.modulePath, "utf-8");
+          isClientComponent =
+            content.trimStart().startsWith("'use client'") ||
+            content.trimStart().startsWith('"use client"');
+        } catch (error) {
+          isClientComponent = false;
+        }
       }
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
@@ -354,18 +356,21 @@ export class ServerRenderer {
       };
 
       // Convert routes array to object keyed by pattern
+      const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
       for (const routeEntry of manifest.routes) {
         let isClient = false;
-        try {
-          const absolutePath = routeEntry.modulePath.startsWith("/")
-            ? this.config.root + routeEntry.modulePath
-            : routeEntry.modulePath;
-          const content = fs.readFileSync(absolutePath, "utf-8");
-          isClient =
-            content.trimStart().startsWith("'use client'") ||
-            content.trimStart().startsWith('"use client"');
-        } catch {
-          isClient = false;
+        if (serverComponentsEnabled) {
+          try {
+            const absolutePath = routeEntry.modulePath.startsWith("/")
+              ? this.config.root + routeEntry.modulePath
+              : routeEntry.modulePath;
+            const content = fs.readFileSync(absolutePath, "utf-8");
+            isClient =
+              content.trimStart().startsWith("'use client'") ||
+              content.trimStart().startsWith('"use client"');
+          } catch {
+            isClient = false;
+          }
         }
 
         clientManifest.routes[routeEntry.pattern] = {

@@ -148,8 +148,8 @@ export async function resolveConfig(
     preset: userConfig.preset || "node-server",
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
-      serverComponents: true,
-      serverActions: true,
+      serverComponents: false,
+      serverActions: false,
       ...userConfig.experimental,
     },
     plugins: userConfig.plugins || [],

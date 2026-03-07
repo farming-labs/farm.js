@@ -58,8 +58,8 @@ export class FarmApp {
       preset: config.preset ?? "node-server",
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
-        serverComponents: config.experimental?.serverComponents ?? true,
-        serverActions: config.experimental?.serverActions ?? true,
+        serverComponents: config.experimental?.serverComponents ?? false,
+        serverActions: config.experimental?.serverActions ?? false,
         ...config.experimental,
       },
       vite: config.vite || {},

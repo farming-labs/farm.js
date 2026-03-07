@@ -4,6 +4,10 @@ import { createLoggerPlugin } from '@farmjs/core/plugin/server';
 export default defineFarmConfig({
   srcDir: 'src',
   preset: 'vercel',
+  experimental: {
+    serverComponents: true,
+    serverActions: true,
+  },
   notFound: {
     component: './src/app/not-found.tsx',
   },

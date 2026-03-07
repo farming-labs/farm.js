@@ -19,6 +19,32 @@ type OutputBundle = Rollup.OutputBundle;
 const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
 const _dirname = path.dirname(_filename);
 
+function hasProjectPostcssConfig(root: string): boolean {
+  const candidates = [
+    "postcss.config.js",
+    "postcss.config.cjs",
+    "postcss.config.mjs",
+    "postcss.config.ts",
+    "postcss.config.json",
+    ".postcssrc",
+    ".postcssrc.json",
+    ".postcssrc.js",
+    ".postcssrc.cjs",
+    ".postcssrc.mjs",
+    ".postcssrc.ts",
+  ];
+
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  return candidates.some((file) => {
+    try {
+      projectRequire.resolve(`./${file}`);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 /**
  * Universal build using TanStack Start pattern
  * - Builds SSR bundle in memory
@@ -155,10 +181,14 @@ async function buildClient(
   });
   pluginManager.addPlugins(config.plugins || []);
 
-  // Detect which pages are "use client" components
+  // Detect which pages are "use client" components (RSC opt-in via experimental.serverComponents)
   const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
+  const serverComponentsEnabled = config.experimental?.serverComponents !== false;
 
   for (const route of pageRoutes) {
+    if (!serverComponentsEnabled) {
+      continue;
+    }
     try {
       const content = await fs.readFile(route.modulePath, "utf-8");
       // Check for "use client" directive (can be at the start or after whitespace/comments)
@@ -190,31 +220,22 @@ async function buildClient(
   const clientEntryPath = path.join(root, srcDir, ".farm-client-entry.tsx");
   await fs.writeFile(clientEntryPath, clientHydrationCode);
 
-  // Tailwind v4 via @tailwindcss/vite (only if the PROJECT has it in dependencies)
-  // Otherwise, rely on the project's PostCSS/Tailwind v3 setup
+  // Tailwind support:
+  // - If project has explicit PostCSS config, respect it.
+  // - Otherwise enable built-in @tailwindcss/vite (out of the box).
   let tailwindVitePlugin: any = undefined;
-  try {
-    // Check if the project's package.json has @tailwindcss/vite as a dependency
-    const projectPkgPath = path.join(root, "package.json");
-    const projectPkg = JSON.parse(await fs.readFile(projectPkgPath, "utf-8"));
-    const hasTailwindVite =
-      projectPkg.dependencies?.["@tailwindcss/vite"] ||
-      projectPkg.devDependencies?.["@tailwindcss/vite"];
-
-    if (hasTailwindVite) {
-      // Try to require from the project's node_modules
-      const projectRequire = createRequire(projectPkgPath);
-      const tailwindVite = projectRequire("@tailwindcss/vite");
-      tailwindVitePlugin = (tailwindVite.default ?? tailwindVite)();
-      logger.info("📦 Using Tailwind v4 (@tailwindcss/vite) from project");
-    } else {
-      logger.info(
-        "📦 Using project's PostCSS/Tailwind setup (no @tailwindcss/vite in project deps)",
+  if (hasProjectPostcssConfig(root)) {
+    logger.info("📦 Using project PostCSS/Tailwind configuration");
+  } else {
+    try {
+      const tailwindVite = (await import("@tailwindcss/vite")).default;
+      tailwindVitePlugin = tailwindVite();
+      logger.info("📦 Enabled built-in Tailwind support (@tailwindcss/vite)");
+    } catch (error) {
+      logger.warn(
+        `Tailwind plugin auto-enable failed; continuing without it: ${(error as Error).message}`,
       );
     }
-  } catch (err) {
-    // Error reading package.json or loading the plugin
-    logger.info("📦 Using project's PostCSS/Tailwind setup (fallback)");
   }
 
   try {

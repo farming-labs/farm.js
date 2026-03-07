@@ -23,6 +23,7 @@ export {
   type Parser,
   type inferParserType,
 } from "./parsers";
+export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
 // Re-export types
 export type {
