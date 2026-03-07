@@ -76,7 +76,9 @@ export interface ObservabilityRule {
     | Partial<Omit<ObservabilityIncident, "id" | "detectedAt" | "signalId">>
     | null
     | undefined
-    | Promise<Partial<Omit<ObservabilityIncident, "id" | "detectedAt" | "signalId">> | null | undefined>;
+    | Promise<
+        Partial<Omit<ObservabilityIncident, "id" | "detectedAt" | "signalId">> | null | undefined
+      >;
 }
 
 export interface ObservabilityFixResult {
@@ -155,7 +157,11 @@ export interface ObservabilityWorkflowOptions {
    */
   runFix?: (
     context: ObservabilityPipelineContext,
-  ) => ObservabilityFixResult | null | undefined | Promise<ObservabilityFixResult | null | undefined>;
+  ) =>
+    | ObservabilityFixResult
+    | null
+    | undefined
+    | Promise<ObservabilityFixResult | null | undefined>;
 
   /**
    * @deprecated Use `actions.pullRequest` and include "pullRequest" in `pipeline`.
@@ -388,8 +394,8 @@ export function observabilityPlugin(options: ObservabilityPluginOptions = {}): O
           stableFingerprint(["rule", rule.id, signal.kind]),
         summary: partial.summary || defaultIncident?.summary,
         metadata: {
-          ...(defaultIncident?.metadata || {}),
-          ...(partial.metadata || {}),
+          ...defaultIncident?.metadata,
+          ...partial.metadata,
           ruleId: rule.id,
         },
       };
@@ -554,7 +560,10 @@ export function observabilityPlugin(options: ObservabilityPluginOptions = {}): O
 
   const createSignal = (
     kind: ObservabilitySignalKind,
-    payload: Omit<ObservabilitySignal, "id" | "kind" | "timestamp" | "service" | "environment" | "tags">,
+    payload: Omit<
+      ObservabilitySignal,
+      "id" | "kind" | "timestamp" | "service" | "environment" | "tags"
+    >,
   ): ObservabilitySignal => {
     return {
       id: nextSignalId(),

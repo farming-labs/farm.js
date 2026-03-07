@@ -270,7 +270,9 @@ export class ServerRenderer {
 
       let LoadingFallbackComponent: React.ComponentType<any> | null = null;
       if (loadingBoundaryEntry) {
-        const loadingModule = await this.routeManager.loadRouteModule(loadingBoundaryEntry.modulePath);
+        const loadingModule = await this.routeManager.loadRouteModule(
+          loadingBoundaryEntry.modulePath,
+        );
         if (loadingModule.default) {
           LoadingFallbackComponent = loadingModule.default;
         }
@@ -453,22 +455,18 @@ export class ServerRenderer {
       }
 
       const ErrorComponent = errorModule.default as React.ComponentType<unknown>;
-      const errorElement = React.createElement(
-        ErrorComponent,
-        {
-          error: options.error,
-          params: options.params,
-          path: options.pathname,
-          searchParams: Promise.resolve(options.searchParamsObject),
-          middleware:
-            options.middlewareMap.size > 0 ? { data: options.middlewareMap } : undefined,
-          context:
-            options.pluginExposedContext.size > 0
-              ? { data: options.pluginExposedContext }
-              : undefined,
-          reset: () => {},
-        } as React.Attributes,
-      );
+      const errorElement = React.createElement(ErrorComponent, {
+        error: options.error,
+        params: options.params,
+        path: options.pathname,
+        searchParams: Promise.resolve(options.searchParamsObject),
+        middleware: options.middlewareMap.size > 0 ? { data: options.middlewareMap } : undefined,
+        context:
+          options.pluginExposedContext.size > 0
+            ? { data: options.pluginExposedContext }
+            : undefined,
+        reset: () => {},
+      } as React.Attributes);
 
       let wrapped: React.ReactElement = errorElement;
       const layoutModules = await Promise.all(

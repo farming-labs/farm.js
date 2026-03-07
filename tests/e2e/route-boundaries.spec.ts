@@ -1,7 +1,10 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Route-level boundaries", () => {
-  test("loading boundary is emitted for suspended route and final content resolves", async ({ page, request }) => {
+  test("loading boundary is emitted for suspended route and final content resolves", async ({
+    page,
+    request,
+  }) => {
     const response = await request.get("/boundaries/loading");
     expect(response.status()).toBe(200);
 
@@ -17,7 +20,10 @@ test.describe("Route-level boundaries", () => {
     await expect(page.getByTestId("route-loading-final")).toBeVisible();
   });
 
-  test("error boundary renders route-scoped fallback for server render failures", async ({ page, request }) => {
+  test("error boundary renders route-scoped fallback for server render failures", async ({
+    page,
+    request,
+  }) => {
     const response = await request.get("/boundaries/error");
     expect(response.status()).toBe(500);
 
