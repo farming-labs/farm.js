@@ -17,13 +17,10 @@ describe("query route params parsing", () => {
   });
 
   it("loads route params from async input", async () => {
-    const parsed = await loadRouteParams(
-      Promise.resolve({ id: "7", slug: "release-notes" }),
-      {
-        id: asInteger.withDefault!(0),
-        slug: asString.withDefault!(""),
-      },
-    );
+    const parsed = await loadRouteParams(Promise.resolve({ id: "7", slug: "release-notes" }), {
+      id: asInteger.withDefault!(0),
+      slug: asString.withDefault!(""),
+    });
 
     expect(parsed.id).toBe(7);
     expect(parsed.slug).toBe("release-notes");

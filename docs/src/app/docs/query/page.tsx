@@ -1,6 +1,12 @@
 import { Link } from "@farmjs/core";
 import type { PagePropsSafe } from "@farmjs/core/query";
-import { asBoolean, asInteger, asString, loadRouteParams, loadSearchParams } from "@farmjs/core/query/server";
+import {
+  asBoolean,
+  asInteger,
+  asString,
+  loadRouteParams,
+  loadSearchParams,
+} from "@farmjs/core/query/server";
 
 export const metadata = {
   title: "Query - Farm.js",
@@ -30,8 +36,8 @@ export default async function QueryDocsPage({ searchParams, params }: PagePropsS
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Server-side parsing</h2>
         <p className="mt-2 text-slate-600">
-          Use <code>loadSearchParams</code> to parse URL query values and <code>loadRouteParams</code>{" "}
-          for dynamic route params.
+          Use <code>loadSearchParams</code> to parse URL query values and{" "}
+          <code>loadRouteParams</code> for dynamic route params.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`import type { PagePropsSafe } from "@farmjs/core/query";
@@ -66,7 +72,10 @@ export default async function Page({ searchParams, params }: PagePropsSafe) {
             <strong>Parsed route:</strong> section=<code>{route.section}</code>
           </p>
           <div className="mt-4 flex flex-wrap gap-3 text-sm">
-            <Link href="/docs/query?q=farmjs&page=2&draft=true" className="text-emerald-600 hover:underline">
+            <Link
+              href="/docs/query?q=farmjs&page=2&draft=true"
+              className="text-emerald-600 hover:underline"
+            >
               /docs/query?q=farmjs&page=2&draft=true
             </Link>
             <Link href="/docs/query?q=plugin&page=5" className="text-emerald-600 hover:underline">
@@ -79,8 +88,8 @@ export default async function Page({ searchParams, params }: PagePropsSafe) {
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Client-side query state</h2>
         <p className="mt-2 text-slate-600">
-          Use <code>useQueryState</code> from <code>@farmjs/core/query/client</code> to keep UI state in
-          the URL.
+          Use <code>useQueryState</code> from <code>@farmjs/core/query/client</code> to keep UI
+          state in the URL.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`'use client';
