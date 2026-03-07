@@ -108,6 +108,8 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
     target,
     onMouseEnter,
     onMouseLeave,
+    onFocus,
+    onBlur,
     onTouchStart,
     ...props
   }: LinkProps<TRoute>,
@@ -145,6 +147,15 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
     if (!render || isExternal) return;
     doPrefetch();
   }, [render, isExternal, doPrefetch]);
+
+  useEffect(() => {
+    return () => {
+      if (intentTimeoutRef.current) {
+        clearTimeout(intentTimeoutRef.current);
+        intentTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const cancelIntent = useCallback(() => {
     if (intentTimeoutRef.current) {
@@ -184,6 +195,22 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
       scheduleIntentPrefetch();
     },
     [onTouchStart, scheduleIntentPrefetch],
+  );
+
+  const handleFocus = useCallback(
+    (event: React.FocusEvent<HTMLAnchorElement>) => {
+      onFocus?.(event);
+      scheduleIntentPrefetch();
+    },
+    [onFocus, scheduleIntentPrefetch],
+  );
+
+  const handleBlur = useCallback(
+    (event: React.FocusEvent<HTMLAnchorElement>) => {
+      onBlur?.(event);
+      cancelIntent();
+    },
+    [onBlur, cancelIntent],
   );
 
   const handleClick = useCallback(
@@ -226,6 +253,8 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
       onTouchStart={handleTouchStart}
       {...props}
     />

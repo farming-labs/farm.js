@@ -117,6 +117,34 @@ describe("Link", () => {
       vi.useRealTimers();
     });
 
+    it("prefetch=intent triggers on focus for keyboard navigation", () => {
+      vi.useFakeTimers();
+      const el = render(
+        createElement(Link, { href: "/docs", prefetch: "intent", prefetchDelay: 10 }),
+      ) as HTMLAnchorElement;
+      act(() => {
+        el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        vi.advanceTimersByTime(10);
+      });
+      expect(prefetch).toHaveBeenCalledWith("/docs");
+      vi.useRealTimers();
+    });
+
+    it("prefetch=intent cancels pending prefetch on blur", () => {
+      vi.useFakeTimers();
+      const el = render(
+        createElement(Link, { href: "/docs", prefetch: "intent", prefetchDelay: 100 }),
+      ) as HTMLAnchorElement;
+      act(() => {
+        el.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+        vi.advanceTimersByTime(50);
+        el.dispatchEvent(new FocusEvent("focusout", { bubbles: true }));
+        vi.advanceTimersByTime(100);
+      });
+      expect(prefetch).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+
     it("prefetch=true enables both intent and viewport", () => {
       const el = render(createElement(Link, { href: "/", prefetch: true }));
       expect(observeForPrefetch).toHaveBeenCalledWith(el);
