@@ -5,6 +5,7 @@
  */
 
 import type { Parser } from "./parsers";
+export { parseRouteParams, loadRouteParams, type RouteParamsInput } from "./params";
 
 export {
   asString,

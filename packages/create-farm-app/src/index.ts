@@ -1,7 +1,7 @@
 import prompts from "prompts";
 import path from "path";
 import fs from "fs/promises";
-import { logger } from "./utils";
+import { logger, showBanner } from "./utils";
 
 interface CreateAppOptions {
   template?: string;
@@ -9,6 +9,14 @@ interface CreateAppOptions {
 }
 
 export async function createApp(projectName?: string, options: CreateAppOptions = {}) {
+  showBanner();
+
+  const templates = await getAvailableTemplates();
+  if (templates.length === 0) {
+    logger.error("No templates are available in this package.");
+    process.exit(1);
+  }
+
   // Get project name if not provided
   if (!projectName) {
     const response = await prompts({
@@ -16,14 +24,21 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
       name: "projectName",
       message: "What is your project named?",
       initial: "my-farm-app",
+      validate: validateProjectName,
     });
 
     if (!response.projectName) {
-      logger.error("Project name is required");
+      logger.error("Operation cancelled.");
       process.exit(1);
     }
 
     projectName = response.projectName;
+  } else {
+    const validation = validateProjectPathArg(projectName);
+    if (validation !== true) {
+      logger.error(validation);
+      process.exit(1);
+    }
   }
 
   // Get template if not provided
@@ -33,19 +48,25 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
       type: "select",
       name: "template",
       message: "Which template would you like to use?",
-      choices: [
-        { title: "Basic", value: "basic", description: "A simple Farm.js app" },
-        {
-          title: "With Database",
-          value: "with-database",
-          description: "Farm.js app with database integration",
-        },
-        { title: "E-commerce", value: "e-commerce", description: "Full e-commerce example" },
-      ],
+      choices: templates.map((name) => ({
+        title: prettifyTemplateName(name),
+        value: name,
+        description:
+          name === "basic" ? "A simple Farm.js app with built-in Tailwind support" : undefined,
+      })),
       initial: 0,
     });
 
-    template = response.template || "basic";
+    if (!response.template) {
+      logger.error("Operation cancelled.");
+      process.exit(1);
+    }
+    template = response.template;
+  } else if (!templates.includes(template)) {
+    logger.error(
+      `Unknown template "${template}". Available: ${templates.map((t) => `"${t}"`).join(", ")}`,
+    );
+    process.exit(1);
   }
 
   // Check TypeScript preference
@@ -58,10 +79,28 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
       initial: true,
     });
 
+    if (response.typescript === undefined) {
+      logger.error("Operation cancelled.");
+      process.exit(1);
+    }
     useTypeScript = response.typescript;
   }
 
   const projectPath = path.resolve(process.cwd(), projectName!);
+  const hasExistingFiles = await directoryHasFiles(projectPath);
+  if (hasExistingFiles) {
+    const overwriteResponse = await prompts({
+      type: "confirm",
+      name: "overwrite",
+      message: `Directory "${projectName}" is not empty. Continue and overwrite conflicting files?`,
+      initial: false,
+    });
+
+    if (!overwriteResponse.overwrite) {
+      logger.error("Operation cancelled.");
+      process.exit(1);
+    }
+  }
 
   logger.info(`Creating Farm.js app in ${projectPath}`);
 
@@ -73,10 +112,12 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
 
   logger.success(`🚜 Created ${projectName}`);
   logger.info("");
-  logger.info("Next steps:");
+  logger.info("Next steps");
   logger.info(`  cd ${projectName}`);
   logger.info("  pnpm install");
   logger.info("  pnpm dev");
+  logger.info("");
+  logger.info("Tailwind is enabled by default. You only need postcss config for custom plugins.");
 }
 
 async function copyTemplate(template: string, projectPath: string, useTypeScript: boolean) {
@@ -118,6 +159,63 @@ async function dirExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function directoryHasFiles(dirPath: string): Promise<boolean> {
+  if (!(await dirExists(dirPath))) {
+    return false;
+  }
+  const files = await fs.readdir(dirPath);
+  return files.length > 0;
+}
+
+function validateProjectName(value: string): true | string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "Project name is required";
+  }
+
+  // npm package-safe pattern
+  if (!/^[a-z0-9._-]+$/i.test(trimmed)) {
+    return "Use letters, numbers, hyphens, underscores, or dots";
+  }
+
+  if (trimmed.startsWith(".") || trimmed.startsWith("_")) {
+    return "Project name cannot start with '.' or '_'";
+  }
+
+  return true;
+}
+
+function validateProjectPathArg(value: string): true | string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return "Project name is required";
+  }
+
+  const normalized = trimmed.replace(/[\\/]+$/, "");
+  const baseName = path.basename(normalized);
+  if (!baseName || baseName === "." || baseName === "..") {
+    return "Please provide a valid project directory name";
+  }
+
+  return validateProjectName(baseName);
+}
+
+function prettifyTemplateName(name: string): string {
+  return name
+    .split("-")
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+async function getAvailableTemplates(): Promise<string[]> {
+  const templatesRoot = path.join(__dirname, "..", "templates");
+  const entries = await fs.readdir(templatesRoot, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
+    .map((entry) => entry.name)
+    .sort();
 }
 
 async function updatePackageJson(projectPath: string, projectName: string) {

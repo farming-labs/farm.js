@@ -2,6 +2,7 @@ import React from 'react';
 import type { PagePropsSafe } from '@farmjs/core/query';
 import { 
   loadSearchParams,
+  loadRouteParams,
   asString,
   asInteger,
   asBoolean,
@@ -18,6 +19,9 @@ async function ServerQueryDemo({ searchParams , params: p }: PagePropsSafe) {
     tags: asArrayOf(asString).withDefault!([]),
     sortBy: asString.withDefault!('date'),
     sortOrder: asString.withDefault!('desc'),
+  });
+  const routeParams = await loadRouteParams(p, {
+    section: asString.withDefault!("query-demo"),
   });
   return (
     <div className="min-h-screen bg-gray-50 py-8">
@@ -54,6 +58,7 @@ async function ServerQueryDemo({ searchParams , params: p }: PagePropsSafe) {
                 <p><strong className="text-blue-900">Tags:</strong> <span className="text-gray-700">{params.tags.length > 0 ? params.tags.join(', ') : 'None'}</span></p>
                 <p><strong className="text-blue-900">Sort By:</strong> <span className="text-gray-700">{params.sortBy}</span></p>
                 <p><strong className="text-blue-900">Sort Order:</strong> <span className="text-gray-700">{params.sortOrder}</span></p>
+                <p><strong className="text-blue-900">Route Section:</strong> <span className="text-gray-700">{routeParams.section}</span></p>
               </div>
             </div>
             
@@ -103,8 +108,23 @@ export default async function Page({ searchParams }: PagePropsSafe) {
     search: parseAsString.withDefault!(''),
     page: parseAsInteger.withDefault!(1),
   });
-  
+
   return <div>Search: {params.search}, Page: {params.page}</div>;
+}`}
+              </pre>
+            </div>
+
+            <div>
+              <h4 className="font-medium mb-2 text-blue-800">Server-Side Route Params (Type-safe)</h4>
+              <pre className="bg-gray-100 p-4 rounded text-xs overflow-x-auto">
+{`import { loadRouteParams, asInteger } from '@farmjs/core/query/server';
+
+export default async function Page({ params }: PagePropsSafe) {
+  const route = await loadRouteParams(params, {
+    id: asInteger.withDefault!(0),
+  });
+
+  return <div>User ID: {route.id}</div>;
 }`}
               </pre>
             </div>
@@ -139,6 +159,5 @@ export default function Page() {
 }
 
 export default ServerQueryDemo;
-
 
 

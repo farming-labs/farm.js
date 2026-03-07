@@ -19,11 +19,11 @@ type PrefetchLegacy = boolean | "hover" | "viewport" | "none";
  * Augment this interface via your generated farm-routes.d.ts so Link href is typed
  * without passing a generic. Defaults to string when not augmented.
  */
-export interface LinkDefaultRoute {
-}
+export interface LinkDefaultRoute {}
 
-export type DefaultRoutePath =
-  LinkDefaultRoute extends { _: infer TRoute extends string } ? TRoute : string;
+export type DefaultRoutePath = LinkDefaultRoute extends { _: infer TRoute extends string }
+  ? TRoute
+  : string;
 
 /** External URLs; these are never type-checked as routes. */
 export type ExternalHref =

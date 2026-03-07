@@ -12,25 +12,29 @@ export default function CreatePluginPage(_props: PageProps) {
       <div>
         <h1 className="text-3xl font-bold text-slate-900">How to create your own plugin</h1>
         <p className="mt-2 text-slate-600">
-          Use <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">definePlugin</code> and the{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">FarmPlugin</code> interface to add custom
-          behavior to your Farm.js app.
+          Use{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">definePlugin</code>{" "}
+          and the{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">FarmPlugin</code>{" "}
+          interface to add custom behavior to your Farm.js app.
         </p>
       </div>
 
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Plugin interface</h2>
         <p className="mt-2 text-slate-600">
-          A plugin is an object with a <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">name</code> and
+          A plugin is an object with a{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">name</code> and
           optional lifecycle hooks. Import the type and helper from the core package:
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`import { definePlugin, type FarmPlugin, type FarmPluginContext } from "@farmjs/core";`}
         </pre>
         <p className="mt-4 text-slate-600">
-          <strong>Context</strong> passed to hooks: <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">config</code>,{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">viteServer</code> (in dev),{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">isDev</code>,{" "}
+          <strong>Context</strong> passed to hooks:{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">config</code>,{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">viteServer</code> (in
+          dev), <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">isDev</code>,{" "}
           <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">isProd</code>.
         </p>
       </section>
@@ -39,22 +43,41 @@ export default function CreatePluginPage(_props: PageProps) {
         <h2 className="text-xl font-semibold text-slate-900">Lifecycle hooks</h2>
         <ul className="mt-2 list-inside list-disc space-y-2 text-slate-600">
           <li>
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">config</code> – Modify or return a new config (runs early).
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">config</code> –
+            Modify or return a new config (runs early).
           </li>
           <li>
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">configResolved</code> – Called after config is resolved.
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">
+              configResolved
+            </code>{" "}
+            – Called after config is resolved.
           </li>
           <li>
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">beforeRequest</code> – Run before handling each request; can send a response and stop the pipeline.
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">
+              beforeRequest
+            </code>{" "}
+            – Run before handling each request; can send a response and stop the pipeline.
           </li>
           <li>
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">afterResponse</code> – Run after the response is prepared.
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">
+              afterResponse
+            </code>{" "}
+            – Run after the response is prepared.
           </li>
           <li>
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">buildStart</code> / <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">buildEnd</code> – Run at build start/end.
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">buildStart</code> /{" "}
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">buildEnd</code> –
+            Run at build start/end.
           </li>
           <li>
-            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">transformHTML</code> / <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">transformPage</code> – Transform final HTML or page component (if supported).
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">
+              transformHTML
+            </code>{" "}
+            /{" "}
+            <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-sm">
+              transformPage
+            </code>{" "}
+            – Transform final HTML or page component (if supported).
           </li>
         </ul>
       </section>
@@ -76,7 +99,11 @@ export const myPlugin = definePlugin({
 });`}
         </pre>
         <p className="mt-4 text-slate-600">
-          Register it in <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">farm.config.ts</code>:
+          Register it in{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            farm.config.ts
+          </code>
+          :
         </p>
         <pre className="mt-2 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`import { defineFarmConfig } from "@farmjs/core";
@@ -91,8 +118,15 @@ export default defineFarmConfig({
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Enforce order</h2>
         <p className="mt-2 text-slate-600">
-          Use <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">enforce: "pre"</code> to run before other plugins, or{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">enforce: "post"</code> to run after.
+          Use{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            enforce: "pre"
+          </code>{" "}
+          to run before other plugins, or{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            enforce: "post"
+          </code>{" "}
+          to run after.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`definePlugin({
@@ -108,7 +142,9 @@ export default defineFarmConfig({
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Modifying config</h2>
         <p className="mt-2 text-slate-600">
-          Return a new config from the <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">config</code> hook to merge or override settings.
+          Return a new config from the{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">config</code> hook
+          to merge or override settings.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`definePlugin({
@@ -126,10 +162,20 @@ export default defineFarmConfig({
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Request and response</h2>
         <p className="mt-2 text-slate-600">
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">beforeRequest</code> receives{" "}
-          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">(req, res, context)</code>. If you write
-          to <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">res</code> and end the response, the request is considered handled.{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">afterResponse</code> runs after the response is ready; use it for logging or last-mile headers.
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            beforeRequest
+          </code>{" "}
+          receives{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">
+            (req, res, context)
+          </code>
+          . If you write to{" "}
+          <code className="rounded bg-slate-100 px-1 py-0.5 font-mono text-xs">res</code> and end
+          the response, the request is considered handled.{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            afterResponse
+          </code>{" "}
+          runs after the response is ready; use it for logging or last-mile headers.
         </p>
       </section>
 
@@ -137,7 +183,8 @@ export default defineFarmConfig({
         <h2 className="text-xl font-semibold text-slate-900">Publishing a plugin</h2>
         <p className="mt-2 text-slate-600">
           Package your plugin as an npm package that exports one or more plugins. List{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">@farmjs/core</code> as a peer dependency so users install the version that matches their Farm.js app.
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">@farmjs/core</code>{" "}
+          as a peer dependency so users install the version that matches their Farm.js app.
         </p>
       </section>
 

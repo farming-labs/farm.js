@@ -7,7 +7,18 @@ import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
 import { Writable } from "stream";
 import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
+import { getRequestContextSnapshot } from "../request-context";
 import { isSSGModule, matchSSGPage } from "../ssg";
+
+function toMiddlewareMap(input: unknown): Map<string, any> {
+  if (input instanceof Map) {
+    return new Map(input as Map<string, any>);
+  }
+  if (input && typeof input === "object") {
+    return new Map(Object.entries(input as Record<string, any>));
+  }
+  return new Map<string, any>();
+}
 
 export class ServerRenderer {
   private config: Required<FarmConfig>;
@@ -82,15 +93,21 @@ export class ServerRenderer {
             path: page.urlPath,
           };
 
-          let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
+          let pageElement = React.createElement(
+            PageComponent as React.ComponentType<unknown>,
+            pageProps as React.Attributes,
+          );
 
           for (let i = layoutModules.length - 1; i >= 0; i--) {
             const layoutModule = layoutModules[i];
             const LayoutComponent = layoutModule.default;
-            pageElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
-              children: pageElement,
-              params: page.params,
-            } as React.Attributes);
+            pageElement = React.createElement(
+              LayoutComponent as React.ComponentType<unknown>,
+              {
+                children: pageElement,
+                params: page.params,
+              } as React.Attributes,
+            );
           }
 
           const { renderToString } = await import("react-dom/server");
@@ -173,8 +190,8 @@ export class ServerRenderer {
         return;
       }
 
-      const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
-      const middlewareMap = new Map(Object.entries(middlewareData));
+      const middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
+      const pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
 
       const searchParamsObject: Record<string, string | string[] | undefined> = {};
       url.searchParams.forEach((value, key) => {
@@ -197,6 +214,7 @@ export class ServerRenderer {
         searchParams: Promise.resolve(searchParamsObject),
         path: pathname,
         middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+        context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
       };
 
       // Load route module
@@ -206,16 +224,18 @@ export class ServerRenderer {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
       }
 
-      // Check if this is a client component by reading the file content
       let isClientComponent = false;
-      try {
-        const fs = await import("fs");
-        const content = fs.readFileSync(route.modulePath, "utf-8");
-        isClientComponent =
-          content.trimStart().startsWith("'use client'") ||
-          content.trimStart().startsWith('"use client"');
-      } catch (error) {
-        isClientComponent = false;
+      const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
+      if (serverComponentsEnabled) {
+        try {
+          const fs = await import("fs");
+          const content = fs.readFileSync(route.modulePath, "utf-8");
+          isClientComponent =
+            content.trimStart().startsWith("'use client'") ||
+            content.trimStart().startsWith('"use client"');
+        } catch (error) {
+          isClientComponent = false;
+        }
       }
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
@@ -226,6 +246,18 @@ export class ServerRenderer {
         params,
         searchParams: searchParamsObject,
         path: pathname,
+        middleware:
+          middlewareMap.size > 0
+            ? {
+                data: Object.fromEntries(middlewareMap),
+              }
+            : undefined,
+        context:
+          pluginExposedContext.size > 0
+            ? {
+                data: Object.fromEntries(pluginExposedContext),
+              }
+            : undefined,
       };
 
       // Load layout modules
@@ -252,11 +284,14 @@ export class ServerRenderer {
       (req as any).__FARM_METADATA__ = mergedMetadata;
 
       // Get middleware data for AsyncLocalStorage
-      const middlewareDataForContext = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
+      const middlewareDataForContext = middlewareMap;
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         const PageComponent = routeModule.default!;
-        let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
+        let pageElement = React.createElement(
+          PageComponent as React.ComponentType<unknown>,
+          pageProps as React.Attributes,
+        );
 
         // For client components, wrap in a container div for targeted hydration
         if (isClientComponent) {
@@ -271,10 +306,13 @@ export class ServerRenderer {
         for (let i = layoutModules.length - 1; i >= 0; i--) {
           const layoutModule = layoutModules[i];
           const LayoutComponent = layoutModule.default;
-          wrappedElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
-            children: wrappedElement,
-            params,
-          } as React.Attributes);
+          wrappedElement = React.createElement(
+            LayoutComponent as React.ComponentType<unknown>,
+            {
+              children: wrappedElement,
+              params,
+            } as React.Attributes,
+          );
         }
 
         // Render with middleware data available
@@ -318,18 +356,21 @@ export class ServerRenderer {
       };
 
       // Convert routes array to object keyed by pattern
+      const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
       for (const routeEntry of manifest.routes) {
         let isClient = false;
-        try {
-          const absolutePath = routeEntry.modulePath.startsWith("/")
-            ? this.config.root + routeEntry.modulePath
-            : routeEntry.modulePath;
-          const content = fs.readFileSync(absolutePath, "utf-8");
-          isClient =
-            content.trimStart().startsWith("'use client'") ||
-            content.trimStart().startsWith('"use client"');
-        } catch {
-          isClient = false;
+        if (serverComponentsEnabled) {
+          try {
+            const absolutePath = routeEntry.modulePath.startsWith("/")
+              ? this.config.root + routeEntry.modulePath
+              : routeEntry.modulePath;
+            const content = fs.readFileSync(absolutePath, "utf-8");
+            isClient =
+              content.trimStart().startsWith("'use client'") ||
+              content.trimStart().startsWith('"use client"');
+          } catch {
+            isClient = false;
+          }
         }
 
         clientManifest.routes[routeEntry.pattern] = {
@@ -499,11 +540,17 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
           }
 
           // Render the 404 page
-          let element = React.createElement(NotFoundComponent as React.ComponentType<unknown>, { pathname } as React.Attributes);
+          let element = React.createElement(
+            NotFoundComponent as React.ComponentType<unknown>,
+            { pathname } as React.Attributes,
+          );
 
           // Wrap with layout if available
           if (LayoutComponent) {
-            element = React.createElement(LayoutComponent as React.ComponentType<unknown>, { children: element } as React.Attributes);
+            element = React.createElement(
+              LayoutComponent as React.ComponentType<unknown>,
+              { children: element } as React.Attributes,
+            );
           }
 
           // Render to string

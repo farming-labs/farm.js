@@ -2,6 +2,7 @@ import type { ResolvedFarmConfig } from "../config";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
+import type { PluginManager } from "../plugin";
 import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import path from "path";
@@ -18,6 +19,32 @@ type OutputBundle = Rollup.OutputBundle;
 const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
 const _dirname = path.dirname(_filename);
 
+function hasProjectPostcssConfig(root: string): boolean {
+  const candidates = [
+    "postcss.config.js",
+    "postcss.config.cjs",
+    "postcss.config.mjs",
+    "postcss.config.ts",
+    "postcss.config.json",
+    ".postcssrc",
+    ".postcssrc.json",
+    ".postcssrc.js",
+    ".postcssrc.cjs",
+    ".postcssrc.mjs",
+    ".postcssrc.ts",
+  ];
+
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  return candidates.some((file) => {
+    try {
+      projectRequire.resolve(`./${file}`);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
 /**
  * Universal build using TanStack Start pattern
  * - Builds SSR bundle in memory
@@ -32,12 +59,14 @@ export async function buildUniversal(
   options: {
     preset?: string;
     root?: string;
+    pluginManager?: PluginManager;
   } = {},
 ): Promise<void> {
   const root = options.root || config.root || process.cwd();
   const preset = options.preset || config.preset || "node-server";
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
+  const lifecyclePluginManager = options.pluginManager;
 
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
 
@@ -109,11 +138,22 @@ export async function buildUniversal(
       ssrBundle,
       ssrEntryFile,
       clientOutputDir,
+      lifecyclePluginManager,
     );
 
     logger.success("✅ Build completed successfully!");
     logger.info(`📁 Output directory: ${path.join(root, distDir, ".output")}`);
   } catch (error) {
+    if (lifecyclePluginManager) {
+      await lifecyclePluginManager.runHookParallel("onError", {
+        phase: "buildUniversal",
+        error,
+        meta: {
+          root,
+          preset,
+        },
+      });
+    }
     logger.error(`❌ Build failed: ${error}`);
     throw error;
   }
@@ -139,11 +179,16 @@ async function buildClient(
     isDev: false,
     isProd: true,
   });
+  pluginManager.addPlugins(config.plugins || []);
 
-  // Detect which pages are "use client" components
+  // Detect which pages are "use client" components (RSC opt-in via experimental.serverComponents)
   const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
+  const serverComponentsEnabled = config.experimental?.serverComponents !== false;
 
   for (const route of pageRoutes) {
+    if (!serverComponentsEnabled) {
+      continue;
+    }
     try {
       const content = await fs.readFile(route.modulePath, "utf-8");
       // Check for "use client" directive (can be at the start or after whitespace/comments)
@@ -175,31 +220,22 @@ async function buildClient(
   const clientEntryPath = path.join(root, srcDir, ".farm-client-entry.tsx");
   await fs.writeFile(clientEntryPath, clientHydrationCode);
 
-  // Tailwind v4 via @tailwindcss/vite (only if the PROJECT has it in dependencies)
-  // Otherwise, rely on the project's PostCSS/Tailwind v3 setup
+  // Tailwind support:
+  // - If project has explicit PostCSS config, respect it.
+  // - Otherwise enable built-in @tailwindcss/vite (out of the box).
   let tailwindVitePlugin: any = undefined;
-  try {
-    // Check if the project's package.json has @tailwindcss/vite as a dependency
-    const projectPkgPath = path.join(root, "package.json");
-    const projectPkg = JSON.parse(await fs.readFile(projectPkgPath, "utf-8"));
-    const hasTailwindVite =
-      projectPkg.dependencies?.["@tailwindcss/vite"] ||
-      projectPkg.devDependencies?.["@tailwindcss/vite"];
-
-    if (hasTailwindVite) {
-      // Try to require from the project's node_modules
-      const projectRequire = createRequire(projectPkgPath);
-      const tailwindVite = projectRequire("@tailwindcss/vite");
-      tailwindVitePlugin = (tailwindVite.default ?? tailwindVite)();
-      logger.info("📦 Using Tailwind v4 (@tailwindcss/vite) from project");
-    } else {
-      logger.info(
-        "📦 Using project's PostCSS/Tailwind setup (no @tailwindcss/vite in project deps)",
+  if (hasProjectPostcssConfig(root)) {
+    logger.info("📦 Using project PostCSS/Tailwind configuration");
+  } else {
+    try {
+      const tailwindVite = (await import("@tailwindcss/vite")).default;
+      tailwindVitePlugin = tailwindVite();
+      logger.info("📦 Enabled built-in Tailwind support (@tailwindcss/vite)");
+    } catch (error) {
+      logger.warn(
+        `Tailwind plugin auto-enable failed; continuing without it: ${(error as Error).message}`,
       );
     }
-  } catch (err) {
-    // Error reading package.json or loading the plugin
-    logger.info("📦 Using project's PostCSS/Tailwind setup (fallback)");
   }
 
   try {
@@ -875,6 +911,7 @@ async function buildSSRInMemory(
     isDev: false,
     isProd: true,
   });
+  pluginManager.addPlugins(config.plugins || []);
 
   let ssrBundle: OutputBundle;
   let ssrEntryFile: string;
@@ -1568,6 +1605,7 @@ async function buildNitroUniversal(
   ssrBundle: OutputBundle,
   ssrEntryFile: string,
   clientOutputDir: string,
+  pluginManager?: PluginManager,
 ) {
   const fs = await import("fs/promises");
 
@@ -1613,7 +1651,7 @@ export default fromWebHandler(handler.fetch)
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
 
-  const nitroConfig: NitroConfig = {
+  let nitroConfig: NitroConfig = {
     preset,
     rootDir: root,
     srcDir: root,
@@ -1656,12 +1694,25 @@ export default fromWebHandler(handler.fetch)
     sourceMap: false, // Skip sourcemaps for faster build
   };
 
+  if (pluginManager) {
+    nitroConfig = await pluginManager.runHookSerial("beforeNitroBuild", nitroConfig);
+  }
+
   // Build with Nitro
   const nitroInstance = await nitro.createNitro(nitroConfig);
   await nitro.prepare(nitroInstance);
   await nitro.copyPublicAssets(nitroInstance);
   await nitro.build(nitroInstance);
   await nitroInstance.close();
+
+  if (pluginManager) {
+    await pluginManager.runHookParallel("afterNitroBuild", {
+      root,
+      preset,
+      distDir,
+      outputDir,
+    });
+  }
 
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json

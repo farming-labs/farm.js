@@ -56,12 +56,21 @@ export interface MiddlewareProps {
 }
 
 /**
+ * Plugin context data available in server page components.
+ * Only values explicitly exposed by plugins are included.
+ */
+export interface PluginContextProps {
+  data: Map<string, any>;
+}
+
+/**
  * Page component props
  *
  * @param params - Dynamic route parameters (e.g., { id: '123' } for /users/[id])
  * @param searchParams - URL search/query parameters
  * @param path - Current pathname
  * @param middleware - Data set by middleware.ts (optional, available if middleware exists)
+ * @param context - Data explicitly exposed by plugins for this request (optional)
  */
 export interface PageProps {
   params: Record<string, string>;
@@ -82,6 +91,11 @@ export interface PageProps {
    * ```
    */
   middleware?: MiddlewareProps;
+  /**
+   * Request-scoped plugin context values explicitly exposed by plugins.
+   * Access data via props.context?.data.get('key').
+   */
+  context?: PluginContextProps;
 }
 /**
  * Helper type to create typed page props with specific middleware data shape

@@ -1,9 +1,17 @@
 #!/usr/bin/env node
 
 const { program } = require("commander");
-const { startDevServer } = require("../dist/index.js");
+
+const banner = `
+ _______                         
+|  ___  |__ _ _ __ _ __ ___     
+| |_ /| / _\` | '__| '_ \` _ \\ 
+|  _ \\| | (_| | |  | | | | | |
+|_| \\_\\_|\\__,_|_|  |_| |_| |_|
+`;
 
 program.name("farm").description("Farm.js CLI - A modern React meta-framework").version("0.1.0");
+program.addHelpText("beforeAll", `${banner}\n`);
 
 program
   .command("dev")
@@ -12,6 +20,7 @@ program
   .option("-r, --root <root>", "Root directory", process.cwd())
   .action(async (options) => {
     try {
+      const { startDevServer } = require("../dist/index.js");
       await startDevServer(
         {
           root: options.root,

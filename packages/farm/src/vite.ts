@@ -41,6 +41,18 @@ export function farmPlugin(
 
       // Store the plugin manager passed during creation
       const pm = initialPluginManager;
+      const emitPluginError = async (
+        phase: string,
+        error: unknown,
+        meta?: Record<string, unknown>,
+      ) => {
+        if (!pm) return;
+        try {
+          await pm.runHookParallel("onError", { phase, error, meta });
+        } catch {
+          // Ignore plugin error reporter failures
+        }
+      };
 
       farmApp = new FarmApp(
         {
@@ -101,11 +113,52 @@ export function farmPlugin(
 
       // Initialize API route manager
       const appDir = path.join(server.config.root, "src/app");
+      const routeManager = farmApp.getRouteManager();
+      const discoveredRoutes: Array<{
+        kind: "page" | "layout";
+        pattern: string;
+        modulePath: string;
+      }> = [];
+      for (const [pattern, entry] of routeManager.getRoutes()) {
+        discoveredRoutes.push({ kind: "page", pattern, modulePath: entry.modulePath });
+      }
+      for (const [pattern, entry] of routeManager.getLayouts()) {
+        discoveredRoutes.push({ kind: "layout", pattern, modulePath: entry.modulePath });
+      }
+      if (pm) {
+        for (const route of discoveredRoutes) {
+          await pm.runHookParallel("routeDiscovered", route);
+        }
+        await pm.runHookParallel("routesGenerated", {
+          routes: discoveredRoutes,
+          pageCount: discoveredRoutes.filter((r) => r.kind === "page").length,
+          layoutCount: discoveredRoutes.filter((r) => r.kind === "layout").length,
+        });
+      }
+
       apiRouteManager = new APIRouteManager(appDir, server);
       await apiRouteManager.discoverRoutes();
+      if (pm) {
+        for (const [, apiRoute] of apiRouteManager.getRoutes()) {
+          await pm.runHookParallel("apiRouteDiscovered", {
+            path: apiRoute.path,
+            filePath: apiRoute.filePath,
+            methods: apiRoute.methods,
+          });
+        }
+      }
 
       middlewareManager = new MiddlewareManager(appDir, server);
       await middlewareManager.discover();
+      if (pm) {
+        for (const middleware of middlewareManager.getMiddlewares()) {
+          await pm.runHookParallel("middlewareDiscovered", {
+            path: middleware.path,
+            filePath: middleware.filePath,
+            handlerCount: middleware.handlers.length,
+          });
+        }
+      }
 
       // Initialize OpenAPI manager if enabled
       if (options.openapi?.enabled) {
@@ -220,22 +273,35 @@ export function farmPlugin(
                 body: body || undefined,
               });
 
+              const apiLifecyclePayload = {
+                pathname: new URL(url).pathname,
+                method,
+                routePath: urlPath,
+              };
+              const handledRequest: Request = pm
+                ? await pm.runHookSerial("beforeApiHandler", request, apiLifecyclePayload)
+                : request;
+
               // Call better-call handler
-              const response = await apiHandler(request);
+              const response = await apiHandler(handledRequest);
+              const handledResponse: Response = pm
+                ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
+                : response;
 
               const duration = Date.now() - startTime;
-              logResponse(method, urlPath, response.status, duration, "API");
+              logResponse(method, urlPath, handledResponse.status, duration, "API");
 
               // Send response
-              res.statusCode = response.status;
-              response.headers.forEach((value, key) => {
+              res.statusCode = handledResponse.status;
+              handledResponse.headers.forEach((value, key) => {
                 res.setHeader(key, value);
               });
 
-              const responseBody = await response.text();
+              const responseBody = await handledResponse.text();
               res.end(responseBody);
               return;
             } catch (error) {
+              await emitPluginError("api-handler", error, { urlPath, method });
               logger.error(`API route error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
@@ -261,7 +327,22 @@ export function farmPlugin(
 
           try {
             const routeManager = farmApp.getRouteManager();
+            if (pm) {
+              await pm.runHookParallel("beforeRouteMatch", {
+                pathname: targetPath,
+                method: req.method || "GET",
+              });
+            }
             const match = routeManager.matchRoute(targetPath);
+            if (pm) {
+              await pm.runHookParallel("afterRouteMatch", {
+                pathname: targetPath,
+                matched: !!match?.route,
+                routePattern: match?.route?.pattern || null,
+                params: match?.params || {},
+                layoutPatterns: (match?.layouts || []).map((l) => l.pattern),
+              });
+            }
 
             if (!match) {
               res.statusCode = 404;
@@ -344,6 +425,9 @@ export function farmPlugin(
             res.end(JSON.stringify(pageData));
             return;
           } catch (error) {
+            await emitPluginError("page-data", error, {
+              path: targetPath,
+            });
             console.error("[Farm.js] Page data error:", error);
             res.statusCode = 500;
             res.setHeader("Content-Type", "application/json");
@@ -360,6 +444,31 @@ export function farmPlugin(
         const startTime = Date.now();
         const method = req.method || "GET";
         const urlPath = req.url || "/";
+        const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
+          .pathname;
+        const routeManager = farmApp.getRouteManager();
+        if (pm) {
+          await pm.runHookParallel("beforeRouteMatch", {
+            pathname,
+            method,
+          });
+        }
+        const routeMatch = routeManager.matchRoute(pathname);
+        if (pm) {
+          await pm.runHookParallel("afterRouteMatch", {
+            pathname,
+            matched: !!routeMatch?.route,
+            routePattern: routeMatch?.route?.pattern || null,
+            params: routeMatch?.params || {},
+            layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
+          });
+        }
+        const renderPayload = {
+          pathname,
+          method,
+          routePattern: routeMatch?.route?.pattern || null,
+          params: routeMatch?.params || {},
+        };
 
         // logRequest(method, urlPath, "PAGE");
 
@@ -386,8 +495,25 @@ export function farmPlugin(
           }
 
           // Intercept res.end to call afterResponse hooks and log response before response is fully sent
+          const originalWrite = res.write.bind(res);
           const originalEnd = res.end.bind(res);
           let afterResponseCalled = false;
+          const htmlChunks: Buffer[] = [];
+
+          res.write = ((chunk: any, ...args: any[]) => {
+            const contentTypeHeader =
+              res.getHeader("content-type") || res.getHeader("Content-Type");
+            const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+            const isHtmlResponse = contentType.includes("text/html");
+
+            if (isHtmlResponse && chunk !== undefined && chunk !== null) {
+              const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+              htmlChunks.push(bufferChunk);
+              return true;
+            }
+
+            return originalWrite(chunk, ...args);
+          }) as any;
 
           res.end = ((...args: any[]) => {
             if (!afterResponseCalled && pm) {
@@ -395,12 +521,44 @@ export function farmPlugin(
               // Log page response
               const duration = Date.now() - startTime;
               logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-              // Call afterResponse synchronously before actually ending
-              pm.runHookParallel("afterResponse", req, res)
+              // Call lifecycle hooks before actually ending the response.
+              Promise.resolve()
+                .then(async () => {
+                  const contentTypeHeader =
+                    res.getHeader("content-type") || res.getHeader("Content-Type");
+                  const contentType =
+                    typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+                  const isHtmlResponse = contentType.includes("text/html");
+                  if (isHtmlResponse) {
+                    const firstArg = args[0];
+                    if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
+                      const bufferChunk = Buffer.isBuffer(firstArg)
+                        ? firstArg
+                        : Buffer.from(firstArg, "utf-8");
+                      htmlChunks.push(bufferChunk);
+                    }
+
+                    let html = Buffer.concat(htmlChunks).toString("utf-8");
+                    html = await pm.runHookSerial("transformHTML", html);
+                    html = await pm.runHookSerial("afterRender", html, renderPayload);
+
+                    const callback =
+                      typeof args[args.length - 1] === "function"
+                        ? args[args.length - 1]
+                        : undefined;
+                    args.length = 0;
+                    args.push(html);
+                    if (callback) {
+                      args.push(callback);
+                    }
+                  }
+                })
+                .then(() => pm.runHookParallel("afterResponse", req, res))
                 .then(() => {
                   originalEnd(...args);
                 })
                 .catch((err) => {
+                  emitPluginError("response-end", err, { pathname }).catch(() => {});
                   console.error("Error in afterResponse hook:", err);
                   originalEnd(...args);
                 });
@@ -412,11 +570,15 @@ export function farmPlugin(
           // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
 
           const renderer = farmApp.getServerRenderer();
+          if (pm) {
+            await pm.runHookParallel("beforeRender", renderPayload);
+          }
           await renderer.renderPage(req as any, res as any);
         } catch (error) {
           // Log error response
           const duration = Date.now() - startTime;
           logResponse(method, urlPath, 500, duration, "PAGE");
+          await emitPluginError("render-page", error, { pathname });
           next(error);
         }
       });
@@ -613,16 +775,22 @@ if (import.meta.hot) {
               path: page.urlPath,
             };
 
-            let pageElement = React.createElement(PageComponent as React.ComponentType<unknown>, pageProps as React.Attributes);
+            let pageElement = React.createElement(
+              PageComponent as React.ComponentType<unknown>,
+              pageProps as React.Attributes,
+            );
 
             // Wrap with layouts
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
               const LayoutComponent = layoutModule.default;
-              pageElement = React.createElement(LayoutComponent as React.ComponentType<unknown>, {
-                children: pageElement,
-                params: page.params,
-              } as React.Attributes);
+              pageElement = React.createElement(
+                LayoutComponent as React.ComponentType<unknown>,
+                {
+                  children: pageElement,
+                  params: page.params,
+                } as React.Attributes,
+              );
             }
 
             const html = renderToString(pageElement);
@@ -681,12 +849,35 @@ if (import.meta.hot) {
 
     async handleHotUpdate(ctx: HmrContext) {
       const { file, server, modules } = ctx;
+      if (initialPluginManager) {
+        try {
+          await initialPluginManager.runHookParallel("hmrUpdate", {
+            file,
+            modules: modules.map((m) => m.id || m.url || "").filter(Boolean),
+          });
+        } catch (error) {
+          await initialPluginManager.runHookParallel("onError", {
+            phase: "hmrUpdate",
+            error,
+            meta: { file },
+          });
+        }
+      }
       if (file.includes("/app/")) {
         // Hot reload middleware changes
         if (file.includes("middleware.")) {
           if (middlewareManager) {
             await middlewareManager.reload();
             logger.success("✅ Middleware reloaded!");
+            if (initialPluginManager) {
+              for (const middleware of middlewareManager.getMiddlewares()) {
+                await initialPluginManager.runHookParallel("middlewareDiscovered", {
+                  path: middleware.path,
+                  filePath: middleware.filePath,
+                  handlerCount: middleware.handlers.length,
+                });
+              }
+            }
           }
 
           return [];
@@ -716,6 +907,13 @@ if (import.meta.hot) {
               logger.success("✅ OpenAPI spec regenerated!");
             }
           } catch (error) {
+            if (initialPluginManager) {
+              await initialPluginManager.runHookParallel("onError", {
+                phase: "api-type-regeneration",
+                error,
+                meta: { file },
+              });
+            }
             logger.warn(`Failed to regenerate API types: ${error}`);
           }
         }
@@ -1065,6 +1263,17 @@ let LayoutComponent = null;
 // Track if we've taken over rendering from SSR
 let hasClientTakenOver = false;
 
+function normalizeServerProps(rawProps) {
+  const props = rawProps && typeof rawProps === 'object' ? { ...rawProps } : {};
+  if (props.middleware && props.middleware.data && !(props.middleware.data instanceof Map)) {
+    props.middleware = { ...props.middleware, data: new Map(Object.entries(props.middleware.data)) };
+  }
+  if (props.context && props.context.data && !(props.context.data instanceof Map)) {
+    props.context = { ...props.context, data: new Map(Object.entries(props.context.data)) };
+  }
+  return props;
+}
+
 // ====== CHUNK-BASED NAVIGATION (TanStack Start pattern) ======
 // NO HTML fetching! Uses manifest to dynamically import page chunks
 async function renderPage(pageData) {
@@ -1278,7 +1487,7 @@ async function hydrate() {
     currentPageComponent = PageComponent;
     
     // Get props - either from server-injected props or by matching the current URL
-    let pageProps = window.__FARM_PROPS__;
+    let pageProps = normalizeServerProps(window.__FARM_PROPS__);
     if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
       // Extract params from URL using manifest route matching (fallback)
       const pathname = window.location.pathname;
@@ -1287,11 +1496,11 @@ async function hydrate() {
       new URLSearchParams(window.location.search).forEach((value, key) => {
         searchParams[key] = value;
       });
-      pageProps = {
+      pageProps = normalizeServerProps({
         params: foundRoute?.params || {},
         searchParams: searchParams,
         path: pathname,
-      };
+      });
     }
     currentPageProps = pageProps;
     

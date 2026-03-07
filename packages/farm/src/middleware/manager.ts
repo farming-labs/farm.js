@@ -237,7 +237,7 @@ export class MiddlewareManager {
       }
     }
 
-    (req as any).__FARM_MIDDLEWARE_DATA__ = Object.fromEntries(ctx.data);
+    (req as any).__FARM_MIDDLEWARE_DATA__ = new Map(ctx.data);
 
     return false; // Continue to page rendering
   }
@@ -298,5 +298,9 @@ export class MiddlewareManager {
    */
   async reload(): Promise<void> {
     await this.discover();
+  }
+
+  getMiddlewares(): DiscoveredMiddleware[] {
+    return [...this.middleware];
   }
 }
