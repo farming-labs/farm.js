@@ -24,6 +24,8 @@ export class RouteManager {
   private config: Required<FarmConfig>;
   private routes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
+  private loadings: Map<string, RouteEntry> = new Map();
+  private errors: Map<string, RouteEntry> = new Map();
   private viteServer?: ViteDevServer;
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
@@ -40,6 +42,8 @@ export class RouteManager {
     // Find all page and layout files
     const pageFiles = await globFiles("**/page.{ts,tsx,js,jsx}", appDir);
     const layoutFiles = await globFiles("**/layout.{ts,tsx,js,jsx}", appDir);
+    const loadingFiles = await globFiles("**/loading.{ts,tsx,js,jsx}", appDir);
+    const errorFiles = await globFiles("**/error.{ts,tsx,js,jsx}", appDir);
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
@@ -66,6 +70,32 @@ export class RouteManager {
       const pattern = this.createRoutePattern(route);
 
       this.layouts.set(pattern, {
+        route,
+        modulePath,
+        pattern,
+      });
+    }
+
+    // Process loading files
+    for (const file of loadingFiles) {
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+
+      this.loadings.set(pattern, {
+        route,
+        modulePath,
+        pattern,
+      });
+    }
+
+    // Process error files
+    for (const file of errorFiles) {
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+
+      this.errors.set(pattern, {
         route,
         modulePath,
         pattern,
@@ -122,6 +152,34 @@ export class RouteManager {
    */
   getLayouts(): Map<string, RouteEntry> {
     return new Map(this.layouts);
+  }
+
+  /**
+   * Get all route-level loading boundaries.
+   */
+  getLoadings(): Map<string, RouteEntry> {
+    return new Map(this.loadings);
+  }
+
+  /**
+   * Get all route-level error boundaries.
+   */
+  getErrors(): Map<string, RouteEntry> {
+    return new Map(this.errors);
+  }
+
+  /**
+   * Return the nearest matching loading boundary for a pathname.
+   */
+  getMatchingLoading(pathname: string): RouteEntry | null {
+    return this.findNearestBoundary(pathname, this.loadings);
+  }
+
+  /**
+   * Return the nearest matching error boundary for a pathname.
+   */
+  getMatchingError(pathname: string): RouteEntry | null {
+    return this.findNearestBoundary(pathname, this.errors);
   }
 
   /**
@@ -259,6 +317,47 @@ export class RouteManager {
     }
 
     return matchingLayouts;
+  }
+
+  private findNearestBoundary(
+    pathname: string,
+    boundaries: Map<string, RouteEntry>,
+  ): RouteEntry | null {
+    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const pathSegments = normalizedPath.split("/").filter(Boolean);
+    let bestMatch: RouteEntry | null = null;
+
+    for (const boundaryEntry of boundaries.values()) {
+      if (boundaryEntry.route.segments.length > pathSegments.length) {
+        continue;
+      }
+
+      let matches = true;
+      for (let i = 0; i < boundaryEntry.route.segments.length; i++) {
+        const segment = boundaryEntry.route.segments[i];
+        const pathSegment = pathSegments[i];
+
+        if (!pathSegment) {
+          matches = false;
+          break;
+        }
+
+        if (!segment.isDynamic && segment.segment !== pathSegment) {
+          matches = false;
+          break;
+        }
+      }
+
+      if (!matches) {
+        continue;
+      }
+
+      if (!bestMatch || boundaryEntry.route.segments.length > bestMatch.route.segments.length) {
+        bestMatch = boundaryEntry;
+      }
+    }
+
+    return bestMatch;
   }
 
   /**
