@@ -20,6 +20,22 @@ function createBrandingPlugin() {
   let serverStarted = false;
   let startTime = Date.now();
 
+  const getColors = () => {
+    const id = (s: string) => s;
+    try {
+      const pc = typeof require === "function" ? require("picocolors") : null;
+      if (pc && typeof pc.createColors === "function") return pc.createColors(true);
+      if (pc) return pc;
+    } catch {}
+    return {
+      dim: id,
+      bold: id,
+      green: id,
+      cyan: id,
+      gray: id,
+    };
+  };
+
   return {
     name: "farm:branding",
     enforce: "pre" as const,
@@ -38,7 +54,7 @@ function createBrandingPlugin() {
               ? address.port
               : server.config.server.port || port || 3000;
 
-          const pc = require("picocolors");
+          const pc = getColors();
           console.log("");
           console.log(
             `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`,

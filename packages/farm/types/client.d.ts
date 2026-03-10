@@ -51,9 +51,59 @@ declare module "@farmjs/core/client" {
     headers?: Record<string, string>;
   }
 
-  export function createAPIClient<TRouter extends Record<string, unknown>>(
+  /**
+   * Minimal structural type for Farm.js endpoints used for client inference.
+   * This avoids depending on build-hash-based type files.
+   */
+  type TypedEndpointLike = {
+    __types: {
+      body: any;
+      query: any;
+      response: any;
+    };
+  };
+
+  // Type utilities to extract endpoint input/output types
+  type InferEndpointInput<T> = T extends {
+    __types: {
+      body: infer TBody;
+      query: infer TQuery;
+    };
+  }
+    ? TBody extends never
+      ? TQuery extends never
+        ? {}
+        : { query?: TQuery }
+      : TQuery extends never
+        ? { body?: TBody }
+        : { body?: TBody; query?: TQuery }
+    : {};
+
+  type InferEndpointOutput<T> = T extends {
+    __types: {
+      response: infer R;
+    };
+  }
+    ? R
+    : any;
+
+  type EndpointMethod<T = any> = (options?: InferEndpointInput<T>) => Promise<InferEndpointOutput<T>>;
+
+  type RouterToClient<T> = {
+    [K in keyof T]: T[K] extends Record<string, TypedEndpointLike>
+      ? {
+          [M in keyof T[K]]: M extends "get" | "post" | "put" | "delete" | "patch"
+            ? EndpointMethod<T[K][M]>
+            : never;
+        }
+      : T[K] extends Record<string, unknown>
+        ? RouterToClient<T[K]>
+        : EndpointMethod<T[K]>;
+  };
+
+  export function createAPIClient<TRouter extends Record<string, any>>(
     options?: APIClientOptions,
-  ): unknown;
+  ): RouterToClient<TRouter>;
 
   export function createServerAPIClient<TEndpoints extends Record<string, unknown>>(
     endpoints: TEndpoints,

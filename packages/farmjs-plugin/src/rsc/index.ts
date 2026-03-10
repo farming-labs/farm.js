@@ -295,7 +295,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
-          routesDir: options.routesDir ?? "",
+          routesDir: options.routesDir,
           actionsEnabled,
           debug,
         };
@@ -496,8 +496,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (id.startsWith(VIRTUAL_PREFIX + "/@rsc-hydrate/")) {
           const pagePath = id.replace(VIRTUAL_PREFIX + "/@rsc-hydrate", "");
           const srcDir = entryContext.srcDir;
-          const appSegment = entryContext.routesDir || "app";
-          const basePath = `/${srcDir}/${appSegment}`;
+          const appSegment = entryContext.routesDir ?? "app";
+          const basePath = appSegment ? `/${srcDir}/${appSegment}` : `/${srcDir}`;
           const pageImportPath =
             pagePath === "/" ? `${basePath}/page.tsx` : `${basePath}${pagePath}/page.tsx`;
           const layoutImportPath = `${basePath}/layout.tsx`;
@@ -720,8 +720,8 @@ if (document.readyState === 'loading') {
 
               // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
               const srcDir = entryContext.srcDir;
-              const appSegment = entryContext.routesDir || "app";
-              const glob = `/${srcDir}/${appSegment}`;
+              const appSegment = entryContext.routesDir ?? "app";
+              const glob = appSegment ? `/${srcDir}/${appSegment}` : `/${srcDir}`;
 
               // Find matching page file
               const normalized = pathname.replace(/\/$/, "") || "/";
@@ -775,7 +775,9 @@ if (document.readyState === 'loading') {
               }
 
               try {
-                const layoutPath = `./${srcDir}/${appSegment}/layout.tsx`;
+                const layoutPath = appSegment
+                  ? `./${srcDir}/${appSegment}/layout.tsx`
+                  : `./${srcDir}/layout.tsx`;
                 layoutModule = await server.ssrLoadModule(layoutPath);
               } catch {}
 
@@ -862,6 +864,8 @@ if (document.readyState === 'loading') {
               const h = React.default.createElement;
               const isSyncPage = !isAsyncPage && !isAsyncLayout;
               // For sync pages we load preamble + vite client + hydrate in one script below; do not load vite-client in head so order is guaranteed.
+              const routesDir = entryContext.routesDir?.trim() ?? "";
+              const routesPath = routesDir ? `/${routesDir}` : "";
               const headElements = [
                 h("meta", { key: "charset", charSet: "utf-8" }),
                 h("meta", {
@@ -882,7 +886,7 @@ if (document.readyState === 'loading') {
                 h("link", {
                   key: "globals-css",
                   rel: "stylesheet",
-                  href: `/${srcDir}/${entryContext.routesDir || "app"}/globals.css`,
+                  href: `/${srcDir}${routesPath}/globals.css`,
                 }),
                 ...(isSyncPage
                   ? []

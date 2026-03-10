@@ -28,6 +28,20 @@ export function farmPlugin(
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
   const pluginManager: PluginManager | undefined = initialPluginManager;
+  const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE", message: string) => {
+    try {
+      const pc = require("picocolors");
+      const log = [
+        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+        pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+        pc.dim("[") + pc.bold(pc.yellow("UPDATE")) + pc.dim("]"),
+        pc.gray(message),
+      ].join(" ");
+      console.log(log);
+    } catch {
+      console.log(`[FARM] [${tag}] [UPDATE] ${message}`);
+    }
+  };
 
   return {
     name: "farm",
@@ -886,7 +900,7 @@ if (import.meta.hot) {
         // Auto-generate types when API routes change
         if (file.includes("/api/") && file.includes("/route.")) {
           const shortPath = file.split("/app/")[1] || file;
-          logger.event(`API route updated: ${shortPath} - regenerating types...`);
+          logUpdate("API", `updated ${shortPath} - regenerating types...`);
 
           // Dynamically regenerate API types
           try {
@@ -920,7 +934,7 @@ if (import.meta.hot) {
 
         if (file.includes("page.") || file.includes("layout.")) {
           const shortPath = file.split("/app/")[1] || file;
-          logger.event(`Updated: ${shortPath}`);
+          logUpdate("PAGE", `updated ${shortPath}`);
 
           for (const mod of modules) {
             server.moduleGraph.invalidateModule(mod);

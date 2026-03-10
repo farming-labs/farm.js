@@ -44,10 +44,24 @@ if (existsSync(appPkgPath)) {
     dependencies: deps,
   };
   writeFileSync(path.join(funcDir, "package.json"), JSON.stringify(funcPkg, null, 2), "utf-8");
-  try {
-    execSync("npm install --omit=dev", { cwd: funcDir, stdio: "inherit" });
-  } catch {
-    console.warn("[vercel-output] npm install in function dir failed; deploy may fail at runtime if dist needs node_modules.");
+  const shouldInstall =
+    process.env.FARM_SKIP_NPM_INSTALL !== "1" && process.env.SKIP_NPM_INSTALL !== "1";
+  if (shouldInstall) {
+    try {
+      execSync("npm install --omit=dev", {
+        cwd: funcDir,
+        stdio: "inherit",
+        timeout: 120_000,
+      });
+    } catch (err) {
+      const timedOut = typeof err === "object" && err && "signal" in err && err.signal === "SIGTERM";
+      console.warn(
+        `[vercel-output] npm install in function dir failed${timedOut ? " (timed out)" : ""}; ` +
+          "deploy may fail at runtime if dist needs node_modules.",
+      );
+    }
+  } else {
+    console.warn("[vercel-output] Skipping npm install in function dir (FARM_SKIP_NPM_INSTALL=1).");
   }
 }
 

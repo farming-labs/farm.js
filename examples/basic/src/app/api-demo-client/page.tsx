@@ -17,7 +17,7 @@ export default function APIClientDemo() {
 
     try {
       const data = await api.hello.post({
-        body: { name: 'something' }
+        body: {name:'something'}
       });
       setHelloResponse(data);
     } catch (err) {
