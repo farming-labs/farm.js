@@ -1791,7 +1791,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
-      include: ["react", "react-dom"],
+      include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"],
       // Exclude server-side packages from browser bundling
       exclude: [
         "@farmjs/core/server",

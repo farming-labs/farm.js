@@ -141,7 +141,8 @@ export async function createServer(config: FarmConfig = {}) {
     const projectRoot = finalConfig.root || process.cwd();
 
     let tailwindVitePlugin: any = undefined;
-    if (hasProjectPostcssConfig(projectRoot)) {
+    const shouldUseProjectPostcss = hasProjectPostcssConfig(projectRoot);
+    if (shouldUseProjectPostcss) {
       logger.info("📦 Using project PostCSS/Tailwind configuration");
     } else {
       try {
@@ -157,6 +158,7 @@ export async function createServer(config: FarmConfig = {}) {
 
     const server = await createViteServer({
       root: projectRoot,
+      css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
       plugins: [
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         farmPlugin(finalConfig, pluginManager),
@@ -168,7 +170,7 @@ export async function createServer(config: FarmConfig = {}) {
       optimizeDeps: {
         // Avoid Vite scanning server/native-only deps from framework internals.
         noDiscovery: true,
-        include: ["react", "react-dom"],
+        include: ["react", "react-dom", "react-dom/client", "react/jsx-runtime", "react/jsx-dev-runtime"],
         exclude: [
           "@farmjs/core/server",
           "@farmjs/core/api",

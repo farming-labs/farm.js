@@ -13,7 +13,7 @@ import type { EntryContext } from "../types.js";
  */
 export function generateClientEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  const globalsCssPath = `/${ctx.srcDir}/globals.css`;
+  const globalsCssPath = `/${ctx.srcDir}/${ctx.routesDir || "app"}/globals.css`;
   let imports = `
 import ${JSON.stringify(globalsCssPath)};
 import React from 'react';

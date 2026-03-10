@@ -496,9 +496,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (id.startsWith(VIRTUAL_PREFIX + "/@rsc-hydrate/")) {
           const pagePath = id.replace(VIRTUAL_PREFIX + "/@rsc-hydrate", "");
           const srcDir = entryContext.srcDir;
+          const appSegment = entryContext.routesDir || "app";
+          const basePath = `/${srcDir}/${appSegment}`;
           const pageImportPath =
-            pagePath === "/" ? `/${srcDir}/page.tsx` : `/${srcDir}${pagePath}/page.tsx`;
-          const layoutImportPath = `/${srcDir}/layout.tsx`;
+            pagePath === "/" ? `${basePath}/page.tsx` : `${basePath}${pagePath}/page.tsx`;
+          const layoutImportPath = `${basePath}/layout.tsx`;
           const actionBlock = entryContext.actionsEnabled
             ? `
 import { setServerCallback, encodeReply, createTemporaryReferenceSet, createFromReadableStream } from '@vitejs/plugin-rsc/browser';
@@ -716,11 +718,10 @@ if (document.readyState === 'loading') {
               // Get middleware data from standalone middleware plugin
               const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
 
-              // Build the glob pattern for discovering routes
+              // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
               const srcDir = entryContext.srcDir;
-              const glob = entryContext.routesDir
-                ? `/${srcDir}/${entryContext.routesDir}`
-                : `/${srcDir}`;
+              const appSegment = entryContext.routesDir || "app";
+              const glob = `/${srcDir}/${appSegment}`;
 
               // Find matching page file
               const normalized = pathname.replace(/\/$/, "") || "/";
@@ -774,7 +775,7 @@ if (document.readyState === 'loading') {
               }
 
               try {
-                const layoutPath = `./${srcDir}/layout.tsx`;
+                const layoutPath = `./${srcDir}/${appSegment}/layout.tsx`;
                 layoutModule = await server.ssrLoadModule(layoutPath);
               } catch {}
 
@@ -881,7 +882,7 @@ if (document.readyState === 'loading') {
                 h("link", {
                   key: "globals-css",
                   rel: "stylesheet",
-                  href: `/${srcDir}/globals.css`,
+                  href: `/${srcDir}/${entryContext.routesDir || "app"}/globals.css`,
                 }),
                 ...(isSyncPage
                   ? []

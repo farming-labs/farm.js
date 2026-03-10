@@ -11,8 +11,9 @@ import type { EntryContext } from "../types.js";
  * - Either returns the stream directly (for client navigation) or delegates to SSR (for initial page load)
  */
 export function generateRscEntry(ctx: EntryContext): string {
-  // Build the glob pattern for discovering routes
-  const glob = ctx.routesDir ? `/${ctx.srcDir}/${ctx.routesDir}` : `/${ctx.srcDir}`;
+  // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
+  const appSegment = ctx.routesDir || "app";
+  const glob = `/${ctx.srcDir}/${appSegment}`;
 
   const debugLog = `// Debug disabled`;
   let code = `
@@ -475,7 +476,7 @@ async function handler(request) {
         h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
         metadata?.title ? h('title', null, metadata.title) : null,
         metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null,
-        typeof import.meta.viteRsc?.loadCss === 'function' ? import.meta.viteRsc.loadCss() : h('link', { rel: 'stylesheet', href: '/${ctx.srcDir}/globals.css' })
+        typeof import.meta.viteRsc?.loadCss === 'function' ? import.meta.viteRsc.loadCss() : h('link', { rel: 'stylesheet', href: '/${ctx.srcDir}/${ctx.routesDir || "app"}/globals.css' })
       ),
       h('body', null,
         h('div', { id: 'root' }, rootInner)
@@ -538,7 +539,7 @@ async function handler(request) {
       h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
       metadata?.title ? h('title', null, metadata.title) : null,
       metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null,
-      h('link', { rel: 'stylesheet', href: '/${ctx.srcDir}/globals.css' }),
+      h('link', { rel: 'stylesheet', href: '/${ctx.srcDir}/${ctx.routesDir || "app"}/globals.css' }),
       h('script', { type: 'module', src: '/@vite/client' })
     ),
     h('body', null,
