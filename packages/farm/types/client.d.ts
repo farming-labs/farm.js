@@ -87,7 +87,9 @@ declare module "@farmjs/core/client" {
     ? R
     : any;
 
-  type EndpointMethod<T = any> = (options?: InferEndpointInput<T>) => Promise<InferEndpointOutput<T>>;
+  type EndpointMethod<T = any> = (
+    options?: InferEndpointInput<T>,
+  ) => Promise<InferEndpointOutput<T>>;
 
   type RouterToClient<T> = {
     [K in keyof T]: T[K] extends Record<string, TypedEndpointLike>
