@@ -17,7 +17,7 @@ export default function APIClientDemo() {
 
     try {
       const data = await api.hello.post({
-        body: {name:'something'}
+        body: { name: 'something' },
       });
       setHelloResponse(data);
     } catch (err) {
@@ -32,7 +32,6 @@ export default function APIClientDemo() {
     setLoading('users');
     setError(null);
     try {
-
       // Nested API call: api.users.get()
       const data = await api.users.get({
         query: { limit: '5' }

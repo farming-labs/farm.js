@@ -12,8 +12,8 @@ import type { EntryContext } from "../types.js";
  */
 export function generateRscEntry(ctx: EntryContext): string {
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
-  const appSegment = ctx.routesDir ?? "app";
-  const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
+  const appSegment = (ctx.routesDir?.trim() ?? "") || "app";
+  const glob = `/${ctx.srcDir}/${appSegment}`;
 
   const debugLog = `// Debug disabled`;
   let code = `
@@ -439,7 +439,7 @@ async function handler(request) {
   const { Page, pattern, params, metadata } = matched;
   const Layout = getLayout(pattern) || (function PassThrough({ children }) { return children; });
   const routesDir = ${JSON.stringify(ctx.routesDir ?? "")}.trim();
-  const routesPath = routesDir ? '/' + routesDir : '';
+  const routesPath = routesDir ? '/' + routesDir : '/app';
   const globalsCssPath = '/${ctx.srcDir}' + routesPath + '/globals.css';
   
   // Parse search params
