@@ -295,7 +295,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
-          routesDir: options.routesDir ?? "",
+          routesDir: options.routesDir,
           actionsEnabled,
           debug,
         };
@@ -496,9 +496,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         if (id.startsWith(VIRTUAL_PREFIX + "/@rsc-hydrate/")) {
           const pagePath = id.replace(VIRTUAL_PREFIX + "/@rsc-hydrate", "");
           const srcDir = entryContext.srcDir;
+          const appSegment = entryContext.routesDir ?? "app";
+          const basePath = appSegment ? `/${srcDir}/${appSegment}` : `/${srcDir}`;
           const pageImportPath =
-            pagePath === "/" ? `/${srcDir}/page.tsx` : `/${srcDir}${pagePath}/page.tsx`;
-          const layoutImportPath = `/${srcDir}/layout.tsx`;
+            pagePath === "/" ? `${basePath}/page.tsx` : `${basePath}${pagePath}/page.tsx`;
+          const layoutImportPath = `${basePath}/layout.tsx`;
           const actionBlock = entryContext.actionsEnabled
             ? `
 import { setServerCallback, encodeReply, createTemporaryReferenceSet, createFromReadableStream } from '@vitejs/plugin-rsc/browser';
@@ -716,11 +718,10 @@ if (document.readyState === 'loading') {
               // Get middleware data from standalone middleware plugin
               const middlewareData = (req as any).__FARM_MIDDLEWARE_DATA__ || {};
 
-              // Build the glob pattern for discovering routes
+              // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
               const srcDir = entryContext.srcDir;
-              const glob = entryContext.routesDir
-                ? `/${srcDir}/${entryContext.routesDir}`
-                : `/${srcDir}`;
+              const appSegment = entryContext.routesDir ?? "app";
+              const glob = appSegment ? `/${srcDir}/${appSegment}` : `/${srcDir}`;
 
               // Find matching page file
               const normalized = pathname.replace(/\/$/, "") || "/";
@@ -774,7 +775,9 @@ if (document.readyState === 'loading') {
               }
 
               try {
-                const layoutPath = `./${srcDir}/layout.tsx`;
+                const layoutPath = appSegment
+                  ? `./${srcDir}/${appSegment}/layout.tsx`
+                  : `./${srcDir}/layout.tsx`;
                 layoutModule = await server.ssrLoadModule(layoutPath);
               } catch {}
 
@@ -861,6 +864,8 @@ if (document.readyState === 'loading') {
               const h = React.default.createElement;
               const isSyncPage = !isAsyncPage && !isAsyncLayout;
               // For sync pages we load preamble + vite client + hydrate in one script below; do not load vite-client in head so order is guaranteed.
+              const routesDir = entryContext.routesDir?.trim() ?? "";
+              const routesPath = routesDir ? `/${routesDir}` : "";
               const headElements = [
                 h("meta", { key: "charset", charSet: "utf-8" }),
                 h("meta", {
@@ -881,7 +886,7 @@ if (document.readyState === 'loading') {
                 h("link", {
                   key: "globals-css",
                   rel: "stylesheet",
-                  href: `/${srcDir}/globals.css`,
+                  href: `/${srcDir}${routesPath}/globals.css`,
                 }),
                 ...(isSyncPage
                   ? []

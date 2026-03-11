@@ -26,7 +26,7 @@ export interface FarmRscPluginOptions {
   /**
    * Subdirectory within srcDir containing route files.
    * If empty, routes are discovered directly in srcDir.
-   * @default ''
+   * @default 'app'
    */
   routesDir?: string;
 
@@ -58,7 +58,7 @@ export interface EntryContext {
   basePath: string;
 
   /** Route files subdirectory within srcDir */
-  routesDir: string;
+  routesDir?: string;
 
   /** Whether server actions are enabled */
   actionsEnabled: boolean;

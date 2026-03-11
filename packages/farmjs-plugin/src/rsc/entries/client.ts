@@ -13,7 +13,9 @@ import type { EntryContext } from "../types.js";
  */
 export function generateClientEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  const globalsCssPath = `/${ctx.srcDir}/globals.css`;
+  const routesDir = ctx.routesDir?.trim() ?? "";
+  const routesPath = routesDir ? `/${routesDir}` : "";
+  const globalsCssPath = `/${ctx.srcDir}${routesPath}/globals.css`;
   let imports = `
 import ${JSON.stringify(globalsCssPath)};
 import React from 'react';

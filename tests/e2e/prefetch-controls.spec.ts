@@ -46,14 +46,18 @@ test.describe("Link prefetch controls", () => {
     await page.getByTestId("clear-logs").focus();
     await page.waitForTimeout(260);
     const logs = await page.evaluate(() => window.__FARM_PREFETCH_E2E__?.getLogs() || []);
-    expect(logs.some((log: { href: string }) => log.href.includes("mode=intent-cancel"))).toBeFalsy();
+    expect(
+      logs.some((log: { href: string }) => log.href.includes("mode=intent-cancel")),
+    ).toBeFalsy();
   });
 
   test("prefetch=hover (legacy alias) still prefetches", async ({ page }) => {
     await page.getByTestId("link-hover-legacy").hover();
     await page.waitForTimeout(80);
     const logs = await page.evaluate(() => window.__FARM_PREFETCH_E2E__?.getLogs() || []);
-    expect(logs.some((log: { href: string }) => log.href.includes("mode=hover-legacy"))).toBeTruthy();
+    expect(
+      logs.some((log: { href: string }) => log.href.includes("mode=hover-legacy")),
+    ).toBeTruthy();
   });
 
   test("prefetch=true prefetches when entering viewport", async ({ page }) => {
@@ -66,6 +70,8 @@ test.describe("Link prefetch controls", () => {
   test("external links never prefetch", async ({ page }) => {
     await page.waitForTimeout(200);
     const logs = await page.evaluate(() => window.__FARM_PREFETCH_E2E__?.getLogs() || []);
-    expect(logs.some((log: { href: string }) => log.href.startsWith("https://example.com"))).toBeFalsy();
+    expect(
+      logs.some((log: { href: string }) => log.href.startsWith("https://example.com")),
+    ).toBeFalsy();
   });
 });

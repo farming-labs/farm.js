@@ -20,6 +20,36 @@ function toMiddlewareMap(input: unknown): Map<string, any> {
   return new Map<string, any>();
 }
 
+class FarmRouteErrorBoundary extends React.Component<
+  {
+    Fallback: React.ComponentType<any>;
+    fallbackProps: Record<string, any>;
+    children: React.ReactNode;
+  },
+  { hasError: boolean; error: unknown }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+
+  static getDerivedStateFromError(error: unknown) {
+    return { hasError: true, error };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      const Fallback = this.props.Fallback;
+      return React.createElement(Fallback, {
+        ...this.props.fallbackProps,
+        error: this.state.error,
+        reset: () => this.setState({ hasError: false, error: null }),
+      });
+    }
+    return this.props.children as React.ReactElement;
+  }
+}
+
 export class ServerRenderer {
   private config: Required<FarmConfig>;
   private routeManager: RouteManager;
@@ -169,9 +199,17 @@ export class ServerRenderer {
   }
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
+    let pathname = "/";
+    let params: Record<string, string> = {};
+    let layouts: Array<{ modulePath: string }> = [];
+    let searchParamsObject: Record<string, string | string[] | undefined> = {};
+    let middlewareMap = new Map<string, any>();
+    let pluginExposedContext = new Map<string, any>();
+    let errorBoundaryEntry: { modulePath: string } | null = null;
+
     try {
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
-      const pathname = url.pathname;
+      pathname = url.pathname;
 
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
@@ -183,17 +221,23 @@ export class ServerRenderer {
       }
 
       // Match route
-      const { route, params, layouts } = this.routeManager.matchRoute(pathname);
+      const match = this.routeManager.matchRoute(pathname);
+      const route = match.route;
+      params = match.params;
+      layouts = match.layouts;
 
       if (!route) {
         await this.render404(req, res);
         return;
       }
 
-      const middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
-      const pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
+      const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname);
+      errorBoundaryEntry = this.routeManager.getMatchingError(pathname);
 
-      const searchParamsObject: Record<string, string | string[] | undefined> = {};
+      middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
+      pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
+
+      searchParamsObject = {};
       url.searchParams.forEach((value, key) => {
         const existing = searchParamsObject[key];
         if (existing) {
@@ -222,6 +266,24 @@ export class ServerRenderer {
 
       if (!routeModule.default) {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
+      }
+
+      let LoadingFallbackComponent: React.ComponentType<any> | null = null;
+      if (loadingBoundaryEntry) {
+        const loadingModule = await this.routeManager.loadRouteModule(
+          loadingBoundaryEntry.modulePath,
+        );
+        if (loadingModule.default) {
+          LoadingFallbackComponent = loadingModule.default;
+        }
+      }
+
+      let ErrorFallbackComponent: React.ComponentType<any> | null = null;
+      if (errorBoundaryEntry) {
+        const errorModule = await this.routeManager.loadRouteModule(errorBoundaryEntry.modulePath);
+        if (errorModule.default) {
+          ErrorFallbackComponent = errorModule.default;
+        }
       }
 
       let isClientComponent = false;
@@ -293,6 +355,19 @@ export class ServerRenderer {
           pageProps as React.Attributes,
         );
 
+        if (LoadingFallbackComponent) {
+          const loadingFallback = React.createElement(LoadingFallbackComponent, {
+            params,
+            path: pathname,
+          } as React.Attributes);
+
+          pageElement = React.createElement(
+            React.Suspense,
+            { fallback: loadingFallback },
+            pageElement,
+          );
+        }
+
         // For client components, wrap in a container div for targeted hydration
         if (isClientComponent) {
           pageElement = React.createElement(
@@ -315,12 +390,109 @@ export class ServerRenderer {
           );
         }
 
+        if (ErrorFallbackComponent) {
+          wrappedElement = React.createElement(
+            FarmRouteErrorBoundary,
+            {
+              Fallback: ErrorFallbackComponent,
+              fallbackProps: {
+                params,
+                path: pathname,
+                searchParams: Promise.resolve(searchParamsObject),
+                middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+                context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+              },
+            },
+            wrappedElement,
+          );
+        }
+
         // Render with middleware data available
         await this.renderWithSSR(wrappedElement, req, res, _clearCurrentMiddlewareData);
       });
     } catch (error) {
       logger.error(`Error rendering page: ${error}`);
+
+      if (errorBoundaryEntry) {
+        const rendered = await this.renderRouteErrorBoundary(req, res, {
+          pathname,
+          params,
+          layouts,
+          searchParamsObject,
+          middlewareMap,
+          pluginExposedContext,
+          error,
+          errorModulePath: errorBoundaryEntry.modulePath,
+        });
+
+        if (rendered) {
+          return;
+        }
+      }
+
       await this.render500(req, res, error);
+    }
+  }
+
+  private async renderRouteErrorBoundary(
+    req: FarmRequest,
+    res: FarmResponse,
+    options: {
+      pathname: string;
+      params: Record<string, string>;
+      layouts: Array<{ modulePath: string }>;
+      searchParamsObject: Record<string, string | string[] | undefined>;
+      middlewareMap: Map<string, any>;
+      pluginExposedContext: Map<string, any>;
+      error: unknown;
+      errorModulePath: string;
+    },
+  ): Promise<boolean> {
+    try {
+      const errorModule = await this.routeManager.loadRouteModule(options.errorModulePath);
+      if (!errorModule.default) {
+        return false;
+      }
+
+      const ErrorComponent = errorModule.default as React.ComponentType<unknown>;
+      const errorElement = React.createElement(ErrorComponent, {
+        error: options.error,
+        params: options.params,
+        path: options.pathname,
+        searchParams: Promise.resolve(options.searchParamsObject),
+        middleware: options.middlewareMap.size > 0 ? { data: options.middlewareMap } : undefined,
+        context:
+          options.pluginExposedContext.size > 0
+            ? { data: options.pluginExposedContext }
+            : undefined,
+        reset: () => {},
+      } as React.Attributes);
+
+      let wrapped: React.ReactElement = errorElement;
+      const layoutModules = await Promise.all(
+        options.layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
+      );
+      for (let i = layoutModules.length - 1; i >= 0; i--) {
+        const LayoutComponent = layoutModules[i].default;
+        wrapped = React.createElement(
+          LayoutComponent as React.ComponentType<unknown>,
+          {
+            children: wrapped,
+            params: options.params,
+          } as React.Attributes,
+        );
+      }
+
+      const ReactDOMServer = await import("react-dom/server");
+      const html = ReactDOMServer.renderToString(wrapped);
+      res.statusCode = 500;
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.write(this.createFullHTML(html));
+      res.end();
+      return true;
+    } catch (renderError) {
+      logger.warn(`Failed to render route-level error boundary: ${renderError}`);
+      return false;
     }
   }
 

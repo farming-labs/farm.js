@@ -97,7 +97,7 @@ describe("RouteManager", () => {
   });
 
   describe("discoverRoutes", () => {
-    it("should discover page and layout files", async () => {
+    it("should discover page/layout/loading/error files", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
         if (pattern.includes("page")) {
@@ -106,6 +106,12 @@ describe("RouteManager", () => {
         if (pattern.includes("layout")) {
           return ["layout.tsx"];
         }
+        if (pattern.includes("loading")) {
+          return ["loading.tsx", "about/loading.tsx"];
+        }
+        if (pattern.includes("error")) {
+          return ["error.tsx", "about/error.tsx"];
+        }
         return [];
       });
 
@@ -113,9 +119,71 @@ describe("RouteManager", () => {
 
       const routes = routeManager.getRoutes();
       const layouts = routeManager.getLayouts();
+      const loadings = routeManager.getLoadings();
+      const errors = routeManager.getErrors();
 
       expect(routes.size).toBe(2);
       expect(layouts.size).toBe(1);
+      expect(loadings.size).toBe(2);
+      expect(errors.size).toBe(2);
+    });
+  });
+
+  describe("route-level boundaries", () => {
+    beforeEach(async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return [
+            "page.tsx",
+            "docs/page.tsx",
+            "docs/getting-started/page.tsx",
+            "users/[id]/page.tsx",
+          ];
+        }
+        if (pattern.includes("layout")) {
+          return ["layout.tsx"];
+        }
+        if (pattern.includes("loading")) {
+          return [
+            "loading.tsx",
+            "docs/loading.tsx",
+            "docs/getting-started/loading.tsx",
+            "users/[id]/loading.tsx",
+          ];
+        }
+        if (pattern.includes("error")) {
+          return ["error.tsx", "docs/error.tsx", "users/[id]/error.tsx"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+    });
+
+    it("should return nearest matching loading boundary", () => {
+      const nested = routeManager.getMatchingLoading("/docs/getting-started");
+      expect(nested?.route.filePath).toBe("docs/getting-started/loading.tsx");
+
+      const parent = routeManager.getMatchingLoading("/docs/plugins");
+      expect(parent?.route.filePath).toBe("docs/loading.tsx");
+
+      const dynamic = routeManager.getMatchingLoading("/users/42/settings");
+      expect(dynamic?.route.filePath).toBe("users/[id]/loading.tsx");
+
+      const root = routeManager.getMatchingLoading("/outside/known/pages");
+      expect(root?.route.filePath).toBe("loading.tsx");
+    });
+
+    it("should return nearest matching error boundary", () => {
+      const docs = routeManager.getMatchingError("/docs/getting-started");
+      expect(docs?.route.filePath).toBe("docs/error.tsx");
+
+      const dynamic = routeManager.getMatchingError("/users/42/profile");
+      expect(dynamic?.route.filePath).toBe("users/[id]/error.tsx");
+
+      const root = routeManager.getMatchingError("/outside/known/pages");
+      expect(root?.route.filePath).toBe("error.tsx");
     });
   });
 });

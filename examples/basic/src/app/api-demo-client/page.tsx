@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-// import { Link } from '@farmjs/core/client';
+import { Link } from '@farmjs/core/client';
 import { api } from '../../lib/api-client';
 
 export default function APIClientDemo() {
@@ -17,7 +17,7 @@ export default function APIClientDemo() {
 
     try {
       const data = await api.hello.post({
-        body: { name: 'something' }
+        body: {name:'something'}
       });
       setHelloResponse(data);
     } catch (err) {
@@ -237,18 +237,12 @@ console.log(result.user);  // ✅ Autocomplete works!`}
 
           {/* Navigation */}
           <div className="flex gap-4 justify-center pt-8">
-            {/* <Link
-              href="/api-demo"
-              className="inline-block px-6 py-3 bg-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700 transition-colors"
-            >
-              Server Component Demo
-            </Link>
             <Link
               href="/"
               className="inline-block px-6 py-3 bg-white text-black rounded-lg font-semibold hover:bg-gray-200 transition-colors"
             >
               ← Back to Home
-            </Link> */}
+            </Link>
           </div>
         </div>
       </div>

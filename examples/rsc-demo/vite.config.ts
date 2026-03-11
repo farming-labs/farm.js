@@ -7,6 +7,7 @@ const nitroPreset = process.env.NITRO_PRESET || "vercel";
 
 export default defineConfig({
   srcDir: "src",
+  routesDir: "",
   outDir: "dist",
   port: 3000,
   debug: false,

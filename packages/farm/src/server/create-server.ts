@@ -20,6 +20,22 @@ function createBrandingPlugin() {
   let serverStarted = false;
   let startTime = Date.now();
 
+  const getColors = () => {
+    const id = (s: string) => s;
+    try {
+      const pc = typeof require === "function" ? require("picocolors") : null;
+      if (pc && typeof pc.createColors === "function") return pc.createColors(true);
+      if (pc) return pc;
+    } catch {}
+    return {
+      dim: id,
+      bold: id,
+      green: id,
+      cyan: id,
+      gray: id,
+    };
+  };
+
   return {
     name: "farm:branding",
     enforce: "pre" as const,
@@ -38,7 +54,7 @@ function createBrandingPlugin() {
               ? address.port
               : server.config.server.port || port || 3000;
 
-          const pc = require("picocolors");
+          const pc = getColors();
           console.log("");
           console.log(
             `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`,
@@ -141,7 +157,8 @@ export async function createServer(config: FarmConfig = {}) {
     const projectRoot = finalConfig.root || process.cwd();
 
     let tailwindVitePlugin: any = undefined;
-    if (hasProjectPostcssConfig(projectRoot)) {
+    const shouldUseProjectPostcss = hasProjectPostcssConfig(projectRoot);
+    if (shouldUseProjectPostcss) {
       logger.info("📦 Using project PostCSS/Tailwind configuration");
     } else {
       try {
@@ -157,6 +174,7 @@ export async function createServer(config: FarmConfig = {}) {
 
     const server = await createViteServer({
       root: projectRoot,
+      css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
       plugins: [
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         farmPlugin(finalConfig, pluginManager),
@@ -168,7 +186,13 @@ export async function createServer(config: FarmConfig = {}) {
       optimizeDeps: {
         // Avoid Vite scanning server/native-only deps from framework internals.
         noDiscovery: true,
-        include: ["react", "react-dom"],
+        include: [
+          "react",
+          "react-dom",
+          "react-dom/client",
+          "react/jsx-runtime",
+          "react/jsx-dev-runtime",
+        ],
         exclude: [
           "@farmjs/core/server",
           "@farmjs/core/api",
