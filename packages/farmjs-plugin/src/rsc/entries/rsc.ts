@@ -44,11 +44,66 @@ function debug(...args) {
 // eager: true means they're imported at startup, not lazily
 const pages = import.meta.glob('${glob}/**/page.{tsx,jsx,ts,js}', { eager: true });
 const layouts = import.meta.glob('${glob}/**/layout.{tsx,jsx,ts,js}', { eager: true });
+const loadings = import.meta.glob('${glob}/**/loading.{tsx,jsx,ts,js}', { eager: true });
+const errors = import.meta.glob('${glob}/**/error.{tsx,jsx,ts,js}', { eager: true });
 const middlewares = import.meta.glob('${glob}/**/middleware.{tsx,jsx,ts,js}', { eager: true });
 
 debug('Discovered pages:', Object.keys(pages));
 debug('Discovered layouts:', Object.keys(layouts));
+debug('Discovered loadings:', Object.keys(loadings));
+debug('Discovered errors:', Object.keys(errors));
 debug('Discovered middlewares:', Object.keys(middlewares));
+
+/**
+ * Convert loading/error file path to route pattern (segment the boundary applies to).
+ * Inlined to avoid runtime dependency on plugin package; logic is simple and covered by e2e.
+ */
+function boundaryPathToRoute(filePath, globVal, kind) {
+  const re = kind === 'loading' ? /\\/loading\\.[tj]sx?$/i : /\\/error\\.[tj]sx?$/i;
+  let route = filePath.replace(globVal, '').replace(re, '').replace(/\\\\/g, '/') || '/';
+  route = route.replace(/\\[([^\\]]+)\\]/g, ':$1');
+  return route;
+}
+function getMatchingLoading(pathname, globVal) {
+  const normalized = pathname.replace(/\\/$/, '') || '/';
+  const pathParts = normalized.split('/').filter(Boolean);
+  let best = null, bestLength = -1;
+  for (const filePath of Object.keys(loadings)) {
+    const pattern = boundaryPathToRoute(filePath, globVal, 'loading');
+    const patternParts = pattern === '/' ? [] : pattern.split('/').filter(Boolean);
+    if (patternParts.length > pathParts.length) continue;
+    let matches = true;
+    for (let i = 0; i < patternParts.length; i++) {
+      const p = patternParts[i], seg = pathParts[i];
+      if (!seg || (p.startsWith(':') && p !== ':...') || p === ':...') continue;
+      if (!p.startsWith(':') && p !== seg) { matches = false; break; }
+    }
+    if (matches && patternParts.length > bestLength && loadings[filePath]?.default) {
+      best = loadings[filePath].default; bestLength = patternParts.length;
+    }
+  }
+  return best;
+}
+function getMatchingError(pathname, globVal) {
+  const normalized = pathname.replace(/\\/$/, '') || '/';
+  const pathParts = normalized.split('/').filter(Boolean);
+  let best = null, bestLength = -1;
+  for (const filePath of Object.keys(errors)) {
+    const pattern = boundaryPathToRoute(filePath, globVal, 'error');
+    const patternParts = pattern === '/' ? [] : pattern.split('/').filter(Boolean);
+    if (patternParts.length > pathParts.length) continue;
+    let matches = true;
+    for (let i = 0; i < patternParts.length; i++) {
+      const p = patternParts[i], seg = pathParts[i];
+      if (!seg || (p.startsWith(':') && p !== ':...') || p === ':...') continue;
+      if (!p.startsWith(':') && p !== seg) { matches = false; break; }
+    }
+    if (matches && patternParts.length > bestLength && errors[filePath]?.default) {
+      best = errors[filePath].default; bestLength = patternParts.length;
+    }
+  }
+  return best;
+}
 
 /**
  * Convert middleware file path to route path
@@ -240,6 +295,28 @@ function filePathToRoute(filePath) {
 }
 
 /**
+ * Route-level error boundary (React class component for getDerivedStateFromError)
+ * Next.js-style: error.tsx receives { error, reset }.
+ */
+class RouteErrorBoundary extends React.Component {
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  render() {
+    if (this.state.hasError) {
+      const Fallback = this.props.Fallback;
+      const reset = () => this.setState({ hasError: false, error: null });
+      return React.createElement(Fallback, { ...this.props.fallbackProps, error: this.state.error, reset });
+    }
+    return this.props.children;
+  }
+}
+
+/**
  * Match a URL pathname to a route pattern
  * Supports dynamic segments like :id and catch-all like *
  */
@@ -377,6 +454,8 @@ async function handler(request) {
   for (const [key, value] of middlewareResult.ctx.headers) {
     middlewareHeaders.set(key, value);
   }
+  
+  const glob = ${JSON.stringify(glob)};
 `;
 
   // If actions enabled, add action handling before rendering
@@ -459,6 +538,23 @@ async function handler(request) {
     pageContent = await Page(pageProps);
   } else {
     pageContent = h(Page, pageProps);
+  }
+  
+  // Route-level loading boundary (Next.js loading.tsx): wrap in Suspense so async content shows fallback
+  const LoadingComponent = getMatchingLoading(url.pathname, glob);
+  if (LoadingComponent) {
+    const loadingFallback = h(LoadingComponent, { params, path: url.pathname });
+    pageContent = h(React.Suspense, { fallback: loadingFallback }, pageContent);
+  }
+  
+  // Route-level error boundary (Next.js error.tsx): catches render errors in this segment
+  const ErrorComponent = getMatchingError(url.pathname, glob);
+  if (ErrorComponent) {
+    pageContent = h(RouteErrorBoundary, {
+      Fallback: ErrorComponent,
+      fallbackProps: { params, path: url.pathname, searchParams },
+      children: pageContent,
+    });
   }
   
   // Render layout
@@ -557,6 +653,44 @@ async function handler(request) {
   return new Response(html, { headers: responseHeaders });
   } catch (err) {
     console.error('[RSC] Handler error:', err);
+    // If route has error.tsx, render it (Next.js-style: SSR error goes to route error boundary)
+    const pathname = url.pathname.replace(/\\/$/, '') || '/';
+    const ErrorComponent = getMatchingError(pathname, glob);
+    if (ErrorComponent) {
+      try {
+        const matched = matchRoute(pathname);
+        const layoutPattern = matched ? matched.pattern : null;
+        const Layout = matched ? getLayout(layoutPattern) : null;
+        const LayoutComp = Layout || (function PassThrough({ children }) { return children; });
+        const errParams = matched ? matched.params : {};
+        const errSearchParams = Object.fromEntries(url.searchParams);
+        const errorElement = h(ErrorComponent, {
+          error: err,
+          reset: () => {},
+          params: errParams,
+          path: pathname,
+          searchParams: errSearchParams,
+        });
+        const layoutContent = LayoutComp.constructor.name === 'AsyncFunction' || LayoutComp.toString().includes('async')
+          ? await LayoutComp({ children: errorElement })
+          : h(LayoutComp, null, errorElement);
+        const rootInner = h('div', { 'data-farm-root': 'true' }, layoutContent);
+        const doc = h('html', null,
+          h('head', null,
+            h('meta', { charSet: 'utf-8' }),
+            h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
+            h('title', null, 'Error'),
+            h('link', { rel: 'stylesheet', href: globalsCssPath })
+          ),
+          h('body', null, h('div', { id: 'root' }, rootInner))
+        );
+        const renderToString = (await import('react-dom/server')).renderToString;
+        const html = '<!DOCTYPE html>' + renderToString(doc);
+        return new Response(html, { status: 500, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      } catch (e) {
+        console.error('[RSC] Error boundary render failed:', e);
+      }
+    }
     const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Server Error';
     return new Response(JSON.stringify({ error: true, url: request.url, status: 500, message }), {
       status: 500,
