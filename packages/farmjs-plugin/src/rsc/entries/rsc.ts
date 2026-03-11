@@ -540,7 +540,7 @@ async function handler(request) {
     pageContent = h(Page, pageProps);
   }
   
-  // Route-level loading boundary (Next.js loading.tsx): wrap in Suspense so async content shows fallback
+  // Route-level loading boundary: wrap in Suspense so async content shows fallback
   const LoadingComponent = getMatchingLoading(url.pathname, glob);
   if (LoadingComponent) {
     const loadingFallback = h(LoadingComponent, { params, path: url.pathname });
