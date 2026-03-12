@@ -622,7 +622,8 @@ async function handler(request) {
       ssr = await globalThis.__VITE_RSC_LOAD_SSR__();
     }
     if (ssr) {
-      const html = await ssr.renderHTML(rscStream${ctx.actionsEnabled ? ", { formState }" : ""});
+      // Pass payload so SSR can stream the tree (Suspense fallback first, then content)
+      const html = await ssr.renderHTML({ payload, rscStream }${ctx.actionsEnabled ? ", { formState }" : ""});
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/html');

@@ -503,7 +503,11 @@ export class ServerRenderer {
     clearMiddlewareData?: () => void,
   ): Promise<void> {
     return new Promise((resolve, reject) => {
+      const streamStartTime = Date.now();
       res.setHeader("Content-Type", "text/html; charset=utf-8");
+      if (typeof res.flushHeaders === "function") {
+        res.flushHeaders();
+      }
 
       const htmlParts: string[] = [];
       let didError = false;
@@ -609,10 +613,15 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
           metaTags += `\n  <meta property="og:type" content="${og.type.replace(/"/g, "&quot;")}">`;
       }
 
-      const { pipe, abort } = renderToPipeableStream(element, {
+      // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
+      const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
+      const { pipe, abort } = renderToPipeableStream(streamRoot, {
         onShellReady() {
-          // Send HTML opening tags
-          res.write(`<!DOCTYPE html>
+          const shellReadyMs = Date.now() - streamStartTime;
+          if (process.env.FARM_VERBOSE) {
+            console.log(`[FARM STREAM] onShellReady at ${shellReadyMs}ms`);
+          }
+          const shell = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -623,35 +632,39 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
   ${propsScript}
 </head>
 <body class="">
-  <div id="root">`);
+  <div id="root">`;
 
-          // Pipe the React content
+          let firstChunk = true;
           const writableStream = new Writable({
             write(chunk, encoding, callback) {
-              res.write(chunk, encoding);
-              callback();
+              if (firstChunk && process.env.FARM_VERBOSE) {
+                console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
+                firstChunk = false;
+              }
+              res.write(chunk, encoding, () => {
+                if (typeof (res as any).flush === "function") (res as any).flush();
+                callback();
+              });
             },
             final(callback) {
-              // Close the root div and ALWAYS add client script for SPA navigation
-              // The client script contains the SPA router that handles Link clicks
-              // For client components, it also handles hydration
               res.write(`</div>
   <script type="module" src="/@farm/client.js"></script>
 </body>
 </html>`);
               res.end();
               callback();
-
-              // Clear middleware data AFTER rendering completes
               if (clearMiddlewareData) {
                 clearMiddlewareData();
               }
-
               resolve();
             },
           });
 
-          pipe(writableStream);
+          // Start pipe only after shell write is accepted so the loading fallback can flush before more data
+          res.write(shell, (err?: Error | null) => {
+            if (err) return reject(err);
+            setImmediate(() => pipe(writableStream));
+          });
         },
         onShellError(error) {
           didError = true;
