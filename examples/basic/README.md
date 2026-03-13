@@ -25,6 +25,35 @@ pnpm dev
 
 The example will be available at `http://localhost:3000`.
 
+### Required config for route boundaries
+
+This example enables route-level `loading.tsx` and `error.tsx` boundaries with:
+
+```ts
+// examples/basic/farm.config.ts
+export default defineFarmConfig({
+  experimental: {
+    serverComponents: true,
+    serverActions: true,
+  },
+});
+```
+
+`serverComponents: true` is the important part for the current loading/error boundary behavior in this example.
+
+### Monorepo note
+
+If you change code in `packages/farm` or `packages/farmjs-plugin`, rebuild the workspace packages before restarting this example:
+
+```bash
+pnpm --filter @farmjs/core build
+pnpm --filter @farmjs/plugin build
+cd examples/basic
+pnpm dev
+```
+
+The example consumes the built package output from `dist`, so source changes in the framework packages are not picked up until they are rebuilt.
+
 ## Project Structure
 
 ```
@@ -44,6 +73,14 @@ src/
 
 - **`error.tsx`** – Catches runtime errors during SSR or client render for that route segment. Receives `error` and `reset()`. When an error is thrown (e.g. in a page or async component), this UI is shown instead; "Try again" calls `reset()` to re-render.
 - **`loading.tsx`** – Shown while the route segment is loading (e.g. async page/layout, streaming). Wraps the segment in a Suspense boundary; you get instant loading states during navigation and SSR streaming.
+
+Important notes:
+
+- You do not manually import `loading.tsx` into `page.tsx`
+- The segment must suspend or throw for the boundary to appear
+- `loading.tsx` can stay a normal component; add `'use client'` only if it truly needs client-only APIs
+- See `src/app/boundaries/loading` for the streamed loading example
+- See `src/app/boundaries/suspense` for a plain React Suspense example
 
 ## What to Explore
 

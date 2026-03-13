@@ -22,6 +22,7 @@ export default defineFarmConfig({
   basePath: '/',
   preset: "vercel",
   experimental: {
+    // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
     serverComponents: true,
     serverActions: true,
   },

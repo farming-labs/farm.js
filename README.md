@@ -108,6 +108,10 @@ Farm.js supports a powerful configuration system via `farm.config.ts`:
 import { defineFarmConfig } from "@farmjs/core";
 
 export default defineFarmConfig({
+  experimental: {
+    serverComponents: true,
+  },
+
   // Routing
   async redirects() {
     return [{ source: "/old", destination: "/new", permanent: true }];
@@ -138,6 +142,68 @@ export default defineFarmConfig({
 ```
 
 See [farm.config.ts documentation](./PLUGIN_SYSTEM.md) for all options.
+
+### Route-level Boundaries
+
+Farm.js supports Next.js-style route boundaries with special files inside a route segment:
+
+- `loading.tsx` - Route-level loading UI shown while the segment is suspended
+- `error.tsx` - Route-level error UI shown when the segment throws during render
+
+Example structure:
+
+```text
+src/app/
+  layout.tsx
+  page.tsx
+  loading.tsx
+  error.tsx
+  dashboard/
+    page.tsx
+    loading.tsx
+    error.tsx
+```
+
+Required config:
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  experimental: {
+    serverComponents: true,
+  },
+});
+```
+
+How it works:
+
+- `loading.tsx` is used automatically as the Suspense fallback for that segment
+- `error.tsx` is used automatically as the error boundary for that segment
+- You do not need to import or conditionally render `loading.tsx` in `page.tsx`
+- The route must actually suspend to show `loading.tsx` (for example: async server component, async layout, or a child wrapped by Suspense)
+- `loading.tsx` and `error.tsx` do not need `'use client'` unless they use client-only features like hooks or browser APIs
+
+Example:
+
+```tsx
+// src/app/dashboard/loading.tsx
+export default function Loading() {
+  return <p>Loading dashboard...</p>;
+}
+```
+
+```tsx
+// src/app/dashboard/page.tsx
+async function SlowContent() {
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return <div>Dashboard ready</div>;
+}
+
+export default function DashboardPage() {
+  return <SlowContent />;
+}
+```
 
 ## 🔌 Plugin System
 
