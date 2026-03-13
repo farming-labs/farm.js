@@ -32,11 +32,18 @@ src/
   app/
     layout.tsx      # Root layout with navigation
     page.tsx        # Home page (/)
+    error.tsx       # Route-level error boundary (catches errors for this segment)
+    loading.tsx     # Route-level loading UI (Suspense fallback while segment loads)
     about/
       page.tsx      # About page (/about)
     contact/
       page.tsx      # Contact page (/contact)
 ```
+
+## Route-level boundaries (Next.js-style)
+
+- **`error.tsx`** – Catches runtime errors during SSR or client render for that route segment. Receives `error` and `reset()`. When an error is thrown (e.g. in a page or async component), this UI is shown instead; "Try again" calls `reset()` to re-render.
+- **`loading.tsx`** – Shown while the route segment is loading (e.g. async page/layout, streaming). Wraps the segment in a Suspense boundary; you get instant loading states during navigation and SSR streaming.
 
 ## What to Explore
 

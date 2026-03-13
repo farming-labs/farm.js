@@ -36,22 +36,27 @@ function pipeableStreamToString(stream) {
 /**
  * Renders an RSC stream to HTML
  * Called by the RSC environment's handler
+ * @param { { payload, rscStream } | ReadableStream } firstArg - Either { payload, rscStream } for initial load (stream tree so loading.tsx shows first) or legacy rscStream only
  */
-export async function renderHTML(rscStream, options = {}) {
+export async function renderHTML(firstArg, options = {}) {
   debug('Starting SSR render');
   
-  // Tee (duplicate) the stream:
-  // - s1 is used for SSR rendering
-  // - s2 is injected into HTML for client hydration
+  const hasPayload = firstArg && typeof firstArg === 'object' && firstArg.payload != null && firstArg.rscStream != null;
+  const rscStream = hasPayload ? firstArg.rscStream : firstArg;
   const [s1, s2] = rscStream.tee();
   
-  // Resolve payload once before streaming so we never suspend and never output
-  // a shell + content (which would show two blocks, e.g. home below current page)
-  const payload = await createFromReadableStream(s1);
+  // When payload is provided: render the tree directly so Suspense streams (loading fallback first, then content).
+  // When not: deserialize full stream first (legacy), then render (no streaming of loading state).
+  let rootElement;
+  if (hasPayload) {
+    rootElement = firstArg.payload.root;
+  } else {
+    const payload = await createFromReadableStream(s1);
+    rootElement = payload.root;
+  }
   
-  // Single root component
   function Root() {
-    return payload.root;
+    return rootElement;
   }
   
   // Get the bootstrap script that loads the client bundle (for hydration).
@@ -70,19 +75,68 @@ export async function renderHTML(rscStream, options = {}) {
   }
   if (!bootstrap && PROD_BOOTSTRAP !== "__FARM_BOOTSTRAP_SCRIPT__") bootstrap = PROD_BOOTSTRAP;
   
-  // Use renderToPipeableStream (Node) so Suspense/client boundaries don't throw "suspended while responding to synchronous input".
-  // Pipe to a buffer so we get one HTML string (no duplicate visible blocks).
-  debug('Rendering to HTML stream (then buffering)');
+  // Use renderToPipeableStream so Suspense streams: fallback (loading.tsx) first, then resolved content.
   const { pipe } = renderToPipeableStream(React.createElement(Root), {
     ...(bootstrap && { bootstrapScriptContent: bootstrap }),
     formState: options.formState,
   });
-  const { PassThrough } = await import('stream');
+  const { PassThrough, Readable } = await import('stream');
   const passThrough = new PassThrough();
   pipe(passThrough);
+
+  const CLIENT_ENTRY_HREF = "__FARM_CLIENT_ENTRY_HREF__";
+  const PLACEHOLDER_STR = "__FARM_CLIENT_ENTRY_HREF__";
+  const injectClientScriptInStream = typeof CLIENT_ENTRY_HREF === "string" && CLIENT_ENTRY_HREF.length > 0 && CLIENT_ENTRY_HREF.indexOf(PLACEHOLDER_STR) < 0;
+  const clientScriptTag = injectClientScriptInStream ? '<script type="module" src="' + CLIENT_ENTRY_HREF + '"></script>' : '';
+
+  if (hasPayload) {
+    // Stream HTML to the client so loading.tsx appears first, then content when async work finishes.
+    debug('Streaming HTML (loading fallback then content)');
+    const BODY_HTML_END = '</body></html>';
+    const TAG_LEN = BODY_HTML_END.length;
+    const encoder = new TextEncoder();
+    let streamBuf = '';
+    const streamingClientScriptInjector = new TransformStream({
+      transform(chunk, controller) {
+        const str = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+        if (!injectClientScriptInStream || !clientScriptTag) {
+          controller.enqueue(typeof chunk === "string" ? encoder.encode(str) : chunk);
+          return;
+        }
+        streamBuf += str;
+        while (streamBuf.length > TAG_LEN) {
+          const tail = streamBuf.slice(-TAG_LEN);
+          if (tail === BODY_HTML_END) {
+            const before = streamBuf.slice(0, streamBuf.length - TAG_LEN);
+            controller.enqueue(encoder.encode(before + clientScriptTag + BODY_HTML_END));
+            streamBuf = '';
+            return;
+          }
+          controller.enqueue(encoder.encode(streamBuf.slice(0, streamBuf.length - TAG_LEN)));
+          streamBuf = streamBuf.slice(-TAG_LEN);
+        }
+      },
+      flush(controller) {
+        if (streamBuf) controller.enqueue(encoder.encode(streamBuf));
+      }
+    });
+    const webStream = typeof Readable.toWeb === 'function'
+      ? Readable.toWeb(passThrough)
+      : new ReadableStream({
+          start(controller) {
+            passThrough.on('data', (c) => controller.enqueue(c instanceof Buffer ? c : new TextEncoder().encode(String(c))));
+            passThrough.on('end', () => controller.close());
+            passThrough.on('error', (e) => controller.error(e));
+          }
+        });
+    let out = webStream.pipeThrough(injectRSCPayload(s2));
+    out = out.pipeThrough(streamingClientScriptInjector);
+    return out;
+  }
+
+  // Legacy path: buffer full HTML then send (no loading streaming)
+  debug('Rendering to HTML stream (then buffering)');
   const fullHtmlRaw = await pipeableStreamToString(passThrough);
-  
-  // In production, inject client CSS link (placeholder __FARM_CLIENT_CSS_HREF__ is replaced at build time by nitro-build).
   const CLIENT_CSS_HREF = "__FARM_CLIENT_CSS_HREF__";
   const shouldInjectCss = typeof CLIENT_CSS_HREF === "string" && CLIENT_CSS_HREF.length > 0 && CLIENT_CSS_HREF.indexOf("__FARM_CLIENT_CSS_HREF__") < 0;
   let fullHtml = fullHtmlRaw;
@@ -101,19 +155,12 @@ export async function renderHTML(rscStream, options = {}) {
       : ""
   }
   debug('Injecting RSC payload into HTML');
-  
   const streamFromHtml = new ReadableStream({
     start(controller) {
       controller.enqueue(new TextEncoder().encode(fullHtml));
       controller.close();
     }
   });
-  // Inject client script AFTER RSC payload so __FLIGHT_DATA is populated before the client bundle runs (fixes hydration + client nav)
-  // PLACEHOLDER_STR is never patched so indexOf(PLACEHOLDER_STR) < 0 means CLIENT_ENTRY_HREF was patched to the real URL
-  const PLACEHOLDER_STR = "__FARM_CLIENT_ENTRY_HREF__";
-  const CLIENT_ENTRY_HREF = "__FARM_CLIENT_ENTRY_HREF__";
-  // Only inject client script in production when the placeholder was replaced with a real URL
-  const injectClientScriptInStream = typeof CLIENT_ENTRY_HREF === "string" && CLIENT_ENTRY_HREF.length > 0 && CLIENT_ENTRY_HREF.indexOf(PLACEHOLDER_STR) < 0;
   let clientBuffer = "";
   let clientScriptInjected = false;
   const injectClientScriptStream = new TransformStream({
@@ -127,14 +174,14 @@ export async function renderHTML(rscStream, options = {}) {
       if (clientBuffer.includes("</body></html>")) {
         const href = (typeof CLIENT_ENTRY_HREF === "string" && CLIENT_ENTRY_HREF.length > 0 && CLIENT_ENTRY_HREF.indexOf(PLACEHOLDER_STR) < 0) ? CLIENT_ENTRY_HREF : "";
         const out = href ? clientBuffer.replace("</body></html>", '<script type="module" src="' + href + '"></script></body></html>') : clientBuffer;
-        controller.enqueue(typeof chunk === "string" ? out : new TextEncoder().encode(out));
+        controller.enqueue(new TextEncoder().encode(out));
         clientBuffer = "";
         clientScriptInjected = true;
       }
     },
     flush(controller) {
       if (clientBuffer) {
-        controller.enqueue(typeof clientBuffer === "string" ? clientBuffer : new TextEncoder().encode(clientBuffer));
+        controller.enqueue(new TextEncoder().encode(clientBuffer));
       }
     }
   });

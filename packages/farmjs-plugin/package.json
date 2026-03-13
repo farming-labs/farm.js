@@ -46,7 +46,7 @@
     "build": "tsc && node scripts/build.js",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'No tests in this package'"
+    "test": "echo 'No tests in this package (boundary-matching tested via @farmjs/core)'"
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",

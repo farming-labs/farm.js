@@ -98,6 +98,12 @@ export default function HomePage({ params, searchParams }: PageProps) {
           <Link href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
             Query State Demo
           </Link>
+          <Link href="/boundaries/loading" className="inline-flex items-center px-4 py-2 bg-cyan-600 text-white rounded-md hover:bg-cyan-700 transition-colors">
+            Loading Boundary
+          </Link>
+          <Link href="/boundaries/suspense" className="inline-flex items-center px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors">
+            React Suspense
+          </Link>
           <Link href="/docs/reference" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
             📚 API Documentation
           </Link>

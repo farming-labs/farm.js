@@ -650,6 +650,7 @@ if (document.readyState === 'loading') {
               });
 
               // Load the RSC entry in the "rsc" environment so @vitejs/plugin-rsc transforms run with this.environment.name === "rsc".
+              // Fallback: when Farm dev server has no rsc environment, load via main server so streaming/loading still works.
               const rscEnv = (server as any).environments?.rsc;
               let rscEntry: any = null;
               if (rscEnv) {
@@ -672,6 +673,13 @@ if (document.readyState === 'loading') {
                   }));
                 const id = resolved?.id ?? pathToFileURL(absoluteRscEntry).href;
                 rscEntry = await rscEnv.runner.import(id);
+              }
+              if (!rscEntry?.default?.fetch) {
+                try {
+                  rscEntry = await server.ssrLoadModule("./.farm/rsc-entries/entry.rsc.tsx");
+                } catch (_) {
+                  // Ignore; will fall through to legacy handler
+                }
               }
               if (!rscEntry?.default?.fetch)
                 throw new Error("[Farm.js] Could not load RSC entry in rsc environment");
