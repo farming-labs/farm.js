@@ -9,9 +9,7 @@ test.describe("Route-level boundaries", () => {
     expect(response.status()).toBe(200);
 
     const html = await response.text();
-    expect(
-      html.includes("Route Loading Boundary") || html.includes("Data loaded"),
-    ).toBe(true);
+    expect(html.includes("Route Loading Boundary") || html.includes("Data loaded")).toBe(true);
 
     await page.goto("/boundaries/loading");
     await expect(page.getByTestId("route-loading-final")).toBeVisible({ timeout: 15000 });
