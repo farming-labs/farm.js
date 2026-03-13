@@ -647,7 +647,9 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
               });
             },
             final(callback) {
+              const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
               res.write(`</div>
+  ${suspenseRevealFallback}
   <script type="module" src="/@farm/client.js"></script>
 </body>
 </html>`);
@@ -660,11 +662,14 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
             },
           });
 
-          // Start pipe only after shell write is accepted so the loading fallback can flush before more data
-          res.write(shell, (err?: Error | null) => {
-            if (err) return reject(err);
-            setImmediate(() => pipe(writableStream));
-          });
+          // Queue the shell immediately, then start piping the Suspense stream.
+          // Waiting for the write callback can delay the fallback until the whole
+          // response is ready under some dev-server wrappers.
+          res.write(shell);
+          if (typeof (res as any).flush === "function") {
+            (res as any).flush();
+          }
+          pipe(writableStream);
         },
         onShellError(error) {
           didError = true;

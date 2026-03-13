@@ -513,6 +513,7 @@ export function farmPlugin(
           const originalEnd = res.end.bind(res);
           let afterResponseCalled = false;
           const htmlChunks: Buffer[] = [];
+          let didStreamHtml = false;
 
           res.write = ((chunk: any, ...args: any[]) => {
             const contentTypeHeader =
@@ -523,7 +524,12 @@ export function farmPlugin(
             if (isHtmlResponse && chunk !== undefined && chunk !== null) {
               const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
               htmlChunks.push(bufferChunk);
-              return true;
+              didStreamHtml = true;
+              const writeResult = originalWrite(chunk, ...args);
+              if (typeof (res as any).flush === "function") {
+                (res as any).flush();
+              }
+              return writeResult;
             }
 
             return originalWrite(chunk, ...args);
@@ -532,10 +538,9 @@ export function farmPlugin(
           res.end = ((...args: any[]) => {
             if (!afterResponseCalled && pm) {
               afterResponseCalled = true;
-              // Log page response
               const duration = Date.now() - startTime;
               logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-              // Call lifecycle hooks before actually ending the response.
+              const originalEndArgs = [...args];
               Promise.resolve()
                 .then(async () => {
                   const contentTypeHeader =
@@ -552,29 +557,32 @@ export function farmPlugin(
                       htmlChunks.push(bufferChunk);
                     }
 
-                    let html = Buffer.concat(htmlChunks).toString("utf-8");
-                    html = await pm.runHookSerial("transformHTML", html);
-                    html = await pm.runHookSerial("afterRender", html, renderPayload);
-
-                    const callback =
-                      typeof args[args.length - 1] === "function"
-                        ? args[args.length - 1]
-                        : undefined;
-                    args.length = 0;
-                    args.push(html);
-                    if (callback) {
-                      args.push(callback);
+                    const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
+                    let html = fullHtml;
+                    if (!didStreamHtml) {
+                      html = await pm.runHookSerial("transformHTML", html);
+                      html = await pm.runHookSerial("afterRender", html, renderPayload);
+                      const callback =
+                        typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+                          ? originalEndArgs[originalEndArgs.length - 1]
+                          : undefined;
+                      originalEndArgs.length = 0;
+                      originalEndArgs.push(html);
+                      if (callback) originalEndArgs.push(callback);
+                    } else {
+                      await pm.runHookSerial("transformHTML", fullHtml);
+                      await pm.runHookSerial("afterRender", fullHtml, renderPayload);
                     }
                   }
                 })
                 .then(() => pm.runHookParallel("afterResponse", req, res))
                 .then(() => {
-                  originalEnd(...args);
+                  originalEnd(...originalEndArgs);
                 })
                 .catch((err) => {
                   emitPluginError("response-end", err, { pathname }).catch(() => {});
                   console.error("Error in afterResponse hook:", err);
-                  originalEnd(...args);
+                  originalEnd(...originalEndArgs);
                 });
             } else {
               originalEnd(...args);
