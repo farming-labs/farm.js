@@ -16,10 +16,14 @@ export default function APIClientDemo() {
     setError(null);
 
     try {
-      const data = await api.hello.post({
+      const result = await api.hello.post({
         body: { name: 'something' },
       });
-      setHelloResponse(data);
+      if (result.error) {
+        setError('Failed to fetch hello endpoint: ' + result.error);
+      } else {
+        setHelloResponse(result.data);
+      }
     } catch (err) {
       setError('Failed to fetch hello endpoint: ' + err);
     } finally {
@@ -33,10 +37,14 @@ export default function APIClientDemo() {
     setError(null);
     try {
       // Nested API call: api.users.get()
-      const data = await api.users.get({
+      const result = await api.users.get({
         query: { limit: '5' }
       });
-      setUsersResponse(data);
+      if (result.error) {
+        setError('Failed to fetch users: ' + result.error);
+      } else {
+        setUsersResponse(result.data);
+      }
     } catch (err) {
       setError('Failed to fetch users: ' + err);
     } finally {
@@ -49,14 +57,18 @@ export default function APIClientDemo() {
     setLoading('login');
     setError(null);
     try {
-      const data = await api.auth.login.post({
+      const result = await api.auth.login.post({
         body: {
           hint: "login post",
           email: "test@example.com",
           password: "password123"
         }
       });
-      setLoginResponse(data);
+      if (result.error) {
+        setError('Failed to login: ' + result.error);
+      } else {
+        setLoginResponse(result.data);
+      }
     } catch (err) {
       setError('Failed to login: ' + err);
     } finally {
@@ -70,15 +82,19 @@ export default function APIClientDemo() {
     setError(null);
     try {
       // Nested API call: api.users.post()
-      const data = await api.users.post({
+      const result = await api.users.post({
         body: {
           email: "test@example.com",
           name: "test user"
         }
       });
-      alert('User created! ' + JSON.stringify(data));
-      // Refresh users list
-      await fetchUsers();
+      if (result.error) {
+        setError('Failed to create user: ' + result.error);
+      } else {
+        alert('User created! ' + JSON.stringify(result.data));
+        // Refresh users list
+        await fetchUsers();
+      }
     } catch (err) {
       setError('Failed to create user: ' + err);
     } finally {
@@ -220,15 +236,19 @@ export default function APIClientDemo() {
               <div>
                 <p className="text-gray-500 mb-2">// Option 2: Nested API syntax (recommended!)</p>
                 <pre className="text-yellow-300">
-                  {`const result = await api.auth.login({
+                  {`const result = await api.auth.login.post({
   body: {
     email: 'test@example.com',
     password: 'password123'
   }
 });
 
-console.log(result.token); // ✅ Fully typed!
-console.log(result.user);  // ✅ Autocomplete works!`}
+if (result.error) {
+  console.error(result.error);
+} else {
+  console.log(result.data?.token); // ✅ Fully typed!
+  console.log(result.data?.user);  // ✅ Autocomplete works!
+}`}
                 </pre>
               </div>
             </div>

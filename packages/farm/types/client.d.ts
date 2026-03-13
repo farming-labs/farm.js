@@ -49,7 +49,114 @@ declare module "@farmjs/core/client" {
   export interface APIClientOptions {
     baseURL?: string;
     headers?: Record<string, string>;
+    cacheDefaults?: CacheOptions;
   }
+
+  export type StatusPhase =
+    | "idle"
+    | "pending"
+    | "success"
+    | "error"
+    | "revalidating"
+    | "invalidated";
+
+  export type StatusEvent<TData = unknown, TError = unknown> = {
+    phase: StatusPhase;
+    requestId: string;
+    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+    key: string;
+    input?: unknown;
+    data?: TData;
+    error?: TError;
+    isBackground?: boolean;
+    timestamp: number;
+  };
+
+  export type APIResult<TData = unknown, TError = Error> = {
+    data: TData | undefined;
+    error: TError | null;
+  };
+
+  export type RequestEvent = {
+    requestId: string;
+    method: StatusEvent["method"];
+    key: string;
+    path: string;
+    input?: unknown;
+    attempt: number;
+    timestamp: number;
+  };
+
+  export type ResponseEvent<TData = unknown, TError = Error> = {
+    requestId: string;
+    method: StatusEvent["method"];
+    key: string;
+    path: string;
+    input?: unknown;
+    attempt: number;
+    timestamp: number;
+    response?: Response;
+    data?: TData;
+    error?: TError;
+    ok?: boolean;
+    status?: number;
+  };
+
+  export type CachePolicy = "cache-first" | "network-only" | "stale-while-revalidate";
+
+  export type CacheOptions = {
+    key?: string;
+    policy?: CachePolicy;
+    staleTime?: number;
+    gcTime?: number;
+    dedupeMs?: number;
+  };
+
+  export type RetryOptions = {
+    count?: number;
+    delay?: number | ((attempt: number) => number);
+  };
+
+  export type InvalidateTarget =
+    | string
+    | {
+        key: string;
+      }
+    | {
+        path: string;
+        method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+        input?: unknown;
+      }
+    | [RouteRef, unknown?];
+
+  export type InvalidateOptions =
+    | InvalidateTarget[]
+    | {
+        targets: InvalidateTarget[];
+        refetch?: boolean;
+      };
+
+  export type OptimisticUpdate = [RouteRef, unknown, (prev: any) => any];
+
+  export type OptimisticOptions = {
+    update: OptimisticUpdate[];
+    rollbackOnError?: boolean;
+  };
+
+  export type ClientOptions<TData = unknown, TError = unknown> = {
+    cache?: CacheOptions;
+    retry?: RetryOptions;
+    invalidate?: InvalidateOptions;
+    optimistic?: OptimisticOptions;
+    onRequest?: (event: RequestEvent) => void;
+    onResponse?: (data: TData | undefined, error: TError | null, event: ResponseEvent<TData, TError>) => void;
+    onSuccess?: (data: TData) => void;
+    onError?: (err: TError) => void;
+    onSettled?: (data?: TData, err?: TError | null) => void;
+    onStatus?: (event: StatusEvent<TData, TError>) => void;
+  };
+
+  type RouteRef = (...args: any[]) => any;
 
   /**
    * Minimal structural type for Farm.js endpoints used for client inference.
@@ -89,7 +196,8 @@ declare module "@farmjs/core/client" {
 
   type EndpointMethod<T = any> = (
     options?: InferEndpointInput<T>,
-  ) => Promise<InferEndpointOutput<T>>;
+    clientOptions?: ClientOptions<InferEndpointOutput<T>, Error>,
+  ) => Promise<APIResult<InferEndpointOutput<T>, Error>>;
 
   type RouterToClient<T> = {
     [K in keyof T]: T[K] extends Record<string, TypedEndpointLike>

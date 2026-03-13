@@ -39,6 +39,9 @@ export default function RootLayout({ children }: LayoutProps) {
             <Link href="/api-demo-client" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               API Client
             </Link>
+            <Link href="/api-demo-client-advanced" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              API Client Advanced
+            </Link>
             <Link href="/docs/reference" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               API Docs
             </Link>
@@ -51,4 +54,3 @@ export default function RootLayout({ children }: LayoutProps) {
     </div>
   )
 }
-
