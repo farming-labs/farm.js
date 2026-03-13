@@ -1,5 +1,9 @@
 import React from "react";
 
+/**
+ * Route-level loading UI. The framework uses this as the Suspense fallback for this
+ * segment. When the page (or a child) suspends, this component is shown automatically.
+ */
 interface LoadingBoundaryProps {
   path?: string;
   params?: Record<string, string>;
