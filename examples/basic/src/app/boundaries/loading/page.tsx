@@ -2,11 +2,7 @@ import React from 'react';
 import { Link } from '@farmjs/core/client';
 import SlowDetails from './slow-details';
 
-/**
- * This route has a loading.tsx in the same segment. The framework wraps this page
- * in React Suspense with that file as the fallback. No conditional rendering—
- * when the content below suspends, loading.tsx is shown automatically.
- */
+
 export default function RouteLoadingBoundaryPage() {
   const AsyncSlowDetails = SlowDetails as unknown as React.ComponentType;
 
