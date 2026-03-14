@@ -9,14 +9,49 @@ type LogLine = {
   text: string;
 };
 
+type UsersListResponse = {
+  users: Array<{ id: string; name: string; email: string }>;
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+type KeyedResult<T> = {
+  data: T | undefined;
+  error: unknown;
+  key: string;
+};
+
+const USERS_CACHE_KEY = 'demo:users:list';
+
 const makeLogLine = (event: any) => {
   const time = new Date(event.timestamp).toLocaleTimeString();
   const bg = event.isBackground ? ' (bg)' : '';
   return `${time} - ${event.method} - ${event.phase}${bg} - ${event.key}`;
 };
 
+async function getUsersWithKey(
+  policy: 'cache-first' | 'stale-while-revalidate' | 'network-only',
+  onStatus?: (event: any) => void,
+) {
+  return (await api.users.get(
+    { query: { limit: '5' } },
+    {
+      key: USERS_CACHE_KEY,
+      cache: {
+        policy,
+        staleTime: 5000,
+        gcTime: 60000,
+        dedupeMs: 200,
+      },
+      onStatus,
+    } as any,
+  )) as KeyedResult<UsersListResponse>;
+}
+
 export default function APIClientAdvancedDemo() {
   const [usersResponse, setUsersResponse] = useState<any>(null);
+  const [usersKey, setUsersKey] = useState<string>(USERS_CACHE_KEY);
   const [statusLog, setStatusLog] = useState<LogLine[]>([]);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,28 +72,12 @@ export default function APIClientAdvancedDemo() {
     setError(null);
 
     try {
-      const result = await api.users.get(
-        { query: { limit: '5' } },
-        {
-          cache: {
-            policy,
-            staleTime: 5000,
-            gcTime: 60000,
-            dedupeMs: 200,
-          },
-          onStatus: addLog,
-          onError: (err) => {
-            setError(`Failed to fetch users: ${err}`);
-          },
-          onSuccess: (data) => {
-            setUsersResponse(data);
-          },
-        },
-      );
+      const result = await getUsersWithKey(policy, addLog);
       if (result.error) {
         setError(`Failed to fetch users: ${result.error}`);
       } else {
         setUsersResponse(result.data);
+        setUsersKey(result.key);
         if (!selectedUserId && result.data?.users?.[0]?.id) {
           setSelectedUserId(result.data.users[0].id);
         }
@@ -81,57 +100,48 @@ export default function APIClientAdvancedDemo() {
 
     const name = `Optimistic ${Math.floor(Math.random() * 1000)}`;
     const email = `optimistic${Date.now()}@example.com`;
+    const targetKey = usersKey || USERS_CACHE_KEY;
+    const optimisticUpdater = (prev: any) => {
+      const base = prev ?? { users: [], total: 0, limit: 5, offset: 0 };
+      return {
+        ...base,
+        users: [{ id: `optimistic-${Date.now()}`, name, email }, ...base.users].slice(
+          0,
+          base.limit ?? 5,
+        ),
+        total: (base.total ?? base.users.length) + 1,
+      };
+    };
+    const optimisticUpdate: [string, (prev: any) => any] = [targetKey, optimisticUpdater];
+    const previousUsersResponse = usersResponse;
 
     try {
-      const postPromise = api.users.post(
+      setUsersResponse((prev: any) => optimisticUpdater(prev ?? previousUsersResponse));
+
+      const {data , error} = await api.users.post(
         { body: { name, email } },
         {
           optimistic: {
-            update: [
-              [
-                api.users.get,
-                { query: { limit: '5' } },
-                (prev: any) => {
-                  const base = prev ?? { users: [], total: 0, limit: 5, offset: 0 };
-                  return {
-                    ...base,
-                    users: [
-                      ...base.users,
-                      { id: `optimistic-${Date.now()}`, name, email },
-                    ],
-                    total: (base.total ?? base.users.length) + 1,
-                  };
-                },
-              ],
-            ],
+            update: [optimisticUpdate],
             rollbackOnError: true,
           },
-          invalidate: [[api.users.get, { query: { limit: '5' } }]],
+          invalidate: [targetKey],
+          onRequest: () => {},
+          onError: (err) => {},
+          onSuccess: (data) => {},
           onStatus: addLog,
-        },
-      );
-
-      const optimistic = await api.users.get(
-        { query: { limit: '5' } },
-        {
-          cache: {
-            policy: 'cache-first',
-            staleTime: 5000,
-          },
-          onStatus: addLog,
-        },
-      );
-      if (!optimistic.error) {
-        setUsersResponse(optimistic.data);
-      }
-
-      const postResult = await postPromise;
-      if (postResult.error) {
-        setError(`Create failed: ${postResult.error}`);
+        }
+      )
+      if (error) {
+        setError(`Create failed: ${error}`);
+        setUsersResponse(previousUsersResponse);
+      } else {
+        setUsersKey(targetKey);
       }
       await fetchUsers('cache-first');
     } catch (err: any) {
       setError(`Create failed: ${err}`);
+      setUsersResponse(previousUsersResponse);
     } finally {
       setLoading(null);
     }
@@ -146,7 +156,7 @@ export default function APIClientAdvancedDemo() {
       const result = await api.users.patch(
         { body: { id: selectedUserId, name: `Updated ${Date.now()}` } },
         {
-          invalidate: [[api.users.get, { query: { limit: '5' } }]],
+          invalidate: [usersKey || USERS_CACHE_KEY],
           onStatus: addLog,
         },
       );
@@ -172,7 +182,7 @@ export default function APIClientAdvancedDemo() {
       const result = await api.users.delete(
         { body: { id: selectedUserId } },
         {
-          invalidate: [[api.users.get, { query: { limit: '5' } }]],
+          invalidate: [usersKey || USERS_CACHE_KEY],
           onStatus: addLog,
         },
       );
@@ -216,6 +226,10 @@ export default function APIClientAdvancedDemo() {
               Uses <code className="bg-black/40 px-1 rounded">cache-first</code> and{' '}
               <code className="bg-black/40 px-1 rounded">stale-while-revalidate</code> with
               status events.
+            </p>
+            <p className="text-xs text-indigo-300">
+              Current cache key:{' '}
+              <code className="bg-black/40 px-1 rounded">{usersKey}</code>
             </p>
             <div className="flex flex-wrap gap-3">
               <button
@@ -317,20 +331,21 @@ export default function APIClientAdvancedDemo() {
 const users = await api.users.get(
   { query: { limit: '5' } },
   {
+    key: 'demo:users:list',
     cache: { policy: 'stale-while-revalidate', staleTime: 5000 },
     onStatus: (e) => console.log(e.phase, e.key),
   }
 )
-console.log(users.data, users.error)
+console.log(users.data, users.error, users.key)
 
 const created = await api.users.post(
   { body: { name: 'Ada', email: 'ada@example.com' } },
   {
     optimistic: {
-      update: [[api.users.get, { query: { limit: '5' } }, (prev) => prev]],
+      update: [[users.key, (prev) => prev]],
       rollbackOnError: true,
     },
-    invalidate: [[api.users.get, { query: { limit: '5' } }]],
+    invalidate: [users.key],
   }
 )
 console.log(created.data, created.error)`}

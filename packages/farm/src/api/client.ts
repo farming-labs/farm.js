@@ -26,9 +26,14 @@ export type StatusEvent<TData = unknown, TError = unknown> = {
   timestamp: number;
 };
 
+export type CacheKey<TData = unknown> = string & {
+  readonly __farmCacheData?: TData;
+};
+
 export type APIResult<TData = unknown, TError = Error> = {
   data: TData | undefined;
   error: TError | null;
+  key: CacheKey<TData>;
 };
 
 export type RequestEvent = {
@@ -81,7 +86,7 @@ export type InvalidateTarget =
       method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
       input?: unknown;
     }
-  | [RouteRef, unknown?];
+  | [RouteRef<any, any>, unknown?];
 
 export type InvalidateOptions =
   | InvalidateTarget[]
@@ -90,18 +95,25 @@ export type InvalidateOptions =
       refetch?: boolean;
     };
 
-export type OptimisticUpdate = [RouteRef, unknown, (prev: any) => any];
+export type OptimisticUpdate =
+  | [RouteRef<any, any>, unknown, (prev: any) => any]
+  | [CacheKey<any> | string, (prev: any) => any];
 
-export type OptimisticOptions = {
-  update: OptimisticUpdate[];
+export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> = {
+  update: TUpdates & NormalizeOptimisticUpdates<TUpdates>;
   rollbackOnError?: boolean;
 };
 
-export type ClientOptions<TData = unknown, TError = unknown> = {
+export type ClientOptions<
+  TData = unknown,
+  TError = unknown,
+  TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
+> = {
+  key?: CacheKey<TData> | string;
   cache?: CacheOptions;
   retry?: RetryOptions;
   invalidate?: InvalidateOptions;
-  optimistic?: OptimisticOptions;
+  optimistic?: OptimisticOptions<TUpdates>;
   onRequest?: (event: RequestEvent) => void;
   onResponse?: (data: TData | undefined, error: TError | null, event: ResponseEvent<TData, TError>) => void;
   onSuccess?: (data: TData) => void;
@@ -110,7 +122,38 @@ export type ClientOptions<TData = unknown, TError = unknown> = {
   onStatus?: (event: StatusEvent<TData, TError>) => void;
 };
 
-type RouteRef = (...args: any[]) => any;
+type RouteRef<TInput = any, TData = any> = (
+  options?: TInput,
+  clientOptions?: ClientOptions<any, any>,
+) => Promise<APIResult<TData, any>>;
+type AnyRouteRef = (...args: any[]) => any;
+
+type InferRouteInput<TRoute> = TRoute extends RouteRef<infer TInput, any> ? TInput : never;
+type InferRouteData<TRoute> = TRoute extends RouteRef<any, infer TData> ? TData : never;
+
+type NormalizeOptimisticUpdate<TUpdate> = TUpdate extends readonly [
+  infer TRoute,
+  unknown,
+  (prev: any) => any,
+]
+  ? TRoute extends RouteRef<any, any>
+    ? [
+        TRoute,
+        InferRouteInput<TRoute> | undefined,
+        (prev: InferRouteData<TRoute> | undefined) => InferRouteData<TRoute>,
+      ]
+    : never
+  : TUpdate extends readonly [infer TKey, (prev: any) => any]
+    ? TKey extends CacheKey<infer TData>
+      ? [TKey, (prev: TData | undefined) => TData]
+      : TKey extends string
+        ? [TKey, (prev: unknown) => unknown]
+        : never
+    : never;
+
+type NormalizeOptimisticUpdates<TUpdates extends readonly unknown[]> = {
+  [K in keyof TUpdates]: NormalizeOptimisticUpdate<TUpdates[K]>;
+};
 
 // Type utilities to extract endpoint input/output types from TypedEndpoint
 type InferEndpointInput<T> = T extends {
@@ -137,9 +180,9 @@ type InferEndpointOutput<T> = T extends {
   : any;
 
 // Type for a single endpoint method
-type EndpointMethod<T = any> = (
+type EndpointMethod<T = any> = <TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]>(
   options?: InferEndpointInput<T>,
-  clientOptions?: ClientOptions<InferEndpointOutput<T>, Error>,
+  clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
 ) => Promise<APIResult<InferEndpointOutput<T>, Error>>;
 
 // Type for converting router structure to client structure
@@ -191,7 +234,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
 
   const cacheState = new Map<string, CacheEntry>();
   const inflightState = new Map<string, InflightEntry>();
-  const routeMeta = new WeakMap<RouteRef, RouteMeta>();
+  const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
 
   // Create a simple fetch-based client (browser compatible)
@@ -245,7 +288,9 @@ export function createAPIClient<TRouter extends Record<string, any>>(
           ...clientOptions.cache,
         }
       : undefined;
-    const cacheKey = cacheOptions?.key || buildCacheKey(methodUpper, path, input);
+    const cacheKey = (clientOptions?.key ||
+      cacheOptions?.key ||
+      buildCacheKey(methodUpper, path, input)) as CacheKey<any>;
     const now = Date.now();
 
     const emitStatus = (phase: StatusPhase, payload?: Partial<StatusEvent>) => {
@@ -270,7 +315,11 @@ export function createAPIClient<TRouter extends Record<string, any>>(
       if (!clientOptions?.optimistic?.update?.length) return [] as OptimisticSnapshot[];
 
       const snapshots: OptimisticSnapshot[] = [];
-      for (const [target, targetInput, updater] of clientOptions.optimistic.update) {
+      for (const update of clientOptions.optimistic.update) {
+        const [target, targetInput, updater] =
+          update.length === 2
+            ? [update[0], undefined, update[1]]
+            : [update[0], update[1], update[2]];
         const targetKey = resolveTargetKey(routeMeta, target, targetInput);
         if (!targetKey) continue;
 
@@ -278,17 +327,15 @@ export function createAPIClient<TRouter extends Record<string, any>>(
         const previousEntry = targetEntry ? { ...targetEntry } : undefined;
         const previousData = targetEntry?.data;
         const nextData = updater(previousData);
-        const nextStaleAt =
-          targetEntry?.staleAt ??
-          now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0);
-        const nextGcAt =
-          targetEntry?.gcAt ?? getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime);
-
         cacheState.set(targetKey, {
           data: nextData,
           updatedAt: now,
-          staleAt: nextStaleAt,
-          gcAt: nextGcAt,
+          staleAt:
+            targetEntry?.staleAt ??
+            now + (cacheOptions?.staleTime ?? options.cacheDefaults?.staleTime ?? 0),
+          gcAt:
+            targetEntry?.gcAt ??
+            getGcAt(now, cacheOptions?.gcTime ?? options.cacheDefaults?.gcTime),
           invalidatedAt: targetEntry?.invalidatedAt,
         });
 
@@ -385,11 +432,11 @@ export function createAPIClient<TRouter extends Record<string, any>>(
             );
 
             if (!error) {
-              return { data, error: null } as APIResult<any, Error>;
+              return { data, error: null, key: cacheKey } as APIResult<any, Error>;
             }
 
             if (attempt >= maxRetries) {
-              return { data: undefined, error } as APIResult<any, Error>;
+              return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
             }
           } catch (err: any) {
             const error = normalizeError(err);
@@ -408,7 +455,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
             clientOptions?.onResponse?.(undefined, error, responseEvent);
 
             if (attempt >= maxRetries) {
-              return { data: undefined, error } as APIResult<any, Error>;
+              return { data: undefined, error, key: cacheKey } as APIResult<any, Error>;
             }
           }
 
@@ -496,7 +543,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
         emitStatus("success", { data: entry.data });
         clientOptions?.onSuccess?.(entry.data);
         clientOptions?.onSettled?.(entry.data, null);
-        return { data: entry.data, error: null };
+        return { data: entry.data, error: null, key: cacheKey };
       }
 
       if (entry && isStale && policy === "stale-while-revalidate") {
@@ -505,7 +552,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
         clientOptions?.onSettled?.(entry.data, null);
 
         void executeNetwork({ isBackground: true, callCallbacks: false });
-        return { data: entry.data, error: null };
+        return { data: entry.data, error: null, key: cacheKey };
       }
     }
 
@@ -539,7 +586,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
 function createNestedProxy(
   path: string[],
   client: any,
-  routeMeta: WeakMap<RouteRef, RouteMeta>,
+  routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
 ): any {
   const target = () => {};
   const proxy = new Proxy(target, {
@@ -663,8 +710,8 @@ function isEntryStale(entry: CacheEntry, now: number): boolean {
 }
 
 function resolveTargetKey(
-  routeMeta: WeakMap<RouteRef, RouteMeta>,
-  target: InvalidateTarget | RouteRef,
+  routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
+  target: InvalidateTarget | AnyRouteRef,
   input?: unknown,
 ): string | null {
   if (!target) return null;

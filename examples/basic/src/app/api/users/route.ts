@@ -43,7 +43,7 @@ export const POST = createEndpoint('/api/users', {
     ...ctx.body,
   };
   
-  users.push(newUser);
+  users.unshift(newUser);
   
   return {
     success: true,

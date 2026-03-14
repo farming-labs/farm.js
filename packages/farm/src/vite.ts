@@ -1296,6 +1296,29 @@ function normalizeServerProps(rawProps) {
   return props;
 }
 
+async function buildClientHydrationElement(PageComponent, pageProps) {
+  let element = React.createElement(PageComponent, pageProps);
+  const loadingModulePath = window.__FARM_LOADING_MODULE__;
+
+  if (loadingModulePath) {
+    try {
+      const loadingModule = await import(/* @vite-ignore */ loadingModulePath);
+      const LoadingComponent = loadingModule?.default;
+      if (LoadingComponent) {
+        const loadingFallback = React.createElement(LoadingComponent, {
+          params: pageProps?.params || {},
+          path: pageProps?.path || window.location.pathname,
+        });
+        element = React.createElement(React.Suspense, { fallback: loadingFallback }, element);
+      }
+    } catch (error) {
+      console.warn('[Farm.js] Could not load loading boundary for hydration:', error);
+    }
+  }
+
+  return element;
+}
+
 // ====== CHUNK-BASED NAVIGATION (TanStack Start pattern) ======
 // NO HTML fetching! Uses manifest to dynamically import page chunks
 async function renderPage(pageData) {
@@ -1528,13 +1551,14 @@ async function hydrate() {
     
     // Use hydrateRoot for initial hydration to preserve server-rendered content
     try {
-      reactRoot = hydrateRoot(pageContainer, React.createElement(PageComponent, currentPageProps));
+      const hydrationElement = await buildClientHydrationElement(PageComponent, currentPageProps);
+      reactRoot = hydrateRoot(pageContainer, hydrationElement);
       window.__FARM_REACT_ROOT__ = reactRoot;
       console.log('[Farm.js] ✅ Hydrated:', modulePath);
     } catch (error) {
       console.log('[Farm.js] Hydration mismatch, using createRoot');
       reactRoot = createRoot(pageContainer);
-      reactRoot.render(React.createElement(PageComponent, currentPageProps));
+      reactRoot.render(await buildClientHydrationElement(PageComponent, currentPageProps));
       window.__FARM_REACT_ROOT__ = reactRoot;
     }
   } catch (error) {

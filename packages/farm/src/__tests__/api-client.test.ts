@@ -32,6 +32,17 @@ const buildResponse = (data: any, ok = true, status = 200) => ({
   json: async () => data,
 });
 
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+
+  return { promise, resolve, reject };
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
 });
@@ -183,5 +194,217 @@ describe("createAPIClient", () => {
     );
 
     expect(afterRollback.data?.users).toHaveLength(1);
+  });
+
+  it("applies optimistic updates immediately while the mutation is still pending", async () => {
+    const postDeferred = createDeferred<ReturnType<typeof buildResponse>>();
+    let getCount = 0;
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET") {
+        getCount += 1;
+
+        if (getCount === 1) {
+          return buildResponse({
+            users: [{ id: "1", name: "Alice" }],
+            total: 1,
+            limit: 5,
+            offset: 0,
+          });
+        }
+
+        return buildResponse({
+          users: [
+            { id: "2", name: "Ada" },
+            { id: "1", name: "Alice" },
+          ],
+          total: 2,
+          limit: 5,
+          offset: 0,
+        });
+      }
+
+      return postDeferred.promise;
+    });
+
+    globalThis.fetch = fetchMock as any;
+
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+
+    const initial = await api.users.get(
+      { query: { limit: "5" } },
+      { cache: { policy: "cache-first", staleTime: 10000 } },
+    );
+
+    expect(initial.error).toBeNull();
+    expect(initial.key).toBeTruthy();
+
+    const mutation = api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      {
+        optimistic: {
+          update: [
+            [
+              initial.key,
+              (prev: any) => ({
+                ...prev,
+                users: [{ id: "temp", name: "Ada" }, ...(prev?.users ?? [])],
+                total: (prev?.total ?? 0) + 1,
+              }),
+            ],
+          ],
+          rollbackOnError: true,
+        },
+        invalidate: [initial.key],
+      },
+    );
+
+    const onMutationSettled = vi.fn();
+    void mutation.then(onMutationSettled);
+    await Promise.resolve();
+
+    expect(onMutationSettled).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const optimistic = await api.users.get(
+      { query: { limit: "5" } },
+      {
+        key: initial.key,
+        cache: { policy: "cache-first", staleTime: 10000 },
+      },
+    );
+
+    expect(optimistic.error).toBeNull();
+    expect(optimistic.data?.users).toEqual([
+      { id: "temp", name: "Ada" },
+      { id: "1", name: "Alice" },
+    ]);
+    expect(optimistic.data?.total).toBe(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    postDeferred.resolve(buildResponse({ success: true }));
+
+    const mutationResult = await mutation;
+    expect(mutationResult.error).toBeNull();
+
+    const afterInvalidate = await api.users.get(
+      { query: { limit: "5" } },
+      {
+        key: initial.key,
+        cache: { policy: "cache-first", staleTime: 10000 },
+      },
+    );
+
+    expect(afterInvalidate.error).toBeNull();
+    expect(afterInvalidate.data?.users).toEqual([
+      { id: "2", name: "Ada" },
+      { id: "1", name: "Alice" },
+    ]);
+    expect(afterInvalidate.data?.total).toBe(2);
+    expect(getCount).toBe(2);
+  });
+
+  it("keeps optimistic data visible during a delayed mutation response", async () => {
+    vi.useFakeTimers();
+    let getCount = 0;
+
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const method = (init?.method ?? "GET").toUpperCase();
+      if (method === "GET") {
+        getCount += 1;
+
+        if (getCount === 1) {
+          return buildResponse({
+            users: [{ id: "1", name: "Alice" }],
+            total: 1,
+            limit: 5,
+            offset: 0,
+          });
+        }
+
+        return buildResponse({
+          users: [
+            { id: "2", name: "Ada" },
+            { id: "1", name: "Alice" },
+          ],
+          total: 2,
+          limit: 5,
+          offset: 0,
+        });
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 250));
+      return buildResponse({ success: true });
+    });
+
+    globalThis.fetch = fetchMock as any;
+
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+
+    const initial = await api.users.get(
+      { query: { limit: "5" } },
+      { cache: { policy: "cache-first", staleTime: 10_000 } },
+    );
+
+    const mutationPromise = api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      {
+        optimistic: {
+          update: [
+            [
+              initial.key,
+              (prev: any) => ({
+                ...prev,
+                users: [{ id: "temp", name: "Ada" }, ...(prev?.users ?? [])],
+                total: (prev?.total ?? 0) + 1,
+              }),
+            ],
+          ],
+          rollbackOnError: true,
+        },
+        invalidate: [initial.key],
+      },
+    );
+
+    await Promise.resolve();
+
+    const duringDelay = await api.users.get(
+      { query: { limit: "5" } },
+      {
+        key: initial.key,
+        cache: { policy: "cache-first", staleTime: 10_000 },
+      },
+    );
+
+    expect(duringDelay.error).toBeNull();
+    expect(duringDelay.data?.users).toEqual([
+      { id: "temp", name: "Ada" },
+      { id: "1", name: "Alice" },
+    ]);
+    expect(duringDelay.data?.total).toBe(2);
+
+    await vi.advanceTimersByTimeAsync(250);
+
+    const mutationResult = await mutationPromise;
+    expect(mutationResult.error).toBeNull();
+
+    const afterDelay = await api.users.get(
+      { query: { limit: "5" } },
+      {
+        key: initial.key,
+        cache: { policy: "cache-first", staleTime: 10_000 },
+      },
+    );
+
+    expect(afterDelay.error).toBeNull();
+    expect(afterDelay.data?.users).toEqual([
+      { id: "2", name: "Ada" },
+      { id: "1", name: "Alice" },
+    ]);
+    expect(afterDelay.data?.total).toBe(2);
+    expect(getCount).toBe(2);
+
+    vi.useRealTimers();
   });
 });
