@@ -303,6 +303,11 @@ export class ServerRenderer {
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
+      (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
+        ? loadingBoundaryEntry.modulePath.substring(
+            loadingBoundaryEntry.modulePath.indexOf("/src/app/"),
+          )
+        : null;
       // Store pageProps for client-side hydration (serializable version - no Promises)
       (req as any).__FARM_PROPS__ = {
         params,
@@ -576,6 +581,9 @@ window.__FARM_PROPS__ = ${JSON.stringify((req as any).__FARM_PROPS__ || {})};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
+window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
+        (req as any).__FARM_LOADING_MODULE_PATH__ || null,
+      )};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 </script>`;
 

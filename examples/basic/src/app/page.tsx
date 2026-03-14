@@ -95,6 +95,9 @@ export default function HomePage({ params, searchParams }: PageProps) {
           <Link href="/api-demo-client" className="inline-flex items-center px-4 py-2 bg-pink-600 text-white rounded-md hover:bg-pink-700 transition-colors">
             API Demo (Client)
           </Link>
+          <Link href="/api-demo-client-advanced" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
+            API Client Advanced
+          </Link>
           <Link href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
             Query State Demo
           </Link>
@@ -141,4 +144,3 @@ function FeatureCard({ icon, title, description, href }: {
     </div>
   );
 }
-
