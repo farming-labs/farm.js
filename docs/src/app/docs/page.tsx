@@ -51,6 +51,18 @@ export default function DocsIndexPage(_props: PageProps) {
           </p>
         </Link>
         <Link
+          href="/docs/api-client"
+          className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
+        >
+          <h2 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-600">
+            API Client
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Promise-based API calls with cache policies, invalidation, callbacks, and optimistic
+            updates.
+          </p>
+        </Link>
+        <Link
           href="/docs/layouts"
           className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
         >

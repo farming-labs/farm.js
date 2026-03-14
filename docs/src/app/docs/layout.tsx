@@ -6,6 +6,7 @@ const docLinks = [
   { href: "/docs/getting-started", label: "Getting Started" },
   { href: "/docs/routing", label: "Routing" },
   { href: "/docs/query", label: "Query" },
+  { href: "/docs/api-client", label: "API Client" },
   { href: "/docs/layouts", label: "Layouts" },
   { href: "/docs/plugins", label: "Plugin Ecosystem" },
   { href: "/docs/plugins/create-plugin", label: "Create a Plugin" },
