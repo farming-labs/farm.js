@@ -62,6 +62,12 @@ export default function HomePage({ params, searchParams }: PageProps) {
           description="Type-safe API endpoints with better-call"
           href="/api-demo"
         />
+        <FeatureCard
+          icon="🗃️"
+          title="Global Store"
+          description="Built-in global client store with direct field subscriptions"
+          href="/store-e2e"
+        />
       </div>
 
       <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
@@ -100,6 +106,9 @@ export default function HomePage({ params, searchParams }: PageProps) {
           </Link>
           <Link href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
             Query State Demo
+          </Link>
+          <Link href="/store-e2e" className="inline-flex items-center px-4 py-2 bg-slate-800 text-white rounded-md hover:bg-slate-900 transition-colors">
+            Global Store Demo
           </Link>
           <Link href="/boundaries/loading" className="inline-flex items-center px-4 py-2 bg-cyan-600 text-white rounded-md hover:bg-cyan-700 transition-colors">
             Loading Boundary
