@@ -3,12 +3,13 @@ import { expect, test } from "@playwright/test";
 test.describe("Framework flows", () => {
   test("query parsing works in server-rendered query demo", async ({ page }) => {
     await page.goto("/query-demo?search=e2e&page=7&category=test&enabled=true&tags=a,b");
-    await expect(page.getByText("Search:")).toBeVisible();
-    await expect(page.getByText("e2e")).toBeVisible();
-    await expect(page.getByText("Page:")).toBeVisible();
-    await expect(page.getByText("7")).toBeVisible();
-    await expect(page.getByText("Category:")).toBeVisible();
-    await expect(page.getByText("test")).toBeVisible();
+    const serverSection = page.locator(".bg-blue-50").first();
+    await expect(serverSection).toContainText("Search:");
+    await expect(serverSection).toContainText("e2e");
+    await expect(serverSection).toContainText("Page:");
+    await expect(serverSection).toContainText("7");
+    await expect(serverSection).toContainText("Category:");
+    await expect(serverSection).toContainText("test");
   });
 
   test("dynamic route params and query render correctly", async ({ page }) => {
@@ -20,7 +21,7 @@ test.describe("Framework flows", () => {
 
   test("spa navigation through Link works", async ({ page }) => {
     await page.goto("/");
-    await page.getByRole("link", { name: "About" }).click();
+    await page.getByRole("link", { name: "About", exact: true }).click();
     await expect(page).toHaveURL(/\/about$/);
     await expect(page.getByRole("heading", { name: "About .js" })).toBeVisible();
   });

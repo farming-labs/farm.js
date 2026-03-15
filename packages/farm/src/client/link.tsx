@@ -145,8 +145,32 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
 
   useEffect(() => {
     if (!render || isExternal) return;
-    doPrefetch();
-  }, [render, isExternal, doPrefetch]);
+
+    let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+
+    const tryRenderPrefetch = () => {
+      if (cancelled || hasPrefetched.current) return;
+
+      const router = getRouter();
+      if (!router) {
+        timeoutId = setTimeout(tryRenderPrefetch, 30);
+        return;
+      }
+
+      hasPrefetched.current = true;
+      router.prefetch(href);
+    };
+
+    tryRenderPrefetch();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    };
+  }, [render, isExternal, href]);
 
   useEffect(() => {
     return () => {

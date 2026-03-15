@@ -9,6 +9,52 @@
 import type { AnchorHTMLAttributes, ForwardRefExoticComponent, RefAttributes } from "react";
 
 declare module "@farmjs/core/client" {
+  export type StoreState = Record<string, any>;
+  export type StoreValueUpdater<T> = T | ((previous: T) => T);
+  export type StorePatch<T extends StoreState> = Partial<T> | ((state: T) => Partial<T>);
+  export type StoreListener<T extends StoreState> = (state: T, previousState: T) => void;
+  export type StoreKeyListener<T extends StoreState, K extends keyof T> = (
+    value: T[K],
+    previousValue: T[K],
+  ) => void;
+  export type StoreKeysListener<T extends StoreState, K extends keyof T> = (
+    value: Pick<T, K>,
+    previousValue: Pick<T, K>,
+  ) => void;
+
+  export type StoreFields<T extends StoreState> = {
+    [K in keyof T]: {
+      (): T[K];
+      get(): T[K];
+      set(value: StoreValueUpdater<T[K]>): T[K];
+      subscribe(listener: StoreKeyListener<T, K>): () => void;
+    };
+  };
+
+  export interface StoreApi<T extends StoreState> {
+    use(): T;
+    use<K extends keyof T>(key: K): T[K];
+    use<K extends keyof T>(keys: readonly K[]): Pick<T, K>;
+    get(): T;
+    get<K extends keyof T>(key: K): T[K];
+    set<K extends keyof T>(key: K, value: StoreValueUpdater<T[K]>): T[K];
+    set(patch: StorePatch<T>): T;
+    replace(nextState: T | ((state: T) => T)): T;
+    reset(): T;
+    subscribe(listener: StoreListener<T>): () => void;
+    subscribe<K extends keyof T>(key: K, listener: StoreKeyListener<T, K>): () => void;
+    subscribe<K extends keyof T>(keys: readonly K[], listener: StoreKeysListener<T, K>): () => void;
+  }
+
+  export type Store<T extends StoreState, TMethods extends Record<string, any> = {}> = StoreApi<T> &
+    StoreFields<T> &
+    TMethods;
+
+  export function createStore<T extends StoreState, TMethods extends Record<string, any> = {}>(
+    initialState: T,
+    extend?: (store: Store<T>) => TMethods,
+  ): Store<T, TMethods>;
+
   export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none";
 
   /** External URLs are never type-checked as routes; use for http/https/mailto etc. */
@@ -145,12 +191,11 @@ declare module "@farmjs/core/client" {
     | [RouteRef<any, any>, unknown, (prev: any) => any]
     | [CacheKey<any> | string, (prev: any) => any];
 
-  export type OptimisticOptions<
-    TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
-  > = {
-    update: TUpdates & NormalizeOptimisticUpdates<TUpdates>;
-    rollbackOnError?: boolean;
-  };
+  export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> =
+    {
+      update: TUpdates & NormalizeOptimisticUpdates<TUpdates>;
+      rollbackOnError?: boolean;
+    };
 
   export type ClientOptions<
     TData = unknown,
@@ -163,7 +208,11 @@ declare module "@farmjs/core/client" {
     invalidate?: InvalidateOptions;
     optimistic?: OptimisticOptions<TUpdates>;
     onRequest?: (event: RequestEvent) => void;
-    onResponse?: (data: TData | undefined, error: TError | null, event: ResponseEvent<TData, TError>) => void;
+    onResponse?: (
+      data: TData | undefined,
+      error: TError | null,
+      event: ResponseEvent<TData, TError>,
+    ) => void;
     onSuccess?: (data: TData) => void;
     onError?: (err: TError) => void;
     onSettled?: (data?: TData, err?: TError | null) => void;
