@@ -18,13 +18,7 @@ type StoreSubscription<T extends StoreState> = {
   notify: (state: T, previousState: T) => void;
 };
 
-type ReservedStoreKey =
-  | "use"
-  | "get"
-  | "set"
-  | "replace"
-  | "reset"
-  | "subscribe";
+type ReservedStoreKey = "use" | "get" | "set" | "replace" | "reset" | "subscribe";
 
 type FieldAccessor<T extends StoreState, K extends keyof T> = {
   (): T[K];
@@ -69,7 +63,10 @@ function cloneState<T extends StoreState>(state: T): T {
   return { ...state };
 }
 
-function pickState<T extends StoreState, K extends keyof T>(state: T, keys: readonly K[]): Pick<T, K> {
+function pickState<T extends StoreState, K extends keyof T>(
+  state: T,
+  keys: readonly K[],
+): Pick<T, K> {
   const slice = {} as Pick<T, K>;
 
   for (const key of keys) {
@@ -129,10 +126,7 @@ export function createStore<T extends StoreState, TMethods extends Record<string
     const changedKeySet = new Set(changedKeys);
 
     for (const subscription of subscriptions) {
-      if (
-        subscription.keys === null ||
-        subscription.keys.some((key) => changedKeySet.has(key))
-      ) {
+      if (subscription.keys === null || subscription.keys.some((key) => changedKeySet.has(key))) {
         subscription.notify(nextState, previousState);
       }
     }
@@ -282,7 +276,9 @@ export function createStore<T extends StoreState, TMethods extends Record<string
 
     for (const [name, method] of Object.entries(methods)) {
       if (name in store) {
-        throw new Error(`createStore cannot attach the method "${name}" because it already exists.`);
+        throw new Error(
+          `createStore cannot attach the method "${name}" because it already exists.`,
+        );
       }
 
       Object.defineProperty(store, name, {
