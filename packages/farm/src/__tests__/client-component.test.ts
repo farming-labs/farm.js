@@ -22,7 +22,10 @@ describe("client component path resolution", () => {
 
     const sourceFile = path.join(root, "src", "app", "demo", "page.tsx");
     fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
-    fs.writeFileSync(sourceFile, "'use client';\nexport default function Page() { return null; }\n");
+    fs.writeFileSync(
+      sourceFile,
+      "'use client';\nexport default function Page() { return null; }\n",
+    );
 
     expect(resolveModuleSourcePath("/src/app/demo/page.tsx", root)).toBe(sourceFile);
     expect(isClientComponentModule("/src/app/demo/page.tsx", root)).toBe(true);
@@ -33,7 +36,10 @@ describe("client component path resolution", () => {
     tempDirs.push(root);
 
     const sourceFile = path.join(root, "page.tsx");
-    fs.writeFileSync(sourceFile, "'use client';\nexport default function Page() { return null; }\n");
+    fs.writeFileSync(
+      sourceFile,
+      "'use client';\nexport default function Page() { return null; }\n",
+    );
 
     expect(resolveModuleSourcePath(sourceFile, root)).toBe(sourceFile);
     expect(isClientComponentModule(sourceFile, root)).toBe(true);
@@ -45,7 +51,10 @@ describe("client component path resolution", () => {
 
     const sourceFile = path.join(root, "src", "app", "demo", "page.tsx");
     fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
-    fs.writeFileSync(sourceFile, "'use client';\nexport default function Page() { return null; }\n");
+    fs.writeFileSync(
+      sourceFile,
+      "'use client';\nexport default function Page() { return null; }\n",
+    );
 
     expect(resolveModuleSourcePath(`file://${sourceFile}`, root)).toBe(sourceFile);
     expect(isClientComponentModule(`file://${sourceFile}`, root)).toBe(true);

@@ -45,8 +45,8 @@ if (result.error) {
 }`}
         </pre>
         <p className="mt-3 text-slate-600">
-          Every client call resolves to <code>{`{ data, error, key }`}</code>. It does not throw
-          for HTTP errors. That keeps plain promise flows predictable and makes optimistic and cache
+          Every client call resolves to <code>{`{ data, error, key }`}</code>. It does not throw for
+          HTTP errors. That keeps plain promise flows predictable and makes optimistic and cache
           logic easier to compose.
         </p>
       </section>
@@ -80,8 +80,8 @@ if (result.error) {
           </p>
           <p className="mt-2">
             <strong>Invalidation targets:</strong> route refs like{" "}
-            <code>[api.users.get, {`{ query: { limit: "5" } }`}]</code>, a returned typed cache
-            key like <code>users.key</code>, or a raw string key if you want a manual namespace.
+            <code>[api.users.get, {`{ query: { limit: "5" } }`}]</code>, a returned typed cache key
+            like <code>users.key</code>, or a raw string key if you want a manual namespace.
           </p>
           <p className="mt-2">
             <strong>Invalidation behavior:</strong> invalidated entries are marked stale, so the
@@ -97,8 +97,8 @@ if (result.error) {
         </p>
         <ul className="mt-4 list-disc space-y-2 pl-6 text-slate-700">
           <li>
-            <code>onRequest(event)</code>: runs before the network call. Use it for logging or
-            local pending state.
+            <code>onRequest(event)</code>: runs before the network call. Use it for logging or local
+            pending state.
           </li>
           <li>
             <code>onResponse(data, error, event)</code>: runs after the response is parsed. One of{" "}
@@ -114,8 +114,8 @@ if (result.error) {
             <code>onSettled(data, error)</code>: runs in both cases after success or failure.
           </li>
           <li>
-            <code>onStatus(event)</code>: receives client status transitions for cache hits,
-            pending requests, success, error, invalidation, and rollback.
+            <code>onStatus(event)</code>: receives client status transitions for cache hits, pending
+            requests, success, error, invalidation, and rollback.
           </li>
         </ul>
       </section>
@@ -210,7 +210,9 @@ await api.users.post(
           <li>Cache-first reads reuse cached data and emit status events.</li>
           <li>Invalidation marks cached queries stale and causes the next read to refetch.</li>
           <li>Failed optimistic mutations roll back to the previous cached value.</li>
-          <li>Pending optimistic mutations expose the optimistic data before the mutation settles.</li>
+          <li>
+            Pending optimistic mutations expose the optimistic data before the mutation settles.
+          </li>
           <li>
             Delayed optimistic mutations keep the optimistic data visible during the timeout window
             before the server response resolves.

@@ -400,8 +400,7 @@ function generateClientHydrationEntry(
 ): string {
   // Always import global CSS for Tailwind
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
-  const cssImportPath =
-    "./" + path.relative(clientEntryDir, globalsCssPath).replace(/\\/g, "/");
+  const cssImportPath = "./" + path.relative(clientEntryDir, globalsCssPath).replace(/\\/g, "/");
   const cssImport = `import ${JSON.stringify(cssImportPath)};`;
 
   // Import layouts for wrapping client components
@@ -409,7 +408,8 @@ function generateClientHydrationEntry(
   const layoutRegistrations: string[] = [];
 
   layoutRoutes.forEach((layout, index) => {
-    const relativePath = "./" + path.relative(clientEntryDir, layout.modulePath).replace(/\\/g, "/");
+    const relativePath =
+      "./" + path.relative(clientEntryDir, layout.modulePath).replace(/\\/g, "/");
     layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     layoutRegistrations.push(
       `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`,

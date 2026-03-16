@@ -2,8 +2,7 @@ import { Link } from "@farmjs/core";
 
 export const metadata = {
   title: "Storage - Farm.js",
-  description:
-    "Programmatic storage clients, mounted stores, and multi-driver usage in Farm.js.",
+  description: "Programmatic storage clients, mounted stores, and multi-driver usage in Farm.js.",
 };
 
 const helpers = [
@@ -157,8 +156,8 @@ await sqlite.removeItem("settings");`}
         </pre>
         <p className="mt-3 text-slate-600">
           The returned object exposes the normal storage API: <code>getItem</code>,
-          <code>setItem</code>, <code>setItems</code>, <code>getKeys</code>, <code>removeItem</code>,
-          <code>clear</code>, and <code>dispose</code>.
+          <code>setItem</code>, <code>setItems</code>, <code>getKeys</code>, <code>removeItem</code>
+          ,<code>clear</code>, and <code>dispose</code>.
         </p>
       </section>
 
@@ -278,7 +277,10 @@ export const custom = createStorageClient({
       </section>
 
       <nav className="flex gap-4 border-t border-slate-200 pt-8">
-        <Link href="/docs/api-client" className="text-sm font-medium text-emerald-600 hover:underline">
+        <Link
+          href="/docs/api-client"
+          className="text-sm font-medium text-emerald-600 hover:underline"
+        >
           ← API Client
         </Link>
         <Link href="/docs/layouts" className="text-sm font-medium text-emerald-600 hover:underline">

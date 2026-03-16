@@ -380,10 +380,7 @@ export function farmPlugin(
             const routeModule = await routeManager.loadRouteModule(route.modulePath);
 
             // Check if client component
-            const isClientComponent = isClientComponentModule(
-              route.modulePath,
-              server.config.root,
-            );
+            const isClientComponent = isClientComponentModule(route.modulePath, server.config.root);
 
             // Collect metadata from layouts and page
             let mergedMetadata: Record<string, any> = {};

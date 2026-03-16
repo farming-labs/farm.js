@@ -145,12 +145,11 @@ declare module "@farmjs/core/client" {
     | [RouteRef<any, any>, unknown, (prev: any) => any]
     | [CacheKey<any> | string, (prev: any) => any];
 
-  export type OptimisticOptions<
-    TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
-  > = {
-    update: TUpdates & NormalizeOptimisticUpdates<TUpdates>;
-    rollbackOnError?: boolean;
-  };
+  export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> =
+    {
+      update: TUpdates & NormalizeOptimisticUpdates<TUpdates>;
+      rollbackOnError?: boolean;
+    };
 
   export type ClientOptions<
     TData = unknown,
@@ -163,7 +162,11 @@ declare module "@farmjs/core/client" {
     invalidate?: InvalidateOptions;
     optimistic?: OptimisticOptions<TUpdates>;
     onRequest?: (event: RequestEvent) => void;
-    onResponse?: (data: TData | undefined, error: TError | null, event: ResponseEvent<TData, TError>) => void;
+    onResponse?: (
+      data: TData | undefined,
+      error: TError | null,
+      event: ResponseEvent<TData, TError>,
+    ) => void;
     onSuccess?: (data: TData) => void;
     onError?: (err: TError) => void;
     onSettled?: (data?: TData, err?: TError | null) => void;

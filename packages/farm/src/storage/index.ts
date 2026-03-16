@@ -321,7 +321,9 @@ export function createStorageClient(config: FarmStorageClientConfig): FarmStorag
   return defineStorageClient(() => resolveDriver(config));
 }
 
-export function driverStorage(driver: Driver | (() => Driver | Promise<Driver>)): FarmStorageClient {
+export function driverStorage(
+  driver: Driver | (() => Driver | Promise<Driver>),
+): FarmStorageClient {
   return defineStorageClient(() => (typeof driver === "function" ? driver() : driver));
 }
 
@@ -330,9 +332,8 @@ export function databaseStorage(
   options: { tableName?: string } = {},
 ): FarmStorageClient {
   return defineStorageClient(async () => {
-    const db0DriverModule = await loadModule<typeof import("unstorage/drivers/db0")>(
-      "unstorage/drivers/db0",
-    );
+    const db0DriverModule =
+      await loadModule<typeof import("unstorage/drivers/db0")>("unstorage/drivers/db0");
     return db0DriverModule.default({
       database,
       tableName: options.tableName,

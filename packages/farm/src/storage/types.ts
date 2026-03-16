@@ -73,8 +73,7 @@ export interface FarmStorageCustomDriverConfig {
   driver: Driver | (() => Driver | Promise<Driver>);
 }
 
-export type FarmStorageDatabaseConfig =
-  FarmStorageDatabaseConfigMap[FarmStorageDatabaseDriverName];
+export type FarmStorageDatabaseConfig = FarmStorageDatabaseConfigMap[FarmStorageDatabaseDriverName];
 
 export type FarmStorageClientConfig =
   | FarmStorageBuiltinDriverConfig

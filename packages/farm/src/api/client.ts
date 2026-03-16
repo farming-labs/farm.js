@@ -6,13 +6,7 @@ export type APIClientOptions = {
   cacheDefaults?: CacheOptions;
 };
 
-export type StatusPhase =
-  | "idle"
-  | "pending"
-  | "success"
-  | "error"
-  | "revalidating"
-  | "invalidated";
+export type StatusPhase = "idle" | "pending" | "success" | "error" | "revalidating" | "invalidated";
 
 export type StatusEvent<TData = unknown, TError = unknown> = {
   phase: StatusPhase;
@@ -115,7 +109,11 @@ export type ClientOptions<
   invalidate?: InvalidateOptions;
   optimistic?: OptimisticOptions<TUpdates>;
   onRequest?: (event: RequestEvent) => void;
-  onResponse?: (data: TData | undefined, error: TError | null, event: ResponseEvent<TData, TError>) => void;
+  onResponse?: (
+    data: TData | undefined,
+    error: TError | null,
+    event: ResponseEvent<TData, TError>,
+  ) => void;
   onSuccess?: (data: TData) => void;
   onError?: (err: TError) => void;
   onSettled?: (data?: TData, err?: TError | null) => void;
@@ -425,11 +423,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
               status: response.status,
             };
 
-            clientOptions?.onResponse?.(
-              response.ok ? data : undefined,
-              error,
-              responseEvent,
-            );
+            clientOptions?.onResponse?.(response.ok ? data : undefined, error, responseEvent);
 
             if (!error) {
               return { data, error: null, key: cacheKey } as APIResult<any, Error>;
@@ -463,7 +457,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
           const delay =
             typeof clientOptions?.retry?.delay === "function"
               ? clientOptions.retry.delay(attempt)
-              : clientOptions?.retry?.delay ?? 0;
+              : (clientOptions?.retry?.delay ?? 0);
 
           if (delay > 0) {
             await new Promise((resolve) => setTimeout(resolve, delay));

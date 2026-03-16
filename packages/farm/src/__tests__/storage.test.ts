@@ -321,28 +321,32 @@ describe("Storage", () => {
 
   const itWithPostgres = process.env.FARM_TEST_POSTGRES_URL ? it : it.skip;
 
-  itWithPostgres("supports postgres storage against a real database", async () => {
-    const tableName = `farm_pg_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
-    const pg = postgresStorage({
-      url: process.env.FARM_TEST_POSTGRES_URL!,
-      tableName,
-    });
+  itWithPostgres(
+    "supports postgres storage against a real database",
+    async () => {
+      const tableName = `farm_pg_${Date.now()}_${Math.floor(Math.random() * 1_000_000)}`;
+      const pg = postgresStorage({
+        url: process.env.FARM_TEST_POSTGRES_URL!,
+        tableName,
+      });
 
-    await pg.setItem("user:1", { id: 1, name: "Ada" });
-    await pg.setItems([
-      { key: "user:2", value: { id: 2, name: "Grace" } },
-      { key: "user:3", value: { id: 3, name: "Linus" } },
-    ]);
+      await pg.setItem("user:1", { id: 1, name: "Ada" });
+      await pg.setItems([
+        { key: "user:2", value: { id: 2, name: "Grace" } },
+        { key: "user:3", value: { id: 3, name: "Linus" } },
+      ]);
 
-    expect(await pg.getItem("user:1")).toEqual({ id: 1, name: "Ada" });
-    expect(await pg.getItem("user:2")).toEqual({ id: 2, name: "Grace" });
+      expect(await pg.getItem("user:1")).toEqual({ id: 1, name: "Ada" });
+      expect(await pg.getItem("user:2")).toEqual({ id: 2, name: "Grace" });
 
-    await pg.removeItem("user:2");
-    expect(await pg.getItem("user:2")).toBeNull();
+      await pg.removeItem("user:2");
+      expect(await pg.getItem("user:2")).toBeNull();
 
-    await pg.clear();
-    expect(await pg.getKeys()).toEqual([]);
+      await pg.clear();
+      expect(await pg.getKeys()).toEqual([]);
 
-    await pg.dispose();
-  }, 30_000);
+      await pg.dispose();
+    },
+    30_000,
+  );
 });
