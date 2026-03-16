@@ -79,9 +79,14 @@ export default function HomePage({ params, searchParams }: PageProps) {
       <section>
         <h2 className="text-xl font-semibold text-slate-900">Generated route types</h2>
         <p className="mt-2 text-slate-600">
-          Farm.js generates <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">src/farm-routes.d.ts</code>{" "}
-          from your <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">src/app</code>{" "}
-          pages. That file drives typed <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">Link href</code>{" "}
+          Farm.js generates{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            src/farm-routes.d.ts
+          </code>{" "}
+          from your{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">src/app</code>{" "}
+          pages. That file drives typed{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">Link href</code>{" "}
           values.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
@@ -93,8 +98,13 @@ export default function HomePage({ params, searchParams }: PageProps) {
         </pre>
         <p className="mt-3 text-slate-600">
           The route file is regenerated on dev start and when routes change. Keep a local{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">tsconfig.json</code>{" "}
-          in each app so <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">pnpm type-check</code>{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            tsconfig.json
+          </code>{" "}
+          in each app so{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            pnpm type-check
+          </code>{" "}
           validates those typed links.
         </p>
       </section>

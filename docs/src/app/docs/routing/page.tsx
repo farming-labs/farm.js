@@ -69,7 +69,8 @@ export default function UserPage({ params }: PageProps) {
           <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
             @farmjs/core/client
           </code>{" "}
-          or the root export <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">@farmjs/core</code>{" "}
+          or the root export{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">@farmjs/core</code>{" "}
           for client-side navigation:
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
@@ -81,9 +82,15 @@ export default function UserPage({ params }: PageProps) {
         </pre>
         <p className="mt-4 text-slate-600">
           Internal route typing also accepts query strings and hashes, so a generated route like{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">/users/{"${string}"}</code>{" "}
-          can be used as <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">/users/123?tab=profile</code>{" "}
-          without widening the type to plain <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">string</code>.
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            /users/{"${string}"}
+          </code>{" "}
+          can be used as{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            /users/123?tab=profile
+          </code>{" "}
+          without widening the type to plain{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">string</code>.
         </p>
       </section>
 
@@ -91,9 +98,11 @@ export default function UserPage({ params }: PageProps) {
         <h2 className="text-xl font-semibold text-slate-900">Generated route typing</h2>
         <p className="mt-2 text-slate-600">
           Farm.js generates{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">src/farm-routes.d.ts</code>{" "}
-          from your page tree. The generated union is what powers typed <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">href</code>{" "}
-          values.
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            src/farm-routes.d.ts
+          </code>{" "}
+          from your page tree. The generated union is what powers typed{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">href</code> values.
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`/**
@@ -107,8 +116,10 @@ export type RoutePath =
         </pre>
         <p className="mt-4 text-slate-600">
           Framework-defined routes can be included too. For example, if OpenAPI is enabled with{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">route: "/docs/reference"</code>,
-          that path should be part of the generated route union.
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            route: "/docs/reference"
+          </code>
+          , that path should be part of the generated route union.
         </p>
       </section>
 
@@ -116,8 +127,14 @@ export type RoutePath =
         <h2 className="text-xl font-semibold text-slate-900">Relaxing href checks</h2>
         <p className="mt-2 text-slate-600">
           If you intentionally want to disable route-typed links for an app, set{" "}
-          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">suppressLintOnLink</code>{" "}
-          in <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">farm.config.ts</code>.
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            suppressLintOnLink
+          </code>{" "}
+          in{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">
+            farm.config.ts
+          </code>
+          .
         </p>
         <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
           {`export default defineFarmConfig({
@@ -125,8 +142,9 @@ export type RoutePath =
 });`}
         </pre>
         <p className="mt-4 text-slate-600">
-          That changes the generated route type to plain <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">string</code>.
-          Use it only when you explicitly do not want route validation on links.
+          That changes the generated route type to plain{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">string</code>. Use
+          it only when you explicitly do not want route validation on links.
         </p>
       </section>
 
