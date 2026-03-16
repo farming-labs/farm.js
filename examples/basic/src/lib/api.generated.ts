@@ -36,7 +36,7 @@ export type APIRouter = {
   slow: {
     get: typeof GET_slow;
   };
-  storage-demo: {
+  "storage-demo": {
     get: typeof GET_storagedemo;
     post: typeof POST_storagedemo;
     delete: typeof DELETE_storagedemo;

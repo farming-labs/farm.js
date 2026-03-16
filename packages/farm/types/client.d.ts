@@ -6,9 +6,45 @@
  * farm-routes.d.ts in your app augments LinkDefaultRoute for typed href.
  */
 
-import type { AnchorHTMLAttributes, ForwardRefExoticComponent, RefAttributes } from "react";
+import type { AnchorHTMLAttributes, ForwardRefExoticComponent, ReactNode, RefAttributes } from "react";
 
 declare module "@farmjs/core/client" {
+  export interface MiddlewareProps {
+    data: Map<string, any>;
+  }
+
+  export interface PluginContextProps {
+    data: Map<string, any>;
+  }
+
+  export interface PageProps {
+    params: Record<string, string>;
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+    path: string;
+    middleware?: MiddlewareProps;
+    context?: PluginContextProps;
+  }
+
+  export interface LayoutProps {
+    children: ReactNode;
+    params: Record<string, string>;
+  }
+
+  export interface Metadata {
+    title?: string | { default?: string; template?: string };
+    description?: string;
+    keywords?: string | string[];
+    authors?: Array<{ name: string; url?: string }>;
+    creator?: string;
+    publisher?: string;
+    robots?: string | { index?: boolean; follow?: boolean };
+    openGraph?: Record<string, any>;
+    twitter?: Record<string, any>;
+    alternates?: Record<string, any>;
+    icons?: Record<string, any>;
+    manifest?: string;
+  }
+
   export type StoreState = Record<string, any>;
   export type StoreValueUpdater<T> = T | ((previous: T) => T);
   export type StorePatch<T extends StoreState> = Partial<T> | ((state: T) => Partial<T>);
@@ -70,12 +106,18 @@ declare module "@farmjs/core/client" {
     ? TRoute
     : string;
 
+  export type RouteHref<TRoute extends string> =
+    | TRoute
+    | `${TRoute}?${string}`
+    | `${TRoute}#${string}`
+    | `${TRoute}?${string}#${string}`;
+
   export interface LinkProps<TRoute extends string = DefaultRoutePath> extends Omit<
     AnchorHTMLAttributes<HTMLAnchorElement>,
     "href"
   > {
     /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
-    href: TRoute | ExternalHref;
+    href: RouteHref<TRoute> | ExternalHref;
     prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
     prefetchDelay?: number;
     replace?: boolean;

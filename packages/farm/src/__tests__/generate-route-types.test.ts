@@ -71,4 +71,15 @@ describe("generateRouteTypes", () => {
     content = fs.readFileSync(path.join(tmpDir, "src", "farm-routes.d.ts"), "utf8");
     expect(content).toContain('"/blog"');
   });
+
+  it("includes configured extra routes in the generated union", async () => {
+    const outPath = await generateRouteTypes({
+      root: tmpDir,
+      srcDir: "src",
+      extraRoutes: ["/docs/reference"],
+    });
+
+    const content = fs.readFileSync(outPath, "utf8");
+    expect(content).toContain('"/docs/reference"');
+  });
 });

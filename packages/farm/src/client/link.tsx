@@ -25,6 +25,12 @@ export type DefaultRoutePath = LinkDefaultRoute extends { _: infer TRoute extend
   ? TRoute
   : string;
 
+type RouteHref<TRoute extends string> =
+  | TRoute
+  | `${TRoute}?${string}`
+  | `${TRoute}#${string}`
+  | `${TRoute}?${string}#${string}`;
+
 /** External URLs; these are never type-checked as routes. */
 export type ExternalHref =
   | `http://${string}`
@@ -37,7 +43,7 @@ export interface LinkProps<TRoute extends string = DefaultRoutePath> extends Omi
   "href"
 > {
   /** Internal route path (typed when route types are generated) or external URL. */
-  href: TRoute | ExternalHref;
+  href: RouteHref<TRoute> | ExternalHref;
   /**
    * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
    * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".

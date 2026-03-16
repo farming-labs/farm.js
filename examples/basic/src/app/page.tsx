@@ -1,6 +1,7 @@
 import React from 'react'
 import type { PageProps, Metadata } from '@farmjs/core'
 import { Link } from '@farmjs/core/client'
+import type { LinkProps } from '@farmjs/core/client'
 
 // Note: This page uses Link components which require hydration
 // SSG is better suited for pages without client-side interactivity
@@ -125,9 +126,6 @@ export default function HomePage({ params, searchParams }: PageProps) {
           <Link href="/boundaries/suspense" className="inline-flex items-center px-4 py-2 bg-amber-600 text-white rounded-md hover:bg-amber-700 transition-colors">
             React Suspense
           </Link>
-          <Link href="/docs/reference" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
-            📚 API Documentation
-          </Link>
         </div>
       </div>
     </div>
@@ -138,7 +136,7 @@ function FeatureCard({ icon, title, description, href }: {
   icon: string
   title: string
   description: string
-  href?: string
+  href?: LinkProps["href"]
 }) {
   const content = (
     <>

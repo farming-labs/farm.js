@@ -41,9 +41,11 @@ export const storageDemoClients = {
     : {}),
 } as const;
 
-export const storageDemoAvailableBackends = (
-  ['sqlite', 'local', ...(STORAGE_DEMO_POSTGRES_URL ? ['postgres'] : [])] as const
-) satisfies readonly StorageDemoBackend[];
+export const storageDemoAvailableBackends: readonly StorageDemoBackend[] = [
+  'sqlite',
+  'local',
+  ...(STORAGE_DEMO_POSTGRES_URL ? (['postgres'] as const) : []),
+];
 
 export function getStorageDemoMount(backend: StorageDemoBackend) {
   return STORAGE_DEMO_MOUNTS[backend];
