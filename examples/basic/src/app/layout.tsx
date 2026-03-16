@@ -42,6 +42,9 @@ export default function RootLayout({ children }: LayoutProps) {
             <Link href="/api-demo-client-advanced" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               API Client Advanced
             </Link>
+            <Link href="/store-e2e" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
+              Store Demo
+            </Link>
             <Link href="/storage-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               Storage Demo
             </Link>
