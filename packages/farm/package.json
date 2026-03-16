@@ -30,6 +30,9 @@
         "./types/middleware.d.ts",
         "./dist/middleware.d.ts"
       ],
+      "storage": [
+        "./dist/storage.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -71,6 +74,11 @@
       "types": "./types/client.d.ts",
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
+    },
+    "./storage": {
+      "types": "./dist/storage.d.ts",
+      "import": "./dist/storage.mjs",
+      "require": "./dist/storage.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
@@ -140,16 +148,19 @@
     "@tailwindcss/vite": "^4.1.0",
     "@vitejs/plugin-react": "^4.2.1",
     "better-call": "^1.0.19",
+    "db0": "^0.3.4",
     "esbuild": "^0.19.11",
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.5",
     "nitro": "3.0.1-alpha.0",
+    "pg": "^8.20.0",
     "picocolors": "^1.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-server-dom-webpack": "^18.3.0-canary-670c8dfb8-20231204",
     "sirv": "^2.0.4",
     "tailwindcss": "^4.0.0",
+    "unstorage": "^2.0.0-alpha.3",
     "vite": "^5.0.10",
     "zod": "^4.1.12"
   },

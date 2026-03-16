@@ -1,5 +1,6 @@
 import type { FarmConfig } from "./types";
 import { resolveAppPath, fileExists, logger } from "./utils";
+import { initStorage } from "./storage";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
 import path from "path";
@@ -23,6 +24,8 @@ export class FarmApp {
     if (process.env.FARM_VERBOSE) {
       logger.info("Initializing Farm.js application...");
     }
+
+    await initStorage(this.config.storage);
 
     // Verify app directory structure
     await this.verifyAppStructure();
@@ -56,6 +59,7 @@ export class FarmApp {
       outDir: config.outDir || "dist",
       basePath: config.basePath || "/",
       preset: config.preset ?? "node-server",
+      storage: config.storage || {},
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? false,

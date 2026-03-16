@@ -63,6 +63,17 @@ export default function DocsIndexPage(_props: PageProps) {
           </p>
         </Link>
         <Link
+          href="/docs/storage"
+          className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
+        >
+          <h2 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-600">
+            Storage
+          </h2>
+          <p className="mt-2 text-sm text-slate-600">
+            Programmatic storage helpers, mounted stores, and multi-driver usage.
+          </p>
+        </Link>
+        <Link
           href="/docs/layouts"
           className="group block rounded-xl border border-slate-200 bg-white p-6 shadow-sm hover:border-emerald-200 hover:shadow-md"
         >

@@ -170,9 +170,9 @@ export class APIRouteManager {
           query[key] = value;
         });
 
-        // Parse body for POST/PUT/PATCH
+        // Parse body for any method that can carry JSON payloads.
         let body: any = undefined;
-        if (["POST", "PUT", "PATCH"].includes(method)) {
+        if (method !== "GET" && method !== "HEAD") {
           try {
             const text = await request.text();
             if (text) {

@@ -5,6 +5,7 @@ import * as path from "path";
 import type { FarmConfig, FarmRequest, FarmResponse, PageProps, SSGPage } from "../types";
 import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
+import { isClientComponentModule } from "../utils/client-component";
 import { Writable } from "stream";
 import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
@@ -289,15 +290,7 @@ export class ServerRenderer {
       let isClientComponent = false;
       const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
       if (serverComponentsEnabled) {
-        try {
-          const fs = await import("fs");
-          const content = fs.readFileSync(route.modulePath, "utf-8");
-          isClientComponent =
-            content.trimStart().startsWith("'use client'") ||
-            content.trimStart().startsWith('"use client"');
-        } catch (error) {
-          isClientComponent = false;
-        }
+        isClientComponent = isClientComponentModule(route.modulePath, this.config.root);
       }
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
@@ -541,17 +534,7 @@ export class ServerRenderer {
       for (const routeEntry of manifest.routes) {
         let isClient = false;
         if (serverComponentsEnabled) {
-          try {
-            const absolutePath = routeEntry.modulePath.startsWith("/")
-              ? this.config.root + routeEntry.modulePath
-              : routeEntry.modulePath;
-            const content = fs.readFileSync(absolutePath, "utf-8");
-            isClient =
-              content.trimStart().startsWith("'use client'") ||
-              content.trimStart().startsWith('"use client"');
-          } catch {
-            isClient = false;
-          }
+          isClient = isClientComponentModule(routeEntry.modulePath, this.config.root);
         }
 
         clientManifest.routes[routeEntry.pattern] = {

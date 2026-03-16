@@ -9,6 +9,7 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateRouteTypes } from "./routing/generate-route-types";
+import { isClientComponentModule } from "./utils/client-component";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -379,15 +380,7 @@ export function farmPlugin(
             const routeModule = await routeManager.loadRouteModule(route.modulePath);
 
             // Check if client component
-            let isClientComponent = false;
-            try {
-              const content = fs.readFileSync(route.modulePath, "utf-8");
-              isClientComponent =
-                content.trimStart().startsWith("'use client'") ||
-                content.trimStart().startsWith('"use client"');
-            } catch {
-              isClientComponent = false;
-            }
+            const isClientComponent = isClientComponentModule(route.modulePath, server.config.root);
 
             // Collect metadata from layouts and page
             let mergedMetadata: Record<string, any> = {};
@@ -659,18 +652,7 @@ export const getManifest = () => ({
 
         // Convert routes array to object keyed by pattern
         for (const route of manifest.routes) {
-          const isClient = (() => {
-            try {
-              const absolutePath = path.join(server.config.root, route.modulePath);
-              const content = fs.readFileSync(absolutePath, "utf-8");
-              return (
-                content.trimStart().startsWith("'use client'") ||
-                content.trimStart().startsWith('"use client"')
-              );
-            } catch {
-              return false;
-            }
-          })();
+          const isClient = isClientComponentModule(route.modulePath, server.config.root);
 
           fullManifest.routes[route.pattern] = {
             modulePath: route.modulePath,
@@ -1319,6 +1301,120 @@ async function buildClientHydrationElement(PageComponent, pageProps) {
   return element;
 }
 
+async function ensureLayoutLoaded(layouts = []) {
+  if (LayoutComponent || layouts.length === 0) {
+    return LayoutComponent;
+  }
+
+  try {
+    const rootLayout = layouts.find((layout) => layout.pattern === '/');
+    if (rootLayout) {
+      const layoutModule = await import(/* @vite-ignore */ rootLayout.modulePath);
+      LayoutComponent = layoutModule.default;
+    }
+  } catch (error) {
+    console.warn('[Farm.js] Could not load layout:', error);
+  }
+
+  return LayoutComponent;
+}
+
+function getCurrentSearchParams() {
+  const searchParams = {};
+  const url = new URL(window.location.href);
+  url.searchParams.forEach((value, key) => {
+    searchParams[key] = value;
+  });
+  return searchParams;
+}
+
+const clientModuleHintCache = new Map();
+
+async function moduleLooksClient(modulePath) {
+  if (!modulePath) {
+    return false;
+  }
+
+  if (clientModuleHintCache.has(modulePath)) {
+    return clientModuleHintCache.get(modulePath);
+  }
+
+  try {
+    const response = await fetch(modulePath, { headers: { Accept: "text/javascript" } });
+    const source = await response.text();
+    const looksClient = /["']use client["']/.test(source.slice(0, 256));
+    clientModuleHintCache.set(modulePath, looksClient);
+    return looksClient;
+  } catch (error) {
+    clientModuleHintCache.set(modulePath, false);
+    return false;
+  }
+}
+
+async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = []) {
+  await ensureLayoutLoaded(layouts);
+  const pageElement = await buildClientHydrationElement(PageComponent, pageProps);
+  return LayoutComponent
+    ? React.createElement(LayoutComponent, { children: pageElement })
+    : pageElement;
+}
+
+async function tryHydrateImportedPage(container, route, params, layouts, useHydrate = false) {
+  const modulePath = route?.modulePath;
+  if (!modulePath) {
+    return false;
+  }
+
+  let pageModule = pageModuleCache.get(modulePath);
+  if (!pageModule) {
+    pageModule = await import(/* @vite-ignore */ modulePath);
+    pageModuleCache.set(modulePath, pageModule);
+  }
+
+  const PageComponent = pageModule?.default;
+  if (!PageComponent) {
+    return false;
+  }
+
+  currentPageComponent = PageComponent;
+  currentPageProps = {
+    params,
+    searchParams: getCurrentSearchParams(),
+    path: window.location.pathname,
+  };
+
+  const wrappedElement = useHydrate && container?.id === '__farm_page__'
+    ? await buildClientHydrationElement(PageComponent, currentPageProps)
+    : await buildWrappedHydrationElement(
+        PageComponent,
+        currentPageProps,
+        layouts,
+      );
+
+  if (useHydrate) {
+    try {
+      reactRoot = hydrateRoot(container, wrappedElement);
+      window.__FARM_REACT_ROOT__ = reactRoot;
+      return true;
+    } catch (error) {
+      console.log('[Farm.js] Hydration mismatch, using createRoot');
+      appRoot = createRoot(container);
+      appRoot.render(wrappedElement);
+      window.__FARM_REACT_ROOT__ = appRoot;
+      hasClientTakenOver = true;
+      return true;
+    }
+  }
+
+  hasClientTakenOver = true;
+  if (reactRoot) { try { reactRoot.unmount(); } catch (e) {} reactRoot = null; }
+  if (appRoot) { try { appRoot.unmount(); } catch (e) {} appRoot = null; }
+  appRoot = createRoot(container);
+  window.__FARM_REACT_ROOT__ = appRoot;
+  appRoot.render(wrappedElement);
+  return true;
+}
+
 // ====== CHUNK-BASED NAVIGATION (TanStack Start pattern) ======
 // NO HTML fetching! Uses manifest to dynamically import page chunks
 async function renderPage(pageData) {
@@ -1345,20 +1441,12 @@ async function renderPage(pageData) {
       if (newTitle) document.title = newTitle.textContent || document.title;
       hasClientTakenOver = false;
       
-      // After HTML swap, check if this is a client component that needs hydration
-      // The server-rendered HTML includes the client entry script that will handle hydration
-      // But for SPA navigation, we need to manually trigger re-hydration
-      if (route.isClientComponent) {
-        // Find the page container and hydrate it
-        const pageContainer = document.querySelector('[data-farm-page]') || container;
-        if (pageContainer) {
-          // Create a new React root for the swapped content
-          appRoot = createRoot(pageContainer);
-          window.__FARM_REACT_ROOT__ = appRoot;
-          
-          // The page component will be imported and rendered by the hydrate function
-          // We need to trigger hydration - the client script in HTML should handle this
-          // But since we swapped HTML, let Vite's HMR or the initial script re-run
+      const shouldHydrate = route.isClientComponent || await moduleLooksClient(route.modulePath);
+      if (shouldHydrate) {
+        try {
+          await tryHydrateImportedPage(container, route, params, layouts);
+        } catch (error) {
+          // Keep the swapped server HTML when the page can only run on the server.
         }
       }
       
@@ -1426,23 +1514,10 @@ async function renderPage(pageData) {
     currentPageProps = { params, searchParams: {} };
     
     // Parse search params
-    const url = new URL(window.location.href);
-    url.searchParams.forEach((value, key) => {
-      currentPageProps.searchParams[key] = value;
-    });
+    currentPageProps.searchParams = getCurrentSearchParams();
     
     // Load layout if needed
-    if (!LayoutComponent && layouts.length > 0) {
-      try {
-        const rootLayout = layouts.find(l => l.pattern === '/');
-        if (rootLayout) {
-          const layoutModule = await import(/* @vite-ignore */ rootLayout.modulePath);
-          LayoutComponent = layoutModule.default;
-        }
-      } catch (e) {
-        console.warn('[Farm.js] Could not load layout:', e);
-      }
-    }
+    await ensureLayoutLoaded(layouts);
     
     // Build React tree
     let element;
@@ -1501,66 +1576,56 @@ async function hydrate() {
     // Check if this is a client component (set by SSR)
     const isClientComponent = window.__FARM_IS_CLIENT__ === true;
     const modulePath = window.__FARM_PAGE_MODULE__;
-    
-    if (!isClientComponent) {
-      console.log('[Farm.js] Server component - SPA router ready')
-      return
-    }
 
     if (!modulePath) {
       console.error('[Farm.js] No page module path found')
       return
     }
 
-    // Cache the current page module
-    const pageModule = await import(/* @vite-ignore */ modulePath)
-    pageModuleCache.set(modulePath, pageModule);
-    
-    // For client components, hydrate into the page-specific container
-    const pageContainer = document.getElementById('__farm_page__');
-    if (!pageContainer) {
-      console.error('[Farm.js] Page container not found')
+    const shouldHydrate = isClientComponent || await moduleLooksClient(modulePath);
+    if (!shouldHydrate) {
+      console.log('[Farm.js] Server component - SPA router ready')
       return
     }
 
-    const PageComponent = pageModule.default
-    if (!PageComponent) {
-      console.error('[Farm.js] No default export found in', modulePath)
-      return
-    }
-
-    currentPageComponent = PageComponent;
-    
     // Get props - either from server-injected props or by matching the current URL
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
     if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
       // Extract params from URL using manifest route matching (fallback)
       const pathname = window.location.pathname;
       const foundRoute = findRoute(pathname);
-      const searchParams = {};
-      new URLSearchParams(window.location.search).forEach((value, key) => {
-        searchParams[key] = value;
-      });
       pageProps = normalizeServerProps({
         params: foundRoute?.params || {},
-        searchParams: searchParams,
+        searchParams: getCurrentSearchParams(),
         path: pathname,
       });
     }
     currentPageProps = pageProps;
-    
-    // Use hydrateRoot for initial hydration to preserve server-rendered content
-    try {
-      const hydrationElement = await buildClientHydrationElement(PageComponent, currentPageProps);
-      reactRoot = hydrateRoot(pageContainer, hydrationElement);
-      window.__FARM_REACT_ROOT__ = reactRoot;
-      console.log('[Farm.js] ✅ Hydrated:', modulePath);
-    } catch (error) {
-      console.log('[Farm.js] Hydration mismatch, using createRoot');
-      reactRoot = createRoot(pageContainer);
-      reactRoot.render(await buildClientHydrationElement(PageComponent, currentPageProps));
-      window.__FARM_REACT_ROOT__ = reactRoot;
+
+    const layouts = findLayouts(window.location.pathname);
+    const pageContainer = isClientComponent
+      ? document.getElementById('__farm_page__')
+      : rootContainer;
+
+    if (!pageContainer) {
+      console.log('[Farm.js] Server component - SPA router ready')
+      return
     }
+
+    const hydrated = await tryHydrateImportedPage(
+      pageContainer,
+      { modulePath },
+      currentPageProps.params || {},
+      layouts,
+      isClientComponent,
+    ).catch(() => false);
+
+    if (hydrated) {
+      console.log('[Farm.js] ✅ Hydrated:', modulePath);
+      return;
+    }
+
+    console.log('[Farm.js] Server component - SPA router ready')
   } catch (error) {
     console.error('[Farm.js] Hydration error:', error)
   }

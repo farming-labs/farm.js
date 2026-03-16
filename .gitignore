@@ -8,6 +8,9 @@ dist/
 build/
 .next/
 out/
+.farm/
+**/.farm/
+**/src/.farm-client-entry.tsx
 
 # Environment variables
 .env
