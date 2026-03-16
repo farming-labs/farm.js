@@ -94,8 +94,8 @@ export function farmPlugin(
           root: farmConfig.root,
           srcDir: farmConfig.srcDir,
           extraRoutes:
-            farmConfig.openapi?.enabled && farmConfig.openapi.route
-              ? [farmConfig.openapi.route]
+            options.openapi?.enabled && options.openapi.route
+              ? [options.openapi.route]
               : [],
           suppressLintOnLink: farmConfig.suppressLintOnLink,
         });
@@ -118,8 +118,8 @@ export function farmPlugin(
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             extraRoutes:
-              farmConfig.openapi?.enabled && farmConfig.openapi.route
-                ? [farmConfig.openapi.route]
+              options.openapi?.enabled && options.openapi.route
+                ? [options.openapi.route]
                 : [],
             suppressLintOnLink: farmConfig.suppressLintOnLink,
           }).catch(() => {});

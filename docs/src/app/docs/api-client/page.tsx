@@ -52,6 +52,34 @@ if (result.error) {
       </section>
 
       <section>
+        <h2 className="text-xl font-semibold text-slate-900">Generated router types</h2>
+        <p className="mt-2 text-slate-600">
+          The generated <code>APIRouter</code> reflects your route structure. If a route segment is
+          not a valid TypeScript identifier, the generated type uses a quoted property key.
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
+          {`export type APIRouter = {
+  users: {
+    get: typeof GET_users;
+  };
+  "storage-demo": {
+    get: typeof GET_storagedemo;
+    post: typeof POST_storagedemo;
+    delete: typeof DELETE_storagedemo;
+  };
+};`}
+        </pre>
+        <p className="mt-3 text-slate-600">
+          That means hyphenated routes are accessed with bracket notation in TypeScript:
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
+          {`const result = await api["storage-demo"].get({
+  query: { backend: "sqlite" },
+});`}
+        </pre>
+      </section>
+
+      <section>
         <h2 className="text-xl font-semibold text-slate-900">Client options</h2>
         <p className="mt-2 text-slate-600">
           The second argument controls cache, retry, invalidation, optimistic writes, and lifecycle

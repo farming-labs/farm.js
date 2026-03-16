@@ -47,8 +47,10 @@ pnpm dev`}
 │           ├── page.tsx  # /users
 │           └── [id]/
 │               └── page.tsx  # /users/:id
+│   └── farm-routes.d.ts  # Generated route union for typed Link href
 ├── farm.config.ts
 ├── package.json
+├── tsconfig.json
 └── vite.config.ts`}
         </pre>
       </section>
@@ -72,6 +74,29 @@ export default function HomePage({ params, searchParams }: PageProps) {
   );
 }`}
         </pre>
+      </section>
+
+      <section>
+        <h2 className="text-xl font-semibold text-slate-900">Generated route types</h2>
+        <p className="mt-2 text-slate-600">
+          Farm.js generates <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">src/farm-routes.d.ts</code>{" "}
+          from your <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">src/app</code>{" "}
+          pages. That file drives typed <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">Link href</code>{" "}
+          values.
+        </p>
+        <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-900 p-4 text-sm text-slate-100">
+          {`import { Link } from "@farmjs/core";
+
+<Link href="/about">About</Link>
+<Link href="/users/123">User</Link>
+<Link href="/users/123?tab=profile">User Tab</Link>`}
+        </pre>
+        <p className="mt-3 text-slate-600">
+          The route file is regenerated on dev start and when routes change. Keep a local{" "}
+          <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">tsconfig.json</code>{" "}
+          in each app so <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-sm">pnpm type-check</code>{" "}
+          validates those typed links.
+        </p>
       </section>
 
       <nav className="flex gap-4 pt-8 border-t border-slate-200">
