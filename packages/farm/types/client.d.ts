@@ -6,7 +6,12 @@
  * farm-routes.d.ts in your app augments LinkDefaultRoute for typed href.
  */
 
-import type { AnchorHTMLAttributes, ForwardRefExoticComponent, ReactNode, RefAttributes } from "react";
+import type {
+  AnchorHTMLAttributes,
+  ForwardRefExoticComponent,
+  ReactNode,
+  RefAttributes,
+} from "react";
 
 declare module "@farmjs/core/client" {
   export interface MiddlewareProps {

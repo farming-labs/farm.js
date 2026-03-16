@@ -93,9 +93,10 @@ export function farmPlugin(
         await generateRouteTypes({
           root: farmConfig.root,
           srcDir: farmConfig.srcDir,
-          extraRoutes: farmConfig.openapi?.enabled && farmConfig.openapi.route
-            ? [farmConfig.openapi.route]
-            : [],
+          extraRoutes:
+            farmConfig.openapi?.enabled && farmConfig.openapi.route
+              ? [farmConfig.openapi.route]
+              : [],
           suppressLintOnLink: farmConfig.suppressLintOnLink,
         });
       } catch (e) {
@@ -116,9 +117,10 @@ export function farmPlugin(
           generateRouteTypes({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
-            extraRoutes: farmConfig.openapi?.enabled && farmConfig.openapi.route
-              ? [farmConfig.openapi.route]
-              : [],
+            extraRoutes:
+              farmConfig.openapi?.enabled && farmConfig.openapi.route
+                ? [farmConfig.openapi.route]
+                : [],
             suppressLintOnLink: farmConfig.suppressLintOnLink,
           }).catch(() => {});
         }, 100);
