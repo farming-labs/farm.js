@@ -1,6 +1,6 @@
 "use client";
 
-import { Link } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 import { useEffect, useMemo, useState } from "react";
 
 type PrefetchLog = {
@@ -22,6 +22,7 @@ declare global {
 }
 
 export default function PrefetchLab() {
+  const [ready, setReady] = useState(false);
   const [tick, setTick] = useState(0);
 
   useEffect(() => {
@@ -53,6 +54,7 @@ export default function PrefetchLab() {
         window.__FARM_PREFETCH_LOGS__?.push({ href, at: Date.now() });
         return originalPrefetch(href);
       };
+      setReady(true);
       cleanup = () => {
         router.prefetch = originalPrefetch;
       };
@@ -76,11 +78,19 @@ export default function PrefetchLab() {
   }, []);
 
   const logs = useMemo(() => {
+    if (typeof window === "undefined") {
+      return [];
+    }
+
     return window.__FARM_PREFETCH_LOGS__ || [];
   }, [tick]);
 
   return (
     <div className="space-y-6">
+      <p data-testid="hydrated" className="text-sm text-slate-500">
+        {ready ? "yes" : "no"}
+      </p>
+
       <div>
         <h2 className="text-xl font-semibold text-slate-900">Prefetch E2E Lab</h2>
         <p className="text-slate-600">
@@ -89,14 +99,16 @@ export default function PrefetchLab() {
       </div>
 
       <div className="flex flex-wrap gap-3">
-        <Link
-          data-testid="link-render"
-          href="/about?mode=render"
-          prefetch="render"
-          className="rounded border border-slate-300 px-3 py-2 text-sm"
-        >
-          Render prefetch
-        </Link>
+        {ready ? (
+          <Link
+            data-testid="link-render"
+            href="/about?mode=render"
+            prefetch="render"
+            className="rounded border border-slate-300 px-3 py-2 text-sm"
+          >
+            Render prefetch
+          </Link>
+        ) : null}
         <Link
           data-testid="link-intent"
           href="/about?mode=intent"
