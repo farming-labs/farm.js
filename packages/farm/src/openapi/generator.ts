@@ -311,7 +311,7 @@ export class OpenAPIGenerator {
    * Extract request body schema from endpoint
    */
   private async getRequestBody(route: APIRouteInfo, method: string): Promise<any> {
-    if (!["POST", "PUT", "PATCH"].includes(method)) {
+    if (!["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       return undefined;
     }
 
@@ -485,8 +485,8 @@ export class OpenAPIGenerator {
       operation.parameters = parameters;
     }
 
-    // Add request body for POST, PUT, PATCH
-    if (["POST", "PUT", "PATCH"].includes(method)) {
+    // Add request body for POST, PUT, PATCH, DELETE
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method)) {
       operation.requestBody = await this.getRequestBody(route, method);
     }
 

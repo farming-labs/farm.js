@@ -15,6 +15,7 @@ export default defineConfig({
     middleware: "src/middleware/index.ts",
     api: "src/api/index.ts",
     plugin: "src/plugin.ts",
+    storage: "src/storage/index.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

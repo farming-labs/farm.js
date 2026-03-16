@@ -184,12 +184,13 @@ export function DELETE<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function DELETE<
+  TBody extends AnySchema = any,
   TQuery extends AnySchema = any,
   THeaders extends AnySchema = any,
   TResponse = any,
 >(
-  options: Omit<EndpointOptions<any, TQuery, THeaders>, "method">,
-  handler: EndpointHandler<any, TQuery, THeaders, TResponse>,
+  options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,
+  handler: EndpointHandler<TBody, TQuery, THeaders, TResponse>,
 ): ReturnType<typeof createEndpoint>;
 export function DELETE(...args: any[]): any {
   if (args.length === 1) {

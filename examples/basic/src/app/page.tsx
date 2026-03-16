@@ -62,6 +62,12 @@ export default function HomePage({ params, searchParams }: PageProps) {
           description="Type-safe API endpoints with better-call"
           href="/api-demo"
         />
+        <FeatureCard
+          icon="🗄️"
+          title="Storage Clients"
+          description="Programmatic storage helpers for sqlite, redis, postgres, mysql, s3, and more"
+          href="/storage-demo"
+        />
       </div>
 
       <div className="bg-white rounded-lg shadow-md p-6 border border-gray-200">
@@ -97,6 +103,9 @@ export default function HomePage({ params, searchParams }: PageProps) {
           </Link>
           <Link href="/api-demo-client-advanced" className="inline-flex items-center px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors">
             API Client Advanced
+          </Link>
+          <Link href="/storage-demo" className="inline-flex items-center px-4 py-2 bg-slate-800 text-white rounded-md hover:bg-slate-900 transition-colors">
+            Storage Demo
           </Link>
           <Link href="/query-demo" className="inline-flex items-center px-4 py-2 bg-yellow-600 text-white rounded-md hover:bg-yellow-700 transition-colors">
             Query State Demo

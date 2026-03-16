@@ -1,5 +1,6 @@
 import type { ReactNode, ComponentType } from "react";
 import type { IncomingMessage, ServerResponse } from "http";
+import type { FarmStorageUserConfig } from "./storage/types";
 
 export type NitroPreset =
   | "node-server"
@@ -24,6 +25,7 @@ export interface FarmConfig {
   outDir?: string;
   basePath?: string;
   preset?: NitroPreset;
+  storage?: FarmStorageUserConfig;
   /**
    * When true, Link href is not strictly typed (accepts any string).
    * Use when you want to skip route-type errors on Link or don't use generated route types.

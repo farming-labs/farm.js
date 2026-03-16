@@ -1,5 +1,6 @@
 import { defineFarmConfig, type FarmPlugin } from '@farmjs/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farmjs/core/plugin/server';
+import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 
 const myCustomPlugin: FarmPlugin = {
   name: 'my-custom-plugin',
@@ -21,6 +22,15 @@ export default defineFarmConfig({
   outDir: 'dist',
   basePath: '/',
   preset: "vercel",
+  storage: {
+    mounts: {
+      [STORAGE_DEMO_MOUNTS.local]: storageDemoClients.local,
+      [STORAGE_DEMO_MOUNTS.sqlite]: storageDemoClients.sqlite,
+      ...(storageDemoClients.postgres
+        ? { [STORAGE_DEMO_MOUNTS.postgres]: storageDemoClients.postgres }
+        : {}),
+    },
+  },
   experimental: {
     // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
     serverComponents: true,
@@ -157,4 +167,3 @@ export default defineFarmConfig({
     },
   },
 });
-

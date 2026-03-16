@@ -1,9 +1,0 @@
-{
-  "farm-client.js": {
-    "id": "farm-client.js",
-    "chunks": [
-      "farm-client.js"
-    ],
-    "name": "farm-client"
-  }
-}

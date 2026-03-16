@@ -5,6 +5,7 @@ import type { ServerRenderer } from "../server/renderer";
 import type { PluginManager } from "../plugin";
 import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { createRequire } from "module";
@@ -214,10 +215,17 @@ async function buildClient(
   );
 
   // Generate client hydration entry code
-  const clientHydrationCode = generateClientHydrationEntry(clientPages, layoutRoutes, root, srcDir);
+  const clientEntryDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-client-entry-"));
+  const clientEntryPath = path.join(clientEntryDir, "farm-client-entry.tsx");
+  const clientHydrationCode = generateClientHydrationEntry(
+    clientPages,
+    layoutRoutes,
+    root,
+    srcDir,
+    clientEntryDir,
+  );
 
   // Write the client entry to a temporary file
-  const clientEntryPath = path.join(root, srcDir, ".farm-client-entry.tsx");
   await fs.writeFile(clientEntryPath, clientHydrationCode);
 
   // Tailwind support:
@@ -373,7 +381,7 @@ async function buildClient(
   } finally {
     // Clean up temporary entry file
     try {
-      await fs.unlink(clientEntryPath);
+      await fs.rm(clientEntryDir, { recursive: true, force: true });
     } catch {
       // Ignore cleanup errors
     }
@@ -388,17 +396,20 @@ function generateClientHydrationEntry(
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   root: string,
   srcDir: string,
+  clientEntryDir: string,
 ): string {
   // Always import global CSS for Tailwind
-  const cssImport = `import "./app/globals.css";`;
+  const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
+  const cssImportPath =
+    "./" + path.relative(clientEntryDir, globalsCssPath).replace(/\\/g, "/");
+  const cssImport = `import ${JSON.stringify(cssImportPath)};`;
 
   // Import layouts for wrapping client components
   const layoutImportStatements: string[] = [];
   const layoutRegistrations: string[] = [];
 
   layoutRoutes.forEach((layout, index) => {
-    // Create relative import path from srcDir
-    const relativePath = layout.modulePath.replace(path.join(root, srcDir) + "/", "./");
+    const relativePath = "./" + path.relative(clientEntryDir, layout.modulePath).replace(/\\/g, "/");
     layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     layoutRegistrations.push(
       `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`,
@@ -547,8 +558,7 @@ console.log("[Farm.js] SPA router ready");
   const imports: string[] = [];
   const routeEntries: string[] = [];
 
-  // Client entry is at srcDir/.farm-client-entry.tsx, so calculate relative paths from there
-  const clientEntryDir = path.join(root, srcDir);
+  // Client entry is generated under .farm/.generated, so calculate relative paths from there
 
   clientPages.forEach((page, index) => {
     // Calculate relative path from client entry directory to the page module

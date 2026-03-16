@@ -11,20 +11,35 @@ import type {
   RateLimitStorage,
   RateLimitStatus,
 } from "./types";
+import { getStorage } from "../storage";
+import type { Storage } from "unstorage";
 
-const defaultStore = new Map<string, any>();
+interface RateLimitRecord {
+  count: number;
+  resetAt: number;
+}
+
+function getRateLimitStorage(): Storage {
+  return getStorage("ratelimit");
+}
+
 const defaultRateLimitStorage: RateLimitStorage = {
-  get(key: string) {
-    return defaultStore.get(key) || null;
+  async get(key: string) {
+    const storage = getRateLimitStorage();
+    const value = await storage.getItem<RateLimitRecord>(key);
+    return value ?? null;
   },
-  set(key: string, value: any, ttl?: number) {
-    defaultStore.set(key, value);
+  async set(key: string, value: any, ttl?: number) {
+    const storage = getRateLimitStorage();
+    await storage.setItem(key, value, ttl ? { ttl } : undefined);
   },
-  delete(key: string) {
-    defaultStore.delete(key);
+  async delete(key: string) {
+    const storage = getRateLimitStorage();
+    await storage.removeItem(key);
   },
-  ttl(key: string) {
-    const record = defaultStore.get(key);
+  async ttl(key: string) {
+    const storage = getRateLimitStorage();
+    const record = await storage.getItem<RateLimitRecord>(key);
     if (!record || !record.resetAt) {
       return null;
     }
