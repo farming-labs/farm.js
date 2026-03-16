@@ -187,18 +187,24 @@ ${typeExports}
     const lines: string[] = [];
 
     for (const [key, value] of Object.entries(obj)) {
+      const propertyKey = this.toTypePropertyKey(key);
+
       if (typeof value === "string") {
         // It's a type reference
-        lines.push(`${spaces}${key}: ${value};`);
+        lines.push(`${spaces}${propertyKey}: ${value};`);
       } else if (typeof value === "object") {
         // It's a nested object
-        lines.push(`${spaces}${key}: {`);
+        lines.push(`${spaces}${propertyKey}: {`);
         lines.push(this.structureToTypeString(value, indent + 1));
         lines.push(`${spaces}};`);
       }
     }
 
     return lines.join("\n");
+  }
+
+  private toTypePropertyKey(key: string): string {
+    return /^[$A-Z_][0-9A-Z_$]*$/i.test(key) ? key : JSON.stringify(key);
   }
 
   private getBaseExportName(path: string): string {

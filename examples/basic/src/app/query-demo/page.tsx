@@ -55,7 +55,7 @@ async function ServerQueryDemo({ searchParams , params: p }: PagePropsSafe) {
                 <p><strong className="text-blue-900">Enabled:</strong> <span className="text-gray-700">{params.enabled ? 'Yes' : 'No'}</span></p>
               </div>
               <div>
-                <p><strong className="text-blue-900">Tags:</strong> <span className="text-gray-700">{params.tags.length > 0 ? params.tags.join(', ') : 'None'}</span></p>
+                <p><strong className="text-blue-900">Tags:</strong> <span className="text-gray-700">{(params.tags?.length ?? 0) > 0 ? params.tags!.join(', ') : 'None'}</span></p>
                 <p><strong className="text-blue-900">Sort By:</strong> <span className="text-gray-700">{params.sortBy}</span></p>
                 <p><strong className="text-blue-900">Sort Order:</strong> <span className="text-gray-700">{params.sortOrder}</span></p>
                 <p><strong className="text-blue-900">Route Section:</strong> <span className="text-gray-700">{routeParams.section}</span></p>
@@ -159,5 +159,4 @@ export default function Page() {
 }
 
 export default ServerQueryDemo;
-
 

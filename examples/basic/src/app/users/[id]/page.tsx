@@ -1,8 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from 'react'
-import type { PageProps } from '@farmjs/core/client'
 import { Link } from '@farmjs/core/client'
+import type { LinkProps, PageProps } from '@farmjs/core'
 
 export default function UserPage({ params = {} }: PageProps) {
   const { id = '' } = params
@@ -138,7 +138,7 @@ function InfoCard({ title, description, data, example }: {
   )
 }
 
-function UrlDemo({ href, description }: { href: string; description: string }) {
+function UrlDemo({ href, description }: { href: LinkProps["href"]; description: string }) {
   return (
     <div className="flex items-center justify-between p-3 bg-gray-50 rounded-md hover:bg-gray-100 transition-colors">
       <div>

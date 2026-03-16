@@ -203,8 +203,7 @@ function FarmClientQueryDemo() {
 }
 
 // Main page component
-export default function FarmQueryDemoPage(props) {
-  console.log({props})
+export default function FarmQueryDemoPage(_props: unknown) {
   return (
     <div className="min-h-screen bg-gray-50 py-8">
       <div className="max-w-4xl mx-auto px-4">

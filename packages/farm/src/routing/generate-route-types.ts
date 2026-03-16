@@ -34,6 +34,7 @@ export interface GenerateRouteTypesOptions {
   root: string;
   srcDir?: string;
   outFile?: string;
+  extraRoutes?: string[];
   /** When true, do not augment LinkDefaultRoute so Link href accepts any string (no route-type errors). */
   suppressLintOnLink?: boolean;
 }
@@ -45,7 +46,13 @@ const DEFAULT_OUT_FILE = "farm-routes.d.ts";
  * and write a .d.ts file for typed Link href.
  */
 export async function generateRouteTypes(options: GenerateRouteTypesOptions): Promise<string> {
-  const { root, srcDir = "src", outFile = DEFAULT_OUT_FILE, suppressLintOnLink = false } = options;
+  const {
+    root,
+    srcDir = "src",
+    outFile = DEFAULT_OUT_FILE,
+    extraRoutes = [],
+    suppressLintOnLink = false,
+  } = options;
   const appDir = path.join(root, srcDir, "app");
 
   const outPath = path.join(root, srcDir, outFile);
@@ -72,6 +79,12 @@ export type RoutePath = string;
     if (route.type === "page") {
       const pattern = createRoutePattern(route);
       patterns.add(pattern);
+    }
+  }
+
+  for (const route of extraRoutes) {
+    if (route.startsWith("/")) {
+      patterns.add(route);
     }
   }
 

@@ -3,8 +3,9 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
+import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
-import { Link } from "../client/link";
+import { Link, type LinkProps } from "../client/link";
 
 const prefetch = vi.fn().mockResolvedValue(undefined);
 const navigate = vi.fn();
@@ -195,6 +196,29 @@ describe("Link", () => {
       type AppRoutes = "/" | "/about" | "/blog/[slug]";
       const el = render(createElement(Link<AppRoutes>, { href: "/about" }));
       expect(el?.getAttribute("href")).toBe("/about");
+    });
+
+    it("accepts route hrefs with query strings and hashes", () => {
+      type AppRoutes = "/" | "/docs/query" | `/users/${string}`;
+
+      expectTypeOf<LinkProps<AppRoutes>["href"]>().toEqualTypeOf<
+        | "/"
+        | `/?${string}`
+        | `/#${string}`
+        | `/?${string}#${string}`
+        | "/docs/query"
+        | `/docs/query?${string}`
+        | `/docs/query#${string}`
+        | `/docs/query?${string}#${string}`
+        | `/users/${string}`
+        | `/users/${string}?${string}`
+        | `/users/${string}#${string}`
+        | `/users/${string}?${string}#${string}`
+        | `http://${string}`
+        | `https://${string}`
+        | `//${string}`
+        | `mailto:${string}`
+      >();
     });
   });
 });
