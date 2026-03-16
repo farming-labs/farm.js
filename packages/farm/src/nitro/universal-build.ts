@@ -398,9 +398,11 @@ function generateClientHydrationEntry(
   srcDir: string,
   clientEntryDir: string,
 ): string {
+  const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
+
   // Always import global CSS for Tailwind
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
-  const cssImportPath = "./" + path.relative(clientEntryDir, globalsCssPath).replace(/\\/g, "/");
+  const cssImportPath = toImportPath(globalsCssPath);
   const cssImport = `import ${JSON.stringify(cssImportPath)};`;
 
   // Import layouts for wrapping client components
@@ -408,8 +410,7 @@ function generateClientHydrationEntry(
   const layoutRegistrations: string[] = [];
 
   layoutRoutes.forEach((layout, index) => {
-    const relativePath =
-      "./" + path.relative(clientEntryDir, layout.modulePath).replace(/\\/g, "/");
+    const relativePath = toImportPath(layout.modulePath);
     layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     layoutRegistrations.push(
       `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`,
@@ -558,13 +559,8 @@ console.log("[Farm.js] SPA router ready");
   const imports: string[] = [];
   const routeEntries: string[] = [];
 
-  // Client entry is generated under .farm/.generated, so calculate relative paths from there
-
   clientPages.forEach((page, index) => {
-    // Calculate relative path from client entry directory to the page module
-    const relativePath = path.relative(clientEntryDir, page.modulePath);
-    // Convert to forward-slash path for cross-platform compatibility and ensure it starts with ./
-    const importPath = "./" + relativePath.replace(/\\/g, "/");
+    const importPath = toImportPath(page.modulePath);
     imports.push(`import Page${index} from "${importPath}";`);
     routeEntries.push(`  { pattern: ${JSON.stringify(page.pattern)}, Component: Page${index} }`);
   });

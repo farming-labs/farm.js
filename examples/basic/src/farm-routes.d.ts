@@ -3,7 +3,7 @@
  * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
-export type RoutePath = "/" | "/about" | "/api-demo" | "/api-demo-client" | "/api-demo-client-advanced" | "/boundaries/error" | "/boundaries/loading" | "/boundaries/suspense" | "/contact" | "/docs/reference" | "/farm-query-client-demo" | "/farm-query-demo" | "/prefetch-e2e" | "/query-demo" | "/storage-demo" | "/store-e2e" | `/users/${string}`;
+export type RoutePath = "/" | "/about" | "/api-demo" | "/api-demo-client" | "/api-demo-client-advanced" | "/boundaries/error" | "/boundaries/loading" | "/boundaries/suspense" | "/contact" | "/farm-query-client-demo" | "/farm-query-demo" | "/prefetch-e2e" | "/query-demo" | "/storage-demo" | "/store-e2e" | `/users/${string}`;
 declare module "@farmjs/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
@@ -24,3 +24,4 @@ declare module "@farmjs/core/dist/client.js" {
     _: import("./farm-routes").RoutePath;
   }
 }
+
