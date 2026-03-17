@@ -10,6 +10,16 @@ import { Writable } from "stream";
 import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
 import { isSSGModule, matchSSGPage } from "../ssg";
+import { getIntegrationProviders } from "../integrations";
+
+let cachedClerkProvider:
+  | { ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>> }
+  | null = null;
+
+const importRuntimeModule = new Function(
+  "specifier",
+  "return import(specifier);",
+) as (specifier: string) => Promise<any>;
 
 function toMiddlewareMap(input: unknown): Map<string, any> {
   if (input instanceof Map) {
@@ -142,7 +152,7 @@ export class ServerRenderer {
           }
 
           const { renderToString } = await import("react-dom/server");
-          const html = renderToString(pageElement);
+          const html = renderToString(await this.wrapWithIntegrationProviders(pageElement));
 
           // Update cache
           this.ssgCache.set(page.urlPath, { html, timestamp: Date.now() });
@@ -405,8 +415,10 @@ export class ServerRenderer {
           );
         }
 
+        const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
+
         // Render with middleware data available
-        await this.renderWithSSR(wrappedElement, req, res, _clearCurrentMiddlewareData);
+        await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData);
       });
     } catch (error) {
       logger.error(`Error rendering page: ${error}`);
@@ -430,6 +442,30 @@ export class ServerRenderer {
 
       await this.render500(req, res, error);
     }
+  }
+
+  private async wrapWithIntegrationProviders(
+    element: React.ReactElement,
+  ): Promise<React.ReactElement> {
+    const providers = getIntegrationProviders(this.config.integrations);
+    let wrapped = element;
+
+    for (let i = providers.length - 1; i >= 0; i--) {
+      const provider = providers[i];
+      if (provider.type === "clerk") {
+        if (!cachedClerkProvider) {
+          cachedClerkProvider = await importRuntimeModule("@clerk/react");
+        }
+
+        wrapped = React.createElement(
+          cachedClerkProvider!.ClerkProvider,
+          provider.props || {},
+          wrapped,
+        );
+      }
+    }
+
+    return wrapped;
   }
 
   private async renderRouteErrorBoundary(

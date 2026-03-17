@@ -99,8 +99,8 @@ export async function createServer(config: FarmConfig = {}) {
     const root = config.root || process.cwd();
 
     // Load farm.config.ts if it exists
-    const userConfig = await loadConfig(root);
     const mode = process.env.NODE_ENV === "production" ? "production" : "development";
+    const userConfig = await loadConfig(root, undefined, mode);
 
     const resolvedConfig = userConfig ? await resolveConfig(userConfig, mode) : null;
 

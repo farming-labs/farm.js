@@ -10,6 +10,10 @@ import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateRouteTypes } from "./routing/generate-route-types";
 import { isClientComponentModule } from "./utils/client-component";
+import {
+  getIntegrationDocumentNavigationMatchers,
+  getIntegrationProviders,
+} from "./integrations";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -253,16 +257,36 @@ export function farmPlugin(
 
         // Handle API routes first
         if (req.url?.startsWith("/api/")) {
+          const startTime = Date.now();
+          const method = req.method || "GET";
+          const urlPath = req.url || "/";
+
+          try {
+            if (pm) {
+              await pm.runHookParallel("beforeRequest", req, res);
+            }
+
+            if (res.writableEnded) {
+              const duration = Date.now() - startTime;
+              logResponse(method, urlPath, res.statusCode || 200, duration, "API");
+              return;
+            }
+          } catch (error) {
+            await emitPluginError("before-request", error, { urlPath, method });
+            logger.error(`Request hook error: ${error}`);
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "Internal server error" }));
+            return;
+          }
+
           const apiHandler = apiRouteManager.getHandler();
           if (apiHandler) {
-            const startTime = Date.now();
-            const method = req.method || "GET";
-            const urlPath = req.url || "/";
-
             // Log API request
             // logRequest(method, urlPath, "API");
 
             try {
+
               // Convert Node.js request to Web Request
               const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
               const headers = new Headers();
@@ -331,10 +355,14 @@ export function farmPlugin(
         }
 
         // Skip internal Vite requests
+        const requestPathname = new URL(
+          req.url || "/",
+          `http://${req.headers.host || "localhost:3000"}`,
+        ).pathname;
         if (
           req.url?.startsWith("/@") ||
           req.url?.startsWith("/node_modules") ||
-          (req.url?.includes(".") && !req.url?.endsWith(".html"))
+          (requestPathname.includes(".") && !requestPathname.endsWith(".html"))
         ) {
           return next();
         }
@@ -620,7 +648,12 @@ export function farmPlugin(
 
     load(id) {
       if (id === "/@farm/client" || id === "/@farm/client.js") {
-        return generateClientCode();
+        return generateClientCode(
+          getIntegrationProviders(farmApp?.getConfig().integrations || options.integrations),
+          getIntegrationDocumentNavigationMatchers(
+            farmApp?.getConfig().integrations || options.integrations,
+          ),
+        );
       }
 
       if (id === "/@farm/server") {
@@ -714,8 +747,14 @@ if (import.meta.hot) {
       // Re-render with the new component
       const React = window.__FARM_REACT__;
       const props = window.__FARM_PROPS__ || {};
-      window.__FARM_REACT_ROOT__.render(React.createElement(newModule.default, props));
-      console.log('[Farm.js] ⚡ HMR update applied');
+      const nextElement = React.createElement(newModule.default, props);
+      const wrapProviders = window.__FARM_WRAP_PROVIDERS__;
+      Promise.resolve(
+        typeof wrapProviders === 'function' ? wrapProviders(nextElement) : nextElement
+      ).then((wrappedElement) => {
+        window.__FARM_REACT_ROOT__.render(wrappedElement);
+        console.log('[Farm.js] ⚡ HMR update applied');
+      });
     }
   });
 }
@@ -948,10 +987,19 @@ if (import.meta.hot) {
   };
 }
 
-function generateClientCode(): string {
+function generateClientCode(
+  integrationProviders: Array<{ name: string; type: string; props?: Record<string, unknown> }> = [],
+  documentNavigationMatchers: string[] = [],
+): string {
+  const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
+  const providerImportBlock = hasClerkProvider
+    ? `import { ClerkProvider } from '@clerk/react';`
+    : "";
+
   return `
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
+${providerImportBlock}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
 // Uses manifest-based chunk loading - NO HTML fetching!
@@ -959,8 +1007,38 @@ import { hydrateRoot, createRoot } from 'react-dom/client'
 
 // Expose React for HMR
 window.__FARM_REACT__ = React;
+const integrationProviders = ${JSON.stringify(integrationProviders)};
+const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
 
 let reactRoot = null;
+
+function matchesDocumentNavigation(pathname) {
+  return integrationDocumentNavigationMatchers.some((matcher) => {
+    if (matcher === '/(.*)' || matcher === '*') {
+      return true;
+    }
+    if (matcher.endsWith('(.*)')) {
+      const prefix = matcher.slice(0, -4);
+      return pathname === prefix || pathname.startsWith(prefix + '/');
+    }
+    return matcher === pathname;
+  });
+}
+
+function wrapWithIntegrationProviders(element) {
+  let wrapped = element;
+
+  for (let i = integrationProviders.length - 1; i >= 0; i--) {
+    const provider = integrationProviders[i];
+    if (provider.type === 'clerk') {
+      wrapped = React.createElement(ClerkProvider, provider.props || {}, wrapped);
+    }
+  }
+
+  return wrapped;
+}
+
+window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
 
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
@@ -1074,6 +1152,15 @@ class SPARouter {
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;
+
+    if (matchesDocumentNavigation(pathname)) {
+      if (replace) {
+        window.location.replace(url.toString());
+      } else {
+        window.location.assign(url.toString());
+      }
+      return;
+    }
 
     // Same page - just update hash
     if (pathname === window.location.pathname && search === window.location.search) {
@@ -1358,9 +1445,10 @@ async function moduleLooksClient(modulePath) {
 async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = []) {
   await ensureLayoutLoaded(layouts);
   const pageElement = await buildClientHydrationElement(PageComponent, pageProps);
-  return LayoutComponent
+  const wrappedTree = LayoutComponent
     ? React.createElement(LayoutComponent, { children: pageElement })
     : pageElement;
+  return wrapWithIntegrationProviders(wrappedTree);
 }
 
 async function tryHydrateImportedPage(container, route, params, layouts, useHydrate = false) {
@@ -1388,7 +1476,9 @@ async function tryHydrateImportedPage(container, route, params, layouts, useHydr
   };
 
   const wrappedElement = useHydrate && container?.id === '__farm_page__'
-    ? await buildClientHydrationElement(PageComponent, currentPageProps)
+    ? wrapWithIntegrationProviders(
+        await buildClientHydrationElement(PageComponent, currentPageProps),
+      )
     : await buildWrappedHydrationElement(
         PageComponent,
         currentPageProps,
@@ -1515,23 +1605,17 @@ async function renderPage(pageData) {
     
     // Update current page state
     currentPageComponent = PageComponent;
-    currentPageProps = { params, searchParams: {} };
-    
-    // Parse search params
-    currentPageProps.searchParams = getCurrentSearchParams();
-    
-    // Load layout if needed
-    await ensureLayoutLoaded(layouts);
-    
-    // Build React tree
-    let element;
-    const pageElement = React.createElement(PageComponent, currentPageProps);
-    
-    if (LayoutComponent) {
-      element = React.createElement(LayoutComponent, { children: pageElement });
-    } else {
-      element = pageElement;
-    }
+    currentPageProps = {
+      params,
+      searchParams: getCurrentSearchParams(),
+      path,
+    };
+
+    const element = await buildWrappedHydrationElement(
+      PageComponent,
+      currentPageProps,
+      layouts,
+    );
     
     // On first SPA navigation, take over from SSR
     if (!hasClientTakenOver) {

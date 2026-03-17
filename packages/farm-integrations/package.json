@@ -1,0 +1,59 @@
+{
+  "name": "@farmjs/integrations",
+  "version": "0.0.1",
+  "description": "Official integration adapters for Farm.js",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./better-auth": {
+      "types": "./dist/better-auth.d.ts",
+      "import": "./dist/better-auth.js"
+    },
+    "./authjs": {
+      "types": "./dist/authjs.d.ts",
+      "import": "./dist/authjs.js"
+    },
+    "./clerk": {
+      "types": "./dist/clerk.d.ts",
+      "import": "./dist/clerk.js"
+    },
+    "./auth0": {
+      "types": "./dist/auth0.d.ts",
+      "import": "./dist/auth0.js"
+    },
+    "./workos": {
+      "types": "./dist/workos.d.ts",
+      "import": "./dist/workos.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "echo 'No tests in this package'"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*",
+    "@workos-inc/node": "^8.9.0"
+  },
+  "devDependencies": {
+    "@clerk/backend": "^3.2.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.3.3"
+  },
+  "peerDependencies": {
+    "@clerk/backend": "^3.2.0",
+    "@clerk/react": "^6.1.0",
+    "react": "^18.2.0 || ^19.0.0"
+  }
+}

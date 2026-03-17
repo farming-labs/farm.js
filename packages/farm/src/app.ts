@@ -60,6 +60,7 @@ export class FarmApp {
       basePath: config.basePath || "/",
       preset: config.preset ?? "node-server",
       storage: config.storage || {},
+      integrations: config.integrations || {},
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? false,

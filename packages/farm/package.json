@@ -165,6 +165,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@clerk/react": "^6.1.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitest/coverage-v8": "^1.1.0",

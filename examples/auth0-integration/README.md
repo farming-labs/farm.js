@@ -1,0 +1,32 @@
+# Auth0 Integration Example
+
+Config-only Auth0 setup through `@farmjs/integrations/auth0`.
+
+The example passes the callback URL directly in `farm.config.ts`:
+
+```ts
+auth0({
+  callbackUrl: "http://localhost:3000/auth/callback",
+  protectedRoutes: ["/dashboard(.*)"],
+})
+```
+
+Getting started:
+
+1. Add an `.env.local` in this example with:
+   - `AUTH0_DOMAIN`
+   - `AUTH0_CLIENT_ID`
+   - `AUTH0_CLIENT_SECRET`
+   - `AUTH0_SECRET`
+2. In Auth0, allow:
+   - callback URL: `http://localhost:3000/auth/callback`
+   - logout URL: `http://localhost:3000`
+3. Run `pnpm dev`
+
+The integration owns:
+
+- `/auth/login`
+- `/auth/signup`
+- `/auth/callback`
+- `/auth/logout`
+- `/auth/profile`
