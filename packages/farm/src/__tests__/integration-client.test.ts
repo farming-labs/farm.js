@@ -40,7 +40,7 @@ describe("integration client", () => {
     );
 
     const auth = defineIntegration({
-      slot: "auth",
+      category: "auth",
       type: "supabase",
       instance: {},
       api: {

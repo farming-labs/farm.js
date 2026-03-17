@@ -1,21 +1,64 @@
 declare module "@farmjs/core" {
-  export type FarmIntegrationSlot =
+  export type FarmIntegrationCategory =
     | "auth"
     | "payment"
     | "monitoring"
     | "logging"
     | (string & {});
 
+  /** @deprecated Use FarmIntegrationCategory instead. */
+  export type FarmIntegrationSlot = FarmIntegrationCategory;
+
+  export type FarmIntegrationRouteParamValue = string | string[];
+  export type FarmIntegrationRouteParams = Record<string, FarmIntegrationRouteParamValue>;
+
+  export interface FarmIntegrationRequestContextStore {
+    get<T = unknown>(key: string): T | undefined;
+    set(key: string, value: unknown, options?: { exposeToPage?: boolean }): void;
+    has(key: string): boolean;
+    delete(key: string): boolean;
+    clear(): void;
+    snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
+  }
+
+  export interface FarmIntegrationHandlerContext {
+    request: Request;
+    requestId: string;
+    url: URL;
+    pathname: string;
+    method: string;
+    params: FarmIntegrationRouteParams;
+    integration: {
+      category: FarmIntegrationCategory;
+      /** @deprecated Use category instead. */
+      slot: FarmIntegrationCategory;
+      type: string;
+      instance: unknown;
+    };
+    route: {
+      kind: "route" | "middleware";
+      path: string;
+      methods: readonly string[];
+    };
+    requestContext: FarmIntegrationRequestContextStore;
+    config: Record<string, unknown>;
+    isDev: boolean;
+    isProd: boolean;
+  }
+
   export interface FarmIntegrationRoute {
     path: string;
     methods: readonly string[];
     rawBody?: boolean;
-    handler(request: Request): Promise<Response> | Response;
+    handler(request: Request, context: FarmIntegrationHandlerContext): Promise<Response> | Response;
   }
 
   export interface FarmIntegrationMiddleware {
     matcher?: string | string[];
-    handler(request: Request): Promise<Response | void> | Response | void;
+    handler(
+      request: Request,
+      context: FarmIntegrationHandlerContext,
+    ): Promise<Response | void> | Response | void;
   }
 
   export interface FarmIntegrationProviderProps {
@@ -49,6 +92,7 @@ declare module "@farmjs/core" {
     TBody = never,
     TQuery = never,
     TResponse = unknown,
+    TServer extends boolean = false,
   > {
     readonly kind: "farm-integration-api-operation";
     path: string;
@@ -57,6 +101,7 @@ declare module "@farmjs/core" {
     responseFormat?: FarmIntegrationAPIResponseFormat;
     headers?: Record<string, string>;
     credentials?: RequestCredentials;
+    isServer?: TServer;
     __types?: {
       body: TBody;
       query: TQuery;
@@ -72,9 +117,13 @@ declare module "@farmjs/core" {
     TBody = never,
     TQuery = never,
     TResponse = unknown,
+    TServer extends boolean = false,
   >(
-    operation: Omit<FarmIntegrationAPIOperation<TBody, TQuery, TResponse>, "kind" | "__types">,
-  ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse>;
+    operation: Omit<
+      FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>,
+      "kind" | "__types"
+    >,
+  ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
 
   export function defineIntegrationAPI<TAPI extends FarmIntegrationAPI>(api: TAPI): TAPI;
 
@@ -90,7 +139,9 @@ declare module "@farmjs/core" {
     | "request:error";
 
   export interface FarmIntegrationLogEvent {
-    slot: FarmIntegrationSlot;
+    category: FarmIntegrationCategory;
+    /** @deprecated Use category instead. */
+    slot: FarmIntegrationCategory;
     type: string;
     phase: FarmIntegrationLogPhase;
     route?: {
@@ -112,7 +163,9 @@ declare module "@farmjs/core" {
 
   export interface FarmIntegration {
     readonly kind: "farm-integration";
-    slot: FarmIntegrationSlot;
+    category: FarmIntegrationCategory;
+    /** @deprecated Use category instead. */
+    slot?: FarmIntegrationCategory;
     type: string;
     instance: unknown;
     api?: FarmIntegrationAPI;
@@ -124,8 +177,20 @@ declare module "@farmjs/core" {
     plugins?: readonly FarmPlugin[];
   }
 
+  export type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> &
+    (
+      | {
+          category: FarmIntegrationCategory;
+          slot?: FarmIntegrationCategory;
+        }
+      | {
+          category?: FarmIntegrationCategory;
+          slot: FarmIntegrationCategory;
+        }
+    );
+
   export function defineIntegration(
-    integration: Omit<FarmIntegration, "kind">,
+    integration: FarmIntegrationInput,
   ): FarmIntegration;
 
   export function getIntegrationProviders(

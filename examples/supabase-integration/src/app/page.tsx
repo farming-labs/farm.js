@@ -1,3 +1,7 @@
+"use client";
+
+import LocalDemoCard from "./local-demo-card";
+
 export default function Page() {
   return (
     <main className="page-shell">
@@ -53,6 +57,32 @@ export default function Page() {
             <div className="session-line">
               <strong>/auth/session</strong>
               <span>Read through `api.supabase.session()` on the client.</span>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section className="playground-grid">
+        <LocalDemoCard />
+
+        <section className="card">
+          <h2>Custom Integration Layout</h2>
+          <div className="session-stack">
+            <div className="session-line">
+              <strong>Definition</strong>
+              <span>`src/lib/integrations/local-demo/index.ts`</span>
+            </div>
+            <div className="session-line">
+              <strong>Client</strong>
+              <span>`src/lib/integrations/local-demo/client.ts`</span>
+            </div>
+            <div className="session-line">
+              <strong>Registration</strong>
+              <span>Imported directly into `farm.config.ts` like any other integration.</span>
+            </div>
+            <div className="session-line">
+              <strong>Usage</strong>
+              <span>Available through the same shared `api.localDemo.*` namespace.</span>
             </div>
           </div>
         </section>

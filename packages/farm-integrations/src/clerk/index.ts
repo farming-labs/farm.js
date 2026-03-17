@@ -53,7 +53,7 @@ export function clerk(input: ClerkIntegrationInput = {}) {
   };
 
   return defineIntegration({
-    slot: "auth",
+    category: "auth",
     type: "clerk",
     instance: {
       publishableKey,

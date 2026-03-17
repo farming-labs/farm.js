@@ -270,7 +270,7 @@ async function exchangeCode(
 export function auth0(input: Auth0IntegrationInput = {}) {
   if (input.instance) {
     return defineIntegration({
-      slot: "auth",
+      category: "auth",
       type: "auth0",
       instance: input.instance,
       log: input.log,
@@ -352,7 +352,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
   }
 
   return defineIntegration({
-    slot: "auth",
+    category: "auth",
     type: "auth0",
     instance: {
       domain,

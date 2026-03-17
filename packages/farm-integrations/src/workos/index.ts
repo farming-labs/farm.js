@@ -109,7 +109,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
   }
 
   return defineIntegration({
-    slot: "auth",
+    category: "auth",
     type: "workos",
     instance: {
       clientId,

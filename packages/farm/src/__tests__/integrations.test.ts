@@ -54,13 +54,31 @@ function createResponse() {
 }
 
 describe("integrations runtime", () => {
-  it("registers route integrations as pre-plugins and handles matching requests", async () => {
+  it("normalizes legacy slot inputs to category", () => {
+    const integration = defineIntegration({
+      slot: "auth",
+      type: "legacy-auth",
+      instance: {},
+    });
+
+    expect(integration.category).toBe("auth");
+    expect(integration.slot).toBe("auth");
+  });
+
+  it("registers route integrations as pre-plugins and exposes shared handler context", async () => {
     const log = vi.fn();
     const manager = createManager();
+    manager.addPlugin({
+      name: "seed-request-context",
+      enforce: "pre",
+      beforeRequest(req, _res, context) {
+        context.requestContext.set(req, "seed", "shared-value");
+      },
+    });
     manager.addPlugins(
       resolveIntegrationPlugins({
         auth: defineIntegration({
-          slot: "auth",
+          category: "auth",
           type: "better-auth",
           instance: {
             handler: vi.fn(),
@@ -68,9 +86,34 @@ describe("integrations runtime", () => {
           log,
           routes: [
             {
-              path: "/api/auth/[...auth]",
+              path: "/api/auth/[provider]/[...auth]",
               methods: ["GET", "POST"],
-              handler: () => new Response("ok", { status: 201 }),
+              handler(request, context) {
+                expect(context.request).toBe(request);
+                expect(context.requestId).toBe("req-1");
+                expect(context.pathname).toBe("/api/auth/github/callback");
+                expect(context.params).toEqual({
+                  provider: "github",
+                  auth: ["callback"],
+                });
+                expect(context.integration.category).toBe("auth");
+                expect(context.integration.slot).toBe("auth");
+                expect(context.integration.type).toBe("better-auth");
+                expect(context.route.kind).toBe("route");
+                expect(context.requestContext.get("seed")).toBe("shared-value");
+
+                context.requestContext.set("handled", "yes");
+
+                return Response.json(
+                  {
+                    provider: context.params.provider,
+                    auth: context.params.auth,
+                    handled: context.requestContext.get("handled"),
+                    seeded: context.requestContext.get("seed"),
+                  },
+                  { status: 201 },
+                );
+              },
             },
           ],
         }),
@@ -79,19 +122,24 @@ describe("integrations runtime", () => {
 
     await manager.runHookParallel("init");
 
-    const req = createRequest("/api/auth/session");
+    const req = createRequest("/api/auth/github/callback");
     const res = createResponse();
     const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
 
     expect(ended).toBe(true);
     expect(res.writableEnded).toBe(true);
     expect(res.statusCode).toBe(201);
-    expect(res.body.toString()).toBe("ok");
+    expect(JSON.parse(res.body.toString())).toEqual({
+      provider: "github",
+      auth: ["callback"],
+      handled: "yes",
+      seeded: "shared-value",
+    });
     expect(log).toHaveBeenCalledWith(
       expect.objectContaining({
         phase: "registered",
         route: expect.objectContaining({
-          path: "/api/auth/[...auth]",
+          path: "/api/auth/[provider]/[...auth]",
         }),
       }),
     );
@@ -104,8 +152,12 @@ describe("integrations runtime", () => {
       expect.objectContaining({
         phase: "request:end",
         durationMs: expect.any(Number),
+        context: expect.any(Map),
       }),
     );
+    const endLog = log.mock.calls.find((call) => call[0]?.phase === "request:end")?.[0];
+    expect(endLog?.context.get("handled")).toBe("yes");
+    expect(endLog?.context.get("seed")).toBe("shared-value");
   });
 
   it("runs integration middleware before routes and can short-circuit the request", async () => {
@@ -113,13 +165,19 @@ describe("integrations runtime", () => {
     manager.addPlugins(
       resolveIntegrationPlugins({
         auth: defineIntegration({
-          slot: "auth",
+          category: "auth",
           type: "clerk",
           instance: {},
           middleware: [
             {
-              matcher: "/dashboard(.*)",
-              handler: () => new Response("blocked", { status: 401 }),
+              matcher: "/dashboard/[section]",
+              handler(_request, context) {
+                expect(context.route.kind).toBe("middleware");
+                expect(context.params).toEqual({
+                  section: "settings",
+                });
+                return new Response("blocked", { status: 401 });
+              },
             },
           ],
         }),
@@ -138,7 +196,7 @@ describe("integrations runtime", () => {
   it("collects document navigation matchers from integrations", () => {
     const matchers = getIntegrationDocumentNavigationMatchers({
       auth: defineIntegration({
-        slot: "auth",
+        category: "auth",
         type: "clerk",
         instance: {},
         documentNavigations: [
@@ -150,5 +208,47 @@ describe("integrations runtime", () => {
     });
 
     expect(matchers).toEqual(["/sign-in(.*)", "/sign-up(.*)"]);
+  });
+
+  it("supports custom integration slots outside the built-in categories", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {
+            greeting: "hello",
+          },
+          routes: [
+            {
+              path: "/api/local-demo/status",
+              methods: ["GET"],
+              handler(_request, context) {
+                return Response.json({
+                  slot: context.integration.slot,
+                  category: context.integration.category,
+                  type: context.integration.type,
+                  greeting: (context.integration.instance as { greeting: string }).greeting,
+                });
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/status");
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      slot: "custom",
+      category: "custom",
+      type: "local-demo",
+      greeting: "hello",
+    });
   });
 });

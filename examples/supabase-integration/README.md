@@ -51,6 +51,7 @@ import { supabaseClient } from "@farmjs/integrations/supabase/client";
 export const api = createIntegrationClient({
   integrations: {
     supabase: supabaseClient,
+    localDemo: localDemoClient,
   },
 });
 ```
@@ -77,6 +78,36 @@ const serverApi = createIntegrationClient(
 );
 
 const { data, error } = await serverApi.supabase.session();
+```
+
+This example also includes an app-local integration to show that integrations are not limited to
+the ones published by Farm:
+
+```ts
+import { localDemo } from "./src/lib/integrations/local-demo/index.ts";
+
+export default defineFarmConfig({
+  integrations: {
+    auth: supabase(...),
+    localDemo: localDemo(),
+  },
+});
+```
+
+The local integration definition lives in:
+
+- `src/lib/integrations/local-demo/index.ts`
+- `src/lib/integrations/local-demo/client.ts`
+
+And it is used through the same shared client:
+
+```ts
+const { data, error } = await api.localDemo.status();
+const echo = await api.localDemo.echo({
+  body: {
+    message: "hello from a local integration",
+  },
+});
 ```
 
 Server-only methods should be registered on the integration definition itself:

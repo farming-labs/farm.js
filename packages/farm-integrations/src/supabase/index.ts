@@ -1,6 +1,7 @@
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import {
   defineIntegration,
+  type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
 } from "@farmjs/core";
 import { api as clientApi } from "@farmjs/core/client";
@@ -75,7 +76,7 @@ interface SupabaseAPIInput {
 
 interface RenderAuthPageInput {
   mode: SupabasePageMode;
-  request: Request;
+  context: FarmIntegrationHandlerContext;
   loginPath: string;
   signupPath: string;
   signInViewPath: string;
@@ -101,8 +102,8 @@ function createSupabaseApi(input: SupabaseAPIInput = {}) {
       SupabaseSignUpResult
     >(signupPath),
     oauth: clientApi.get<
-      SupabaseRedirectResult,
-      SupabaseOAuthInput
+      SupabaseOAuthInput,
+      SupabaseRedirectResult
     >(loginPath, {
       responseFormat: "json",
     }),
@@ -204,21 +205,20 @@ function formatProviderLabel(provider: string): string {
 
 function redirectToPage(
   pagePath: string,
-  request: Request,
+  context: FarmIntegrationHandlerContext,
   configuredBaseUrl: string | undefined,
   params: Record<string, string | null | undefined>,
 ) {
   const targetUrl = withSearchParams(
-    toAbsoluteUrl(pagePath, request, configuredBaseUrl),
+    toAbsoluteUrl(pagePath, context.request, configuredBaseUrl),
     params,
   );
 
   return Response.redirect(targetUrl, 302);
 }
 
-function readPageFeedback(request: Request): SupabasePageFeedback | undefined {
-  const requestUrl = new URL(request.url);
-  const error = requestUrl.searchParams.get("error");
+function readPageFeedback(context: FarmIntegrationHandlerContext): SupabasePageFeedback | undefined {
+  const error = context.url.searchParams.get("error");
   if (error) {
     return {
       tone: "error",
@@ -226,13 +226,13 @@ function readPageFeedback(request: Request): SupabasePageFeedback | undefined {
     };
   }
 
-  const message = requestUrl.searchParams.get("message");
+  const message = context.url.searchParams.get("message");
   if (!message) {
     return undefined;
   }
 
   if (message === "check-email") {
-    const email = requestUrl.searchParams.get("email");
+    const email = context.url.searchParams.get("email");
     return {
       tone: "success",
       message: email
@@ -283,7 +283,7 @@ function jsonError(message: string, status = 400, headers?: HeadersInit): Respon
 }
 
 function renderAuthPage(input: RenderAuthPageInput): Response {
-  const requestUrl = new URL(input.request.url);
+  const requestUrl = input.context.url;
   const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
   const title = input.mode === "sign-in" ? "Sign in" : "Sign up";
 
@@ -634,12 +634,12 @@ function renderAuthPage(input: RenderAuthPageInput): Response {
 }
 
 function renderCheckEmailPage(
-  request: Request,
+  context: FarmIntegrationHandlerContext,
   signInViewPath: string,
   email: string,
   returnTo: string,
 ): Response {
-  const requestUrl = new URL(request.url);
+  const requestUrl = context.url;
   const signInUrl = new URL(signInViewPath, requestUrl.origin);
   signInUrl.searchParams.set("returnTo", returnTo);
 
@@ -724,7 +724,10 @@ function renderCheckEmailPage(
   });
 }
 
-function createSupabaseHandler(request: Request, env: ResolvedSupabaseEnv) {
+function createSupabaseHandler(
+  context: Pick<FarmIntegrationHandlerContext, "request" | "requestContext">,
+  env: ResolvedSupabaseEnv,
+) {
   const setCookies: string[] = [];
 
   const supabase = createServerClient(env.url, env.anonKey, {
@@ -734,12 +737,13 @@ function createSupabaseHandler(request: Request, env: ResolvedSupabaseEnv) {
     },
     cookies: {
       getAll() {
-        return parseCookieHeaderList(request.headers.get("cookie"));
+        return parseCookieHeaderList(context.request.headers.get("cookie"));
       },
       setAll(cookiesToSet) {
         for (const cookie of cookiesToSet) {
           setCookies.push(serializeCookie(cookie.name, cookie.value, cookie.options));
         }
+        context.requestContext.set("supabase:set-cookies", [...setCookies]);
       },
     },
   });
@@ -813,7 +817,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
   });
 
   return defineIntegration({
-    slot: "auth",
+    category: "auth",
     type: "supabase",
     instance: {
       url: env.url,
@@ -839,8 +843,9 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
       {
         path: loginPath,
         methods: ["GET", "POST"],
-        async handler(request: Request) {
-          const requestUrl = new URL(request.url);
+        async handler(_request: Request, context: FarmIntegrationHandlerContext) {
+          const request = context.request;
+          const requestUrl = context.url;
           const clientRequest = isIntegrationClientRequest(request);
           const provider = requestUrl.searchParams.get("provider") || input.defaultProvider;
           const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
@@ -853,7 +858,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
               }
 
               if (pages.signIn && pages.signIn !== loginPath) {
-                return redirectToPage(pages.signIn, request, env.appBaseUrl, {
+                return redirectToPage(pages.signIn, context, env.appBaseUrl, {
                   returnTo: parsedRequest.returnTo,
                   error: parsedRequest.message,
                 });
@@ -861,7 +866,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
               return renderAuthPage({
                 mode: "sign-in",
-                request,
+                context,
                 loginPath,
                 signupPath,
                 signInViewPath,
@@ -875,7 +880,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
               });
             }
 
-            const { supabase, setCookies } = createSupabaseHandler(request, env);
+            const { supabase, setCookies } = createSupabaseHandler(context, env);
             const { error } = await supabase.auth.signInWithPassword({
               email: parsedRequest.email,
               password: parsedRequest.password,
@@ -888,7 +893,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
               }
 
               if (pages.signIn && pages.signIn !== loginPath) {
-                return redirectToPage(pages.signIn, request, env.appBaseUrl, {
+                return redirectToPage(pages.signIn, context, env.appBaseUrl, {
                   returnTo: parsedRequest.returnTo,
                   error: message,
                 });
@@ -896,7 +901,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
               return renderAuthPage({
                 mode: "sign-in",
-                request,
+                context,
                 loginPath,
                 signupPath,
                 signInViewPath,
@@ -914,7 +919,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             appendSetCookies(headers, setCookies);
             const redirectTo = new URL(
               parsedRequest.returnTo,
-              getOrigin(request, env.appBaseUrl),
+              getOrigin(context.request, env.appBaseUrl),
             ).toString();
 
             if (clientRequest) {
@@ -935,7 +940,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           }
 
           if (!provider && pages.signIn && pages.signIn !== loginPath) {
-            return redirectToPage(pages.signIn, request, env.appBaseUrl, {
+            return redirectToPage(pages.signIn, context, env.appBaseUrl, {
               returnTo,
               error: requestUrl.searchParams.get("error"),
               message: requestUrl.searchParams.get("message"),
@@ -946,22 +951,22 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           if (!provider) {
             return renderAuthPage({
               mode: "sign-in",
-              request,
+              context,
               loginPath,
               signupPath,
               signInViewPath,
               signUpViewPath,
               providers,
               defaultProvider: input.defaultProvider,
-              feedback: readPageFeedback(request),
+              feedback: readPageFeedback(context),
             });
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(request, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { data, error } = await supabase.auth.signInWithOAuth({
             provider: provider as any,
             options: {
-              redirectTo: callbackSettings.getCallbackUrl(request, { returnTo }),
+              redirectTo: callbackSettings.getCallbackUrl(context.request, { returnTo }),
             },
           });
 
@@ -999,14 +1004,15 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
       {
         path: signupPath,
         methods: ["GET", "POST"],
-        async handler(request: Request) {
-          const requestUrl = new URL(request.url);
+        async handler(_request: Request, context: FarmIntegrationHandlerContext) {
+          const request = context.request;
+          const requestUrl = context.url;
           const clientRequest = isIntegrationClientRequest(request);
           const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
 
           if (request.method === "GET") {
             if (pages.signUp && pages.signUp !== signupPath) {
-              return redirectToPage(pages.signUp, request, env.appBaseUrl, {
+              return redirectToPage(pages.signUp, context, env.appBaseUrl, {
                 returnTo,
                 error: requestUrl.searchParams.get("error"),
                 message: requestUrl.searchParams.get("message"),
@@ -1016,24 +1022,24 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
             return renderAuthPage({
               mode: "sign-up",
-              request,
+              context,
               loginPath,
               signupPath,
               signInViewPath,
               signUpViewPath,
               providers,
-              feedback: readPageFeedback(request),
+              feedback: readPageFeedback(context),
             });
           }
 
-          const parsedRequest = await parseEmailPasswordRequest(request);
+          const parsedRequest = await parseEmailPasswordRequest(context.request);
           if (!parsedRequest.ok) {
             if (clientRequest) {
               return jsonError(parsedRequest.message, 400);
             }
 
             if (pages.signUp && pages.signUp !== signupPath) {
-              return redirectToPage(pages.signUp, request, env.appBaseUrl, {
+              return redirectToPage(pages.signUp, context, env.appBaseUrl, {
                 returnTo: parsedRequest.returnTo,
                 error: parsedRequest.message,
               });
@@ -1041,7 +1047,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
             return renderAuthPage({
               mode: "sign-up",
-              request,
+              context,
               loginPath,
               signupPath,
               signInViewPath,
@@ -1054,12 +1060,12 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             });
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(request, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { data, error } = await supabase.auth.signUp({
             email: parsedRequest.email,
             password: parsedRequest.password,
             options: {
-              emailRedirectTo: callbackSettings.getCallbackUrl(request, {
+              emailRedirectTo: callbackSettings.getCallbackUrl(context.request, {
                 returnTo: parsedRequest.returnTo,
               }),
             },
@@ -1072,7 +1078,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             }
 
             if (pages.signUp && pages.signUp !== signupPath) {
-              return redirectToPage(pages.signUp, request, env.appBaseUrl, {
+              return redirectToPage(pages.signUp, context, env.appBaseUrl, {
                 returnTo: parsedRequest.returnTo,
                 error: message,
               });
@@ -1080,7 +1086,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
             return renderAuthPage({
               mode: "sign-up",
-              request,
+              context,
               loginPath,
               signupPath,
               signInViewPath,
@@ -1099,7 +1105,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           if (data.session) {
             const redirectTo = new URL(
               parsedRequest.returnTo,
-              getOrigin(request, env.appBaseUrl),
+              getOrigin(context.request, env.appBaseUrl),
             ).toString();
 
             if (clientRequest) {
@@ -1121,7 +1127,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
           const signInRedirectTo = toAbsoluteUrl(
             signInViewPath,
-            request,
+            context.request,
             env.appBaseUrl,
           );
           signInRedirectTo.searchParams.set("returnTo", parsedRequest.returnTo);
@@ -1141,7 +1147,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           }
 
           if (pages.signIn && pages.signIn !== loginPath) {
-            return redirectToPage(pages.signIn, request, env.appBaseUrl, {
+            return redirectToPage(pages.signIn, context, env.appBaseUrl, {
               returnTo: parsedRequest.returnTo,
               message: "check-email",
               email: parsedRequest.email,
@@ -1149,7 +1155,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
           }
 
           return renderCheckEmailPage(
-            request,
+            context,
             signInViewPath,
             parsedRequest.email,
             parsedRequest.returnTo,
@@ -1159,8 +1165,8 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
       {
         path: callbackPath,
         methods: ["GET"],
-        async handler(request: Request) {
-          const requestUrl = new URL(request.url);
+        async handler(_request: Request, context: FarmIntegrationHandlerContext) {
+          const requestUrl = context.url;
           const code = requestUrl.searchParams.get("code");
           const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
 
@@ -1168,7 +1174,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             return new Response("Missing Supabase authorization code.", { status: 400 });
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(request, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
             return new Response(error.message, { status: 500 });
@@ -1176,7 +1182,10 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
           const headers = new Headers();
           appendSetCookies(headers, setCookies);
-          headers.set("location", new URL(returnTo, getOrigin(request, env.appBaseUrl)).toString());
+          headers.set(
+            "location",
+            new URL(returnTo, getOrigin(context.request, env.appBaseUrl)).toString(),
+          );
 
           return new Response(null, {
             status: 302,
@@ -1187,20 +1196,21 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
       {
         path: logoutPath,
         methods: ["GET", "POST"],
-        async handler(request: Request) {
-          const requestUrl = new URL(request.url);
+        async handler(_request: Request, context: FarmIntegrationHandlerContext) {
+          const request = context.request;
+          const requestUrl = context.url;
           let returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/");
           const clientRequest = isIntegrationClientRequest(request);
 
           if (request.method === "POST") {
-            const contentType = request.headers.get("content-type") || "";
+            const contentType = context.request.headers.get("content-type") || "";
             if (contentType.includes("application/json")) {
-              const payload = ((await request.json()) as SupabaseLogoutInput) || {};
+              const payload = ((await context.request.json()) as SupabaseLogoutInput) || {};
               returnTo = getReturnTo(payload.returnTo, returnTo);
             }
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(request, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { error } = await supabase.auth.signOut();
           if (error) {
             if (clientRequest) {
@@ -1212,7 +1222,10 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
 
           const headers = new Headers();
           appendSetCookies(headers, setCookies);
-          const redirectTo = new URL(returnTo, getOrigin(request, env.appBaseUrl)).toString();
+          const redirectTo = new URL(
+            returnTo,
+            getOrigin(context.request, env.appBaseUrl),
+          ).toString();
 
           if (clientRequest) {
             return jsonSuccess<SupabaseRedirectResult>(
@@ -1234,8 +1247,9 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
       {
         path: sessionPath,
         methods: ["GET"],
-        async handler(request: Request) {
-          const { supabase, setCookies } = createSupabaseHandler(request, env);
+        async handler(_request: Request, context: FarmIntegrationHandlerContext) {
+          console.log({context}) 
+          const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { data, error } = await supabase.auth.getUser();
 
           const headers = new Headers({
@@ -1268,8 +1282,8 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
         ? [
             {
               matcher: protectedMatchers,
-              async handler(request: Request) {
-                const { supabase } = createSupabaseHandler(request, env);
+              async handler(_request: Request, context: FarmIntegrationHandlerContext) {
+                const { supabase } = createSupabaseHandler(context, env);
                 const {
                   data: { session },
                 } = await supabase.auth.getSession();
@@ -1278,9 +1292,8 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
                   return;
                 }
 
-                const requestUrl = new URL(request.url);
-                return redirectToPage(signInViewPath, request, env.appBaseUrl, {
-                  returnTo: `${requestUrl.pathname}${requestUrl.search}`,
+                return redirectToPage(signInViewPath, context, env.appBaseUrl, {
+                  returnTo: `${context.url.pathname}${context.url.search}`,
                 });
               },
             },

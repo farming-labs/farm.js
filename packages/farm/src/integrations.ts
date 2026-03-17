@@ -16,18 +16,69 @@ export type {
   FarmIntegrationAPIResponseFormat,
 } from "./integration-api";
 
-export type FarmIntegrationSlot = "auth" | "payment" | "monitoring" | "logging" | (string & {});
+export type FarmIntegrationCategory =
+  | "auth"
+  | "payment"
+  | "monitoring"
+  | "logging"
+  | (string & {});
+
+/** @deprecated Use FarmIntegrationCategory instead. */
+export type FarmIntegrationSlot = FarmIntegrationCategory;
+
+export type FarmIntegrationRouteParamValue = string | string[];
+export type FarmIntegrationRouteParams = Record<string, FarmIntegrationRouteParamValue>;
+
+export interface FarmIntegrationRequestContextStore {
+  get<T = unknown>(key: string): T | undefined;
+  set(key: string, value: unknown, options?: { exposeToPage?: boolean }): void;
+  has(key: string): boolean;
+  delete(key: string): boolean;
+  clear(): void;
+  snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
+}
+
+export interface FarmIntegrationHandlerContext {
+  request: Request;
+  requestId: string;
+  url: URL;
+  pathname: string;
+  method: string;
+  params: FarmIntegrationRouteParams;
+  integration: {
+    category: FarmIntegrationCategory;
+    /** @deprecated Use category instead. */
+    slot: FarmIntegrationCategory;
+    type: string;
+    instance: unknown;
+  };
+  route: {
+    kind: "route" | "middleware";
+    path: string;
+    methods: readonly string[];
+  };
+  requestContext: FarmIntegrationRequestContextStore;
+  config: FarmPluginContext["config"];
+  isDev: boolean;
+  isProd: boolean;
+}
 
 export interface FarmIntegrationRoute {
   path: string;
   methods: readonly string[];
   rawBody?: boolean;
-  handler(request: Request): Promise<Response> | Response;
+  handler(
+    request: Request,
+    context: FarmIntegrationHandlerContext,
+  ): Promise<Response> | Response;
 }
 
 export interface FarmIntegrationMiddleware {
   matcher?: string | string[];
-  handler(request: Request): Promise<Response | void> | Response | void;
+  handler(
+    request: Request,
+    context: FarmIntegrationHandlerContext,
+  ): Promise<Response | void> | Response | void;
 }
 
 export interface FarmIntegrationProviderProps {
@@ -52,7 +103,9 @@ export type FarmIntegrationLogPhase =
   | "request:error";
 
 export interface FarmIntegrationLogEvent {
-  slot: FarmIntegrationSlot;
+  category: FarmIntegrationCategory;
+  /** @deprecated Use category instead. */
+  slot: FarmIntegrationCategory;
   type: string;
   phase: FarmIntegrationLogPhase;
   route?: {
@@ -74,7 +127,9 @@ export type FarmIntegrationLogger = (
 
 export interface FarmIntegration {
   readonly kind: "farm-integration";
-  slot: FarmIntegrationSlot;
+  category: FarmIntegrationCategory;
+  /** @deprecated Use category instead. */
+  slot?: FarmIntegrationCategory;
   type: string;
   instance: unknown;
   api?: FarmIntegrationAPI;
@@ -88,12 +143,36 @@ export interface FarmIntegration {
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration | undefined>;
 
+type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> &
+  (
+    | {
+        category: FarmIntegrationCategory;
+        slot?: FarmIntegrationCategory;
+      }
+    | {
+        category?: FarmIntegrationCategory;
+        slot: FarmIntegrationCategory;
+      }
+  );
+
 export function defineIntegration(
-  integration: Omit<FarmIntegration, "kind">,
+  integration: FarmIntegrationInput,
 ): FarmIntegration {
+  const category = integration.category ?? integration.slot;
+
+  if (!category) {
+    throw new Error("Integration category is required.");
+  }
+
+  if (integration.category && integration.slot && integration.category !== integration.slot) {
+    throw new Error("Integration category and slot must match when both are provided.");
+  }
+
   return {
     kind: "farm-integration",
     ...integration,
+    category,
+    slot: category,
   };
 }
 
@@ -185,7 +264,7 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
   const middleware = [...(integration.middleware || [])];
 
   return {
-    name: `farm:integration:${integration.slot}:${integration.type}`,
+    name: `farm:integration:${integration.category}:${integration.type}`,
     enforce: "pre",
 
     async init() {
@@ -195,7 +274,8 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
 
       for (const route of routes) {
         await integration.log({
-          slot: integration.slot,
+          category: integration.category,
+          slot: integration.category,
           type: integration.type,
           phase: "registered",
           route: {
@@ -209,7 +289,8 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
 
       for (const entry of middleware) {
         await integration.log({
-          slot: integration.slot,
+          category: integration.category,
+          slot: integration.category,
           type: integration.type,
           phase: "registered",
           route: {
@@ -223,19 +304,53 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
     },
 
     async beforeRequest(req, res, context) {
-      const requestContext = context.requestContext.getAll(req);
       const fullUrl = `http://${req.headers.host || "localhost"}${req.url || "/"}`;
-      const pathname = new URL(fullUrl).pathname;
+      const url = new URL(fullUrl);
+      const pathname = url.pathname;
+      const requestId = getRequestId(req);
+      let bodyLoaded = false;
+      let requestBody: Buffer | undefined;
+
+      const getRequestBody = async () => {
+        if (!bodyLoaded) {
+          bodyLoaded = true;
+          if (req.method && req.method !== "GET" && req.method !== "HEAD") {
+            requestBody = await readRequestBody(req);
+          }
+        }
+
+        return requestBody;
+      };
+
+      const createHandlerRequest = async () => {
+        return createWebRequest(req, fullUrl, await getRequestBody());
+      };
 
       for (const entry of middleware) {
-        if (!matchesMatcher(entry.matcher, pathname)) {
+        const params = resolveMatcherParams(entry.matcher, pathname);
+        if (!params) {
           continue;
         }
 
-        const request = await createWebRequest(req, fullUrl);
+        const request = await createHandlerRequest();
+        const handlerContext = createIntegrationHandlerContext({
+          integration,
+          route: {
+            kind: "middleware",
+            path: normalizeMatcher(entry.matcher),
+            methods: ["ALL"],
+          },
+          request,
+          rawRequest: req,
+          params,
+          pathname,
+          requestId,
+          pluginContext: context,
+        });
         const startedAt = Date.now();
         await integration.log?.({
-          slot: integration.slot,
+          category: integration.category,
+          slot: integration.category,
           type: integration.type,
           phase: "request:start",
           route: {
@@ -244,16 +359,17 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
             methods: ["ALL"],
           },
           request,
-          requestId: getRequestId(req),
-          context: requestContext,
+          requestId,
+          context: handlerContext.requestContext.snapshot(),
         });
 
         try {
-          const response = await entry.handler(request);
+          const response = await entry.handler(request, handlerContext);
           if (response) {
             await sendWebResponse(res, response);
             await integration.log?.({
-              slot: integration.slot,
+              category: integration.category,
+              slot: integration.category,
               type: integration.type,
               phase: "request:end",
               route: {
@@ -263,15 +379,16 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
               },
               request,
               response,
-              requestId: getRequestId(req),
+              requestId,
               durationMs: Date.now() - startedAt,
-              context: requestContext,
+              context: handlerContext.requestContext.snapshot(),
             });
             return;
           }
 
           await integration.log?.({
-            slot: integration.slot,
+            category: integration.category,
+            slot: integration.category,
             type: integration.type,
             phase: "request:end",
             route: {
@@ -280,13 +397,14 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
               methods: ["ALL"],
             },
             request,
-            requestId: getRequestId(req),
+            requestId,
             durationMs: Date.now() - startedAt,
-            context: requestContext,
+            context: handlerContext.requestContext.snapshot(),
           });
         } catch (error) {
           await integration.log?.({
-            slot: integration.slot,
+            category: integration.category,
+            slot: integration.category,
             type: integration.type,
             phase: "request:error",
             route: {
@@ -295,24 +413,43 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
               methods: ["ALL"],
             },
             request,
-            requestId: getRequestId(req),
+            requestId,
             durationMs: Date.now() - startedAt,
             error,
-            context: requestContext,
+            context: handlerContext.requestContext.snapshot(),
           });
           throw error;
         }
       }
 
       for (const route of routes) {
-        if (!matchesMethod(route.methods, req.method) || !matchesPath(route.path, pathname)) {
+        const params =
+          matchesMethod(route.methods, req.method)
+            ? extractPathParams(route.path, pathname)
+            : null;
+        if (!params) {
           continue;
         }
 
-        const request = await createWebRequest(req, fullUrl);
+        const request = await createHandlerRequest();
+        const handlerContext = createIntegrationHandlerContext({
+          integration,
+          route: {
+            kind: "route",
+            path: route.path,
+            methods: route.methods,
+          },
+          request,
+          rawRequest: req,
+          params,
+          pathname,
+          requestId,
+          pluginContext: context,
+        });
         const startedAt = Date.now();
         await integration.log?.({
-          slot: integration.slot,
+          category: integration.category,
+          slot: integration.category,
           type: integration.type,
           phase: "request:start",
           route: {
@@ -321,15 +458,16 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
             methods: route.methods,
           },
           request,
-          requestId: getRequestId(req),
-          context: requestContext,
+          requestId,
+          context: handlerContext.requestContext.snapshot(),
         });
 
         try {
-          const response = await route.handler(request);
+          const response = await route.handler(request, handlerContext);
           await sendWebResponse(res, response);
           await integration.log?.({
-            slot: integration.slot,
+            category: integration.category,
+            slot: integration.category,
             type: integration.type,
             phase: "request:end",
             route: {
@@ -339,14 +477,15 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
             },
             request,
             response,
-            requestId: getRequestId(req),
+            requestId,
             durationMs: Date.now() - startedAt,
-            context: requestContext,
+            context: handlerContext.requestContext.snapshot(),
           });
           return;
         } catch (error) {
           await integration.log?.({
-            slot: integration.slot,
+            category: integration.category,
+            slot: integration.category,
             type: integration.type,
             phase: "request:error",
             route: {
@@ -355,10 +494,10 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
               methods: route.methods,
             },
             request,
-            requestId: getRequestId(req),
+            requestId,
             durationMs: Date.now() - startedAt,
             error,
-            context: requestContext,
+            context: handlerContext.requestContext.snapshot(),
           });
           throw error;
         }
@@ -367,7 +506,86 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
   };
 }
 
-async function createWebRequest(req: FarmRequest, fullUrl: string): Promise<Request> {
+function createIntegrationHandlerContext(input: {
+  integration: FarmIntegration;
+  route: FarmIntegrationHandlerContext["route"];
+  request: Request;
+  rawRequest: FarmRequest;
+  params: FarmIntegrationRouteParams;
+  pathname: string;
+  requestId: string;
+  pluginContext: FarmPluginContext;
+}): FarmIntegrationHandlerContext {
+  return {
+    request: input.request,
+    requestId: input.requestId,
+    url: new URL(input.request.url),
+    pathname: input.pathname,
+    method: input.request.method,
+    params: input.params,
+    integration: {
+      category: input.integration.category,
+      slot: input.integration.category,
+      type: input.integration.type,
+      instance: input.integration.instance,
+    },
+    route: input.route,
+    requestContext: createIntegrationRequestContextStore(
+      input.rawRequest,
+      input.request,
+      input.pluginContext,
+    ),
+    config: input.pluginContext.config,
+    isDev: input.pluginContext.isDev,
+    isProd: input.pluginContext.isProd,
+  };
+}
+
+function createIntegrationRequestContextStore(
+  rawRequest: FarmRequest,
+  request: Request,
+  pluginContext: FarmPluginContext,
+): FarmIntegrationRequestContextStore {
+  return {
+    get(key) {
+      const requestValue = pluginContext.requestContext.get(request, key);
+      if (requestValue !== undefined) {
+        return requestValue;
+      }
+
+      return pluginContext.requestContext.get(rawRequest, key);
+    },
+    set(key, value, options) {
+      pluginContext.requestContext.set(rawRequest, key, value, options);
+      pluginContext.requestContext.set(request, key, value, options);
+    },
+    has(key) {
+      return (
+        pluginContext.requestContext.has(request, key) ||
+        pluginContext.requestContext.has(rawRequest, key)
+      );
+    },
+    delete(key) {
+      const deletedRequest = pluginContext.requestContext.delete(request, key);
+      const deletedRaw = pluginContext.requestContext.delete(rawRequest, key);
+      return deletedRequest || deletedRaw;
+    },
+    clear() {
+      pluginContext.requestContext.clear(rawRequest);
+      pluginContext.requestContext.clear(request);
+    },
+    snapshot(options) {
+      const merged = pluginContext.requestContext.getAll(rawRequest, options);
+      const requestSnapshot = pluginContext.requestContext.getAll(request, options);
+      for (const [key, value] of requestSnapshot) {
+        merged.set(key, value);
+      }
+      return merged;
+    },
+  };
+}
+
+function createWebRequest(req: FarmRequest, fullUrl: string, body?: Buffer): Request {
   const headers = new Headers();
   for (const [key, value] of Object.entries(req.headers)) {
     if (value == null) {
@@ -382,11 +600,6 @@ async function createWebRequest(req: FarmRequest, fullUrl: string): Promise<Requ
     }
 
     headers.set(key, value);
-  }
-
-  let body: Buffer | undefined;
-  if (req.method && req.method !== "GET" && req.method !== "HEAD") {
-    body = await readRequestBody(req);
   }
 
   return new Request(fullUrl, {
@@ -427,26 +640,49 @@ function matchesMethod(methods: readonly string[], method: string | undefined): 
 }
 
 function matchesMatcher(matcher: string | readonly string[] | undefined, pathname: string): boolean {
+  return resolveMatcherParams(matcher, pathname) !== null;
+}
+
+function resolveMatcherParams(
+  matcher: string | readonly string[] | undefined,
+  pathname: string,
+): FarmIntegrationRouteParams | null {
   if (!matcher) {
-    return true;
+    return {};
   }
 
   const list = Array.isArray(matcher) ? matcher : [matcher];
-  return list.some((item) => {
+  for (const item of list) {
     if (item === "/(.*)" || item === "*") {
-      return true;
+      return {};
     }
     if (item.endsWith("(.*)")) {
       const prefix = item.slice(0, -4);
-      return pathname === prefix || pathname.startsWith(`${prefix}/`);
+      if (pathname === prefix || pathname.startsWith(`${prefix}/`)) {
+        return {};
+      }
+      continue;
     }
-    return matchesPath(item, pathname);
-  });
+    const params = extractPathParams(item, pathname);
+    if (params) {
+      return params;
+    }
+  }
+
+  return null;
 }
 
 function matchesPath(pattern: string, pathname: string): boolean {
+  return extractPathParams(pattern, pathname) !== null;
+}
+
+function extractPathParams(
+  pattern: string,
+  pathname: string,
+): FarmIntegrationRouteParams | null {
   const routeSegments = splitPath(pattern);
   const pathSegments = splitPath(pathname);
+  const params: FarmIntegrationRouteParams = {};
 
   let routeIndex = 0;
   let pathIndex = 0;
@@ -456,17 +692,21 @@ function matchesPath(pattern: string, pathname: string): boolean {
     const pathSegment = pathSegments[pathIndex];
 
     if (isCatchAllSegment(routeSegment)) {
-      return true;
+      params[getSegmentParamName(routeSegment)] = pathSegments
+        .slice(pathIndex)
+        .map((segment) => decodeURIComponent(segment));
+      return params;
     }
 
     if (isDynamicSegment(routeSegment)) {
+      params[getSegmentParamName(routeSegment)] = decodeURIComponent(pathSegment);
       routeIndex += 1;
       pathIndex += 1;
       continue;
     }
 
     if (routeSegment !== pathSegment) {
-      return false;
+      return null;
     }
 
     routeIndex += 1;
@@ -474,14 +714,15 @@ function matchesPath(pattern: string, pathname: string): boolean {
   }
 
   if (routeIndex === routeSegments.length && pathIndex === pathSegments.length) {
-    return true;
+    return params;
   }
 
   if (routeIndex === routeSegments.length - 1 && isCatchAllSegment(routeSegments[routeIndex])) {
-    return true;
+    params[getSegmentParamName(routeSegments[routeIndex])] = [];
+    return params;
   }
 
-  return false;
+  return null;
 }
 
 function splitPath(value: string): string[] {
@@ -494,6 +735,14 @@ function isDynamicSegment(segment: string): boolean {
 
 function isCatchAllSegment(segment: string): boolean {
   return segment.startsWith("[...") && segment.endsWith("]");
+}
+
+function getSegmentParamName(segment: string): string {
+  if (isCatchAllSegment(segment)) {
+    return segment.slice(4, -1);
+  }
+
+  return segment.slice(1, -1);
 }
 
 function getRequestId(req: FarmRequest): string {

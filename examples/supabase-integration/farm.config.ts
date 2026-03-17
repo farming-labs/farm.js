@@ -1,5 +1,6 @@
 import { defineFarmConfig } from "@farmjs/core";
 import { supabase } from "@farmjs/integrations/supabase";
+import { localDemo } from "./src/lib/integrations/local-demo/index.ts";
 
 export default defineFarmConfig({
   experimental: {
@@ -21,6 +22,12 @@ export default defineFarmConfig({
       },
       log(event) {
         console.log("[supabase-example]", event.phase, event.route?.path || "none");
+      },
+    }),
+    localDemo: localDemo({
+      greeting: "App-local integration registered from farm.config.ts.",
+      log(event) {
+        console.log("[local-demo]", event.phase, event.route?.path || "none");
       },
     }),
   },

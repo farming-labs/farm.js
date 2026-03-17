@@ -1,4 +1,8 @@
-import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import {
+  defineIntegration,
+  type FarmIntegrationHandlerContext,
+  type FarmIntegrationLogger,
+} from "@farmjs/core";
 
 export interface AuthRouteIntegrationConfig<TInstance> {
   type: string;
@@ -6,14 +10,18 @@ export interface AuthRouteIntegrationConfig<TInstance> {
   log?: FarmIntegrationLogger;
   path: string;
   methods: string[];
-  handler: (request: Request, instance: TInstance) => Promise<Response> | Response;
+  handler: (
+    request: Request,
+    context: FarmIntegrationHandlerContext,
+    instance: TInstance,
+  ) => Promise<Response> | Response;
 }
 
 export function createAuthRouteIntegration<TInstance>(
   config: AuthRouteIntegrationConfig<TInstance>,
 ) {
   return defineIntegration({
-    slot: "auth",
+    category: "auth",
     type: config.type,
     instance: config.instance,
     log: config.log,
@@ -21,8 +29,8 @@ export function createAuthRouteIntegration<TInstance>(
       {
         path: config.path,
         methods: config.methods,
-        handler(request: Request) {
-          return config.handler(request, config.instance);
+        handler(request: Request, context: FarmIntegrationHandlerContext) {
+          return config.handler(request, context, config.instance);
         },
       },
     ],
