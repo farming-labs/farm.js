@@ -1,4 +1,5 @@
-import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import type { FarmIntegrationLogger } from "@farmjs/core";
+import { createAuthRouteIntegration } from "../utils/index.js";
 
 export interface BetterAuthInstance {
   handler(request: Request): Promise<Response> | Response;
@@ -10,19 +11,14 @@ export interface BetterAuthIntegrationInput {
 }
 
 export function betterAuth(input: BetterAuthIntegrationInput) {
-  return defineIntegration({
-    slot: "auth",
+  return createAuthRouteIntegration({
     type: "better-auth",
     instance: input.instance,
     log: input.log,
-    routes: [
-      {
-        path: "/api/auth/[...auth]",
-        methods: ["GET", "POST"],
-        handler(request: Request) {
-          return input.instance.handler(request);
-        },
-      },
-    ],
+    path: "/api/auth/[...auth]",
+    methods: ["GET", "POST"],
+    handler(request: Request) {
+      return input.instance.handler(request);
+    },
   });
 }

@@ -1,5 +1,13 @@
 import { WorkOS } from "@workos-inc/node";
 import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import {
+  clearRequestCookie,
+  createDocumentNavigationMatchers,
+  createRequestCookie,
+  getCookieValue,
+  getReturnTo,
+  normalizeMatchers,
+} from "../utils/index.js";
 
 export interface WorkOSIntegrationInput {
   clientId?: string;
@@ -43,92 +51,13 @@ function resolveEnv(input: WorkOSIntegrationInput) {
   };
 }
 
-function normalizeMatchers(input: WorkOSIntegrationInput): string[] {
-  if (!input.protectedRoutes) {
-    return [];
-  }
-
-  return Array.isArray(input.protectedRoutes) ? input.protectedRoutes : [input.protectedRoutes];
-}
-
-function getCookie(headers: Headers, name: string): string | null {
-  const cookieHeader = headers.get("cookie");
-  if (!cookieHeader) {
-    return null;
-  }
-
-  for (const part of cookieHeader.split(";")) {
-    const trimmed = part.trim();
-    if (!trimmed) {
-      continue;
-    }
-
-    const separator = trimmed.indexOf("=");
-    if (separator === -1) {
-      continue;
-    }
-
-    const key = trimmed.slice(0, separator).trim();
-    if (key !== name) {
-      continue;
-    }
-
-    return decodeURIComponent(trimmed.slice(separator + 1));
-  }
-
-  return null;
-}
-
-function createSessionCookie(name: string, value: string, request: Request): string {
-  const url = new URL(request.url);
-  const secure = url.protocol === "https:";
-  const parts = [
-    `${name}=${encodeURIComponent(value)}`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-  ];
-
-  if (secure) {
-    parts.push("Secure");
-  }
-
-  return parts.join("; ");
-}
-
-function clearSessionCookie(name: string, request: Request): string {
-  const url = new URL(request.url);
-  const secure = url.protocol === "https:";
-  const parts = [
-    `${name}=`,
-    "Path=/",
-    "HttpOnly",
-    "SameSite=Lax",
-    "Max-Age=0",
-  ];
-
-  if (secure) {
-    parts.push("Secure");
-  }
-
-  return parts.join("; ");
-}
-
-function getReturnTo(rawValue: string | null, fallback = "/"): string {
-  if (!rawValue || !rawValue.startsWith("/")) {
-    return fallback;
-  }
-
-  return rawValue;
-}
-
 async function getSession(
   workos: WorkOS,
   request: Request,
   cookieName: string,
   cookiePassword: string,
 ) {
-  const sessionData = getCookie(request.headers, cookieName);
+  const sessionData = getCookieValue(request.headers, cookieName);
   if (!sessionData) {
     return null;
   }
@@ -151,7 +80,7 @@ async function getSession(
 
 export function workos(input: WorkOSIntegrationInput = {}) {
   const { clientId, apiKey, cookiePassword } = resolveEnv(input);
-  const protectedMatchers = normalizeMatchers(input);
+  const protectedMatchers = normalizeMatchers(input.protectedRoutes);
   const cookieName = input.cookieName ?? "wos-session";
   const loginPath = input.loginPath ?? "/login";
   const signUpPath = input.signUpPath ?? "/signup";
@@ -190,7 +119,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
     log: input.log,
     documentNavigations: [
       {
-        matcher: [`${loginPath}(.*)`, `${signUpPath}(.*)`, `${callbackPath}(.*)`],
+        matcher: createDocumentNavigationMatchers(loginPath, signUpPath, callbackPath),
       },
     ],
     routes: [
@@ -252,7 +181,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
           const headers = new Headers();
           headers.set(
             "set-cookie",
-            createSessionCookie(cookieName, authentication.sealedSession, request),
+            createRequestCookie(cookieName, authentication.sealedSession, request),
           );
           headers.set("location", new URL(returnTo, requestUrl.origin).toString());
 
@@ -269,7 +198,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
           const requestUrl = new URL(request.url);
           const sessionState = await getSession(workos, request, cookieName, cookiePassword);
           const headers = new Headers();
-          headers.set("set-cookie", clearSessionCookie(cookieName, request));
+          headers.set("set-cookie", clearRequestCookie(cookieName, request));
 
           if (!sessionState) {
             headers.set("location", new URL("/", requestUrl.origin).toString());

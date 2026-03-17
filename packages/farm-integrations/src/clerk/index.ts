@@ -1,5 +1,6 @@
 import { createClerkClient, type ClerkClient } from "@clerk/backend";
 import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import { createDocumentNavigationMatchers, normalizeMatchers } from "../utils/index.js";
 
 export interface ClerkIntegrationInput {
   publishableKey?: string;
@@ -32,17 +33,9 @@ function resolveClerkKeys(input: ClerkIntegrationInput) {
   };
 }
 
-function normalizeMatchers(input: ClerkIntegrationInput): string[] {
-  if (!input.protectedRoutes) {
-    return [];
-  }
-
-  return Array.isArray(input.protectedRoutes) ? input.protectedRoutes : [input.protectedRoutes];
-}
-
 export function clerk(input: ClerkIntegrationInput = {}) {
   const { publishableKey, secretKey } = resolveClerkKeys(input);
-  const protectedMatchers = normalizeMatchers(input);
+  const protectedMatchers = normalizeMatchers(input.protectedRoutes);
   const signInUrl = input.signInUrl ?? "/sign-in";
   const signUpUrl = input.signUpUrl ?? "/sign-up";
 
@@ -80,7 +73,7 @@ export function clerk(input: ClerkIntegrationInput = {}) {
     ],
     documentNavigations: [
       {
-        matcher: [`${signInUrl}(.*)`, `${signUpUrl}(.*)`],
+        matcher: createDocumentNavigationMatchers(signInUrl, signUpUrl),
       },
     ],
     middleware:

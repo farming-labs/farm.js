@@ -1,6 +1,20 @@
 import type { ComponentType, ReactNode } from "react";
+import type { FarmIntegrationAPI } from "./integration-api";
 import type { FarmPlugin, FarmPluginContext } from "./plugin";
 import type { FarmRequest, FarmResponse } from "./types";
+
+export {
+  api,
+  defineIntegrationAPI,
+  defineIntegrationAPIOperation,
+} from "./integration-api";
+export type {
+  FarmIntegrationAPI,
+  FarmIntegrationAPIBodyFormat,
+  FarmIntegrationAPIMethod,
+  FarmIntegrationAPIOperation,
+  FarmIntegrationAPIResponseFormat,
+} from "./integration-api";
 
 export type FarmIntegrationSlot = "auth" | "payment" | "monitoring" | "logging" | (string & {});
 
@@ -63,6 +77,7 @@ export interface FarmIntegration {
   slot: FarmIntegrationSlot;
   type: string;
   instance: unknown;
+  api?: FarmIntegrationAPI;
   log?: FarmIntegrationLogger;
   routes?: readonly FarmIntegrationRoute[];
   middleware?: readonly FarmIntegrationMiddleware[];

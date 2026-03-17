@@ -361,5 +361,336 @@ declare module "@farmjs/core/client" {
     endpoints: TEndpoints,
   ): TEndpoints;
 
+  export type FarmIntegrationAPIMethod =
+    | "GET"
+    | "POST"
+    | "PUT"
+    | "PATCH"
+    | "DELETE"
+    | "OPTIONS"
+    | "HEAD";
+
+  export type FarmIntegrationAPIBodyFormat = "json" | "form" | "none";
+  export type FarmIntegrationAPIResponseFormat = "json" | "text" | "response";
+
+  export interface FarmIntegrationAPIOperation<
+    TBody = never,
+    TQuery = never,
+    TResponse = unknown,
+    TServer extends boolean = false,
+  > {
+    readonly kind: "farm-integration-api-operation";
+    path: string;
+    method: FarmIntegrationAPIMethod;
+    bodyFormat?: FarmIntegrationAPIBodyFormat;
+    responseFormat?: FarmIntegrationAPIResponseFormat;
+    headers?: Record<string, string>;
+    credentials?: RequestCredentials;
+    isServer?: TServer;
+    __types?: {
+      body: TBody;
+      query: TQuery;
+      response: TResponse;
+    };
+  }
+
+  export type FarmIntegrationAPI = {
+    [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any>;
+  };
+
+  export function defineIntegrationAPIOperation<
+    TBody = never,
+    TQuery = never,
+    TResponse = unknown,
+    TServer extends boolean = false,
+  >(
+    operation: Omit<
+      FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>,
+      "kind" | "__types"
+    >,
+  ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+
+  export function defineIntegrationAPI<TAPI extends FarmIntegrationAPI>(api: TAPI): TAPI;
+
+  export const api: {
+    get<TResponse = unknown, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<never, never, TResponse, TServer>;
+    get<TQuery = never, TResponse = unknown, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<never, TQuery, TResponse, TServer>;
+    post<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+    put<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+    patch<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+    delete<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+    options<TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<never, TQuery, TResponse, TServer>;
+    head<TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: Omit<
+        FarmIntegrationAPIOperation<any, any, any, TServer>,
+        "kind" | "method" | "path" | "__types"
+      >,
+    ): FarmIntegrationAPIOperation<never, TQuery, TResponse, TServer>;
+    form: {
+      post<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+        path: string,
+        options?: Omit<
+          FarmIntegrationAPIOperation<any, any, any, TServer>,
+          "kind" | "method" | "path" | "__types"
+        >,
+      ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+      put<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+        path: string,
+        options?: Omit<
+          FarmIntegrationAPIOperation<any, any, any, TServer>,
+          "kind" | "method" | "path" | "__types"
+        >,
+      ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+      patch<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+        path: string,
+        options?: Omit<
+          FarmIntegrationAPIOperation<any, any, any, TServer>,
+          "kind" | "method" | "path" | "__types"
+        >,
+      ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+      delete<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+        path: string,
+        options?: Omit<
+          FarmIntegrationAPIOperation<any, any, any, TServer>,
+          "kind" | "method" | "path" | "__types"
+        >,
+      ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
+    };
+  };
+
+  export const endpoint: typeof api;
+
+  export interface IntegrationClientOptions {
+    baseURL?: string;
+    headers?: Record<string, string>;
+    credentials?: RequestCredentials;
+    isServer?: false | undefined;
+  }
+
+  interface IntegrationRequestOptionsBase {
+    headers?: Record<string, string>;
+    signal?: AbortSignal;
+    credentials?: RequestCredentials;
+  }
+
+  export interface IntegrationClientRequestOptions extends IntegrationRequestOptionsBase {}
+
+  export type IntegrationServerRequestLike =
+    | Request
+    | {
+        url?: string;
+        headers?: HeadersInit;
+      };
+
+  export interface IntegrationServerClientOptions
+    extends Omit<IntegrationClientOptions, "isServer"> {
+    isServer: true;
+    request: IntegrationServerRequestLike;
+    forwardHeaders?: boolean | readonly string[];
+  }
+
+  export interface IntegrationServerClientRequestOptions
+    extends IntegrationRequestOptionsBase {
+    baseURL?: string;
+    request?: IntegrationServerRequestLike;
+    forwardHeaders?: boolean | readonly string[];
+  }
+
+  export class IntegrationClientError<TData = unknown> extends Error {
+    readonly status: number;
+    readonly response: Response;
+    readonly data: TData | undefined;
+  }
+
+  export type IntegrationOperationResult<
+    TData = unknown,
+    TError = IntegrationClientError<unknown> | Error,
+  > = {
+    data: TData | null;
+    error: TError | null;
+  };
+
+  type ExtractIntegrationOperationBody<T> = T extends {
+    __types?: { body: infer TBody };
+  }
+    ? TBody
+    : never;
+
+  type ExtractIntegrationOperationQuery<T> = T extends {
+    __types?: { query: infer TQuery };
+  }
+    ? TQuery
+    : never;
+
+  type ExtractIntegrationOperationResponse<T> = T extends {
+    __types?: { response: infer TResponse };
+  }
+    ? TResponse
+    : unknown;
+
+  type IsNever<T> = [T] extends [never] ? true : false;
+
+  type IntegrationOperationInput<T> = IsNever<ExtractIntegrationOperationBody<T>> extends true
+    ? IsNever<ExtractIntegrationOperationQuery<T>> extends true
+      ? {}
+      : { query?: ExtractIntegrationOperationQuery<T> }
+    : IsNever<ExtractIntegrationOperationQuery<T>> extends true
+      ? { body: ExtractIntegrationOperationBody<T> }
+      : {
+          body: ExtractIntegrationOperationBody<T>;
+          query?: ExtractIntegrationOperationQuery<T>;
+        };
+
+  type IntegrationOperationMethod<T> = (
+    options?: IntegrationOperationInput<T>,
+    requestOptions?: IntegrationClientRequestOptions,
+  ) => Promise<IntegrationOperationResult<ExtractIntegrationOperationResponse<T>>>;
+
+  type ExtractAPIFromSource<TSource> = TSource extends { api?: infer TAPI }
+    ? NonNullable<TAPI> extends FarmIntegrationAPI
+      ? NonNullable<TAPI>
+      : never
+    : TSource extends FarmIntegrationAPI
+      ? TSource
+      : never;
+
+  type IsServerRegisteredOperation<T> = T extends { isServer: true } ? true : false;
+
+  type IntegrationAPIToClient<TAPI> = {
+    [K in keyof TAPI as TAPI[K] extends FarmIntegrationAPIOperation<any, any, any, any>
+      ? IsServerRegisteredOperation<TAPI[K]> extends true
+        ? never
+        : K
+      : K]: TAPI[K] extends FarmIntegrationAPIOperation<any, any, any, any>
+      ? IntegrationOperationMethod<TAPI[K]>
+      : TAPI[K] extends Record<string, any>
+        ? IntegrationAPIToClient<TAPI[K]>
+        : never;
+  };
+
+  export type IntegrationClient<TSources extends Record<string, any>> = {
+    [K in keyof TSources]: IntegrationAPIToClient<ExtractAPIFromSource<TSources[K]>>;
+  };
+
+  export type IntegrationClientRoot<TSources extends Record<string, any>> = {
+    integrations: IntegrationClient<TSources>;
+  };
+
+  export type IntegrationClientAliases<TSources extends Record<string, any>> =
+    IntegrationClient<TSources> & {
+      integrations: IntegrationClient<TSources>;
+    };
+
+  type IntegrationServerOperationMethod<T> = (
+    options?: IntegrationOperationInput<T>,
+    requestOptions?: IntegrationServerClientRequestOptions,
+  ) => Promise<IntegrationOperationResult<ExtractIntegrationOperationResponse<T>>>;
+
+  type IntegrationAPIToServerClient<TAPI> = {
+    [K in keyof TAPI]: TAPI[K] extends FarmIntegrationAPIOperation<any, any, any, any>
+      ? IntegrationServerOperationMethod<TAPI[K]>
+      : TAPI[K] extends Record<string, any>
+        ? IntegrationAPIToServerClient<TAPI[K]>
+        : never;
+  };
+
+  export type IntegrationServerClient<TSources extends Record<string, any>> = {
+    [K in keyof TSources]: IntegrationAPIToServerClient<ExtractAPIFromSource<TSources[K]>>;
+  };
+
+  export type IntegrationServerClientRoot<TSources extends Record<string, any>> = {
+    integrations: IntegrationServerClient<TSources>;
+  };
+
+  export type IntegrationServerClientAliases<TSources extends Record<string, any>> =
+    IntegrationServerClient<TSources> & {
+      integrations: IntegrationServerClient<TSources>;
+    };
+
+  export type IntegrationAPI<TSources extends Record<string, any>> =
+    IntegrationClientAliases<TSources> & {
+    server: (
+      options: Omit<IntegrationServerClientOptions, "isServer">,
+    ) => IntegrationServerClientAliases<TSources>;
+  };
+
+  export function createIntegrationClient<TSources extends Record<string, any>>(
+    sources: { integrations: TSources },
+    options: IntegrationServerClientOptions,
+  ): IntegrationServerClientAliases<TSources>;
+
+  export function createIntegrationClient<TSources extends Record<string, any>>(
+    sources: { integrations: TSources },
+    options?: IntegrationClientOptions,
+  ): IntegrationClientAliases<TSources>;
+
+  export function createIntegrationClient<TSources extends Record<string, any>>(
+    sources: TSources,
+    options: IntegrationServerClientOptions,
+  ): IntegrationServerClient<TSources>;
+
+  export function createIntegrationClient<TSources extends Record<string, any>>(
+    sources: TSources,
+    options?: IntegrationClientOptions,
+  ): IntegrationClient<TSources>;
+
+  export function createIntegrationServerClient<TSources extends Record<string, any>>(
+    sources: { integrations: TSources },
+    options: Omit<IntegrationServerClientOptions, "isServer">,
+  ): IntegrationServerClientAliases<TSources>;
+
+  export function createIntegrationServerClient<TSources extends Record<string, any>>(
+    sources: TSources,
+    options: Omit<IntegrationServerClientOptions, "isServer">,
+  ): IntegrationServerClient<TSources>;
+
+  export function createIntegrationApi<TSources extends Record<string, any>>(
+    sources: { integrations: TSources },
+    options?: IntegrationClientOptions,
+  ): IntegrationAPI<TSources>;
+
   export type { APIClientOptions };
 }

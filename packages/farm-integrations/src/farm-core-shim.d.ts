@@ -33,6 +33,51 @@ declare module "@farmjs/core" {
     matcher: string | readonly string[];
   }
 
+  export type FarmIntegrationAPIMethod =
+    | "GET"
+    | "POST"
+    | "PUT"
+    | "PATCH"
+    | "DELETE"
+    | "OPTIONS"
+    | "HEAD";
+
+  export type FarmIntegrationAPIBodyFormat = "json" | "form" | "none";
+  export type FarmIntegrationAPIResponseFormat = "json" | "text" | "response";
+
+  export interface FarmIntegrationAPIOperation<
+    TBody = never,
+    TQuery = never,
+    TResponse = unknown,
+  > {
+    readonly kind: "farm-integration-api-operation";
+    path: string;
+    method: FarmIntegrationAPIMethod;
+    bodyFormat?: FarmIntegrationAPIBodyFormat;
+    responseFormat?: FarmIntegrationAPIResponseFormat;
+    headers?: Record<string, string>;
+    credentials?: RequestCredentials;
+    __types?: {
+      body: TBody;
+      query: TQuery;
+      response: TResponse;
+    };
+  }
+
+  export type FarmIntegrationAPI = {
+    [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any>;
+  };
+
+  export function defineIntegrationAPIOperation<
+    TBody = never,
+    TQuery = never,
+    TResponse = unknown,
+  >(
+    operation: Omit<FarmIntegrationAPIOperation<TBody, TQuery, TResponse>, "kind" | "__types">,
+  ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse>;
+
+  export function defineIntegrationAPI<TAPI extends FarmIntegrationAPI>(api: TAPI): TAPI;
+
   export interface FarmPlugin {
     name: string;
     enforce?: "pre" | "post";
@@ -70,6 +115,7 @@ declare module "@farmjs/core" {
     slot: FarmIntegrationSlot;
     type: string;
     instance: unknown;
+    api?: FarmIntegrationAPI;
     log?: FarmIntegrationLogger;
     routes?: readonly FarmIntegrationRoute[];
     middleware?: readonly FarmIntegrationMiddleware[];

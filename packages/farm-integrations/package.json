@@ -16,34 +16,48 @@
       "import": "./dist/index.js"
     },
     "./better-auth": {
-      "types": "./dist/better-auth.d.ts",
-      "import": "./dist/better-auth.js"
+      "types": "./dist/better-auth/index.d.ts",
+      "import": "./dist/better-auth/index.js"
     },
     "./authjs": {
-      "types": "./dist/authjs.d.ts",
-      "import": "./dist/authjs.js"
+      "types": "./dist/authjs/index.d.ts",
+      "import": "./dist/authjs/index.js"
     },
     "./clerk": {
-      "types": "./dist/clerk.d.ts",
-      "import": "./dist/clerk.js"
+      "types": "./dist/clerk/index.d.ts",
+      "import": "./dist/clerk/index.js"
     },
     "./auth0": {
-      "types": "./dist/auth0.d.ts",
-      "import": "./dist/auth0.js"
+      "types": "./dist/auth0/index.d.ts",
+      "import": "./dist/auth0/index.js"
     },
     "./workos": {
-      "types": "./dist/workos.d.ts",
-      "import": "./dist/workos.js"
+      "types": "./dist/workos/index.d.ts",
+      "import": "./dist/workos/index.js"
+    },
+    "./utils": {
+      "types": "./dist/utils/index.d.ts",
+      "import": "./dist/utils/index.js"
+    },
+    "./supabase": {
+      "types": "./dist/supabase/index.d.ts",
+      "import": "./dist/supabase/index.js"
+    },
+    "./supabase/client": {
+      "types": "./dist/supabase/client.d.ts",
+      "import": "./dist/supabase/client.js"
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
     "dev": "tsc --watch",
     "type-check": "tsc --noEmit",
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",
+    "@supabase/ssr": "^0.9.0",
+    "@supabase/supabase-js": "^2.99.2",
     "@workos-inc/node": "^8.9.0"
   },
   "devDependencies": {

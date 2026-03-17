@@ -1,5 +1,15 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import {
+  clearRequestCookie,
+  createDocumentNavigationMatchers,
+  createRequestCookie,
+  getOrigin,
+  getReturnTo,
+  normalizeMatchers,
+  parseCookieHeaderMap,
+  resolveCallbackSettings,
+} from "../utils/index.js";
 
 const DEV_SECRET = "farmjs-auth0-development-secret-2026";
 
@@ -47,14 +57,6 @@ interface Auth0SessionPayload {
   expiresAt: number;
 }
 
-function normalizeMatchers(input: Auth0IntegrationInput): string[] {
-  if (!input.protectedRoutes) {
-    return [];
-  }
-
-  return Array.isArray(input.protectedRoutes) ? input.protectedRoutes : [input.protectedRoutes];
-}
-
 function normalizeDomain(value: string): string {
   return value.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 }
@@ -84,59 +86,6 @@ function resolveEnv(input: Auth0IntegrationInput): ResolvedAuth0Env {
     secret,
     appBaseUrl,
   };
-}
-
-function getReturnTo(rawValue: string | null, fallback = "/"): string {
-  if (!rawValue || !rawValue.startsWith("/")) {
-    return fallback;
-  }
-
-  return rawValue;
-}
-
-function createCookie(
-  name: string,
-  value: string,
-  request: Request,
-  options: { maxAge?: number; httpOnly?: boolean } = {},
-): string {
-  const requestUrl = new URL(request.url);
-  const parts = [`${name}=${encodeURIComponent(value)}`, "Path=/", "SameSite=Lax"];
-
-  if (options.httpOnly !== false) {
-    parts.push("HttpOnly");
-  }
-
-  if (typeof options.maxAge === "number") {
-    parts.push(`Max-Age=${Math.max(0, Math.floor(options.maxAge))}`);
-  }
-
-  if (requestUrl.protocol === "https:") {
-    parts.push("Secure");
-  }
-
-  return parts.join("; ");
-}
-
-function clearCookie(name: string, request: Request): string {
-  return createCookie(name, "", request, { maxAge: 0 });
-}
-
-function parseCookies(header: string | null): Record<string, string> {
-  if (!header) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    header
-      .split(";")
-      .map((part) => part.trim())
-      .filter(Boolean)
-      .map((part) => {
-        const [key, ...rest] = part.split("=");
-        return [key, decodeURIComponent(rest.join("="))];
-      }),
-  );
 }
 
 function createCodeVerifier(): string {
@@ -184,49 +133,6 @@ function unsignValue<T>(signed: string | undefined, secret: string): T | null {
   }
 }
 
-function getOrigin(request: Request, configuredBaseUrl?: string): string {
-  return configuredBaseUrl || new URL(request.url).origin;
-}
-
-function resolveCallbackSettings(
-  input: Auth0IntegrationInput,
-  configuredBaseUrl?: string,
-): {
-  callbackPath: string;
-  getCallbackUrl: (request: Request) => string;
-} {
-  if (input.callbackUrl) {
-    let parsedUrl: URL;
-
-    try {
-      parsedUrl = new URL(input.callbackUrl);
-    } catch {
-      throw new Error("Auth0 integration callbackUrl must be an absolute URL.");
-    }
-
-    if (input.callbackPath && input.callbackPath !== parsedUrl.pathname) {
-      throw new Error(
-        "Auth0 integration callbackUrl pathname must match callbackPath when both are provided.",
-      );
-    }
-
-    return {
-      callbackPath: input.callbackPath ?? parsedUrl.pathname,
-      getCallbackUrl() {
-        return parsedUrl.toString();
-      },
-    };
-  }
-
-  const callbackPath = input.callbackPath ?? "/auth/callback";
-  return {
-    callbackPath,
-    getCallbackUrl(request: Request) {
-      return new URL(callbackPath, getOrigin(request, configuredBaseUrl)).toString();
-    },
-  };
-}
-
 function decodeJwtPayload(token: string | undefined): Record<string, unknown> | null {
   if (!token) {
     return null;
@@ -252,7 +158,7 @@ function getSession(
   cookieName: string,
   secret: string,
 ): Auth0SessionPayload | null {
-  const cookies = parseCookies(request.headers.get("cookie"));
+  const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
   const session = unsignValue<Auth0SessionPayload>(cookies[cookieName], secret);
 
   if (!session) {
@@ -380,7 +286,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
   }
 
   const { domain, clientId, clientSecret, secret, appBaseUrl } = resolveEnv(input);
-  const protectedMatchers = normalizeMatchers(input);
+  const protectedMatchers = normalizeMatchers(input.protectedRoutes);
   const loginPath = input.loginPath ?? "/auth/login";
   const signUpPath = input.signUpPath ?? "/auth/signup";
   const logoutPath = input.logoutPath ?? "/auth/logout";
@@ -388,7 +294,15 @@ export function auth0(input: Auth0IntegrationInput = {}) {
   const scopes = input.scopes?.length ? input.scopes : ["openid", "profile", "email"];
   const stateCookieName = "farm_auth0_state";
   const sessionCookieName = "farm_auth0_session";
-  const callbackSettings = resolveCallbackSettings(input, appBaseUrl);
+  const callbackSettings = resolveCallbackSettings(
+    {
+      callbackUrl: input.callbackUrl,
+      callbackPath: input.callbackPath,
+      defaultPath: "/auth/callback",
+      label: "Auth0 integration",
+    },
+    appBaseUrl,
+  );
   const callbackPath = callbackSettings.callbackPath;
 
   async function redirectToAuth(
@@ -422,7 +336,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
     const headers = new Headers();
     headers.append(
       "set-cookie",
-      createCookie(
+      createRequestCookie(
         stateCookieName,
         signValue({ state, returnTo, codeVerifier } satisfies Auth0StatePayload, secret),
         request,
@@ -448,7 +362,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
     log: input.log,
     documentNavigations: [
       {
-        matcher: [`${loginPath}(.*)`, `${signUpPath}(.*)`, `${callbackPath}(.*)`, `${logoutPath}(.*)`],
+        matcher: createDocumentNavigationMatchers(loginPath, signUpPath, callbackPath, logoutPath),
       },
     ],
     routes: [
@@ -484,7 +398,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
             return new Response("Missing Auth0 authorization code or state.", { status: 400 });
           }
 
-          const cookies = parseCookies(request.headers.get("cookie"));
+          const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
           const statePayload = unsignValue<Auth0StatePayload>(cookies[stateCookieName], secret);
           if (!statePayload || statePayload.state !== state) {
             return new Response("Invalid Auth0 state.", { status: 400 });
@@ -511,7 +425,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
           const headers = new Headers();
           headers.append(
             "set-cookie",
-            createCookie(
+            createRequestCookie(
               sessionCookieName,
               signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret),
               request,
@@ -520,7 +434,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
               },
             ),
           );
-          headers.append("set-cookie", clearCookie(stateCookieName, request));
+          headers.append("set-cookie", clearRequestCookie(stateCookieName, request));
           headers.set(
             "location",
             new URL(statePayload.returnTo || "/dashboard", origin).toString(),
@@ -542,7 +456,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
           logoutUrl.searchParams.set("returnTo", origin);
 
           const headers = new Headers();
-          headers.append("set-cookie", clearCookie(sessionCookieName, request));
+          headers.append("set-cookie", clearRequestCookie(sessionCookieName, request));
           headers.set("location", logoutUrl.toString());
 
           return new Response(null, {

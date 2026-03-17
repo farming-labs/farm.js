@@ -1,5 +1,41 @@
 export { createAPIClient, createServerAPIClient } from "./api/client";
 export type { APIClientOptions } from "./api/client";
+export {
+  api,
+  endpoint,
+  defineIntegrationAPI,
+  defineIntegrationAPIOperation,
+} from "./integration-api";
+export type {
+  FarmIntegrationAPI,
+  FarmIntegrationAPIBodyFormat,
+  FarmIntegrationAPIMethod,
+  FarmIntegrationAPIOperation,
+  FarmIntegrationAPIResponseFormat,
+} from "./integration-api";
+export {
+  createIntegrationClient,
+  IntegrationClientError,
+} from "./integration-client";
+export {
+  createIntegrationApi,
+  createIntegrationServerClient,
+} from "./integration-client";
+export type {
+  IntegrationClient,
+  IntegrationClientAliases,
+  IntegrationClientRoot,
+  IntegrationClientOptions,
+  IntegrationClientRequestOptions,
+  IntegrationAPI,
+  IntegrationOperationResult,
+  IntegrationServerClient,
+  IntegrationServerClientAliases,
+  IntegrationServerClientOptions,
+  IntegrationServerClientRequestOptions,
+  IntegrationServerClientRoot,
+  IntegrationServerRequestLike,
+} from "./integration-client";
 export { createStore } from "./store";
 export type {
   Store,
