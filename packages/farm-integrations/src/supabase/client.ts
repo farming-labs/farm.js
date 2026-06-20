@@ -37,24 +37,12 @@ export interface SupabaseLogoutInput {
 }
 
 export const supabaseClient = {
-  login: api.post<
-    SupabaseCredentials,
-    SupabaseRedirectResult
-  >("/auth/login"),
-  signup: api.post<
-    SupabaseCredentials,
-    SupabaseSignUpResult
-  >("/auth/signup"),
-  oauth: api.get<
-    SupabaseOAuthInput,
-    SupabaseRedirectResult
-  >("/auth/login", {
+  login: api.post<SupabaseCredentials, SupabaseRedirectResult>("/auth/login"),
+  signup: api.post<SupabaseCredentials, SupabaseSignUpResult>("/auth/signup"),
+  oauth: api.get<SupabaseOAuthInput, SupabaseRedirectResult>("/auth/login", {
     responseFormat: "json",
   }),
-  logout: api.post<
-    SupabaseLogoutInput,
-    SupabaseRedirectResult
-  >("/auth/logout"),
+  logout: api.post<SupabaseLogoutInput, SupabaseRedirectResult>("/auth/logout"),
   session: api.get<SupabaseSessionResult>("/auth/session", {
     responseFormat: "json",
   }),

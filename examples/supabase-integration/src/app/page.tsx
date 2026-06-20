@@ -22,7 +22,7 @@ export default function Page() {
           <div className="link-grid">
             <a className="nav-card" href="/sign-in?returnTo=/dashboard">
               <strong>Sign In</strong>
-              <span>Open the custom sign-in page backed by `api.supabase.login()`.</span>
+              <span>Open the custom sign-in page backed by `apiClient.auth.login()`.</span>
             </a>
             <a className="nav-card" href="/sign-up?returnTo=/dashboard">
               <strong>Sign Up</strong>
@@ -32,6 +32,10 @@ export default function Page() {
               <strong>Dashboard</strong>
               <span>Protected by the Supabase session middleware.</span>
             </a>
+            <a className="nav-card" href="/server-demo">
+              <strong>Server Demo</strong>
+              <span>See the same local integration called during SSR on the server.</span>
+            </a>
           </div>
         </section>
 
@@ -40,11 +44,11 @@ export default function Page() {
           <div className="session-stack">
             <div className="session-line">
               <strong>/auth/login</strong>
-              <span>Server auth action used by `api.supabase.login()`.</span>
+              <span>Server auth action used by `apiClient.auth.login()`.</span>
             </div>
             <div className="session-line">
               <strong>/auth/signup</strong>
-              <span>Server auth action used by `api.supabase.signup()`.</span>
+              <span>Server auth action used by `apiClient.auth.signup()`.</span>
             </div>
             <div className="session-line">
               <strong>/auth/callback</strong>
@@ -56,7 +60,7 @@ export default function Page() {
             </div>
             <div className="session-line">
               <strong>/auth/session</strong>
-              <span>Read through `api.supabase.session()` on the client.</span>
+              <span>Read through `apiClient.auth.session()` on the client.</span>
             </div>
           </div>
         </section>
@@ -74,15 +78,15 @@ export default function Page() {
             </div>
             <div className="session-line">
               <strong>Client</strong>
-              <span>`src/lib/integrations/local-demo/client.ts`</span>
+              <span>Inferred automatically from the registered integration routes.</span>
             </div>
             <div className="session-line">
               <strong>Registration</strong>
-              <span>Imported directly into `farm.config.ts` like any other integration.</span>
+              <span>Shared through `src/lib/integrations.ts` and loaded by `farm.config.ts`.</span>
             </div>
             <div className="session-line">
               <strong>Usage</strong>
-              <span>Available through the same shared `api.localDemo.*` namespace.</span>
+              <span>Available through the same shared `apiClient.localDemo.*` namespace.</span>
             </div>
           </div>
         </section>

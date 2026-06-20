@@ -1,0 +1,27 @@
+{
+  "name": "farm-example-polar-integration",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev --port 3002",
+    "build": "farm build",
+    "type-check": "tsc --noEmit",
+    "generate": "farm generate"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*",
+    "@farmjs/integrations": "workspace:*",
+    "better-auth": "^1.5.5",
+    "better-sqlite3": "^12.8.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@farmjs/cli": "workspace:*",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  }
+}

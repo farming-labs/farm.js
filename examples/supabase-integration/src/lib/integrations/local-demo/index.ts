@@ -1,14 +1,46 @@
 import {
   defineIntegration,
+  endpoint,
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
+  integrationRoute,
 } from "@farmjs/core";
-import { localDemoClient } from "./client.ts";
 
 export interface LocalDemoIntegrationOptions {
   greeting?: string;
   log?: FarmIntegrationLogger;
 }
+
+export type LocalDemoStatusResult = {
+  ok: true;
+  integration: {
+    category: string;
+    type: string;
+  };
+  message: string;
+  pathname: string;
+  requestId: string;
+  bootedAt: string;
+  lastAction: unknown;
+  middlewareOrder: string[];
+  timestamp: string;
+};
+
+export type LocalDemoEchoInput = {
+  message: string;
+};
+
+export type LocalDemoEchoResult = {
+  ok: true;
+  message: string;
+  uppercase: string;
+  length: number;
+  pathname: string;
+  requestId: string;
+  lastAction: string;
+  middlewareOrder: string[];
+  timestamp: string;
+};
 
 type LocalDemoInstance = {
   bootedAt: string;
@@ -32,8 +64,6 @@ function createStatusResponse(
   context: FarmIntegrationHandlerContext,
   instance: LocalDemoInstance,
 ) {
-  context.requestContext.set("local-demo:last-action", "status");
-
   return Response.json({
     ok: true,
     integration: {
@@ -45,9 +75,100 @@ function createStatusResponse(
     requestId: context.requestId,
     bootedAt: instance.bootedAt,
     lastAction: context.requestContext.get("local-demo:last-action"),
+    middlewareOrder:
+      context.requestContext.get<string[]>("local-demo:middleware-order") || [],
     timestamp: new Date().toISOString(),
   });
 }
+
+function appendMiddlewareStep(
+  context: FarmIntegrationHandlerContext,
+  step: string,
+) {
+  const current =
+    context.requestContext.get<string[]>("local-demo:middleware-order") || [];
+  context.requestContext.set("local-demo:middleware-order", [...current, step]);
+}
+
+export const localDemoRoutes = [
+  integrationRoute.get<
+    "/api/local-demo/message",
+    LocalDemoStatusResult
+  >("/api/local-demo/message", {
+    responseFormat: "json",
+    middleware: [
+      {
+        handler(_request, context) {
+          context.requestContext.set("local-demo:last-action", "status");
+          appendMiddlewareStep(context, "status:first");
+        },
+      },
+      {
+        handler(_request, context) {
+          const lists = context.requestContext.get<string[]>("local-demo:middleware-order") || [];
+          appendMiddlewareStep(context, "status:second");
+        },
+      },
+    ],
+    handler(_request, context) {
+      return createStatusResponse(context, {
+        bootedAt:
+          (context.integration.instance as LocalDemoInstance).bootedAt,
+        greeting:
+          (context.integration.instance as LocalDemoInstance).greeting,
+      });
+    },
+  }),
+  integrationRoute.post<
+    "/api/local-demo/message",
+    LocalDemoEchoInput,
+    LocalDemoEchoResult
+  >("/api/local-demo/message", {
+    responseFormat: "json",
+    middleware: [
+      {
+        handler(_request, context) {
+          context.requestContext.set("local-demo:last-action", "echo");
+          appendMiddlewareStep(context, "echo:first");
+        },
+      },
+      {
+        handler(_request, context) {
+          appendMiddlewareStep(context, "echo:second");
+        },
+      },
+    ],
+    async handler(request, context) {
+      const body = await readJsonBody(request);
+      const message = typeof body.message === "string" ? body.message.trim() : "";
+
+      if (!message) {
+        return Response.json(
+          {
+            error: "Message is required.",
+          },
+          {
+            status: 400,
+          },
+        );
+      }
+
+      context.requestContext.set("local-demo:last-message", message);
+      return Response.json({
+        ok: true,
+        message,
+        uppercase: message.toUpperCase(),
+        length: message.length,
+        pathname: context.pathname,
+        requestId: context.requestId,
+        lastAction: context.requestContext.get("local-demo:last-action"),
+        middlewareOrder:
+          context.requestContext.get<string[]>("local-demo:middleware-order") || [],
+        timestamp: new Date().toISOString(),
+      });
+    },
+  }),
+] as const;
 
 export function localDemo(options: LocalDemoIntegrationOptions = {}) {
   const instance: LocalDemoInstance = {
@@ -60,49 +181,8 @@ export function localDemo(options: LocalDemoIntegrationOptions = {}) {
     category: "custom",
     type: "local-demo",
     instance,
-    api: localDemoClient,
+    api: endpoint.fromRoutes(localDemoRoutes),
     log: options.log,
-    routes: [
-      {
-        path: "/api/local-demo/status",
-        methods: ["GET"],
-        handler(_request, context) {
-          return createStatusResponse(context, instance);
-        },
-      },
-      {
-        path: "/api/local-demo/echo",
-        methods: ["POST"],
-        async handler(request, context) {
-          const body = await readJsonBody(request);
-          const message = typeof body.message === "string" ? body.message.trim() : "";
-
-          if (!message) {
-            return Response.json(
-              {
-                error: "Message is required.",
-              },
-              {
-                status: 400,
-              },
-            );
-          }
-
-          context.requestContext.set("local-demo:last-action", "echo");
-          context.requestContext.set("local-demo:last-message", message);
-
-          return Response.json({
-            ok: true,
-            message,
-            uppercase: message.toUpperCase(),
-            length: message.length,
-            pathname: context.pathname,
-            requestId: context.requestId,
-            lastAction: context.requestContext.get("local-demo:last-action"),
-            timestamp: new Date().toISOString(),
-          });
-        },
-      },
-    ],
+    routes: localDemoRoutes,
   });
 }

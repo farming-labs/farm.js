@@ -5,6 +5,7 @@
   "workspaces": [
     "packages/*",
     "examples/*",
+    "examples/*/*",
     "docs",
     "playground"
   ],
@@ -42,7 +43,9 @@
   "devDependencies": {
     "@changesets/cli": "^2.27.1",
     "@playwright/test": "^1.52.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.10.5",
+    "supports-color": "^10.2.2",
     "turbo": "^1.11.2",
     "typescript": "^5.3.3"
   },

@@ -1,10 +1,28 @@
-import { createIntegrationClient } from "@farmjs/core/client";
+import { integrationsClient, integrationsServer } from "@farmjs/core/client";
 import { supabaseClient } from "@farmjs/integrations/supabase/client";
-import { localDemoClient } from "./integrations/local-demo/client.ts";
+import type { InferIntegrationAPIFromRoutes } from "@farmjs/core";
+import type { localDemoRoutes } from "./integrations/local-demo/index.ts";
 
-export const api = createIntegrationClient({
-  integrations: {
-    supabase: supabaseClient,
-    localDemo: localDemoClient,
+const supabaseApi = {
+  login: {
+    get: supabaseClient.oauth,
+    post: supabaseClient.login,
   },
-});
+  signup: {
+    post: supabaseClient.signup,
+  },
+  logout: {
+    post: supabaseClient.logout,
+  },
+  session: {
+    get: supabaseClient.session,
+  },
+} as const;
+
+type SupabaseIntegrationSources = {
+  auth: typeof supabaseApi;
+  localDemo: InferIntegrationAPIFromRoutes<typeof localDemoRoutes>;
+};
+
+export const api = integrationsServer<SupabaseIntegrationSources>();
+export const apiClient = integrationsClient<SupabaseIntegrationSources>();

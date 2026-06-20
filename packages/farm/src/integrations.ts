@@ -1,13 +1,25 @@
 import type { ComponentType, ReactNode } from "react";
-import type { FarmIntegrationAPI } from "./integration-api";
+import { api as integrationApi, defineIntegrationAPIOperation } from "./integration-api";
+import type {
+  FarmIntegrationAPI,
+  FarmIntegrationAPIBodyFormat,
+  FarmIntegrationAPIMethod,
+  FarmIntegrationAPIOperation,
+  FarmIntegrationAPIResponseFormat,
+  InferIntegrationAPIFromRoutes,
+} from "./integration-api";
 import type { FarmPlugin, FarmPluginContext } from "./plugin";
+import {
+  clearRequestContext,
+  deleteRequestContext,
+  getRequestContext,
+  getRequestContextSnapshot,
+  hasRequestContext,
+  setRequestContext,
+} from "./request-context";
 import type { FarmRequest, FarmResponse } from "./types";
 
-export {
-  api,
-  defineIntegrationAPI,
-  defineIntegrationAPIOperation,
-} from "./integration-api";
+export { api, defineIntegrationAPI, defineIntegrationAPIOperation } from "./integration-api";
 export type {
   FarmIntegrationAPI,
   FarmIntegrationAPIBodyFormat,
@@ -16,18 +28,18 @@ export type {
   FarmIntegrationAPIResponseFormat,
 } from "./integration-api";
 
-export type FarmIntegrationCategory =
-  | "auth"
-  | "payment"
-  | "monitoring"
-  | "logging"
-  | (string & {});
+export type FarmIntegrationCategory = "auth" | "payment" | "monitoring" | "logging" | (string & {});
 
 /** @deprecated Use FarmIntegrationCategory instead. */
 export type FarmIntegrationSlot = FarmIntegrationCategory;
 
 export type FarmIntegrationRouteParamValue = string | string[];
 export type FarmIntegrationRouteParams = Record<string, FarmIntegrationRouteParamValue>;
+export type FarmIntegrationRouteMethod =
+  | FarmIntegrationAPIMethod
+  | Lowercase<FarmIntegrationAPIMethod>
+  | "ALL"
+  | "all";
 
 export interface FarmIntegrationRequestContextStore {
   get<T = unknown>(key: string): T | undefined;
@@ -65,12 +77,31 @@ export interface FarmIntegrationHandlerContext {
 
 export interface FarmIntegrationRoute {
   path: string;
-  methods: readonly string[];
+  method?: FarmIntegrationRouteMethod;
+  methods?: readonly FarmIntegrationRouteMethod[];
+  middleware?: readonly FarmIntegrationRouteMiddleware[];
   rawBody?: boolean;
+  handler(request: Request, context: FarmIntegrationHandlerContext): Promise<Response> | Response;
+}
+
+export interface FarmTypedIntegrationRoute<
+  TPath extends string = string,
+  TBody = never,
+  TQuery = never,
+  TResponse = unknown,
+  TServer extends boolean = false,
+  TMethod extends FarmIntegrationAPIMethod = FarmIntegrationAPIMethod,
+> extends FarmIntegrationRoute {
+  path: TPath;
+  method: TMethod;
+  __operation: FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, TMethod>;
+}
+
+export interface FarmIntegrationRouteMiddleware {
   handler(
     request: Request,
     context: FarmIntegrationHandlerContext,
-  ): Promise<Response> | Response;
+  ): Promise<Response | void> | Response | void;
 }
 
 export interface FarmIntegrationMiddleware {
@@ -94,6 +125,86 @@ export interface FarmIntegrationProvider {
 
 export interface FarmIntegrationDocumentNavigation {
   matcher: string | readonly string[];
+}
+
+export type FarmIntegrationSchemaFieldType =
+  | "id"
+  | "uuid"
+  | "string"
+  | "text"
+  | "boolean"
+  | "integer"
+  | "number"
+  | "datetime"
+  | "json"
+  | "enum";
+
+export interface FarmIntegrationSchemaReference {
+  model: string;
+  field: string;
+  relation?: "belongsTo" | "hasOne" | "hasMany";
+  onDelete?: "cascade" | "restrict" | "setNull" | "noAction";
+  enforced?: "db" | "app" | "none";
+}
+
+export interface FarmIntegrationSchemaField {
+  type: FarmIntegrationSchemaFieldType;
+  name?: string;
+  description?: string;
+  required?: boolean;
+  nullable?: boolean;
+  primaryKey?: boolean;
+  unique?: boolean;
+  index?: boolean;
+  list?: boolean;
+  default?: unknown;
+  values?: readonly string[];
+  reference?: FarmIntegrationSchemaReference;
+  meta?: Record<string, unknown>;
+}
+
+export interface FarmIntegrationSchemaConstraint {
+  type: "unique" | "index";
+  fields: readonly string[];
+  name?: string;
+  meta?: Record<string, unknown>;
+}
+
+export interface FarmIntegrationSchemaModel {
+  name?: string;
+  description?: string;
+  fields: Record<string, FarmIntegrationSchemaField>;
+  constraints?: readonly FarmIntegrationSchemaConstraint[];
+  meta?: Record<string, unknown>;
+}
+
+export interface FarmIntegrationSchemaModelExtension {
+  name?: string;
+  description?: string;
+  fields?: Record<string, FarmIntegrationSchemaField>;
+  constraints?: readonly FarmIntegrationSchemaConstraint[];
+  meta?: Record<string, unknown>;
+}
+
+export interface FarmIntegrationSchemaModelOverride {
+  name?: string;
+  description?: string;
+  fields?: Record<string, Partial<FarmIntegrationSchemaField>>;
+  constraints?: readonly FarmIntegrationSchemaConstraint[];
+  meta?: Record<string, unknown>;
+}
+
+export interface FarmIntegrationSchema {
+  models: Record<string, FarmIntegrationSchemaModel>;
+  meta?: Record<string, unknown>;
+  extend?: Record<string, FarmIntegrationSchemaModelExtension>;
+  override?: Record<string, FarmIntegrationSchemaModelOverride>;
+}
+
+export function defineIntegrationSchema<TSchema extends FarmIntegrationSchema>(
+  schema: TSchema,
+): TSchema {
+  return schema;
 }
 
 export type FarmIntegrationLogPhase =
@@ -121,9 +232,7 @@ export interface FarmIntegrationLogEvent {
   context: Map<string, unknown>;
 }
 
-export type FarmIntegrationLogger = (
-  event: FarmIntegrationLogEvent,
-) => void | Promise<void>;
+export type FarmIntegrationLogger = (event: FarmIntegrationLogEvent) => void | Promise<void>;
 
 export interface FarmIntegration {
   readonly kind: "farm-integration";
@@ -133,6 +242,7 @@ export interface FarmIntegration {
   type: string;
   instance: unknown;
   api?: FarmIntegrationAPI;
+  schema?: FarmIntegrationSchema;
   log?: FarmIntegrationLogger;
   routes?: readonly FarmIntegrationRoute[];
   middleware?: readonly FarmIntegrationMiddleware[];
@@ -142,6 +252,171 @@ export interface FarmIntegration {
 }
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration | undefined>;
+
+type IntegrationRouteBuilderOptions<TBody, TQuery, TResponse, TServer extends boolean> = {
+  middleware?: readonly FarmIntegrationRouteMiddleware[];
+  rawBody?: boolean;
+  headers?: Record<string, string>;
+  credentials?: RequestCredentials;
+  bodyFormat?: FarmIntegrationAPIBodyFormat;
+  responseFormat?: FarmIntegrationAPIResponseFormat;
+  isServer?: TServer;
+  handler(request: Request, context: FarmIntegrationHandlerContext): Promise<Response> | Response;
+};
+
+function defineTypedIntegrationRoute<
+  TPath extends string,
+  TBody,
+  TQuery,
+  TResponse,
+  TServer extends boolean,
+  TMethod extends FarmIntegrationAPIMethod,
+>(
+  method: TMethod,
+  path: TPath,
+  input: IntegrationRouteBuilderOptions<TBody, TQuery, TResponse, TServer>,
+): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, TMethod> {
+  return {
+    path,
+    method,
+    middleware: input.middleware,
+    rawBody: input.rawBody,
+    handler: input.handler,
+    __operation: defineIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, TMethod>({
+      path,
+      method,
+      bodyFormat: input.bodyFormat,
+      responseFormat: input.responseFormat,
+      headers: input.headers,
+      credentials: input.credentials,
+      isServer: input.isServer,
+    }),
+  };
+}
+
+export const integrationRoute = {
+  get<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+    path: TPath,
+    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TResponse, TServer>, "bodyFormat">,
+  ) {
+    return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "GET">(
+      "GET",
+      path,
+      input,
+    );
+  },
+  post<
+    TPath extends string,
+    TBody = never,
+    TResponse = unknown,
+    TQuery = never,
+    TServer extends boolean = false,
+  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TResponse, TServer>) {
+    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST">(
+      "POST",
+      path,
+      {
+        bodyFormat: "json",
+        ...input,
+      },
+    );
+  },
+  put<
+    TPath extends string,
+    TBody = never,
+    TResponse = unknown,
+    TQuery = never,
+    TServer extends boolean = false,
+  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TResponse, TServer>) {
+    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PUT">(
+      "PUT",
+      path,
+      {
+        bodyFormat: "json",
+        ...input,
+      },
+    );
+  },
+  patch<
+    TPath extends string,
+    TBody = never,
+    TResponse = unknown,
+    TQuery = never,
+    TServer extends boolean = false,
+  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TResponse, TServer>) {
+    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PATCH">(
+      "PATCH",
+      path,
+      {
+        bodyFormat: "json",
+        ...input,
+      },
+    );
+  },
+  delete<
+    TPath extends string,
+    TBody = never,
+    TResponse = unknown,
+    TQuery = never,
+    TServer extends boolean = false,
+  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TResponse, TServer>) {
+    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "DELETE">(
+      "DELETE",
+      path,
+      {
+        bodyFormat: "json",
+        ...input,
+      },
+    );
+  },
+  options<
+    TPath extends string,
+    TResponse = unknown,
+    TQuery = never,
+    TServer extends boolean = false,
+  >(
+    path: TPath,
+    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TResponse, TServer>, "bodyFormat">,
+  ) {
+    return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "OPTIONS">(
+      "OPTIONS",
+      path,
+      input,
+    );
+  },
+  head<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+    path: TPath,
+    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TResponse, TServer>, "bodyFormat">,
+  ) {
+    return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "HEAD">(
+      "HEAD",
+      path,
+      input,
+    );
+  },
+};
+
+type RegisteredIntegrationRuntime = {
+  integration: FarmIntegration;
+  config: FarmPluginContext["config"];
+  isDev: boolean;
+  isProd: boolean;
+};
+
+const INTEGRATION_RUNTIME_REGISTRY_KEY = Symbol.for("farm.integrationRuntimeRegistry");
+
+type GlobalWithIntegrationRuntimeRegistry = typeof globalThis & {
+  [INTEGRATION_RUNTIME_REGISTRY_KEY]?: Map<string, RegisteredIntegrationRuntime>;
+};
+
+function getIntegrationRuntimeRegistry() {
+  const globalState = globalThis as GlobalWithIntegrationRuntimeRegistry;
+  if (!globalState[INTEGRATION_RUNTIME_REGISTRY_KEY]) {
+    globalState[INTEGRATION_RUNTIME_REGISTRY_KEY] = new Map<string, RegisteredIntegrationRuntime>();
+  }
+
+  return globalState[INTEGRATION_RUNTIME_REGISTRY_KEY]!;
+}
 
 type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> &
   (
@@ -155,9 +430,42 @@ type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> 
       }
   );
 
-export function defineIntegration(
-  integration: FarmIntegrationInput,
-): FarmIntegration {
+type ExtractIntegrationCategory<TIntegration extends FarmIntegrationInput> = TIntegration extends {
+  category: infer TCategory extends FarmIntegrationCategory;
+}
+  ? TCategory
+  : TIntegration extends { slot: infer TSlot extends FarmIntegrationCategory }
+    ? TSlot
+    : FarmIntegrationCategory;
+
+type ExtractDerivedIntegrationAPI<TIntegration extends FarmIntegrationInput> =
+  TIntegration extends { api: infer TAPI extends FarmIntegrationAPI }
+    ? TAPI
+    : TIntegration extends {
+          routes: infer TRoutes extends readonly {
+            path: string;
+            __operation: FarmIntegrationAPIOperation<any, any, any, any, any>;
+          }[];
+        }
+      ? InferIntegrationAPIFromRoutes<TRoutes>
+      : FarmIntegrationAPI | undefined;
+
+export type DefinedIntegration<TIntegration extends FarmIntegrationInput> = Omit<
+  TIntegration,
+  "kind" | "category" | "slot" | "api"
+> & {
+  readonly kind: "farm-integration";
+  category: ExtractIntegrationCategory<TIntegration>;
+  slot: ExtractIntegrationCategory<TIntegration>;
+  api: ExtractDerivedIntegrationAPI<TIntegration>;
+};
+
+export function defineIntegration<TIntegration extends FarmIntegrationInput>(
+  integration: TIntegration,
+): DefinedIntegration<TIntegration>;
+export function defineIntegration<TIntegration extends FarmIntegrationInput>(
+  integration: TIntegration,
+): DefinedIntegration<TIntegration> {
   const category = integration.category ?? integration.slot;
 
   if (!category) {
@@ -168,19 +476,29 @@ export function defineIntegration(
     throw new Error("Integration category and slot must match when both are provided.");
   }
 
+  const derivedApi =
+    integration.api ||
+    (integration.routes?.length
+      ? integrationApi.fromRoutes(
+          integration.routes as unknown as ReadonlyArray<{
+            path: string;
+            __operation: FarmIntegrationAPIOperation<any, any, any, any, any>;
+          }>,
+        )
+      : undefined);
+
   return {
     kind: "farm-integration",
     ...integration,
+    api: derivedApi,
     category,
     slot: category,
-  };
+  } as unknown as DefinedIntegration<TIntegration>;
 }
 
 export function isFarmIntegration(value: unknown): value is FarmIntegration {
   return (
-    !!value &&
-    typeof value === "object" &&
-    (value as FarmIntegration).kind === "farm-integration"
+    !!value && typeof value === "object" && (value as FarmIntegration).kind === "farm-integration"
   );
 }
 
@@ -192,12 +510,12 @@ export function resolveIntegrationPlugins(
   }
 
   const plugins: FarmPlugin[] = [];
-  for (const integration of Object.values(integrations)) {
+  for (const [key, integration] of Object.entries(integrations)) {
     if (!integration || !isFarmIntegration(integration)) {
       continue;
     }
 
-    plugins.push(createIntegrationPlugin(integration));
+    plugins.push(createIntegrationPlugin(key, integration));
 
     if (integration.plugins?.length) {
       plugins.push(...integration.plugins);
@@ -241,14 +559,16 @@ export function getIntegrationDocumentNavigationMatchers(
 
   const matchers: string[] = [];
   for (const integration of Object.values(integrations)) {
-    if (!integration || !isFarmIntegration(integration) || !integration.documentNavigations?.length) {
+    if (
+      !integration ||
+      !isFarmIntegration(integration) ||
+      !integration.documentNavigations?.length
+    ) {
       continue;
     }
 
     for (const navigation of integration.documentNavigations) {
-      const items = Array.isArray(navigation.matcher)
-        ? navigation.matcher
-        : [navigation.matcher];
+      const items = Array.isArray(navigation.matcher) ? navigation.matcher : [navigation.matcher];
 
       for (const item of items) {
         matchers.push(item);
@@ -259,15 +579,170 @@ export function getIntegrationDocumentNavigationMatchers(
   return matchers;
 }
 
-function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
-  const routes = [...(integration.routes || [])];
+export function getIntegrationSchemas(
+  integrations: FarmIntegrationsUserConfig | undefined,
+): Record<string, FarmIntegrationSchema> {
+  if (!integrations) {
+    return {};
+  }
+
+  const schemaEntries = Object.entries(integrations)
+    .map(([key, integration]) => {
+      const schema = integration && isFarmIntegration(integration) ? integration.schema : undefined;
+      return schema ? ([key, schema] as const) : null;
+    })
+    .filter((value): value is readonly [string, FarmIntegrationSchema] => value !== null);
+
+  return Object.fromEntries(schemaEntries);
+}
+
+export function getRegisteredIntegrationRuntime(
+  key: string,
+): RegisteredIntegrationRuntime | undefined {
+  return getIntegrationRuntimeRegistry().get(key);
+}
+
+export function getRegisteredIntegrations(): Record<string, FarmIntegration> {
+  return Object.fromEntries(
+    Array.from(getIntegrationRuntimeRegistry().entries()).map(([key, runtime]) => [
+      key,
+      runtime.integration,
+    ]),
+  );
+}
+
+export function getRegisteredIntegrationSchemas(): Record<string, FarmIntegrationSchema> {
+  return getIntegrationSchemas(getRegisteredIntegrations());
+}
+
+export function matchIntegrationRoute(
+  integrations: FarmIntegrationsUserConfig | undefined,
+  input: {
+    pathname: string;
+    method?: string;
+  },
+): {
+  key: string;
+  integration: FarmIntegration;
+  route: {
+    path: string;
+    methods: readonly string[];
+  };
+  params: FarmIntegrationRouteParams;
+} | null {
+  if (!integrations) {
+    return null;
+  }
+
+  for (const [key, integration] of Object.entries(integrations)) {
+    if (!integration || !isFarmIntegration(integration)) {
+      continue;
+    }
+
+    const routes = normalizeIntegrationRoutes(integration.routes || []);
+
+    for (const route of routes) {
+      if (!matchesMethod(route.methods, input.method)) {
+        continue;
+      }
+
+      const params = extractPathParams(route.path, input.pathname);
+      if (!params) {
+        continue;
+      }
+
+      return {
+        key,
+        integration,
+        route: {
+          path: route.path,
+          methods: route.methods,
+        },
+        params,
+      };
+    }
+  }
+
+  return null;
+}
+
+export function matchRegisteredIntegrationRoute(input: { pathname: string; method?: string }): {
+  key: string;
+  integration: FarmIntegration;
+  route: {
+    path: string;
+    methods: readonly string[];
+  };
+  params: FarmIntegrationRouteParams;
+} | null {
+  return matchIntegrationRoute(getRegisteredIntegrations(), input);
+}
+
+function createClientSafeIntegrationAPI(
+  api: FarmIntegrationAPI | undefined,
+): FarmIntegrationAPI | undefined {
+  if (!api) {
+    return undefined;
+  }
+
+  const entries = Object.entries(api as Record<string, unknown>).map(([key, value]) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      (value as FarmIntegrationAPIOperation<any, any, any, any, any>).kind ===
+        "farm-integration-api-operation"
+    ) {
+      const operation = value as FarmIntegrationAPIOperation<any, any, any, any, any>;
+      return [
+        key,
+        defineIntegrationAPIOperation({
+          path: operation.path,
+          method: operation.method,
+          bodyFormat: operation.bodyFormat,
+          responseFormat: operation.responseFormat,
+          credentials: operation.credentials,
+          isServer: operation.isServer,
+        }),
+      ];
+    }
+
+    if (value && typeof value === "object") {
+      return [key, createClientSafeIntegrationAPI(value as FarmIntegrationAPI)];
+    }
+
+    return [key, value];
+  });
+
+  return Object.fromEntries(entries) as FarmIntegrationAPI;
+}
+
+export function getRegisteredIntegrationAPIManifest(): Record<string, FarmIntegrationAPI> {
+  const manifestEntries = Object.entries(getRegisteredIntegrations())
+    .map(([key, integration]) => {
+      const api = createClientSafeIntegrationAPI(integration.api);
+      return api ? ([key, api] as const) : null;
+    })
+    .filter((value): value is readonly [string, FarmIntegrationAPI] => value !== null);
+
+  return Object.fromEntries(manifestEntries);
+}
+
+function createIntegrationPlugin(integrationKey: string, integration: FarmIntegration): FarmPlugin {
+  const routes = normalizeIntegrationRoutes(integration.routes || []);
   const middleware = [...(integration.middleware || [])];
 
   return {
     name: `farm:integration:${integration.category}:${integration.type}`,
     enforce: "pre",
 
-    async init() {
+    async init(context) {
+      getIntegrationRuntimeRegistry().set(integrationKey, {
+        integration,
+        config: context.config,
+        isDev: context.isDev,
+        isProd: context.isProd,
+      });
+
       if (!integration.log) {
         return;
       }
@@ -423,10 +898,9 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
       }
 
       for (const route of routes) {
-        const params =
-          matchesMethod(route.methods, req.method)
-            ? extractPathParams(route.path, pathname)
-            : null;
+        const params = matchesMethod(route.methods, req.method)
+          ? extractPathParams(route.path, pathname)
+          : null;
         if (!params) {
           continue;
         }
@@ -463,6 +937,30 @@ function createIntegrationPlugin(integration: FarmIntegration): FarmPlugin {
         });
 
         try {
+          for (const middlewareEntry of route.middleware || []) {
+            const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
+            if (middlewareResponse) {
+              await sendWebResponse(res, middlewareResponse);
+              await integration.log?.({
+                category: integration.category,
+                slot: integration.category,
+                type: integration.type,
+                phase: "request:end",
+                route: {
+                  kind: "route",
+                  path: route.path,
+                  methods: route.methods,
+                },
+                request,
+                response: middlewareResponse,
+                requestId,
+                durationMs: Date.now() - startedAt,
+                context: handlerContext.requestContext.snapshot(),
+              });
+              return;
+            }
+          }
+
           const response = await route.handler(request, handlerContext);
           await sendWebResponse(res, response);
           await integration.log?.({
@@ -541,6 +1039,244 @@ function createIntegrationHandlerContext(input: {
   };
 }
 
+type NormalizedIntegrationRoute = Omit<FarmIntegrationRoute, "method" | "methods"> & {
+  methods: readonly string[];
+};
+
+function normalizeIntegrationRoutes(
+  routes: readonly FarmIntegrationRoute[],
+): NormalizedIntegrationRoute[] {
+  return routes.map((route) => ({
+    ...route,
+    methods: normalizeIntegrationRouteMethods(route),
+  }));
+}
+
+function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "method" | "methods">) {
+  const input =
+    route.methods && route.methods.length > 0
+      ? [...route.methods]
+      : route.method
+        ? [route.method]
+        : ["ALL"];
+
+  return input.map((method) => String(method).toUpperCase());
+}
+
+export async function dispatchIntegrationRequest(
+  runtime: RegisteredIntegrationRuntime,
+  request: Request,
+  options: {
+    currentRequest?: Request;
+  } = {},
+): Promise<Response | null> {
+  const integration = runtime.integration;
+  const pathname = new URL(request.url).pathname;
+  const requestId =
+    request.headers.get("x-request-id") ||
+    options.currentRequest?.headers.get("x-request-id") ||
+    String(Date.now());
+  const routes = normalizeIntegrationRoutes(integration.routes || []);
+  const middleware = [...(integration.middleware || [])];
+
+  for (const entry of middleware) {
+    const params = resolveMatcherParams(entry.matcher, pathname);
+    if (!params) {
+      continue;
+    }
+
+    const handlerContext = createServerIntegrationHandlerContext({
+      runtime,
+      route: {
+        kind: "middleware",
+        path: normalizeMatcher(entry.matcher),
+        methods: ["ALL"],
+      },
+      request,
+      params,
+      pathname,
+      requestId,
+      currentRequest: options.currentRequest,
+    });
+    const startedAt = Date.now();
+
+    await integration.log?.({
+      category: integration.category,
+      slot: integration.category,
+      type: integration.type,
+      phase: "request:start",
+      route: {
+        kind: "middleware",
+        path: normalizeMatcher(entry.matcher),
+        methods: ["ALL"],
+      },
+      request,
+      requestId,
+      context: handlerContext.requestContext.snapshot(),
+    });
+
+    try {
+      const response = await entry.handler(request, handlerContext);
+      if (response) {
+        await integration.log?.({
+          category: integration.category,
+          slot: integration.category,
+          type: integration.type,
+          phase: "request:end",
+          route: {
+            kind: "middleware",
+            path: normalizeMatcher(entry.matcher),
+            methods: ["ALL"],
+          },
+          request,
+          response,
+          requestId,
+          durationMs: Date.now() - startedAt,
+          context: handlerContext.requestContext.snapshot(),
+        });
+        return response;
+      }
+
+      await integration.log?.({
+        category: integration.category,
+        slot: integration.category,
+        type: integration.type,
+        phase: "request:end",
+        route: {
+          kind: "middleware",
+          path: normalizeMatcher(entry.matcher),
+          methods: ["ALL"],
+        },
+        request,
+        requestId,
+        durationMs: Date.now() - startedAt,
+        context: handlerContext.requestContext.snapshot(),
+      });
+    } catch (error) {
+      await integration.log?.({
+        category: integration.category,
+        slot: integration.category,
+        type: integration.type,
+        phase: "request:error",
+        route: {
+          kind: "middleware",
+          path: normalizeMatcher(entry.matcher),
+          methods: ["ALL"],
+        },
+        request,
+        requestId,
+        durationMs: Date.now() - startedAt,
+        error,
+        context: handlerContext.requestContext.snapshot(),
+      });
+      throw error;
+    }
+  }
+
+  for (const route of routes) {
+    const params = matchesMethod(route.methods, request.method)
+      ? extractPathParams(route.path, pathname)
+      : null;
+    if (!params) {
+      continue;
+    }
+
+    const handlerContext = createServerIntegrationHandlerContext({
+      runtime,
+      route: {
+        kind: "route",
+        path: route.path,
+        methods: route.methods,
+      },
+      request,
+      params,
+      pathname,
+      requestId,
+      currentRequest: options.currentRequest,
+    });
+    const startedAt = Date.now();
+
+    await integration.log?.({
+      category: integration.category,
+      slot: integration.category,
+      type: integration.type,
+      phase: "request:start",
+      route: {
+        kind: "route",
+        path: route.path,
+        methods: route.methods,
+      },
+      request,
+      requestId,
+      context: handlerContext.requestContext.snapshot(),
+    });
+
+    try {
+      for (const middlewareEntry of route.middleware || []) {
+        const middlewareResponse = await middlewareEntry.handler(request, handlerContext);
+        if (middlewareResponse) {
+          await integration.log?.({
+            category: integration.category,
+            slot: integration.category,
+            type: integration.type,
+            phase: "request:end",
+            route: {
+              kind: "route",
+              path: route.path,
+              methods: route.methods,
+            },
+            request,
+            response: middlewareResponse,
+            requestId,
+            durationMs: Date.now() - startedAt,
+            context: handlerContext.requestContext.snapshot(),
+          });
+          return middlewareResponse;
+        }
+      }
+
+      const response = await route.handler(request, handlerContext);
+      await integration.log?.({
+        category: integration.category,
+        slot: integration.category,
+        type: integration.type,
+        phase: "request:end",
+        route: {
+          kind: "route",
+          path: route.path,
+          methods: route.methods,
+        },
+        request,
+        response,
+        requestId,
+        durationMs: Date.now() - startedAt,
+        context: handlerContext.requestContext.snapshot(),
+      });
+      return response;
+    } catch (error) {
+      await integration.log?.({
+        category: integration.category,
+        slot: integration.category,
+        type: integration.type,
+        phase: "request:error",
+        route: {
+          kind: "route",
+          path: route.path,
+          methods: route.methods,
+        },
+        request,
+        requestId,
+        durationMs: Date.now() - startedAt,
+        error,
+        context: handlerContext.requestContext.snapshot(),
+      });
+      throw error;
+    }
+  }
+
+  return null;
+}
+
 function createIntegrationRequestContextStore(
   rawRequest: FarmRequest,
   request: Request,
@@ -577,6 +1313,89 @@ function createIntegrationRequestContextStore(
     snapshot(options) {
       const merged = pluginContext.requestContext.getAll(rawRequest, options);
       const requestSnapshot = pluginContext.requestContext.getAll(request, options);
+      for (const [key, value] of requestSnapshot) {
+        merged.set(key, value);
+      }
+      return merged;
+    },
+  };
+}
+
+function createServerIntegrationHandlerContext(input: {
+  runtime: RegisteredIntegrationRuntime;
+  route: FarmIntegrationHandlerContext["route"];
+  request: Request;
+  params: FarmIntegrationRouteParams;
+  pathname: string;
+  requestId: string;
+  currentRequest?: Request;
+}): FarmIntegrationHandlerContext {
+  return {
+    request: input.request,
+    requestId: input.requestId,
+    url: new URL(input.request.url),
+    pathname: input.pathname,
+    method: input.request.method,
+    params: input.params,
+    integration: {
+      category: input.runtime.integration.category,
+      slot: input.runtime.integration.category,
+      type: input.runtime.integration.type,
+      instance: input.runtime.integration.instance,
+    },
+    route: input.route,
+    requestContext: createServerIntegrationRequestContextStore(input.request, input.currentRequest),
+    config: input.runtime.config,
+    isDev: input.runtime.isDev,
+    isProd: input.runtime.isProd,
+  };
+}
+
+function createServerIntegrationRequestContextStore(
+  request: Request,
+  currentRequest?: Request,
+): FarmIntegrationRequestContextStore {
+  return {
+    get(key) {
+      const requestValue = getRequestContext(request, key);
+      if (requestValue !== undefined) {
+        return requestValue;
+      }
+
+      if (currentRequest) {
+        return getRequestContext(currentRequest, key);
+      }
+
+      return undefined;
+    },
+    set(key, value, options) {
+      setRequestContext(request, key, value, options);
+      if (currentRequest) {
+        setRequestContext(currentRequest, key, value, options);
+      }
+    },
+    has(key) {
+      return (
+        hasRequestContext(request, key) ||
+        (!!currentRequest && hasRequestContext(currentRequest, key))
+      );
+    },
+    delete(key) {
+      const deletedRequest = deleteRequestContext(request, key);
+      const deletedCurrent = currentRequest ? deleteRequestContext(currentRequest, key) : false;
+      return deletedRequest || deletedCurrent;
+    },
+    clear() {
+      clearRequestContext(request);
+      if (currentRequest) {
+        clearRequestContext(currentRequest);
+      }
+    },
+    snapshot(options) {
+      const merged = currentRequest
+        ? getRequestContextSnapshot(currentRequest, options)
+        : new Map<string, unknown>();
+      const requestSnapshot = getRequestContextSnapshot(request, options);
       for (const [key, value] of requestSnapshot) {
         merged.set(key, value);
       }
@@ -639,7 +1458,10 @@ function matchesMethod(methods: readonly string[], method: string | undefined): 
   return methods.some((item) => item.toUpperCase() === method.toUpperCase());
 }
 
-function matchesMatcher(matcher: string | readonly string[] | undefined, pathname: string): boolean {
+function matchesMatcher(
+  matcher: string | readonly string[] | undefined,
+  pathname: string,
+): boolean {
   return resolveMatcherParams(matcher, pathname) !== null;
 }
 
@@ -676,10 +1498,7 @@ function matchesPath(pattern: string, pathname: string): boolean {
   return extractPathParams(pattern, pathname) !== null;
 }
 
-function extractPathParams(
-  pattern: string,
-  pathname: string,
-): FarmIntegrationRouteParams | null {
+function extractPathParams(pattern: string, pathname: string): FarmIntegrationRouteParams | null {
   const routeSegments = splitPath(pattern);
   const pathSegments = splitPath(pathname);
   const params: FarmIntegrationRouteParams = {};

@@ -1,125 +1,137 @@
 import type { PageProps } from "@farmjs/core";
-import { Link } from "@farmjs/core";
+import { ConsoleAscii } from "../components/console-ascii";
+import { WaitlistForm } from "../components/waitlist-form";
+import { DitherShader } from "../components/ui/dither-shader";
 
 export const metadata = {
-  title: "Farm.js - Modern React meta-framework",
+  title: "farmjs.dev - React framework for integrated apps",
   description:
-    "A modern React meta-framework built on Vite with Next.js-like semantics, React Server Components, and blazing-fast development.",
+    "Farm.js is the comprehensive JavaScript framework for shipping full products with React, with auth, data, billing, and deployment working as one system.",
 };
 
-export default function HomePage(_props: PageProps) {
+const asciiRows = [
+  "              . .     . .       . .     .     . .             . .       . .     . .       . .       . .     .",
+  "     . . .     ? ?   .   + +       . .   ? ?     . .     + +       . .     ? ?       . .       + +     . .",
+  "   . . ? ? + + # #   . . ? ? + +   . .   # #   ? ? + +   . .   @ @   . .   + +   ? ?   . .   # #   . .",
+  " . . + + ? ? # # @ @ . . + + ? ? # #   . . + + ? ? # #   . . @ @ # #   . . + + ? ? # #   . . @ @",
+  "? ? + + # # @ @ $ $ ? ? + + # # @ @   ? ? + + # # @ @   ? ? # # @ @ $ $   ? ? + + # # @ @   ? ?",
+  "+ + # # @ @ $ $ % % + + # # @ @ $ $   + + # # @ @ $ $   + + @ @ $ $ % %   + + # # @ @ $ $   + +",
+  "# # @ @ $ $ % % S S # # @ @ $ $ % %   # # @ @ $ $ % %   # # $ $ % % S S   # # @ @ $ $ % %   # #",
+  "@ @ $ $ % % S S ? ? @ @ $ $ % % S S   @ @ $ $ % % S S   @ @ % % S S ? ?   @ @ $ $ % % S S   @ @",
+  "$ $ % % S S ? ? + + $ $ % % S S ? ?   $ $ % % S S ? ?   $ $ S S ? ? + +   $ $ % % S S ? ?   $ $",
+  "% % S S ? ? + + # # % % S S ? ? + +   % % S S ? ? + +   % % ? ? + + # #   % % S S ? ? + +   % %",
+  "S S ? ? + + # # @ @ S S ? ? + + # #   S S ? ? + + # #   S S + + # # @ @   S S ? ? + + # #   S S",
+  "? ? + + # # @ @ $ $ ? ? + + # # @ @   ? ? + + # # @ @   ? ? # # @ @ $ $   ? ? + + # # @ @   ? ?",
+  "+ + # # @ @ $ $ % % + + # # @ @ $ $   + + # # @ @ $ $   + + @ @ $ $ % %   + + # # @ @ $ $   + +",
+  "# # @ @ $ $ % % S S # # @ @ $ $ % %   # # @ @ $ $ % %   # # $ $ % % S S   # # @ @ $ $ % %   # #",
+  "@ @ $ $ % % S S @ @ @ @ $ $ % % S S   @ @ $ $ % % S S   @ @ % % S S @ @   @ @ $ $ % % S S   @ @",
+];
+
+const asciiField = asciiRows.map((row) => `${row}     ${row}`).join("\n");
+const heroGridCells = Array.from({ length: 8 }, (_, index) => index);
+
+function HeroGridRow({ className = "" }: { className?: string }) {
   return (
-    <div>
-      <section className="relative overflow-hidden border-b border-slate-200 bg-white">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6 sm:py-28">
-          <div className="text-center">
-            <h1 className="text-4xl font-bold tracking-tight text-slate-900 sm:text-5xl md:text-6xl">
-              <span className="block">Build fast with</span>
-              <span className="mt-2 block bg-gradient-to-r from-emerald-600 to-teal-500 bg-clip-text text-transparent">
-                Farm.js
-              </span>
-            </h1>
-            <p className="mx-auto mt-6 max-w-2xl text-lg text-slate-600">
-              A modern React meta-framework built on Vite with Next.js-like semantics, featuring
-              React Server Components and a blazing-fast development experience.
-            </p>
-            <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Link
-                href="/docs/getting-started"
-                className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-emerald-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-600"
-              >
-                Get Started
-              </Link>
-              <Link
-                href="/docs"
-                className="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-6 py-3 text-base font-semibold text-slate-900 shadow-sm hover:bg-slate-50"
-              >
-                Read the docs
-              </Link>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="py-16 sm:py-24">
-        <div className="mx-auto max-w-6xl px-4 sm:px-6">
-          <h2 className="text-center text-2xl font-bold text-slate-900 sm:text-3xl">
-            Everything you need to build modern React apps
-          </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-center text-slate-600">
-            Farm.js combines the best of Vite and Next.js into one cohesive framework.
-          </p>
-          <div className="mt-12 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
-            <FeatureCard
-              icon="⚡"
-              title="Lightning fast"
-              description="Built on Vite for instant server start and blazing-fast HMR during development."
-            />
-            <FeatureCard
-              icon="⚛️"
-              title="React Server Components"
-              description="Full RSC support with streaming SSR for optimal performance and smaller client bundles."
-            />
-            <FeatureCard
-              icon="🎯"
-              title="Next.js-like API"
-              description="Familiar file-based routing and app directory structure that developers already know."
-            />
-            <FeatureCard
-              icon="🔄"
-              title="Server Actions"
-              description="Seamless server-client data mutations without writing API routes by hand."
-            />
-            <FeatureCard
-              icon="📦"
-              title="Zero config"
-              description="Works out of the box with sensible defaults. Tailwind CSS is pre-configured."
-            />
-            <FeatureCard
-              icon="🧪"
-              title="Type safe"
-              description="Full TypeScript support and type-safe APIs throughout the framework."
-            />
-          </div>
-        </div>
-      </section>
-
-      <section className="border-t border-slate-200 bg-white py-16 sm:py-24">
-        <div className="mx-auto max-w-6xl px-4 text-center sm:px-6">
-          <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">Ready to get started?</h2>
-          <p className="mx-auto mt-4 max-w-xl text-slate-600">
-            Create a new Farm.js app in seconds and start building.
-          </p>
-          <div className="mt-8">
-            <Link
-              href="/docs/getting-started"
-              className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-6 py-3 text-base font-semibold text-white shadow-sm hover:bg-emerald-500"
-            >
-              Get Started
-            </Link>
-          </div>
-        </div>
-      </section>
+    <div aria-hidden className={`hidden md:flex ${className}`}>
+      {heroGridCells.map((cell) => (
+        <div
+          key={cell}
+          className="h-6 flex-1 border-l border-white/[0.105] last:border-r md:h-8 lg:h-9"
+        />
+      ))}
     </div>
   );
 }
 
-function FeatureCard({
-  icon,
-  title,
-  description,
-}: {
-  icon: string;
-  title: string;
-  description: string;
-}) {
+function HeroSideRail({ className = "" }: { className?: string }) {
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md">
-      <div className="text-3xl" aria-hidden>
-        {icon}
-      </div>
-      <h3 className="mt-4 text-lg font-semibold text-slate-900">{title}</h3>
-      <p className="mt-2 text-slate-600">{description}</p>
+    <div aria-hidden className={`hidden border-white/[0.105] md:grid md:grid-rows-8 ${className}`}>
+      {heroGridCells.map((cell) => (
+        <div key={cell} className="border-b border-white/[0.105] last:border-b-0" />
+      ))}
+    </div>
+  );
+}
+
+function HeroCornerMark({ className }: { className: string }) {
+  return (
+    <span aria-hidden className={`pointer-events-none absolute z-20 size-5 ${className}`}>
+      <span className="absolute left-1/2 top-0 h-full -translate-x-1/2 border-l border-white/25" />
+      <span className="absolute left-0 top-1/2 w-full -translate-y-1/2 border-t border-white/25" />
+    </span>
+  );
+}
+
+export default function HomePage(_props: PageProps) {
+  return (
+    <div className="relative isolate min-h-screen min-h-dvh overflow-hidden bg-black font-mono text-white">
+      <ConsoleAscii />
+      <div className="absolute inset-0 -z-20 bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.08),transparent_32%),linear-gradient(180deg,#000_0%,#020202_56%,#000_100%)]" />
+      <DitherShader
+        aria-hidden
+        animated
+        animationSpeed={0.03}
+        className="pointer-events-none absolute inset-0 -z-10 h-full w-full opacity-70 [mask-image:linear-gradient(to_bottom,transparent_0%,transparent_24%,black_43%,black_100%)]"
+        colorMode="duotone"
+        ditherMode="bayer"
+        gridSize={3}
+        primaryColor="#000000"
+        secondaryColor="#ffffff"
+        threshold={0.53}
+      />
+      <div className="absolute inset-x-0 bottom-0 -z-10 h-[62vh] bg-gradient-to-b from-transparent via-white/[0.02] to-white/[0.04]" />
+
+      <pre
+        aria-hidden
+        className="pointer-events-none absolute inset-x-1/2 bottom-[-0.5rem] -z-10 w-[86rem] -translate-x-1/2 select-none whitespace-pre font-mono text-[9px] leading-[1.1] tracking-[0.04em] text-white/[0.22] [mask-image:linear-gradient(to_bottom,transparent_0%,black_18%,black_100%)] sm:w-[140rem] sm:text-[13px] md:w-[190rem] md:text-[18px]"
+        children={asciiField}
+      />
+      <div className="absolute inset-x-0 bottom-0 -z-10 h-[52vh] bg-gradient-to-b from-black via-black/35 to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-t from-black to-transparent" />
+
+      <section className="mx-auto flex min-h-screen min-h-dvh w-full max-w-[92rem] flex-col items-center justify-center px-3 py-4 text-center sm:px-6 sm:py-6 lg:px-8">
+        <div className="relative grid min-h-[calc(100dvh-2rem)] w-full grid-cols-10 border-y border-white/[0.12] bg-black/15 sm:min-h-[min(46rem,calc(100dvh-3rem))] md:border-x">
+          <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(65%_90%_at_50%_100%,rgba(255,255,255,0.07),transparent_70%)] [mask-image:linear-gradient(to_top,black_0%,transparent_72%)]" />
+          <HeroCornerMark className="left-0 top-0 -translate-x-1/2 -translate-y-1/2" />
+          <HeroCornerMark className="bottom-0 right-0 translate-x-1/2 translate-y-1/2" />
+
+          <HeroSideRail className="border-r" />
+
+          <div className="col-span-10 flex min-h-0 flex-col md:col-span-8">
+            <HeroGridRow className="border-b border-white/[0.105]" />
+
+            <div className="relative flex min-h-[calc(100dvh-2rem)] flex-1 flex-col items-center justify-center overflow-hidden border border-white/[0.09] bg-black/30 px-4 py-8 text-center sm:min-h-[24rem] sm:px-8 md:min-h-[27rem] md:px-12 lg:px-16">
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(45%_70%_at_50%_0%,rgba(255,255,255,0.07),transparent_68%)]" />
+              <div className="pointer-events-none absolute inset-y-0 left-1/2 border-l border-dashed border-white/[0.105]" />
+
+              <div className="relative z-10 flex flex-col items-center">
+                <p className="font-mono text-xs font-semibold uppercase tracking-[0.14em] text-white/80 sm:text-base sm:tracking-[0.18em]">
+                  [ farm.js ]
+                </p>
+
+                <h1 className="mt-6 max-w-6xl text-balance font-sans text-[clamp(2.75rem,14vw,4.8rem)] font-medium leading-[0.92] tracking-[-0.045em] text-white sm:mt-8 sm:text-7xl md:text-8xl">
+                  Accelerate your product shipping.
+                </h1>
+
+                <p className="mt-5 max-w-4xl text-balance font-sans text-base leading-7 text-white/58 sm:mt-7 sm:text-2xl sm:leading-10">
+                  A comprehensive JavaScript metaframework with a lightweight core. Auth, data,
+                  billing, and deployment are built into one system that runs anywhere.
+                </p>
+
+                <WaitlistForm />
+              </div>
+            </div>
+
+            <div className="relative hidden md:block">
+              <HeroGridRow className="border-b border-white/[0.105]" />
+              <HeroGridRow className="border-b border-white/[0.105]" />
+              <HeroGridRow />
+            </div>
+          </div>
+
+          <HeroSideRail className="border-l" />
+        </div>
+      </section>
     </div>
   );
 }

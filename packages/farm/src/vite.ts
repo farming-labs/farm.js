@@ -9,10 +9,12 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateRouteTypes } from "./routing/generate-route-types";
-import { isClientComponentModule } from "./utils/client-component";
+import { getClientModuleMetadata, isClientComponentModule } from "./utils/client-component";
 import {
+  dispatchIntegrationRequest,
   getIntegrationDocumentNavigationMatchers,
   getIntegrationProviders,
+  matchIntegrationRoute,
 } from "./integrations";
 import * as fs from "fs";
 import * as path from "path";
@@ -249,10 +251,115 @@ export function farmPlugin(
 
       // Register middleware directly (not in return function) to ensure it runs early
       server.middlewares.use(async (req, res, next) => {
+        const requestUrl = req.url || "/";
+        const requestMethod = req.method || "GET";
+        const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
+        const requestPathname = new URL(fullUrl).pathname;
+
         // Handle OpenAPI docs route
         if (openAPIManager && req.url === options.openapi?.route) {
           const docsHandler = openAPIManager.getDocsRouteHandler();
           return docsHandler(req, res);
+        }
+
+        const currentConfig = farmApp?.getConfig() ?? options;
+        const configuredIntegrations = currentConfig.integrations;
+
+        const tryConfiguredIntegrationRoute = async () => {
+          const matchedRoute = matchIntegrationRoute(configuredIntegrations, {
+            pathname: requestPathname,
+            method: requestMethod,
+          });
+
+          if (!matchedRoute) {
+            return false;
+          }
+
+          const startTime = Date.now();
+
+          try {
+            if (pm) {
+              await pm.runHookParallel("beforeRequest", req, res);
+            }
+
+            if (res.writableEnded) {
+              const duration = Date.now() - startTime;
+              logResponse(requestMethod, requestUrl, res.statusCode || 200, duration, "API");
+              return true;
+            }
+
+            const headers = new Headers();
+            for (const [key, value] of Object.entries(req.headers)) {
+              if (value) {
+                headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+              }
+            }
+
+            let body: string | undefined;
+            if (req.method !== "GET" && req.method !== "HEAD") {
+              body = await new Promise<string>((resolve) => {
+                let data = "";
+                req.on("data", (chunk) => {
+                  data += chunk;
+                });
+                req.on("end", () => {
+                  resolve(data);
+                });
+              });
+            }
+
+            const integrationRequest = new Request(fullUrl, {
+              method: req.method,
+              headers,
+              body: body || undefined,
+            });
+
+            const response = await dispatchIntegrationRequest(
+              {
+                integration: matchedRoute.integration,
+                config: currentConfig,
+                isDev: true,
+                isProd: false,
+              },
+              integrationRequest,
+            );
+
+            if (!response) {
+              return false;
+            }
+
+            const duration = Date.now() - startTime;
+            logResponse(requestMethod, requestUrl, response.status, duration, "API");
+
+            res.statusCode = response.status;
+            response.headers.forEach((value, key) => {
+              res.setHeader(key, value);
+            });
+
+            const responseBody = await response.text();
+            res.end(responseBody);
+            return true;
+          } catch (error) {
+            const duration = Date.now() - startTime;
+            logResponse(requestMethod, requestUrl, 500, duration, "API");
+            await emitPluginError("integration-handler", error, {
+              pathname: requestPathname,
+              routePath: requestUrl,
+              method: requestMethod,
+              integration: matchedRoute.key,
+            });
+            logger.error(`Integration route error: ${error}`);
+            if (!res.writableEnded) {
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Internal server error" }));
+            }
+            return true;
+          }
+        };
+
+        if (await tryConfiguredIntegrationRoute()) {
+          return;
         }
 
         // Handle API routes first
@@ -286,7 +393,6 @@ export function farmPlugin(
             // logRequest(method, urlPath, "API");
 
             try {
-
               // Convert Node.js request to Web Request
               const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
               const headers = new Headers();
@@ -355,10 +461,6 @@ export function farmPlugin(
         }
 
         // Skip internal Vite requests
-        const requestPathname = new URL(
-          req.url || "/",
-          `http://${req.headers.host || "localhost:3000"}`,
-        ).pathname;
         if (
           req.url?.startsWith("/@") ||
           req.url?.startsWith("/node_modules") ||
@@ -411,8 +513,9 @@ export function farmPlugin(
             // Load route module to get metadata
             const routeModule = await routeManager.loadRouteModule(route.modulePath);
 
-            // Check if client component
-            const isClientComponent = isClientComponentModule(route.modulePath, server.config.root);
+            const moduleMetadata = getClientModuleMetadata(route.modulePath, server.config.root);
+            const isClientComponent = moduleMetadata.isClientComponent;
+            const shouldHydrate = moduleMetadata.shouldHydrate;
 
             // Collect metadata from layouts and page
             let mergedMetadata: Record<string, any> = {};
@@ -451,6 +554,7 @@ export function farmPlugin(
               props: { params, searchParams },
               modulePath: toUrlPath(route.modulePath),
               isClientComponent,
+              shouldHydrate,
               metadata: {
                 title: mergedMetadata.title,
                 description: mergedMetadata.description,
@@ -689,13 +793,14 @@ export const getManifest = () => ({
 
         // Convert routes array to object keyed by pattern
         for (const route of manifest.routes) {
-          const isClient = isClientComponentModule(route.modulePath, server.config.root);
+          const moduleMetadata = getClientModuleMetadata(route.modulePath, server.config.root);
 
           fullManifest.routes[route.pattern] = {
             modulePath: route.modulePath,
             pattern: route.pattern,
             segments: route.segments,
-            isClientComponent: isClient,
+            isClientComponent: moduleMetadata.isClientComponent,
+            shouldHydrate: moduleMetadata.shouldHydrate,
             preloads: [route.modulePath], // In dev, preload is just the module
             assets: [],
           };
@@ -1237,8 +1342,8 @@ class SPARouter {
     const match = findRoute(pathname);
     if (!match) return;
 
-    // Only prefetch client components (server components can't be prefetched client-side)
-    if (!match.route.isClientComponent) return;
+    // Only prefetch routes that will hydrate on the client.
+    if (!match.route.isClientComponent && !match.route.shouldHydrate) return;
 
     const modulePath = match.route.modulePath;
     if (this.moduleCache.has(modulePath)) return;
@@ -1434,8 +1539,10 @@ async function moduleLooksClient(modulePath) {
     const response = await fetch(modulePath, { headers: { Accept: "text/javascript" } });
     const source = await response.text();
     const looksClient = /["']use client["']/.test(source.slice(0, 256));
-    clientModuleHintCache.set(modulePath, looksClient);
-    return looksClient;
+    const hasHydrateExport = /\bexports+consts+hydrates*=s*true\b/.test(source);
+    const shouldHydrate = looksClient || hasHydrateExport;
+    clientModuleHintCache.set(modulePath, shouldHydrate);
+    return shouldHydrate;
   } catch (error) {
     clientModuleHintCache.set(modulePath, false);
     return false;
@@ -1535,10 +1642,14 @@ async function renderPage(pageData) {
       if (newTitle) document.title = newTitle.textContent || document.title;
       hasClientTakenOver = false;
       
-      const shouldHydrate = route.isClientComponent || await moduleLooksClient(route.modulePath);
+      const shouldHydrate =
+        route.shouldHydrate === true ||
+        route.isClientComponent ||
+        await moduleLooksClient(route.modulePath);
       if (shouldHydrate) {
         try {
-          await tryHydrateImportedPage(container, route, params, layouts);
+          const hydrationContainer = document.getElementById('__farm_page__') || container;
+          await tryHydrateImportedPage(hydrationContainer, route, params, layouts, true);
         } catch (error) {
           // Keep the swapped server HTML when the page can only run on the server.
         }
@@ -1670,7 +1781,10 @@ async function hydrate() {
       return
     }
 
-    const shouldHydrate = isClientComponent || await moduleLooksClient(modulePath);
+    const shouldHydrate =
+      window.__FARM_SHOULD_HYDRATE__ === true ||
+      isClientComponent ||
+      await moduleLooksClient(modulePath);
     if (!shouldHydrate) {
       console.log('[Farm.js] Server component - SPA router ready')
       return
@@ -1691,8 +1805,8 @@ async function hydrate() {
     currentPageProps = pageProps;
 
     const layouts = findLayouts(window.location.pathname);
-    const pageContainer = isClientComponent
-      ? document.getElementById('__farm_page__')
+    const pageContainer = shouldHydrate
+      ? document.getElementById('__farm_page__') || rootContainer
       : rootContainer;
 
     if (!pageContainer) {
@@ -1705,7 +1819,7 @@ async function hydrate() {
       { modulePath },
       currentPageProps.params || {},
       layouts,
-      isClientComponent,
+      shouldHydrate,
     ).catch(() => false);
 
     if (hydrated) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "../../lib/api";
+import { apiClient } from "../../lib/api";
 
 type SessionState =
   | { status: "loading" }
@@ -21,9 +21,9 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
 
-    api.supabase
-      .session()
-      .then((result) => {
+    async function loadSession() {
+      const result = await apiClient.auth.session.get();
+
         if (cancelled) {
           return;
         }
@@ -49,7 +49,9 @@ export default function DashboardPage() {
                 : undefined,
           },
         });
-      });
+    }
+
+    void loadSession();
 
     return () => {
       cancelled = true;
@@ -59,7 +61,7 @@ export default function DashboardPage() {
   async function handleLogout() {
     setLoggingOut(true);
 
-    const result = await api.supabase.logout({
+    const result = await apiClient.auth.logout.post({
       body: {
         returnTo: "/",
       },

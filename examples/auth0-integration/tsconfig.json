@@ -11,11 +11,19 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@farmjs/core": ["../../packages/farm/dist/index.d.ts"],
+      "@farmjs/core/client": ["../../packages/farm/types/client.d.ts"],
+      "@farmjs/integrations": ["../../packages/farm-integrations/dist/index.d.ts"]
+    },
+    "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["vite/client"]
+    "types": ["vite/client", "node"],
+    "skipLibCheck": true
   },
   "include": ["src", "farm.config.ts"]
 }

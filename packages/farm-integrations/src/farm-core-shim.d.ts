@@ -11,6 +11,11 @@ declare module "@farmjs/core" {
 
   export type FarmIntegrationRouteParamValue = string | string[];
   export type FarmIntegrationRouteParams = Record<string, FarmIntegrationRouteParamValue>;
+  export type FarmIntegrationRouteMethod =
+    | FarmIntegrationAPIMethod
+    | Lowercase<FarmIntegrationAPIMethod>
+    | "ALL"
+    | "all";
 
   export interface FarmIntegrationRequestContextStore {
     get<T = unknown>(key: string): T | undefined;
@@ -48,9 +53,31 @@ declare module "@farmjs/core" {
 
   export interface FarmIntegrationRoute {
     path: string;
-    methods: readonly string[];
+    method?: FarmIntegrationRouteMethod;
+    methods?: readonly FarmIntegrationRouteMethod[];
+    middleware?: readonly FarmIntegrationRouteMiddleware[];
     rawBody?: boolean;
     handler(request: Request, context: FarmIntegrationHandlerContext): Promise<Response> | Response;
+  }
+
+  export interface FarmIntegrationRouteMiddleware {
+    handler(
+      request: Request,
+      context: FarmIntegrationHandlerContext,
+    ): Promise<Response | void> | Response | void;
+  }
+
+  export interface FarmTypedIntegrationRoute<
+    TPath extends string = string,
+    TBody = never,
+    TQuery = never,
+    TResponse = unknown,
+    TServer extends boolean = false,
+    TMethod extends FarmIntegrationAPIMethod = FarmIntegrationAPIMethod,
+  > extends FarmIntegrationRoute {
+    path: TPath;
+    method: TMethod;
+    __operation: FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
   }
 
   export interface FarmIntegrationMiddleware {
@@ -75,6 +102,84 @@ declare module "@farmjs/core" {
   export interface FarmIntegrationDocumentNavigation {
     matcher: string | readonly string[];
   }
+
+  export type FarmIntegrationSchemaFieldType =
+    | "id"
+    | "uuid"
+    | "string"
+    | "text"
+    | "boolean"
+    | "integer"
+    | "number"
+    | "datetime"
+    | "json"
+    | "enum";
+
+  export interface FarmIntegrationSchemaReference {
+    model: string;
+    field: string;
+    relation?: "belongsTo" | "hasOne" | "hasMany";
+    onDelete?: "cascade" | "restrict" | "setNull" | "noAction";
+    enforced?: "db" | "app" | "none";
+  }
+
+  export interface FarmIntegrationSchemaField {
+    type: FarmIntegrationSchemaFieldType;
+    name?: string;
+    description?: string;
+    required?: boolean;
+    nullable?: boolean;
+    primaryKey?: boolean;
+    unique?: boolean;
+    index?: boolean;
+    list?: boolean;
+    default?: unknown;
+    values?: readonly string[];
+    reference?: FarmIntegrationSchemaReference;
+    meta?: Record<string, unknown>;
+  }
+
+  export interface FarmIntegrationSchemaConstraint {
+    type: "unique" | "index";
+    fields: readonly string[];
+    name?: string;
+    meta?: Record<string, unknown>;
+  }
+
+  export interface FarmIntegrationSchemaModel {
+    name?: string;
+    description?: string;
+    fields: Record<string, FarmIntegrationSchemaField>;
+    constraints?: readonly FarmIntegrationSchemaConstraint[];
+    meta?: Record<string, unknown>;
+  }
+
+  export interface FarmIntegrationSchemaModelExtension {
+    name?: string;
+    description?: string;
+    fields?: Record<string, FarmIntegrationSchemaField>;
+    constraints?: readonly FarmIntegrationSchemaConstraint[];
+    meta?: Record<string, unknown>;
+  }
+
+  export interface FarmIntegrationSchemaModelOverride {
+    name?: string;
+    description?: string;
+    fields?: Record<string, Partial<FarmIntegrationSchemaField>>;
+    constraints?: readonly FarmIntegrationSchemaConstraint[];
+    meta?: Record<string, unknown>;
+  }
+
+  export interface FarmIntegrationSchema {
+    models: Record<string, FarmIntegrationSchemaModel>;
+    meta?: Record<string, unknown>;
+    extend?: Record<string, FarmIntegrationSchemaModelExtension>;
+    override?: Record<string, FarmIntegrationSchemaModelOverride>;
+  }
+
+  export function defineIntegrationSchema<TSchema extends FarmIntegrationSchema>(
+    schema: TSchema,
+  ): TSchema;
 
   export type FarmIntegrationAPIMethod =
     | "GET"
@@ -112,6 +217,74 @@ declare module "@farmjs/core" {
   export type FarmIntegrationAPI = {
     [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any>;
   };
+
+  export type FarmIntegrationRouteOperationCarrier<
+    TPath extends string = string,
+    TOperation extends FarmIntegrationAPIOperation<any, any, any, any> =
+      FarmIntegrationAPIOperation<any, any, any, any>,
+  > = {
+    path: TPath;
+    __operation: TOperation;
+  };
+
+  type StripRouteClientPrefix<TPath extends string> = TPath extends `/api/${string}/${infer TRest}`
+    ? TRest
+    : TPath extends `/${string}/${infer TRest}`
+      ? TRest
+      : TPath extends `/${infer TRest}`
+        ? TRest
+        : TPath;
+
+  type CamelCaseRouteSegment<TSegment extends string> =
+    TSegment extends `${infer THead}-${infer TTail}`
+      ? `${THead}${Capitalize<CamelCaseRouteSegment<TTail>>}`
+      : TSegment;
+
+  type NormalizeRouteSegment<TSegment extends string> = TSegment extends `[...${infer TName}]`
+    ? TName
+    : TSegment extends `[${infer TName}]`
+      ? TName
+      : TSegment extends `${infer TName}(${string}`
+        ? TName
+        : CamelCaseRouteSegment<TSegment>;
+
+  type RouteNamespaceFromPath<
+    TPath extends string,
+    TOperation extends FarmIntegrationAPIOperation<any, any, any, any>,
+  > = TPath extends `${infer THead}/${infer TTail}`
+    ? {
+        [TKey in NormalizeRouteSegment<THead>]: RouteNamespaceFromPath<TTail, TOperation>;
+      }
+    : {
+        [TKey in NormalizeRouteSegment<TPath>]: {
+          [TMethod in Lowercase<TOperation["method"] & string>]: TOperation;
+        };
+      };
+
+  type UnionToIntersection<TUnion> = (
+    TUnion extends unknown ? (value: TUnion) => void : never
+  ) extends (value: infer TIntersection) => void
+    ? TIntersection
+    : never;
+
+  type ExpandRecursively<TValue> = TValue extends (...args: any[]) => any
+    ? TValue
+    : TValue extends object
+      ? { [TKey in keyof TValue]: ExpandRecursively<TValue[TKey]> }
+      : TValue;
+
+  type RoutesToAPI<TRoutes extends readonly FarmIntegrationRouteOperationCarrier<string, any>[]> =
+    ExpandRecursively<
+      UnionToIntersection<
+        TRoutes[number] extends FarmIntegrationRouteOperationCarrier<infer TPath, infer TOperation>
+          ? RouteNamespaceFromPath<StripRouteClientPrefix<TPath>, TOperation>
+          : never
+      >
+    >;
+
+  export type InferIntegrationAPIFromRoutes<
+    TRoutes extends readonly FarmIntegrationRouteOperationCarrier<string, any>[],
+  > = RoutesToAPI<TRoutes>;
 
   export function defineIntegrationAPIOperation<
     TBody = never,
@@ -157,9 +330,7 @@ declare module "@farmjs/core" {
     context: Map<string, unknown>;
   }
 
-  export type FarmIntegrationLogger = (
-    event: FarmIntegrationLogEvent,
-  ) => void | Promise<void>;
+  export type FarmIntegrationLogger = (event: FarmIntegrationLogEvent) => void | Promise<void>;
 
   export interface FarmIntegration {
     readonly kind: "farm-integration";
@@ -169,6 +340,7 @@ declare module "@farmjs/core" {
     type: string;
     instance: unknown;
     api?: FarmIntegrationAPI;
+    schema?: FarmIntegrationSchema;
     log?: FarmIntegrationLogger;
     routes?: readonly FarmIntegrationRoute[];
     middleware?: readonly FarmIntegrationMiddleware[];
@@ -189,9 +361,61 @@ declare module "@farmjs/core" {
         }
     );
 
-  export function defineIntegration(
-    integration: FarmIntegrationInput,
-  ): FarmIntegration;
+  export type DefinedIntegration<TIntegration extends FarmIntegrationInput> = Omit<
+    TIntegration,
+    "kind" | "category" | "slot" | "api"
+  > & {
+    readonly kind: "farm-integration";
+    category: FarmIntegrationCategory;
+    slot: FarmIntegrationCategory;
+    api: TIntegration extends { api: infer TAPI extends FarmIntegrationAPI }
+      ? TAPI
+      : FarmIntegrationAPI | undefined;
+  };
+
+  export function defineIntegration<TIntegration extends FarmIntegrationInput>(
+    integration: TIntegration,
+  ): DefinedIntegration<TIntegration>;
+
+  export const integrationRoute: {
+    get<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: TPath,
+      input: {
+        middleware?: readonly FarmIntegrationRouteMiddleware[];
+        rawBody?: boolean;
+        headers?: Record<string, string>;
+        credentials?: RequestCredentials;
+        responseFormat?: FarmIntegrationAPIResponseFormat;
+        isServer?: TServer;
+        handler(
+          request: Request,
+          context: FarmIntegrationHandlerContext,
+        ): Promise<Response> | Response;
+      },
+    ): FarmTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "GET">;
+    post<
+      TPath extends string,
+      TBody = never,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(
+      path: TPath,
+      input: {
+        middleware?: readonly FarmIntegrationRouteMiddleware[];
+        rawBody?: boolean;
+        headers?: Record<string, string>;
+        credentials?: RequestCredentials;
+        bodyFormat?: FarmIntegrationAPIBodyFormat;
+        responseFormat?: FarmIntegrationAPIResponseFormat;
+        isServer?: TServer;
+        handler(
+          request: Request,
+          context: FarmIntegrationHandlerContext,
+        ): Promise<Response> | Response;
+      },
+    ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST">;
+  };
 
   export function getIntegrationProviders(
     integrations: Record<string, FarmIntegration | undefined> | undefined,
@@ -200,4 +424,10 @@ declare module "@farmjs/core" {
   export function getIntegrationDocumentNavigationMatchers(
     integrations: Record<string, FarmIntegration | undefined> | undefined,
   ): string[];
+
+  export function getIntegrationSchemas(
+    integrations: Record<string, FarmIntegration | undefined> | undefined,
+  ): Record<string, FarmIntegrationSchema>;
+
+  export function getRegisteredIntegrationSchemas(): Record<string, FarmIntegrationSchema>;
 }

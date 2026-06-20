@@ -1,5 +1,5 @@
 import type { PageProps } from "@farmjs/core";
-import { Link } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 
 export const metadata = {
   title: "Create a Plugin - Farm.js",

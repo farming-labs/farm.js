@@ -1,5 +1,9 @@
 export { escapeHtml } from "./html.js";
-export { createAuthRouteIntegration, methodNotAllowed } from "./integration.js";
+export {
+  createAuthRouteIntegration,
+  createPathInferredClientApi,
+  methodNotAllowed,
+} from "./integration.js";
 export { createDocumentNavigationMatchers, normalizeMatchers } from "./matchers.js";
 export {
   clearRequestCookie,
@@ -16,3 +20,12 @@ export {
   toAbsoluteUrl,
   withSearchParams,
 } from "./url.js";
+export { normalizeWebhookConfig } from "./webhooks.js";
+export type {
+  FarmNormalizedWebhookDefinition,
+  FarmWebhookAckResult,
+  FarmWebhookConfig,
+  FarmWebhookContext,
+  FarmWebhookDefinition,
+  FarmWebhookEvent,
+} from "./webhooks.js";

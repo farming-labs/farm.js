@@ -42,42 +42,36 @@ The integration owns:
 - `/auth/logout`
 - `/auth/session`
 
-Create a small client once and reuse it in your custom pages:
+Create the shared callers once and reuse them in your pages:
 
 ```ts
-import { createIntegrationClient } from "@farmjs/core/client";
-import { supabaseClient } from "@farmjs/integrations/supabase/client";
+import { integrationsClient, integrationsServer } from "@farmjs/core/client";
+import type { AppIntegrations } from "./src/lib/integrations";
 
-export const api = createIntegrationClient({
-  integrations: {
-    supabase: supabaseClient,
-    localDemo: localDemoClient,
-  },
-});
+export const api = integrationsServer<AppIntegrations>();
+export const apiClient = integrationsClient<AppIntegrations>();
 ```
 
 Client usage:
 
 ```ts
-const { data, error } = await api.supabase.login({ body: ... });
+const { data, error } = await apiClient.auth.login.post({ body: ... });
 ```
 
 Server usage:
 
 ```ts
-const serverApi = createIntegrationClient(
-  {
-    integrations: {
-      supabase: supabaseClient,
-    },
-  },
-  {
-    isServer: true,
-    request,
-  },
-);
+const { data, error } = await api.auth.session.get();
+```
 
-const { data, error } = await serverApi.supabase.session();
+There is also a live SSR example in:
+
+- `src/app/server-demo/page.tsx`
+
+It uses:
+
+```ts
+const result = await api.localDemo.message.get();
 ```
 
 This example also includes an app-local integration to show that integrations are not limited to
@@ -97,13 +91,13 @@ export default defineFarmConfig({
 The local integration definition lives in:
 
 - `src/lib/integrations/local-demo/index.ts`
-- `src/lib/integrations/local-demo/client.ts`
 
-And it is used through the same shared client:
+Farm infers its client and server callers from the registered integration routes, so it is used
+through the same shared client without a separate `client.ts` file:
 
 ```ts
-const { data, error } = await api.localDemo.status();
-const echo = await api.localDemo.echo({
+const { data, error } = await apiClient.localDemo.message.get();
+const echo = await apiClient.localDemo.message.post({
   body: {
     message: "hello from a local integration",
   },
@@ -144,7 +138,7 @@ Then call the inferred methods directly:
 "use client";
 
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { apiClient } from "@/lib/api";
 
 export default function SignInPage() {
   const [pending, setPending] = useState(false);
@@ -154,7 +148,7 @@ export default function SignInPage() {
     setPending(true);
 
     const formData = new FormData(event.currentTarget);
-    const result = await api.supabase.login({
+    const result = await apiClient.supabase.login({
       body: {
         email: String(formData.get("email") || ""),
         password: String(formData.get("password") || ""),
@@ -186,11 +180,11 @@ export default function SignInPage() {
 
 The available typed methods are:
 
-- `api.supabase.login({ body })`
-- `api.supabase.signup({ body })`
-- `api.supabase.oauth({ query })`
-- `api.supabase.logout({ body })`
-- `api.supabase.session()`
+- `apiClient.supabase.login({ body })`
+- `apiClient.supabase.signup({ body })`
+- `apiClient.supabase.oauth({ query })`
+- `apiClient.supabase.logout({ body })`
+- `apiClient.supabase.session()`
 
 Each call resolves to:
 

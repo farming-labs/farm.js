@@ -2,7 +2,7 @@
 
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { apiClient } from "../lib/api";
 
 type AuthMode = "sign-in" | "sign-up";
 
@@ -88,7 +88,7 @@ export default function AuthScreen(props: AuthScreenProps) {
     setFeedback(null);
 
     if (props.mode === "sign-in") {
-      const result = await api.supabase.login({
+      const result = await apiClient.auth.login.post({
         body: {
           email,
           password,
@@ -108,7 +108,7 @@ export default function AuthScreen(props: AuthScreenProps) {
       return;
     }
 
-    const result = await api.supabase.signup({
+    const result = await apiClient.auth.signup.post({
       body: {
         email,
         password,

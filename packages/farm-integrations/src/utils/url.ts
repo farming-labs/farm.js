@@ -29,10 +29,7 @@ export function toAbsoluteUrl(
   }
 }
 
-export function withSearchParams(
-  url: URL,
-  params: Record<string, string | null | undefined>,
-): URL {
+export function withSearchParams(url: URL, params: Record<string, string | null | undefined>): URL {
   for (const [key, value] of Object.entries(params)) {
     if (value == null || value === "") {
       continue;
@@ -61,10 +58,7 @@ export function resolveCallbackSettings(
   configuredBaseUrl?: string,
 ): {
   callbackPath: string;
-  getCallbackUrl: (
-    request: Request,
-    params?: Record<string, string | null | undefined>,
-  ) => string;
+  getCallbackUrl: (request: Request, params?: Record<string, string | null | undefined>) => string;
 } {
   if (input.callbackUrl) {
     let parsedUrl: URL;

@@ -6,9 +6,7 @@ export function normalizeMatchers(input?: string | string[]): string[] {
   return Array.isArray(input) ? input : [input];
 }
 
-export function createDocumentNavigationMatchers(
-  ...paths: Array<string | undefined>
-): string[] {
+export function createDocumentNavigationMatchers(...paths: Array<string | undefined>): string[] {
   const seen = new Set<string>();
   const matchers: string[] = [];
 

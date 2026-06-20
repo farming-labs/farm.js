@@ -6,3 +6,4 @@ export * from "./types";
 export * from "./utils";
 export * from "./storage";
 export { createServer, startDevServer } from "./server/create-server";
+export { getCurrentRequest } from "./server/request";

@@ -1,13 +1,16 @@
 import { WorkOS } from "@workos-inc/node";
-import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farmjs/core";
 import {
   clearRequestCookie,
+  createPathInferredClientApi,
   createDocumentNavigationMatchers,
   createRequestCookie,
   getCookieValue,
   getReturnTo,
   normalizeMatchers,
 } from "../utils/index.js";
+import type { WorkOSRedirectQuery, WorkOSRedirectResult, WorkOSSessionResult } from "./client.js";
+import { workosClient } from "./client.js";
 
 export interface WorkOSIntegrationInput {
   clientId?: string;
@@ -25,6 +28,32 @@ export interface WorkOSIntegrationInput {
 
 const DEV_COOKIE_PASSWORD = "farmjs-workos-cookie-password-development-2026";
 
+function createWorkOSApi(input: {
+  loginPath: string;
+  signUpPath: string;
+  logoutPath: string;
+  sessionPath: string;
+}) {
+  return createPathInferredClientApi(
+    {
+      path: input.loginPath,
+      operation: workosClient.login,
+    },
+    {
+      path: input.signUpPath,
+      operation: workosClient.signup,
+    },
+    {
+      path: input.logoutPath,
+      operation: workosClient.logout,
+    },
+    {
+      path: input.sessionPath,
+      operation: workosClient.session,
+    },
+  );
+}
+
 function resolveEnv(input: WorkOSIntegrationInput) {
   const clientId = input.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
   const apiKey = input.apiKey ?? process.env.WORKOS_API_KEY ?? "";
@@ -39,9 +68,7 @@ function resolveEnv(input: WorkOSIntegrationInput) {
   }
 
   if (!cookiePassword) {
-    throw new Error(
-      "WorkOS integration requires WORKOS_COOKIE_PASSWORD in production.",
-    );
+    throw new Error("WorkOS integration requires WORKOS_COOKIE_PASSWORD in production.");
   }
 
   return {
@@ -105,7 +132,9 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       state: JSON.stringify({ returnTo }),
     });
 
-    return Response.redirect(authorizationUrl, 302);
+    return {
+      redirectTo: authorizationUrl,
+    } satisfies WorkOSRedirectResult;
   }
 
   return defineIntegration({
@@ -116,6 +145,12 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       apiKey: "[redacted]",
       protectedRoutes: protectedMatchers,
     },
+    api: createWorkOSApi({
+      loginPath,
+      signUpPath,
+      logoutPath,
+      sessionPath,
+    }),
     log: input.log,
     documentNavigations: [
       {
@@ -123,23 +158,34 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       },
     ],
     routes: [
-      {
-        path: loginPath,
-        methods: ["GET"],
-        handler(request: Request) {
-          return redirectToAuth(request, "sign-in");
+      integrationRoute.get<typeof loginPath, WorkOSRedirectResult, WorkOSRedirectQuery>(loginPath, {
+        responseFormat: "json",
+        async handler(request: Request) {
+          const result = await redirectToAuth(request, "sign-in");
+
+          if (request.headers.get("x-farm-integration-client") === "1") {
+            return Response.json(result);
+          }
+
+          return Response.redirect(result.redirectTo, 302);
         },
-      },
-      {
-        path: signUpPath,
-        methods: ["GET"],
-        handler(request: Request) {
-          return redirectToAuth(request, "sign-up");
+      }),
+      integrationRoute.get<typeof signUpPath, WorkOSRedirectResult, WorkOSRedirectQuery>(
+        signUpPath,
+        {
+          responseFormat: "json",
+          async handler(request: Request) {
+            const result = await redirectToAuth(request, "sign-up");
+
+            if (request.headers.get("x-farm-integration-client") === "1") {
+              return Response.json(result);
+            }
+
+            return Response.redirect(result.redirectTo, 302);
+          },
         },
-      },
-      {
-        path: callbackPath,
-        methods: ["GET"],
+      ),
+      integrationRoute.get(callbackPath, {
         async handler(request: Request) {
           const requestUrl = new URL(request.url);
           const code = requestUrl.searchParams.get("code");
@@ -190,38 +236,42 @@ export function workos(input: WorkOSIntegrationInput = {}) {
             headers,
           });
         },
-      },
-      {
-        path: logoutPath,
-        methods: ["POST"],
-        async handler(request: Request) {
-          const requestUrl = new URL(request.url);
-          const sessionState = await getSession(workos, request, cookieName, cookiePassword);
-          const headers = new Headers();
-          headers.set("set-cookie", clearRequestCookie(cookieName, request));
+      }),
+      integrationRoute.post<typeof logoutPath, { returnTo?: string }, WorkOSRedirectResult>(
+        logoutPath,
+        {
+          responseFormat: "json",
+          async handler(request: Request) {
+            const requestUrl = new URL(request.url);
+            const sessionState = await getSession(workos, request, cookieName, cookiePassword);
+            const headers = new Headers();
+            headers.set("set-cookie", clearRequestCookie(cookieName, request));
 
-          if (!sessionState) {
-            headers.set("location", new URL("/", requestUrl.origin).toString());
-            return new Response(null, {
-              status: 303,
-              headers,
+            if (!sessionState) {
+              const redirectTo = new URL("/", requestUrl.origin).toString();
+              if (request.headers.get("x-farm-integration-client") === "1") {
+                return Response.json({ redirectTo }, { status: 200, headers });
+              }
+
+              headers.set("location", redirectTo);
+              return new Response(null, { status: 303, headers });
+            }
+
+            const logoutUrl = await sessionState.session.getLogoutUrl({
+              returnTo: requestUrl.origin,
             });
-          }
 
-          const logoutUrl = await sessionState.session.getLogoutUrl({
-            returnTo: requestUrl.origin,
-          });
-          headers.set("location", logoutUrl);
+            if (request.headers.get("x-farm-integration-client") === "1") {
+              return Response.json({ redirectTo: logoutUrl }, { status: 200, headers });
+            }
 
-          return new Response(null, {
-            status: 303,
-            headers,
-          });
+            headers.set("location", logoutUrl);
+            return new Response(null, { status: 303, headers });
+          },
         },
-      },
-      {
-        path: sessionPath,
-        methods: ["GET"],
+      ),
+      integrationRoute.get<typeof sessionPath, WorkOSSessionResult>(sessionPath, {
+        responseFormat: "json",
         async handler(request: Request) {
           const sessionState = await getSession(workos, request, cookieName, cookiePassword);
 
@@ -248,7 +298,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
             },
           });
         },
-      },
+      }),
     ],
     middleware:
       protectedMatchers.length > 0
@@ -263,10 +313,7 @@ export function workos(input: WorkOSIntegrationInput = {}) {
 
                 const requestUrl = new URL(request.url);
                 const loginUrl = new URL(loginPath, request.url);
-                loginUrl.searchParams.set(
-                  "returnTo",
-                  `${requestUrl.pathname}${requestUrl.search}`,
-                );
+                loginUrl.searchParams.set("returnTo", `${requestUrl.pathname}${requestUrl.search}`);
                 return Response.redirect(loginUrl, 307);
               },
             },

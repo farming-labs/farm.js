@@ -1,0 +1,34 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+// Farm.js integrations generated schema: start
+/// Farm.js generated from integration "billing" model "billingAccount"
+model BillingBillingAccount {
+  id String @id @default(cuid())
+  ownerId String @map("owner_id")
+  ownerKind String @default("user") @map("owner_kind")
+  stripeCustomerId String? @unique @map("stripe_customer_id")
+  stripeSubscriptionId String? @unique @map("stripe_subscription_id")
+  planId String @default("free") @map("plan_id")
+  productId String? @map("product_id")
+  status String @default("free")
+  currentPeriodEnd DateTime? @map("current_period_end")
+  cancelAtPeriodEnd Boolean @default(false) @map("cancel_at_period_end")
+  trialEndsAt DateTime? @map("trial_ends_at")
+  trialUsedAt DateTime? @map("trial_used_at")
+  seatQuantity Int? @map("seat_quantity")
+  seatAllowanceOverride Int? @map("seat_allowance_override")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+  @@map("billing_account")
+  @@index([ownerId], map: "billing_account_owner_id_idx")
+  @@index([ownerKind], map: "billing_account_owner_kind_idx")
+  @@unique([ownerKind, ownerId], map: "billing_account_owner_unique")
+}
+// Farm.js integrations generated schema: end

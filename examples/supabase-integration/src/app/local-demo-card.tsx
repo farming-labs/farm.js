@@ -2,11 +2,11 @@
 
 import type { FormEvent } from "react";
 import { useEffect, useState } from "react";
-import { api } from "../lib/api";
+import { apiClient } from "../lib/api";
 import type {
   LocalDemoEchoResult,
   LocalDemoStatusResult,
-} from "../lib/integrations/local-demo/client";
+} from "../lib/integrations/local-demo";
 
 type Feedback =
   | {
@@ -14,6 +14,32 @@ type Feedback =
       message: string;
     }
   | null;
+
+function asStatusResult(value: unknown): LocalDemoStatusResult | null {
+  if (
+    value &&
+    typeof value === "object" &&
+    "integration" in value &&
+    "bootedAt" in value
+  ) {
+    return value as LocalDemoStatusResult;
+  }
+
+  return null;
+}
+
+function asEchoResult(value: unknown): LocalDemoEchoResult | null {
+  if (
+    value &&
+    typeof value === "object" &&
+    "uppercase" in value &&
+    "length" in value
+  ) {
+    return value as LocalDemoEchoResult;
+  }
+
+  return null;
+}
 
 export default function LocalDemoCard() {
   const [message, setMessage] = useState("Farm custom integrations");
@@ -28,7 +54,7 @@ export default function LocalDemoCard() {
 
     async function loadStatus() {
       setLoadingStatus(true);
-      const result = await api.localDemo.status();
+      const result = await apiClient.localDemo.message.get();
 
       if (cancelled) {
         return;
@@ -42,7 +68,7 @@ export default function LocalDemoCard() {
         setStatus(null);
       } else {
         setFeedback(null);
-        setStatus(result.data);
+        setStatus(asStatusResult(result.data));
       }
 
       setLoadingStatus(false);
@@ -57,7 +83,7 @@ export default function LocalDemoCard() {
 
   async function refreshStatus() {
     setLoadingStatus(true);
-    const result = await api.localDemo.status();
+    const result = await apiClient.localDemo.message.get();
 
     if (result.error) {
       setFeedback({
@@ -67,7 +93,7 @@ export default function LocalDemoCard() {
       setStatus(null);
     } else {
       setFeedback(null);
-      setStatus(result.data);
+      setStatus(asStatusResult(result.data));
     }
 
     setLoadingStatus(false);
@@ -78,7 +104,7 @@ export default function LocalDemoCard() {
     setSubmittingEcho(true);
     setFeedback(null);
 
-    const result = await api.localDemo.echo({
+    const result = await apiClient.localDemo.message.post({
       body: {
         message,
       },
@@ -95,7 +121,7 @@ export default function LocalDemoCard() {
         tone: "success",
         message: "Custom integration request completed.",
       });
-      setEcho(result.data);
+      setEcho(asEchoResult(result.data));
     }
 
     setSubmittingEcho(false);
@@ -105,8 +131,10 @@ export default function LocalDemoCard() {
     <section className="card">
       <h2>App-local Integration</h2>
       <p>
-        This demo is defined inside the example itself, registered in <code>farm.config.ts</code>,
-        and exposed through <code>api.localDemo.*</code>.
+        This demo is defined inside the example itself and registered in <code>farm.config.ts</code>.
+        Farm infers the typed client calls from the integration routes and keeps the actual handler
+        code on the server. The per-route middleware array also runs before the handler for these
+        requests.
       </p>
 
       {feedback ? (
@@ -122,7 +150,7 @@ export default function LocalDemoCard() {
 
       <div className="response-panel">
         <div className="response-meta">
-          <span className="status-pill">GET /api/local-demo/status</span>
+          <span className="status-pill">GET /api/local-demo/message</span>
           <strong>{status?.message || "Waiting for the local integration response."}</strong>
         </div>
         <pre>{JSON.stringify(status, null, 2)}</pre>
@@ -153,7 +181,7 @@ export default function LocalDemoCard() {
 
       <div className="response-panel">
         <div className="response-meta">
-          <span className="status-pill">POST /api/local-demo/echo</span>
+          <span className="status-pill">POST /api/local-demo/message</span>
           <strong>Typed client call through the same shared integration API.</strong>
         </div>
         <pre>{JSON.stringify(echo, null, 2)}</pre>

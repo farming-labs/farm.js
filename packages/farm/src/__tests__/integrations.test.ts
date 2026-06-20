@@ -4,7 +4,11 @@ import { PluginManager } from "../plugin";
 import {
   defineIntegration,
   getIntegrationDocumentNavigationMatchers,
+  getIntegrationSchemas,
+  getRegisteredIntegrationSchemas,
+  matchRegisteredIntegrationRoute,
   resolveIntegrationPlugins,
+  type FarmIntegrationSchema,
 } from "../integrations";
 
 function createManager() {
@@ -63,6 +67,66 @@ describe("integrations runtime", () => {
 
     expect(integration.category).toBe("auth");
     expect(integration.slot).toBe("auth");
+  });
+
+  it("preserves optional integration schemas and exposes them through schema helpers", async () => {
+    const manager = createManager();
+    const schema = {
+      models: {
+        billingAccount: {
+          name: "billing_account",
+          fields: {
+            id: {
+              type: "id",
+              primaryKey: true,
+            },
+            userId: {
+              type: "string",
+              name: "user_id",
+              required: true,
+              index: true,
+            },
+          },
+          constraints: [
+            {
+              type: "unique",
+              fields: ["userId"],
+            },
+          ],
+        },
+      },
+      meta: {
+        source: "test",
+      },
+    } satisfies FarmIntegrationSchema;
+    const integration = defineIntegration({
+      category: "payment",
+      type: "billing-test",
+      instance: {},
+      schema,
+    });
+
+    expect(integration.schema).toEqual(schema);
+    expect(
+      getIntegrationSchemas({
+        billing: integration,
+      }),
+    ).toEqual({
+      billing: schema,
+    });
+
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        billing: integration,
+      }),
+    );
+    await manager.runHookParallel("init");
+
+    expect(getRegisteredIntegrationSchemas()).toEqual(
+      expect.objectContaining({
+        billing: schema,
+      }),
+    );
   });
 
   it("registers route integrations as pre-plugins and exposes shared handler context", async () => {
@@ -193,6 +257,115 @@ describe("integrations runtime", () => {
     expect(res.body.toString()).toBe("blocked");
   });
 
+  it("supports same-path routes with singular method definitions", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            {
+              path: "/api/local-demo/message",
+              method: "get",
+              handler() {
+                return Response.json({
+                  mode: "get",
+                });
+              },
+            },
+            {
+              path: "/api/local-demo/message",
+              method: "POST",
+              async handler(request) {
+                const body = (await request.json()) as { message?: string };
+                return Response.json({
+                  mode: "post",
+                  message: body.message || null,
+                });
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const getReq = createRequest("/api/local-demo/message", "GET");
+    const getRes = createResponse();
+    const getEnded = await manager.runHookParallel("beforeRequest", getReq as any, getRes as any);
+
+    expect(getEnded).toBe(true);
+    expect(getRes.statusCode).toBe(200);
+    expect(JSON.parse(getRes.body.toString())).toEqual({
+      mode: "get",
+    });
+
+    const postReq = createRequest("/api/local-demo/message", "POST");
+    const postRes = createResponse();
+    const postPromise = manager.runHookParallel("beforeRequest", postReq as any, postRes as any);
+    setImmediate(() => {
+      postReq.emit("data", Buffer.from(JSON.stringify({ message: "hello" })));
+      postReq.emit("end");
+    });
+    const postEnded = await postPromise;
+
+    expect(postEnded).toBe(true);
+    expect(postRes.statusCode).toBe(200);
+    expect(JSON.parse(postRes.body.toString())).toEqual({
+      mode: "post",
+      message: "hello",
+    });
+  });
+
+  it("runs route-level middleware in order before the route handler", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            {
+              path: "/api/local-demo/middleware",
+              method: "GET",
+              middleware: [
+                {
+                  handler(_request, context) {
+                    context.requestContext.set("route-middleware-order", ["first"]);
+                  },
+                },
+                {
+                  handler(_request, context) {
+                    const order =
+                      context.requestContext.get<string[]>("route-middleware-order") || [];
+                    context.requestContext.set("route-middleware-order", [...order, "second"]);
+                  },
+                },
+              ],
+              handler(_request, context) {
+                return Response.json({
+                  middleware: context.requestContext.get("route-middleware-order"),
+                });
+              },
+            },
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/middleware");
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      middleware: ["first", "second"],
+    });
+  });
+
   it("collects document navigation matchers from integrations", () => {
     const matchers = getIntegrationDocumentNavigationMatchers({
       auth: defineIntegration({
@@ -250,5 +423,56 @@ describe("integrations runtime", () => {
       type: "local-demo",
       greeting: "hello",
     });
+  });
+
+  it("can match registered integration routes without dispatching them", async () => {
+    const manager = createManager();
+    const integration = defineIntegration({
+      category: "payment",
+      type: "stripe",
+      instance: {},
+      routes: [
+        {
+          path: "/billing/checkout",
+          method: "POST",
+          handler() {
+            return Response.json({ ok: true });
+          },
+        },
+      ],
+    });
+
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        billing: integration,
+      }),
+    );
+    await manager.runHookParallel("init");
+
+    expect(
+      matchRegisteredIntegrationRoute({
+        pathname: "/billing/checkout",
+        method: "POST",
+      }),
+    ).toEqual(
+      expect.objectContaining({
+        key: "billing",
+        integration: expect.objectContaining({
+          type: "stripe",
+        }),
+        route: {
+          path: "/billing/checkout",
+          methods: ["POST"],
+        },
+        params: {},
+      }),
+    );
+
+    expect(
+      matchRegisteredIntegrationRoute({
+        pathname: "/billing/checkout",
+        method: "GET",
+      }),
+    ).toBeNull();
   });
 });

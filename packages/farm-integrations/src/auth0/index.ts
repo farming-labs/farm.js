@@ -1,7 +1,8 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
+import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farmjs/core";
 import {
   clearRequestCookie,
+  createPathInferredClientApi,
   createDocumentNavigationMatchers,
   createRequestCookie,
   getOrigin,
@@ -10,6 +11,8 @@ import {
   parseCookieHeaderMap,
   resolveCallbackSettings,
 } from "../utils/index.js";
+import type { Auth0ProfileResult, Auth0RedirectQuery, Auth0RedirectResult } from "./client.js";
+import { auth0Client } from "./client.js";
 
 const DEV_SECRET = "farmjs-auth0-development-secret-2026";
 
@@ -55,6 +58,36 @@ interface Auth0StatePayload {
 interface Auth0SessionPayload {
   user: Record<string, unknown>;
   expiresAt: number;
+}
+
+interface Auth0RedirectResponse extends Auth0RedirectResult {
+  headers: Headers;
+}
+
+function createAuth0Api(input: {
+  loginPath: string;
+  signUpPath: string;
+  logoutPath: string;
+  profilePath: string;
+}) {
+  return createPathInferredClientApi(
+    {
+      path: input.loginPath,
+      operation: auth0Client.login,
+    },
+    {
+      path: input.signUpPath,
+      operation: auth0Client.signup,
+    },
+    {
+      path: input.logoutPath,
+      operation: auth0Client.logout,
+    },
+    {
+      path: input.profilePath,
+      operation: auth0Client.profile,
+    },
+  );
 }
 
 function normalizeDomain(value: string): string {
@@ -120,9 +153,7 @@ function unsignValue<T>(signed: string | undefined, secret: string): T | null {
     return null;
   }
 
-  if (
-    !timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))
-  ) {
+  if (!timingSafeEqual(Buffer.from(signature, "utf8"), Buffer.from(expected, "utf8"))) {
     return null;
   }
 
@@ -308,7 +339,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
   async function redirectToAuth(
     request: Request,
     screenHint?: "signup",
-  ): Promise<Response> {
+  ): Promise<Auth0RedirectResponse> {
     const requestUrl = new URL(request.url);
     const callbackUrl = callbackSettings.getCallbackUrl(request);
     const returnTo = getReturnTo(requestUrl.searchParams.get("returnTo"), "/dashboard");
@@ -343,12 +374,10 @@ export function auth0(input: Auth0IntegrationInput = {}) {
         { maxAge: 600 },
       ),
     );
-    headers.set("location", authorizeUrl.toString());
-
-    return new Response(null, {
-      status: 302,
+    return {
+      redirectTo: authorizeUrl.toString(),
       headers,
-    });
+    };
   }
 
   return defineIntegration({
@@ -359,6 +388,12 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       clientId,
       protectedRoutes: protectedMatchers,
     },
+    api: createAuth0Api({
+      loginPath,
+      signUpPath,
+      logoutPath,
+      profilePath,
+    }),
     log: input.log,
     documentNavigations: [
       {
@@ -366,108 +401,140 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       },
     ],
     routes: [
-      {
-        path: loginPath,
-        methods: ["GET"],
-        handler(request: Request) {
-          return redirectToAuth(request);
-        },
-      },
-      {
-        path: signUpPath,
-        methods: ["GET"],
-        handler(request: Request) {
-          return redirectToAuth(request, "signup");
-        },
-      },
-      {
-        path: callbackPath,
-        methods: ["GET"],
+      integrationRoute.get<typeof loginPath, Auth0RedirectResult, Auth0RedirectQuery>(loginPath, {
+        responseFormat: "json",
         async handler(request: Request) {
-          const requestUrl = new URL(request.url);
-          const error = requestUrl.searchParams.get("error");
-          const errorDescription = requestUrl.searchParams.get("error_description");
+          const result = await redirectToAuth(request);
+          const headers = result.headers;
+          const redirectTo = result.redirectTo;
 
-          if (error) {
-            return new Response(errorDescription || error, { status: 400 });
+          if (request.headers.get("x-farm-integration-client") === "1") {
+            return Response.json({ redirectTo }, { status: 200, headers });
           }
 
-          const code = requestUrl.searchParams.get("code");
-          const state = requestUrl.searchParams.get("state");
-          if (!code || !state) {
-            return new Response("Missing Auth0 authorization code or state.", { status: 400 });
-          }
-
-          const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
-          const statePayload = unsignValue<Auth0StatePayload>(cookies[stateCookieName], secret);
-          if (!statePayload || statePayload.state !== state) {
-            return new Response("Invalid Auth0 state.", { status: 400 });
-          }
-
-          const origin = getOrigin(request, appBaseUrl);
-          const redirectUri = callbackSettings.getCallbackUrl(request);
-          const tokenResponse = await exchangeCode(
-            domain,
-            clientId,
-            clientSecret,
-            code,
-            redirectUri,
-            statePayload.codeVerifier,
-            input.tokenEndpointAuthMethod,
-          );
-          const user = await createUserProfile(
-            domain,
-            tokenResponse.access_token,
-            tokenResponse.id_token,
-          );
-          const expiresAt = Date.now() + Math.max(tokenResponse.expires_in || 3600, 60) * 1000;
-
-          const headers = new Headers();
-          headers.append(
-            "set-cookie",
-            createRequestCookie(
-              sessionCookieName,
-              signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret),
-              request,
-              {
-                maxAge: Math.max((expiresAt - Date.now()) / 1000, 60),
-              },
-            ),
-          );
-          headers.append("set-cookie", clearRequestCookie(stateCookieName, request));
-          headers.set(
-            "location",
-            new URL(statePayload.returnTo || "/dashboard", origin).toString(),
-          );
-
+          headers.set("location", redirectTo);
           return new Response(null, {
             status: 302,
             headers,
           });
         },
-      },
-      {
-        path: logoutPath,
-        methods: ["GET"],
+      }),
+      integrationRoute.get<typeof signUpPath, Auth0RedirectResult, Auth0RedirectQuery>(signUpPath, {
+        responseFormat: "json",
+        async handler(request: Request) {
+          const result = await redirectToAuth(request, "signup");
+          const headers = result.headers;
+          const redirectTo = result.redirectTo;
+
+          if (request.headers.get("x-farm-integration-client") === "1") {
+            return Response.json({ redirectTo }, { status: 200, headers });
+          }
+
+          headers.set("location", redirectTo);
+          return new Response(null, {
+            status: 302,
+            headers,
+          });
+        },
+      }),
+      integrationRoute.get(callbackPath, {
+        handler(request: Request) {
+          return (async () => {
+            const requestUrl = new URL(request.url);
+            const error = requestUrl.searchParams.get("error");
+            const errorDescription = requestUrl.searchParams.get("error_description");
+
+            if (error) {
+              return new Response(errorDescription || error, { status: 400 });
+            }
+
+            const code = requestUrl.searchParams.get("code");
+            const state = requestUrl.searchParams.get("state");
+            if (!code || !state) {
+              return new Response("Missing Auth0 authorization code or state.", { status: 400 });
+            }
+
+            const cookies = parseCookieHeaderMap(request.headers.get("cookie"));
+            const statePayload = unsignValue<Auth0StatePayload>(cookies[stateCookieName], secret);
+            if (!statePayload || statePayload.state !== state) {
+              return new Response("Invalid Auth0 state.", { status: 400 });
+            }
+
+            const origin = getOrigin(request, appBaseUrl);
+            const redirectUri = callbackSettings.getCallbackUrl(request);
+            const tokenResponse = await exchangeCode(
+              domain,
+              clientId,
+              clientSecret,
+              code,
+              redirectUri,
+              statePayload.codeVerifier,
+              input.tokenEndpointAuthMethod,
+            );
+            const user = await createUserProfile(
+              domain,
+              tokenResponse.access_token,
+              tokenResponse.id_token,
+            );
+            const expiresAt = Date.now() + Math.max(tokenResponse.expires_in || 3600, 60) * 1000;
+
+            const headers = new Headers();
+            headers.append(
+              "set-cookie",
+              createRequestCookie(
+                sessionCookieName,
+                signValue({ user, expiresAt } satisfies Auth0SessionPayload, secret),
+                request,
+                {
+                  maxAge: Math.max((expiresAt - Date.now()) / 1000, 60),
+                },
+              ),
+            );
+            headers.append("set-cookie", clearRequestCookie(stateCookieName, request));
+            headers.set(
+              "location",
+              new URL(statePayload.returnTo || "/dashboard", origin).toString(),
+            );
+
+            return new Response(null, {
+              status: 302,
+              headers,
+            });
+          })();
+        },
+      }),
+      integrationRoute.get<typeof logoutPath, Auth0RedirectResult>(logoutPath, {
+        responseFormat: "json",
         handler(request: Request) {
           const origin = getOrigin(request, appBaseUrl);
-          const logoutUrl = new URL("/v2/logout", `https://${domain}`);
-          logoutUrl.searchParams.set("client_id", clientId);
-          logoutUrl.searchParams.set("returnTo", origin);
+          const redirectTo = new URL("/v2/logout", `https://${domain}`);
+          redirectTo.searchParams.set("client_id", clientId);
+          redirectTo.searchParams.set("returnTo", origin);
 
           const headers = new Headers();
           headers.append("set-cookie", clearRequestCookie(sessionCookieName, request));
-          headers.set("location", logoutUrl.toString());
 
+          if (request.headers.get("x-farm-integration-client") === "1") {
+            return Response.json(
+              {
+                redirectTo: redirectTo.toString(),
+              },
+              {
+                status: 200,
+                headers,
+              },
+            );
+          }
+
+          headers.set("location", redirectTo.toString());
           return new Response(null, {
             status: 302,
             headers,
           });
         },
-      },
-      {
-        path: profilePath,
-        methods: ["GET"],
+      }),
+      integrationRoute.get<typeof profilePath, Auth0ProfileResult>(profilePath, {
+        responseFormat: "json",
         handler(request: Request) {
           const session = getSession(request, sessionCookieName, secret);
 
@@ -485,7 +552,7 @@ export function auth0(input: Auth0IntegrationInput = {}) {
             user: session.user,
           });
         },
-      },
+      }),
     ],
     middleware:
       protectedMatchers.length > 0

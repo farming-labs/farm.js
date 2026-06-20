@@ -156,10 +156,7 @@ export async function resolveConfig(
       serverActions: false,
       ...userConfig.experimental,
     },
-    plugins: [
-      ...resolveIntegrationPlugins(userConfig.integrations),
-      ...(userConfig.plugins || []),
-    ],
+    plugins: [...resolveIntegrationPlugins(userConfig.integrations), ...(userConfig.plugins || [])],
     integrations: userConfig.integrations || {},
     trailingSlash: userConfig.trailingSlash ?? false,
     redirects: () => redirects,
@@ -215,8 +212,10 @@ export async function loadConfig(
   mode = process.env.NODE_ENV === "production" ? "production" : "development",
 ): Promise<FarmUserConfig | undefined> {
   const path = await import("path");
+  const fs = await import("fs/promises");
   const { pathToFileURL } = await import("url");
   const { existsSync } = await import("fs");
+  const { build } = await import("esbuild");
   const { loadEnv } = await import("vite");
 
   const root = rootDir || process.cwd();
@@ -245,9 +244,34 @@ export async function loadConfig(
         continue;
       }
 
-      // Use pathToFileURL for proper file:// URL conversion
-      const moduleUrl = pathToFileURL(normalizedPath).href + `?t=${Date.now()}`;
-      const config = await import(/* @vite-ignore */ moduleUrl);
+      const configCacheDir = path.join(root, ".farm", ".config-loader");
+      await fs.mkdir(configCacheDir, { recursive: true });
+      const modulePath = path.join(
+        configCacheDir,
+        `farm-config-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+      );
+      await build({
+        absWorkingDir: root,
+        entryPoints: [normalizedPath],
+        outfile: modulePath,
+        bundle: true,
+        format: "esm",
+        platform: "node",
+        target: `node${process.versions.node.split(".")[0]}`,
+        packages: "external",
+        jsx: "automatic",
+        logLevel: "silent",
+        sourcemap: "inline",
+      });
+
+      const moduleUrl = pathToFileURL(modulePath).href + `?t=${Date.now()}`;
+      let config: any;
+
+      try {
+        config = await import(/* @vite-ignore */ moduleUrl);
+      } finally {
+        await fs.unlink(modulePath).catch(() => undefined);
+      }
 
       return config.default || config;
     } catch (error: any) {

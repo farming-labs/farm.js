@@ -1,6 +1,80 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { apiClient } from "../lib/api";
+
+type SessionState =
+  | { status: "loading" }
+  | { status: "unauthorized" }
+  | { status: "error"; message: string }
+  | {
+      status: "ready";
+      data: {
+        sessionId?: string;
+        organizationId?: string;
+        user?: {
+          id: string;
+          email: string;
+          firstName?: string | null;
+          lastName?: string | null;
+        };
+      };
+    };
+
 export function HomeClient() {
+  const [session, setSession] = useState<SessionState>({ status: "loading" });
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSession() {
+      const result = await apiClient.auth.session.get();
+
+      if (cancelled) {
+        return;
+      }
+
+      if (result.error) {
+        if ("status" in result.error && result.error.status === 401) {
+          setSession({ status: "unauthorized" });
+          return;
+        }
+
+        setSession({ status: "error", message: result.error.message });
+        return;
+      }
+
+      if (!result.data?.authenticated) {
+        setSession({ status: "unauthorized" });
+        return;
+      }
+
+      setSession({
+        status: "ready",
+        data: result.data,
+      });
+    }
+
+    void loadSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleLogout() {
+    setLoggingOut(true);
+    const result = await apiClient.auth.logout.post();
+
+    if (result.data?.redirectTo) {
+      window.location.assign(result.data.redirectTo);
+      return;
+    }
+
+    setLoggingOut(false);
+  }
+
   return (
     <main className="page-shell">
       <section className="hero">
@@ -26,31 +100,44 @@ export function HomeClient() {
             </a>
             <a className="nav-card" href="/dashboard">
               <strong>Dashboard</strong>
-              <span>Protected by the WorkOS integration middleware.</span>
+              <span>Rendered on the server through the typed integration API.</span>
             </a>
           </div>
         </section>
 
         <section className="card">
-          <h2>Integration Routes</h2>
-          <div className="session-stack">
-            <div className="session-line">
-              <strong>/login</strong>
-              <span>Creates a WorkOS authorization URL with a return target.</span>
-            </div>
-            <div className="session-line">
-              <strong>/signup</strong>
-              <span>Starts the same flow with the sign-up screen hint.</span>
-            </div>
-            <div className="session-line">
-              <strong>/callback</strong>
-              <span>Exchanges the code for a sealed session cookie.</span>
-            </div>
-            <div className="session-line">
-              <strong>/auth/session</strong>
-              <span>Returns the authenticated user payload for the dashboard UI.</span>
-            </div>
-          </div>
+          <h2>Typed Client Probe</h2>
+          {session.status === "loading" ? <p>Checking the current WorkOS session…</p> : null}
+          {session.status === "unauthorized" ? (
+            <p>No active WorkOS session was found. Use the sign-in or sign-up links to start one.</p>
+          ) : null}
+          {session.status === "error" ? <p>{session.message}</p> : null}
+          {session.status === "ready" ? (
+            <>
+              <div className="session-stack">
+                <div className="session-line">
+                  <strong>Email</strong>
+                  <span>{session.data.user?.email || "Unavailable"}</span>
+                </div>
+                <div className="session-line">
+                  <strong>Session ID</strong>
+                  <span>{session.data.sessionId || "Unavailable"}</span>
+                </div>
+                <div className="session-line">
+                  <strong>Organization</strong>
+                  <span>{session.data.organizationId || "Personal account"}</span>
+                </div>
+              </div>
+              <div className="action-row">
+                <a className="primary-link" href="/dashboard">
+                  Open Dashboard
+                </a>
+                <button className="ghost-button" onClick={() => void handleLogout()} type="button">
+                  {loggingOut ? "Logging out..." : "Logout with apiClient"}
+                </button>
+              </div>
+            </>
+          ) : null}
         </section>
       </section>
     </main>

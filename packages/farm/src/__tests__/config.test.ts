@@ -83,4 +83,34 @@ describe("loadConfig", () => {
       "Failed to load config from farm.config.mjs: broken config import",
     );
   });
+
+  it("loads farm.config.ts when it transitively imports local tsx modules", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-tsx-"));
+
+    await fs.mkdir(path.join(root, "src"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "template.tsx"),
+      ["export const previewProps = { subject: 'Hello from TSX' };"].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(root, "src", "integrations.ts"),
+      [
+        "import { previewProps } from './template.tsx';",
+        "export const emailConfig = { previewSubject: previewProps.subject };",
+      ].join("\n"),
+    );
+    await fs.writeFile(
+      path.join(root, "farm.config.ts"),
+      [
+        "import { emailConfig } from './src/integrations.ts';",
+        "export default { emailPreview: emailConfig.previewSubject };",
+      ].join("\n"),
+    );
+
+    const config = await loadConfig(root, undefined, "development");
+
+    expect(config).toMatchObject({
+      emailPreview: "Hello from TSX",
+    });
+  });
 });

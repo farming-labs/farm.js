@@ -1,5 +1,5 @@
 import { defineFarmConfig } from "@farmjs/core";
-import { workos } from "@farmjs/integrations/workos";
+import { appIntegrations } from "./src/lib/integrations.ts";
 
 export default defineFarmConfig({
   experimental: {
@@ -11,12 +11,5 @@ export default defineFarmConfig({
       strictPort: true,
     },
   },
-  integrations: {
-    auth: workos({
-      protectedRoutes: ["/dashboard(.*)"],
-      log(event) {
-        console.log("[workos-example]", event.phase, event.route?.path || "none");
-      },
-    }),
-  },
+  integrations: appIntegrations,
 });

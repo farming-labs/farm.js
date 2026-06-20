@@ -90,6 +90,32 @@ function hasProjectPostcssConfig(root: string): boolean {
   return candidates.some((file) => fs.existsSync(path.join(root, file)));
 }
 
+function createDevDependencyStubsPlugin() {
+  const stubs: Record<string, string> = {
+    "supports-color":
+      "const disabled = false; export default { stdout: disabled, stderr: disabled }; export const stdout = disabled; export const stderr = disabled;",
+  };
+
+  return {
+    name: "farm:dev-dependency-stubs",
+    enforce: "pre" as const,
+    resolveId(id: string) {
+      if (id in stubs) {
+        return `\0farm-dev-dependency-stub:${id}`;
+      }
+      return null;
+    },
+    load(id: string) {
+      if (!id.startsWith("\0farm-dev-dependency-stub:")) {
+        return null;
+      }
+
+      const moduleName = id.slice("\0farm-dev-dependency-stub:".length);
+      return stubs[moduleName] || null;
+    },
+  };
+}
+
 /**
  * Create a Vite development server with Farm.js integration
  */
@@ -177,6 +203,7 @@ export async function createServer(config: FarmConfig = {}) {
       css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
       plugins: [
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        createDevDependencyStubsPlugin(),
         farmPlugin(finalConfig, pluginManager),
         createBrandingPlugin(),
       ],

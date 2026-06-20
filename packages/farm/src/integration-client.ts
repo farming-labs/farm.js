@@ -3,7 +3,14 @@ import type {
   FarmIntegrationAPIBodyFormat,
   FarmIntegrationAPIOperation,
 } from "./integration-api";
+import {
+  dispatchIntegrationRequest,
+  getRegisteredIntegrationAPIManifest,
+  getRegisteredIntegrations,
+  getRegisteredIntegrationRuntime,
+} from "./integrations";
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
+import { _resolveCurrentRequest } from "./server/request-bridge";
 
 export type IntegrationClientOptions = {
   baseURL?: string;
@@ -29,16 +36,15 @@ export type IntegrationServerRequestLike =
 
 export type IntegrationServerClientOptions = Omit<IntegrationClientOptions, "isServer"> & {
   isServer: true;
-  request: IntegrationServerRequestLike;
+  request?: IntegrationServerRequestLike;
   forwardHeaders?: boolean | readonly string[];
 };
 
-export type IntegrationServerClientRequestOptions =
-  IntegrationRequestOptionsBase & {
-    baseURL?: string;
-    request?: IntegrationServerRequestLike;
-    forwardHeaders?: boolean | readonly string[];
-  };
+export type IntegrationServerClientRequestOptions = IntegrationRequestOptionsBase & {
+  baseURL?: string;
+  request?: IntegrationServerRequestLike;
+  forwardHeaders?: boolean | readonly string[];
+};
 
 export class IntegrationClientError<TData = unknown> extends Error {
   readonly status: number;
@@ -80,15 +86,20 @@ type ExtractOperationResponse<T> = T extends {
   ? TResponse
   : unknown;
 
+export type InferIntegrationOperationBody<T> = ExtractOperationBody<T>;
+export type InferIntegrationOperationQuery<T> = ExtractOperationQuery<T>;
+export type InferIntegrationOperationResponse<T> = ExtractOperationResponse<T>;
+
 type IsNever<T> = [T] extends [never] ? true : false;
 
-type OperationInput<T> = IsNever<ExtractOperationBody<T>> extends true
-  ? IsNever<ExtractOperationQuery<T>> extends true
-    ? {}
-    : { query?: ExtractOperationQuery<T> }
-  : IsNever<ExtractOperationQuery<T>> extends true
-    ? { body: ExtractOperationBody<T> }
-    : { body: ExtractOperationBody<T>; query?: ExtractOperationQuery<T> };
+type OperationInput<T> =
+  IsNever<ExtractOperationBody<T>> extends true
+    ? IsNever<ExtractOperationQuery<T>> extends true
+      ? {}
+      : { query?: ExtractOperationQuery<T> }
+    : IsNever<ExtractOperationQuery<T>> extends true
+      ? { body: ExtractOperationBody<T> }
+      : { body: ExtractOperationBody<T>; query?: ExtractOperationQuery<T> };
 
 type ClientOperation<T> = (
   options?: OperationInput<T>,
@@ -100,6 +111,10 @@ type ServerOperation<T> = (
   requestOptions?: IntegrationServerClientRequestOptions,
 ) => Promise<IntegrationOperationResult<ExtractOperationResponse<T>>>;
 
+type IsUnion<T, U = T> = T extends any ? ([U] extends [T] ? false : true) : never;
+
+type SingleKey<T> = [T] extends [never] ? never : IsUnion<T> extends true ? never : T;
+
 type ExtractAPIFromSource<TSource> = TSource extends { api?: infer TAPI }
   ? NonNullable<TAPI> extends FarmIntegrationAPI
     ? NonNullable<TAPI>
@@ -108,9 +123,21 @@ type ExtractAPIFromSource<TSource> = TSource extends { api?: infer TAPI }
     ? TSource
     : never;
 
+type SourceKeysWithAPI<TSources extends Record<string, any>> = {
+  [K in keyof TSources]: [ExtractAPIFromSource<TSources[K]>] extends [never] ? never : K;
+}[keyof TSources];
+
 type IsServerRegisteredOperation<T> = T extends { isServer: true } ? true : false;
 
-type IntegrationAPIToClient<TAPI> = {
+type ClientOperationKeys<TAPI> = {
+  [K in keyof TAPI]: TAPI[K] extends FarmIntegrationAPIOperation<any, any, any, any>
+    ? IsServerRegisteredOperation<TAPI[K]> extends true
+      ? never
+      : K
+    : never;
+}[keyof TAPI];
+
+type ClientNamespaceShape<TAPI> = {
   [K in keyof TAPI as TAPI[K] extends FarmIntegrationAPIOperation<any, any, any, any>
     ? IsServerRegisteredOperation<TAPI[K]> extends true
       ? never
@@ -122,15 +149,35 @@ type IntegrationAPIToClient<TAPI> = {
       : never;
 };
 
+type SingleClientOperationKey<TAPI> =
+  Exclude<keyof TAPI, ClientOperationKeys<TAPI>> extends never
+    ? SingleKey<ClientOperationKeys<TAPI>>
+    : never;
+
+type IntegrationAPIToClient<TAPI> =
+  TAPI extends FarmIntegrationAPIOperation<any, any, any, any>
+    ? ClientOperation<TAPI>
+    : TAPI extends Record<string, any>
+      ? [SingleClientOperationKey<TAPI>] extends [never]
+        ? ClientNamespaceShape<TAPI>
+        : SingleClientOperationKey<TAPI> extends keyof TAPI
+          ? ClientOperation<TAPI[SingleClientOperationKey<TAPI>]> & ClientNamespaceShape<TAPI>
+          : ClientNamespaceShape<TAPI>
+      : never;
+
 export type IntegrationClient<TSources extends Record<string, any>> = {
-  [K in keyof TSources]: IntegrationAPIToClient<ExtractAPIFromSource<TSources[K]>>;
+  [K in SourceKeysWithAPI<TSources>]: IntegrationAPIToClient<ExtractAPIFromSource<TSources[K]>>;
 };
 
 export type IntegrationClientRoot<TSources extends Record<string, any>> = {
   integrations: IntegrationClient<TSources>;
 };
 
-type IntegrationAPIToServerClient<TAPI> = {
+type ServerOperationKeys<TAPI> = {
+  [K in keyof TAPI]: TAPI[K] extends FarmIntegrationAPIOperation<any, any, any> ? K : never;
+}[keyof TAPI];
+
+type ServerNamespaceShape<TAPI> = {
   [K in keyof TAPI]: TAPI[K] extends FarmIntegrationAPIOperation<any, any, any>
     ? ServerOperation<TAPI[K]>
     : TAPI[K] extends Record<string, any>
@@ -138,8 +185,26 @@ type IntegrationAPIToServerClient<TAPI> = {
       : never;
 };
 
+type SingleServerOperationKey<TAPI> =
+  Exclude<keyof TAPI, ServerOperationKeys<TAPI>> extends never
+    ? SingleKey<ServerOperationKeys<TAPI>>
+    : never;
+
+type IntegrationAPIToServerClient<TAPI> =
+  TAPI extends FarmIntegrationAPIOperation<any, any, any>
+    ? ServerOperation<TAPI>
+    : TAPI extends Record<string, any>
+      ? [SingleServerOperationKey<TAPI>] extends [never]
+        ? ServerNamespaceShape<TAPI>
+        : SingleServerOperationKey<TAPI> extends keyof TAPI
+          ? ServerOperation<TAPI[SingleServerOperationKey<TAPI>]> & ServerNamespaceShape<TAPI>
+          : ServerNamespaceShape<TAPI>
+      : never;
+
 export type IntegrationServerClient<TSources extends Record<string, any>> = {
-  [K in keyof TSources]: IntegrationAPIToServerClient<ExtractAPIFromSource<TSources[K]>>;
+  [K in SourceKeysWithAPI<TSources>]: IntegrationAPIToServerClient<
+    ExtractAPIFromSource<TSources[K]>
+  >;
 };
 
 export type IntegrationServerClientRoot<TSources extends Record<string, any>> = {
@@ -163,6 +228,24 @@ export type IntegrationAPI<TSources extends Record<string, any>> =
     ) => IntegrationServerClientAliases<TSources>;
   };
 
+export type IntegrationClients<TSources extends Record<string, any>> = {
+  api: IntegrationServerClientAliases<TSources>;
+  apiClient: IntegrationClientAliases<TSources>;
+};
+
+type ResolvedIntegrationNamespace = readonly [
+  string,
+  FarmIntegrationAPI,
+  FarmIntegrationDefinition | FarmIntegrationAPI,
+];
+
+type GlobalWithIntegrationAPIManifest = typeof globalThis & {
+  __FARM_INTEGRATION_API_MANIFEST__?: Record<string, FarmIntegrationAPI>;
+  window?: {
+    __FARM_INTEGRATION_API_MANIFEST__?: Record<string, FarmIntegrationAPI>;
+  };
+};
+
 function isOperation(value: unknown): value is FarmIntegrationAPIOperation<any, any, any, any> {
   return (
     !!value &&
@@ -177,15 +260,44 @@ function resolveSourceAPI(
 ): FarmIntegrationAPI {
   if ("kind" in source && source.kind === "farm-integration") {
     if (!source.api) {
-      throw new Error(
-        `Integration "${source.type}" does not expose a client API definition.`,
-      );
+      throw new Error(`Integration "${source.type}" does not expose a client API definition.`);
     }
 
     return source.api as FarmIntegrationAPI;
   }
 
   return source as FarmIntegrationAPI;
+}
+
+function tryResolveSourceAPI(
+  source: FarmIntegrationDefinition | FarmIntegrationAPI,
+): FarmIntegrationAPI | null {
+  if ("kind" in source && source.kind === "farm-integration") {
+    if (!source.api) {
+      return null;
+    }
+
+    return source.api as FarmIntegrationAPI;
+  }
+
+  return source as FarmIntegrationAPI;
+}
+
+function resolveAutomaticClientNamespaces(): ResolvedIntegrationNamespace[] {
+  const globalState = globalThis as GlobalWithIntegrationAPIManifest;
+  const manifest =
+    globalState.window?.__FARM_INTEGRATION_API_MANIFEST__ ||
+    globalState.__FARM_INTEGRATION_API_MANIFEST__ ||
+    {};
+
+  return Object.entries(manifest).map(([key, api]) => [key, api, api] as const);
+}
+
+function resolveAutomaticServerNamespaces(): ResolvedIntegrationNamespace[] {
+  return Object.entries(getRegisteredIntegrations()).flatMap(([key, source]) => {
+    const api = tryResolveSourceAPI(source);
+    return api ? [[key, api, source] as ResolvedIntegrationNamespace] : [];
+  });
 }
 
 function appendQuery(url: URL, query: Record<string, unknown> | undefined) {
@@ -388,6 +500,31 @@ function normalizeExecutionError(error: unknown): Error {
   return new Error("Integration request failed.");
 }
 
+async function finalizeOperationResponse(
+  operation: FarmIntegrationAPIOperation<any, any, any>,
+  response: Response,
+) {
+  if (!response.ok) {
+    const errorData = await safeParseResponseData(response);
+    return {
+      data: null,
+      error: createResponseError(response, errorData),
+    };
+  }
+
+  if (operation.responseFormat === "response") {
+    return {
+      data: response,
+      error: null,
+    };
+  }
+
+  return {
+    data: (await parseResponseData(response)) as unknown,
+    error: null,
+  };
+}
+
 async function executeClientOperation(
   operation: FarmIntegrationAPIOperation<any, any, any>,
   input: Record<string, unknown>,
@@ -395,19 +532,26 @@ async function executeClientOperation(
   requestOptions?: IntegrationClientRequestOptions,
 ) {
   try {
+    if (!operation.path) {
+      return {
+        data: null,
+        error: new Error(
+          "Integration API operation path is missing. Pass a path to api.get/post/... or wrap pathless methods with api.route(path, { ... }).",
+        ),
+      };
+    }
+
     const baseURL =
       options.baseURL ||
-      (typeof window !== "undefined"
-        ? window.location.origin
-        : "http://localhost:3000");
+      (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
     const url = new URL(operation.path, baseURL);
     appendQuery(url, input.query as Record<string, unknown> | undefined);
 
     const headers = new Headers({
       "x-farm-integration-client": "1",
-      ...(options.headers || {}),
-      ...(operation.headers || {}),
-      ...(requestOptions?.headers || {}),
+      ...options.headers,
+      ...operation.headers,
+      ...requestOptions?.headers,
     });
 
     if (operation.responseFormat !== "response") {
@@ -419,10 +563,7 @@ async function executeClientOperation(
       headers,
       body: createBody(operation.bodyFormat, input.body, headers),
       credentials:
-        requestOptions?.credentials ??
-        operation.credentials ??
-        options.credentials ??
-        "include",
+        requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
       signal: requestOptions?.signal,
     });
 
@@ -461,8 +602,19 @@ async function executeServerOperation(
     "baseURL" | "headers" | "credentials" | "request" | "forwardHeaders"
   >,
   requestOptions?: IntegrationServerClientRequestOptions,
+  integrationKey?: string,
+  source?: FarmIntegrationDefinition | FarmIntegrationAPI,
 ) {
   try {
+    if (!operation.path) {
+      return {
+        data: null,
+        error: new Error(
+          "Integration API operation path is missing. Pass a path to api.get/post/... or wrap pathless methods with api.route(path, { ... }).",
+        ),
+      };
+    }
+
     const serverRequestOptions =
       requestOptions &&
       ("request" in requestOptions ||
@@ -470,13 +622,16 @@ async function executeServerOperation(
         "forwardHeaders" in requestOptions)
         ? requestOptions
         : undefined;
+    const currentRequest =
+      serverRequestOptions?.request instanceof Request
+        ? serverRequestOptions.request
+        : options.request instanceof Request
+          ? options.request
+          : _resolveCurrentRequest();
     const request = resolveRequestLike(
-      serverRequestOptions?.request ?? options.request,
+      serverRequestOptions?.request ?? options.request ?? currentRequest,
     );
-    const baseURL = resolveServerBaseURL(
-      serverRequestOptions?.baseURL ?? options.baseURL,
-      request,
-    );
+    const baseURL = resolveServerBaseURL(serverRequestOptions?.baseURL ?? options.baseURL, request);
     const url = new URL(operation.path, baseURL);
     appendQuery(url, input.query as Record<string, unknown> | undefined);
 
@@ -497,37 +652,47 @@ async function executeServerOperation(
       headers.set("accept", "application/json");
     }
 
+    if (integrationKey) {
+      const runtime =
+        "kind" in (source || {}) &&
+        (source as FarmIntegrationDefinition).kind === "farm-integration"
+          ? getRegisteredIntegrationRuntime(integrationKey) || {
+              integration: source as FarmIntegrationDefinition,
+              config: {},
+              isDev: process.env.NODE_ENV !== "production",
+              isProd: process.env.NODE_ENV === "production",
+            }
+          : getRegisteredIntegrationRuntime(integrationKey);
+
+      if (runtime) {
+        const directResponse = await dispatchIntegrationRequest(
+          runtime,
+          new Request(url.toString(), {
+            method: operation.method,
+            headers,
+            body: createBody(operation.bodyFormat, input.body, headers),
+          }),
+          {
+            currentRequest,
+          },
+        );
+
+        if (directResponse) {
+          return await finalizeOperationResponse(operation, directResponse);
+        }
+      }
+    }
+
     const response = await fetch(url.toString(), {
       method: operation.method,
       headers,
       body: createBody(operation.bodyFormat, input.body, headers),
       credentials:
-        requestOptions?.credentials ??
-        operation.credentials ??
-        options.credentials ??
-        "include",
+        requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
       signal: requestOptions?.signal,
     });
 
-    if (!response.ok) {
-      const errorData = await safeParseResponseData(response);
-      return {
-        data: null,
-        error: createResponseError(response, errorData),
-      };
-    }
-
-    if (operation.responseFormat === "response") {
-      return {
-        data: response,
-        error: null,
-      };
-    }
-
-    return {
-      data: (await parseResponseData(response)) as unknown,
-      error: null,
-    };
+    return await finalizeOperationResponse(operation, response);
   } catch (error) {
     return {
       data: null,
@@ -560,18 +725,26 @@ export function createIntegrationClient<TSources extends Record<string, any>>(
   | IntegrationClientAliases<TSources>
   | IntegrationServerClient<TSources>
   | IntegrationServerClientAliases<TSources> {
-  const rawSources =
-    "integrations" in sources
-      ? sources.integrations
-      : sources;
+  const rawSources = "integrations" in sources ? sources.integrations : sources;
   const isServer = options.isServer === true;
 
-  const namespaces = Object.entries(rawSources).map(([key, source]) => {
-    const api = resolveSourceAPI(
-      source as FarmIntegrationDefinition | FarmIntegrationAPI,
+  const namespaces = Object.entries(rawSources)
+    .map(([key, source]) => {
+      const api = tryResolveSourceAPI(source as FarmIntegrationDefinition | FarmIntegrationAPI);
+      if (!api) {
+        return null;
+      }
+      return [key, api, source as FarmIntegrationDefinition | FarmIntegrationAPI] as const;
+    })
+    .filter(
+      (
+        value,
+      ): value is readonly [
+        string,
+        FarmIntegrationAPI,
+        FarmIntegrationDefinition | FarmIntegrationAPI,
+      ] => value !== null,
     );
-    return [key, api] as const;
-  });
 
   const cache = new Map<string, any>();
 
@@ -597,7 +770,12 @@ export function createIntegrationClient<TSources extends Record<string, any>>(
         }
 
         const namespace = isServer
-          ? createServerNamespaceProxy(match[1], options as IntegrationServerClientOptions)
+          ? createServerNamespaceProxy(
+              match[0],
+              match[2],
+              match[1],
+              options as IntegrationServerClientOptions,
+            )
           : createNamespaceProxy(match[1], options);
         cache.set(property, namespace);
         return namespace;
@@ -622,11 +800,100 @@ export function createIntegrationClient<TSources extends Record<string, any>>(
       | IntegrationServerClientAliases<TSources>;
   }
 
-  return integrationNamespaces as
-    | IntegrationClient<TSources>
-    | IntegrationServerClient<TSources>;
+  return integrationNamespaces as IntegrationClient<TSources> | IntegrationServerClient<TSources>;
 }
 
+function createAutomaticIntegrationAliases<TSources extends Record<string, any>>(
+  isServer: boolean,
+  options: IntegrationClientOptions | IntegrationServerClientOptions = {},
+): IntegrationClientAliases<TSources> | IntegrationServerClientAliases<TSources> {
+  const cache = isServer ? new Map<string, any>() : null;
+
+  const integrationNamespaces = new Proxy(
+    {},
+    {
+      get(_target, property) {
+        if (typeof property !== "string") {
+          return undefined;
+        }
+
+        if (property === "integrations") {
+          return integrationNamespaces;
+        }
+
+        if (cache?.has(property)) {
+          return cache.get(property);
+        }
+
+        const namespaces = isServer
+          ? resolveAutomaticServerNamespaces()
+          : resolveAutomaticClientNamespaces();
+        const match = namespaces.find(([key]) => key === property);
+        if (!match) {
+          return undefined;
+        }
+
+        const namespace = isServer
+          ? createServerNamespaceProxy(
+              match[0],
+              match[2],
+              match[1],
+              options as IntegrationServerClientOptions,
+            )
+          : createNamespaceProxy(match[1], options as IntegrationClientOptions);
+
+        cache?.set(property, namespace);
+        return namespace;
+      },
+    },
+  ) as IntegrationClientAliases<TSources> | IntegrationServerClientAliases<TSources>;
+
+  Object.defineProperty(integrationNamespaces, "integrations", {
+    value: integrationNamespaces,
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+
+  return integrationNamespaces;
+}
+
+export function integrationsClient<
+  TSources extends Record<string, any>,
+>(): IntegrationClientAliases<TSources>;
+export function integrationsClient<TSources extends Record<string, any>>(
+  options: IntegrationClientOptions,
+): IntegrationClientAliases<TSources>;
+export function integrationsClient<TSources extends Record<string, any>>(
+  options: IntegrationClientOptions = {},
+): IntegrationClientAliases<TSources> {
+  return createAutomaticIntegrationAliases<TSources>(
+    false,
+    options,
+  ) as IntegrationClientAliases<TSources>;
+}
+
+export function integrationsServer<
+  TSources extends Record<string, any>,
+>(): IntegrationServerClientAliases<TSources>;
+export function integrationsServer<TSources extends Record<string, any>>(
+  options: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationServerClientAliases<TSources>;
+export function integrationsServer<TSources extends Record<string, any>>(
+  options: Omit<IntegrationServerClientOptions, "isServer"> = {},
+): IntegrationServerClientAliases<TSources> {
+  return createAutomaticIntegrationAliases<TSources>(true, {
+    ...options,
+    isServer: true,
+  }) as IntegrationServerClientAliases<TSources>;
+}
+
+export function createIntegrationServerClient<TSources extends Record<string, any>>(sources: {
+  integrations: TSources;
+}): IntegrationServerClientAliases<TSources>;
+export function createIntegrationServerClient<TSources extends Record<string, any>>(
+  sources: TSources,
+): IntegrationServerClient<TSources>;
 export function createIntegrationServerClient<TSources extends Record<string, any>>(
   sources: { integrations: TSources },
   options: Omit<IntegrationServerClientOptions, "isServer">,
@@ -637,7 +904,7 @@ export function createIntegrationServerClient<TSources extends Record<string, an
 ): IntegrationServerClient<TSources>;
 export function createIntegrationServerClient<TSources extends Record<string, any>>(
   sources: TSources | { integrations: TSources },
-  options: Omit<IntegrationServerClientOptions, "isServer">,
+  options: Omit<IntegrationServerClientOptions, "isServer"> = {},
 ): IntegrationServerClient<TSources> | IntegrationServerClientAliases<TSources> {
   return createIntegrationClient(sources, {
     ...options,
@@ -653,7 +920,7 @@ export function createIntegrationApi<TSources extends Record<string, any>>(
 
   return {
     ...client,
-    server(serverOptions) {
+    server(serverOptions = {}) {
       return createIntegrationServerClient(sources, {
         ...options,
         ...serverOptions,
@@ -662,113 +929,225 @@ export function createIntegrationApi<TSources extends Record<string, any>>(
   };
 }
 
+export function createIntegrationClients<TSources extends Record<string, any>>(
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function createIntegrationClients<TSources extends Record<string, any>>(
+  sources: TSources,
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function createIntegrationClients<TSources extends Record<string, any>>(
+  sources: { integrations: TSources },
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function createIntegrationClients<TSources extends Record<string, any>>(
+  sources?: TSources | { integrations: TSources },
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources> {
+  if (arguments.length === 0) {
+    return {
+      api: integrationsServer<TSources>(),
+      apiClient: integrationsClient<TSources>(),
+    };
+  }
+
+  const explicitSources =
+    sources && "integrations" in sources ? sources.integrations : (sources as TSources);
+
+  return {
+    api: createIntegrationServerClient(
+      {
+        integrations: explicitSources,
+      },
+      serverOptions || {},
+    ) as IntegrationServerClientAliases<TSources>,
+    apiClient: createIntegrationClient(
+      {
+        integrations: explicitSources,
+      },
+      clientOptions,
+    ) as IntegrationClientAliases<TSources>,
+  };
+}
+
+export function getIntegrationAPIManifest(): Record<string, FarmIntegrationAPI> {
+  return getRegisteredIntegrationAPIManifest();
+}
+
+export function integrationClients<TSources extends Record<string, any>>(
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function integrationClients<TSources extends Record<string, any>>(
+  sources: TSources,
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function integrationClients<TSources extends Record<string, any>>(
+  sources: { integrations: TSources },
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function integrationClients<TSources extends Record<string, any>>(
+  sources?: TSources | { integrations: TSources },
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources> {
+  if (arguments.length === 0) {
+    return createIntegrationClients<TSources>();
+  }
+
+  return createIntegrationClients<TSources>(
+    sources as TSources,
+    clientOptions,
+    serverOptions,
+  ) as IntegrationClients<TSources>;
+}
+
+function resolveSingleNamespaceOperation(api: FarmIntegrationAPI) {
+  const entries = Object.entries(api as Record<string, unknown>);
+  if (entries.length !== 1) {
+    return null;
+  }
+
+  const [, value] = entries[0]!;
+  return isOperation(value) ? value : null;
+}
+
+function createClientOperationCaller(
+  operation: FarmIntegrationAPIOperation<any, any, any, any>,
+  property: string,
+  options: IntegrationClientOptions,
+) {
+  if (operation.isServer === true) {
+    return async () => {
+      throw new Error(
+        `Integration method "${property}" is registered with isServer: true and is only available from a server integration client.`,
+      );
+    };
+  }
+
+  return async (
+    input: Record<string, unknown> = {},
+    requestOptions?: IntegrationClientRequestOptions,
+  ) => {
+    if (typeof window === "undefined") {
+      throw new Error(
+        "Client integration API cannot be called on the server. Pass { isServer: true } to createIntegrationClient(...) during server rendering, or provide { isServer: true, request } outside it.",
+      );
+    }
+
+    return executeClientOperation(operation, input, options, requestOptions);
+  };
+}
+
+function createServerOperationCaller(
+  operation: FarmIntegrationAPIOperation<any, any, any, any>,
+  options: IntegrationServerClientOptions,
+  integrationKey: string,
+  source: FarmIntegrationDefinition | FarmIntegrationAPI,
+) {
+  return async (
+    input: Record<string, unknown> = {},
+    requestOptions?: IntegrationServerClientRequestOptions,
+  ) => {
+    if (typeof window !== "undefined") {
+      throw new Error(
+        "Server integration API cannot be called in the browser. Remove { isServer: true } and create a client integration API instead.",
+      );
+    }
+
+    return executeServerOperation(
+      operation,
+      input,
+      options,
+      requestOptions,
+      integrationKey,
+      source,
+    );
+  };
+}
+
 function createNamespaceProxy(api: FarmIntegrationAPI, options: IntegrationClientOptions) {
   const cache = new Map<string, any>();
+  const directOperation = resolveSingleNamespaceOperation(api);
+  const target = directOperation
+    ? createClientOperationCaller(directOperation, directOperation.method.toLowerCase(), options)
+    : {};
 
-  return new Proxy(
-    {},
-    {
-      get(_target, property) {
-        if (typeof property !== "string") {
-          return undefined;
-        }
+  return new Proxy(target, {
+    get(targetObject, property, receiver) {
+      if (typeof property !== "string") {
+        return Reflect.get(targetObject, property, receiver);
+      }
 
-        if (cache.has(property)) {
-          return cache.get(property);
-        }
+      if (cache.has(property)) {
+        return cache.get(property);
+      }
 
-        const value = (api as Record<string, unknown>)[property];
-        if (!value) {
-          return undefined;
-        }
+      const value = (api as Record<string, unknown>)[property];
+      if (!value) {
+        return Reflect.get(targetObject, property, receiver);
+      }
 
-        if (isOperation(value)) {
-          if (value.isServer === true) {
-            const caller = async () => {
-              throw new Error(
-                `Integration method "${property}" is registered with isServer: true and is only available from a server integration client.`,
-              );
-            };
+      if (isOperation(value)) {
+        const caller = createClientOperationCaller(value, property, options);
+        cache.set(property, caller);
+        return caller;
+      }
 
-            cache.set(property, caller);
-            return caller;
-          }
-
-          const caller = async (
-            input: Record<string, unknown> = {},
-            requestOptions?: IntegrationClientRequestOptions,
-          ) => {
-            if (typeof window === "undefined") {
-              throw new Error(
-                "Client integration API cannot be called on the server. Pass { isServer: true, request } to createIntegrationClient(...).",
-              );
-            }
-
-            return executeClientOperation(value, input, options, requestOptions);
-          };
-
-          cache.set(property, caller);
-          return caller;
-        }
-
-        const namespace = createNamespaceProxy(value as FarmIntegrationAPI, options);
-        cache.set(property, namespace);
-        return namespace;
-      },
+      const namespace = createNamespaceProxy(value as FarmIntegrationAPI, options);
+      cache.set(property, namespace);
+      return namespace;
     },
-  );
+  });
 }
 
 function createServerNamespaceProxy(
+  integrationKey: string,
+  source: FarmIntegrationDefinition | FarmIntegrationAPI,
   api: FarmIntegrationAPI,
   options: IntegrationServerClientOptions,
 ) {
   const cache = new Map<string, any>();
+  const directOperation = resolveSingleNamespaceOperation(api);
+  const target = directOperation
+    ? createServerOperationCaller(directOperation, options, integrationKey, source)
+    : {};
 
-  return new Proxy(
-    {},
-    {
-      get(_target, property) {
-        if (typeof property !== "string") {
-          return undefined;
-        }
+  return new Proxy(target, {
+    get(targetObject, property, receiver) {
+      if (typeof property !== "string") {
+        return Reflect.get(targetObject, property, receiver);
+      }
 
-        if (cache.has(property)) {
-          return cache.get(property);
-        }
+      if (cache.has(property)) {
+        return cache.get(property);
+      }
 
-        const value = (api as Record<string, unknown>)[property];
-        if (!value) {
-          return undefined;
-        }
+      const value = (api as Record<string, unknown>)[property];
+      if (!value) {
+        return Reflect.get(targetObject, property, receiver);
+      }
 
-        if (isOperation(value)) {
-          const caller = async (
-            input: Record<string, unknown> = {},
-            requestOptions?: IntegrationServerClientRequestOptions,
-          ) => {
-            if (typeof window !== "undefined") {
-              throw new Error(
-                "Server integration API cannot be called in the browser. Remove { isServer: true } and create a client integration API instead.",
-              );
-            }
+      if (isOperation(value)) {
+        const caller = createServerOperationCaller(value, options, integrationKey, source);
+        cache.set(property, caller);
+        return caller;
+      }
 
-            return executeServerOperation(
-              value,
-              input,
-              options,
-              requestOptions,
-            );
-          };
-
-          cache.set(property, caller);
-          return caller;
-        }
-
-        const namespace = createServerNamespaceProxy(value as FarmIntegrationAPI, options);
-        cache.set(property, namespace);
-        return namespace;
-      },
+      const namespace = createServerNamespaceProxy(
+        integrationKey,
+        source,
+        value as FarmIntegrationAPI,
+        options,
+      );
+      cache.set(property, namespace);
+      return namespace;
     },
-  );
+  });
 }

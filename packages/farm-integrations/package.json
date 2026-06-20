@@ -3,13 +3,13 @@
   "version": "0.0.1",
   "description": "Official integration adapters for Farm.js",
   "license": "MIT",
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": [
-    "dist"
-  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -31,9 +31,57 @@
       "types": "./dist/auth0/index.d.ts",
       "import": "./dist/auth0/index.js"
     },
+    "./auth0/client": {
+      "types": "./dist/auth0/client.d.ts",
+      "import": "./dist/auth0/client.js"
+    },
+    "./jobs": {
+      "types": "./dist/jobs/index.d.ts",
+      "import": "./dist/jobs/index.js"
+    },
+    "./email": {
+      "types": "./dist/email/index.d.ts",
+      "import": "./dist/email/index.js"
+    },
+    "./email/client": {
+      "types": "./dist/email/client.d.ts",
+      "import": "./dist/email/client.js"
+    },
+    "./email/schedule": {
+      "types": "./dist/email/schedule.d.ts",
+      "import": "./dist/email/schedule.js"
+    },
+    "./polar": {
+      "types": "./dist/polar/index.d.ts",
+      "import": "./dist/polar/index.js"
+    },
+    "./polar/client": {
+      "types": "./dist/polar/client.d.ts",
+      "import": "./dist/polar/client.js"
+    },
+    "./autumn": {
+      "types": "./dist/autumn/index.d.ts",
+      "import": "./dist/autumn/index.js"
+    },
+    "./autumn/client": {
+      "types": "./dist/autumn/client.d.ts",
+      "import": "./dist/autumn/client.js"
+    },
     "./workos": {
       "types": "./dist/workos/index.d.ts",
       "import": "./dist/workos/index.js"
+    },
+    "./workos/client": {
+      "types": "./dist/workos/client.d.ts",
+      "import": "./dist/workos/client.js"
+    },
+    "./stripe": {
+      "types": "./dist/stripe/index.d.ts",
+      "import": "./dist/stripe/index.js"
+    },
+    "./stripe/client": {
+      "types": "./dist/stripe/client.d.ts",
+      "import": "./dist/stripe/client.js"
     },
     "./utils": {
       "types": "./dist/utils/index.d.ts",
@@ -56,9 +104,15 @@
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",
+    "@polar-sh/sdk": "^0.47.0",
+    "@react-email/render": "2.0.6",
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.2",
-    "@workos-inc/node": "^8.9.0"
+    "@workos-inc/node": "^8.9.0",
+    "autumn-js": "^1.2.7",
+    "resend": "6.10.0",
+    "standardwebhooks": "^1.0.0",
+    "stripe": "^20.4.1"
   },
   "devDependencies": {
     "@clerk/backend": "^3.2.0",
@@ -68,6 +122,7 @@
   "peerDependencies": {
     "@clerk/backend": "^3.2.0",
     "@clerk/react": "^6.1.0",
-    "react": "^18.2.0 || ^19.0.0"
+    "react": "^18.2.0 || ^19.0.0",
+    "react-dom": "^18.2.0 || ^19.0.0"
   }
 }

@@ -10,6 +10,7 @@ import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from ".
 import { collectSSGPages, isSSGModule, hasISR, getRevalidateInterval } from "../ssg";
 import path from "path";
 import type { ViteDevServer } from "vite";
+import { getClientModuleMetadata } from "../utils/client-component";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -190,6 +191,8 @@ export class RouteManager {
     routes: Array<{
       pattern: string;
       modulePath: string;
+      shouldHydrate: boolean;
+      isClientComponent: boolean;
       segments: Array<{
         segment: string;
         isDynamic: boolean;
@@ -209,16 +212,21 @@ export class RouteManager {
       return absolutePath;
     };
 
-    const routes = Array.from(this.routes.values()).map((entry) => ({
-      pattern: entry.pattern,
-      modulePath: toUrlPath(entry.modulePath),
-      segments: entry.route.segments.map((seg) => ({
-        segment: seg.segment,
-        isDynamic: seg.isDynamic,
-        isCatchAll: seg.isCatchAll,
-        isOptional: seg.isOptional,
-      })),
-    }));
+    const routes = Array.from(this.routes.values()).map((entry) => {
+      const metadata = getClientModuleMetadata(entry.modulePath, projectRoot);
+      return {
+        pattern: entry.pattern,
+        modulePath: toUrlPath(entry.modulePath),
+        shouldHydrate: metadata.shouldHydrate,
+        isClientComponent: metadata.isClientComponent,
+        segments: entry.route.segments.map((seg) => ({
+          segment: seg.segment,
+          isDynamic: seg.isDynamic,
+          isCatchAll: seg.isCatchAll,
+          isOptional: seg.isOptional,
+        })),
+      };
+    });
 
     const layouts = Array.from(this.layouts.values()).map((entry) => ({
       pattern: entry.pattern,

@@ -52,6 +52,33 @@ program
   });
 
 program
+  .command("generate")
+  .description("Generate integration schema artifacts for the detected data layer")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option(
+    "--orm <orm>",
+    "Schema target to generate (prisma, drizzle, postgres, mysql, sqlite, mongodb)",
+  )
+  .option("--dialect <dialect>", "SQL dialect for Drizzle generation (postgres, mysql, sqlite)")
+  .option("-o, --output <output>", "Custom output path")
+  .action(async (options) => {
+    try {
+      const { generateFarmArtifacts } = require("../dist/index.js");
+      await generateFarmArtifacts({
+        root: options.root,
+        configPath: options.config,
+        orm: options.orm,
+        dialect: options.dialect,
+        output: options.output,
+      });
+    } catch (error) {
+      console.error("Failed to generate integration schema artifacts:", error);
+      process.exit(1);
+    }
+  });
+
+program
   .command("deploy")
   .description("Deploy to a platform")
   .option("-r, --root <root>", "Root directory", process.cwd())

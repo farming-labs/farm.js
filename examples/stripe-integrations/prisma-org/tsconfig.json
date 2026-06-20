@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "allowJs": false,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "forceConsistentCasingInFileNames": true,
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "baseUrl": ".",
+    "paths": {
+      "@farmjs/core": ["../../../packages/farm/dist/index.d.ts"],
+      "@farmjs/core/client": ["../../../packages/farm/types/client.d.ts"],
+      "@farmjs/integrations": ["../../../packages/farm-integrations/dist/index.d.ts"],
+      "@farmjs/integrations/*": [
+        "../../../packages/farm-integrations/dist/*.d.ts",
+        "../../../packages/farm-integrations/dist/*/index.d.ts"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "farm.config.ts"]
+}

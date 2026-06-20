@@ -24,6 +24,8 @@ export interface RouteManifestEntry {
   assets?: RouterManagedTag[];
   /** Whether this is a client component */
   isClientComponent?: boolean;
+  /** Whether this route should hydrate on the client after SSR */
+  shouldHydrate?: boolean;
   /** Route pattern (for client-side matching) */
   pattern: string;
   /** Route segments for dynamic matching */
@@ -74,7 +76,10 @@ export interface DehydratedManifest {
   /** All routes (for client-side matching, minimal info) */
   routes: Record<
     string,
-    Pick<RouteManifestEntry, "modulePath" | "pattern" | "segments" | "isClientComponent">
+    Pick<
+      RouteManifestEntry,
+      "modulePath" | "pattern" | "segments" | "isClientComponent" | "shouldHydrate"
+    >
   >;
   /** All layouts (for navigation) */
   allLayouts: Record<string, Pick<LayoutManifestEntry, "modulePath" | "pattern">>;

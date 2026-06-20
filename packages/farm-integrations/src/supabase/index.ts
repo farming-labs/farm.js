@@ -6,6 +6,7 @@ import {
 } from "@farmjs/core";
 import { api as clientApi } from "@farmjs/core/client";
 import {
+  createPathInferredClientApi,
   createDocumentNavigationMatchers,
   escapeHtml,
   getOrigin,
@@ -18,6 +19,7 @@ import {
   withSearchParams,
 } from "../utils/index.js";
 import {
+  supabaseClient,
   supabaseAuthFormFields,
   type SupabaseCredentials,
   type SupabaseLogoutInput,
@@ -92,29 +94,33 @@ function createSupabaseApi(input: SupabaseAPIInput = {}) {
   const logoutPath = input.logoutPath ?? "/auth/logout";
   const sessionPath = input.sessionPath ?? "/auth/session";
 
-  return {
-    login: clientApi.post<
-      SupabaseCredentials,
-      SupabaseRedirectResult
-    >(loginPath),
-    signup: clientApi.post<
-      SupabaseCredentials,
-      SupabaseSignUpResult
-    >(signupPath),
-    oauth: clientApi.get<
-      SupabaseOAuthInput,
-      SupabaseRedirectResult
-    >(loginPath, {
-      responseFormat: "json",
-    }),
-    logout: clientApi.post<
-      SupabaseLogoutInput,
-      SupabaseRedirectResult
-    >(logoutPath),
-    session: clientApi.get<SupabaseSessionResult>(sessionPath, {
-      responseFormat: "json",
-    }),
-  };
+  return createPathInferredClientApi(
+    {
+      path: loginPath,
+      operation: clientApi.post<SupabaseCredentials, SupabaseRedirectResult>(loginPath),
+    },
+    {
+      path: signupPath,
+      operation: clientApi.post<SupabaseCredentials, SupabaseSignUpResult>(signupPath),
+    },
+    {
+      path: loginPath,
+      leafName: "oauth",
+      operation: clientApi.get<SupabaseOAuthInput, SupabaseRedirectResult>(loginPath, {
+        responseFormat: "json",
+      }),
+    },
+    {
+      path: logoutPath,
+      operation: clientApi.post<SupabaseLogoutInput, SupabaseRedirectResult>(logoutPath),
+    },
+    {
+      path: sessionPath,
+      operation: clientApi.get<SupabaseSessionResult>(sessionPath, {
+        responseFormat: "json",
+      }),
+    },
+  );
 }
 
 function resolveEnv(input: SupabaseIntegrationInput): ResolvedSupabaseEnv {
@@ -217,7 +223,9 @@ function redirectToPage(
   return Response.redirect(targetUrl, 302);
 }
 
-function readPageFeedback(context: FarmIntegrationHandlerContext): SupabasePageFeedback | undefined {
+function readPageFeedback(
+  context: FarmIntegrationHandlerContext,
+): SupabasePageFeedback | undefined {
   const error = context.url.searchParams.get("error");
   if (error) {
     return {
@@ -321,7 +329,8 @@ function renderAuthPage(input: RenderAuthPageInput): Response {
   const signUpUrl = new URL(input.signUpViewPath, requestUrl.origin);
   signUpUrl.searchParams.set("returnTo", returnTo);
   const submitLabel = input.mode === "sign-in" ? "Sign in" : "Create account";
-  const returnLabel = returnTo === "/dashboard" ? "Continue to /dashboard" : `Continue to ${returnTo}`;
+  const returnLabel =
+    returnTo === "/dashboard" ? "Continue to /dashboard" : `Continue to ${returnTo}`;
 
   const html = `<!doctype html>
 <html lang="en">
@@ -769,7 +778,10 @@ async function parseEmailPasswordRequest(request: Request) {
 
   const email = String(payload[supabaseAuthFormFields.email] || "").trim();
   const password = String(payload[supabaseAuthFormFields.password] || "");
-  const returnTo = getReturnTo(String(payload[supabaseAuthFormFields.returnTo] || ""), "/dashboard");
+  const returnTo = getReturnTo(
+    String(payload[supabaseAuthFormFields.returnTo] || ""),
+    "/dashboard",
+  );
 
   if (!email || !password) {
     return {
@@ -1125,11 +1137,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             });
           }
 
-          const signInRedirectTo = toAbsoluteUrl(
-            signInViewPath,
-            context.request,
-            env.appBaseUrl,
-          );
+          const signInRedirectTo = toAbsoluteUrl(signInViewPath, context.request, env.appBaseUrl);
           signInRedirectTo.searchParams.set("returnTo", parsedRequest.returnTo);
           signInRedirectTo.searchParams.set("message", "check-email");
           signInRedirectTo.searchParams.set("email", parsedRequest.email);
@@ -1248,7 +1256,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
         path: sessionPath,
         methods: ["GET"],
         async handler(_request: Request, context: FarmIntegrationHandlerContext) {
-          console.log({context}) 
+          console.log({ context });
           const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { data, error } = await supabase.auth.getUser();
 

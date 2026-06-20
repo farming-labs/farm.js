@@ -5,21 +5,21 @@ import * as path from "path";
 import type { FarmConfig, FarmRequest, FarmResponse, PageProps, SSGPage } from "../types";
 import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
-import { isClientComponentModule } from "../utils/client-component";
+import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
 import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
 import { isSSGModule, matchSSGPage } from "../ssg";
-import { getIntegrationProviders } from "../integrations";
+import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
+import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 
-let cachedClerkProvider:
-  | { ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>> }
-  | null = null;
+let cachedClerkProvider: {
+  ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
+} | null = null;
 
-const importRuntimeModule = new Function(
-  "specifier",
-  "return import(specifier);",
-) as (specifier: string) => Promise<any>;
+const importRuntimeModule = new Function("specifier", "return import(specifier);") as (
+  specifier: string,
+) => Promise<any>;
 
 function toMiddlewareMap(input: unknown): Map<string, any> {
   if (input instanceof Map) {
@@ -298,14 +298,15 @@ export class ServerRenderer {
       }
 
       let isClientComponent = false;
-      const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
-      if (serverComponentsEnabled) {
-        isClientComponent = isClientComponentModule(route.modulePath, this.config.root);
-      }
+      let shouldHydrate = false;
+      const moduleMetadata = getClientModuleMetadata(route.modulePath, this.config.root);
+      isClientComponent = moduleMetadata.isClientComponent;
+      shouldHydrate = moduleMetadata.shouldHydrate;
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
+      (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate;
       (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
         ? loadingBoundaryEntry.modulePath.substring(
             loadingBoundaryEntry.modulePath.indexOf("/src/app/"),
@@ -355,73 +356,85 @@ export class ServerRenderer {
 
       // Get middleware data for AsyncLocalStorage
       const middlewareDataForContext = middlewareMap;
+      const currentRequest = createWebRequestFromFarmRequest(req);
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
-        const PageComponent = routeModule.default!;
-        let pageElement = React.createElement(
-          PageComponent as React.ComponentType<unknown>,
-          pageProps as React.Attributes,
-        );
-
-        if (LoadingFallbackComponent) {
-          const loadingFallback = React.createElement(LoadingFallbackComponent, {
-            params,
-            path: pathname,
-          } as React.Attributes);
-
-          pageElement = React.createElement(
-            React.Suspense,
-            { fallback: loadingFallback },
-            pageElement,
+        await _runWithCurrentRequest(currentRequest, async () => {
+          const PageComponent = routeModule.default!;
+          let pageElement = React.createElement(
+            PageComponent as React.ComponentType<unknown>,
+            pageProps as React.Attributes,
           );
-        }
 
-        // For client components, wrap in a container div for targeted hydration
-        if (isClientComponent) {
-          pageElement = React.createElement(
-            "div",
-            { id: "__farm_page__", "data-farm-client": "true" },
-            pageElement,
-          );
-        }
-
-        let wrappedElement: React.ReactElement = pageElement;
-        for (let i = layoutModules.length - 1; i >= 0; i--) {
-          const layoutModule = layoutModules[i];
-          const LayoutComponent = layoutModule.default;
-          wrappedElement = React.createElement(
-            LayoutComponent as React.ComponentType<unknown>,
-            {
-              children: wrappedElement,
+          if (LoadingFallbackComponent) {
+            const loadingFallback = React.createElement(LoadingFallbackComponent, {
               params,
-            } as React.Attributes,
-          );
-        }
+              path: pathname,
+            } as React.Attributes);
 
-        if (ErrorFallbackComponent) {
-          wrappedElement = React.createElement(
-            FarmRouteErrorBoundary,
-            {
-              Fallback: ErrorFallbackComponent,
-              fallbackProps: {
+            pageElement = React.createElement(
+              React.Suspense,
+              { fallback: loadingFallback },
+              pageElement,
+            );
+          }
+
+          // Wrap hydratable pages in a targeted container so the client can attach
+          // without re-hydrating the surrounding layout shell.
+          if (isClientComponent || shouldHydrate) {
+            pageElement = React.createElement(
+              "div",
+              { id: "__farm_page__", "data-farm-client": "true" },
+              pageElement,
+            );
+          }
+
+          let wrappedElement: React.ReactElement = pageElement;
+          for (let i = layoutModules.length - 1; i >= 0; i--) {
+            const layoutModule = layoutModules[i];
+            const LayoutComponent = layoutModule.default;
+            wrappedElement = React.createElement(
+              LayoutComponent as React.ComponentType<unknown>,
+              {
+                children: wrappedElement,
                 params,
-                path: pathname,
-                searchParams: Promise.resolve(searchParamsObject),
-                middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
-                context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+              } as React.Attributes,
+            );
+          }
+
+          if (ErrorFallbackComponent) {
+            wrappedElement = React.createElement(
+              FarmRouteErrorBoundary,
+              {
+                Fallback: ErrorFallbackComponent,
+                fallbackProps: {
+                  params,
+                  path: pathname,
+                  searchParams: Promise.resolve(searchParamsObject),
+                  middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+                  context:
+                    pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+                },
               },
-            },
-            wrappedElement,
-          );
-        }
+              wrappedElement,
+            );
+          }
 
-        const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
+          const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
 
-        // Render with middleware data available
-        await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData);
+          // Render with middleware data available
+          await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData);
+        });
       });
     } catch (error) {
       logger.error(`Error rendering page: ${error}`);
+
+      if (res.headersSent || (res as any).writableEnded) {
+        if (!(res as any).writableEnded) {
+          res.end();
+        }
+        return;
+      }
 
       if (errorBoundaryEntry) {
         const rendered = await this.renderRouteErrorBoundary(req, res, {
@@ -483,6 +496,13 @@ export class ServerRenderer {
     },
   ): Promise<boolean> {
     try {
+      if (res.headersSent || (res as any).writableEnded) {
+        if (!(res as any).writableEnded) {
+          res.end();
+        }
+        return true;
+      }
+
       const errorModule = await this.routeManager.loadRouteModule(options.errorModulePath);
       if (!errorModule.default) {
         return false;
@@ -566,18 +586,17 @@ export class ServerRenderer {
       };
 
       // Convert routes array to object keyed by pattern
-      const serverComponentsEnabled = this.config.experimental?.serverComponents !== false;
       for (const routeEntry of manifest.routes) {
-        let isClient = false;
-        if (serverComponentsEnabled) {
-          isClient = isClientComponentModule(routeEntry.modulePath, this.config.root);
-        }
+        const moduleMetadata = getClientModuleMetadata(routeEntry.modulePath, this.config.root);
+        const isClient = moduleMetadata.isClientComponent;
+        const shouldHydrateRoute = moduleMetadata.shouldHydrate;
 
         clientManifest.routes[routeEntry.pattern] = {
           modulePath: routeEntry.modulePath,
           pattern: routeEntry.pattern,
           segments: routeEntry.segments,
           isClientComponent: isClient,
+          shouldHydrate: shouldHydrateRoute,
           preloads: [routeEntry.modulePath],
           assets: [],
         };
@@ -599,11 +618,13 @@ export class ServerRenderer {
 window.__FARM_PROPS__ = ${JSON.stringify((req as any).__FARM_PROPS__ || {})};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
+window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
         (req as any).__FARM_LOADING_MODULE_PATH__ || null,
       )};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
+window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 </script>`;
 
       // Get metadata from request
@@ -807,6 +828,13 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
   }
 
   private async render500(req: FarmRequest, res: FarmResponse, error: any): Promise<void> {
+    if (res.headersSent || (res as any).writableEnded) {
+      if (!(res as any).writableEnded) {
+        res.end();
+      }
+      return;
+    }
+
     res.statusCode = 500;
 
     const isDev = process.env.NODE_ENV === "development";
@@ -826,6 +854,9 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
     const clientScript = isClientComponent
       ? `  <script type="module" src="/@farm/client.js"></script>`
       : "";
+    const integrationManifestScript = `<script>
+window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
+</script>`;
 
     return `<!DOCTYPE html>
 <html lang="en">
@@ -835,6 +866,7 @@ window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
   <title>Farm.js App</title>
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
+  ${integrationManifestScript}
 </head>
 <body class="">
   <div id="root">${content}</div>

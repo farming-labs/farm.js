@@ -13,13 +13,15 @@ export type {
   FarmIntegrationAPIOperation,
   FarmIntegrationAPIResponseFormat,
 } from "./integration-api";
-export {
-  createIntegrationClient,
-  IntegrationClientError,
-} from "./integration-client";
+export { createIntegrationClient, IntegrationClientError } from "./integration-client";
 export {
   createIntegrationApi,
+  createIntegrationClients,
   createIntegrationServerClient,
+  getIntegrationAPIManifest,
+  integrationClients,
+  integrationsClient,
+  integrationsServer,
 } from "./integration-client";
 export type {
   IntegrationClient,
@@ -28,7 +30,11 @@ export type {
   IntegrationClientOptions,
   IntegrationClientRequestOptions,
   IntegrationAPI,
+  IntegrationClients,
   IntegrationOperationResult,
+  InferIntegrationOperationBody,
+  InferIntegrationOperationQuery,
+  InferIntegrationOperationResponse,
   IntegrationServerClient,
   IntegrationServerClientAliases,
   IntegrationServerClientOptions,

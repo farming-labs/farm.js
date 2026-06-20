@@ -1,4 +1,4 @@
-import { Link } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 import type { PagePropsSafe } from "@farmjs/core/query";
 import {
   asBoolean,

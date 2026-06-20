@@ -21,7 +21,7 @@ export default function DashboardPage() {
         setSession({ status: "unauthorized" });
         return;
       }
-      console.log({data: response.data})
+
       setSession({
         status: "ready",
         user: {

@@ -67,7 +67,7 @@ export function clerk(input: ClerkIntegrationInput = {}) {
         type: "clerk",
         props: {
           publishableKey,
-          ...(input.providerProps || {}),
+          ...input.providerProps,
         },
       },
     ],
@@ -107,8 +107,7 @@ export function clerk(input: ClerkIntegrationInput = {}) {
                 }
 
                 const shouldForwardClerkResponse =
-                  requestState.status === "handshake" ||
-                  (!!location && headers.has("set-cookie"));
+                  requestState.status === "handshake" || (!!location && headers.has("set-cookie"));
 
                 if (shouldForwardClerkResponse) {
                   return new Response(null, {
