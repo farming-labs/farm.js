@@ -1,5 +1,5 @@
 import type { APIRouteManager } from "../api/route-manager";
-import { defineEventHandler, getHeaders, readBody, setHeaders, setResponseStatus } from "h3";
+import { defineEventHandler, getHeaders, readBody, sendWebResponse, setResponseStatus } from "h3";
 import type { H3Event } from "h3";
 
 /**
@@ -56,23 +56,7 @@ export function createNitroAPIHandler(apiRouteManager: APIRouteManager) {
 
       const response = await betterCallHandler(request);
 
-      // Convert Response to H3 response
-      const responseBody = await response.text();
-      const responseHeaders: Record<string, string> = {};
-      response.headers.forEach((value, key) => {
-        responseHeaders[key] = value;
-      });
-
-      setResponseStatus(event, response.status);
-      setHeaders(event, responseHeaders);
-
-      // Return the response body
-      // If it's JSON, parse it so Nitro can handle it properly
-      try {
-        return JSON.parse(responseBody);
-      } catch {
-        return responseBody;
-      }
+      return sendWebResponse(response);
     } catch (error: any) {
       setResponseStatus(event, 500);
       return {
