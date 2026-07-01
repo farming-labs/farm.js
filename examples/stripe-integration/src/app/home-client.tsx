@@ -35,7 +35,6 @@ export function HomeClient() {
 
     async function loadProducts() {
       const result = await apiClient.billing.products();
-      console.log({result})
       if (cancelled) {
         return;
       }
@@ -48,7 +47,6 @@ export function HomeClient() {
         });
         return;
       }
-      console.log({resultData: result.data})
       setProducts({
         status: "ready",
         products: result.data || [],
