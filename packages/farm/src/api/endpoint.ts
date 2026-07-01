@@ -56,6 +56,7 @@ export type TypedEndpoint<TBody = never, TQuery = never, TResponse = any> = {
  *
  * Supports two patterns:
  * 1. File-based routing (path auto-inferred from file location):
+ *    `export const POST = createEndpoint({ method: 'POST', body: schema }, handler)`
  *    `createEndpoint({ method: 'GET', query: z.object({...}) }, handler)`
  *
  * 2. Explicit path (for routes.ts at project root):

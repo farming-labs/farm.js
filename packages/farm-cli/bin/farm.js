@@ -89,6 +89,7 @@ addCommand
   .option("-f, --file <file>", "Path to the app integrations registry", "src/lib/integrations.ts")
   .option("--force", "Overwrite an existing generated integration component")
   .option("--dry-run", "Show what would be added without writing files")
+  .option("--route-file <file>", "Route file path for route-based integrations")
   .option("--skip-package-json", "Do not add @farmjs/integrations to package.json")
   .option("--skip-config", "Do not create or update farm.config")
   .option("-l, --list", "List supported integration providers")
@@ -116,6 +117,7 @@ addCommand
         provider,
         key: options.key,
         integrationsFile: options.file,
+        routeFile: options.routeFile,
         dryRun: options.dryRun,
         force: options.force,
         skipPackageJson: options.skipPackageJson,
@@ -123,7 +125,11 @@ addCommand
       });
 
       const verb = options.dryRun ? "Prepared" : "Added";
-      console.log(`${verb} ${result.provider} integration as appIntegrations.${result.key}`);
+      if (result.mode === "route") {
+        console.log(`${verb} ${result.provider} route at ${result.routePath || result.routeFile}`);
+      } else {
+        console.log(`${verb} ${result.provider} integration as appIntegrations.${result.key}`);
+      }
 
       if (result.created.length) {
         console.log("Created:");
