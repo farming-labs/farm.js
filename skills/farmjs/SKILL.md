@@ -205,6 +205,19 @@ export const localDemo = defineIntegration({
 });
 ```
 
+Use the CLI to scaffold an app integration registry and provider component:
+
+```bash
+farm add integration --list
+farm add integration stripe
+farm add integration supabase --key auth
+farm add integration resend --file src/lib/integrations.ts
+```
+
+The command creates or updates `src/lib/integrations.ts`, adds a provider component under
+`src/lib/integrations/`, wires `farm.config.ts` when it can do so safely, and adds
+`@farmjs/integrations` to `package.json`.
+
 ## Stripe Integration Spec
 
 Simple checkout example: `examples/stripe-integration`.

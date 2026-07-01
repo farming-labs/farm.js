@@ -29,7 +29,7 @@
     "lint:fix": "biome lint --write .",
     "format": "biome format --write .",
     "type-check": "tsc --noEmit",
-    "test": "echo 'No tests in this package'",
+    "test": "tsdown && node --test test/*.test.mjs",
     "clean": "rm -rf dist"
   },
   "dependencies": {
