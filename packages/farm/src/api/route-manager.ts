@@ -40,30 +40,31 @@ export class APIRouteManager {
   }
 
   /**
-   * Discover all route.ts files in /app/api
+   * Discover route.ts files in /app/api and explicit endpoints in root routes.ts
    */
   async discoverRoutes(): Promise<void> {
     const apiDir = path.join(this.appDir, "api");
+    let routeFiles: string[] = [];
 
-    if (!fs.existsSync(apiDir)) {
+    if (fs.existsSync(apiDir)) {
+      routeFiles = this.findRouteFiles(apiDir);
+    } else {
       if (process.env.FARM_VERBOSE) {
-        logger.info("No /app/api directory found, skipping API route discovery");
+        logger.info("No /app/api directory found, skipping file-based API route discovery");
       }
-      return;
     }
-
-    const routeFiles = this.findRouteFiles(apiDir);
 
     if (routeFiles.length === 0) {
       if (process.env.FARM_VERBOSE) {
         logger.info("No route files found in /app/api");
       }
-      return;
     }
 
     for (const filePath of routeFiles) {
       await this.loadRoute(filePath);
     }
+
+    await this.loadRootRoutes();
 
     if (process.env.FARM_VERBOSE) {
       logger.success(`Discovered ${this.routes.size} API routes`);
@@ -113,14 +114,7 @@ export class APIRouteManager {
       const relativePath = path.relative(apiDir, path.dirname(filePath));
       const routePath = "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
-      // Load the module (use Vite in dev, native import in prod)
-      let routeModule;
-      if (this.viteServer) {
-        routeModule = await this.viteServer.ssrLoadModule(filePath);
-      } else {
-        const fileUrl = `file://${filePath}`;
-        routeModule = await import(/* @vite-ignore */ fileUrl);
-      }
+      const routeModule = await this.loadModule(filePath);
 
       const endpoints: Record<string, any> = {};
       const availableMethods: string[] = [];
@@ -143,6 +137,83 @@ export class APIRouteManager {
     } catch (error) {
       logger.error(`Error loading route ${filePath}: ${error}`);
     }
+  }
+
+  /**
+   * Load explicit-path endpoints from src/routes.ts-style files.
+   */
+  private async loadRootRoutes(): Promise<void> {
+    const routesFile = this.findRootRoutesFile();
+    if (!routesFile) {
+      return;
+    }
+
+    try {
+      const routesModule = await this.loadModule(routesFile);
+
+      for (const exportValue of Object.values(routesModule)) {
+        const endpoint = exportValue as any;
+        if (!endpoint?.__path) {
+          continue;
+        }
+
+        const method = String(endpoint.__method || "GET").toUpperCase();
+        this.addEndpoint(endpoint.__path, routesFile, method, endpoint);
+      }
+    } catch (error) {
+      logger.error(`Error loading root API routes ${routesFile}: ${error}`);
+    }
+  }
+
+  private findRootRoutesFile(): string | null {
+    const routeNames = ["routes.ts", "routes.tsx", "routes.js"];
+    const candidateDirs = [path.dirname(this.appDir), this.appDir];
+    const seen = new Set<string>();
+
+    for (const dir of candidateDirs) {
+      for (const routeName of routeNames) {
+        const routesFile = path.join(dir, routeName);
+        if (seen.has(routesFile)) {
+          continue;
+        }
+        seen.add(routesFile);
+
+        if (fs.existsSync(routesFile)) {
+          return routesFile;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  private async loadModule(filePath: string): Promise<Record<string, unknown>> {
+    if (this.viteServer) {
+      return await this.viteServer.ssrLoadModule(filePath);
+    }
+
+    const fileUrl = `file://${filePath}`;
+    return await import(/* @vite-ignore */ fileUrl);
+  }
+
+  private addEndpoint(routePath: string, filePath: string, method: string, endpoint: any): void {
+    const normalizedMethod = method.toUpperCase();
+    const existingRoute = this.routes.get(routePath);
+
+    if (existingRoute) {
+      if (!existingRoute.methods.includes(normalizedMethod)) {
+        existingRoute.methods.push(normalizedMethod);
+      }
+      existingRoute.endpoints[normalizedMethod] = endpoint;
+      return;
+    }
+
+    this.routes.set(routePath, {
+      path: routePath,
+      filePath,
+      methods: [normalizedMethod],
+      endpoints: { [normalizedMethod]: endpoint },
+    });
   }
 
   /**

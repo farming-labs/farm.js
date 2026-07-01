@@ -2,6 +2,8 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
+import { z } from "zod";
+import { createEndpoint } from "../api/endpoint";
 import { APIRouteManager } from "../api/route-manager";
 
 const tempDirs: string[] = [];
@@ -159,6 +161,106 @@ describe("APIRouteManager", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ slug: ["core", "routes"] });
+  });
+
+  it("invokes createEndpoint file routes with ctx, validation, and params", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "projects", "[id]");
+    fs.mkdirSync(routeDir, { recursive: true });
+    const routeFile = path.join(routeDir, "route.js");
+    fs.writeFileSync(routeFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        expect(filePath).toBe(routeFile);
+        return {
+          GET: createEndpoint(
+            {
+              method: "GET",
+              query: z.object({ view: z.enum(["summary", "details"]) }),
+            },
+            async (ctx) => ({
+              id: ctx.params.id,
+              view: ctx.query.view,
+              hasRequest: ctx.request instanceof Request,
+            }),
+          ),
+        };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+    const handler = manager.getHandler();
+
+    const response = await handler!(
+      new Request("http://example.com/api/projects/farm?view=details"),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      id: "farm",
+      view: "details",
+      hasRequest: true,
+    });
+
+    const invalidResponse = await handler!(
+      new Request("http://example.com/api/projects/farm?view=unknown"),
+    );
+
+    expect(invalidResponse.status).toBe(400);
+    await expect(invalidResponse.json()).resolves.toMatchObject({
+      error: "Invalid query parameters",
+    });
+  });
+
+  it("discovers explicit-path createEndpoint routes from root routes files", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routesFile = path.join(root, "routes.js");
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        expect(filePath).toBe(routesFile);
+        return {
+          healthCheck: createEndpoint("/api/health", { method: "GET" }, async () => ({
+            ok: true,
+          })),
+          echo: createEndpoint(
+            "/api/echo",
+            {
+              method: "POST",
+              body: z.object({ message: z.string().min(1) }),
+            },
+            async (ctx) => ({ echo: ctx.body.message }),
+          ),
+        };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+    const handler = manager.getHandler();
+
+    expect(handler).toBeTypeOf("function");
+    expect(Array.from(manager.getRoutes().keys()).sort()).toEqual(["/api/echo", "/api/health"]);
+
+    const healthResponse = await handler!(new Request("http://example.com/api/health"));
+    expect(healthResponse.status).toBe(200);
+    await expect(healthResponse.json()).resolves.toEqual({ ok: true });
+
+    const echoResponse = await handler!(
+      new Request("http://example.com/api/echo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "hello better-call" }),
+      }),
+    );
+
+    expect(echoResponse.status).toBe(200);
+    await expect(echoResponse.json()).resolves.toEqual({ echo: "hello better-call" });
   });
 
   it("parses DELETE request bodies", async () => {
