@@ -1,6 +1,8 @@
 import type { FarmConfig as BaseFarmConfig } from "./types";
+import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
+import { resolveIntegrationPlugins } from "./integrations";
 
 export interface RedirectConfig {
   source: string;
@@ -68,6 +70,7 @@ export interface NotFoundConfig {
 
 export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
   plugins?: FarmPlugin[];
+  integrations?: FarmIntegrationsUserConfig;
   preset?: BaseFarmConfig["preset"];
 
   trailingSlash?: boolean;
@@ -153,7 +156,8 @@ export async function resolveConfig(
       serverActions: false,
       ...userConfig.experimental,
     },
-    plugins: userConfig.plugins || [],
+    plugins: [...resolveIntegrationPlugins(userConfig.integrations), ...(userConfig.plugins || [])],
+    integrations: userConfig.integrations || {},
     trailingSlash: userConfig.trailingSlash ?? false,
     redirects: () => redirects,
     rewrites: () => rewrites,
@@ -205,12 +209,22 @@ export async function resolveConfig(
 export async function loadConfig(
   rootDir?: string,
   configPath?: string,
+  mode = process.env.NODE_ENV === "production" ? "production" : "development",
 ): Promise<FarmUserConfig | undefined> {
   const path = await import("path");
+  const fs = await import("fs/promises");
   const { pathToFileURL } = await import("url");
   const { existsSync } = await import("fs");
+  const { build } = await import("esbuild");
+  const { loadEnv } = await import("vite");
 
   const root = rootDir || process.cwd();
+  const loadedEnv = loadEnv(mode, root, "");
+  for (const [key, value] of Object.entries(loadedEnv)) {
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
   const searchPaths = [configPath, "farm.config.ts", "farm.config.js", "farm.config.mjs"].filter(
     Boolean,
   ) as string[];
@@ -230,17 +244,39 @@ export async function loadConfig(
         continue;
       }
 
-      // Use pathToFileURL for proper file:// URL conversion
-      const moduleUrl = pathToFileURL(normalizedPath).href + `?t=${Date.now()}`;
-      const config = await import(/* @vite-ignore */ moduleUrl);
+      const configCacheDir = path.join(root, ".farm", ".config-loader");
+      await fs.mkdir(configCacheDir, { recursive: true });
+      const modulePath = path.join(
+        configCacheDir,
+        `farm-config-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+      );
+      await build({
+        absWorkingDir: root,
+        entryPoints: [normalizedPath],
+        outfile: modulePath,
+        bundle: true,
+        format: "esm",
+        platform: "node",
+        target: `node${process.versions.node.split(".")[0]}`,
+        packages: "external",
+        jsx: "automatic",
+        logLevel: "silent",
+        sourcemap: "inline",
+      });
+
+      const moduleUrl = pathToFileURL(modulePath).href + `?t=${Date.now()}`;
+      let config: any;
+
+      try {
+        config = await import(/* @vite-ignore */ moduleUrl);
+      } finally {
+        await fs.unlink(modulePath).catch(() => undefined);
+      }
 
       return config.default || config;
     } catch (error: any) {
-      // Log error for debugging but continue searching
-      if (process.env.FARM_VERBOSE) {
-        console.warn(`Failed to load config from ${relativePath}:`, error.message);
-      }
-      continue;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to load config from ${relativePath}: ${message}`);
     }
   }
   return undefined;

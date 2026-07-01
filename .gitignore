@@ -6,6 +6,8 @@ node_modules/
 # Production builds
 dist/
 build/
+!packages/farm/src/build/
+!packages/farm/src/build/**
 .next/
 out/
 .farm/
@@ -33,6 +35,10 @@ pids
 *.pid
 *.seed
 *.pid.lock
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
 
 # Coverage directory used by tools like istanbul
 coverage/

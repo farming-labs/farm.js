@@ -12,9 +12,8 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
   const root = options.root || process.cwd();
 
   try {
-    // Load config
-    const userConfig = await loadConfig(root);
     const mode = "production";
+    const userConfig = await loadConfig(root, undefined, mode);
 
     if (!userConfig) {
       throw new Error("No farm.config.ts found. Please create a configuration file.");

@@ -1,0 +1,26 @@
+{
+  "name": "farm-example-clerk-integration",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clerk/backend": "^3.2.0",
+    "@clerk/react": "^6.1.0",
+    "@farmjs/core": "workspace:*",
+    "@farmjs/integrations": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@farmjs/cli": "workspace:*",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  }
+}

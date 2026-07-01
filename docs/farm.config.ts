@@ -1,4 +1,4 @@
-import { defineFarmConfig, definePlugin } from "@farmjs/core";
+import type { FarmPlugin, FarmUserConfig } from "@farmjs/core";
 import { createLoggerPlugin } from "@farmjs/core/plugin/server";
 import { randomUUID } from "crypto";
 
@@ -18,13 +18,13 @@ function createDocsContextDemoPlugin(
       statusCode: number;
     }) => void;
   } = {},
-) {
+): FarmPlugin {
   const userHeader = (options.userHeader || "x-docs-user").toLowerCase();
   const defaultUser = options.defaultUser || "guest";
   const log = options.log ?? true;
   const logLifecycle = options.logLifecycle ?? true;
 
-  return definePlugin({
+  return {
     name: "docs-context-demo",
     enforce: "pre",
     init() {
@@ -139,10 +139,10 @@ function createDocsContextDemoPlugin(
         );
       }
     },
-  });
+  };
 }
 
-export default defineFarmConfig({
+export default {
   srcDir: "src",
   preset: "vercel",
   // suppressLintOnLink: true, // set to true to allow any string on <Link href="..."> (no route-type errors)
@@ -161,4 +161,4 @@ export default defineFarmConfig({
     ];
   },
   plugins: [createDocsContextDemoPlugin({ log: true, logLifecycle: true }), createLoggerPlugin({})],
-});
+} satisfies FarmUserConfig;

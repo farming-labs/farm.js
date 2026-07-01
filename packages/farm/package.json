@@ -159,12 +159,14 @@
     "react-dom": "^19.0.0",
     "react-server-dom-webpack": "^18.3.0-canary-670c8dfb8-20231204",
     "sirv": "^2.0.4",
+    "supports-color": "^10.2.2",
     "tailwindcss": "^4.0.0",
     "unstorage": "^2.0.0-alpha.3",
     "vite": "^5.0.10",
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@clerk/react": "^6.1.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitest/coverage-v8": "^1.1.0",

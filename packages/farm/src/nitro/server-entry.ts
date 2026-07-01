@@ -8,6 +8,7 @@ import { createHandler } from "./create-handler";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
+import { getClientModuleMetadata } from "../utils/client-component";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -113,17 +114,9 @@ async function defaultHandler({
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
 
-      // Check if client component
-      let isClientComponent = false;
-      try {
-        const fs = await import("fs");
-        const content = fs.readFileSync(route.modulePath, "utf-8");
-        isClientComponent =
-          content.trimStart().startsWith("'use client'") ||
-          content.trimStart().startsWith('"use client"');
-      } catch {
-        isClientComponent = false;
-      }
+      const moduleMetadata = getClientModuleMetadata(route.modulePath);
+      const isClientComponent = moduleMetadata.isClientComponent;
+      const shouldHydrate = moduleMetadata.shouldHydrate;
 
       // Collect metadata from layouts and page
       let mergedMetadata: Record<string, any> = {};
@@ -155,6 +148,7 @@ async function defaultHandler({
         },
         modulePath: route.modulePath,
         isClientComponent,
+        shouldHydrate,
         metadata: {
           title: mergedMetadata.title,
           description: mergedMetadata.description,

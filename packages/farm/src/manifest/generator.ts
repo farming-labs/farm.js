@@ -11,6 +11,7 @@ import type {
   LayoutManifestEntry,
   RouterManagedTag,
 } from "./types";
+import { getClientModuleMetadata } from "../utils/client-component";
 
 interface RouteInfo {
   pattern: string;
@@ -22,21 +23,6 @@ interface ChunkInfo {
   fileName: string;
   imports?: string[];
   css?: string[];
-}
-
-/**
- * Check if a file is a client component
- */
-function isClientComponent(filePath: string): boolean {
-  try {
-    const content = fs.readFileSync(filePath, "utf-8");
-    return (
-      content.trimStart().startsWith("'use client'") ||
-      content.trimStart().startsWith('"use client"')
-    );
-  } catch {
-    return false;
-  }
 }
 
 /**
@@ -166,11 +152,13 @@ export async function generateDevManifest(
 
   const routeManifest: Record<string, RouteManifestEntry> = {};
   for (const route of routes) {
+    const metadata = getClientModuleMetadata(route.modulePath, projectRoot);
     routeManifest[route.pattern] = {
       modulePath: toUrlPath(route.modulePath),
       pattern: route.pattern,
       segments: route.segments,
-      isClientComponent: isClientComponent(route.modulePath),
+      isClientComponent: metadata.isClientComponent,
+      shouldHydrate: metadata.shouldHydrate,
       preloads: [],
       assets: [],
     };
@@ -255,11 +243,13 @@ export async function generateProdManifest(
       }
     }
 
+    const metadata = getClientModuleMetadata(route.modulePath, projectRoot);
     routeManifest[route.pattern] = {
       modulePath: urlPath,
       pattern: route.pattern,
       segments: route.segments,
-      isClientComponent: isClientComponent(route.modulePath),
+      isClientComponent: metadata.isClientComponent,
+      shouldHydrate: metadata.shouldHydrate,
       preloads,
       assets,
     };

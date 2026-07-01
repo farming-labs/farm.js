@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@farmjs/core": ["../../packages/farm/dist/index.d.ts"],
+      "@farmjs/core/client": ["../../packages/farm/types/client.d.ts"],
+      "@farmjs/integrations": ["../../packages/farm-integrations/dist/index.d.ts"],
+      "@farmjs/integrations/*": [
+        "../../packages/farm-integrations/dist/*.d.ts",
+        "../../packages/farm-integrations/dist/*/index.d.ts"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "types": ["vite/client", "node"],
+    "skipLibCheck": true
+  },
+  "include": ["src", "farm.config.ts"]
+}

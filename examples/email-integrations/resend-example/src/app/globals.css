@@ -1,0 +1,209 @@
+:root {
+  --bg: #f4efe6;
+  --panel: rgba(255, 252, 247, 0.92);
+  --line: rgba(33, 24, 13, 0.12);
+  --ink: #21180d;
+  --muted: #65594a;
+  --accent: #bb4d1e;
+  --accent-dark: #8f3610;
+  --shadow: 0 20px 50px rgba(48, 29, 12, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(255, 201, 164, 0.8), transparent 30%),
+    radial-gradient(circle at top right, rgba(255, 229, 153, 0.5), transparent 28%),
+    linear-gradient(180deg, #f8f1e7 0%, #f2eadf 44%, #efe6d8 100%);
+  font-family:
+    "Iowan Old Style",
+    "Palatino Linotype",
+    "Book Antiqua",
+    serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.page-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 56px 20px 72px;
+}
+
+.hero {
+  margin-bottom: 28px;
+  padding: 28px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: linear-gradient(135deg, rgba(255, 252, 247, 0.96), rgba(250, 239, 220, 0.92));
+  box-shadow: var(--shadow);
+}
+
+.hero h1 {
+  margin: 10px 0 12px;
+  font-size: clamp(2.3rem, 6vw, 4.4rem);
+  line-height: 0.96;
+  letter-spacing: -0.04em;
+}
+
+.hero p {
+  max-width: 56rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.4rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(187, 77, 30, 0.12);
+  color: var(--accent-dark);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.card {
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.card h2 {
+  margin-top: 0;
+  margin-bottom: 14px;
+  font-size: 1.3rem;
+}
+
+.stack {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.field input,
+.field select,
+.field textarea {
+  width: 100%;
+  padding: 0.85rem 0.95rem;
+  border: 1px solid rgba(33, 24, 13, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--ink);
+}
+
+.field textarea {
+  resize: vertical;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+button {
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+button.primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), #de7d2f);
+  color: #fffaf4;
+}
+
+.line {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(33, 24, 13, 0.08);
+}
+
+.line span {
+  text-align: right;
+  color: var(--muted);
+}
+
+.template-list {
+  display: grid;
+  gap: 10px;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.helper-copy {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.preview-frame {
+  width: 100%;
+  min-height: 360px;
+  border: 1px solid rgba(33, 24, 13, 0.12);
+  border-radius: 18px;
+  background: #fff;
+}
+
+code {
+  font-family:
+    "SFMono-Regular",
+    "SF Mono",
+    Consolas,
+    "Liberation Mono",
+    monospace;
+  font-size: 0.92em;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .line {
+    flex-direction: column;
+  }
+
+  .line span {
+    text-align: left;
+  }
+}

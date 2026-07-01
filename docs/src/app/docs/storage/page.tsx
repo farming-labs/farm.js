@@ -1,4 +1,4 @@
-import { Link } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 
 export const metadata = {
   title: "Storage - Farm.js",

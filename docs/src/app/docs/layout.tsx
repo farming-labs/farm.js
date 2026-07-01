@@ -1,5 +1,5 @@
 import type { LayoutProps } from "@farmjs/core";
-import { Link } from "@farmjs/core";
+import { Link } from "@farmjs/core/client";
 
 const docLinks = [
   { href: "/docs", label: "Introduction" },

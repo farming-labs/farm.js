@@ -1,0 +1,96 @@
+"use client";
+
+import LocalDemoCard from "./local-demo-card";
+
+export default function Page() {
+  return (
+    <main className="page-shell">
+      <section className="hero">
+        <span className="eyebrow">Supabase SSR Auth</span>
+        <h1>Supabase Integration</h1>
+        <p>
+          Use integration-owned sign-in and sign-up routes, return through the Supabase callback
+          when OAuth is configured, and open a protected dashboard backed by the server session.
+          You can keep the built-in screens or point the integration at your own `/sign-in` and
+          `/sign-up` pages.
+        </p>
+      </section>
+
+      <section className="playground-grid">
+        <section className="card">
+          <h2>Get Started</h2>
+          <div className="link-grid">
+            <a className="nav-card" href="/sign-in?returnTo=/dashboard">
+              <strong>Sign In</strong>
+              <span>Open the custom sign-in page backed by `apiClient.auth.login()`.</span>
+            </a>
+            <a className="nav-card" href="/sign-up?returnTo=/dashboard">
+              <strong>Sign Up</strong>
+              <span>Create an account through the custom page and integration client.</span>
+            </a>
+            <a className="nav-card" href="/dashboard">
+              <strong>Dashboard</strong>
+              <span>Protected by the Supabase session middleware.</span>
+            </a>
+            <a className="nav-card" href="/server-demo">
+              <strong>Server Demo</strong>
+              <span>See the same local integration called during SSR on the server.</span>
+            </a>
+          </div>
+        </section>
+
+        <section className="card">
+          <h2>Integration Routes</h2>
+          <div className="session-stack">
+            <div className="session-line">
+              <strong>/auth/login</strong>
+              <span>Server auth action used by `apiClient.auth.login()`.</span>
+            </div>
+            <div className="session-line">
+              <strong>/auth/signup</strong>
+              <span>Server auth action used by `apiClient.auth.signup()`.</span>
+            </div>
+            <div className="session-line">
+              <strong>/auth/callback</strong>
+              <span>Exchanges the Supabase PKCE code for a server session.</span>
+            </div>
+            <div className="session-line">
+              <strong>/auth/logout</strong>
+              <span>Signs the user out and clears the Supabase session cookies.</span>
+            </div>
+            <div className="session-line">
+              <strong>/auth/session</strong>
+              <span>Read through `apiClient.auth.session()` on the client.</span>
+            </div>
+          </div>
+        </section>
+      </section>
+
+      <section className="playground-grid">
+        <LocalDemoCard />
+
+        <section className="card">
+          <h2>Custom Integration Layout</h2>
+          <div className="session-stack">
+            <div className="session-line">
+              <strong>Definition</strong>
+              <span>`src/lib/integrations/local-demo/index.ts`</span>
+            </div>
+            <div className="session-line">
+              <strong>Client</strong>
+              <span>Inferred automatically from the registered integration routes.</span>
+            </div>
+            <div className="session-line">
+              <strong>Registration</strong>
+              <span>Shared through `src/lib/integrations.ts` and loaded by `farm.config.ts`.</span>
+            </div>
+            <div className="session-line">
+              <strong>Usage</strong>
+              <span>Available through the same shared `apiClient.localDemo.*` namespace.</span>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+  );
+}

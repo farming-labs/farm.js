@@ -3,3 +3,9 @@ node_modules
 .vercel
 dist
 build
+.env
+.env.*
+!.env.example
+prisma/dev.db
+prisma/dev.db-journal
+src/generated/prisma

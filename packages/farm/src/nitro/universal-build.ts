@@ -8,8 +8,9 @@ import * as nitro from "nitro";
 import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
-import { createRequire } from "module";
+import { builtinModules, createRequire } from "module";
 import { logger } from "../utils";
+import { getClientModuleMetadata } from "../utils/client-component";
 import { virtualBundlePlugin } from "./virtual-bundle-plugin";
 import type { NitroConfig } from "nitro/config";
 
@@ -19,6 +20,40 @@ type OutputBundle = Rollup.OutputBundle;
 // Get __dirname equivalent for ESM
 const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
 const _dirname = path.dirname(_filename);
+const NODE_BUILTIN_MODULES = new Set([
+  ...builtinModules,
+  ...builtinModules.map((moduleName) => `node:${moduleName}`),
+]);
+const NITRO_EXTERNAL_MODULES = new Set([
+  "react",
+  "react-dom",
+  "react-dom/server",
+  "@prisma/client",
+  "@prisma/client/default",
+  "@prisma/client/default.js",
+  ".prisma/client",
+  ".prisma/client/default",
+  "better-sqlite3",
+  "fsevents",
+  "esbuild",
+  "lightningcss",
+  "rollup",
+  "vite",
+  "nitro",
+  "nitropack",
+]);
+
+function isNitroRollupExternal(id: string): boolean {
+  const normalizedId = id.replace(/\\/g, "/");
+
+  return (
+    NODE_BUILTIN_MODULES.has(id) ||
+    NITRO_EXTERNAL_MODULES.has(id) ||
+    normalizedId.startsWith(".prisma/") ||
+    normalizedId.includes("/node_modules/@prisma/client/") ||
+    normalizedId.includes("/node_modules/.prisma/client/")
+  );
+}
 
 function hasProjectPostcssConfig(root: string): boolean {
   const candidates = [
@@ -44,6 +79,23 @@ function hasProjectPostcssConfig(root: string): boolean {
       return false;
     }
   });
+}
+
+async function findFarmConfigPath(root: string): Promise<string | null> {
+  const fs = await import("fs/promises");
+  const candidates = ["farm.config.ts", "farm.config.js", "farm.config.mjs"];
+
+  for (const candidate of candidates) {
+    const resolvedPath = path.join(root, candidate);
+    try {
+      await fs.access(resolvedPath);
+      return resolvedPath;
+    } catch {
+      // Continue checking the next supported config path.
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -182,36 +234,24 @@ async function buildClient(
   });
   pluginManager.addPlugins(config.plugins || []);
 
-  // Detect which pages are "use client" components (RSC opt-in via experimental.serverComponents)
+  // Detect which pages should hydrate on the client.
   const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
-  const serverComponentsEnabled = config.experimental?.serverComponents !== false;
 
   for (const route of pageRoutes) {
-    if (!serverComponentsEnabled) {
-      continue;
-    }
     try {
-      const content = await fs.readFile(route.modulePath, "utf-8");
-      // Check for "use client" directive (can be at the start or after whitespace/comments)
-      const trimmedContent = content.trimStart();
-      const isClient =
-        trimmedContent.startsWith("'use client'") ||
-        trimmedContent.startsWith('"use client"') ||
-        trimmedContent.startsWith("'use client';") ||
-        trimmedContent.startsWith('"use client";');
-      if (isClient) {
+      const metadata = getClientModuleMetadata(route.modulePath, root);
+      if (metadata.shouldHydrate) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
         clientPages.push({ ...route, relativePath });
-        logger.info(`📱 Found client component: ${route.pattern} -> ${route.modulePath}`);
+        logger.info(`📱 Found hydratable route: ${route.pattern} -> ${route.modulePath}`);
       }
     } catch (error) {
-      // Log error but continue
-      logger.warn(`⚠️  Could not read route file ${route.modulePath}: ${error}`);
+      logger.warn(`⚠️  Could not inspect route file ${route.modulePath}: ${error}`);
     }
   }
 
   logger.info(
-    `📱 Total client components detected: ${clientPages.length} out of ${pageRoutes.length} pages`,
+    `📱 Total hydratable routes detected: ${clientPages.length} out of ${pageRoutes.length} pages`,
   );
 
   // Generate client hydration entry code
@@ -231,10 +271,15 @@ async function buildClient(
   // Tailwind support:
   // - If project has explicit PostCSS config, respect it.
   // - Otherwise enable built-in @tailwindcss/vite (out of the box).
+  const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
+  let postcssSearchPath: string | undefined;
   let tailwindVitePlugin: any = undefined;
-  if (hasProjectPostcssConfig(root)) {
+  if (hasScopedPostcssConfig) {
     logger.info("📦 Using project PostCSS/Tailwind configuration");
   } else {
+    const postcssConfigPath = path.join(clientEntryDir, "postcss.config.cjs");
+    await fs.writeFile(postcssConfigPath, "module.exports = { plugins: [] };\n");
+    postcssSearchPath = clientEntryDir;
     try {
       const tailwindVite = (await import("@tailwindcss/vite")).default;
       tailwindVitePlugin = tailwindVite();
@@ -369,6 +414,11 @@ async function buildClient(
         farmPlugin(config, pluginManager),
       ],
       mode: "production",
+      css: postcssSearchPath
+        ? {
+            postcss: postcssSearchPath,
+          }
+        : undefined,
       // Ensure React is bundled for client
       resolve: {
         dedupe: ["react", "react-dom"],
@@ -427,8 +477,6 @@ ${cssImport}
 ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
-
-console.log("[Farm.js] Client loaded (server-only mode)");
 
 // SPA Router for server-rendered pages (HTML swap)
 const spaRouter = {
@@ -550,8 +598,6 @@ document.addEventListener("click", function(e) {
   e.preventDefault();
   spaRouter.navigate(href);
 });
-
-console.log("[Farm.js] SPA router ready");
 `.trim();
   }
 
@@ -584,8 +630,6 @@ ${routeEntries.join(",\n")}
 const layoutRoutes = [
 ${layoutRegistrations.join(",\n")}
 ];
-
-console.log("[Farm.js] Client bundle loaded with", clientRoutes.length, "client routes and", layoutRoutes.length, "layouts");
 
 // Get applicable layouts for a pathname (sorted by depth, root first)
 function getApplicableLayouts(pathname) {
@@ -668,7 +712,6 @@ function hydrate() {
   const matched = matchRoute(pathname);
   
   if (!matched) {
-    console.log("[Farm.js] Server-rendered page, no hydration needed:", pathname);
     return;
   }
   
@@ -692,13 +735,11 @@ function hydrate() {
     if (!isHydrated && container.innerHTML.trim()) {
       reactRoot = hydrateRoot(container, wrappedElement);
       isHydrated = true;
-      console.log("[Farm.js] Hydrated:", pathname);
     } else {
       if (!reactRoot) {
         reactRoot = createRoot(container);
       }
       reactRoot.render(wrappedElement);
-      console.log("[Farm.js] Rendered:", pathname);
     }
     currentPathname = pathname;
   } catch (error) {
@@ -739,7 +780,6 @@ const spaRouter = {
         }
         reactRoot.render(wrappedElement);
         currentPathname = pathname;
-        console.log("[Farm.js] SPA navigated to client route:", pathname);
       }
       return;
     }
@@ -890,8 +930,6 @@ document.addEventListener("click", function(e) {
 
 // Initial hydration
 hydrate();
-
-console.log("[Farm.js] SPA router ready");
 `.trim();
 }
 
@@ -918,6 +956,15 @@ async function buildSSRInMemory(
     isProd: true,
   });
   pluginManager.addPlugins(config.plugins || []);
+  const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
+  let postcssConfigDir: string | undefined;
+  if (!hasScopedPostcssConfig) {
+    postcssConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-postcss-"));
+    await fs.writeFile(
+      path.join(postcssConfigDir, "postcss.config.cjs"),
+      "module.exports = { plugins: [] };\n",
+    );
+  }
 
   let ssrBundle: OutputBundle;
   let ssrEntryFile: string;
@@ -998,6 +1045,9 @@ async function buildSSRInMemory(
     `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, and ${apiRoutes.length} API routes`,
   );
 
+  const hasConfiguredIntegrations = Object.keys(config.integrations || {}).length > 0;
+  const configModulePath = hasConfiguredIntegrations ? await findFarmConfigPath(root) : null;
+
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
   const virtualEntryCode = generateVirtualEntryCode(
@@ -1006,104 +1056,136 @@ async function buildSSRInMemory(
     layoutRoutes,
     notFoundPath,
     config,
+    configModulePath,
   );
 
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
   const virtualEntryId = "\0virtual:farm-ssr-entry";
 
-  await viteBuild({
-    root,
-    build: {
-      ssr: true,
-      write: false, // ⭐ Keep in memory
-      minify: false, // Skip minification for SSR (faster build, Nitro will minify)
-      sourcemap: false, // Skip sourcemaps for faster SSR build
-      rollupOptions: {
-        input: virtualEntryId,
-        // Externalize native modules and Node.js built-ins
-        external: ["fsevents", /\.node$/, /^node:/],
-        // Optimize tree-shaking
-        treeshake: {
-          moduleSideEffects: false,
+  try {
+    await viteBuild({
+      root,
+      build: {
+        target: "esnext",
+        ssr: true,
+        write: false, // ⭐ Keep in memory
+        minify: false, // Skip minification for SSR (faster build, Nitro will minify)
+        sourcemap: false, // Skip sourcemaps for faster SSR build
+        rollupOptions: {
+          input: virtualEntryId,
+          // Externalize native modules and Node.js built-ins
+          external: [
+            "fsevents",
+            "@prisma/client",
+            "@prisma/client/default",
+            "@prisma/client/default.js",
+            ".prisma/client",
+            ".prisma/client/default",
+            /^\.prisma\//,
+            /\.node$/,
+            /^node:/,
+          ],
+          // Optimize tree-shaking
+          treeshake: {
+            moduleSideEffects: false,
+          },
         },
       },
-    },
-    // Use esbuild for faster transforms
-    esbuild: {
-      target: "node18",
-      keepNames: true,
-    },
-    // SSR configuration to externalize problematic modules
-    ssr: {
-      // Externalize native modules and build tools that can't be bundled
-      // These have native binaries that won't work in serverless environments
-      external: [
-        "fsevents",
-        "esbuild",
-        "lightningcss",
-        "rollup",
-        "@rollup/rollup-darwin-arm64",
-        "@rollup/rollup-darwin-x64",
-        "@rollup/rollup-linux-x64-gnu",
-        "@rollup/rollup-linux-x64-musl",
-        "@rollup/rollup-linux-arm64-gnu",
-        "@rollup/rollup-linux-arm64-musl",
-        "@rollup/rollup-win32-x64-msvc",
-        "@rollup/rollup-win32-arm64-msvc",
-        "@rollup/rollup-win32-ia32-msvc",
-        "vite",
-        "nitro",
-        "nitropack",
-      ],
-      // Don't externalize these - bundle them into the SSR output
-      // Keep this list minimal for faster builds
-      noExternal: ["@farmjs/core", "better-call", "react", "react-dom", "react-dom/server"],
-    },
-    plugins: [
-      farmPlugin(config, pluginManager),
-      {
-        name: "farm-virtual-ssr-entry",
-        resolveId(id) {
-          if (id === virtualEntryId || id === "\0virtual:farm-ssr-entry") {
-            return virtualEntryId;
-          }
-          return null;
-        },
-        load(id) {
-          if (id === virtualEntryId) {
-            return virtualEntryCode;
-          }
-          return null;
-        },
+      // Use esbuild for faster transforms
+      esbuild: {
+        target: "node18",
+        keepNames: true,
       },
-      {
-        name: "capture-ssr-bundle",
-        generateBundle(_options, bundle) {
-          ssrBundle = bundle;
-
-          // Find entry file
-          for (const [fileName, file] of Object.entries(bundle)) {
-            if (file.type === "chunk" && file.isEntry) {
-              ssrEntryFile = fileName;
-              break;
+      // SSR configuration to externalize problematic modules
+      ssr: {
+        // Externalize native modules and build tools that can't be bundled
+        // These have native binaries that won't work in serverless environments
+        external: [
+          "fsevents",
+          "esbuild",
+          "lightningcss",
+          "rollup",
+          "@rollup/rollup-darwin-arm64",
+          "@rollup/rollup-darwin-x64",
+          "@rollup/rollup-linux-x64-gnu",
+          "@rollup/rollup-linux-x64-musl",
+          "@rollup/rollup-linux-arm64-gnu",
+          "@rollup/rollup-linux-arm64-musl",
+          "@rollup/rollup-win32-x64-msvc",
+          "@rollup/rollup-win32-arm64-msvc",
+          "@rollup/rollup-win32-ia32-msvc",
+          "vite",
+          "nitro",
+          "nitropack",
+          "@prisma/client",
+          "@prisma/client/default",
+          "@prisma/client/default.js",
+          ".prisma/client",
+          ".prisma/client/default",
+        ],
+        // Don't externalize these - bundle them into the SSR output
+        // Keep this list minimal for faster builds
+        noExternal: ["@farmjs/core", "better-call", "react", "react-dom", "react-dom/server"],
+      },
+      plugins: [
+        farmPlugin(config, pluginManager),
+        {
+          name: "farm-virtual-ssr-entry",
+          resolveId(id) {
+            if (id === virtualEntryId || id === "\0virtual:farm-ssr-entry") {
+              return virtualEntryId;
             }
-          }
+            return null;
+          },
+          load(id) {
+            if (id === virtualEntryId) {
+              return virtualEntryCode;
+            }
+            return null;
+          },
+        },
+        {
+          name: "capture-ssr-bundle",
+          generateBundle(_options, bundle) {
+            ssrBundle = bundle;
 
-          if (!ssrEntryFile) {
-            throw new Error("No entry point found in SSR bundle");
+            // Find entry file
+            for (const [fileName, file] of Object.entries(bundle)) {
+              if (file.type === "chunk" && file.isEntry) {
+                ssrEntryFile = fileName;
+                break;
+              }
+            }
+
+            if (!ssrEntryFile) {
+              throw new Error("No entry point found in SSR bundle");
+            }
+          },
+        },
+      ],
+      mode: "production",
+      css: postcssConfigDir
+        ? {
+            postcss: postcssConfigDir,
           }
+        : undefined,
+      resolve: {
+        alias: {
+          // Ensure imports can resolve farm modules
+          farm: path.resolve(root, "node_modules", "@farmjs", "core", "src"),
         },
       },
-    ],
-    mode: "production",
-    resolve: {
-      alias: {
-        // Ensure imports can resolve farm modules
-        farm: path.resolve(root, "node_modules", "@farmjs", "core", "src"),
-      },
-    },
-  });
+    });
+  } finally {
+    if (postcssConfigDir) {
+      try {
+        await fs.rm(postcssConfigDir, { recursive: true, force: true });
+      } catch {
+        // Ignore cleanup errors.
+      }
+    }
+  }
 
   return { bundle: ssrBundle!, entryFile: ssrEntryFile! };
 }
@@ -1118,6 +1200,7 @@ function generateVirtualEntryCode(
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   notFoundPath: string | null,
   config: ResolvedFarmConfig,
+  configModulePath: string | null,
 ): string {
   // Generate imports for all API routes
   const apiImports: string[] = [];
@@ -1164,38 +1247,19 @@ function generateVirtualEntryCode(
 
   // Generate import for custom not-found page if exists
   const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
-
-  return `
-// Farm.js SSR Entry - Generated at build time
-// All routes are bundled here, managers are created at runtime
-
-${apiImports.join("\n")}
-${pageImports.join("\n")}
-${layoutImports.join("\n")}
-${notFoundImport}
-
-// Custom 404 page component (if provided)
-const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
-const CustomNotFoundComponent = ${notFoundPath ? "CustomNotFound.default || CustomNotFound" : "null"};
-
-// API routes bundled at build time
-const apiRoutes = [${apiRegistrations.join(",")}
-];
-
-// Page routes bundled at build time
-const pageRoutes = [${pageRegistrations.join(",")}
-];
-
-// Layout routes bundled at build time (sorted by depth, root first)
-const layoutRoutes = [${layoutRegistrations.join(",")}
-];
-
-// Create better-call router at runtime from bundled handlers
-import { createRouter } from "better-call";
-
+  const apiRouterImport = apiRoutes.length > 0 ? `import { createRouter } from "better-call";` : "";
+  const integrationImports = configModulePath
+    ? `
+import * as FarmUserConfigModule from "${configModulePath}";
+import { dispatchIntegrationRequest, matchIntegrationRoute } from "farm";
+`
+    : "";
+  const apiHandlerCode =
+    apiRoutes.length > 0
+      ? `
 function createAPIHandler() {
   const allEndpoints = {};
-  
+
   for (const route of apiRoutes) {
     for (const method of route.methods) {
       const handler = route.handlers[method];
@@ -1209,17 +1273,80 @@ function createAPIHandler() {
       }
     }
   }
-  
+
   if (Object.keys(allEndpoints).length > 0) {
     const router = createRouter(allEndpoints, { basePath: "" });
     return router.handler;
   }
-  
+
   return null;
 }
 
 // Create the API handler at runtime
 const apiHandler = createAPIHandler();
+`
+      : `
+const apiHandler = null;
+`;
+
+  return `
+// Farm.js SSR Entry - Generated at build time
+// All routes are bundled here, managers are created at runtime
+
+${apiImports.join("\n")}
+${pageImports.join("\n")}
+${layoutImports.join("\n")}
+${notFoundImport}
+${apiRouterImport}
+${integrationImports}
+
+// Custom 404 page component (if provided)
+const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
+const CustomNotFoundComponent = ${notFoundPath ? "CustomNotFound.default || CustomNotFound" : "null"};
+const farmUserConfig = ${
+    configModulePath ? "(FarmUserConfigModule.default || FarmUserConfigModule)" : "null"
+  };
+const configuredIntegrations = farmUserConfig?.integrations || {};
+const integrationRuntimeConfig = farmUserConfig || {};
+
+// API routes bundled at build time
+const apiRoutes = [${apiRegistrations.join(",")}
+];
+
+// Page routes bundled at build time
+const pageRoutes = [${pageRegistrations.join(",")}
+];
+
+// Layout routes bundled at build time (sorted by depth, root first)
+const layoutRoutes = [${layoutRegistrations.join(",")}
+];
+
+${apiHandlerCode}
+
+async function handleIntegrationRequest(request) {
+  ${
+    configModulePath
+      ? `const matchedIntegrationRoute = matchIntegrationRoute(configuredIntegrations, {
+    pathname: new URL(request.url).pathname,
+    method: request.method,
+  });
+
+  if (!matchedIntegrationRoute) {
+    return null;
+  }
+
+  return dispatchIntegrationRequest(
+    {
+      integration: matchedIntegrationRoute.integration,
+      config: integrationRuntimeConfig,
+      isDev: false,
+      isProd: true,
+    },
+    request,
+  );`
+      : "return null;"
+  }
+}
 
 /**
  * Match URL to page route pattern
@@ -1277,6 +1404,11 @@ function getApplicableLayouts(pathname) {
 async function handleRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
+
+  const integrationResponse = await handleIntegrationRequest(request.clone());
+  if (integrationResponse) {
+    return integrationResponse;
+  }
 
   // Handle API routes
   if (pathname.startsWith("/api/")) {
@@ -1696,6 +1828,21 @@ export default fromWebHandler(handler.fetch)
         prerender: false,
       },
     },
+    externals: {
+      external: [
+        "react",
+        "react-dom",
+        "@prisma/client",
+        "@prisma/client/default",
+        "@prisma/client/default.js",
+        ".prisma/client",
+        ".prisma/client/default",
+        "better-sqlite3",
+      ],
+    },
+    rollupConfig: {
+      external: isNitroRollupExternal,
+    },
     minify: true, // Enable minification for smaller bundles
     sourceMap: false, // Skip sourcemaps for faster build
   };
@@ -1723,7 +1870,7 @@ export default fromWebHandler(handler.fetch)
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json
   if (isVercel) {
-    await postProcessVercelOutput(outputDir, fs);
+    await postProcessVercelOutput(root, outputDir, fs);
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
@@ -1733,7 +1880,11 @@ export default fromWebHandler(handler.fetch)
  * Post-process Vercel output to match Build Output API v3
  * Moves server/ to functions/__nitro.func/ and updates routes
  */
-async function postProcessVercelOutput(outputDir: string, fs: typeof import("fs/promises")) {
+async function postProcessVercelOutput(
+  root: string,
+  outputDir: string,
+  fs: typeof import("fs/promises"),
+) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
   const nitroFuncDir = path.join(functionsDir, "__nitro.func");
@@ -1790,6 +1941,55 @@ async function postProcessVercelOutput(outputDir: string, fs: typeof import("fs/
   ];
 
   await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  await copyPrismaClientForVercel(root, nitroFuncDir, fs);
 
   logger.info("✅ Post-processed Vercel output for Build Output API v3");
+}
+
+async function copyPrismaClientForVercel(
+  root: string,
+  nitroFuncDir: string,
+  fs: typeof import("fs/promises"),
+) {
+  const projectRequire = createRequire(path.join(root, "package.json"));
+
+  let prismaClientDir: string;
+  try {
+    prismaClientDir = path.dirname(projectRequire.resolve("@prisma/client/default.js"));
+  } catch {
+    return;
+  }
+
+  const generatedClientDir = path.join(prismaClientDir, "..", "..", ".prisma", "client");
+
+  try {
+    await fs.access(generatedClientDir);
+  } catch {
+    return;
+  }
+
+  const targetNodeModules = path.join(nitroFuncDir, "node_modules");
+  const targetPrismaScopeDir = path.join(targetNodeModules, "@prisma");
+  const targetGeneratedDir = path.join(targetNodeModules, ".prisma", "client");
+  const targetClientDir = path.join(targetPrismaScopeDir, "client");
+
+  await fs.mkdir(targetPrismaScopeDir, { recursive: true });
+  await fs.cp(prismaClientDir, targetClientDir, { recursive: true, force: true });
+  await fs.cp(generatedClientDir, targetGeneratedDir, { recursive: true, force: true });
+
+  const functionPackagePath = path.join(nitroFuncDir, "package.json");
+  const clientPackagePath = path.join(prismaClientDir, "package.json");
+  const [functionPackageContent, clientPackageContent] = await Promise.all([
+    fs.readFile(functionPackagePath, "utf-8"),
+    fs.readFile(clientPackagePath, "utf-8"),
+  ]);
+  const functionPackage = JSON.parse(functionPackageContent);
+  const clientPackage = JSON.parse(clientPackageContent);
+
+  functionPackage.dependencies = {
+    ...functionPackage.dependencies,
+    "@prisma/client": clientPackage.version,
+  };
+
+  await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
 }

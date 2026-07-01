@@ -1,0 +1,256 @@
+:root {
+  --bg: #f5efe4;
+  --bg-accent: #efe1c4;
+  --panel: rgba(255, 252, 245, 0.9);
+  --panel-strong: #fffdf8;
+  --text: #201714;
+  --muted: #6e5a4f;
+  --line: rgba(32, 23, 20, 0.12);
+  --brand: #0f766e;
+  --brand-strong: #115e59;
+  --brand-soft: rgba(15, 118, 110, 0.12);
+  --danger: #b42318;
+  --shadow: 0 30px 80px rgba(61, 43, 30, 0.12);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.15), transparent 34%),
+    radial-gradient(circle at top right, rgba(180, 35, 24, 0.08), transparent 28%),
+    linear-gradient(180deg, var(--bg) 0%, #f9f6ee 100%);
+}
+
+body {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  background: rgba(32, 23, 20, 0.05);
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+}
+
+button {
+  font: inherit;
+}
+
+.page-shell {
+  width: min(1080px, calc(100vw - 2rem));
+  margin: 0 auto;
+  padding: 3rem 0 4rem;
+}
+
+.hero {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.eyebrow {
+  width: fit-content;
+  padding: 0.45rem 0.8rem;
+  border-radius: 999px;
+  background: var(--brand-soft);
+  color: var(--brand-strong);
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.hero h1,
+.card h1,
+.card h2 {
+  margin: 0;
+  font-family: "Fraunces", "Georgia", serif;
+  letter-spacing: -0.03em;
+}
+
+.hero h1 {
+  font-size: clamp(2.6rem, 5vw, 4.5rem);
+  line-height: 0.95;
+}
+
+.hero p,
+.card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+  font-size: 1rem;
+}
+
+.playground-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 1.5rem;
+}
+
+.card {
+  background: var(--panel);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+  padding: 1.5rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.form-card {
+  max-width: 720px;
+}
+
+.link-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.nav-card,
+.primary-link,
+.secondary-link,
+.ghost-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.nav-card {
+  padding: 1rem 1.1rem;
+  background: var(--panel-strong);
+  border-color: rgba(15, 118, 110, 0.16);
+  align-items: flex-start;
+  flex-direction: column;
+}
+
+.nav-card:hover,
+.primary-link:hover,
+.secondary-link:hover,
+.ghost-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 20px 30px rgba(15, 118, 110, 0.12);
+}
+
+.nav-card strong,
+.endpoint-line,
+.response-meta strong,
+.session-line strong {
+  font-weight: 700;
+}
+
+.nav-card span,
+.empty-state {
+  color: var(--muted);
+}
+
+.primary-link,
+.ghost-button {
+  background: linear-gradient(135deg, var(--brand) 0%, var(--brand-strong) 100%);
+  color: white;
+  padding: 0.9rem 1.1rem;
+}
+
+.secondary-link {
+  background: transparent;
+  color: var(--text);
+  border-color: var(--line);
+  padding: 0.9rem 1.1rem;
+}
+
+.ghost-button {
+  width: 100%;
+  border: 0;
+}
+
+.action-row,
+.response-panel,
+.response-meta,
+.session-stack {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.response-panel {
+  background: rgba(255, 255, 255, 0.7);
+  border-radius: 22px;
+  padding: 1rem;
+  border: 1px solid rgba(15, 118, 110, 0.12);
+}
+
+.response-meta {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.status-pill {
+  width: fit-content;
+  padding: 0.25rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(15, 118, 110, 0.1);
+  color: var(--brand-strong);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.endpoint-line,
+pre {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.9rem;
+}
+
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #134e4a;
+}
+
+.session-line {
+  padding: 0.8rem 0.95rem;
+  border-radius: 18px;
+  background: rgba(15, 118, 110, 0.08);
+  display: grid;
+  gap: 0.25rem;
+}
+
+.session-line span:last-child {
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.logout-form {
+  margin: 0;
+}
+
+@media (max-width: 860px) {
+  .page-shell {
+    padding-top: 1.5rem;
+  }
+
+  .playground-grid {
+    grid-template-columns: 1fr;
+  }
+}
