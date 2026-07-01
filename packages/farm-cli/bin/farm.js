@@ -78,6 +78,86 @@ program
     }
   });
 
+const addCommand = program.command("add").description("Add Farm.js components to the current app");
+
+addCommand
+  .command("integration [provider]")
+  .alias("integrations")
+  .description("Add an official Farm.js integration to the app registry")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-k, --key <key>", "Registry key to use in appIntegrations")
+  .option("-f, --file <file>", "Path to the app integrations registry", "src/lib/integrations.ts")
+  .option("--force", "Overwrite an existing generated integration component")
+  .option("--dry-run", "Show what would be added without writing files")
+  .option("--skip-package-json", "Do not add @farmjs/integrations to package.json")
+  .option("--skip-config", "Do not create or update farm.config")
+  .option("-l, --list", "List supported integration providers")
+  .action(async (provider, options) => {
+    try {
+      const {
+        addFarmIntegration,
+        listFarmIntegrationProviders,
+      } = require("../dist/add-integration.js");
+
+      if (options.list) {
+        for (const entry of listFarmIntegrationProviders()) {
+          console.log(`${entry.name.padEnd(13)} ${entry.description}`);
+        }
+        return;
+      }
+
+      if (!provider) {
+        console.error("Please pass an integration provider, or use --list.");
+        process.exit(1);
+      }
+
+      const result = await addFarmIntegration({
+        root: options.root,
+        provider,
+        key: options.key,
+        integrationsFile: options.file,
+        dryRun: options.dryRun,
+        force: options.force,
+        skipPackageJson: options.skipPackageJson,
+        skipConfig: options.skipConfig,
+      });
+
+      const verb = options.dryRun ? "Prepared" : "Added";
+      console.log(`${verb} ${result.provider} integration as appIntegrations.${result.key}`);
+
+      if (result.created.length) {
+        console.log("Created:");
+        for (const file of result.created) {
+          console.log(`  ${file}`);
+        }
+      }
+
+      if (result.updated.length) {
+        console.log("Updated:");
+        for (const file of result.updated) {
+          console.log(`  ${file}`);
+        }
+      }
+
+      if (result.env.length) {
+        console.log("Environment:");
+        for (const key of result.env) {
+          console.log(`  ${key}`);
+        }
+      }
+
+      if (result.notes.length) {
+        console.log("Notes:");
+        for (const note of result.notes) {
+          console.log(`  ${note}`);
+        }
+      }
+    } catch (error) {
+      console.error("Failed to add integration:", error);
+      process.exit(1);
+    }
+  });
+
 program
   .command("deploy")
   .description("Deploy to a platform")
