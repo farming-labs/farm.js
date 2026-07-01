@@ -6,6 +6,8 @@ node_modules/
 # Production builds
 dist/
 build/
+!packages/farm/src/build/
+!packages/farm/src/build/**
 .next/
 out/
 .farm/
