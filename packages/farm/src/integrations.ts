@@ -17,7 +17,8 @@ import {
   hasRequestContext,
   setRequestContext,
 } from "./request-context";
-import type { FarmRequest, FarmResponse } from "./types";
+import { sendWebResponse } from "./server/response";
+import type { FarmRequest } from "./types";
 
 export { api, defineIntegrationAPI, defineIntegrationAPIOperation } from "./integration-api";
 export type {
@@ -1767,28 +1768,6 @@ function createWebRequest(req: FarmRequest, fullUrl: string, body?: Buffer): Req
     headers,
     body: body as BodyInit | undefined,
   });
-}
-
-async function sendWebResponse(res: FarmResponse, response: Response): Promise<void> {
-  res.statusCode = response.status;
-
-  const responseHeaders = response.headers as Headers & {
-    getSetCookie?: () => string[];
-  };
-  const setCookies = responseHeaders.getSetCookie?.() || [];
-  if (setCookies.length > 0) {
-    res.setHeader("Set-Cookie", setCookies);
-  }
-
-  response.headers.forEach((value, key) => {
-    if (key.toLowerCase() === "set-cookie" && setCookies.length > 0) {
-      return;
-    }
-    res.setHeader(key, value);
-  });
-
-  const body = await response.arrayBuffer();
-  res.end(Buffer.from(body));
 }
 
 function matchesMethod(methods: readonly string[], method: string | undefined): boolean {

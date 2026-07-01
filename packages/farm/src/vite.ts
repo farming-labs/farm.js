@@ -9,6 +9,7 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateRouteTypes } from "./routing/generate-route-types";
+import { sendWebResponse } from "./server/response";
 import { getClientModuleMetadata, isClientComponentModule } from "./utils/client-component";
 import {
   dispatchIntegrationRequest,
@@ -331,13 +332,7 @@ export function farmPlugin(
             const duration = Date.now() - startTime;
             logResponse(requestMethod, requestUrl, response.status, duration, "API");
 
-            res.statusCode = response.status;
-            response.headers.forEach((value, key) => {
-              res.setHeader(key, value);
-            });
-
-            const responseBody = await response.text();
-            res.end(responseBody);
+            await sendWebResponse(res, response);
             return true;
           } catch (error) {
             const duration = Date.now() - startTime;
@@ -441,13 +436,7 @@ export function farmPlugin(
               logResponse(method, urlPath, handledResponse.status, duration, "API");
 
               // Send response
-              res.statusCode = handledResponse.status;
-              handledResponse.headers.forEach((value, key) => {
-                res.setHeader(key, value);
-              });
-
-              const responseBody = await handledResponse.text();
-              res.end(responseBody);
+              await sendWebResponse(res, handledResponse);
               return;
             } catch (error) {
               await emitPluginError("api-handler", error, { urlPath, method });

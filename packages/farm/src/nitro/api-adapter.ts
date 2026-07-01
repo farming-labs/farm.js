@@ -1,6 +1,6 @@
 import type { APIRouteManager } from "../api/route-manager";
 import type { H3Event } from "h3";
-import { getHeaders, readBody, setHeaders, setResponseStatus } from "h3";
+import { getHeaders, readBody, sendWebResponse, setResponseStatus } from "h3";
 
 /**
  * Convert better-call API routes to Nitro-compatible handlers
@@ -63,17 +63,7 @@ export async function createNitroAPIHandlers(
 
           const response = await betterCallHandler(request);
 
-          // Convert Response to H3 response
-          const responseBody = await response.text();
-          const responseHeaders: Record<string, string> = {};
-          response.headers.forEach((value, key) => {
-            responseHeaders[key] = value;
-          });
-
-          setResponseStatus(event, response.status);
-          setHeaders(event, responseHeaders);
-
-          return responseBody;
+          return sendWebResponse(response);
         } catch (error: any) {
           setResponseStatus(event, 500);
           return {

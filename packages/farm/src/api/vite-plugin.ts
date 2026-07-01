@@ -16,6 +16,8 @@
  */
 
 import type { Plugin, ViteDevServer } from "vite";
+import { API_ROUTE_METHODS, invokeAPIRouteEndpoint, matchAPIRoute } from "./route-manager";
+import { sendWebResponse } from "../server/response";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -78,17 +80,18 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     if (totalEndpoints > 0) {
       apiRouterHandler = async (request: Request): Promise<Response> => {
         const url = new URL(request.url);
-        const method = request.method;
+        const method = request.method.toUpperCase();
         const pathname = url.pathname;
 
-        const route = apiRoutesCache.get(pathname);
-        if (!route) {
+        const match = matchAPIRoute(apiRoutesCache, pathname);
+        if (!match) {
           return new Response(JSON.stringify({ error: "Not Found" }), {
             status: 404,
             headers: { "Content-Type": "application/json" },
           });
         }
 
+        const { route, params } = match;
         const endpoint = route.endpoints[method];
         if (!endpoint) {
           return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
@@ -98,90 +101,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         }
 
         try {
-          // Parse query params
-          const queryObj: Record<string, string> = {};
-          url.searchParams.forEach((value, key) => {
-            queryObj[key] = value;
-          });
-
-          // Parse body for non-GET requests
-          let bodyObj: any = {};
-          if (method !== "GET" && method !== "HEAD") {
-            try {
-              const bodyText = await request.text();
-              if (bodyText) {
-                bodyObj = JSON.parse(bodyText);
-              }
-            } catch {
-              // Body parsing failed
-            }
-          }
-
-          // Parse headers
-          const headersObj: Record<string, string> = {};
-          request.headers.forEach((value, key) => {
-            headersObj[key] = value;
-          });
-
-          // Validate with Zod if schemas are defined
-          const types = endpoint.__types || {};
-          let validatedQuery = queryObj;
-          let validatedBody = bodyObj;
-
-          if (types.query && typeof types.query.parse === "function") {
-            try {
-              validatedQuery = types.query.parse(queryObj);
-            } catch (e: any) {
-              return new Response(
-                JSON.stringify({
-                  error: "Invalid query parameters",
-                  details: e.errors || e.message,
-                }),
-                {
-                  status: 400,
-                  headers: { "Content-Type": "application/json" },
-                },
-              );
-            }
-          }
-
-          if (types.body && typeof types.body.parse === "function") {
-            try {
-              validatedBody = types.body.parse(bodyObj);
-            } catch (e: any) {
-              return new Response(
-                JSON.stringify({
-                  error: "Invalid request body",
-                  details: e.errors || e.message,
-                }),
-                {
-                  status: 400,
-                  headers: { "Content-Type": "application/json" },
-                },
-              );
-            }
-          }
-
-          const ctx = {
-            query: validatedQuery,
-            body: validatedBody,
-            headers: headersObj,
-            request,
-            context: {},
-            params: {},
-          };
-
-          const handlerFn = endpoint.__handler || endpoint;
-          const result = await handlerFn(ctx);
-
-          if (result instanceof Response) {
-            return result;
-          }
-
-          return new Response(JSON.stringify(result), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          return await invokeAPIRouteEndpoint(endpoint, request, params);
         } catch (error: any) {
           return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
             status: 500,
@@ -239,11 +159,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(filePath);
-            const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
-            for (const method of methods) {
+            for (const method of API_ROUTE_METHODS) {
               if (routeModule[method]) {
                 availableMethods.push(method);
                 endpoints[method] = routeModule[method];
@@ -286,7 +205,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
                 if (endpoint && endpoint.__path) {
                   const routePath = endpoint.__path;
-                  const method = endpoint.__method || "GET";
+                  const method = String(endpoint.__method || "GET").toUpperCase();
 
                   const existing = apiRoutesCache.get(routePath);
                   if (existing) {
@@ -405,13 +324,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             const duration = Date.now() - startTime;
             logResponse(method, pathname, response.status, duration);
 
-            res.statusCode = response.status;
-            response.headers.forEach((value, key) => {
-              res.setHeader(key, value);
-            });
-
-            const responseBody = await response.text();
-            res.end(responseBody);
+            await sendWebResponse(res, response);
           } catch (error: any) {
             const duration = Date.now() - startTime;
             logResponse(method, pathname, 500, duration);
@@ -450,7 +363,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
             if (endpoint && endpoint.__path) {
               const routePath = endpoint.__path;
-              const method = endpoint.__method || "GET";
+              const method = String(endpoint.__method || "GET").toUpperCase();
 
               const existing = apiRoutesCache.get(routePath);
               if (existing) {
@@ -497,11 +410,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         if (routePathToUpdate) {
           try {
             const routeModule = await server.ssrLoadModule(file);
-            const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
-            for (const method of methods) {
+            for (const method of API_ROUTE_METHODS) {
               if (routeModule[method]) {
                 availableMethods.push(method);
                 endpoints[method] = routeModule[method];
@@ -532,11 +444,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
             const routeModule = await server.ssrLoadModule(file);
-            const methods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
             const endpoints: Record<string, any> = {};
             const availableMethods: string[] = [];
 
-            for (const method of methods) {
+            for (const method of API_ROUTE_METHODS) {
               if (routeModule[method]) {
                 availableMethods.push(method);
                 endpoints[method] = routeModule[method];

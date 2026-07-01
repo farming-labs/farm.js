@@ -11,12 +11,15 @@ type InferOutput<T> = T extends { _output: infer O }
     ? R
     : unknown;
 
+export type EndpointParamValue = string | string[];
+export type EndpointParams = Record<string, EndpointParamValue>;
+
 export type EndpointOptions<
   TBody extends AnySchema = any,
   TQuery extends AnySchema = any,
   THeaders extends AnySchema = any,
 > = {
-  method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS";
+  method?: "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS";
   body?: TBody;
   query?: TQuery;
   headers?: THeaders;
@@ -34,7 +37,7 @@ export type EndpointHandler<
   headers: THeaders extends AnySchema ? InferOutput<THeaders> : Record<string, string>;
   request: Request;
   context: any;
-  params: Record<string, string>;
+  params: EndpointParams;
 }) => Promise<TResponse> | TResponse;
 
 // Type to represent an endpoint with its input/output types
@@ -134,6 +137,27 @@ export function GET(...args: any[]): any {
 }
 
 /**
+ * Convenience method for HEAD requests
+ */
+export function HEAD<T = any>(
+  handler: EndpointHandler<any, any, any, T>,
+): ReturnType<typeof createEndpoint>;
+export function HEAD<
+  TQuery extends AnySchema = any,
+  THeaders extends AnySchema = any,
+  TResponse = any,
+>(
+  options: Omit<EndpointOptions<any, TQuery, THeaders>, "method">,
+  handler: EndpointHandler<any, TQuery, THeaders, TResponse>,
+): ReturnType<typeof createEndpoint>;
+export function HEAD(...args: any[]): any {
+  if (args.length === 1) {
+    return createEndpoint("", { method: "HEAD" }, args[0]);
+  }
+  return createEndpoint("", { ...args[0], method: "HEAD" }, args[1]);
+}
+
+/**
  * Convenience method for POST requests
  */
 export function POST<T = any>(
@@ -219,4 +243,26 @@ export function PATCH(...args: any[]): any {
     return createEndpoint("", { method: "PATCH" }, args[0]);
   }
   return createEndpoint("", { ...args[0], method: "PATCH" }, args[1]);
+}
+
+/**
+ * Convenience method for OPTIONS requests
+ */
+export function OPTIONS<T = any>(
+  handler: EndpointHandler<any, any, any, T>,
+): ReturnType<typeof createEndpoint>;
+export function OPTIONS<
+  TBody extends AnySchema = any,
+  TQuery extends AnySchema = any,
+  THeaders extends AnySchema = any,
+  TResponse = any,
+>(
+  options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,
+  handler: EndpointHandler<TBody, TQuery, THeaders, TResponse>,
+): ReturnType<typeof createEndpoint>;
+export function OPTIONS(...args: any[]): any {
+  if (args.length === 1) {
+    return createEndpoint("", { method: "OPTIONS" }, args[0]);
+  }
+  return createEndpoint("", { ...args[0], method: "OPTIONS" }, args[1]);
 }
