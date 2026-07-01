@@ -12,6 +12,7 @@ test("lists official integration providers", () => {
   const providers = listFarmIntegrationProviders().map((provider) => provider.name);
 
   assert.ok(providers.includes("stripe"));
+  assert.ok(providers.includes("ai"));
   assert.ok(providers.includes("supabase"));
   assert.ok(providers.includes("jobs-inngest"));
 });
@@ -106,6 +107,43 @@ export default defineFarmConfig({
     assert.match(config, /import \{ appIntegrations \}/);
     assert.match(config, /integrations: appIntegrations/);
     assert.match(config, /vite:/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("adds a Vercel AI SDK chat route template", async () => {
+  const root = await createTempProject({
+    packageJson: {
+      type: "module",
+      dependencies: {
+        "@farmjs/core": "workspace:*",
+      },
+    },
+  });
+
+  try {
+    const result = await addFarmIntegration({
+      root,
+      provider: "vercel-ai-sdk",
+    });
+
+    const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    const routeFile = path.join(root, "src/app/api/chat/route.ts");
+    const route = await readFile(routeFile, "utf8");
+
+    assert.equal(result.provider, "ai");
+    assert.equal(result.key, "chat");
+    assert.equal(result.mode, "route");
+    assert.equal(result.routeFile, routeFile);
+    assert.equal(result.routePath, "/api/chat");
+    assert.deepEqual(result.env, ["AI_GATEWAY_API_KEY"]);
+    assert.equal(packageJson.dependencies["@farmjs/integrations"], "workspace:*");
+    assert.match(route, /import \{ aiChatRoute \} from "@farmjs\/integrations\/ai"/);
+    assert.match(route, /export const POST = aiChatRoute/);
+    assert.match(route, /model: "openai\/gpt-4o-mini"/);
+    await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));
+    await assert.rejects(() => readFile(path.join(root, "farm.config.ts"), "utf8"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -19,6 +19,10 @@
       "types": "./dist/better-auth/index.d.ts",
       "import": "./dist/better-auth/index.js"
     },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js"
+    },
     "./authjs": {
       "types": "./dist/authjs/index.d.ts",
       "import": "./dist/authjs/index.js"
@@ -109,6 +113,7 @@
     "@supabase/ssr": "^0.9.0",
     "@supabase/supabase-js": "^2.99.2",
     "@workos-inc/node": "^8.9.0",
+    "ai": "^7.0.11",
     "autumn-js": "^1.2.7",
     "resend": "6.10.0",
     "standardwebhooks": "^1.0.0",

@@ -1,4 +1,10 @@
 export { betterAuth } from "./better-auth/index.js";
+export {
+  aiChatRequestBodySchema,
+  aiChatRoute,
+  createAIChatRoute,
+  defineAIChatRoute,
+} from "./ai/index.js";
 export { authjs } from "./authjs/index.js";
 export { clerk } from "./clerk/index.js";
 export { auth0 } from "./auth0/index.js";
@@ -22,6 +28,14 @@ export {
   stripe,
   stripeSchema,
 } from "./stripe/index.js";
+export type {
+  AIChatPrepareContext,
+  AIChatRequestBody,
+  AIChatResponseOptions,
+  AIChatRouteOptions,
+  AIChatStreamTextOptions,
+  AIChatValidationIssue,
+} from "./ai/index.js";
 export type {
   StripeBillingFeatures,
   StripeBillingHookTools,

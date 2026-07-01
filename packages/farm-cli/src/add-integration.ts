@@ -14,6 +14,7 @@ export interface AddFarmIntegrationOptions {
   provider: string;
   key?: string;
   integrationsFile?: string;
+  routeFile?: string;
   skipPackageJson?: boolean;
   skipConfig?: boolean;
   dryRun?: boolean;
@@ -23,8 +24,11 @@ export interface AddFarmIntegrationOptions {
 export interface AddFarmIntegrationResult {
   provider: FarmIntegrationProvider;
   key: string;
+  mode?: "integration" | "route";
   integrationFile: string;
   registryFile: string;
+  routeFile?: string;
+  routePath?: string;
   packageJson?: string;
   configFile?: string;
   created: string[];
@@ -35,6 +39,7 @@ export interface AddFarmIntegrationResult {
 }
 
 export type FarmIntegrationProvider =
+  | "ai"
   | "auth0"
   | "authjs"
   | "autumn"
@@ -61,6 +66,27 @@ interface IntegrationProviderDefinition {
 }
 
 const PROVIDERS: readonly IntegrationProviderDefinition[] = [
+  {
+    provider: "ai",
+    aliases: ["ai-sdk", "vercel-ai", "vercel-ai-sdk", "chat"],
+    defaultKey: "chat",
+    fileName: "chat",
+    exportName: "POST",
+    description: "Vercel AI SDK chat route",
+    env: ["AI_GATEWAY_API_KEY"],
+    notes: [
+      'Use @ai-sdk/react useChat with api: "/api/chat" on the client.',
+      "Replace model with any AI SDK provider model or Vercel AI Gateway model id.",
+      "No farm.config integration wiring is required for this route.",
+    ],
+    template: () => `import { aiChatRoute } from "@farmjs/integrations/ai";
+
+export const POST = aiChatRoute({
+  model: "openai/gpt-4o-mini",
+  system: "You are a helpful assistant.",
+});
+`,
+  },
   {
     provider: "stripe",
     aliases: ["billing-stripe", "payments", "stripe-billing"],
@@ -385,6 +411,18 @@ export async function addFarmIntegration(
 ): Promise<AddFarmIntegrationResult> {
   const root = path.resolve(options.root || process.cwd());
   const definition = resolveProvider(options.provider);
+
+  if (definition.provider === "ai") {
+    return addAIRouteIntegration({
+      root,
+      definition,
+      routeFile: options.routeFile,
+      skipPackageJson: options.skipPackageJson,
+      dryRun: options.dryRun,
+      force: options.force,
+    });
+  }
+
   const key = options.key || definition.defaultKey;
   assertValidIntegrationKey(key);
 
@@ -400,6 +438,7 @@ export async function addFarmIntegration(
   const result: AddFarmIntegrationResult = {
     provider: definition.provider,
     key,
+    mode: "integration",
     integrationFile,
     registryFile,
     created: [],
@@ -438,6 +477,52 @@ export async function addFarmIntegration(
       root,
       registryFile,
       dryRun: options.dryRun,
+      result,
+    });
+  }
+
+  return result;
+}
+
+async function addAIRouteIntegration(input: {
+  root: string;
+  definition: IntegrationProviderDefinition;
+  routeFile?: string;
+  skipPackageJson?: boolean;
+  dryRun?: boolean;
+  force?: boolean;
+}): Promise<AddFarmIntegrationResult> {
+  const routeFile = path.resolve(
+    input.root,
+    input.routeFile || path.join("src", "app", "api", "chat", "route.ts"),
+  );
+  const result: AddFarmIntegrationResult = {
+    provider: "ai",
+    key: input.definition.defaultKey,
+    mode: "route",
+    integrationFile: routeFile,
+    registryFile: "",
+    routeFile,
+    routePath: "/api/chat",
+    created: [],
+    updated: [],
+    skipped: [],
+    env: [...input.definition.env],
+    notes: [...(input.definition.notes || [])],
+  };
+
+  await writeIntegrationComponent({
+    path: routeFile,
+    definition: input.definition,
+    force: input.force,
+    dryRun: input.dryRun,
+    result,
+  });
+
+  if (!input.skipPackageJson) {
+    await updatePackageJson({
+      root: input.root,
+      dryRun: input.dryRun,
       result,
     });
   }

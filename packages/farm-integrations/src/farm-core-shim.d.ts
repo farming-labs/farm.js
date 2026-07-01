@@ -427,6 +427,52 @@ declare module "@farmjs/core" {
     integration: TIntegration,
   ): DefinedIntegration<TIntegration>;
 
+  type FarmEndpointSchema<TValue = unknown> = {
+    parse(value: unknown): TValue;
+  };
+
+  type InferFarmEndpointSchema<TSchema> =
+    TSchema extends FarmEndpointSchema<infer TValue> ? TValue : unknown;
+
+  export type FarmTypedEndpoint<TBody = never, TQuery = never, TResponse = unknown> = {
+    __types: {
+      body: TBody;
+      query: TQuery;
+      response: TResponse;
+    };
+    __path?: string;
+    __method?: string;
+  } & ((options?: { body?: TBody; query?: TQuery }) => Promise<TResponse>);
+
+  export function createEndpoint<
+    TBodySchema extends FarmEndpointSchema | undefined = undefined,
+    TQuerySchema extends FarmEndpointSchema | undefined = undefined,
+    THeadersSchema extends FarmEndpointSchema | undefined = undefined,
+    TResponse = unknown,
+  >(
+    options: {
+      method?: FarmIntegrationAPIMethod;
+      body?: TBodySchema;
+      query?: TQuerySchema;
+      headers?: THeadersSchema;
+      use?: unknown[];
+    },
+    handler: (context: {
+      body: InferFarmEndpointSchema<TBodySchema>;
+      query: InferFarmEndpointSchema<TQuerySchema>;
+      headers: THeadersSchema extends FarmEndpointSchema
+        ? InferFarmEndpointSchema<THeadersSchema>
+        : Record<string, string>;
+      request: Request;
+      context: unknown;
+      params: FarmIntegrationRouteParams;
+    }) => TResponse | Promise<TResponse>,
+  ): FarmTypedEndpoint<
+    InferFarmEndpointSchema<TBodySchema>,
+    InferFarmEndpointSchema<TQuerySchema>,
+    Awaited<TResponse>
+  >;
+
   export const integrationRoute: {
     get<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
       path: TPath,

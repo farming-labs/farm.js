@@ -215,6 +215,70 @@ describe("APIRouteManager", () => {
     });
   });
 
+  it("supports Next-style POST exports created with createEndpoint", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "chat");
+    fs.mkdirSync(routeDir, { recursive: true });
+    const routeFile = path.join(routeDir, "route.js");
+    fs.writeFileSync(routeFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async (filePath: string) => {
+        expect(filePath).toBe(routeFile);
+        return {
+          POST: createEndpoint(
+            {
+              method: "POST",
+              body: z.object({
+                message: z.string().min(1),
+              }),
+            },
+            async (ctx) =>
+              Response.json({
+                message: ctx.body.message,
+                path: new URL(ctx.request.url).pathname,
+              }),
+          ),
+        };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+    const handler = manager.getHandler();
+
+    expect(handler).toBeTypeOf("function");
+    expect(Array.from(manager.getRoutes().keys())).toEqual(["/api/chat"]);
+
+    const response = await handler!(
+      new Request("http://example.com/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "hello" }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      message: "hello",
+      path: "/api/chat",
+    });
+
+    const invalidResponse = await handler!(
+      new Request("http://example.com/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: "" }),
+      }),
+    );
+
+    expect(invalidResponse.status).toBe(400);
+    await expect(invalidResponse.json()).resolves.toMatchObject({
+      error: "Invalid request body",
+    });
+  });
+
   it("discovers explicit-path createEndpoint routes from root routes files", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
     tempDirs.push(root);
