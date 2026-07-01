@@ -1,11 +1,15 @@
 import { EventEmitter } from "events";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { z } from "zod";
 import { PluginManager } from "../plugin";
 import {
   defineIntegration,
+  dispatchIntegrationRequest,
+  getRegisteredIntegrationRuntime,
   getIntegrationDocumentNavigationMatchers,
   getIntegrationSchemas,
   getRegisteredIntegrationSchemas,
+  integrationRoute,
   matchRegisteredIntegrationRoute,
   resolveIntegrationPlugins,
   type FarmIntegrationSchema,
@@ -315,6 +319,171 @@ describe("integrations runtime", () => {
     expect(JSON.parse(postRes.body.toString())).toEqual({
       mode: "post",
       message: "hello",
+    });
+  });
+
+  it("validates route input schemas and exposes parsed values in handler context", async () => {
+    const routeMiddleware = vi.fn();
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.post("/api/local-demo/messages", {
+              input: {
+                body: z.object({
+                  message: z.string().min(2),
+                }),
+                query: z.object({
+                  count: z.coerce.number().int().positive(),
+                }),
+              },
+              middleware: [
+                {
+                  handler() {
+                    routeMiddleware();
+                  },
+                },
+              ],
+              async handler(request, context) {
+                expectTypeOf(context.input.body).toEqualTypeOf<
+                  | {
+                      message: string;
+                    }
+                  | undefined
+                >();
+                expectTypeOf(context.input.query).toEqualTypeOf<
+                  | {
+                      count: number;
+                    }
+                  | undefined
+                >();
+
+                const rawBody = (await request.json()) as { message: string };
+                return Response.json({
+                  message: context.input.body?.message,
+                  count: context.input.query?.count,
+                  rawMessage: rawBody.message,
+                });
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+
+    const invalidReq = createRequest("/api/local-demo/messages?count=bad", "POST");
+    const invalidRes = createResponse();
+    const invalidPromise = manager.runHookParallel(
+      "beforeRequest",
+      invalidReq as any,
+      invalidRes as any,
+    );
+    setImmediate(() => {
+      invalidReq.emit("data", Buffer.from(JSON.stringify({ message: "x" })));
+      invalidReq.emit("end");
+    });
+    const invalidEnded = await invalidPromise;
+
+    expect(invalidEnded).toBe(true);
+    expect(invalidRes.statusCode).toBe(400);
+    expect(JSON.parse(invalidRes.body.toString())).toEqual({
+      error: "Integration route input validation failed",
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          source: "body",
+          path: ["message"],
+        }),
+        expect.objectContaining({
+          source: "query",
+          path: ["count"],
+        }),
+      ]),
+    });
+    expect(routeMiddleware).not.toHaveBeenCalled();
+
+    const validReq = createRequest("/api/local-demo/messages?count=2", "POST");
+    const validRes = createResponse();
+    const validPromise = manager.runHookParallel("beforeRequest", validReq as any, validRes as any);
+    setImmediate(() => {
+      validReq.emit("data", Buffer.from(JSON.stringify({ message: "hello" })));
+      validReq.emit("end");
+    });
+    const validEnded = await validPromise;
+
+    expect(validEnded).toBe(true);
+    expect(validRes.statusCode).toBe(200);
+    expect(JSON.parse(validRes.body.toString())).toEqual({
+      message: "hello",
+      count: 2,
+      rawMessage: "hello",
+    });
+    expect(routeMiddleware).toHaveBeenCalledTimes(1);
+  });
+
+  it("validates route input schemas during server integration dispatch", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        serverValidation: defineIntegration({
+          category: "custom",
+          type: "server-validation",
+          instance: {},
+          routes: [
+            integrationRoute.post("/api/server-validation/echo", {
+              input: {
+                body: z.object({
+                  value: z.string().min(1),
+                }),
+              },
+              handler(_request, context) {
+                return Response.json({
+                  value: context.input.body?.value,
+                });
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("serverValidation");
+    expect(runtime).toBeDefined();
+
+    const invalidResponse = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/server-validation/echo", {
+        method: "POST",
+        body: JSON.stringify({ value: "" }),
+      }),
+    );
+
+    expect(invalidResponse?.status).toBe(400);
+    expect(await invalidResponse?.json()).toEqual({
+      error: "Integration route input validation failed",
+      issues: [
+        expect.objectContaining({
+          source: "body",
+          path: ["value"],
+        }),
+      ],
+    });
+
+    const validResponse = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/server-validation/echo", {
+        method: "POST",
+        body: JSON.stringify({ value: "ok" }),
+      }),
+    );
+
+    expect(validResponse?.status).toBe(200);
+    expect(await validResponse?.json()).toEqual({
+      value: "ok",
     });
   });
 

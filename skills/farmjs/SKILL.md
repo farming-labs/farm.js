@@ -174,6 +174,37 @@ When building a new integration, use core primitives from `@farmjs/core`:
 
 Follow existing provider code in `packages/farm-integrations/src/<provider>`.
 
+Integration routes can validate body and query input with Zod-compatible schemas:
+
+```ts
+import { z } from "zod";
+import { defineIntegration, integrationRoute } from "@farmjs/core";
+
+export const localDemo = defineIntegration({
+  category: "custom",
+  type: "local-demo",
+  instance: {},
+  routes: [
+    integrationRoute.post("/api/local-demo/message", {
+      input: {
+        body: z.object({
+          message: z.string().min(1),
+        }),
+        query: z.object({
+          count: z.coerce.number().int().positive().optional(),
+        }),
+      },
+      handler(_request, context) {
+        return Response.json({
+          message: context.input.body?.message,
+          count: context.input.query?.count,
+        });
+      },
+    }),
+  ],
+});
+```
+
 ## Stripe Integration Spec
 
 Simple checkout example: `examples/stripe-integration`.

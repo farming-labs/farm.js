@@ -51,6 +51,7 @@ function createContext(
     pathname: new URL(request.url).pathname,
     method,
     params: {},
+    input: {},
     integration: {
       category: "payment",
       slot: "payment",

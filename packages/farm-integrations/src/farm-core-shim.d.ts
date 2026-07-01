@@ -16,6 +16,50 @@ declare module "@farmjs/core" {
     | Lowercase<FarmIntegrationAPIMethod>
     | "ALL"
     | "all";
+  export type FarmIntegrationRouteInputSource = "body" | "query";
+
+  type MaybePromise<T> = T | Promise<T>;
+
+  export interface FarmIntegrationRouteInput<TBody = unknown, TQuery = unknown> {
+    body?: TBody;
+    query?: TQuery;
+  }
+
+  export interface FarmIntegrationValidationIssue {
+    source: FarmIntegrationRouteInputSource;
+    path?: readonly (string | number)[];
+    code?: string;
+    message: string;
+  }
+
+  export interface FarmIntegrationValidationErrorLike {
+    issues?: readonly {
+      path?: readonly (string | number)[];
+      code?: string;
+      message?: string;
+    }[];
+    message?: string;
+  }
+
+  export type FarmIntegrationValidationResult<TValue> =
+    | {
+        success: true;
+        data: TValue;
+      }
+    | {
+        success: false;
+        error: FarmIntegrationValidationErrorLike;
+      };
+
+  export interface FarmIntegrationInputSchema<TValue = unknown> {
+    safeParse?(value: unknown): MaybePromise<FarmIntegrationValidationResult<TValue>>;
+    safeParseAsync?(value: unknown): Promise<FarmIntegrationValidationResult<TValue>>;
+  }
+
+  export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unknown> {
+    body?: FarmIntegrationInputSchema<TBody>;
+    query?: FarmIntegrationInputSchema<TQuery>;
+  }
 
   export interface FarmIntegrationRequestContextStore {
     get<T = unknown>(key: string): T | undefined;
@@ -26,13 +70,14 @@ declare module "@farmjs/core" {
     snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
   }
 
-  export interface FarmIntegrationHandlerContext {
+  export interface FarmIntegrationHandlerContext<TBody = unknown, TQuery = unknown> {
     request: Request;
     requestId: string;
     url: URL;
     pathname: string;
     method: string;
     params: FarmIntegrationRouteParams;
+    input: FarmIntegrationRouteInput<TBody, TQuery>;
     integration: {
       category: FarmIntegrationCategory;
       /** @deprecated Use category instead. */
@@ -51,13 +96,18 @@ declare module "@farmjs/core" {
     isProd: boolean;
   }
 
-  export interface FarmIntegrationRoute {
+  export interface FarmIntegrationRoute<TBody = unknown, TQuery = unknown> {
     path: string;
     method?: FarmIntegrationRouteMethod;
     methods?: readonly FarmIntegrationRouteMethod[];
     middleware?: readonly FarmIntegrationRouteMiddleware[];
     rawBody?: boolean;
-    handler(request: Request, context: FarmIntegrationHandlerContext): Promise<Response> | Response;
+    bodyFormat?: FarmIntegrationAPIBodyFormat;
+    input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
+    handler(
+      request: Request,
+      context: FarmIntegrationHandlerContext<TBody, TQuery>,
+    ): Promise<Response> | Response;
   }
 
   export interface FarmIntegrationRouteMiddleware {
@@ -74,7 +124,7 @@ declare module "@farmjs/core" {
     TResponse = unknown,
     TServer extends boolean = false,
     TMethod extends FarmIntegrationAPIMethod = FarmIntegrationAPIMethod,
-  > extends FarmIntegrationRoute {
+  > extends FarmIntegrationRoute<TBody, TQuery> {
     path: TPath;
     method: TMethod;
     __operation: FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
@@ -387,9 +437,10 @@ declare module "@farmjs/core" {
         credentials?: RequestCredentials;
         responseFormat?: FarmIntegrationAPIResponseFormat;
         isServer?: TServer;
+        input?: FarmIntegrationRouteInputSchemas<never, TQuery>;
         handler(
           request: Request,
-          context: FarmIntegrationHandlerContext,
+          context: FarmIntegrationHandlerContext<never, TQuery>,
         ): Promise<Response> | Response;
       },
     ): FarmTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "GET">;
@@ -409,9 +460,10 @@ declare module "@farmjs/core" {
         bodyFormat?: FarmIntegrationAPIBodyFormat;
         responseFormat?: FarmIntegrationAPIResponseFormat;
         isServer?: TServer;
+        input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
         handler(
           request: Request,
-          context: FarmIntegrationHandlerContext,
+          context: FarmIntegrationHandlerContext<TBody, TQuery>,
         ): Promise<Response> | Response;
       },
     ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST">;
