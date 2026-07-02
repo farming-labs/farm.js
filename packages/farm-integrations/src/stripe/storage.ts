@@ -153,9 +153,15 @@ export interface StripeBillingStorageAdapter {
   clearBillingSnapshot(owner: StripeBillingOwner): Promise<void>;
 }
 
+export interface StripeBillingStorageTools {
+  getClient(): Promise<unknown | undefined>;
+  getOrm(): Promise<unknown>;
+}
+
 export interface StripeBillingHookTools {
   ctx: FarmIntegrationHandlerContext;
   stripe: Stripe | null;
+  storage: StripeBillingStorageTools;
 }
 
 export interface StripeBillingUsageOptions {
@@ -251,6 +257,7 @@ export interface StripeBillingHooks {
 export interface StripeBillingOptions {
   resolveOwner(
     context: FarmIntegrationHandlerContext,
+    tools?: StripeBillingHookTools,
   ): Promise<StripeBillingOwner | null> | StripeBillingOwner | null;
   plans?: Record<string, StripeBillingPlan>;
   products?: Record<string, StripeBillingProduct>;

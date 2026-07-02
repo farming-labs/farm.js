@@ -2845,21 +2845,57 @@ function hasConfiguredStorageRuntimeClient(context: FarmIntegrationHandlerContex
   );
 }
 
+async function resolveConfiguredStorageRuntimeClient(
+  context: FarmIntegrationHandlerContext,
+): Promise<unknown | undefined> {
+  if (!hasConfiguredStorageRuntimeClient(context)) {
+    return undefined;
+  }
+
+  const storage = (context.config as { storage?: { client?: unknown } }).storage;
+  const client = storage?.client;
+  return typeof client === "function"
+    ? await (client as () => unknown | Promise<unknown>)()
+    : client;
+}
+
+function createBillingHookTools(
+  context: FarmIntegrationHandlerContext,
+  stripe: Stripe | null,
+  schema: FarmIntegrationSchema,
+): StripeBillingHookTools {
+  let clientPromise: Promise<unknown | undefined> | undefined;
+  let ormPromise: ReturnType<typeof createIntegrationOrm> | undefined;
+
+  return {
+    ctx: context,
+    stripe,
+    storage: {
+      getClient() {
+        clientPromise ??= resolveConfiguredStorageRuntimeClient(context);
+        return clientPromise;
+      },
+      getOrm() {
+        ormPromise ??= createIntegrationOrm({
+          schema,
+          config: context.config,
+        });
+        return ormPromise;
+      },
+    },
+  };
+}
+
 function resolveConfiguredBillingStorage(
   context: FarmIntegrationHandlerContext,
-  schema: FarmIntegrationSchema,
+  tools: StripeBillingHookTools,
 ): StripeBillingStorageAdapter | undefined {
   if (!hasConfiguredStorageRuntimeClient(context)) {
     return undefined;
   }
 
-  let ormPromise: ReturnType<typeof createIntegrationOrm> | undefined;
   return ormStorageAdapter({
-    orm: () =>
-      (ormPromise ??= createIntegrationOrm({
-        schema,
-        config: context.config,
-      })),
+    orm: () => tools.storage.getOrm(),
   });
 }
 
@@ -2868,12 +2904,9 @@ function resolveBillingPersistence(
   context: FarmIntegrationHandlerContext,
   stripe: Stripe | null,
   schema: FarmIntegrationSchema = stripeSchema,
+  tools: StripeBillingHookTools = createBillingHookTools(context, stripe, schema),
 ) {
-  const tools: StripeBillingHookTools = {
-    ctx: context,
-    stripe,
-  };
-  const storage = billing?.storage ?? resolveConfiguredBillingStorage(context, schema);
+  const storage = billing?.storage ?? resolveConfiguredBillingStorage(context, tools);
 
   return {
     tools,
@@ -2918,6 +2951,14 @@ function requireBillingMethod<T>(value: T | undefined, label: string): T {
   }
 
   return value;
+}
+
+async function resolveBillingOwner(
+  billing: StripeBillingOptions,
+  context: FarmIntegrationHandlerContext,
+  tools: StripeBillingHookTools,
+): Promise<StripeBillingOwner | null> {
+  return await billing.resolveOwner(context, tools);
 }
 
 function resolveProductIdFromSession(session: StripeSessionResult): string | null {
@@ -3199,7 +3240,7 @@ async function resolveBillingSnapshotForSession(
     return null;
   }
 
-  let owner = await billing.resolveOwner(context);
+  let owner = await resolveBillingOwner(billing, context, persistence.tools);
   let existingSnapshot: StripeBillingSnapshot | null = null;
 
   if (session.customerId && persistence.getBillingAccountByStripeCustomerId) {
@@ -3603,7 +3644,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -3620,6 +3662,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             context,
             stripeSdk,
             integrationSchema,
+            billingTools,
           );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
@@ -3682,7 +3725,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -3699,6 +3743,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             context,
             stripeSdk,
             integrationSchema,
+            billingTools,
           );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
@@ -3727,7 +3772,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -3744,6 +3790,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             context,
             stripeSdk,
             integrationSchema,
+            billingTools,
           );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
@@ -3774,7 +3821,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               );
             }
 
-            const owner = await input.billing.resolveOwner(context);
+            const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+            const owner = await resolveBillingOwner(input.billing, context, billingTools);
             if (!owner) {
               return Response.json(
                 {
@@ -3804,6 +3852,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               context,
               stripeSdk,
               integrationSchema,
+              billingTools,
             );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
@@ -3854,7 +3903,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -3896,6 +3946,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             context,
             stripeSdk,
             integrationSchema,
+            billingTools,
           );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
@@ -4012,7 +4063,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -4029,6 +4081,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             context,
             stripeSdk,
             integrationSchema,
+            billingTools,
           );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
@@ -4134,7 +4187,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               );
             }
 
-            const owner = await input.billing.resolveOwner(context);
+            const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+            const owner = await resolveBillingOwner(input.billing, context, billingTools);
             if (!owner) {
               return Response.json(
                 {
@@ -4151,6 +4205,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               context,
               stripeSdk,
               integrationSchema,
+              billingTools,
             );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
@@ -4268,7 +4323,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -4356,6 +4412,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             context,
             stripeSdk,
             integrationSchema,
+            billingTools,
           );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
@@ -4657,7 +4714,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               );
             }
 
-            const owner = await input.billing.resolveOwner(context);
+            const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+            const owner = await resolveBillingOwner(input.billing, context, billingTools);
             if (!owner) {
               return Response.json(
                 {
@@ -4701,6 +4759,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               context,
               stripeSdk,
               integrationSchema,
+              billingTools,
             );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
@@ -4777,7 +4836,13 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
 
             try {
               const product = getProduct(configuredProducts, productId);
-              const billingOwner = input.billing ? await input.billing.resolveOwner(context) : null;
+              const billingTools = input.billing
+                ? createBillingHookTools(context, stripeSdk, integrationSchema)
+                : undefined;
+              const billingOwner =
+                input.billing && billingTools
+                  ? await resolveBillingOwner(input.billing, context, billingTools)
+                  : null;
               if (input.billing && !billingOwner) {
                 return Response.json(
                   {
@@ -4794,6 +4859,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                 context,
                 stripeSdk,
                 integrationSchema,
+                billingTools,
               );
               const existingSnapshot =
                 input.billing && billingOwner && persistence.getBillingAccount
@@ -4954,7 +5020,8 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const owner = await input.billing.resolveOwner(context);
+          const billingTools = createBillingHookTools(context, stripeSdk, integrationSchema);
+          const owner = await resolveBillingOwner(input.billing, context, billingTools);
           if (!owner) {
             return Response.json(
               {
@@ -4978,6 +5045,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               context,
               stripeSdk,
               integrationSchema,
+              billingTools,
             );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
@@ -5128,11 +5196,15 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
           try {
             let customerId = typeof body.customerId === "string" ? body.customerId : undefined;
 
+            const billingTools = input.billing
+              ? createBillingHookTools(context, stripeSdk, integrationSchema)
+              : undefined;
             const persistence = resolveBillingPersistence(
               input.billing,
               context,
               stripeSdk,
               integrationSchema,
+              billingTools,
             );
 
             if (!customerId && typeof body.sessionId === "string") {
@@ -5141,7 +5213,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             }
 
             if (!customerId && input.billing) {
-              const owner = await input.billing.resolveOwner(context);
+              const owner = await resolveBillingOwner(input.billing, context, persistence.tools);
               if (owner) {
                 const getBillingAccount = requireBillingMethod(
                   persistence.getBillingAccount,

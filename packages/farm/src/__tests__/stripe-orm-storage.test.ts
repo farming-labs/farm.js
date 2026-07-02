@@ -155,6 +155,8 @@ describe("stripe ORM-backed storage", () => {
         id: "user_orm_1",
         email: "owner@example.com",
       };
+      let ownerToolsClient: unknown;
+      let ownerToolsOrmStatus: unknown;
       const integration = stripe({
         instance: {
           async createCheckoutSession() {
@@ -176,7 +178,25 @@ describe("stripe ORM-backed storage", () => {
           },
         },
         billing: {
-          async resolveOwner() {
+          async resolveOwner(_context, tools) {
+            if (!tools) {
+              throw new Error("Expected Stripe billing tools.");
+            }
+
+            ownerToolsClient = await tools.storage.getClient();
+            const orm = (await tools.storage.getOrm()) as {
+              billingAccount: {
+                findFirst(args: {
+                  where: Record<string, unknown>;
+                }): Promise<Record<string, unknown> | null>;
+              };
+            };
+            const account = await orm.billingAccount.findFirst({
+              where: {
+                ownerId: owner.id,
+              },
+            });
+            ownerToolsOrmStatus = account?.status;
             return owner;
           },
           plans: {
@@ -225,6 +245,8 @@ describe("stripe ORM-backed storage", () => {
       const json = JSON.parse(await response.text()) as Record<string, unknown>;
 
       expect(response.status).toBe(200);
+      expect(ownerToolsClient).toBe(db);
+      expect(ownerToolsOrmStatus).toBe("active");
       expect(json).toMatchObject({
         owner: {
           kind: "user",
