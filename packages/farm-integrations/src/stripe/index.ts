@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import {
+  createIntegrationOrm,
   defineIntegration,
   integrationRoute,
   type FarmIntegration,
@@ -8,9 +9,7 @@ import {
   type FarmIntegrationLogger,
   type FarmIntegrationSchema,
 } from "@farmjs/core";
-import { api as clientApi } from "@farmjs/core/client";
 import {
-  getOrigin,
   normalizeWebhookConfig,
   resolveAppPath,
   toAbsoluteUrl,
@@ -35,7 +34,6 @@ import {
   type StripeBillingUpgradeResult,
   type StripeBillingFeaturesResult,
   type StripeBillingLimitsResult,
-  stripeClient,
   type StripeBillingUsageInput,
   type StripeBillingUsageResult,
   type StripeBillingStatusResult,
@@ -57,6 +55,7 @@ import {
 } from "./client.js";
 import {
   drizzleStorageAdapter,
+  ormStorageAdapter,
   prismaStorageAdapter,
   sqliteStorageAdapter,
   type StripeBillingFeatures,
@@ -119,7 +118,12 @@ export type {
   StripeSessionResult,
   StripeWebhookResult,
 } from "./client.js";
-export { drizzleStorageAdapter, prismaStorageAdapter, sqliteStorageAdapter } from "./storage.js";
+export {
+  drizzleStorageAdapter,
+  ormStorageAdapter,
+  prismaStorageAdapter,
+  sqliteStorageAdapter,
+} from "./storage.js";
 export type {
   StripeBillingFeatures,
   StripeBillingHookTools,
@@ -2831,35 +2835,65 @@ function getBillingMeter(
   return meter ?? null;
 }
 
+function hasConfiguredStorageRuntimeClient(context: FarmIntegrationHandlerContext): boolean {
+  const storage = (context.config as { storage?: unknown }).storage;
+  return (
+    !!storage &&
+    typeof storage === "object" &&
+    "client" in storage &&
+    (storage as { client?: unknown }).client != null
+  );
+}
+
+function resolveConfiguredBillingStorage(
+  context: FarmIntegrationHandlerContext,
+  schema: FarmIntegrationSchema,
+): StripeBillingStorageAdapter | undefined {
+  if (!hasConfiguredStorageRuntimeClient(context)) {
+    return undefined;
+  }
+
+  let ormPromise: ReturnType<typeof createIntegrationOrm> | undefined;
+  return ormStorageAdapter({
+    orm: () =>
+      (ormPromise ??= createIntegrationOrm({
+        schema,
+        config: context.config,
+      })),
+  });
+}
+
 function resolveBillingPersistence(
   billing: StripeBillingOptions | undefined,
   context: FarmIntegrationHandlerContext,
   stripe: Stripe | null,
+  schema: FarmIntegrationSchema = stripeSchema,
 ) {
   const tools: StripeBillingHookTools = {
     ctx: context,
     stripe,
   };
+  const storage = billing?.storage ?? resolveConfiguredBillingStorage(context, schema);
 
   return {
     tools,
     getBillingAccount: billing?.hooks?.getBillingAccount
       ? (owner: StripeBillingOwner) => billing.hooks!.getBillingAccount!(owner, tools)
-      : billing?.storage?.getBillingAccount
-        ? (owner: StripeBillingOwner) => billing.storage!.getBillingAccount(owner)
+      : storage?.getBillingAccount
+        ? (owner: StripeBillingOwner) => storage.getBillingAccount(owner)
         : undefined,
     getBillingAccountByStripeCustomerId: billing?.hooks?.getBillingAccountByStripeCustomerId
       ? (customerId: string) =>
           billing.hooks!.getBillingAccountByStripeCustomerId!(customerId, tools)
-      : billing?.storage?.getBillingAccountByStripeCustomerId
-        ? (customerId: string) => billing.storage!.getBillingAccountByStripeCustomerId(customerId)
+      : storage?.getBillingAccountByStripeCustomerId
+        ? (customerId: string) => storage.getBillingAccountByStripeCustomerId(customerId)
         : undefined,
     ensureCustomer: billing?.hooks?.ensureCustomer
       ? (owner: StripeBillingOwner) => billing.hooks!.ensureCustomer!(owner, tools)
-      : billing?.storage?.ensureCustomer
+      : storage?.ensureCustomer
         ? stripe
           ? (owner: StripeBillingOwner) =>
-              billing.storage!.ensureCustomer({
+              storage.ensureCustomer({
                 owner,
                 stripe,
               })
@@ -2867,13 +2901,13 @@ function resolveBillingPersistence(
         : undefined,
     saveBillingSnapshot: billing?.hooks?.saveBillingSnapshot
       ? (snapshot: StripeBillingSnapshot) => billing.hooks!.saveBillingSnapshot!(snapshot, tools)
-      : billing?.storage?.saveBillingSnapshot
-        ? (snapshot: StripeBillingSnapshot) => billing.storage!.saveBillingSnapshot(snapshot)
+      : storage?.saveBillingSnapshot
+        ? (snapshot: StripeBillingSnapshot) => storage.saveBillingSnapshot(snapshot)
         : undefined,
     clearBillingSnapshot: billing?.hooks?.clearBillingSnapshot
       ? (owner: StripeBillingOwner) => billing.hooks!.clearBillingSnapshot!(owner, tools)
-      : billing?.storage?.clearBillingSnapshot
-        ? (owner: StripeBillingOwner) => billing.storage!.clearBillingSnapshot(owner)
+      : storage?.clearBillingSnapshot
+        ? (owner: StripeBillingOwner) => storage.clearBillingSnapshot(owner)
         : undefined,
   };
 }
@@ -3245,6 +3279,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
   const rawInstance = input.instance || (env.secretKey ? new Stripe(env.secretKey) : undefined);
   const instance = resolveStripeInstance(input, env);
   const stripeSdk = rawInstance && isStripeSdkInstance(rawInstance) ? rawInstance : null;
+  const integrationSchema = input.schema ?? stripeSchema;
 
   const configuredProducts = input.billing?.products
     ? normalizeBillingProducts(input.billing.products)
@@ -3349,7 +3384,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
           };
 
           if (input.billing) {
-            const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+            const persistence = resolveBillingPersistence(
+              input.billing,
+              context,
+              stripeSdk,
+              integrationSchema,
+            );
 
             if (
               event.type === "checkout.session.completed" &&
@@ -3527,7 +3567,7 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       portalPath,
       sessionPath,
     }) as unknown as FarmIntegrationAPI,
-    schema: input.schema ?? stripeSchema,
+    schema: integrationSchema,
     log: input.log,
     routes: [
       integrationRoute.get<typeof productsPath, StripeCatalogProduct[]>(productsPath, {
@@ -3575,7 +3615,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+          const persistence = resolveBillingPersistence(
+            input.billing,
+            context,
+            stripeSdk,
+            integrationSchema,
+          );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
             "getBillingAccount",
@@ -3649,7 +3694,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+          const persistence = resolveBillingPersistence(
+            input.billing,
+            context,
+            stripeSdk,
+            integrationSchema,
+          );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
             "getBillingAccount",
@@ -3689,7 +3739,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+          const persistence = resolveBillingPersistence(
+            input.billing,
+            context,
+            stripeSdk,
+            integrationSchema,
+          );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
             "getBillingAccount",
@@ -3744,7 +3799,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               );
             }
 
-            const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+            const persistence = resolveBillingPersistence(
+              input.billing,
+              context,
+              stripeSdk,
+              integrationSchema,
+            );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
               "getBillingAccount",
@@ -3831,7 +3891,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+          const persistence = resolveBillingPersistence(
+            input.billing,
+            context,
+            stripeSdk,
+            integrationSchema,
+          );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
             "getBillingAccount",
@@ -3959,7 +4024,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+          const persistence = resolveBillingPersistence(
+            input.billing,
+            context,
+            stripeSdk,
+            integrationSchema,
+          );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
             "getBillingAccount",
@@ -4076,7 +4146,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               );
             }
 
-            const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+            const persistence = resolveBillingPersistence(
+              input.billing,
+              context,
+              stripeSdk,
+              integrationSchema,
+            );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
               "getBillingAccount",
@@ -4276,7 +4351,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
             );
           }
 
-          const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+          const persistence = resolveBillingPersistence(
+            input.billing,
+            context,
+            stripeSdk,
+            integrationSchema,
+          );
           const getBillingAccount = requireBillingMethod(
             persistence.getBillingAccount,
             "getBillingAccount",
@@ -4616,7 +4696,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               );
             }
 
-            const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+            const persistence = resolveBillingPersistence(
+              input.billing,
+              context,
+              stripeSdk,
+              integrationSchema,
+            );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
               "getBillingAccount",
@@ -4704,7 +4789,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
                 );
               }
 
-              const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+              const persistence = resolveBillingPersistence(
+                input.billing,
+                context,
+                stripeSdk,
+                integrationSchema,
+              );
               const existingSnapshot =
                 input.billing && billingOwner && persistence.getBillingAccount
                   ? await persistence.getBillingAccount(billingOwner)
@@ -4883,7 +4973,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               Number.NaN,
             );
             const prorationBehavior = normalizeProrationBehavior(body.prorationBehavior);
-            const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+            const persistence = resolveBillingPersistence(
+              input.billing,
+              context,
+              stripeSdk,
+              integrationSchema,
+            );
             const getBillingAccount = requireBillingMethod(
               persistence.getBillingAccount,
               "getBillingAccount",
@@ -5033,7 +5128,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
           try {
             let customerId = typeof body.customerId === "string" ? body.customerId : undefined;
 
-            const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+            const persistence = resolveBillingPersistence(
+              input.billing,
+              context,
+              stripeSdk,
+              integrationSchema,
+            );
 
             if (!customerId && typeof body.sessionId === "string") {
               const session = await instance.retrieveCheckoutSession(body.sessionId);
@@ -5124,7 +5224,12 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
               const session = await instance.retrieveCheckoutSession(sessionId);
 
               if (input.billing) {
-                const persistence = resolveBillingPersistence(input.billing, context, stripeSdk);
+                const persistence = resolveBillingPersistence(
+                  input.billing,
+                  context,
+                  stripeSdk,
+                  integrationSchema,
+                );
                 const snapshot = await resolveBillingSnapshotForSession(
                   session,
                   configuredProducts,

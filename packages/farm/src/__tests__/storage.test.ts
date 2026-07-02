@@ -21,6 +21,7 @@ import {
   sqliteStorage,
   upstashStorage,
   vercelKVStorage,
+  resolveStorageRuntimeClient,
 } from "../storage";
 import type { MiddlewareContext } from "../middleware/types";
 
@@ -178,6 +179,39 @@ describe("Storage", () => {
     expect(await sqlite.getItem("project")).toEqual({ name: "farm" });
 
     await sqlite.dispose();
+  });
+
+  it("preserves storage.client for helper-created Farm storage clients", async () => {
+    const backing = createStorageClient({
+      driver: "memory",
+    });
+    await backing.setItem("project", { name: "farm" });
+
+    const storage = await createFarmStorage({
+      client: backing,
+    });
+
+    expect(await storage.getItem("project")).toEqual({ name: "farm" });
+
+    await storage.dispose();
+  });
+
+  it("treats non-Farm storage.client values as runtime clients", async () => {
+    const runtimeClient = {
+      prepare() {},
+      exec() {},
+    };
+    const storage = await createFarmStorage({
+      driver: "memory",
+      client: runtimeClient,
+    });
+
+    await storage.setItem("key", "value");
+
+    expect(await storage.getItem("key")).toBe("value");
+    expect(await resolveStorageRuntimeClient({ client: runtimeClient })).toBe(runtimeClient);
+
+    await storage.dispose();
   });
 
   it("persists sqlite data across recreated instances and supports delete/clear", async () => {

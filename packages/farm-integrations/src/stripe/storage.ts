@@ -275,6 +275,81 @@ type PrismaStorageOptions = {
   model?: string;
 };
 
+type StripeOrmModelClient = {
+  findFirst(args: { where: Record<string, unknown> }): Promise<Record<string, unknown> | null>;
+  create(args: { data: Record<string, unknown> }): Promise<Record<string, unknown>>;
+  update(args: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<Record<string, unknown> | null>;
+};
+
+type StripeOrmStorageOptions = {
+  orm: unknown | Promise<unknown> | (() => unknown | Promise<unknown>);
+  model?: string;
+};
+
+type StripeBillingSnapshotRecord = {
+  id?: string;
+  ownerId: string;
+  ownerKind: StripeBillingOwner["kind"];
+  stripeCustomerId: string | null;
+  stripeSubscriptionId: string | null;
+  planId: string;
+  productId: string | null;
+  status: StripeBillingStatus;
+  currentPeriodEnd: Date | null;
+  cancelAtPeriodEnd: boolean;
+  trialEndsAt: Date | null;
+  trialUsedAt: Date | null;
+  seatQuantity: number | null;
+  seatAllowanceOverride: number | null;
+  createdAt?: Date;
+  updatedAt: Date;
+};
+
+function requireOrmModel(options: { orm: unknown; model: string }): StripeOrmModelClient {
+  const modelClient = (options.orm as Record<string, unknown> | null)?.[options.model];
+
+  if (!modelClient || typeof modelClient !== "object") {
+    throw new Error(`Stripe ORM storage adapter could not find orm.${options.model}.`);
+  }
+
+  const candidate = modelClient as Partial<StripeOrmModelClient>;
+  if (
+    typeof candidate.findFirst !== "function" ||
+    typeof candidate.create !== "function" ||
+    typeof candidate.update !== "function"
+  ) {
+    throw new Error(
+      `Stripe ORM storage adapter expected orm.${options.model} to expose findFirst, create, and update.`,
+    );
+  }
+
+  return candidate as StripeOrmModelClient;
+}
+
+function createBillingSnapshotData(
+  snapshot: StripeBillingSnapshot,
+): Omit<StripeBillingSnapshotRecord, "id" | "createdAt"> {
+  return {
+    ownerId: snapshot.owner.id,
+    ownerKind: snapshot.owner.kind,
+    stripeCustomerId: snapshot.stripeCustomerId,
+    stripeSubscriptionId: snapshot.stripeSubscriptionId,
+    planId: snapshot.planId,
+    productId: snapshot.productId,
+    status: snapshot.status,
+    currentPeriodEnd: snapshot.currentPeriodEnd,
+    cancelAtPeriodEnd: snapshot.cancelAtPeriodEnd,
+    trialEndsAt: snapshot.trialEndsAt,
+    trialUsedAt: snapshot.trialUsedAt,
+    seatQuantity: snapshot.seatQuantity,
+    seatAllowanceOverride: snapshot.seatAllowanceOverride,
+    updatedAt: new Date(),
+  };
+}
+
 function isUnknownPrismaFieldError(error: unknown, field: string): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -581,6 +656,161 @@ export function prismaStorageAdapter(options: PrismaStorageOptions): StripeBilli
         },
         ["seatQuantity", "trialEndsAt", "productId"],
       );
+    },
+  };
+}
+
+export function ormStorageAdapter(options: StripeOrmStorageOptions): StripeBillingStorageAdapter {
+  const modelName = options.model ?? "billingAccount";
+  let modelPromise: Promise<StripeOrmModelClient> | undefined;
+
+  async function getModel(): Promise<StripeOrmModelClient> {
+    modelPromise ??= Promise.resolve(
+      typeof options.orm === "function" ? options.orm() : options.orm,
+    ).then((orm) =>
+      requireOrmModel({
+        orm,
+        model: modelName,
+      }),
+    );
+
+    return modelPromise;
+  }
+
+  async function findByOwner(owner: StripeBillingOwner) {
+    const model = await getModel();
+    return await model.findFirst({
+      where: {
+        ownerKind: owner.kind,
+        ownerId: owner.id,
+      },
+    });
+  }
+
+  async function findByCustomerId(customerId: string) {
+    const model = await getModel();
+    return await model.findFirst({
+      where: {
+        stripeCustomerId: customerId,
+      },
+    });
+  }
+
+  return {
+    async getBillingAccount(owner) {
+      const record = await findByOwner(owner);
+      return record ? toSnapshot(record) : null;
+    },
+
+    async getBillingAccountByStripeCustomerId(customerId) {
+      const record = await findByCustomerId(customerId);
+      return record ? toSnapshot(record) : null;
+    },
+
+    async ensureCustomer({ owner, stripe }) {
+      const existing = await findByOwner(owner);
+      const existingCustomerId =
+        existing && getNullableString(existing, "stripeCustomerId", "stripe_customer_id");
+      if (existingCustomerId) {
+        return {
+          customerId: existingCustomerId,
+        };
+      }
+
+      const customer = await stripe.customers.create({
+        email: owner.email,
+        metadata: {
+          ownerId: owner.id,
+          ownerKind: owner.kind,
+        },
+      });
+
+      const model = await getModel();
+      if (existing?.id) {
+        await model.update({
+          where: {
+            id: existing.id,
+          },
+          data: {
+            stripeCustomerId: customer.id,
+            updatedAt: new Date(),
+          },
+        });
+      } else {
+        await model.create({
+          data: {
+            id: createBillingRecordId(),
+            ownerId: owner.id,
+            ownerKind: owner.kind,
+            stripeCustomerId: customer.id,
+            stripeSubscriptionId: null,
+            planId: "free",
+            productId: null,
+            status: "free",
+            currentPeriodEnd: null,
+            cancelAtPeriodEnd: false,
+            trialEndsAt: null,
+            trialUsedAt: null,
+            seatQuantity: null,
+            seatAllowanceOverride: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+      }
+
+      return {
+        customerId: customer.id,
+      };
+    },
+
+    async saveBillingSnapshot(snapshot) {
+      const existing = await findByOwner(snapshot.owner);
+      const data = createBillingSnapshotData(snapshot);
+      const model = await getModel();
+
+      if (existing?.id) {
+        await model.update({
+          where: {
+            id: existing.id,
+          },
+          data,
+        });
+        return;
+      }
+
+      await model.create({
+        data: {
+          id: createBillingRecordId(),
+          ...data,
+          createdAt: new Date(),
+        },
+      });
+    },
+
+    async clearBillingSnapshot(owner) {
+      const existing = await findByOwner(owner);
+      if (!existing?.id) {
+        return;
+      }
+
+      const model = await getModel();
+      await model.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          planId: "free",
+          productId: null,
+          status: "free",
+          stripeSubscriptionId: null,
+          currentPeriodEnd: null,
+          cancelAtPeriodEnd: false,
+          trialEndsAt: null,
+          seatQuantity: null,
+          updatedAt: new Date(),
+        },
+      });
     },
   };
 }

@@ -143,6 +143,8 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@farming-labs/orm": "0.0.62",
+    "@farming-labs/orm-runtime": "0.0.62",
     "@scalar/api-reference": "^1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
     "@tailwindcss/vite": "^4.1.0",

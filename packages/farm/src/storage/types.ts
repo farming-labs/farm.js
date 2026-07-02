@@ -69,6 +69,8 @@ export interface FarmStorageClient extends Storage {
   resolveDriver(): Promise<Driver>;
 }
 
+export type FarmStorageRuntimeClient = object | (() => unknown | Promise<unknown>);
+
 export interface FarmStorageCustomDriverConfig {
   driver: Driver | (() => Driver | Promise<Driver>);
 }
@@ -85,7 +87,12 @@ export type FarmStorageMountConfig = FarmStorageClientConfig | FarmStorageClient
 export type FarmStorageMounts = Record<string, FarmStorageMountConfig>;
 
 export type FarmStorageConfigObject = FarmStorageClientConfig & {
-  client?: FarmStorageClient;
+  /**
+   * Existing FarmStorageClient instances still drive Farm's key/value storage.
+   * Other objects/functions are treated as application runtime clients for
+   * schema-backed integration persistence via @farming-labs/orm.
+   */
+  client?: FarmStorageClient | FarmStorageRuntimeClient;
   mounts?: FarmStorageMounts;
 };
 

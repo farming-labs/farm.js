@@ -10,6 +10,7 @@ import type {
   FarmStorageDatabaseConfig,
   FarmStorageDatabaseDriverMap,
   FarmStorageDatabaseDriverName,
+  FarmStorageRuntimeClient,
   FarmStorageMountConfig,
   FarmStorageMounts,
   FarmStorageUserConfig,
@@ -24,6 +25,7 @@ export type {
   FarmStorageDatabaseConfig,
   FarmStorageDatabaseDriverName,
   FarmStorageLocalDriverConfig,
+  FarmStorageRuntimeClient,
   FarmStorageMountConfig,
   FarmStorageMounts,
   FarmStorageUserConfig,
@@ -174,17 +176,20 @@ function isStorageClient(value: unknown): value is FarmStorageClient {
   );
 }
 
-function isStorageConfigObject(value: FarmStorageUserConfig): value is FarmStorageConfigObject {
-  return !isStorageClient(value);
-}
-
 function isDatabaseDriverName(name: string): name is FarmStorageDatabaseDriverName {
   return name in DATABASE_CONNECTORS;
 }
 
 function extractDriverOptions(config: FarmStorageClientConfig): Record<string, any> | undefined {
   const source = config as Record<string, any>;
-  const { client, driver, mounts, options, tableName, ...inlineOptions } = source;
+  const {
+    client: _client,
+    driver: _driver,
+    mounts: _mounts,
+    options,
+    tableName: _tableName,
+    ...inlineOptions
+  } = source;
   const hasInlineOptions = Object.keys(inlineOptions).length > 0;
 
   if (options && typeof options === "object" && !Array.isArray(options)) {
@@ -484,13 +489,28 @@ export async function createFarmStorage(config: FarmStorageUserConfig = {}): Pro
     return config.createStorage();
   }
 
-  const rootConfig = config.client ?? config;
+  const rootConfig = isStorageClient(config.client) ? config.client : config;
   const storage = createStorage({
     driver: await resolveDriver(rootConfig),
   });
 
   await mountNamespaces(storage, config.mounts);
   return storage;
+}
+
+export async function resolveStorageRuntimeClient(
+  config: FarmStorageUserConfig | undefined,
+): Promise<unknown | undefined> {
+  if (!config || isStorageInstance(config) || isStorageClient(config)) {
+    return undefined;
+  }
+
+  const client = config.client;
+  if (!client || isStorageInstance(client) || isStorageClient(client)) {
+    return undefined;
+  }
+
+  return typeof client === "function" ? await client() : client;
 }
 
 export async function initStorage(config: FarmStorageUserConfig = {}): Promise<Storage> {
