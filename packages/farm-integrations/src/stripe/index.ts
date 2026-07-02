@@ -58,6 +58,7 @@ import {
   ormStorageAdapter,
   prismaStorageAdapter,
   sqliteStorageAdapter,
+  type StripeBillingArgs,
   type StripeBillingFeatures,
   type StripeBillingHookTools,
   type StripeBillingHooks,
@@ -125,6 +126,7 @@ export {
   sqliteStorageAdapter,
 } from "./storage.js";
 export type {
+  StripeBillingArgs,
   StripeBillingFeatures,
   StripeBillingHookTools,
   StripeBillingHooks,

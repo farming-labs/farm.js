@@ -81,7 +81,7 @@ export interface StripeBillingTrial {
   oncePerOwner?: boolean;
   eligible?(
     input: StripeBillingTrialEligibilityInput,
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<boolean> | boolean;
 }
 
@@ -158,38 +158,37 @@ export interface StripeBillingStorageTools {
   getOrm(): Promise<unknown>;
 }
 
-export interface StripeBillingHookTools {
+export interface StripeBillingArgs {
   ctx: FarmIntegrationHandlerContext;
   stripe: Stripe | null;
   storage: StripeBillingStorageTools;
 }
 
+export type StripeBillingHookTools = StripeBillingArgs;
+
 export interface StripeBillingUsageOptions {
   resolve(
     owner: StripeBillingOwner,
     key: string,
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<number | null> | number | null;
 }
 
 export interface StripeBillingHooks {
   getBillingAccount?(
     owner: StripeBillingOwner,
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<StripeBillingSnapshot | null>;
   getBillingAccountByStripeCustomerId?(
     customerId: string,
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<StripeBillingSnapshot | null>;
   ensureCustomer?(
     owner: StripeBillingOwner,
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<{ customerId: string }>;
-  saveBillingSnapshot?(
-    snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
-  ): Promise<void>;
-  clearBillingSnapshot?(owner: StripeBillingOwner, tools: StripeBillingHookTools): Promise<void>;
+  saveBillingSnapshot?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void>;
+  clearBillingSnapshot?(owner: StripeBillingOwner, args: StripeBillingArgs): Promise<void>;
   onCheckoutCreated?(
     payload: {
       owner: StripeBillingOwner;
@@ -200,44 +199,29 @@ export interface StripeBillingHooks {
       trialApplied: boolean;
       trialDays: number | null;
     },
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<void> | void;
   onCheckoutCompleted?(
     snapshot: StripeBillingSnapshot & {
       sessionId: string;
     },
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<void> | void;
   onTrialStarted?(
     snapshot: StripeBillingSnapshot & {
       trialDays: number;
     },
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<void> | void;
-  onTrialWillEnd?(
-    snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
-  ): Promise<void> | void;
-  onTrialEnded?(
-    snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
-  ): Promise<void> | void;
-  onTrialExpired?(
-    snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
-  ): Promise<void> | void;
-  onBillingSync?(
-    snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
-  ): Promise<void> | void;
+  onTrialWillEnd?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void> | void;
+  onTrialEnded?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void> | void;
+  onTrialExpired?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void> | void;
+  onBillingSync?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void> | void;
   onPaymentSucceeded?(
     snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<void> | void;
-  onPaymentFailed?(
-    snapshot: StripeBillingSnapshot,
-    tools: StripeBillingHookTools,
-  ): Promise<void> | void;
+  onPaymentFailed?(snapshot: StripeBillingSnapshot, args: StripeBillingArgs): Promise<void> | void;
   onUsageReported?(
     payload: {
       owner: StripeBillingOwner;
@@ -250,14 +234,14 @@ export interface StripeBillingHooks {
       stripeEventIdentifier: string;
       properties?: StripeBillingUsageProperties;
     },
-    tools: StripeBillingHookTools,
+    args: StripeBillingArgs,
   ): Promise<void> | void;
 }
 
 export interface StripeBillingOptions {
   resolveOwner(
     context: FarmIntegrationHandlerContext,
-    tools?: StripeBillingHookTools,
+    args?: StripeBillingArgs,
   ): Promise<StripeBillingOwner | null> | StripeBillingOwner | null;
   plans?: Record<string, StripeBillingPlan>;
   products?: Record<string, StripeBillingProduct>;
