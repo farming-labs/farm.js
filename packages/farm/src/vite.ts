@@ -10,7 +10,11 @@ import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateRouteTypes } from "./routing/generate-route-types";
 import { sendWebResponse } from "./server/response";
-import { getClientModuleMetadata, isClientComponentModule } from "./utils/client-component";
+import {
+  getClientModuleMetadata,
+  hasUseClientDirective,
+  stripUseClientDirective,
+} from "./utils/client-component";
 import {
   dispatchIntegrationRequest,
   getIntegrationDocumentNavigationMatchers,
@@ -816,17 +820,21 @@ export const manifest = getManifest();
     },
 
     transform(code, id) {
-      if (
-        code.trimStart().startsWith("'use client'") ||
-        code.trimStart().startsWith('"use client"')
-      ) {
+      if (hasUseClientDirective(code)) {
         const moduleInfo = this.getModuleInfo(id);
         if (moduleInfo) {
           (moduleInfo as any).isClientComponent = true;
         }
 
+        const transformedCode = stripUseClientDirective(code);
+
         // Store client component for later injection
-        if (!farmApp) return;
+        if (!farmApp) {
+          return {
+            code: transformedCode,
+            map: null,
+          };
+        }
 
         const clientComponents = (farmApp as any).__clientComponents__ || new Set();
         clientComponents.add(id);
@@ -854,7 +862,7 @@ if (import.meta.hot) {
 }
 `;
         return {
-          code: code + "\n" + hmrCode,
+          code: transformedCode + "\n" + hmrCode,
           map: null,
         };
       }
@@ -1528,7 +1536,7 @@ async function moduleLooksClient(modulePath) {
     const response = await fetch(modulePath, { headers: { Accept: "text/javascript" } });
     const source = await response.text();
     const looksClient = /["']use client["']/.test(source.slice(0, 256));
-    const hasHydrateExport = /\bexports+consts+hydrates*=s*true\b/.test(source);
+    const hasHydrateExport = /\\bexport\\s+const\\s+hydrate\\s*=\\s*true\\b/.test(source);
     const shouldHydrate = looksClient || hasHydrateExport;
     clientModuleHintCache.set(modulePath, shouldHydrate);
     return shouldHydrate;

@@ -848,7 +848,9 @@ const spaRouter = {
         if (!reactRoot) {
           reactRoot = createRoot(currentRoot);
         }
-        reactRoot.render(React.createElement(Component, props));
+        const pageElement = React.createElement(Component, props);
+        const wrappedElement = wrapWithLayouts(pageElement, newPathname, params);
+        reactRoot.render(wrappedElement);
       }
     }
   },
@@ -896,10 +898,12 @@ window.addEventListener("popstate", function() {
     const params = matched.params;
     const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
     const props = { params: params, searchParams: Promise.resolve(searchParams) };
+    const pageElement = React.createElement(Component, props);
+    const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
     
     const container = document.getElementById("root");
     if (container && reactRoot) {
-      reactRoot.render(React.createElement(Component, props));
+      reactRoot.render(wrappedElement);
       currentPathname = pathname;
     }
   } else {

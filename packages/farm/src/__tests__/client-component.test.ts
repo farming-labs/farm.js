@@ -4,9 +4,12 @@ import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getClientModuleMetadata,
+  hasHydrateExport,
+  hasUseClientDirective,
   isClientComponentModule,
   resolveModuleSourcePath,
   shouldHydrateModule,
+  stripUseClientDirective,
 } from "../utils/client-component";
 
 const tempDirs: string[] = [];
@@ -21,6 +24,24 @@ afterEach(() => {
 });
 
 describe("client component path resolution", () => {
+  it("detects and strips top-level client directives", () => {
+    const source = '"use client";\n\nexport default function Page() { return null; }\n';
+
+    expect(hasUseClientDirective(source)).toBe(true);
+    expect(stripUseClientDirective(source)).toBe(
+      "export default function Page() { return null; }\n",
+    );
+  });
+
+  it("detects explicit hydrate exports", () => {
+    expect(
+      hasHydrateExport("export const hydrate = true;\nexport default function Page() {}"),
+    ).toBe(true);
+    expect(hasHydrateExport("const hydrate = true;\nexport default function Page() {}")).toBe(
+      false,
+    );
+  });
+
   it("resolves project-relative /src module paths", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-path-"));
     tempDirs.push(root);
