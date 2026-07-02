@@ -225,7 +225,7 @@ declare module "@farmjs/core/client" {
         method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
         input?: unknown;
       }
-    | [RouteRef, unknown?];
+    | [CallableRouteRef, unknown?];
 
   export type InvalidateOptions =
     | InvalidateTarget[]
@@ -235,7 +235,7 @@ declare module "@farmjs/core/client" {
       };
 
   export type OptimisticUpdate =
-    | [RouteRef<any, any>, unknown, (prev: any) => any]
+    | [CallableRouteRef<any>, unknown, (prev: any) => any]
     | [CacheKey<any> | string, (prev: any) => any];
 
   export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> =
@@ -266,13 +266,19 @@ declare module "@farmjs/core/client" {
     onStatus?: (event: StatusEvent<TData, TError>) => void;
   };
 
-  type RouteRef<TInput = any, TData = any> = (
-    options?: TInput,
-    clientOptions?: ClientOptions<any, any>,
-  ) => Promise<APIResult<TData, any>>;
+  type AnyRouteRef = (...args: any[]) => any;
+  type RouteRef<TData = any, TInput = any> = {
+    readonly __farmRouteInput: TInput;
+    readonly __farmRouteData: TData;
+  };
+  type CallableRouteRef<TData = any, TInput = any> = AnyRouteRef & RouteRef<TData, TInput>;
 
-  type InferRouteInput<TRoute> = TRoute extends RouteRef<infer TInput, any> ? TInput : never;
-  type InferRouteData<TRoute> = TRoute extends RouteRef<any, infer TData> ? TData : never;
+  type InferRouteInput<TRoute> = TRoute extends { readonly __farmRouteInput: infer TInput }
+    ? TInput
+    : never;
+  type InferRouteData<TRoute> = TRoute extends { readonly __farmRouteData: infer TData }
+    ? TData
+    : never;
 
   type NormalizeOptimisticUpdate<TUpdate> = TUpdate extends readonly [
     infer TRoute,
@@ -310,6 +316,40 @@ declare module "@farmjs/core/client" {
     };
   };
 
+  type Simplify<T> = {
+    [K in keyof T]: T[K];
+  } & {};
+
+  type IsNever<T> = [T] extends [never] ? true : false;
+  type IsAny<T> = 0 extends 1 & T ? true : false;
+  type RequiredKeys<T> = T extends object
+    ? {
+        [K in keyof T]-?: {} extends Pick<T, K> ? never : K;
+      }[keyof T]
+    : never;
+
+  type BodyInputProp<TValue> =
+    IsNever<TValue> extends true
+      ? {}
+      : IsAny<TValue> extends true
+        ? { body?: TValue }
+        : undefined extends TValue
+          ? { body?: TValue }
+          : { body: TValue };
+
+  type QueryInputProp<TValue> =
+    IsNever<TValue> extends true
+      ? {}
+      : IsAny<TValue> extends true
+        ? { query?: TValue }
+        : undefined extends TValue
+          ? { query?: TValue }
+          : RequiredKeys<TValue> extends never
+            ? { query?: TValue }
+            : { query: TValue };
+
+  type HasRequiredKeys<T> = RequiredKeys<T> extends never ? false : true;
+
   // Type utilities to extract endpoint input/output types
   type InferEndpointInput<T> = T extends {
     __types: {
@@ -317,13 +357,7 @@ declare module "@farmjs/core/client" {
       query: infer TQuery;
     };
   }
-    ? TBody extends never
-      ? TQuery extends never
-        ? {}
-        : { query?: TQuery }
-      : TQuery extends never
-        ? { body?: TBody }
-        : { body?: TBody; query?: TQuery }
+    ? Simplify<BodyInputProp<TBody> & QueryInputProp<TQuery>>
     : {};
 
   type InferEndpointOutput<T> = T extends {
@@ -334,20 +368,24 @@ declare module "@farmjs/core/client" {
     ? R
     : any;
 
-  type EndpointMethod<T = any> = <
+  type EndpointMethod<T = any> = (<
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   >(
-    options?: InferEndpointInput<T>,
-    clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
-  ) => Promise<APIResult<InferEndpointOutput<T>, Error>>;
+    ...args: HasRequiredKeys<InferEndpointInput<T>> extends true
+      ? [
+          options: InferEndpointInput<T>,
+          clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+        ]
+      : [
+          options?: InferEndpointInput<T>,
+          clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+        ]
+  ) => Promise<APIResult<InferEndpointOutput<T>, Error>>) &
+    RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
   type RouterToClient<T> = {
-    [K in keyof T]: T[K] extends Record<string, TypedEndpointLike>
-      ? {
-          [M in keyof T[K]]: M extends "get" | "post" | "put" | "delete" | "patch"
-            ? EndpointMethod<T[K][M]>
-            : never;
-        }
+    [K in keyof T]: T[K] extends TypedEndpointLike
+      ? EndpointMethod<T[K]>
       : T[K] extends Record<string, unknown>
         ? RouterToClient<T[K]>
         : EndpointMethod<T[K]>;
