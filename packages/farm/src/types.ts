@@ -138,7 +138,8 @@ export type Layout = ComponentType<LayoutProps>;
  * Route module exports for pages
  *
  * SSR is the default - pages render on each request
- * SSG is opt-in via `export const ssg = true`
+ * SSG is opt-in via `export const ssg = true`, Next-compatible route
+ * config exports, or a top-of-file rendering directive.
  *
  * @example SSR Page (default):
  * ```tsx
@@ -182,6 +183,25 @@ export type Layout = ComponentType<LayoutProps>;
  *   return <article>{post.title}</article>;
  * }
  * ```
+ *
+ * @example Next-compatible Route Config:
+ * ```tsx
+ * export const dynamic = "force-static";
+ * export const revalidate = 60;
+ *
+ * export default function DocsPage() {
+ *   return <h1>Docs</h1>;
+ * }
+ * ```
+ *
+ * @example Directive Route Config:
+ * ```tsx
+ * "use ssg; 60";
+ *
+ * export default function DocsPage() {
+ *   return <h1>Docs</h1>;
+ * }
+ * ```
  */
 export interface RouteModule {
   default?: Page;
@@ -194,7 +214,13 @@ export interface RouteModule {
    * Revalidate interval in seconds for Incremental Static Regeneration (ISR)
    * Only applicable when ssg = true
    */
-  revalidate?: number;
+  revalidate?: number | false;
+  /**
+   * Next.js-compatible rendering mode.
+   * - force-static/error: pre-render at build time
+   * - force-dynamic: render on each request
+   */
+  dynamic?: "auto" | "force-static" | "force-dynamic" | "error";
   /**
    * Return all paths to pre-render for dynamic SSG routes
    * Required for dynamic routes (e.g., [slug]) when ssg = true

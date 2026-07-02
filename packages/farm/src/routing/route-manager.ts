@@ -3,11 +3,10 @@ import type {
   ParsedRoute,
   RouteModule,
   LayoutModule,
-  SSGPage,
   SSGCollectionResult,
 } from "../types";
 import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
-import { collectSSGPages, isSSGModule, hasISR, getRevalidateInterval } from "../ssg";
+import { collectSSGPages, resolveRouteRenderingConfigFromFile } from "../ssg";
 import path from "path";
 import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
@@ -122,7 +121,7 @@ export class RouteManager {
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
 
-    for (const [pattern, routeEntry] of this.routes) {
+    for (const routeEntry of this.routes.values()) {
       const match = matchRoute(normalizedPath, routeEntry.route.segments);
       if (match.matches) {
         matchedRoute = routeEntry;
@@ -410,7 +409,8 @@ export class RouteManager {
   async isRouteSSG(modulePath: string): Promise<boolean> {
     try {
       const mod = await this.loadRouteModule(modulePath);
-      return isSSGModule(mod);
+      const rendering = await resolveRouteRenderingConfigFromFile(mod, modulePath);
+      return rendering.ssg;
     } catch {
       return false;
     }
@@ -422,7 +422,8 @@ export class RouteManager {
   async hasRouteISR(modulePath: string): Promise<boolean> {
     try {
       const mod = await this.loadRouteModule(modulePath);
-      return hasISR(mod);
+      const rendering = await resolveRouteRenderingConfigFromFile(mod, modulePath);
+      return rendering.ssg && typeof rendering.revalidate === "number" && rendering.revalidate > 0;
     } catch {
       return false;
     }
@@ -434,7 +435,8 @@ export class RouteManager {
   async getRouteRevalidateInterval(modulePath: string): Promise<number | undefined> {
     try {
       const mod = await this.loadRouteModule(modulePath);
-      return getRevalidateInterval(mod);
+      const rendering = await resolveRouteRenderingConfigFromFile(mod, modulePath);
+      return rendering.revalidate;
     } catch {
       return undefined;
     }

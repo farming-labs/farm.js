@@ -4,7 +4,8 @@
  * Handles collection and pre-rendering of SSG pages at build time.
  *
  * SSR is the default - pages render on each request
- * SSG is opt-in via `export const ssg = true`
+ * SSG is opt-in via `export const ssg = true`, Next-compatible route
+ * config exports, or a top-of-file rendering directive.
  *
  * @example
  * ```tsx
@@ -31,9 +32,20 @@
  * export default async function BlogPost({ params }) {
  *   return <article>{params.slug}</article>;
  * }
+ *
+ * // Next-compatible route config
+ * export const dynamic = "force-static";
+ * export const revalidate = 60;
+ *
+ * // Directive config
+ * "use ssg; 60";
+ * export default function DocsPage() {
+ *   return <h1>Docs</h1>;
+ * }
  * ```
  */
 
+import { readFile } from "fs/promises";
 import type { RouteModule, SSGPage, SSGCollectionResult } from "./types";
 
 interface RouteEntry {
@@ -41,6 +53,224 @@ interface RouteEntry {
   filePath: string;
   isDynamic: boolean;
   pattern: string;
+}
+
+export type RouteRenderingDynamic = NonNullable<RouteModule["dynamic"]>;
+
+export interface RouteRenderingConfig {
+  ssg: boolean;
+  revalidate?: number;
+  dynamic?: RouteRenderingDynamic;
+  directive?: string;
+}
+
+interface DirectiveRenderingConfig {
+  ssg: boolean;
+  revalidate?: number;
+  dynamic?: RouteRenderingDynamic;
+  directive: string;
+}
+
+/**
+ * Resolve route rendering from Farm exports, Next-compatible exports, and
+ * top-of-file directives such as `"use ssg";` or `"use ssg; 60";`.
+ */
+export function resolveRouteRenderingConfig(
+  mod: RouteModule | null | undefined,
+  source?: string,
+): RouteRenderingConfig {
+  const directiveConfig = parseRouteRenderingDirective(source);
+  let ssg = directiveConfig?.ssg ?? false;
+  let revalidate = directiveConfig?.revalidate;
+  const moduleDynamic = normalizeDynamicMode(mod?.dynamic);
+  const dynamic = moduleDynamic ?? directiveConfig?.dynamic;
+  const hasExplicitSsg = typeof mod?.ssg === "boolean";
+
+  if (hasExplicitSsg) {
+    ssg = mod!.ssg === true;
+  }
+
+  if (typeof mod?.revalidate === "number") {
+    if (mod.revalidate > 0) {
+      revalidate = mod.revalidate;
+      if (!hasExplicitSsg) {
+        ssg = true;
+      }
+    } else {
+      revalidate = undefined;
+      if (!hasExplicitSsg) {
+        ssg = false;
+      }
+    }
+  } else if (mod?.revalidate === false) {
+    revalidate = undefined;
+  }
+
+  if (moduleDynamic === "force-static" || moduleDynamic === "error") {
+    ssg = true;
+  } else if (moduleDynamic === "force-dynamic") {
+    ssg = false;
+    revalidate = undefined;
+  }
+
+  return {
+    ssg,
+    revalidate: ssg ? revalidate : undefined,
+    dynamic,
+    directive: directiveConfig?.directive,
+  };
+}
+
+export async function resolveRouteRenderingConfigFromFile(
+  mod: RouteModule | null | undefined,
+  filePath: string,
+): Promise<RouteRenderingConfig> {
+  const source = await readFile(filePath, "utf8").catch(() => undefined);
+  return resolveRouteRenderingConfig(mod, source);
+}
+
+export function parseRouteRenderingDirective(
+  source: string | undefined,
+): DirectiveRenderingConfig | undefined {
+  if (!source) {
+    return undefined;
+  }
+
+  for (const directive of readDirectivePrologue(source)) {
+    const config = parseKnownRenderingDirective(directive);
+    if (config) {
+      return config;
+    }
+  }
+
+  return undefined;
+}
+
+function parseKnownRenderingDirective(directive: string): DirectiveRenderingConfig | undefined {
+  const normalized = directive.trim().toLowerCase();
+  const match = normalized.match(/^use\s+(ssg|static|isr|ssr|dynamic)(?:\s*[;:]\s*(\d+))?\s*;?$/);
+
+  if (!match?.[1]) {
+    return undefined;
+  }
+
+  const mode = match[1];
+  const revalidate = match[2] ? Number(match[2]) : undefined;
+
+  if (mode === "ssr" || mode === "dynamic") {
+    return {
+      ssg: false,
+      dynamic: "force-dynamic",
+      directive,
+    };
+  }
+
+  return {
+    ssg: true,
+    dynamic: "force-static",
+    revalidate: typeof revalidate === "number" && revalidate > 0 ? revalidate : undefined,
+    directive,
+  };
+}
+
+function normalizeDynamicMode(value: unknown): RouteRenderingDynamic | undefined {
+  switch (value) {
+    case "auto":
+    case "force-static":
+    case "force-dynamic":
+    case "error":
+      return value;
+    default:
+      return undefined;
+  }
+}
+
+function readDirectivePrologue(source: string): string[] {
+  const directives: string[] = [];
+  let index = skipTrivia(source, 0);
+
+  while (index < source.length) {
+    const parsed = readStringStatement(source, index);
+    if (!parsed) {
+      break;
+    }
+
+    directives.push(parsed.value);
+    index = skipTrivia(source, parsed.end);
+  }
+
+  return directives;
+}
+
+function skipTrivia(source: string, start: number): number {
+  let index = start;
+
+  while (index < source.length) {
+    const char = source[index];
+
+    if (char && /\s/.test(char)) {
+      index += 1;
+      continue;
+    }
+
+    if (source.startsWith("//", index)) {
+      const nextLine = source.indexOf("\n", index + 2);
+      index = nextLine === -1 ? source.length : nextLine + 1;
+      continue;
+    }
+
+    if (source.startsWith("/*", index)) {
+      const end = source.indexOf("*/", index + 2);
+      index = end === -1 ? source.length : end + 2;
+      continue;
+    }
+
+    break;
+  }
+
+  return index;
+}
+
+function readStringStatement(
+  source: string,
+  start: number,
+): { value: string; end: number } | undefined {
+  const quote = source[start];
+  if (quote !== '"' && quote !== "'") {
+    return undefined;
+  }
+
+  let value = "";
+  let index = start + 1;
+
+  while (index < source.length) {
+    const char = source[index];
+    if (char === "\\") {
+      value += source.slice(index, index + 2);
+      index += 2;
+      continue;
+    }
+
+    if (char === quote) {
+      index += 1;
+      const semicolonIndex = skipHorizontalWhitespace(source, index);
+      const end = source[semicolonIndex] === ";" ? semicolonIndex + 1 : index;
+      return { value, end };
+    }
+
+    value += char ?? "";
+    index += 1;
+  }
+
+  return undefined;
+}
+
+function skipHorizontalWhitespace(source: string, start: number): number {
+  let index = start;
+  while (source[index] === " " || source[index] === "\t" || source[index] === "\r") {
+    index += 1;
+  }
+  return index;
 }
 
 /**
@@ -70,8 +300,10 @@ export async function collectSSGPages(
         continue;
       }
 
+      const rendering = await resolveRouteRenderingConfigFromFile(mod, route.filePath);
+
       // Check if page is marked for SSG
-      if (mod.ssg === true) {
+      if (rendering.ssg) {
         if (route.isDynamic) {
           // Dynamic SSG route requires getStaticPaths
           const getStaticPaths = mod.getStaticPaths || mod.generateStaticParams;
@@ -100,7 +332,7 @@ export async function collectSSGPages(
               urlPath,
               filePath: route.filePath,
               params,
-              revalidate: mod.revalidate,
+              revalidate: rendering.revalidate,
             });
           }
         } else {
@@ -109,7 +341,7 @@ export async function collectSSGPages(
             urlPath: route.path,
             filePath: route.filePath,
             params: {},
-            revalidate: mod.revalidate,
+            revalidate: rendering.revalidate,
           });
         }
       } else {
@@ -130,24 +362,22 @@ export async function collectSSGPages(
  * Check if a route module is SSG
  */
 export function isSSGModule(mod: RouteModule | null | undefined): boolean {
-  return mod?.ssg === true;
+  return resolveRouteRenderingConfig(mod).ssg;
 }
 
 /**
  * Check if a route module has ISR (Incremental Static Regeneration)
  */
 export function hasISR(mod: RouteModule | null | undefined): boolean {
-  return mod?.ssg === true && typeof mod.revalidate === "number" && mod.revalidate > 0;
+  const rendering = resolveRouteRenderingConfig(mod);
+  return rendering.ssg && typeof rendering.revalidate === "number" && rendering.revalidate > 0;
 }
 
 /**
  * Get revalidation interval for a module
  */
 export function getRevalidateInterval(mod: RouteModule | null | undefined): number | undefined {
-  if (hasISR(mod)) {
-    return mod!.revalidate;
-  }
-  return undefined;
+  return resolveRouteRenderingConfig(mod).revalidate;
 }
 
 /**
