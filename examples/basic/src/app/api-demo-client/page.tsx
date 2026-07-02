@@ -4,10 +4,14 @@ import React, { useState } from 'react';
 import { Link } from '@farmjs/core/client';
 import { api } from '../../lib/api-client';
 
+type HelloResponse = NonNullable<Awaited<ReturnType<typeof api.hello.get>>['data']>;
+type UsersResponse = NonNullable<Awaited<ReturnType<typeof api.users.get>>['data']>;
+type LoginResponse = NonNullable<Awaited<ReturnType<typeof api.auth.login.post>>['data']>;
+
 export default function APIClientDemo() {
-  const [helloResponse, setHelloResponse] = useState<any>(null);
-  const [usersResponse, setUsersResponse] = useState<any>(null);
-  const [loginResponse, setLoginResponse] = useState<any>(null);
+  const [helloResponse, setHelloResponse] = useState<HelloResponse | null>(null);
+  const [usersResponse, setUsersResponse] = useState<UsersResponse | null>(null);
+  const [loginResponse, setLoginResponse] = useState<LoginResponse | null>(null);
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,13 +20,13 @@ export default function APIClientDemo() {
     setError(null);
 
     try {
-      const result = await api.hello.post({
-        body: { name: 'something' },
+      const result = await api.hello.get({
+        query: { name: 'something' },
       });
       if (result.error) {
         setError('Failed to fetch hello endpoint: ' + result.error);
       } else {
-        setHelloResponse(result.data);
+        setHelloResponse(result.data ?? null);
       }
     } catch (err) {
       setError('Failed to fetch hello endpoint: ' + err);
@@ -43,7 +47,7 @@ export default function APIClientDemo() {
       if (result.error) {
         setError('Failed to fetch users: ' + result.error);
       } else {
-        setUsersResponse(result.data);
+        setUsersResponse(result.data ?? null);
       }
     } catch (err) {
       setError('Failed to fetch users: ' + err);
@@ -67,7 +71,7 @@ export default function APIClientDemo() {
       if (result.error) {
         setError('Failed to login: ' + result.error);
       } else {
-        setLoginResponse(result.data);
+        setLoginResponse(result.data ?? null);
       }
     } catch (err) {
       setError('Failed to login: ' + err);
@@ -220,21 +224,21 @@ export default function APIClientDemo() {
               <div>
                 <p className="text-gray-500 mb-2">// Import the typed client</p>
                 <pre className="text-gray-300">
-                  {`import { client, api } from '@/lib/api-client';`}
+                  {`import { api } from '@/lib/api-client';`}
                 </pre>
               </div>
 
               <div>
-                <p className="text-gray-500 mb-2">// Option 1: Direct client call</p>
+                <p className="text-gray-500 mb-2">// Query input is inferred from the route</p>
                 <pre className="text-gray-300">
-                  {`const result = await client('/api/hello', {
+                  {`const result = await api.hello.get({
   query: { name: 'World' }
 });`}
                 </pre>
               </div>
 
               <div>
-                <p className="text-gray-500 mb-2">// Option 2: Nested API syntax (recommended!)</p>
+                <p className="text-gray-500 mb-2">// Body input and response data are inferred too</p>
                 <pre className="text-yellow-300">
                   {`const result = await api.auth.login.post({
   body: {

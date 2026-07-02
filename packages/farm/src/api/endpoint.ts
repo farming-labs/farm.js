@@ -2,7 +2,7 @@ import { createEndpoint as betterCallEndpoint } from "better-call";
 
 // Generic schema type that works with both Zod v3 and v4
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnySchema = { _output?: any; _input?: any; parse?: (data: unknown) => any } | any;
+type AnySchema = { _output?: any; _input?: any; parse?: (data: unknown) => any };
 
 // Infer output type from schema (works with Zod v3 and v4)
 type InferOutput<T> = T extends { _output: infer O }
@@ -15,9 +15,9 @@ export type EndpointParamValue = string | string[];
 export type EndpointParams = Record<string, EndpointParamValue>;
 
 export type EndpointOptions<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
 > = {
   method?: "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS";
   body?: TBody;
@@ -27,9 +27,9 @@ export type EndpointOptions<
 };
 
 export type EndpointHandler<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 > = (ctx: {
   body: InferOutput<TBody>;
@@ -63,9 +63,9 @@ export type TypedEndpoint<TBody = never, TQuery = never, TResponse = any> = {
  *    `createEndpoint('/api/hello', { method: 'GET', query: z.object({...}) }, handler)`
  */
 export function createEndpoint<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   pathOrOptions: string | EndpointOptions<TBody, TQuery, THeaders>,
@@ -123,8 +123,8 @@ export function GET<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function GET<
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   options: Omit<EndpointOptions<any, TQuery, THeaders>, "method">,
@@ -165,9 +165,9 @@ export function POST<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function POST<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,
@@ -187,9 +187,9 @@ export function PUT<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function PUT<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,
@@ -209,9 +209,9 @@ export function DELETE<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function DELETE<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,
@@ -231,9 +231,9 @@ export function PATCH<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function PATCH<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,
@@ -253,9 +253,9 @@ export function OPTIONS<T = any>(
   handler: EndpointHandler<any, any, any, T>,
 ): ReturnType<typeof createEndpoint>;
 export function OPTIONS<
-  TBody extends AnySchema = any,
-  TQuery extends AnySchema = any,
-  THeaders extends AnySchema = any,
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
   TResponse = any,
 >(
   options: Omit<EndpointOptions<TBody, TQuery, THeaders>, "method">,

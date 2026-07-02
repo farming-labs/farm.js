@@ -848,7 +848,9 @@ const spaRouter = {
         if (!reactRoot) {
           reactRoot = createRoot(currentRoot);
         }
-        reactRoot.render(React.createElement(Component, props));
+        const pageElement = React.createElement(Component, props);
+        const wrappedElement = wrapWithLayouts(pageElement, newPathname, params);
+        reactRoot.render(wrappedElement);
       }
     }
   },
@@ -896,10 +898,12 @@ window.addEventListener("popstate", function() {
     const params = matched.params;
     const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
     const props = { params: params, searchParams: Promise.resolve(searchParams) };
+    const pageElement = React.createElement(Component, props);
+    const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
     
     const container = document.getElementById("root");
     if (container && reactRoot) {
-      reactRoot.render(React.createElement(Component, props));
+      reactRoot.render(wrappedElement);
       currentPathname = pathname;
     }
   } else {
@@ -1551,6 +1555,7 @@ async function handleRequest(request) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>\${title}</title>\${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
 </head>
@@ -1699,6 +1704,7 @@ async function handleRequest(request) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/farm-client.css">
   <title>404 - Page Not Found</title>
 </head>

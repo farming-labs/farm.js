@@ -74,6 +74,28 @@ const RESOLVABLE_SOURCE_EXTENSIONS = [
   ".cjs",
 ] as const;
 
+export function hasUseClientDirective(content: string | null): boolean {
+  if (!content) {
+    return false;
+  }
+  const normalized = content.trimStart();
+  return normalized.startsWith("'use client'") || normalized.startsWith('"use client"');
+}
+
+export function hasHydrateExport(content: string | null): boolean {
+  if (!content) {
+    return false;
+  }
+  return (
+    /\bexport\s+const\s+hydrate\s*=\s*true\b/.test(content) ||
+    /\bexport\s*\{\s*hydrate\s*\}\b/.test(content)
+  );
+}
+
+export function stripUseClientDirective(content: string): string {
+  return content.replace(/^\s*(["'])use client\1\s*;?\s*/, "");
+}
+
 function parseClientModuleMetadata(content: string | null): ParsedClientModuleMetadata {
   if (!content) {
     return {
@@ -82,16 +104,9 @@ function parseClientModuleMetadata(content: string | null): ParsedClientModuleMe
     };
   }
 
-  const normalized = content.trimStart();
-  const isClientComponent =
-    normalized.startsWith("'use client'") || normalized.startsWith('"use client"');
-  const hasHydrateExport =
-    /\bexport\s+const\s+hydrate\s*=\s*true\b/.test(content) ||
-    /\bexport\s*\{\s*hydrate\s*\}\b/.test(content);
-
   return {
-    isClientComponent,
-    hasHydrateExport,
+    isClientComponent: hasUseClientDirective(content),
+    hasHydrateExport: hasHydrateExport(content),
   };
 }
 

@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   useQueryState,
   asString ,
@@ -24,6 +24,11 @@ function FarmClientQueryDemo() {
   const [tags, setTags] = useQueryState('tags', asArrayOf(asString).withDefault!([]));
   const [sortBy, setSortBy] = useQueryState('sortBy', asString.withDefault!('date'));
   const [sortOrder, setSortOrder] = useQueryState('sortOrder', asString.withDefault!('desc'));
+  const [currentUrl, setCurrentUrl] = useState('');
+
+  useEffect(() => {
+    setCurrentUrl(window.location.href);
+  });
 
   const handleTagAdd = (tag: string) => {
     if (tag && !(tags || []).includes(tag)) {
@@ -194,7 +199,7 @@ function FarmClientQueryDemo() {
         <div className="mt-2">
           <p className="text-xs text-gray-500">Current URL:</p>
           <code className="text-xs text-blue-600 break-all">
-            {typeof window !== 'undefined' ? window.location.href : ''}
+            {currentUrl}
           </code>
         </div>
       </div>

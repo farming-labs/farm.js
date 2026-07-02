@@ -12,8 +12,8 @@ import type { EntryContext } from "../types.js";
  */
 export function generateRscEntry(ctx: EntryContext): string {
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
-  const appSegment = (ctx.routesDir?.trim() ?? "") || "app";
-  const glob = `/${ctx.srcDir}/${appSegment}`;
+  const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
+  const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
 
   const debugLog = `// Debug disabled`;
   let code = `
@@ -298,23 +298,27 @@ function filePathToRoute(filePath) {
  * Route-level error boundary (React class component for getDerivedStateFromError)
  * Next.js-style: error.tsx receives { error, reset }.
  */
-class RouteErrorBoundary extends React.Component {
-  static getDerivedStateFromError(error) {
-    return { hasError: true, error };
-  }
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-  render() {
-    if (this.state.hasError) {
-      const Fallback = this.props.Fallback;
-      const reset = () => this.setState({ hasError: false, error: null });
-      return React.createElement(Fallback, { ...this.props.fallbackProps, error: this.state.error, reset });
+const RouteErrorBoundary = React.Component
+  ? class RouteErrorBoundary extends React.Component {
+      static getDerivedStateFromError(error) {
+        return { hasError: true, error };
+      }
+      constructor(props) {
+        super(props);
+        this.state = { hasError: false, error: null };
+      }
+      render() {
+        if (this.state.hasError) {
+          const Fallback = this.props.Fallback;
+          const reset = () => this.setState({ hasError: false, error: null });
+          return React.createElement(Fallback, { ...this.props.fallbackProps, error: this.state.error, reset });
+        }
+        return this.props.children;
+      }
     }
-    return this.props.children;
-  }
-}
+  : function ServerPassthroughBoundary({ children }) {
+      return children;
+    };
 
 /**
  * Match a URL pathname to a route pattern
@@ -517,8 +521,9 @@ async function handler(request) {
   
   const { Page, pattern, params, metadata } = matched;
   const Layout = getLayout(pattern) || (function PassThrough({ children }) { return children; });
-  const routesDir = ${JSON.stringify(ctx.routesDir ?? "")}.trim();
-  const routesPath = routesDir ? '/' + routesDir : '/app';
+  const configuredRoutesDir = ${ctx.routesDir === undefined ? "undefined" : JSON.stringify(ctx.routesDir)};
+  const routesDir = configuredRoutesDir === undefined ? 'app' : configuredRoutesDir.trim();
+  const routesPath = routesDir ? '/' + routesDir : '';
   const globalsCssPath = '/${ctx.srcDir}' + routesPath + '/globals.css';
   
   // Parse search params
@@ -570,13 +575,13 @@ async function handler(request) {
   // Build the full page. root = full document (for SSR). rootContent = single wrapper + layout (for client hydration).
   const payload = {
     root: h('html', null,
-      h('head', null,
-        h('meta', { charSet: 'utf-8' }),
-        h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
-        metadata?.title ? h('title', null, metadata.title) : null,
-        metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null,
-        typeof import.meta.viteRsc?.loadCss === 'function' ? import.meta.viteRsc.loadCss() : h('link', { rel: 'stylesheet', href: globalsCssPath })
-      ),
+        h('head', null,
+          h('meta', { charSet: 'utf-8' }),
+          h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
+          h('link', { rel: 'icon', href: 'data:,' }),
+          metadata?.title ? h('title', null, metadata.title) : null,
+          metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null
+        ),
       h('body', null,
         h('div', { id: 'root' }, rootInner)
       )
@@ -637,9 +642,10 @@ async function handler(request) {
     h('head', null,
       h('meta', { charSet: 'utf-8' }),
       h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
+      h('link', { rel: 'icon', href: 'data:,' }),
       metadata?.title ? h('title', null, metadata.title) : null,
       metadata?.description ? h('meta', { name: 'description', content: metadata.description }) : null,
-      h('link', { rel: 'stylesheet', href: globalsCssPath }),
+      h('link', { rel: 'stylesheet', href: globalsCssPath, as: 'style', precedence: 'default' }),
       h('script', { type: 'module', src: '/@vite/client' })
     ),
     h('body', null,
@@ -680,8 +686,9 @@ async function handler(request) {
           h('head', null,
             h('meta', { charSet: 'utf-8' }),
             h('meta', { name: 'viewport', content: 'width=device-width, initial-scale=1' }),
+            h('link', { rel: 'icon', href: 'data:,' }),
             h('title', null, 'Error'),
-            h('link', { rel: 'stylesheet', href: globalsCssPath })
+            h('link', { rel: 'stylesheet', href: globalsCssPath, as: 'style', precedence: 'default' })
           ),
           h('body', null, h('div', { id: 'root' }, rootInner))
         );

@@ -3,14 +3,7 @@ import type {
   FarmIntegrationAPIBodyFormat,
   FarmIntegrationAPIOperation,
 } from "./integration-api";
-import {
-  dispatchIntegrationRequest,
-  getRegisteredIntegrationAPIManifest,
-  getRegisteredIntegrations,
-  getRegisteredIntegrationRuntime,
-} from "./integrations";
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
-import { _resolveCurrentRequest } from "./server/request-bridge";
 
 export type IntegrationClientOptions = {
   baseURL?: string;
@@ -239,6 +232,29 @@ type ResolvedIntegrationNamespace = readonly [
   FarmIntegrationDefinition | FarmIntegrationAPI,
 ];
 
+type RegisteredIntegrationRuntime = {
+  integration: FarmIntegrationDefinition;
+  config: unknown;
+  isDev: boolean;
+  isProd: boolean;
+};
+
+const INTEGRATION_RUNTIME_REGISTRY_KEY = Symbol.for("farm.integrationRuntimeRegistry");
+const CURRENT_REQUEST_RESOLVER_KEY = Symbol.for("farm.currentRequestResolver");
+const INTEGRATION_REQUEST_DISPATCHER_KEY = Symbol.for("farm.integrationRequestDispatcher");
+
+type IntegrationRequestDispatcher = (
+  runtime: RegisteredIntegrationRuntime,
+  request: Request,
+  options?: { currentRequest?: Request },
+) => Promise<Response | null>;
+
+type GlobalWithIntegrationRuntimeRegistry = typeof globalThis & {
+  [INTEGRATION_RUNTIME_REGISTRY_KEY]?: Map<string, RegisteredIntegrationRuntime>;
+  [CURRENT_REQUEST_RESOLVER_KEY]?: () => Request | undefined;
+  [INTEGRATION_REQUEST_DISPATCHER_KEY]?: IntegrationRequestDispatcher;
+};
+
 type GlobalWithIntegrationAPIManifest = typeof globalThis & {
   __FARM_INTEGRATION_API_MANIFEST__?: Record<string, FarmIntegrationAPI>;
   window?: {
@@ -283,6 +299,38 @@ function tryResolveSourceAPI(
   return source as FarmIntegrationAPI;
 }
 
+function getIntegrationRuntimeRegistry() {
+  const globalState = globalThis as GlobalWithIntegrationRuntimeRegistry;
+  return (
+    globalState[INTEGRATION_RUNTIME_REGISTRY_KEY] || new Map<string, RegisteredIntegrationRuntime>()
+  );
+}
+
+function getRegisteredIntegrationRuntimeLocal(
+  key: string,
+): RegisteredIntegrationRuntime | undefined {
+  return getIntegrationRuntimeRegistry().get(key);
+}
+
+function getRegisteredIntegrationsLocal(): Record<string, FarmIntegrationDefinition> {
+  return Object.fromEntries(
+    Array.from(getIntegrationRuntimeRegistry().entries()).map(([key, runtime]) => [
+      key,
+      runtime.integration,
+    ]),
+  );
+}
+
+function resolveCurrentRequestLocal(): Request | undefined {
+  const globalState = globalThis as GlobalWithIntegrationRuntimeRegistry;
+  return globalState[CURRENT_REQUEST_RESOLVER_KEY]?.();
+}
+
+function resolveIntegrationRequestDispatcherLocal(): IntegrationRequestDispatcher | undefined {
+  const globalState = globalThis as GlobalWithIntegrationRuntimeRegistry;
+  return globalState[INTEGRATION_REQUEST_DISPATCHER_KEY];
+}
+
 function resolveAutomaticClientNamespaces(): ResolvedIntegrationNamespace[] {
   const globalState = globalThis as GlobalWithIntegrationAPIManifest;
   const manifest =
@@ -294,7 +342,7 @@ function resolveAutomaticClientNamespaces(): ResolvedIntegrationNamespace[] {
 }
 
 function resolveAutomaticServerNamespaces(): ResolvedIntegrationNamespace[] {
-  return Object.entries(getRegisteredIntegrations()).flatMap(([key, source]) => {
+  return Object.entries(getRegisteredIntegrationsLocal()).flatMap(([key, source]) => {
     const api = tryResolveSourceAPI(source);
     return api ? [[key, api, source] as ResolvedIntegrationNamespace] : [];
   });
@@ -627,7 +675,7 @@ async function executeServerOperation(
         ? serverRequestOptions.request
         : options.request instanceof Request
           ? options.request
-          : _resolveCurrentRequest();
+          : resolveCurrentRequestLocal();
     const request = resolveRequestLike(
       serverRequestOptions?.request ?? options.request ?? currentRequest,
     );
@@ -656,26 +704,29 @@ async function executeServerOperation(
       const runtime =
         "kind" in (source || {}) &&
         (source as FarmIntegrationDefinition).kind === "farm-integration"
-          ? getRegisteredIntegrationRuntime(integrationKey) || {
+          ? getRegisteredIntegrationRuntimeLocal(integrationKey) || {
               integration: source as FarmIntegrationDefinition,
               config: {},
               isDev: process.env.NODE_ENV !== "production",
               isProd: process.env.NODE_ENV === "production",
             }
-          : getRegisteredIntegrationRuntime(integrationKey);
+          : getRegisteredIntegrationRuntimeLocal(integrationKey);
 
       if (runtime) {
-        const directResponse = await dispatchIntegrationRequest(
-          runtime,
-          new Request(url.toString(), {
-            method: operation.method,
-            headers,
-            body: createBody(operation.bodyFormat, input.body, headers),
-          }),
-          {
-            currentRequest,
-          },
-        );
+        const dispatchIntegrationRequest = resolveIntegrationRequestDispatcherLocal();
+        const directResponse = dispatchIntegrationRequest
+          ? await dispatchIntegrationRequest(
+              runtime,
+              new Request(url.toString(), {
+                method: operation.method,
+                headers,
+                body: createBody(operation.bodyFormat, input.body, headers),
+              }),
+              {
+                currentRequest,
+              },
+            )
+          : null;
 
         if (directResponse) {
           return await finalizeOperationResponse(operation, directResponse);
@@ -974,8 +1025,49 @@ export function createIntegrationClients<TSources extends Record<string, any>>(
   };
 }
 
+function createClientSafeIntegrationAPI(
+  api: FarmIntegrationAPI | undefined,
+): FarmIntegrationAPI | undefined {
+  if (!api) {
+    return undefined;
+  }
+
+  const entries = Object.entries(api as Record<string, unknown>).map(([key, value]) => {
+    if (isOperation(value)) {
+      return [
+        key,
+        {
+          kind: value.kind,
+          path: value.path,
+          method: value.method,
+          bodyFormat: value.bodyFormat,
+          responseFormat: value.responseFormat,
+          credentials: value.credentials,
+          isServer: value.isServer,
+          __pathless: value.__pathless,
+        },
+      ];
+    }
+
+    if (value && typeof value === "object") {
+      return [key, createClientSafeIntegrationAPI(value as FarmIntegrationAPI)];
+    }
+
+    return [key, value];
+  });
+
+  return Object.fromEntries(entries) as FarmIntegrationAPI;
+}
+
 export function getIntegrationAPIManifest(): Record<string, FarmIntegrationAPI> {
-  return getRegisteredIntegrationAPIManifest();
+  const manifestEntries = Object.entries(getRegisteredIntegrationsLocal())
+    .map(([key, integration]) => {
+      const api = createClientSafeIntegrationAPI(integration.api);
+      return api ? ([key, api] as const) : null;
+    })
+    .filter((value): value is readonly [string, FarmIntegrationAPI] => value !== null);
+
+  return Object.fromEntries(manifestEntries);
 }
 
 export function integrationClients<TSources extends Record<string, any>>(

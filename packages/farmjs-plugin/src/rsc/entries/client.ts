@@ -13,11 +13,7 @@ import type { EntryContext } from "../types.js";
  */
 export function generateClientEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  const routesDir = ctx.routesDir?.trim() ?? "";
-  const routesPath = routesDir ? `/${routesDir}` : "/app";
-  const globalsCssPath = `/${ctx.srcDir}${routesPath}/globals.css`;
   let imports = `
-import ${JSON.stringify(globalsCssPath)};
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
