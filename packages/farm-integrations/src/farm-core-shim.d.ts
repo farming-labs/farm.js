@@ -231,6 +231,19 @@ declare module "@farmjs/core" {
     schema: TSchema,
   ): TSchema;
 
+  export interface CreateIntegrationOrmOptions<TClient = unknown> {
+    schema: FarmIntegrationSchema;
+    config?: {
+      storage?: unknown;
+    };
+    storage?: unknown;
+    client?: TClient | (() => TClient | Promise<TClient>);
+  }
+
+  export function createIntegrationOrm<TClient = unknown>(
+    options: CreateIntegrationOrmOptions<TClient>,
+  ): Promise<Record<string, unknown>>;
+
   export type FarmIntegrationAPIMethod =
     | "GET"
     | "POST"
