@@ -12,6 +12,7 @@ import { getRequestContextSnapshot } from "../request-context";
 import { isSSGModule, matchSSGPage } from "../ssg";
 import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
+import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -20,6 +21,11 @@ let cachedClerkProvider: {
 const importRuntimeModule = new Function("specifier", "return import(specifier);") as (
   specifier: string,
 ) => Promise<any>;
+
+interface CachedSSGPage {
+  html: string;
+  document: boolean;
+}
 
 function toMiddlewareMap(input: unknown): Map<string, any> {
   if (input instanceof Map) {
@@ -65,7 +71,7 @@ export class ServerRenderer {
   private config: Required<FarmConfig>;
   private routeManager: RouteManager;
   private ssgManifest: SSGPage[] = [];
-  private ssgCache: Map<string, { html: string; timestamp: number }> = new Map();
+  private dataCache = getFarmDataCache();
 
   constructor(config: Required<FarmConfig>, routeManager: RouteManager) {
     this.config = config;
@@ -96,19 +102,40 @@ export class ServerRenderer {
     const ssgPage = matchSSGPage(pathname, this.ssgManifest);
     if (!ssgPage) return null;
 
-    // Check ISR revalidation
-    if (ssgPage.revalidate) {
-      const cached = this.ssgCache.get(pathname);
-      if (cached) {
-        const age = (Date.now() - cached.timestamp) / 1000;
-        if (age > ssgPage.revalidate) {
-          // Stale - needs revalidation (serve stale, regenerate in background)
-          this.regenerateSSGPage(ssgPage);
-        }
-      }
+    const cached = this.getCachedSSGPage(pathname);
+    if (cached && this.dataCache.isStale(cached)) {
+      // Stale - needs revalidation (serve stale, regenerate in background)
+      this.regenerateSSGPage(ssgPage);
     }
 
     return ssgPage;
+  }
+
+  private getSSGCacheKey(urlPath: string): string {
+    return createFarmCacheKey(["ssg", normalizeRevalidatePath(urlPath)]);
+  }
+
+  private getCachedSSGPage(urlPath: string) {
+    return this.dataCache.getEntry<CachedSSGPage>(this.getSSGCacheKey(urlPath), {
+      allowStale: true,
+    });
+  }
+
+  private cacheSSGPage(
+    page: SSGPage,
+    html: string,
+    options: { document: boolean; createdAt?: number },
+  ): void {
+    this.dataCache.set(
+      this.getSSGCacheKey(page.urlPath),
+      { html, document: options.document },
+      {
+        createdAt: options.createdAt,
+        paths: [page.urlPath],
+        tags: ["ssg"],
+        revalidate: page.revalidate ?? false,
+      },
+    );
   }
 
   /**
@@ -154,8 +181,7 @@ export class ServerRenderer {
           const { renderToString } = await import("react-dom/server");
           const html = renderToString(await this.wrapWithIntegrationProviders(pageElement));
 
-          // Update cache
-          this.ssgCache.set(page.urlPath, { html, timestamp: Date.now() });
+          this.cacheSSGPage(page, html, { document: false });
 
           logger.info(`ISR: Regenerated ${page.urlPath}`);
         } catch (error) {
@@ -172,14 +198,14 @@ export class ServerRenderer {
    */
   private async serveSSGPage(req: FarmRequest, res: FarmResponse, page: SSGPage): Promise<boolean> {
     // Check cache first (for ISR)
-    const cached = this.ssgCache.get(page.urlPath);
+    const cached = this.getCachedSSGPage(page.urlPath);
     if (cached) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("X-Farm-SSG", "cached");
       if (page.revalidate) {
         res.setHeader("Cache-Control", `s-maxage=${page.revalidate}, stale-while-revalidate`);
       }
-      res.write(this.createFullHTML(cached.html));
+      res.write(cached.value.document ? cached.value.html : this.createFullHTML(cached.value.html));
       res.end();
       return true;
     }
@@ -192,7 +218,14 @@ export class ServerRenderer {
           : path.join(this.config.root, this.config.outDir, "client", page.urlPath + ".html");
 
       if (fs.existsSync(htmlPath)) {
+        const stat = fs.statSync(htmlPath);
         const html = fs.readFileSync(htmlPath, "utf-8");
+        this.cacheSSGPage(page, html, { document: true, createdAt: stat.mtimeMs });
+        const fileCacheEntry = this.getCachedSSGPage(page.urlPath);
+        if (fileCacheEntry && this.dataCache.isStale(fileCacheEntry)) {
+          this.regenerateSSGPage(page);
+        }
+
         res.setHeader("Content-Type", "text/html; charset=utf-8");
         res.setHeader("X-Farm-SSG", "file");
         if (page.revalidate) {

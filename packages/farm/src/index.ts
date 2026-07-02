@@ -21,6 +21,7 @@ export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
 export * from "./client";
 export * from "./ssg";
+export * from "./cache";
 export type {
   FarmPlugin,
   FarmPluginContext,

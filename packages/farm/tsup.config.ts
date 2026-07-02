@@ -16,6 +16,7 @@ export default defineConfig({
     api: "src/api/index.ts",
     plugin: "src/plugin.ts",
     storage: "src/storage/index.ts",
+    cache: "src/cache.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

@@ -33,6 +33,9 @@
       "storage": [
         "./dist/storage.d.ts"
       ],
+      "cache": [
+        "./dist/cache.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -79,6 +82,11 @@
       "types": "./dist/storage.d.ts",
       "import": "./dist/storage.mjs",
       "require": "./dist/storage.cjs"
+    },
+    "./cache": {
+      "types": "./dist/cache.d.ts",
+      "import": "./dist/cache.mjs",
+      "require": "./dist/cache.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
