@@ -56,16 +56,16 @@ export default function StoreDemo() {
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <WholeStoreCard />
-        <ThemeCard />
-        <SidebarCard />
-        <PairCard />
+        <WholeStoreCard hydrated={hydrated} />
+        <ThemeCard hydrated={hydrated} />
+        <SidebarCard hydrated={hydrated} />
+        <PairCard hydrated={hydrated} />
       </div>
     </div>
   );
 }
 
-function WholeStoreCard() {
+function WholeStoreCard({ hydrated }: { hydrated: boolean }) {
   const state = demoStore.use();
   wholeRenders += 1;
 
@@ -76,13 +76,13 @@ function WholeStoreCard() {
         {JSON.stringify(state)}
       </p>
       <p data-testid="whole-renders" className="mt-2 text-sm text-slate-500">
-        renders:{wholeRenders}
+        renders:{hydrated ? wholeRenders : 0}
       </p>
     </div>
   );
 }
 
-function ThemeCard() {
+function ThemeCard({ hydrated }: { hydrated: boolean }) {
   const theme = demoStore.theme();
 
   themeRenders += 1;
@@ -94,13 +94,13 @@ function ThemeCard() {
         {theme}
       </p>
       <p data-testid="theme-renders" className="mt-2 text-sm text-slate-500">
-        renders:{themeRenders}
+        renders:{hydrated ? themeRenders : 0}
       </p>
     </div>
   );
 }
 
-function SidebarCard() {
+function SidebarCard({ hydrated }: { hydrated: boolean }) {
   const sidebar = demoStore.sidebar();
   sidebarRenders += 1;
 
@@ -111,13 +111,13 @@ function SidebarCard() {
         {String(sidebar)}
       </p>
       <p data-testid="sidebar-renders" className="mt-2 text-sm text-slate-500">
-        renders:{sidebarRenders}
+        renders:{hydrated ? sidebarRenders : 0}
       </p>
     </div>
   );
 }
 
-function PairCard() {
+function PairCard({ hydrated }: { hydrated: boolean }) {
   const pair = demoStore.use(["theme", "sidebar"]);
   pairRenders += 1;
 
@@ -128,7 +128,7 @@ function PairCard() {
         {JSON.stringify(pair)}
       </p>
       <p data-testid="pair-renders" className="mt-2 text-sm text-slate-500">
-        renders:{pairRenders}
+        renders:{hydrated ? pairRenders : 0}
       </p>
     </div>
   );

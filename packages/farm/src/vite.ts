@@ -950,6 +950,7 @@ if (import.meta.hot) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/assets/globals.css">
   ${page.revalidate ? `<meta name="x-farm-revalidate" content="${page.revalidate}">` : ""}
 </head>

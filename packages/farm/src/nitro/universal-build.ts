@@ -1555,6 +1555,7 @@ async function handleRequest(request) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>\${title}</title>\${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
 </head>
@@ -1703,6 +1704,7 @@ async function handleRequest(request) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/farm-client.css">
   <title>404 - Page Not Found</title>
 </head>

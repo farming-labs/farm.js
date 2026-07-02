@@ -461,9 +461,17 @@ type RegisteredIntegrationRuntime = {
 };
 
 const INTEGRATION_RUNTIME_REGISTRY_KEY = Symbol.for("farm.integrationRuntimeRegistry");
+const INTEGRATION_REQUEST_DISPATCHER_KEY = Symbol.for("farm.integrationRequestDispatcher");
+
+type IntegrationRequestDispatcher = (
+  runtime: RegisteredIntegrationRuntime,
+  request: Request,
+  options?: { currentRequest?: Request },
+) => Promise<Response | null>;
 
 type GlobalWithIntegrationRuntimeRegistry = typeof globalThis & {
   [INTEGRATION_RUNTIME_REGISTRY_KEY]?: Map<string, RegisteredIntegrationRuntime>;
+  [INTEGRATION_REQUEST_DISPATCHER_KEY]?: IntegrationRequestDispatcher;
 };
 
 function getIntegrationRuntimeRegistry() {
@@ -1617,6 +1625,9 @@ export async function dispatchIntegrationRequest(
 
   return null;
 }
+
+(globalThis as GlobalWithIntegrationRuntimeRegistry)[INTEGRATION_REQUEST_DISPATCHER_KEY] =
+  dispatchIntegrationRequest;
 
 function createIntegrationRequestContextStore(
   rawRequest: FarmRequest,

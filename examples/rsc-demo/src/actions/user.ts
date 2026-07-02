@@ -14,7 +14,7 @@ let nextId = 1;
 export async function submitMessage(formData: FormData) {
   // Simulate network delay
   await new Promise((resolve) => setTimeout(resolve, 500));
-  console.log({formData})
+
   const name = formData.get("name") as string;
   const message = formData.get("message") as string;
 
@@ -30,8 +30,6 @@ export async function submitMessage(formData: FormData) {
     timestamp: new Date().toISOString(),
   };
   messages.push(newMessage);
-
-  console.log("[Server Action] Message saved:", newMessage);
 
   return {
     success: true,
@@ -60,7 +58,6 @@ export async function deleteMessage(id: number) {
   }
 
   messages.splice(index, 1);
-  console.log("[Server Action] Message deleted:", id);
 
   return { success: true };
 }

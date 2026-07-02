@@ -83,7 +83,9 @@ export default function CounterPage({ middlewareData = {} }: PageProps) {
             JavaScript.
           </p>
           <div className="bg-slate-900/50 rounded-lg p-4 font-mono text-sm">
-            <span className="text-emerald-400">{serverInfo}</span>
+            <span className="text-emerald-400" suppressHydrationWarning>
+              {serverInfo}
+            </span>
           </div>
           <p className="text-xs text-slate-500 mt-4">
             Refresh the page to see the time update (server-rendered).

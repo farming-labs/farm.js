@@ -707,6 +707,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>${title}</title>${metaTags}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
@@ -896,6 +897,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>Farm.js App</title>
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>

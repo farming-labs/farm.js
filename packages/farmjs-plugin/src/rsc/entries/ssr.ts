@@ -12,6 +12,9 @@ import type { EntryContext } from "../types.js";
  */
 export function generateSsrEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
+  const routesDir = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
+  const routesPath = routesDir ? `/${routesDir}` : "";
+  const globalsCssPath = `/${ctx.srcDir}${routesPath}/globals.css`;
 
   return `
 import React from 'react';
@@ -21,6 +24,61 @@ import { renderToPipeableStream } from 'react-dom/server';
 
 function debug(...args) {
   ${debugLog}
+}
+
+const DEV_GLOBAL_CSS_HREF = ${JSON.stringify(globalsCssPath)};
+const CLIENT_CSS_HREF = "__FARM_CLIENT_CSS_HREF__";
+const PLACEHOLDER_CSS_HREF = "__FARM_CLIENT_CSS_HREF__";
+const resolvedCssHref =
+  typeof CLIENT_CSS_HREF === "string" &&
+  CLIENT_CSS_HREF.length > 0 &&
+  CLIENT_CSS_HREF.indexOf(PLACEHOLDER_CSS_HREF) < 0
+    ? CLIENT_CSS_HREF
+    : DEV_GLOBAL_CSS_HREF;
+
+function escapeHtmlAttribute(value) {
+  return String(value).replace(/[&"]/g, (char) => (char === '&' ? '&amp;' : '&quot;'));
+}
+
+const cssLinkTag = resolvedCssHref
+  ? '<link rel="stylesheet" href="' + escapeHtmlAttribute(resolvedCssHref) + '" as="style" data-precedence="default">'
+  : '';
+
+function injectIntoHeadStream(tag) {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const marker = '</head>';
+  let buffer = '';
+  let injected = false;
+
+  return new TransformStream({
+    transform(chunk, controller) {
+      const str = typeof chunk === "string" ? chunk : decoder.decode(chunk);
+      if (injected || !tag) {
+        controller.enqueue(typeof chunk === "string" ? encoder.encode(str) : chunk);
+        return;
+      }
+
+      buffer += str;
+      const index = buffer.indexOf(marker);
+      if (index >= 0) {
+        const before = buffer.slice(0, index);
+        const after = buffer.slice(index + marker.length);
+        controller.enqueue(encoder.encode(before + tag + marker + after));
+        buffer = '';
+        injected = true;
+        return;
+      }
+
+      if (buffer.length > marker.length) {
+        controller.enqueue(encoder.encode(buffer.slice(0, buffer.length - marker.length)));
+        buffer = buffer.slice(-marker.length);
+      }
+    },
+    flush(controller) {
+      if (buffer) controller.enqueue(encoder.encode(buffer));
+    },
+  });
 }
 
 /** Collect Node stream (from renderToPipeableStream) into a single string. Supports Suspense. */
@@ -45,15 +103,10 @@ export async function renderHTML(firstArg, options = {}) {
   const rscStream = hasPayload ? firstArg.rscStream : firstArg;
   const [s1, s2] = rscStream.tee();
   
-  // When payload is provided: render the tree directly so Suspense streams (loading fallback first, then content).
-  // When not: deserialize full stream first (legacy), then render (no streaming of loading state).
-  let rootElement;
-  if (hasPayload) {
-    rootElement = firstArg.payload.root;
-  } else {
-    const payload = await createFromReadableStream(s1);
-    rootElement = payload.root;
-  }
+  // Always deserialize the RSC stream before SSR. Rendering the raw payload directly
+  // calls client references on the server (for example, a "use client" Counter).
+  const payload = await createFromReadableStream(s1);
+  const rootElement = payload.root;
   
   function Root() {
     return rootElement;
@@ -90,7 +143,7 @@ export async function renderHTML(firstArg, options = {}) {
   const clientScriptTag = injectClientScriptInStream ? '<script type="module" src="' + CLIENT_ENTRY_HREF + '"></script>' : '';
 
   if (hasPayload) {
-    // Stream HTML to the client so loading.tsx appears first, then content when async work finishes.
+    // Stream HTML to the client while preserving the RSC payload for hydration.
     debug('Streaming HTML (loading fallback then content)');
     const BODY_HTML_END = '</body></html>';
     const TAG_LEN = BODY_HTML_END.length;
@@ -129,7 +182,8 @@ export async function renderHTML(firstArg, options = {}) {
             passThrough.on('error', (e) => controller.error(e));
           }
         });
-    let out = webStream.pipeThrough(injectRSCPayload(s2));
+    let out = webStream.pipeThrough(injectIntoHeadStream(cssLinkTag));
+    out = out.pipeThrough(injectRSCPayload(s2));
     out = out.pipeThrough(streamingClientScriptInjector);
     return out;
   }
@@ -137,11 +191,9 @@ export async function renderHTML(firstArg, options = {}) {
   // Legacy path: buffer full HTML then send (no loading streaming)
   debug('Rendering to HTML stream (then buffering)');
   const fullHtmlRaw = await pipeableStreamToString(passThrough);
-  const CLIENT_CSS_HREF = "__FARM_CLIENT_CSS_HREF__";
-  const shouldInjectCss = typeof CLIENT_CSS_HREF === "string" && CLIENT_CSS_HREF.length > 0 && CLIENT_CSS_HREF.indexOf("__FARM_CLIENT_CSS_HREF__") < 0;
   let fullHtml = fullHtmlRaw;
-  if (shouldInjectCss && fullHtml.includes("</head>")) {
-    fullHtml = fullHtml.replace("</head>", '<link rel="stylesheet" href="' + CLIENT_CSS_HREF + '"></head>');
+  if (cssLinkTag && fullHtml.includes("</head>")) {
+    fullHtml = fullHtml.replace("</head>", cssLinkTag + "</head>");
   }
   ${
     ctx.actionsEnabled

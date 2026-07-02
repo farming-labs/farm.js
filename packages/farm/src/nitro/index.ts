@@ -431,6 +431,7 @@ export default defineEventHandler(async (event: H3Event) => {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,">
   <title>Farm.js App</title>
   <script>
     window.__FARM_PROPS__ = \${JSON.stringify(pageProps)};

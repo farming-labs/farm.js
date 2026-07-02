@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   useQueryState,
   useQueryStates,
@@ -62,6 +62,11 @@ export default function ClientQueryDemo() {
   });
 
   const [jsonInput, setJsonInput] = useState('{"category": "tech", "sort": "date"}');
+  const [currentUrl, setCurrentUrl] = useState('');
+
+  useEffect(() => {
+    setCurrentUrl(window.location.href);
+  });
 
   const handleJsonUpdate = () => {
     try {
@@ -389,7 +394,7 @@ export default function ClientQueryDemo() {
       <div className="mt-6 bg-purple-100 p-4 rounded-lg">
         <h4 className="font-medium mb-2">Current URL:</h4>
         <code className="text-sm text-purple-800 break-all">
-          {typeof window !== 'undefined' ? window.location.href : ''}
+          {currentUrl}
         </code>
       </div>
     </div>

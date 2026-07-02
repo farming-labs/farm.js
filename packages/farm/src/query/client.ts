@@ -144,7 +144,7 @@ export function useQueryState<TParser extends Parser<any>>(
 ] {
   type T = NonNullable<ReturnType<TParser["parse"]>>;
   const [state, setState] = useState<T | null>(() => {
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined") return parser.parse("");
     const searchParams = getCurrentSearchParams();
     const value = searchParams.get(key);
     const parsed = parser.parse(value ?? "");
@@ -237,11 +237,8 @@ export function useQueryStates<T extends Record<string, Parser<any>>>(
   const watchKeys = keys.join("&");
 
   const [state, setState] = useState<{ [K in keyof T]: ReturnType<T[K]["parse"]> }>(() => {
-    if (typeof window === "undefined") {
-      return {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
-    }
-
-    const searchParams = getCurrentSearchParams();
+    const searchParams =
+      typeof window === "undefined" ? new URLSearchParams() : getCurrentSearchParams();
     const result = {} as { [K in keyof T]: ReturnType<T[K]["parse"]> };
 
     Object.entries(parsers).forEach(([key, parser]) => {
