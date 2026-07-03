@@ -734,6 +734,48 @@ describe("integrations runtime", () => {
     });
   });
 
+  it("exposes serialized integration data on HTTP route contexts", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.get<"/api/local-demo/data", { data: Record<string, unknown> }>(
+              "/api/local-demo/data",
+              {
+                handler(_request, context) {
+                  return Response.json({
+                    data: context.data,
+                  });
+                },
+              },
+            ),
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/data");
+    req.headers["x-farm-integration-data"] = JSON.stringify({
+      tenantId: "tenant_browser",
+      locale: "en",
+    });
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      data: {
+        tenantId: "tenant_browser",
+        locale: "en",
+      },
+    });
+  });
+
   it("runs route before and after hooks around the route handler", async () => {
     const manager = createManager();
     const handlerSpy = vi.fn();

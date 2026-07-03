@@ -25,6 +25,7 @@ export { createIntegrationClient, IntegrationClientError } from "./integration-c
 export {
   createIntegrationApi,
   createIntegrationClients,
+  createIntegrations,
   createIntegrationServerClient,
   getIntegrationAPIManifest,
   integrationClients,
@@ -39,6 +40,7 @@ export type {
   IntegrationClientRequestOptions,
   IntegrationAPI,
   IntegrationClients,
+  IntegrationClientData,
   IntegrationOperationResult,
   InferIntegrationOperationBody,
   InferIntegrationOperationQuery,

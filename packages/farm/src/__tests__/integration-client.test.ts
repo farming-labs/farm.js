@@ -4,6 +4,7 @@ import {
   createIntegrationApi,
   createIntegrationClient,
   createIntegrationClients,
+  createIntegrations,
   createIntegrationServerClient,
   endpoint,
   integrationClients,
@@ -208,6 +209,60 @@ describe("integration client", () => {
 
     expect(result.error).toBeNull();
     expect(result.data?.authenticated).toBe(false);
+  });
+
+  it("serializes createIntegrations data for browser integration calls", async () => {
+    stubBrowser();
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+
+    (window as any).__FARM_INTEGRATION_API_MANIFEST__ = {
+      localDemo: {
+        data: endpoint.route(
+          "/api/local-demo/data",
+          endpoint.get<{ ok: boolean }>({
+            responseFormat: "json",
+          }),
+        ),
+      },
+    };
+
+    const { apiClient } = createIntegrations<{
+      localDemo: {
+        data: {
+          get: ReturnType<typeof endpoint.get<{ ok: boolean }>>;
+        };
+      };
+    }>({
+      data: {
+        tenantId: "tenant_global",
+        plan: "starter",
+      },
+    });
+
+    const result = await apiClient.localDemo.data.get(undefined, {
+      data: {
+        tenantId: "tenant_call",
+        locale: "en",
+      },
+    });
+
+    expect(result.error).toBeNull();
+    const headers = fetchSpy.mock.calls[0]?.[1]
+      ? new Headers(fetchSpy.mock.calls[0][1]!.headers as HeadersInit)
+      : new Headers();
+    expect(JSON.parse(headers.get("x-farm-integration-data") || "{}")).toEqual({
+      tenantId: "tenant_call",
+      plan: "starter",
+      locale: "en",
+    });
   });
 
   it("creates api and apiClient aliases from registered integrations when no sources are passed", async () => {
@@ -919,6 +974,78 @@ describe("integration client", () => {
 
     expect(clientResult.error).toBeNull();
     expect(clientResult.data?.ok).toBe(true);
+  });
+
+  it("passes createIntegrations data to registered server handlers", async () => {
+    stubServer();
+
+    const integration = defineIntegration({
+      category: "custom",
+      type: "local-demo",
+      instance: {},
+      routes: [
+        integrationRoute.get<
+          "/api/local-demo/data",
+          { data: Record<string, unknown> },
+          never,
+          true
+        >("/api/local-demo/data", {
+          responseFormat: "json",
+          isServer: true,
+          handler(_request, context) {
+            return Response.json({
+              data: context.data,
+            });
+          },
+        }),
+      ],
+    });
+
+    const manager = new PluginManager({
+      config: {
+        integrations: {
+          localDemo: integration,
+        },
+      } as any,
+      isDev: true,
+      isProd: false,
+    });
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: integration,
+      }),
+    );
+    await manager.runHookParallel("init");
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const { api } = createIntegrations<{
+      localDemo: typeof integration;
+    }>({
+      data: {
+        tenantId: "tenant_global",
+        plan: "starter",
+      },
+    });
+
+    await _runWithCurrentRequest(new Request("https://farmjs.dev/server-demo"), async () => {
+      const result = await api.localDemo.data.get(undefined, {
+        data: {
+          tenantId: "tenant_call",
+          locale: "en",
+        },
+      });
+
+      expect(result.error).toBeNull();
+      expect(result.data).toEqual({
+        data: {
+          tenantId: "tenant_call",
+          plan: "starter",
+          locale: "en",
+        },
+      });
+    });
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("picks up newly added client manifest operations without rebuilding the root alias", async () => {

@@ -195,6 +195,8 @@ export type FarmIntegrationLifecycleHook<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
 > = (context: FarmIntegrationLifecycleContext<TConfig, TSchema>) => MaybePromise<void>;
 
+export type FarmIntegrationData = Record<string, unknown>;
+
 export interface FarmIntegrationHandlerContext<
   TBody = unknown,
   TQuery = unknown,
@@ -208,6 +210,7 @@ export interface FarmIntegrationHandlerContext<
   params: FarmIntegrationRouteParams;
   input: FarmIntegrationRouteInput<TBody, TQuery>;
   args: FarmIntegrationRouteArgs<TSchema>;
+  data: FarmIntegrationData;
   integration: {
     category: FarmIntegrationCategory;
     /** @deprecated Use category instead. */
@@ -1449,6 +1452,33 @@ function createIntegrationLifecycleLogger(
   };
 }
 
+const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
+
+function isFarmIntegrationData(value: unknown): value is FarmIntegrationData {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function parseIntegrationDataHeader(request: Request): FarmIntegrationData {
+  const raw = request.headers.get(INTEGRATION_DATA_HEADER);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const value = JSON.parse(raw);
+    return isFarmIntegrationData(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function resolveIntegrationData(request: Request, data?: FarmIntegrationData): FarmIntegrationData {
+  return {
+    ...parseIntegrationDataHeader(request),
+    ...(isFarmIntegrationData(data) ? data : {}),
+  };
+}
+
 function createIntegrationPlugin(integrationKey: string, integration: FarmIntegration): FarmPlugin {
   const routes = normalizeIntegrationRoutes(integration.routes || []);
   const middleware = [...(integration.middleware || [])];
@@ -1885,6 +1915,7 @@ function createIntegrationHandlerContext(input: {
       integration: input.integration,
       config: input.pluginContext.config,
     }),
+    data: resolveIntegrationData(input.request),
     integration: {
       category: input.integration.category,
       slot: input.integration.category,
@@ -2376,6 +2407,7 @@ export async function dispatchIntegrationRequest(
   request: Request,
   options: {
     currentRequest?: Request;
+    data?: FarmIntegrationData;
   } = {},
 ): Promise<Response | null> {
   const integration = runtime.integration;
@@ -2406,6 +2438,7 @@ export async function dispatchIntegrationRequest(
       pathname,
       requestId,
       currentRequest: options.currentRequest,
+      data: options.data,
     });
     const startedAt = Date.now();
 
@@ -2502,6 +2535,7 @@ export async function dispatchIntegrationRequest(
       pathname,
       requestId,
       currentRequest: options.currentRequest,
+      data: options.data,
     });
     const startedAt = Date.now();
 
@@ -2696,6 +2730,7 @@ function createServerIntegrationHandlerContext(input: {
   pathname: string;
   requestId: string;
   currentRequest?: Request;
+  data?: FarmIntegrationData;
 }): FarmIntegrationHandlerContext {
   return {
     request: input.request,
@@ -2709,6 +2744,7 @@ function createServerIntegrationHandlerContext(input: {
       integration: input.runtime.integration,
       config: input.runtime.config,
     }),
+    data: resolveIntegrationData(input.request, input.data),
     integration: {
       category: input.runtime.integration.category,
       slot: input.runtime.integration.category,

@@ -5,10 +5,13 @@ import type {
 } from "./integration-api";
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
 
+export type IntegrationClientData = Record<string, unknown>;
+
 export type IntegrationClientOptions = {
   baseURL?: string;
   headers?: Record<string, string>;
   credentials?: RequestCredentials;
+  data?: IntegrationClientData;
   isServer?: false | undefined;
 };
 
@@ -16,6 +19,7 @@ type IntegrationRequestOptionsBase = {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   credentials?: RequestCredentials;
+  data?: IntegrationClientData;
 };
 
 export type IntegrationClientRequestOptions = IntegrationRequestOptionsBase;
@@ -246,7 +250,7 @@ const INTEGRATION_REQUEST_DISPATCHER_KEY = Symbol.for("farm.integrationRequestDi
 type IntegrationRequestDispatcher = (
   runtime: RegisteredIntegrationRuntime,
   request: Request,
-  options?: { currentRequest?: Request },
+  options?: { currentRequest?: Request; data?: IntegrationClientData },
 ) => Promise<Response | null>;
 
 type GlobalWithIntegrationRuntimeRegistry = typeof globalThis & {
@@ -329,6 +333,42 @@ function resolveCurrentRequestLocal(): Request | undefined {
 function resolveIntegrationRequestDispatcherLocal(): IntegrationRequestDispatcher | undefined {
   const globalState = globalThis as GlobalWithIntegrationRuntimeRegistry;
   return globalState[INTEGRATION_REQUEST_DISPATCHER_KEY];
+}
+
+const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
+
+function isIntegrationClientData(value: unknown): value is IntegrationClientData {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function mergeIntegrationClientData(
+  ...values: Array<IntegrationClientData | undefined>
+): IntegrationClientData | undefined {
+  let merged: IntegrationClientData | undefined;
+
+  for (const value of values) {
+    if (!isIntegrationClientData(value)) {
+      continue;
+    }
+
+    merged = {
+      ...(merged || {}),
+      ...value,
+    };
+  }
+
+  return merged && Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function appendIntegrationClientDataHeader(
+  headers: Headers,
+  data: IntegrationClientData | undefined,
+) {
+  if (!data) {
+    return;
+  }
+
+  headers.set(INTEGRATION_DATA_HEADER, JSON.stringify(data));
 }
 
 function resolveAutomaticClientNamespaces(): ResolvedIntegrationNamespace[] {
@@ -576,7 +616,7 @@ async function finalizeOperationResponse(
 async function executeClientOperation(
   operation: FarmIntegrationAPIOperation<any, any, any>,
   input: Record<string, unknown>,
-  options: Pick<IntegrationClientOptions, "baseURL" | "headers" | "credentials">,
+  options: Pick<IntegrationClientOptions, "baseURL" | "headers" | "credentials" | "data">,
   requestOptions?: IntegrationClientRequestOptions,
 ) {
   try {
@@ -605,6 +645,11 @@ async function executeClientOperation(
     if (operation.responseFormat !== "response") {
       headers.set("accept", "application/json");
     }
+
+    appendIntegrationClientDataHeader(
+      headers,
+      mergeIntegrationClientData(options.data, requestOptions?.data),
+    );
 
     const response = await fetch(url.toString(), {
       method: operation.method,
@@ -647,7 +692,7 @@ async function executeServerOperation(
   input: Record<string, unknown>,
   options: Pick<
     IntegrationServerClientOptions,
-    "baseURL" | "headers" | "credentials" | "request" | "forwardHeaders"
+    "baseURL" | "headers" | "credentials" | "data" | "request" | "forwardHeaders"
   >,
   requestOptions?: IntegrationServerClientRequestOptions,
   integrationKey?: string,
@@ -700,6 +745,8 @@ async function executeServerOperation(
       headers.set("accept", "application/json");
     }
 
+    const data = mergeIntegrationClientData(options.data, requestOptions?.data);
+
     if (integrationKey) {
       const runtime =
         "kind" in (source || {}) &&
@@ -724,6 +771,7 @@ async function executeServerOperation(
               }),
               {
                 currentRequest,
+                data,
               },
             )
           : null;
@@ -733,6 +781,8 @@ async function executeServerOperation(
         }
       }
     }
+
+    appendIntegrationClientDataHeader(headers, data);
 
     const response = await fetch(url.toString(), {
       method: operation.method,
@@ -980,6 +1030,34 @@ export function createIntegrationApi<TSources extends Record<string, any>>(
   };
 }
 
+function isIntegrationClientOptionsInput(value: unknown): value is IntegrationClientOptions {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    ("baseURL" in value ||
+      "headers" in value ||
+      "credentials" in value ||
+      "data" in value ||
+      "isServer" in value)
+  );
+}
+
+function resolveIntegrationServerOptions(
+  clientOptions: IntegrationClientOptions = {},
+  serverOptions: Omit<IntegrationServerClientOptions, "isServer"> = {},
+): Omit<IntegrationServerClientOptions, "isServer"> {
+  const data = mergeIntegrationClientData(clientOptions.data, serverOptions.data);
+
+  return {
+    baseURL: clientOptions.baseURL,
+    headers: clientOptions.headers,
+    credentials: clientOptions.credentials,
+    ...serverOptions,
+    ...(data ? { data } : {}),
+  };
+}
+
 export function createIntegrationClients<TSources extends Record<string, any>>(
   clientOptions?: IntegrationClientOptions,
   serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
@@ -999,10 +1077,18 @@ export function createIntegrationClients<TSources extends Record<string, any>>(
   clientOptions?: IntegrationClientOptions,
   serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
 ): IntegrationClients<TSources> {
-  if (arguments.length === 0) {
+  if (arguments.length === 0 || isIntegrationClientOptionsInput(sources)) {
+    const automaticClientOptions = isIntegrationClientOptionsInput(sources) ? sources : {};
+    const automaticServerOptions = arguments.length > 1 ? clientOptions : undefined;
+
     return {
-      api: integrationsServer<TSources>(),
-      apiClient: integrationsClient<TSources>(),
+      api: integrationsServer<TSources>(
+        resolveIntegrationServerOptions(
+          automaticClientOptions,
+          automaticServerOptions as Omit<IntegrationServerClientOptions, "isServer"> | undefined,
+        ),
+      ),
+      apiClient: integrationsClient<TSources>(automaticClientOptions),
     };
   }
 
@@ -1014,7 +1100,7 @@ export function createIntegrationClients<TSources extends Record<string, any>>(
       {
         integrations: explicitSources,
       },
-      serverOptions || {},
+      resolveIntegrationServerOptions(clientOptions, serverOptions),
     ) as IntegrationServerClientAliases<TSources>,
     apiClient: createIntegrationClient(
       {
@@ -1023,6 +1109,36 @@ export function createIntegrationClients<TSources extends Record<string, any>>(
       clientOptions,
     ) as IntegrationClientAliases<TSources>,
   };
+}
+
+export function createIntegrations<TSources extends Record<string, any>>(
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function createIntegrations<TSources extends Record<string, any>>(
+  sources: TSources,
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function createIntegrations<TSources extends Record<string, any>>(
+  sources: { integrations: TSources },
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources>;
+export function createIntegrations<TSources extends Record<string, any>>(
+  sources?: TSources | { integrations: TSources } | IntegrationClientOptions,
+  clientOptions?: IntegrationClientOptions,
+  serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+): IntegrationClients<TSources> {
+  if (arguments.length === 0) {
+    return createIntegrationClients<TSources>();
+  }
+
+  return createIntegrationClients<TSources>(
+    sources as TSources,
+    clientOptions,
+    serverOptions,
+  ) as IntegrationClients<TSources>;
 }
 
 function createClientSafeIntegrationAPI(

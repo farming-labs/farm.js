@@ -43,6 +43,7 @@ function createContext(
     method,
     params: {},
     input: {},
+    data: {},
     integration: {
       category: "email",
       slot: "email",
