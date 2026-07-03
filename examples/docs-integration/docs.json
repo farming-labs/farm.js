@@ -1,0 +1,9 @@
+{
+  "entry": "docs",
+  "metadata": {
+    "description": "Farm docs integration example"
+  },
+  "nav": {
+    "title": "Farm Docs"
+  }
+}

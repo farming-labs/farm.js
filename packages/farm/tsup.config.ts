@@ -17,6 +17,7 @@ export default defineConfig({
     plugin: "src/plugin.ts",
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",
+    docs: "src/docs/index.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

@@ -76,10 +76,12 @@ describe("generateRouteTypes", () => {
     const outPath = await generateRouteTypes({
       root: tmpDir,
       srcDir: "src",
-      extraRoutes: ["/docs/reference"],
+      extraRoutes: ["/docs/reference", "/docs", "/docs/[...docs]"],
     });
 
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain('"/docs/reference"');
+    expect(content).toContain('"/docs"');
+    expect(content).toContain("`/docs/${string}`");
   });
 });

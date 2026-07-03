@@ -267,6 +267,10 @@ export class APIRouteManager {
     return pathname === "/api" || pathname.startsWith("/api/");
   }
 
+  matchRoute(pathname: string): APIRouteMatch<APIRoute> | null {
+    return matchAPIRoute(this.routes, pathname);
+  }
+
   /**
    * Get all routes for client type generation
    */

@@ -1,3 +1,6 @@
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { APITypeGenerator } from "../type-generator";
 
@@ -17,5 +20,22 @@ describe("APITypeGenerator", () => {
     expect(content).toContain('"storage-demo": {');
     expect(content).toContain("get: typeof GET_storagedemo;");
     expect(content).toContain("post: typeof POST_storagedemo;");
+  });
+
+  it("creates the output directory before writing generated API types", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
+    const appDir = path.join(root, "src", "app");
+    const routeDir = path.join(appDir, "api", "docs");
+    mkdirSync(routeDir, { recursive: true });
+    const outputPath = path.join(root, "src", "lib", "api.generated.ts");
+
+    const routePath = path.join(routeDir, "route.ts");
+    writeFileSync(routePath, "export const GET = async () => new Response('ok');\n");
+
+    const generator = new APITypeGenerator(appDir);
+    generator.generateAPIIndex(outputPath);
+
+    expect(existsSync(outputPath)).toBe(true);
+    expect(readFileSync(outputPath, "utf8")).toContain("Auto-generated API router types");
   });
 });

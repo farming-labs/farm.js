@@ -1,9 +1,13 @@
 import type { FarmConfig as BaseFarmConfig } from "./types";
+import type { DocsConfig } from "@farming-labs/docs";
+import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import path from "path";
+
+export type { FarmDocsConfigInput, FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 
 export interface RedirectConfig {
   source: string;
@@ -107,11 +111,12 @@ export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output
   outputDir: string;
 }
 
-export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
+export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
+  docs?: FarmDocsUserConfig;
 
   trailingSlash?: boolean;
   redirects?: () => Promise<RedirectConfig[]> | RedirectConfig[];
@@ -154,11 +159,12 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
 }
 
 export interface ResolvedFarmConfig extends Required<
-  Omit<FarmUserConfig, "plugins" | "vite" | "deploy">
+  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs">
 > {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
   deploy: ResolvedFarmDeployConfig;
+  docs: FarmDocsResolvedConfig;
 }
 
 export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
@@ -253,6 +259,235 @@ export function resolveDeployConfig(
   };
 }
 
+export const DOCS_CONFIG_FILENAMES = [
+  "docs.config.ts",
+  "docs.config.tsx",
+  "docs.config.mts",
+  "docs.config.cts",
+  "docs.config.js",
+  "docs.config.jsx",
+  "docs.config.mjs",
+  "docs.config.cjs",
+  "docs.json",
+];
+
+function normalizeDocsRoute(value: string | undefined, fallback = "/docs"): string {
+  const raw = (value || fallback).trim();
+  if (!raw || raw === "/") return "/";
+  const normalized = raw.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/?/, "/").replace(/\/+$/, "");
+  return normalized || "/";
+}
+
+function docsRouteToEntry(route: string): string {
+  const entry = route.replace(/^\/+/, "").replace(/\/+$/, "");
+  return entry || "docs";
+}
+
+function normalizeDocsContentDir(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const normalized = value.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+$/, "");
+  return normalized || undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function cloneSerializable(value: unknown, seen = new WeakSet<object>()): any {
+  if (value === null) return null;
+
+  const valueType = typeof value;
+  if (valueType === "string" || valueType === "number" || valueType === "boolean") {
+    return value;
+  }
+  if (valueType === "undefined" || valueType === "function" || valueType === "symbol") {
+    return undefined;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => cloneSerializable(item, seen)).filter((item) => item !== undefined);
+  }
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (isRecord(value)) {
+    if (seen.has(value)) return undefined;
+    seen.add(value);
+
+    const output: Record<string, any> = {};
+    for (const [key, nestedValue] of Object.entries(value)) {
+      const clonedValue = cloneSerializable(nestedValue, seen);
+      if (clonedValue !== undefined) {
+        output[key] = clonedValue;
+      }
+    }
+    return output;
+  }
+
+  return undefined;
+}
+
+function sanitizeDocsConfig(config: Partial<DocsConfig>): Partial<DocsConfig> {
+  return cloneSerializable(config) || {};
+}
+
+export async function findDocsConfigPath(rootDir: string, configPath?: string): Promise<string | undefined> {
+  const { existsSync } = await import("fs");
+  const root = rootDir || process.cwd();
+
+  if (configPath) {
+    const resolvedPath = path.isAbsolute(configPath) ? configPath : path.join(root, configPath);
+    if (!existsSync(resolvedPath)) {
+      throw new Error(`Could not find docs config at ${configPath}.`);
+    }
+    return path.resolve(resolvedPath);
+  }
+
+  for (const filename of DOCS_CONFIG_FILENAMES) {
+    const resolvedPath = path.join(root, filename);
+    if (existsSync(resolvedPath)) {
+      return resolvedPath;
+    }
+  }
+
+  return undefined;
+}
+
+export async function loadDocsConfig(
+  rootDir: string,
+  configPath?: string,
+): Promise<{ config: Partial<DocsConfig>; configPath: string } | undefined> {
+  const fs = await import("fs/promises");
+  const { pathToFileURL } = await import("url");
+  const root = rootDir || process.cwd();
+  const resolvedPath = await findDocsConfigPath(root, configPath);
+
+  if (!resolvedPath) return undefined;
+
+  try {
+    if (resolvedPath.endsWith(".json")) {
+      const content = await fs.readFile(resolvedPath, "utf8");
+      return { config: JSON.parse(content), configPath: resolvedPath };
+    }
+
+    const { build } = await import("esbuild");
+    const configCacheDir = path.join(root, ".farm", ".config-loader");
+    await fs.mkdir(configCacheDir, { recursive: true });
+    const modulePath = path.join(
+      configCacheDir,
+      `docs-config-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
+    );
+
+    await build({
+      absWorkingDir: root,
+      entryPoints: [resolvedPath],
+      outfile: modulePath,
+      bundle: true,
+      format: "esm",
+      platform: "node",
+      target: `node${process.versions.node.split(".")[0]}`,
+      packages: "external",
+      jsx: "automatic",
+      logLevel: "silent",
+      sourcemap: "inline",
+    });
+
+    const moduleUrl = pathToFileURL(modulePath).href + `?t=${Date.now()}`;
+    let importedConfig: any;
+
+    try {
+      importedConfig = await import(/* @vite-ignore */ moduleUrl);
+    } finally {
+      await fs.unlink(modulePath).catch(() => undefined);
+    }
+
+    return {
+      config: importedConfig.default || importedConfig,
+      configPath: resolvedPath,
+    };
+  } catch (error: any) {
+    const relativePath = path.relative(root, resolvedPath) || resolvedPath;
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to load docs config from ${relativePath}: ${message}`);
+  }
+}
+
+export async function resolveDocsConfig(
+  userDocs: FarmDocsUserConfig | undefined,
+  options: {
+    root?: string;
+    srcDir?: string;
+  } = {},
+): Promise<FarmDocsResolvedConfig> {
+  const root = options.root || process.cwd();
+
+  if (userDocs === false) {
+    return {
+      enabled: false,
+      entry: "/docs",
+      config: { entry: "docs", docsPath: "/docs" },
+    };
+  }
+
+  const docsOptions = isRecord(userDocs) ? userDocs : {};
+  if (docsOptions.enabled === false) {
+    return {
+      enabled: false,
+      entry: "/docs",
+      config: { entry: "docs", docsPath: "/docs" },
+    };
+  }
+
+  const loadedConfig = await loadDocsConfig(root, docsOptions.configPath);
+  const hasExplicitDocsConfig = userDocs === true || isRecord(userDocs);
+
+  if (!hasExplicitDocsConfig && !loadedConfig) {
+    return {
+      enabled: false,
+      entry: "/docs",
+      config: { entry: "docs", docsPath: "/docs" },
+    };
+  }
+
+  const inlineDocsConfig = sanitizeDocsConfig(docsOptions.config || {});
+  const directDocsConfig = sanitizeDocsConfig({
+    ...docsOptions,
+    enabled: undefined,
+    config: undefined,
+    configPath: undefined,
+  } as Partial<DocsConfig>);
+  const loadedDocsConfig = sanitizeDocsConfig(loadedConfig?.config || {});
+  const mergedDocsConfig: Partial<DocsConfig> = {
+    ...loadedDocsConfig,
+    ...inlineDocsConfig,
+    ...directDocsConfig,
+  };
+
+  const explicitRoute = typeof docsOptions.entry === "string" ? docsOptions.entry : undefined;
+  const configuredDocsPath = typeof mergedDocsConfig.docsPath === "string" ? mergedDocsConfig.docsPath : undefined;
+  const configuredEntry = typeof mergedDocsConfig.entry === "string" ? mergedDocsConfig.entry : undefined;
+  const entryRoute = normalizeDocsRoute(
+    configuredDocsPath || explicitRoute || (configuredEntry ? `/${configuredEntry}` : undefined),
+  );
+  const docsEntry =
+    explicitRoute && explicitRoute.startsWith("/")
+      ? docsRouteToEntry(explicitRoute)
+      : docsRouteToEntry(configuredEntry || entryRoute);
+  const contentDir = normalizeDocsContentDir(docsOptions.contentDir || mergedDocsConfig.contentDir);
+
+  return {
+    enabled: true,
+    entry: entryRoute,
+    contentDir,
+    configPath: loadedConfig?.configPath,
+    config: {
+      ...mergedDocsConfig,
+      entry: docsEntry,
+      docsPath: entryRoute,
+      ...(contentDir ? { contentDir } : {}),
+    },
+  };
+}
+
 export async function resolveConfig(
   userConfig: FarmUserConfig,
   mode: "development" | "production",
@@ -275,14 +510,18 @@ export async function resolveConfig(
       : userConfig.headers || [];
 
   const deploy = resolveDeployConfig(userConfig);
+  const root = userConfig.root || process.cwd();
+  const srcDir = userConfig.srcDir || "src";
+  const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
 
   const resolved: ResolvedFarmConfig = {
-    root: userConfig.root || process.cwd(),
-    srcDir: userConfig.srcDir || "src",
+    root,
+    srcDir,
     outDir: userConfig.outDir || "dist",
     basePath: userConfig.basePath || "/",
     preset: deploy.preset || "node-server",
     deploy,
+    docs,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {

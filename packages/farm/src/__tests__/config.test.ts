@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, resolveConfig, resolveDeployConfig } from "../config";
+import { loadConfig, resolveConfig, resolveDeployConfig, resolveDocsConfig } from "../config";
 
 const originalEnv = { ...process.env };
 
@@ -74,10 +74,7 @@ describe("loadConfig", () => {
   it("throws when a discovered config file fails to import", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-env-"));
 
-    await fs.writeFile(
-      path.join(root, "farm.config.mjs"),
-      "throw new Error('broken config import');",
-    );
+    await fs.writeFile(path.join(root, "farm.config.mjs"), "throw new Error('broken config import');");
 
     await expect(loadConfig(root, undefined, "development")).rejects.toThrow(
       "Failed to load config from farm.config.mjs: broken config import",
@@ -173,5 +170,67 @@ describe("resolveDeployConfig", () => {
       preset: "netlify",
       outputDir: "custom-output",
     });
+  });
+});
+
+describe("resolveDocsConfig", () => {
+  it("normalizes a Farm docs entry route into docs config shape", async () => {
+    const docs = await resolveDocsConfig({
+      entry: "/docs",
+      config: {
+        metadata: {
+          description: "Example docs",
+        },
+      },
+    });
+
+    expect(docs).toMatchObject({
+      enabled: true,
+      entry: "/docs",
+      config: {
+        entry: "docs",
+        docsPath: "/docs",
+        metadata: {
+          description: "Example docs",
+        },
+      },
+    });
+  });
+
+  it("auto-enables docs when docs.json exists", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-json-"));
+    await fs.writeFile(
+      path.join(root, "docs.json"),
+      JSON.stringify({
+        entry: "guides",
+        metadata: {
+          description: "Guide docs",
+        },
+      }),
+    );
+
+    const docs = await resolveDocsConfig(undefined, { root });
+
+    expect(docs).toMatchObject({
+      enabled: true,
+      entry: "/guides",
+      config: {
+        entry: "guides",
+        docsPath: "/guides",
+        metadata: {
+          description: "Guide docs",
+        },
+      },
+    });
+    expect(docs.configPath).toBe(path.join(root, "docs.json"));
+  });
+
+  it("lets docs false opt out even when a docs config file exists", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-disabled-"));
+    await fs.writeFile(path.join(root, "docs.json"), JSON.stringify({ entry: "guides" }));
+
+    const docs = await resolveDocsConfig(false, { root });
+
+    expect(docs.enabled).toBe(false);
   });
 });

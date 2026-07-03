@@ -25,6 +25,7 @@ export { APITypeGenerator } from "./type-generator";
 export * from "./openapi";
 export * from "./query";
 export * from "./middleware";
+export * from "./docs";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
@@ -63,6 +64,8 @@ export type {
   FarmDeployConfig,
   ResolvedFarmDeployConfig,
   FarmDeployTarget,
+  FarmDocsResolvedConfig,
+  FarmDocsUserConfig,
 } from "./config";
 
 export type { ComponentType, ReactNode, ReactElement, FC, PropsWithChildren } from "react";

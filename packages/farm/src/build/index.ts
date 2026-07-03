@@ -9,6 +9,7 @@ import { createFarmApp } from "../app";
 import { APIRouteManager } from "../api/route-manager";
 import { resolveAppPath } from "../utils";
 import { buildUniversal } from "../nitro/universal-build";
+import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateRouteTypes } from "../routing/generate-route-types";
 import { PluginManager } from "../plugin";
 
@@ -56,7 +57,15 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     const serverRenderer = farmApp.getServerRenderer();
 
     try {
-      await generateRouteTypes({ root, srcDir, suppressLintOnLink: config.suppressLintOnLink });
+      await generateRouteTypes({
+        root,
+        srcDir,
+        extraRoutes: [
+          ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),
+          ...getFarmDocsRouteTypeEntries(config.docs),
+        ],
+        suppressLintOnLink: config.suppressLintOnLink,
+      });
     } catch {
       // Non-fatal; type generation is for DX only
     }
