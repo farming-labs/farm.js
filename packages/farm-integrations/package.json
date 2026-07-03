@@ -98,6 +98,10 @@
     "./supabase/client": {
       "types": "./dist/supabase/client.d.ts",
       "import": "./dist/supabase/client.js"
+    },
+    "./unkey": {
+      "types": "./dist/unkey/index.d.ts",
+      "import": "./dist/unkey/index.js"
     }
   },
   "scripts": {

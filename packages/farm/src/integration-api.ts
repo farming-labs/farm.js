@@ -34,7 +34,7 @@ export interface FarmIntegrationAPIOperation<
 }
 
 export type FarmIntegrationAPI = {
-  [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any>;
+  [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any, any, any>;
 };
 
 export type FarmIntegrationRouteOperationCarrier<

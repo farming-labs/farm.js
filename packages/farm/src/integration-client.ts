@@ -254,7 +254,7 @@ const INTEGRATION_REQUEST_DISPATCHER_KEY = Symbol.for("farm.integrationRequestDi
 type IntegrationRequestDispatcher = (
   runtime: RegisteredIntegrationRuntime,
   request: Request,
-  options?: { currentRequest?: Request; data?: IntegrationClientData },
+  options?: { currentRequest?: Request; data?: IntegrationClientData; internal?: boolean },
 ) => Promise<Response | null>;
 
 type GlobalWithIntegrationRuntimeRegistry = typeof globalThis & {
@@ -837,6 +837,7 @@ async function executeServerOperation(
               {
                 currentRequest,
                 data,
+                internal: true,
               },
             )
           : null;
