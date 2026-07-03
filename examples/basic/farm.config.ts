@@ -150,6 +150,10 @@ export default defineFarmConfig({
     }
   },
 
+  docs: {
+    entry: '/docs',
+  },
+
   // Plugins
   plugins: [
     createLoggerPlugin({}),

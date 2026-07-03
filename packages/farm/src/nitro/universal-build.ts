@@ -1254,6 +1254,7 @@ function generateVirtualEntryCode(
   // Generate import for custom not-found page if exists
   const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
   const apiRouterImport = apiRoutes.length > 0 ? `import { createRouter } from "better-call";` : "";
+  const docsHandlerImport = config.docs?.enabled ? `import { createFarmDocsHandler } from "farm/docs";` : "";
   const integrationImports = configModulePath
     ? `
 import * as FarmUserConfigModule from "${configModulePath}";
@@ -1304,6 +1305,7 @@ ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
 ${notFoundImport}
 ${apiRouterImport}
+${docsHandlerImport}
 ${integrationImports}
 
 // Custom 404 page component (if provided)
@@ -1314,6 +1316,11 @@ const farmUserConfig = ${
   };
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
+const farmDocsHandler = ${
+    config.docs?.enabled
+      ? `createFarmDocsHandler(${JSON.stringify(config.docs)}, { root: ${JSON.stringify(config.root)}, srcDir: ${JSON.stringify(config.srcDir)} })`
+      : "null"
+  };
 
 // API routes bundled at build time
 const apiRoutes = [${apiRegistrations.join(",")}
@@ -1414,6 +1421,13 @@ async function handleRequest(request) {
   const integrationResponse = await handleIntegrationRequest(request.clone());
   if (integrationResponse) {
     return integrationResponse;
+  }
+
+  if (farmDocsHandler) {
+    const docsResponse = await farmDocsHandler(request.clone());
+    if (docsResponse) {
+      return docsResponse;
+    }
   }
 
   // Handle API routes

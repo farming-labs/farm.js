@@ -9,6 +9,7 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateRouteTypes } from "./routing/generate-route-types";
+import { createFarmDocsHandler, getFarmDocsRouteTypeEntries } from "./docs";
 import { sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
@@ -100,12 +101,15 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      const getExtraRouteTypes = () => [
+        ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
+        ...getFarmDocsRouteTypeEntries(farmConfig.docs),
+      ];
       try {
         await generateRouteTypes({
           root: farmConfig.root,
           srcDir: farmConfig.srcDir,
-          extraRoutes:
-            options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : [],
+          extraRoutes: getExtraRouteTypes(),
           suppressLintOnLink: farmConfig.suppressLintOnLink,
         });
       } catch (e) {
@@ -126,8 +130,7 @@ export function farmPlugin(
           generateRouteTypes({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
-            extraRoutes:
-              options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : [],
+            extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
           }).catch(() => {});
         }, 100);
@@ -197,6 +200,11 @@ export function farmPlugin(
         logger.success("✅ OpenAPI documentation enabled");
       }
 
+      const farmDocsHandler = createFarmDocsHandler(farmConfig.docs, {
+        root: farmConfig.root,
+        srcDir: farmConfig.srcDir,
+      });
+
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
       const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
         try {
@@ -265,6 +273,23 @@ export function farmPlugin(
         if (openAPIManager && req.url === options.openapi?.route) {
           const docsHandler = openAPIManager.getDocsRouteHandler();
           return docsHandler(req, res);
+        }
+
+        const docsHeaders = new Headers();
+        for (const [key, value] of Object.entries(req.headers)) {
+          if (value) {
+            docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+          }
+        }
+        const docsResponse = await farmDocsHandler(
+          new Request(fullUrl, {
+            method: requestMethod,
+            headers: docsHeaders,
+          }),
+        );
+        if (docsResponse) {
+          await sendWebResponse(res, docsResponse);
+          return;
         }
 
         const currentConfig = farmApp?.getConfig() ?? options;

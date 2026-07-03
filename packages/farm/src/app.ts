@@ -1,4 +1,5 @@
 import type { FarmConfig } from "./types";
+import type { FarmDocsResolvedConfig } from "./docs/types";
 import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
 import { RouteManager } from "./routing/route-manager";
@@ -6,8 +7,22 @@ import { ServerRenderer } from "./server/renderer";
 import path from "path";
 import type { ViteDevServer } from "vite";
 
+type NormalizedFarmConfig = Required<FarmConfig> & {
+  docs: FarmDocsResolvedConfig;
+};
+
+const defaultDocsConfig: FarmDocsResolvedConfig = {
+  enabled: false,
+  entry: "/docs",
+  config: { entry: "docs", docsPath: "/docs" },
+};
+
+function isResolvedDocsConfig(value: FarmConfig["docs"]): value is FarmDocsResolvedConfig {
+  return !!value && typeof value === "object" && "enabled" in value && "entry" in value && "config" in value;
+}
+
 export class FarmApp {
-  private config: Required<FarmConfig>;
+  private config: NormalizedFarmConfig;
   private routeManager: RouteManager;
   private serverRenderer: ServerRenderer;
   private viteServer?: ViteDevServer;
@@ -46,11 +61,11 @@ export class FarmApp {
     return this.serverRenderer;
   }
 
-  getConfig(): Required<FarmConfig> {
+  getConfig(): NormalizedFarmConfig {
     return this.config;
   }
 
-  private normalizeConfig(config: FarmConfig): Required<FarmConfig> {
+  private normalizeConfig(config: FarmConfig): NormalizedFarmConfig {
     const root = config.root || process.cwd();
 
     return {
@@ -62,6 +77,7 @@ export class FarmApp {
       deploy: config.deploy || {},
       storage: config.storage || {},
       integrations: config.integrations || {},
+      docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? false,
