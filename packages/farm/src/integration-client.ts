@@ -5,6 +5,10 @@ import type {
 } from "./integration-api";
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
 
+/**
+ * Small per-call integration metadata. When sent from a browser, values are
+ * client-controlled and should be validated before authorization decisions.
+ */
 export type IntegrationClientData = Record<string, unknown>;
 
 export type IntegrationClientOptions = {
@@ -336,9 +340,58 @@ function resolveIntegrationRequestDispatcherLocal(): IntegrationRequestDispatche
 }
 
 const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
+const INTEGRATION_DATA_HEADER_MAX_LENGTH = 16 * 1024;
+const BLOCKED_INTEGRATION_DATA_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function isIntegrationClientData(value: unknown): value is IntegrationClientData {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPlainIntegrationDataObject(value: unknown): value is Record<string, unknown> {
+  if (!isIntegrationClientData(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function sanitizeIntegrationClientDataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeIntegrationClientDataValue(item));
+  }
+
+  if (!isPlainIntegrationDataObject(value)) {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (BLOCKED_INTEGRATION_DATA_KEYS.has(key)) {
+      continue;
+    }
+
+    sanitized[key] = sanitizeIntegrationClientDataValue(item);
+  }
+
+  return sanitized;
+}
+
+function normalizeIntegrationClientData(
+  value: IntegrationClientData | undefined,
+): IntegrationClientData | undefined {
+  if (!isIntegrationClientData(value)) {
+    return undefined;
+  }
+
+  const sanitized = sanitizeIntegrationClientDataValue(value);
+  return isIntegrationClientData(sanitized) && Object.keys(sanitized).length > 0
+    ? sanitized
+    : undefined;
+}
+
+function getIntegrationDataHeaderByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function mergeIntegrationClientData(
@@ -347,17 +400,29 @@ function mergeIntegrationClientData(
   let merged: IntegrationClientData | undefined;
 
   for (const value of values) {
-    if (!isIntegrationClientData(value)) {
+    const data = normalizeIntegrationClientData(value);
+    if (!data) {
       continue;
     }
 
     merged = {
       ...(merged || {}),
-      ...value,
+      ...data,
     };
   }
 
   return merged && Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function serializeIntegrationClientData(data: IntegrationClientData): string {
+  const serialized = JSON.stringify(data);
+  if (getIntegrationDataHeaderByteLength(serialized) > INTEGRATION_DATA_HEADER_MAX_LENGTH) {
+    throw new Error(
+      `Integration client data must be smaller than ${INTEGRATION_DATA_HEADER_MAX_LENGTH} bytes when sent over HTTP headers.`,
+    );
+  }
+
+  return serialized;
 }
 
 function appendIntegrationClientDataHeader(
@@ -368,7 +433,7 @@ function appendIntegrationClientDataHeader(
     return;
   }
 
-  headers.set(INTEGRATION_DATA_HEADER, JSON.stringify(data));
+  headers.set(INTEGRATION_DATA_HEADER, serializeIntegrationClientData(data));
 }
 
 function resolveAutomaticClientNamespaces(): ResolvedIntegrationNamespace[] {

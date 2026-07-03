@@ -195,6 +195,10 @@ export type FarmIntegrationLifecycleHook<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
 > = (context: FarmIntegrationLifecycleContext<TConfig, TSchema>) => MaybePromise<void>;
 
+/**
+ * Small per-call integration metadata. Values received over HTTP are
+ * client-controlled and should be validated before authorization decisions.
+ */
 export type FarmIntegrationData = Record<string, unknown>;
 
 export interface FarmIntegrationHandlerContext<
@@ -1453,9 +1457,54 @@ function createIntegrationLifecycleLogger(
 }
 
 const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
+const INTEGRATION_DATA_HEADER_MAX_LENGTH = 16 * 1024;
+const BLOCKED_INTEGRATION_DATA_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
 function isFarmIntegrationData(value: unknown): value is FarmIntegrationData {
   return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPlainIntegrationDataObject(value: unknown): value is Record<string, unknown> {
+  if (!isFarmIntegrationData(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function sanitizeIntegrationDataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeIntegrationDataValue(item));
+  }
+
+  if (!isPlainIntegrationDataObject(value)) {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (BLOCKED_INTEGRATION_DATA_KEYS.has(key)) {
+      continue;
+    }
+
+    sanitized[key] = sanitizeIntegrationDataValue(item);
+  }
+
+  return sanitized;
+}
+
+function normalizeIntegrationData(value: FarmIntegrationData | undefined): FarmIntegrationData {
+  if (!isFarmIntegrationData(value)) {
+    return {};
+  }
+
+  const sanitized = sanitizeIntegrationDataValue(value);
+  return isFarmIntegrationData(sanitized) ? sanitized : {};
+}
+
+function getIntegrationDataHeaderByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
 }
 
 function parseIntegrationDataHeader(request: Request): FarmIntegrationData {
@@ -1464,9 +1513,13 @@ function parseIntegrationDataHeader(request: Request): FarmIntegrationData {
     return {};
   }
 
+  if (getIntegrationDataHeaderByteLength(raw) > INTEGRATION_DATA_HEADER_MAX_LENGTH) {
+    return {};
+  }
+
   try {
     const value = JSON.parse(raw);
-    return isFarmIntegrationData(value) ? value : {};
+    return normalizeIntegrationData(value);
   } catch {
     return {};
   }
@@ -1475,7 +1528,7 @@ function parseIntegrationDataHeader(request: Request): FarmIntegrationData {
 function resolveIntegrationData(request: Request, data?: FarmIntegrationData): FarmIntegrationData {
   return {
     ...parseIntegrationDataHeader(request),
-    ...(isFarmIntegrationData(data) ? data : {}),
+    ...normalizeIntegrationData(data),
   };
 }
 

@@ -625,6 +625,10 @@ declare module "@farmjs/core/client" {
 
   export const endpoint: typeof api;
 
+  /**
+   * Small per-call integration metadata. When sent from a browser, values are
+   * client-controlled and should be validated before authorization decisions.
+   */
   export type IntegrationClientData = Record<string, unknown>;
 
   export interface IntegrationClientOptions {

@@ -234,24 +234,23 @@ describe("integration client", () => {
       },
     };
 
+    const globalData = JSON.parse(
+      '{"tenantId":"tenant_global","plan":"starter","__proto__":{"polluted":true},"nested":{"safe":true,"constructor":{"prototype":{"polluted":true}}}}',
+    ) as Record<string, unknown>;
+    const callData = JSON.parse(
+      '{"tenantId":"tenant_call","locale":"en","prototype":{"polluted":true}}',
+    ) as Record<string, unknown>;
+
     const { apiClient } = createIntegrations<{
       localDemo: {
         data: {
           get: ReturnType<typeof endpoint.get<{ ok: boolean }>>;
         };
       };
-    }>({
-      data: {
-        tenantId: "tenant_global",
-        plan: "starter",
-      },
-    });
+    }>({ data: globalData });
 
     const result = await apiClient.localDemo.data.get(undefined, {
-      data: {
-        tenantId: "tenant_call",
-        locale: "en",
-      },
+      data: callData,
     });
 
     expect(result.error).toBeNull();
@@ -262,7 +261,53 @@ describe("integration client", () => {
       tenantId: "tenant_call",
       plan: "starter",
       locale: "en",
+      nested: {
+        safe: true,
+      },
     });
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it("rejects oversized integration data before browser fetches", async () => {
+    stubBrowser();
+
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+        },
+      }),
+    );
+
+    (window as any).__FARM_INTEGRATION_API_MANIFEST__ = {
+      localDemo: {
+        data: endpoint.route(
+          "/api/local-demo/data",
+          endpoint.get<{ ok: boolean }>({
+            responseFormat: "json",
+          }),
+        ),
+      },
+    };
+
+    const { apiClient } = createIntegrations<{
+      localDemo: {
+        data: {
+          get: ReturnType<typeof endpoint.get<{ ok: boolean }>>;
+        };
+      };
+    }>({
+      data: {
+        blob: "x".repeat(17 * 1024),
+      },
+    });
+
+    const result = await apiClient.localDemo.data.get();
+
+    expect(result.data).toBeNull();
+    expect(result.error?.message).toContain("must be smaller");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("creates api and apiClient aliases from registered integrations when no sources are passed", async () => {
