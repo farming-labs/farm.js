@@ -1,7 +1,33 @@
+import {
+  integrationsClient,
+  integrationsServer,
+  type IntegrationClientOptions,
+  type IntegrationClientRoot,
+  type IntegrationServerClientOptions,
+  type IntegrationServerClientRoot,
+} from "../integration-client";
+
 export type APIClientOptions = {
   baseURL?: string;
   headers?: Record<string, string>;
+  credentials?: RequestCredentials;
   cacheDefaults?: CacheOptions;
+  integrations?: IntegrationClientOptions;
+};
+
+export type APIClientWithoutIntegrationsOptions = Omit<APIClientOptions, "integrations"> & {
+  integrations: false;
+};
+
+export type ServerAPIClientOptions = {
+  integrations?: Omit<IntegrationServerClientOptions, "isServer">;
+};
+
+export type ServerAPIClientWithoutIntegrationsOptions = Omit<
+  ServerAPIClientOptions,
+  "integrations"
+> & {
+  integrations: false;
 };
 
 export type StatusPhase = "idle" | "pending" | "success" | "error" | "revalidating" | "invalidated";
@@ -239,6 +265,18 @@ type RouterToClient<T> = {
       : EndpointMethod<T[K]>;
 };
 
+export type RouteAPIClient<TRouter extends Record<string, any>> = RouterToClient<TRouter>;
+
+export type APIClient<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+> = RouteAPIClient<TRouter> & IntegrationClientRoot<TIntegrations>;
+
+export type ServerAPIClient<
+  TEndpoints extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+> = TEndpoints & IntegrationServerClientRoot<TIntegrations>;
+
 /**
  * Create a typed RPC client for Farm.js API routes
  *
@@ -246,13 +284,15 @@ type RouterToClient<T> = {
  * - api.hello.get({ query: { name: 'World' } })
  * - api['auth/login'].post({ body: { email: '...', password: '...' } })
  * - api.users.get({ query: { limit: '10' } })
+ * - api.integrations.billing.checkout({ body: { priceId: 'price_...' } })
  *
  * @example
  * ```typescript
  * import { createAPIClient } from 'farm/client';
  * import type { APIRouter } from '@/api';
+ * import type { AppIntegrations } from '@/lib/integrations';
  *
- * export const api = createAPIClient<APIRouter>();
+ * export const api = createAPIClient<APIRouter, AppIntegrations>();
  *
  * // Use it (nested property access)
  * const result = await api.hello.get({ query: { name: 'World' } });
@@ -263,15 +303,48 @@ type RouterToClient<T> = {
  * const result = await api['auth/login'].post({
  *   body: { email: 'test@example.com', password: 'pass123' }
  * });
+ *
+ * // Integration APIs live under a reserved namespace.
+ * const checkout = await api.integrations.billing.checkout({
+ *   body: { priceId: 'price_123' }
+ * });
  * ```
  */
-export function createAPIClient<TRouter extends Record<string, any>>(
-  options: APIClientOptions = {},
-): RouterToClient<TRouter> {
+export function createAPIClient<
+  TRouter extends Record<string, any>,
+>(options: APIClientWithoutIntegrationsOptions): RouteAPIClient<TRouter>;
+export function createAPIClient<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  options?: APIClientOptions,
+): APIClient<TRouter, TIntegrations>;
+export function createAPIClient<
+  TRouter extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
+): RouteAPIClient<TRouter> | APIClient<TRouter, TIntegrations> {
+  options ??= {};
   // Auto-detect baseURL
   const baseURL =
     options.baseURL ||
     (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+  const integrationOptions =
+    options.integrations === false
+      ? false
+      : {
+          baseURL: options.baseURL,
+          headers: options.headers,
+          credentials: options.credentials,
+          ...(typeof options.integrations === "object" ? options.integrations : {}),
+        };
+  const rootAliases =
+    integrationOptions === false
+      ? undefined
+      : {
+          integrations: integrationsClient<TIntegrations>(integrationOptions),
+        };
 
   const cacheState = new Map<string, CacheEntry>();
   const inflightState = new Map<string, InflightEntry>();
@@ -603,7 +676,7 @@ export function createAPIClient<TRouter extends Record<string, any>>(
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy([], request, routeMeta) as RouterToClient<TRouter>;
+  return createNestedProxy([], request, routeMeta, rootAliases) as APIClient<TRouter, TIntegrations>;
 }
 
 /**
@@ -624,13 +697,18 @@ function createNestedProxy(
   path: string[],
   client: any,
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
+  rootAliases?: Record<string, unknown>,
 ): any {
   const target = () => {};
   const proxy = new Proxy(target, {
     // When accessing a property (api.hello)
     get(_target, prop: string) {
+      if (path.length === 0 && typeof prop === "string" && rootAliases && prop in rootAliases) {
+        return rootAliases[prop];
+      }
+
       // Add prop to path and return new proxy
-      return createNestedProxy([...path, prop], client, routeMeta);
+      return createNestedProxy([...path, prop], client, routeMeta, rootAliases);
     },
 
     // When calling as a function
@@ -670,12 +748,58 @@ function createNestedProxy(
 
 /**
  * Server-side API client that calls endpoints directly as functions
- * No HTTP overhead, just direct function calls
+ * No HTTP overhead for app endpoints, and registered integration routes can be exposed at
+ * api.integrations.* where Farm can dispatch them directly to the integration handler.
+ *
+ * @example
+ * ```typescript
+ * import { createServerAPIClient } from 'farm/client';
+ * import type { AppIntegrations } from '@/lib/integrations';
+ *
+ * export const api = createServerAPIClient<{}, AppIntegrations>({});
+ *
+ * const result = await api.integrations.billing.status();
+ * ```
  */
 export function createServerAPIClient<TEndpoints extends Record<string, any>>(
   endpoints: TEndpoints,
-): TEndpoints {
-  return endpoints;
+): TEndpoints;
+export function createServerAPIClient<TEndpoints extends Record<string, any>>(
+  endpoints: TEndpoints,
+  options: ServerAPIClientWithoutIntegrationsOptions,
+): TEndpoints;
+export function createServerAPIClient<
+  TEndpoints extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  endpoints: TEndpoints,
+  options?: ServerAPIClientOptions,
+): ServerAPIClient<TEndpoints, TIntegrations>;
+export function createServerAPIClient<
+  TEndpoints extends Record<string, any>,
+  TIntegrations extends Record<string, any> = {},
+>(
+  endpoints: TEndpoints,
+  options: ServerAPIClientOptions | ServerAPIClientWithoutIntegrationsOptions = {},
+): TEndpoints | ServerAPIClient<TEndpoints, TIntegrations> {
+  if (
+    options.integrations === false ||
+    Object.prototype.hasOwnProperty.call(endpoints, "integrations")
+  ) {
+    return endpoints;
+  }
+
+  Object.defineProperty(endpoints, "integrations", {
+    get() {
+      return integrationsServer<TIntegrations>(
+        typeof options.integrations === "object" ? options.integrations : {},
+      );
+    },
+    enumerable: false,
+    configurable: true,
+  });
+
+  return endpoints as ServerAPIClient<TEndpoints, TIntegrations>;
 }
 
 type CacheEntry = {

@@ -14,6 +14,15 @@ export type {
   ExternalHref,
 } from "./link";
 export { useRouter } from "./router";
-export { createAPIClient } from "../api/client";
+export { createAPIClient, createServerAPIClient } from "../api/client";
+export type {
+  APIClient,
+  APIClientOptions,
+  APIClientWithoutIntegrationsOptions,
+  RouteAPIClient,
+  ServerAPIClient,
+  ServerAPIClientOptions,
+  ServerAPIClientWithoutIntegrationsOptions,
+} from "../api/client";
 export { getRouter, navigateTo, prefetch, SPARouter } from "./spa-router";
 export type { PageProps, LayoutProps, Metadata } from "../types";

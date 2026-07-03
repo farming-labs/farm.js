@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createAPIClient } from "../api/client";
+import { createAPIClient, createServerAPIClient } from "../api/client";
+import { endpoint } from "../integration-api";
+import { defineIntegration, integrationRoute, resolveIntegrationPlugins } from "../integrations";
+import { PluginManager } from "../plugin";
+import { _runWithCurrentRequest } from "../server/request";
 
 type APIRouter = {
   users: {
@@ -45,6 +49,7 @@ function createDeferred<T>() {
 
 beforeEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("createAPIClient", () => {
@@ -406,5 +411,146 @@ describe("createAPIClient", () => {
     expect(getCount).toBe(2);
 
     vi.useRealTimers();
+  });
+
+  it("exposes integration APIs under createAPIClient().integrations in the browser", async () => {
+    vi.stubGlobal("window", {
+      location: {
+        origin: "http://localhost:3000",
+      },
+      __FARM_INTEGRATION_API_MANIFEST__: {
+        localDemo: {
+          message: endpoint.route(
+            "/api/local-demo/message",
+            endpoint.get<{ ok: boolean; source: string }>({
+              responseFormat: "json",
+            }),
+          ),
+        },
+      },
+    });
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === "http://example.com/api/users?limit=5") {
+        return new Response(
+          JSON.stringify({
+            users: [{ id: "1", name: "Alice" }],
+            total: 1,
+            limit: 5,
+            offset: 0,
+          }),
+          {
+            headers: {
+              "content-type": "application/json",
+            },
+          },
+        );
+      }
+
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          source: "integration",
+        }),
+        {
+          headers: {
+            "content-type": "application/json",
+          },
+        },
+      );
+    });
+    globalThis.fetch = fetchMock as any;
+
+    type AppIntegrations = {
+      localDemo: {
+        message: {
+          get: ReturnType<typeof endpoint.get<{ ok: boolean; source: string }>>;
+        };
+      };
+    };
+
+    const api = createAPIClient<APIRouter, AppIntegrations>({
+      baseURL: "http://example.com",
+    });
+
+    const routeResult = await api.users.get({ query: { limit: "5" } });
+    const integrationResult = await api.integrations.localDemo.message.get();
+
+    expect(routeResult.error).toBeNull();
+    expect(routeResult.data?.users[0].id).toBe("1");
+    expect(integrationResult.error).toBeNull();
+    expect(integrationResult.data).toEqual({
+      ok: true,
+      source: "integration",
+    });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "http://example.com/api/local-demo/message",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+  });
+
+  it("exposes registered integration handlers under createServerAPIClient().integrations", async () => {
+    vi.stubGlobal("window", undefined);
+    vi.stubGlobal("document", undefined);
+
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    const handlerSpy = vi.fn();
+    const integration = defineIntegration({
+      category: "custom",
+      type: "local-demo",
+      instance: {},
+      routes: [
+        integrationRoute.get<
+          "/api/local-demo/message",
+          { ok: boolean; source: string },
+          never,
+          true
+        >("/api/local-demo/message", {
+          responseFormat: "json",
+          isServer: true,
+          handler() {
+            handlerSpy();
+            return Response.json({
+              ok: true,
+              source: "handler",
+            });
+          },
+        }),
+      ],
+    });
+
+    const manager = new PluginManager({
+      config: {
+        integrations: {
+          localDemo: integration,
+        },
+      } as any,
+      isDev: true,
+      isProd: false,
+    });
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: integration,
+      }),
+    );
+    await manager.runHookParallel("init");
+
+    const api = createServerAPIClient<{}, { localDemo: typeof integration }>({});
+
+    await _runWithCurrentRequest(new Request("https://farmjs.dev/server-demo"), async () => {
+      const result = await api.integrations.localDemo.message.get();
+
+      expect(result.error).toBeNull();
+      expect(result.data).toEqual({
+        ok: true,
+        source: "handler",
+      });
+    });
+
+    expect(handlerSpy).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
