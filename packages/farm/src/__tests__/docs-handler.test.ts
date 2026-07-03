@@ -5,7 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveDocsConfig } from "../config";
-import { createDocsAPI, createFarmDocsHandler } from "../docs";
+import {
+  createDocsAPI,
+  createFarmDocsAPIHandler,
+  createFarmDocsHandler,
+  isFarmDocsAPIRequest,
+} from "../docs";
 
 describe("createFarmDocsHandler", () => {
   async function createDocsFixture() {
@@ -83,6 +88,26 @@ describe("createDocsAPI", () => {
     );
     return root;
   }
+
+  it("creates a built-in Farm docs API handler for automatic /api/docs routing", async () => {
+    const root = await createDocsFixture();
+    const handler = createFarmDocsAPIHandler({ rootDir: root, srcDir: "src" });
+
+    expect(isFarmDocsAPIRequest("/api/docs")).toBe(true);
+    expect(isFarmDocsAPIRequest("/api/docs/agent/spec")).toBe(true);
+    expect(isFarmDocsAPIRequest("/docs")).toBe(false);
+
+    await expect(handler(new Request("http://farm.test/api/other"))).resolves.toBeNull();
+
+    const configResponse = await handler(new Request("http://farm.test/api/docs?format=config"));
+    expect(configResponse?.status).toBe(200);
+    await expect(configResponse?.json()).resolves.toMatchObject({
+      entry: "/docs",
+      config: {
+        entry: "docs",
+      },
+    });
+  });
 
   it("creates Next-style GET and POST route handlers for Farm API routes", async () => {
     const root = await createDocsFixture();

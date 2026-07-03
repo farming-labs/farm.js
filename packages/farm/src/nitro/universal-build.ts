@@ -1257,7 +1257,9 @@ function generateVirtualEntryCode(
     apiRoutes.length > 0
       ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "farm/api/route-manager";`
       : "";
-  const docsHandlerImport = config.docs?.enabled ? `import { createFarmDocsHandler } from "farm/docs";` : "";
+  const docsHandlerImport = config.docs?.enabled
+    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
+    : "";
   const integrationImports = configModulePath
     ? `
 import * as FarmUserConfigModule from "${configModulePath}";
@@ -1275,10 +1277,7 @@ async function handleAPIRequest(request) {
   const match = matchAPIRoute(apiRouteMap, url.pathname);
 
   if (!match) {
-    return new Response(
-      JSON.stringify({ error: "API route not found", pathname: url.pathname }),
-      { status: 404, headers: { "Content-Type": "application/json" } }
-    );
+    return null;
   }
 
   const { route, params } = match;
@@ -1303,10 +1302,7 @@ async function handleAPIRequest(request) {
 `
       : `
 async function handleAPIRequest(request) {
-  return new Response(
-    JSON.stringify({ error: "API route not found", pathname: new URL(request.url).pathname }),
-    { status: 404, headers: { "Content-Type": "application/json" } }
-  );
+  return null;
 }
 `;
 
@@ -1338,6 +1334,11 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
 const farmDocsHandler = ${
     config.docs?.enabled
       ? `createFarmDocsHandler(${JSON.stringify(config.docs)}, { root: ${JSON.stringify(config.root)}, srcDir: ${JSON.stringify(config.srcDir)} })`
+      : "null"
+  };
+const farmDocsAPIHandler = ${
+    config.docs?.enabled
+      ? `createFarmDocsAPIHandler({ rootDir: ${JSON.stringify(config.root)}, srcDir: ${JSON.stringify(config.srcDir)}, docs: ${JSON.stringify(config.docs)} })`
       : "null"
   };
 
@@ -1451,7 +1452,22 @@ async function handleRequest(request) {
 
   // Handle API routes
   if (pathname.startsWith("/api/")) {
-    return handleAPIRequest(request);
+    const apiResponse = await handleAPIRequest(request.clone());
+    if (apiResponse) {
+      return apiResponse;
+    }
+
+    if (farmDocsAPIHandler) {
+      const docsAPIResponse = await farmDocsAPIHandler(request.clone());
+      if (docsAPIResponse) {
+        return docsAPIResponse;
+      }
+    }
+
+    return new Response(
+      JSON.stringify({ error: "API route not found", pathname }),
+      { status: 404, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   // Handle page routes (SSR)

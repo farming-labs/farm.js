@@ -9,6 +9,10 @@ export default function Page() {
         <code>@farming-labs/docs</code>: human docs, markdown reads, search, llms output,
         sitemap, robots, skill markdown, and agent discovery.
       </p>
+      <p>
+        The docs API is registered automatically from <code>farm.config.ts</code>, so this example
+        does not need a <code>src/app/api/docs/route.ts</code> file unless you want to override it.
+      </p>
       <ul>
         <li>
           <Link href="/docs">Docs home</Link>
@@ -17,7 +21,7 @@ export default function Page() {
           <Link href="/docs/getting-started">Getting started</Link>
         </li>
         <li>
-          <Link href="/docs/server-wrapper">Server wrapper</Link>
+          <Link href="/docs/server-wrapper">Automatic API route</Link>
         </li>
         <li>
           <a href="/docs/getting-started.md">Markdown output</a>

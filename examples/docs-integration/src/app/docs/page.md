@@ -5,18 +5,22 @@ description: Docs rendered from Markdown by Farm.
 
 # Farm Docs
 
-This page is loaded from `src/app/docs/page.md` through the Farm docs integration.
-
-The matching API route uses the same shape as the `@farming-labs/docs` Next.js adapter:
+This page is loaded from `src/app/docs/page.md` through the Farm docs integration. The matching
+machine API route is registered automatically when docs are enabled in `farm.config.ts`:
 
 ```ts
-import { createDocsAPI } from '@farmjs/core/docs';
+import { defineFarmConfig } from '@farmjs/core';
 
-export const { GET, POST } = createDocsAPI();
+export default defineFarmConfig({
+  docs: {
+    entry: '/docs',
+  },
+});
 ```
 
-The example also uses the same handler in `src/app/api/docs/[...docs]/route.ts`, so the same server
-wrapper can answer path-style machine routes.
+If you need custom behavior, you can still add `src/app/api/docs/route.ts` and export
+`createDocsAPI()` handlers as an override. Add the same exports in
+`src/app/api/docs/[...docs]/route.ts` when the override should own path-style URLs too.
 
 ## Machine routes
 

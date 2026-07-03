@@ -37,6 +37,8 @@ export interface FarmDocsAPIRouteHandlers {
   POST(request: Request): Promise<Response>;
 }
 
+export type FarmDocsAPIHandler = (request: Request) => Promise<Response | null>;
+
 interface FarmDocsAPIContext {
   root: string;
   srcDir: string;
@@ -72,6 +74,15 @@ function isResolvedDocsConfig(value: unknown): value is FarmDocsResolvedConfig {
     typeof value.entry === "string" &&
     isRecord(value.config)
   );
+}
+
+export function isFarmDocsAPIRequest(requestOrPathname: Request | string): boolean {
+  const pathname =
+    typeof requestOrPathname === "string"
+      ? requestOrPathname
+      : new URL(requestOrPathname.url).pathname;
+
+  return pathname === "/api/docs" || pathname.startsWith("/api/docs/");
 }
 
 function json(data: unknown, init: ResponseInit = {}): Response {
@@ -457,5 +468,36 @@ export function createDocsAPI(
         { status: 501 },
       );
     },
+  };
+}
+
+export function createFarmDocsAPIHandler(
+  options: FarmDocsAPIOptions = {},
+  cloudIntegration?: FarmDocsCloudIntegration,
+): FarmDocsAPIHandler {
+  const handlers = createDocsAPI(options, cloudIntegration);
+
+  return async function handleFarmDocsAPIRequest(request: Request): Promise<Response | null> {
+    if (!isFarmDocsAPIRequest(request)) return null;
+
+    const method = request.method.toUpperCase();
+    if (method === "GET" || method === "HEAD") {
+      return handlers.GET(request);
+    }
+    if (method === "POST") {
+      return handlers.POST(request);
+    }
+
+    return json(
+      {
+        error: "Method Not Allowed",
+      },
+      {
+        status: 405,
+        headers: {
+          Allow: "GET, HEAD, POST",
+        },
+      },
+    );
   };
 }

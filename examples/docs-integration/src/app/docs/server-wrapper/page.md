@@ -1,11 +1,27 @@
 ---
-title: Server Wrapper
-description: How the Farm docs API mirrors the farming-labs docs adapter shape.
+title: Automatic API Route
+description: How Farm registers the docs API while keeping a Next-style override.
 ---
 
-# Server Wrapper
+# Automatic API Route
 
-Farm keeps the app route small:
+Farm registers the docs API automatically from `farm.config.ts`:
+
+```ts
+import { defineFarmConfig } from '@farmjs/core';
+
+export default defineFarmConfig({
+  docs: {
+    entry: '/docs',
+  },
+});
+```
+
+That gives the app the human docs entry and the machine routes without adding files under
+`src/app/api/docs`.
+
+When you need to customize the server behavior, add a route file and Farm will use it instead of
+the default for that matched path:
 
 ```ts
 import { createDocsAPI } from '@farmjs/core/docs';
@@ -14,19 +30,8 @@ export const { GET, POST } = createDocsAPI();
 export const revalidate = false;
 ```
 
-That shape intentionally follows the `@farming-labs/docs` adapter pattern where a docs server owns
-the shared `GET` and `POST` handlers for search, markdown, agent, and AI surfaces.
-
-The catch-all route uses the same wrapper:
-
-```ts
-import { createDocsAPI } from '@farmjs/core/docs';
-
-export const { GET, POST } = createDocsAPI();
-export const revalidate = false;
-```
-
-With both files in place, the example supports the compact query API and the path-style API:
+Add the same exports in `src/app/api/docs/[...docs]/route.ts` when your override should also own
+path-style URLs. The automatic default supports both compact query routes and path-style routes:
 
 - `/api/docs?format=markdown&path=getting-started`
 - `/api/docs/getting-started.md`
