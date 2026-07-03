@@ -773,7 +773,16 @@ function insertIntegrationsConfig(source: string) {
 }
 
 function findFarmConfig(root: string) {
-  const candidates = ["farm.config.ts", "farm.config.mts", "farm.config.js", "farm.config.mjs"];
+  const candidates = [
+    "farm.config.ts",
+    "farm.config.mts",
+    "farm.config.js",
+    "farm.config.mjs",
+    "config.ts",
+    "config.mts",
+    "config.js",
+    "config.mjs",
+  ];
   for (const candidate of candidates) {
     const absolutePath = path.join(root, candidate);
     if (existsSync(absolutePath)) {

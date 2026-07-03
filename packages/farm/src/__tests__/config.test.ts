@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig } from "../config";
+import { loadConfig, resolveConfig, resolveDeployConfig } from "../config";
 
 const originalEnv = { ...process.env };
 
@@ -111,6 +111,67 @@ describe("loadConfig", () => {
 
     expect(config).toMatchObject({
       emailPreview: "Hello from TSX",
+    });
+  });
+
+  it("loads config.ts as a minimal config filename", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-alias-"));
+
+    await fs.writeFile(
+      path.join(root, "config.ts"),
+      ["export default {", "  srcDir: 'src',", "  deploy: { target: 'vercel' },", "};"].join("\n"),
+    );
+
+    const config = await loadConfig(root, undefined, "development");
+
+    expect(config).toMatchObject({
+      srcDir: "src",
+      deploy: { target: "vercel" },
+    });
+  });
+});
+
+describe("resolveDeployConfig", () => {
+  it("infers vercel preset and Build Output API directory from deploy target", async () => {
+    const config = await resolveConfig(
+      {
+        deploy: {
+          target: "vercel",
+        },
+      },
+      "production",
+    );
+
+    expect(config.preset).toBe("vercel");
+    expect(config.deploy).toMatchObject({
+      target: "vercel",
+      preset: "vercel",
+      outputDir: ".vercel/output",
+    });
+  });
+
+  it("lets CLI preset overrides recompute the deploy output directory", () => {
+    const deploy = resolveDeployConfig({}, { preset: "vercel" });
+
+    expect(deploy).toMatchObject({
+      target: "vercel",
+      preset: "vercel",
+      outputDir: ".vercel/output",
+    });
+  });
+
+  it("respects explicit deploy output aliases", () => {
+    const deploy = resolveDeployConfig({
+      deploy: {
+        target: "netlify",
+        output: "custom-output",
+      },
+    });
+
+    expect(deploy).toMatchObject({
+      target: "netlify",
+      preset: "netlify",
+      outputDir: "custom-output",
     });
   });
 });

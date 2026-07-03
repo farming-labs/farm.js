@@ -50,8 +50,7 @@ pnpm dev`}
 │   └── farm-routes.d.ts  # Generated route union for typed Link href
 ├── farm.config.ts
 ├── package.json
-├── tsconfig.json
-└── vite.config.ts`}
+└── tsconfig.json`}
         </pre>
       </section>
 

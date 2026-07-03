@@ -1,3 +1,4 @@
+import tailwindcss from "@tailwindcss/vite";
 import rsc from "@vitejs/plugin-rsc";
 import react from "@vitejs/plugin-react";
 import { defineConfig, nitro } from "@farmjs/plugin/rsc";
@@ -14,6 +15,7 @@ export default defineConfig({
   // RSC/Server Actions are opt-in.
   // Set experimental.serverComponents/serverActions in farm config when using core runtime.
   plugins: [
+    tailwindcss(),
     rsc({
       serverHandler: false,
       entries: {

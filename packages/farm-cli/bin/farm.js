@@ -166,7 +166,7 @@ addCommand
 
 program
   .command("deploy")
-  .description("Deploy to a platform")
+  .description("Deploy to a platform from deploy.target or a platform flag")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--vercel", "Deploy to Vercel")
   .option("--cloudflare", "Deploy to Cloudflare")

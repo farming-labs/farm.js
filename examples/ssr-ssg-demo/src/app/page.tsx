@@ -10,8 +10,6 @@
  * - You need real-time data
  */
 
-import type { PageProps } from "@farmjs/core";
-
 // Simulate fetching real-time data
 async function getCurrentTime() {
   // In real app, this could be: await fetch('/api/time')
@@ -23,7 +21,7 @@ export const metadata = {
   description: "This page is server-rendered on each request",
 };
 
-export default async function HomePage({ params, searchParams }: PageProps) {
+export default async function HomePage() {
   const currentTime = await getCurrentTime();
 
   return (

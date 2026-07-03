@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
+    "deploy": "farm deploy",
     "start": "farm start",
     "type-check": "tsc --noEmit"
   },

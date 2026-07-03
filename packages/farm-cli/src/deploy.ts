@@ -1,7 +1,15 @@
 import { execSync } from "child_process";
 import { existsSync } from "fs";
 import path from "path";
-import { logger } from "@farmjs/core";
+import {
+  getPresetForDeployTarget,
+  loadConfig,
+  logger,
+  normalizeDeployTarget,
+  resolveConfig,
+  resolveDeployConfig,
+  resolveDeployOutputPath,
+} from "@farmjs/core";
 import { buildFarm } from "./build";
 
 export interface DeployFarmOptions {
@@ -17,35 +25,38 @@ export interface DeployFarmOptions {
  */
 export async function deployFarm(options: DeployFarmOptions = {}) {
   const root = options.root || process.cwd();
+  const mode = "production";
+  const userConfig = await loadConfig(root, undefined, mode);
+  const config = userConfig ? await resolveConfig(userConfig, mode) : undefined;
 
   // Determine platform and preset
-  let platform: "vercel" | "cloudflare" | "netlify" | null = null;
-  let preset: string = "node-server";
+  const cliTarget = options.vercel
+    ? "vercel"
+    : options.cloudflare
+      ? "cloudflare"
+      : options.netlify
+        ? "netlify"
+        : undefined;
+  const platform = normalizeDeployTarget(cliTarget || config?.deploy.target);
 
-  if (options.vercel) {
-    platform = "vercel";
-    preset = "vercel";
-  } else if (options.cloudflare) {
-    platform = "cloudflare";
-    preset = "cloudflare-pages";
-  } else if (options.netlify) {
-    platform = "netlify";
-    preset = "netlify";
-  } else {
-    logger.error("Please specify a platform: --vercel, --cloudflare, or --netlify");
+  if (platform !== "vercel" && platform !== "cloudflare" && platform !== "netlify") {
+    logger.error(
+      "Please specify a deployment target with --vercel, --cloudflare, --netlify, or farm.config deploy.target.",
+    );
     process.exit(1);
   }
+
+  const deployConfig = resolveDeployConfig(userConfig || {}, {
+    target: platform,
+    preset: cliTarget ? getPresetForDeployTarget(platform) : undefined,
+  });
+  const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
 
   // Build with the correct preset
   logger.info(`🚀 Building with ${preset} preset...`);
   await buildFarm({ root, preset });
 
-  // For Vercel, output goes to .vercel/output (Build Output API v3)
-  // For other presets, output goes to .farm/.output
-  const nitroOutput =
-    platform === "vercel"
-      ? path.join(root, ".vercel", "output")
-      : path.join(root, ".farm", ".output");
+  const nitroOutput = resolveDeployOutputPath(root, deployConfig.outputDir);
 
   if (!existsSync(nitroOutput)) {
     logger.error(`Build output not found at ${nitroOutput}. Please run 'farm build' first.`);
@@ -53,7 +64,7 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
   }
 
   // Deploy using platform CLI (always uses user's credentials)
-  await deployPlatform(platform, root, nitroOutput, options.prod);
+  await deployPlatform(platform, root, nitroOutput, deployConfig, options.prod);
 }
 
 /**
@@ -63,6 +74,7 @@ async function deployPlatform(
   platform: "vercel" | "cloudflare" | "netlify",
   root: string,
   outputDir: string,
+  deployConfig: ReturnType<typeof resolveDeployConfig>,
   prod?: boolean,
 ) {
   switch (platform) {
@@ -70,10 +82,14 @@ async function deployPlatform(
       await deployVercel(root, outputDir, prod);
       break;
     case "cloudflare":
-      await deployCloudflare(root, outputDir);
+      await deployCloudflare(
+        root,
+        outputDir,
+        deployConfig.cloudflare?.projectName || deployConfig.projectName,
+      );
       break;
     case "netlify":
-      await deployNetlify(root, outputDir);
+      await deployNetlify(root, outputDir, deployConfig.netlify?.site);
       break;
   }
 }
@@ -271,7 +287,7 @@ async function deployVercel(root: string, outputDir: string, prod?: boolean) {
 /**
  * Deploy to Cloudflare Pages using Wrangler CLI
  */
-async function deployCloudflare(root: string, outputDir: string) {
+async function deployCloudflare(root: string, outputDir: string, projectName?: string) {
   logger.info("🚀 Deploying to Cloudflare Pages...");
 
   // Check if Wrangler CLI is installed
@@ -285,7 +301,8 @@ async function deployCloudflare(root: string, outputDir: string) {
 
   try {
     process.chdir(outputDir);
-    execSync("wrangler pages deploy . --project-name=farm-app", { stdio: "inherit" });
+    const projectFlag = ` --project-name=${projectName || "farm-app"}`;
+    execSync(`wrangler pages deploy .${projectFlag}`, { stdio: "inherit" });
     logger.success("✅ Deployed to Cloudflare Pages successfully!");
   } catch (error: any) {
     logger.error(`❌ Failed to deploy to Cloudflare: ${error.message}`);
@@ -296,7 +313,7 @@ async function deployCloudflare(root: string, outputDir: string) {
 /**
  * Deploy to Netlify using Netlify CLI
  */
-async function deployNetlify(root: string, outputDir: string) {
+async function deployNetlify(root: string, outputDir: string, site?: string) {
   logger.info("🚀 Deploying to Netlify...");
 
   // Check if Netlify CLI is installed
@@ -310,7 +327,8 @@ async function deployNetlify(root: string, outputDir: string) {
 
   try {
     process.chdir(outputDir);
-    execSync("netlify deploy --prod --dir=.", { stdio: "inherit" });
+    const siteFlag = site ? ` --site=${site}` : "";
+    execSync(`netlify deploy --prod --dir=.${siteFlag}`, { stdio: "inherit" });
     logger.success("✅ Deployed to Netlify successfully!");
   } catch (error: any) {
     logger.error(`❌ Failed to deploy to Netlify: ${error.message}`);

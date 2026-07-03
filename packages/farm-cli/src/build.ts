@@ -1,4 +1,4 @@
-import { loadConfig, resolveConfig, build, logger } from "@farmjs/core";
+import { loadConfig, resolveConfig, resolveDeployConfig, build, logger } from "@farmjs/core";
 
 export interface BuildFarmOptions {
   root?: string;
@@ -16,14 +16,16 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
     const userConfig = await loadConfig(root, undefined, mode);
 
     if (!userConfig) {
-      throw new Error("No farm.config.ts found. Please create a configuration file.");
+      throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
     }
 
     const config = await resolveConfig(userConfig, mode);
 
     // Override preset if provided via CLI
     if (options.preset) {
-      config.preset = options.preset as any;
+      const deploy = resolveDeployConfig(userConfig, { preset: options.preset as any });
+      config.preset = deploy.preset;
+      config.deploy = deploy;
     }
 
     // Build

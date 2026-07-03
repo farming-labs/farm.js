@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
+    "deploy": "farm deploy",
+    "deploy:prod": "farm deploy --prod",
     "deploy:vercel": "farm deploy --vercel",
     "deploy:vercel:prod": "farm deploy --vercel --prod",
     "deploy:cloudflare": "farm deploy --cloudflare",

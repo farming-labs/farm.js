@@ -1,4 +1,5 @@
 import type { ResolvedFarmConfig } from "../config";
+import { resolveDeployOutputPath } from "../config";
 import { build as viteBuild } from "vite";
 import { createNitro, build as nitroBuild } from "nitro";
 import path from "path";
@@ -25,6 +26,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
   const preset = options.preset || config.preset || "node-server";
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
+  const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
 
   logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 
@@ -42,6 +44,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
       preset,
       universal: options.universal !== false,
       distDir,
+      outputDir: deployOutputDir,
     });
 
     // Step 1: Initialize Farm app to get route managers
@@ -101,11 +104,12 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
       preset,
       universal: options.universal !== false,
       distDir,
+      outputDir: deployOutputDir,
       success: true,
     });
 
     logger.success("✅ Build completed successfully!");
-    logger.info(`📁 Output directory: ${path.join(root, distDir, ".output")}`);
+    logger.info(`📁 Output directory: ${deployOutputDir}`);
   } catch (error) {
     await pluginManager.runHookParallel("onError", {
       phase: "build",
@@ -120,6 +124,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
       preset,
       universal: options.universal !== false,
       distDir,
+      outputDir: deployOutputDir,
       success: false,
     });
     logger.error(`❌ Build failed: ${error}`);
@@ -246,7 +251,7 @@ async function buildNitro(
   // 6. Deploy from .farm/.output
 
   // Ensure output directory exists before building
-  const outputDir = path.join(root, distDir, ".output");
+  const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const serverOutputDir = path.join(outputDir, "server");
   const publicOutputDir = path.join(outputDir, "public");
   const { mkdir, cp } = await import("fs/promises");
@@ -351,7 +356,7 @@ async function buildNitro(
       root,
       preset,
       distDir,
-      outputDir: path.join(root, distDir, ".output"),
+      outputDir: resolveDeployOutputPath(root, config.deploy.outputDir),
     });
   }
 }

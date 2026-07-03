@@ -21,7 +21,9 @@ export default defineFarmConfig({
   srcDir: 'src',
   outDir: 'dist',
   basePath: '/',
-  preset: "vercel",
+  deploy: {
+    target: 'vercel',
+  },
   storage: {
     mounts: {
       [STORAGE_DEMO_MOUNTS.local]: storageDemoClients.local,
@@ -158,6 +160,15 @@ export default defineFarmConfig({
 ],
 
   vite: {
+    optimizeDeps: {
+      exclude: [
+        'react-dom/server',
+        '@poppinss/dumper',
+        '@mapbox/node-pre-gyp',
+        'supports-color',
+        'nitro',
+      ],
+    },
     server: {
       port: 3000,
       strictPort: false,

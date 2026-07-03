@@ -59,6 +59,7 @@ export class FarmApp {
       outDir: config.outDir || "dist",
       basePath: config.basePath || "/",
       preset: config.preset ?? "node-server",
+      deploy: config.deploy || {},
       storage: config.storage || {},
       integrations: config.integrations || {},
       suppressLintOnLink: config.suppressLintOnLink ?? false,

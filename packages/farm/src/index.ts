@@ -8,7 +8,16 @@ export { createFarmApp } from "./app";
 export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
 export { definePlugin, PluginManager } from "./plugin";
-export { defineFarmConfig, resolveConfig, loadConfig } from "./config";
+export {
+  defineFarmConfig,
+  resolveConfig,
+  loadConfig,
+  resolveDeployConfig,
+  resolveDeployOutputPath,
+  normalizeDeployTarget,
+  getDeployTargetForPreset,
+  getPresetForDeployTarget,
+} from "./config";
 export { HMRManager } from "./hmr";
 export * from "./plugins";
 export * from "./api";
@@ -51,6 +60,9 @@ export type {
   I18nConfig,
   OpenAPIConfig,
   MiddlewareConfig,
+  FarmDeployConfig,
+  ResolvedFarmDeployConfig,
+  FarmDeployTarget,
 } from "./config";
 
 export type { ComponentType, ReactNode, ReactElement, FC, PropsWithChildren } from "react";

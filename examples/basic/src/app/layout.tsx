@@ -48,9 +48,6 @@ export default function RootLayout({ children }: LayoutProps) {
             <Link href="/storage-demo" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
               Storage Demo
             </Link>
-            <Link href="/docs/reference" className="text-gray-600 hover:text-gray-900 px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-100 transition-colors">
-              API Docs
-            </Link>
           </div>
         </div>
       </nav>

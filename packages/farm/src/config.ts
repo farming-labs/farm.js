@@ -3,6 +3,7 @@ import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
+import path from "path";
 
 export interface RedirectConfig {
   source: string;
@@ -68,10 +69,49 @@ export interface NotFoundConfig {
   component?: string;
 }
 
+export type FarmDeployTarget = "vercel" | "cloudflare" | "netlify" | "node" | string;
+
+export interface FarmDeployConfig {
+  /**
+   * Deployment platform. When present, Farm picks the matching Nitro preset and
+   * output directory unless explicitly overridden.
+   */
+  target?: FarmDeployTarget;
+  /** Nitro preset override. Usually inferred from target. */
+  preset?: BaseFarmConfig["preset"];
+  /** Deployable output directory, relative to project root unless absolute. */
+  outputDir?: string;
+  /** Alias for outputDir for terser config. */
+  output?: string;
+  /** Cloudflare Pages project name used by `farm deploy --cloudflare`. */
+  projectName?: string;
+  vercel?: {
+    outputDirectory?: string;
+    buildCommand?: string;
+    installCommand?: string;
+    framework?: string | null;
+  };
+  cloudflare?: {
+    outputDir?: string;
+    projectName?: string;
+  };
+  netlify?: {
+    outputDir?: string;
+    site?: string;
+  };
+}
+
+export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output"> {
+  target?: FarmDeployTarget;
+  preset: BaseFarmConfig["preset"];
+  outputDir: string;
+}
+
 export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
   preset?: BaseFarmConfig["preset"];
+  deploy?: FarmDeployConfig;
 
   trailingSlash?: boolean;
   redirects?: () => Promise<RedirectConfig[]> | RedirectConfig[];
@@ -113,13 +153,104 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite"> {
   [key: string]: any;
 }
 
-export interface ResolvedFarmConfig extends Required<Omit<FarmUserConfig, "plugins" | "vite">> {
+export interface ResolvedFarmConfig extends Required<
+  Omit<FarmUserConfig, "plugins" | "vite" | "deploy">
+> {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
+  deploy: ResolvedFarmDeployConfig;
 }
 
 export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
   return config;
+}
+
+export function normalizeDeployTarget(target?: FarmDeployTarget): FarmDeployTarget | undefined {
+  if (!target) return undefined;
+  if (target === "cloudflare-pages" || target === "cloudflare_pages") return "cloudflare";
+  if (target === "node-server" || target === "nitro") return "node";
+  return target;
+}
+
+export function getPresetForDeployTarget(
+  target?: FarmDeployTarget,
+): BaseFarmConfig["preset"] | undefined {
+  switch (normalizeDeployTarget(target)) {
+    case "vercel":
+      return "vercel";
+    case "cloudflare":
+      return "cloudflare-pages";
+    case "netlify":
+      return "netlify";
+    case "node":
+      return "node-server";
+    default:
+      return undefined;
+  }
+}
+
+export function getDeployTargetForPreset(preset?: string): FarmDeployTarget | undefined {
+  if (!preset) return undefined;
+  if (preset === "vercel" || preset === "vercel-edge") return "vercel";
+  if (preset === "cloudflare" || preset === "cloudflare-pages") return "cloudflare";
+  if (preset === "netlify" || preset === "netlify-edge") return "netlify";
+  if (preset === "node-server") return "node";
+  return undefined;
+}
+
+export function getDefaultDeployOutputDir(
+  target: FarmDeployTarget | undefined,
+  preset: string | undefined,
+  distDir: string,
+): string {
+  const normalizedTarget = normalizeDeployTarget(target) || getDeployTargetForPreset(preset);
+  if (normalizedTarget === "vercel") return ".vercel/output";
+  return `${distDir}/.output`;
+}
+
+export function resolveDeployOutputPath(root: string, outputDir: string): string {
+  return path.isAbsolute(outputDir) ? outputDir : path.join(root, outputDir);
+}
+
+export function resolveDeployConfig(
+  config: Pick<FarmUserConfig, "deploy" | "preset" | "distDir">,
+  overrides: {
+    target?: FarmDeployTarget;
+    preset?: BaseFarmConfig["preset"];
+    outputDir?: string;
+  } = {},
+): ResolvedFarmDeployConfig {
+  const deploy = config.deploy || {};
+  const distDir = config.distDir || ".farm";
+  const target = normalizeDeployTarget(overrides.target || deploy.target);
+  const preset =
+    overrides.preset ||
+    deploy.preset ||
+    config.preset ||
+    getPresetForDeployTarget(target) ||
+    "node-server";
+  const resolvedTarget = target || getDeployTargetForPreset(preset);
+  const platformOutput =
+    resolvedTarget === "vercel"
+      ? deploy.vercel?.outputDirectory
+      : resolvedTarget === "cloudflare"
+        ? deploy.cloudflare?.outputDir
+        : resolvedTarget === "netlify"
+          ? deploy.netlify?.outputDir
+          : undefined;
+  const outputDir =
+    overrides.outputDir ||
+    deploy.outputDir ||
+    deploy.output ||
+    platformOutput ||
+    getDefaultDeployOutputDir(resolvedTarget, preset, distDir);
+
+  return {
+    ...deploy,
+    target: resolvedTarget,
+    preset,
+    outputDir,
+  };
 }
 
 export async function resolveConfig(
@@ -143,12 +274,15 @@ export async function resolveConfig(
       ? await userConfig.headers()
       : userConfig.headers || [];
 
+  const deploy = resolveDeployConfig(userConfig);
+
   const resolved: ResolvedFarmConfig = {
     root: userConfig.root || process.cwd(),
     srcDir: userConfig.srcDir || "src",
     outDir: userConfig.outDir || "dist",
     basePath: userConfig.basePath || "/",
-    preset: userConfig.preset || "node-server",
+    preset: deploy.preset || "node-server",
+    deploy,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
@@ -225,9 +359,17 @@ export async function loadConfig(
       process.env[key] = value;
     }
   }
-  const searchPaths = [configPath, "farm.config.ts", "farm.config.js", "farm.config.mjs"].filter(
-    Boolean,
-  ) as string[];
+  const searchPaths = [
+    configPath,
+    "farm.config.ts",
+    "farm.config.mts",
+    "farm.config.js",
+    "farm.config.mjs",
+    "config.ts",
+    "config.mts",
+    "config.js",
+    "config.mjs",
+  ].filter(Boolean) as string[];
 
   for (const relativePath of searchPaths) {
     try {
