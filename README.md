@@ -40,12 +40,17 @@ pnpm add @farmjs/core react react-dom
 yarn add @farmjs/core react react-dom
 ```
 
-Create a `vite.config.ts`:
+Create a `farm.config.ts`:
 
 ```ts
-import { defineConfig } from "@farmjs/core/vite";
+import { defineFarmConfig } from "@farmjs/core";
 
-export default defineConfig();
+export default defineFarmConfig({
+  srcDir: "src",
+  deploy: {
+    target: "vercel",
+  },
+});
 ```
 
 Create your first page in `src/app/page.tsx`:
@@ -96,8 +101,8 @@ my-farm-app/
 │           ├── page.tsx        # Users list (/users)
 │           └── [id]/
 │               └── page.tsx    # User profile (/users/123)
-├── package.json
-└── vite.config.ts
+├── farm.config.ts
+└── package.json
 ```
 
 ## ⚙️ Configuration

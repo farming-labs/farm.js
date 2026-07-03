@@ -35,7 +35,7 @@ if (existsSync(appPkgPath)) {
   const deps = { ...(appPkg.dependencies || {}), ...(appPkg.devDependencies || {}) };
   delete deps["@farmjs/core"];
   delete deps["@farmjs/plugin"];
-  ["@types/react", "@types/react-dom", "@vitejs/plugin-react", "@vitejs/plugin-rsc", "autoprefixer", "postcss", "tailwindcss", "typescript", "vite"].forEach((k) => delete deps[k]);
+  ["@tailwindcss/vite", "@types/react", "@types/react-dom", "@vitejs/plugin-react", "@vitejs/plugin-rsc", "tailwindcss", "typescript", "vite"].forEach((k) => delete deps[k]);
   const funcPkg = {
     name: "rsc-fallback",
     version: "1.0.0",

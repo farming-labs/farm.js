@@ -3,7 +3,9 @@ import { createLoggerPlugin } from '@farmjs/core/plugin/server';
 
 export default defineFarmConfig({
   srcDir: 'src',
-  preset: 'vercel',
+  deploy: {
+    target: 'vercel',
+  },
   experimental: {
     serverComponents: true,
     serverActions: true,
