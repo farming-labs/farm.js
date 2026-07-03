@@ -1,5 +1,13 @@
 export { createAPIClient, createServerAPIClient } from "./api/client";
-export type { APIClientOptions } from "./api/client";
+export type {
+  APIClient,
+  APIClientOptions,
+  APIClientWithoutIntegrationsOptions,
+  RouteAPIClient,
+  ServerAPIClient,
+  ServerAPIClientOptions,
+  ServerAPIClientWithoutIntegrationsOptions,
+} from "./api/client";
 export {
   api,
   endpoint,

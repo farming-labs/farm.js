@@ -6,8 +6,10 @@ import type {
   FarmIntegrationAPIMethod,
   FarmIntegrationAPIOperation,
   FarmIntegrationAPIResponseFormat,
+  FarmIntegrationRouteOperationCarrier,
   InferIntegrationAPIFromRoutes,
 } from "./integration-api";
+import type { InferFarmIntegrationOrmClient } from "./integration-orm";
 import type { FarmPlugin, FarmPluginContext } from "./plugin";
 import {
   clearRequestContext,
@@ -76,9 +78,29 @@ export type FarmIntegrationValidationResult<TValue> =
       error: FarmIntegrationValidationErrorLike;
     };
 
+export type FarmIntegrationStandardValidationResult<TValue> =
+  | {
+      value: TValue;
+    }
+  | {
+      issues: readonly {
+        path?: readonly (string | number)[];
+        code?: string;
+        message: string;
+      }[];
+    };
+
 export interface FarmIntegrationInputSchema<TValue = unknown> {
+  _output?: TValue;
+  parse?(value: unknown): MaybePromise<TValue>;
   safeParse?(value: unknown): MaybePromise<FarmIntegrationValidationResult<TValue>>;
   safeParseAsync?(value: unknown): Promise<FarmIntegrationValidationResult<TValue>>;
+  "~standard"?: {
+    validate(value: unknown): MaybePromise<FarmIntegrationStandardValidationResult<TValue>>;
+    types?: {
+      output: TValue;
+    };
+  };
 }
 
 export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unknown> {
@@ -95,7 +117,89 @@ export interface FarmIntegrationRequestContextStore {
   snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
 }
 
-export interface FarmIntegrationHandlerContext<TBody = unknown, TQuery = unknown> {
+export type FarmIntegrationRouteDb<TSchema extends FarmIntegrationSchema | undefined> =
+  InferFarmIntegrationOrmClient<TSchema>;
+
+export interface FarmIntegrationRouteStorageArgs<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
+  getClient(): Promise<unknown | undefined>;
+  getOrm(): Promise<FarmIntegrationRouteDb<TSchema>>;
+}
+
+export interface FarmIntegrationRouteArgs<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
+  db: FarmIntegrationRouteDb<TSchema>;
+  getDb(): Promise<FarmIntegrationRouteDb<TSchema>>;
+  storage: FarmIntegrationRouteStorageArgs<TSchema>;
+}
+
+export interface FarmIntegrationConfigContext<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
+  key: string;
+  integration: FarmIntegration<TSchema, any>;
+  appConfig: FarmPluginContext["config"];
+  /** Alias for appConfig. */
+  config: FarmPluginContext["config"];
+  args: FarmIntegrationRouteArgs<TSchema>;
+  env: Record<string, string | undefined>;
+  isDev: boolean;
+  isProd: boolean;
+}
+
+export interface FarmIntegrationConfigDefinition<
+  TConfig = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
+  schema?: FarmIntegrationInputSchema<TConfig>;
+  env?: Record<string, string | readonly string[]>;
+  defaults?:
+    | Partial<TConfig>
+    | ((context: FarmIntegrationConfigContext<TSchema>) => MaybePromise<Partial<TConfig>>);
+  input?:
+    | Partial<TConfig>
+    | ((context: FarmIntegrationConfigContext<TSchema>) => MaybePromise<Partial<TConfig>>);
+  resolve?(
+    context: FarmIntegrationConfigContext<TSchema>,
+  ): MaybePromise<TConfig | Partial<TConfig> | undefined>;
+}
+
+export type FarmIntegrationConfigInput<
+  TConfig = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = FarmIntegrationInputSchema<TConfig> | FarmIntegrationConfigDefinition<TConfig, TSchema>;
+
+export type FarmIntegrationLifecycleLogLevel = "info" | "warn" | "error";
+
+export interface FarmIntegrationLifecycleLogger {
+  info(message: string, meta?: Record<string, unknown>): void;
+  warn(message: string, meta?: Record<string, unknown>): void;
+  error(message: string, meta?: Record<string, unknown>): void;
+}
+
+export interface FarmIntegrationLifecycleContext<
+  TConfig = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> extends FarmIntegrationConfigContext<TSchema> {
+  integration: FarmIntegration<TSchema, TConfig>;
+  integrationConfig: TConfig;
+  log: FarmIntegrationLifecycleLogger;
+  reason?: string;
+  cleanup(callback?: () => MaybePromise<void>): Promise<void>;
+}
+
+export type FarmIntegrationLifecycleHook<
+  TConfig = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = (context: FarmIntegrationLifecycleContext<TConfig, TSchema>) => MaybePromise<void>;
+
+export interface FarmIntegrationHandlerContext<
+  TBody = unknown,
+  TQuery = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
   request: Request;
   requestId: string;
   url: URL;
@@ -103,6 +207,7 @@ export interface FarmIntegrationHandlerContext<TBody = unknown, TQuery = unknown
   method: string;
   params: FarmIntegrationRouteParams;
   input: FarmIntegrationRouteInput<TBody, TQuery>;
+  args: FarmIntegrationRouteArgs<TSchema>;
   integration: {
     category: FarmIntegrationCategory;
     /** @deprecated Use category instead. */
@@ -121,17 +226,44 @@ export interface FarmIntegrationHandlerContext<TBody = unknown, TQuery = unknown
   isProd: boolean;
 }
 
-export interface FarmIntegrationRoute<TBody = unknown, TQuery = unknown> {
+export interface FarmIntegrationRouteHookContext<
+  TBody = unknown,
+  TQuery = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> extends FarmIntegrationHandlerContext<TBody, TQuery, TSchema> {
+  response?: Response;
+}
+
+export type FarmIntegrationRouteHook<
+  TBody = unknown,
+  TQuery = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = {
+  bivarianceHack(
+    request: Request,
+    context: FarmIntegrationRouteHookContext<TBody, TQuery, TSchema>,
+  ): Promise<Response | void> | Response | void;
+}["bivarianceHack"];
+
+export interface FarmIntegrationRoute<
+  TBody = unknown,
+  TQuery = unknown,
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
   path: string;
   method?: FarmIntegrationRouteMethod;
   methods?: readonly FarmIntegrationRouteMethod[];
-  middleware?: readonly FarmIntegrationRouteMiddleware[];
+  middleware?: readonly FarmIntegrationRouteMiddleware<TSchema>[];
+  before?: readonly FarmIntegrationRouteHook<TBody, TQuery, TSchema>[];
+  after?: readonly FarmIntegrationRouteHook<TBody, TQuery, TSchema>[];
   rawBody?: boolean;
   bodyFormat?: FarmIntegrationAPIBodyFormat;
+  body?: FarmIntegrationInputSchema<TBody>;
+  query?: FarmIntegrationInputSchema<TQuery>;
   input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
   handler(
     request: Request,
-    context: FarmIntegrationHandlerContext<TBody, TQuery>,
+    context: FarmIntegrationHandlerContext<TBody, TQuery, TSchema>,
   ): Promise<Response> | Response;
 }
 
@@ -142,24 +274,29 @@ export interface FarmTypedIntegrationRoute<
   TResponse = unknown,
   TServer extends boolean = false,
   TMethod extends FarmIntegrationAPIMethod = FarmIntegrationAPIMethod,
-> extends FarmIntegrationRoute<TBody, TQuery> {
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> extends FarmIntegrationRoute<TBody, TQuery, TSchema> {
   path: TPath;
   method: TMethod;
   __operation: FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, TMethod>;
 }
 
-export interface FarmIntegrationRouteMiddleware {
+export interface FarmIntegrationRouteMiddleware<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
   handler(
     request: Request,
-    context: FarmIntegrationHandlerContext,
+    context: FarmIntegrationHandlerContext<unknown, unknown, TSchema>,
   ): Promise<Response | void> | Response | void;
 }
 
-export interface FarmIntegrationMiddleware {
+export interface FarmIntegrationMiddleware<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
   matcher?: string | string[];
   handler(
     request: Request,
-    context: FarmIntegrationHandlerContext,
+    context: FarmIntegrationHandlerContext<unknown, unknown, TSchema>,
   ): Promise<Response | void> | Response | void;
 }
 
@@ -260,6 +397,10 @@ export function defineIntegrationSchema<TSchema extends FarmIntegrationSchema>(
 
 export type FarmIntegrationLogPhase =
   | "registered"
+  | "validate"
+  | "setup"
+  | "ready"
+  | "dispose"
   | "request:start"
   | "request:end"
   | "request:error";
@@ -280,12 +421,18 @@ export interface FarmIntegrationLogEvent {
   response?: Response;
   error?: unknown;
   durationMs?: number;
+  level?: FarmIntegrationLifecycleLogLevel;
+  message?: string;
+  meta?: Record<string, unknown>;
   context: Map<string, unknown>;
 }
 
 export type FarmIntegrationLogger = (event: FarmIntegrationLogEvent) => void | Promise<void>;
 
-export interface FarmIntegration {
+export interface FarmIntegration<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  TConfig = unknown,
+> {
   readonly kind: "farm-integration";
   category: FarmIntegrationCategory;
   /** @deprecated Use category instead. */
@@ -293,10 +440,16 @@ export interface FarmIntegration {
   type: string;
   instance: unknown;
   api?: FarmIntegrationAPI;
-  schema?: FarmIntegrationSchema;
+  schema?: TSchema;
+  config?: FarmIntegrationConfigInput<TConfig, TSchema>;
+  validate?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
+  setup?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
+  ready?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
+  dispose?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
   log?: FarmIntegrationLogger;
-  routes?: readonly FarmIntegrationRoute[];
-  middleware?: readonly FarmIntegrationMiddleware[];
+  routes?: readonly FarmIntegrationRoute<any, any, TSchema>[];
+  endpoints?: FarmIntegrationEndpoints<TSchema>;
+  middleware?: readonly FarmIntegrationMiddleware<TSchema>[];
   providers?: readonly FarmIntegrationProvider[];
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
   plugins?: readonly FarmPlugin[];
@@ -304,18 +457,27 @@ export interface FarmIntegration {
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration | undefined>;
 
-type IntegrationRouteBuilderOptions<TBody, TQuery, TServer extends boolean> = {
-  middleware?: readonly FarmIntegrationRouteMiddleware[];
+type IntegrationRouteBuilderOptions<
+  TBody,
+  TQuery,
+  TServer extends boolean,
+  TSchema extends FarmIntegrationSchema | undefined,
+> = {
+  middleware?: readonly FarmIntegrationRouteMiddleware<TSchema>[];
+  before?: readonly FarmIntegrationRouteHook<TBody, TQuery, TSchema>[];
+  after?: readonly FarmIntegrationRouteHook<TBody, TQuery, TSchema>[];
   rawBody?: boolean;
   headers?: Record<string, string>;
   credentials?: RequestCredentials;
   bodyFormat?: FarmIntegrationAPIBodyFormat;
   responseFormat?: FarmIntegrationAPIResponseFormat;
   isServer?: TServer;
+  body?: FarmIntegrationInputSchema<TBody>;
+  query?: FarmIntegrationInputSchema<TQuery>;
   input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
   handler(
     request: Request,
-    context: FarmIntegrationHandlerContext<TBody, TQuery>,
+    context: FarmIntegrationHandlerContext<TBody, TQuery, TSchema>,
   ): Promise<Response> | Response;
 };
 
@@ -326,18 +488,21 @@ function defineTypedIntegrationRoute<
   TResponse,
   TServer extends boolean,
   TMethod extends FarmIntegrationAPIMethod,
+  TSchema extends FarmIntegrationSchema | undefined,
 >(
   method: TMethod,
   path: TPath,
-  input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer>,
-): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, TMethod> {
+  input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
+): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, TMethod, TSchema> {
   return {
     path,
     method,
     middleware: input.middleware,
+    before: input.before,
+    after: input.after,
     rawBody: input.rawBody,
     bodyFormat: input.bodyFormat,
-    input: input.input,
+    input: normalizeIntegrationRouteInputSchemas(input),
     handler: input.handler,
     __operation: defineIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, TMethod>({
       path,
@@ -351,81 +516,53 @@ function defineTypedIntegrationRoute<
   };
 }
 
-export const integrationRoute = {
+export interface FarmIntegrationRouteFactory<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
   get<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
     path: TPath,
-    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer>, "bodyFormat">,
-  ) {
-    return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "GET">(
-      "GET",
-      path,
-      input,
-    );
-  },
+    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer, TSchema>, "bodyFormat">,
+  ): FarmTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "GET", TSchema>;
   post<
     TPath extends string,
     TBody = never,
     TResponse = unknown,
     TQuery = never,
     TServer extends boolean = false,
-  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer>) {
-    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST">(
-      "POST",
-      path,
-      {
-        bodyFormat: "json",
-        ...input,
-      },
-    );
-  },
+  >(
+    path: TPath,
+    input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
+  ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST", TSchema>;
   put<
     TPath extends string,
     TBody = never,
     TResponse = unknown,
     TQuery = never,
     TServer extends boolean = false,
-  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer>) {
-    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PUT">(
-      "PUT",
-      path,
-      {
-        bodyFormat: "json",
-        ...input,
-      },
-    );
-  },
+  >(
+    path: TPath,
+    input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
+  ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PUT", TSchema>;
   patch<
     TPath extends string,
     TBody = never,
     TResponse = unknown,
     TQuery = never,
     TServer extends boolean = false,
-  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer>) {
-    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PATCH">(
-      "PATCH",
-      path,
-      {
-        bodyFormat: "json",
-        ...input,
-      },
-    );
-  },
+  >(
+    path: TPath,
+    input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
+  ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PATCH", TSchema>;
   delete<
     TPath extends string,
     TBody = never,
     TResponse = unknown,
     TQuery = never,
     TServer extends boolean = false,
-  >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer>) {
-    return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "DELETE">(
-      "DELETE",
-      path,
-      {
-        bodyFormat: "json",
-        ...input,
-      },
-    );
-  },
+  >(
+    path: TPath,
+    input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
+  ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "DELETE", TSchema>;
   options<
     TPath extends string,
     TResponse = unknown,
@@ -433,25 +570,182 @@ export const integrationRoute = {
     TServer extends boolean = false,
   >(
     path: TPath,
-    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer>, "bodyFormat">,
-  ) {
-    return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "OPTIONS">(
-      "OPTIONS",
-      path,
-      input,
-    );
-  },
+    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer, TSchema>, "bodyFormat">,
+  ): FarmTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "OPTIONS", TSchema>;
   head<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
     path: TPath,
-    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer>, "bodyFormat">,
-  ) {
-    return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "HEAD">(
-      "HEAD",
-      path,
-      input,
-    );
-  },
+    input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer, TSchema>, "bodyFormat">,
+  ): FarmTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "HEAD", TSchema>;
+}
+
+export interface FarmIntegrationRoutesFactoryContext<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> {
+  route: FarmIntegrationRouteFactory<TSchema>;
+  integrationRoute: FarmIntegrationRouteFactory<TSchema>;
+}
+
+export type FarmIntegrationRoutesFactory<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = (
+  context: FarmIntegrationRoutesFactoryContext<TSchema>,
+) => readonly FarmIntegrationRoute<any, any, TSchema>[];
+
+export type FarmIntegrationEndpointValue<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> =
+  | FarmIntegrationRoute<any, any, TSchema>
+  | readonly FarmIntegrationEndpointValue<TSchema>[]
+  | {
+      readonly [key: string]: FarmIntegrationEndpointValue<TSchema> | undefined;
+    };
+
+export type FarmIntegrationEndpoints<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = {
+  readonly [key: string]: FarmIntegrationEndpointValue<TSchema> | undefined;
 };
+
+export interface FarmIntegrationEndpointsFactoryContext<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> extends FarmIntegrationRoutesFactoryContext<TSchema> {
+  endpoint: FarmIntegrationRouteFactory<TSchema>;
+}
+
+export type FarmIntegrationEndpointsFactory<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = (context: FarmIntegrationEndpointsFactoryContext<TSchema>) => FarmIntegrationEndpoints<TSchema>;
+
+function createIntegrationRouteFactory<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+>(): FarmIntegrationRouteFactory<TSchema> {
+  return {
+    get<TPath extends string, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: TPath,
+      input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer, TSchema>, "bodyFormat">,
+    ) {
+      return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "GET", TSchema>(
+        "GET",
+        path,
+        input,
+      );
+    },
+    post<
+      TPath extends string,
+      TBody = never,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>) {
+      return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST", TSchema>(
+        "POST",
+        path,
+        {
+          bodyFormat: "json",
+          ...input,
+        },
+      );
+    },
+    put<
+      TPath extends string,
+      TBody = never,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>) {
+      return defineTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "PUT", TSchema>(
+        "PUT",
+        path,
+        {
+          bodyFormat: "json",
+          ...input,
+        },
+      );
+    },
+    patch<
+      TPath extends string,
+      TBody = never,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>) {
+      return defineTypedIntegrationRoute<
+        TPath,
+        TBody,
+        TQuery,
+        TResponse,
+        TServer,
+        "PATCH",
+        TSchema
+      >("PATCH", path, {
+        bodyFormat: "json",
+        ...input,
+      });
+    },
+    delete<
+      TPath extends string,
+      TBody = never,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>) {
+      return defineTypedIntegrationRoute<
+        TPath,
+        TBody,
+        TQuery,
+        TResponse,
+        TServer,
+        "DELETE",
+        TSchema
+      >("DELETE", path, {
+        bodyFormat: "json",
+        ...input,
+      });
+    },
+    options<
+      TPath extends string,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(
+      path: TPath,
+      input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer, TSchema>, "bodyFormat">,
+    ) {
+      return defineTypedIntegrationRoute<
+        TPath,
+        never,
+        TQuery,
+        TResponse,
+        TServer,
+        "OPTIONS",
+        TSchema
+      >("OPTIONS", path, input);
+    },
+    head<
+      TPath extends string,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(
+      path: TPath,
+      input: Omit<IntegrationRouteBuilderOptions<never, TQuery, TServer, TSchema>, "bodyFormat">,
+    ) {
+      return defineTypedIntegrationRoute<TPath, never, TQuery, TResponse, TServer, "HEAD", TSchema>(
+        "HEAD",
+        path,
+        input,
+      );
+    },
+  };
+}
+
+export function createIntegrationRoute<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+>(_schema?: TSchema): FarmIntegrationRouteFactory<TSchema> {
+  return createIntegrationRouteFactory<TSchema>();
+}
+
+export const integrationRoute = createIntegrationRouteFactory<undefined>();
 
 type RegisteredIntegrationRuntime = {
   integration: FarmIntegration;
@@ -483,8 +777,25 @@ function getIntegrationRuntimeRegistry() {
   return globalState[INTEGRATION_RUNTIME_REGISTRY_KEY]!;
 }
 
-type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> &
-  (
+type FarmIntegrationRoutesInput<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = readonly FarmIntegrationRoute<any, any, TSchema>[] | FarmIntegrationRoutesFactory<TSchema>;
+
+type FarmIntegrationEndpointsInput<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+> = FarmIntegrationEndpoints<TSchema> | FarmIntegrationEndpointsFactory<TSchema>;
+
+type FarmIntegrationInput<
+  TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  TConfig = unknown,
+> = Omit<
+  FarmIntegration<TSchema, TConfig>,
+  "kind" | "category" | "slot" | "config" | "routes" | "endpoints"
+> & {
+  config?: FarmIntegrationConfigInput<TConfig, TSchema>;
+  routes?: FarmIntegrationRoutesInput<TSchema>;
+  endpoints?: FarmIntegrationEndpointsInput<TSchema>;
+} & (
     | {
         category: FarmIntegrationCategory;
         slot?: FarmIntegrationCategory;
@@ -495,42 +806,164 @@ type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> 
       }
   );
 
-type ExtractIntegrationCategory<TIntegration extends FarmIntegrationInput> = TIntegration extends {
-  category: infer TCategory extends FarmIntegrationCategory;
+type FarmIntegrationCategoryInput =
+  | {
+      category: FarmIntegrationCategory;
+      slot?: FarmIntegrationCategory;
+    }
+  | {
+      category?: FarmIntegrationCategory;
+      slot: FarmIntegrationCategory;
+    };
+
+type FarmIntegrationShapeForInference = FarmIntegrationCategoryInput & {
+  api?: FarmIntegrationAPI;
+  schema?: FarmIntegrationSchema;
+  config?: unknown;
+  routes?: unknown;
+  endpoints?: unknown;
+};
+
+type ExtractIntegrationSchema<TIntegration> = TIntegration extends {
+  schema: infer TSchema extends FarmIntegrationSchema;
 }
-  ? TCategory
-  : TIntegration extends { slot: infer TSlot extends FarmIntegrationCategory }
-    ? TSlot
-    : FarmIntegrationCategory;
+  ? TSchema
+  : undefined;
 
-type ExtractDerivedIntegrationAPI<TIntegration extends FarmIntegrationInput> =
-  TIntegration extends { api: infer TAPI extends FarmIntegrationAPI }
-    ? TAPI
-    : TIntegration extends {
-          routes: infer TRoutes extends readonly {
-            path: string;
-            __operation: FarmIntegrationAPIOperation<any, any, any, any, any>;
-          }[];
-        }
-      ? InferIntegrationAPIFromRoutes<TRoutes>
-      : FarmIntegrationAPI | undefined;
+type ResolveIntegrationRoutesInput<TRoutes, TSchema extends FarmIntegrationSchema | undefined> =
+  TRoutes extends FarmIntegrationRoutesFactory<TSchema> ? ReturnType<TRoutes> : TRoutes;
 
-export type DefinedIntegration<TIntegration extends FarmIntegrationInput> = Omit<
+type ResolveIntegrationEndpointsInput<
+  TEndpoints,
+  TSchema extends FarmIntegrationSchema | undefined,
+> =
+  TEndpoints extends FarmIntegrationEndpointsFactory<TSchema> ? ReturnType<TEndpoints> : TEndpoints;
+
+type ExtractIntegrationRoutesFromRoutesInput<
+  TRoutes,
+  TSchema extends FarmIntegrationSchema | undefined,
+> =
+  ResolveIntegrationRoutesInput<TRoutes, TSchema> extends readonly (infer TRoute)[]
+    ? TRoute
+    : never;
+
+type ExtractIntegrationRoutesFromEndpointValue<TValue> =
+  TValue extends FarmIntegrationRouteOperationCarrier<string, any>
+    ? TValue
+    : TValue extends readonly (infer TItem)[]
+      ? ExtractIntegrationRoutesFromEndpointValue<TItem>
+      : TValue extends object
+        ? ExtractIntegrationRoutesFromEndpointValue<TValue[keyof TValue]>
+        : never;
+
+type ExtractIntegrationRoutesFromEndpointsInput<
+  TEndpoints,
+  TSchema extends FarmIntegrationSchema | undefined,
+> = ExtractIntegrationRoutesFromEndpointValue<
+  ResolveIntegrationEndpointsInput<TEndpoints, TSchema>
+>;
+
+type ExtractIntegrationRouteUnion<TIntegration, TSchema extends FarmIntegrationSchema | undefined> =
+  | (TIntegration extends { routes: infer TRoutes }
+      ? ExtractIntegrationRoutesFromRoutesInput<TRoutes, TSchema>
+      : never)
+  | (TIntegration extends { endpoints: infer TEndpoints }
+      ? ExtractIntegrationRoutesFromEndpointsInput<TEndpoints, TSchema>
+      : never);
+
+type ExtractDefinedIntegrationRoutes<
   TIntegration,
-  "kind" | "category" | "slot" | "api"
-> & {
+  TSchema extends FarmIntegrationSchema | undefined,
+> = [ExtractIntegrationRouteUnion<TIntegration, TSchema>] extends [never]
+  ? undefined
+  : readonly ExtractIntegrationRouteUnion<TIntegration, TSchema>[];
+
+type ExtractDefinedIntegrationEndpoints<
+  TIntegration,
+  TSchema extends FarmIntegrationSchema | undefined,
+> = TIntegration extends { endpoints: infer TEndpoints }
+  ? ResolveIntegrationEndpointsInput<TEndpoints, TSchema>
+  : undefined;
+
+type ExtractIntegrationAPIRoutes<
+  TIntegration,
+  TSchema extends FarmIntegrationSchema | undefined,
+> = Extract<
+  ExtractIntegrationRouteUnion<TIntegration, TSchema>,
+  FarmIntegrationRouteOperationCarrier<string, any>
+>;
+
+type ExtractIntegrationCategory<TIntegration extends FarmIntegrationCategoryInput> =
+  TIntegration extends {
+    category: infer TCategory extends FarmIntegrationCategory;
+  }
+    ? TCategory
+    : TIntegration extends { slot: infer TSlot extends FarmIntegrationCategory }
+      ? TSlot
+      : FarmIntegrationCategory;
+
+type ExtractDerivedIntegrationAPI<
+  TIntegration extends FarmIntegrationShapeForInference,
+  TSchema extends FarmIntegrationSchema | undefined = ExtractIntegrationSchema<TIntegration>,
+> = TIntegration extends { api: infer TAPI extends FarmIntegrationAPI }
+  ? TAPI
+  : [ExtractIntegrationAPIRoutes<TIntegration, TSchema>] extends [never]
+    ? FarmIntegrationAPI | undefined
+    : InferIntegrationAPIFromRoutes<readonly ExtractIntegrationAPIRoutes<TIntegration, TSchema>[]>;
+
+export type DefinedIntegration<
+  TIntegration extends FarmIntegrationShapeForInference,
+  TSchema extends FarmIntegrationSchema | undefined = ExtractIntegrationSchema<TIntegration>,
+> = Omit<TIntegration, "kind" | "category" | "slot" | "api" | "routes" | "endpoints"> & {
   readonly kind: "farm-integration";
   category: ExtractIntegrationCategory<TIntegration>;
   slot: ExtractIntegrationCategory<TIntegration>;
-  api: ExtractDerivedIntegrationAPI<TIntegration>;
+  routes: ExtractDefinedIntegrationRoutes<TIntegration, TSchema>;
+  endpoints: ExtractDefinedIntegrationEndpoints<TIntegration, TSchema>;
+  api: ExtractDerivedIntegrationAPI<TIntegration, TSchema>;
 };
 
-export function defineIntegration<TIntegration extends FarmIntegrationInput>(
-  integration: TIntegration,
-): DefinedIntegration<TIntegration>;
-export function defineIntegration<TIntegration extends FarmIntegrationInput>(
-  integration: TIntegration,
-): DefinedIntegration<TIntegration> {
+function isIntegrationEndpointRoute(value: unknown): value is FarmIntegrationRoute {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as { path?: unknown }).path === "string" &&
+    typeof (value as { handler?: unknown }).handler === "function"
+  );
+}
+
+function flattenIntegrationEndpoints(
+  endpoints: FarmIntegrationEndpointValue | FarmIntegrationEndpoints | undefined,
+): FarmIntegrationRoute[] {
+  if (!endpoints) {
+    return [];
+  }
+
+  if (Array.isArray(endpoints)) {
+    return endpoints.flatMap((endpoint) => flattenIntegrationEndpoints(endpoint));
+  }
+
+  if (isIntegrationEndpointRoute(endpoints)) {
+    return [endpoints];
+  }
+
+  if (typeof endpoints === "object") {
+    return Object.values(endpoints).flatMap((endpoint) => flattenIntegrationEndpoints(endpoint));
+  }
+
+  return [];
+}
+
+export function defineIntegration<
+  const TSchema extends FarmIntegrationSchema | undefined,
+  const TConfig,
+  TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
+>(integration: TIntegration): DefinedIntegration<TIntegration, TSchema>;
+export function defineIntegration<
+  const TSchema extends FarmIntegrationSchema | undefined,
+  const TConfig,
+  TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
+>(integration: TIntegration): DefinedIntegration<TIntegration, TSchema> {
   const category = integration.category ?? integration.slot;
 
   if (!category) {
@@ -541,11 +974,33 @@ export function defineIntegration<TIntegration extends FarmIntegrationInput>(
     throw new Error("Integration category and slot must match when both are provided.");
   }
 
+  const routeFactory = createIntegrationRoute(integration.schema);
+  const routes =
+    typeof integration.routes === "function"
+      ? integration.routes({
+          route: routeFactory,
+          integrationRoute: routeFactory,
+        })
+      : integration.routes;
+  const endpoints =
+    typeof integration.endpoints === "function"
+      ? integration.endpoints({
+          endpoint: routeFactory,
+          route: routeFactory,
+          integrationRoute: routeFactory,
+        })
+      : integration.endpoints;
+  const endpointRoutes = flattenIntegrationEndpoints(endpoints);
+  const allRoutes =
+    routes?.length || endpointRoutes.length
+      ? ([...(routes || []), ...endpointRoutes] as readonly FarmIntegrationRoute[])
+      : undefined;
+
   const derivedApi =
     integration.api ||
-    (integration.routes?.length
+    (allRoutes?.length
       ? integrationApi.fromRoutes(
-          integration.routes as unknown as ReadonlyArray<{
+          allRoutes as unknown as ReadonlyArray<{
             path: string;
             __operation: FarmIntegrationAPIOperation<any, any, any, any, any>;
           }>,
@@ -555,10 +1010,12 @@ export function defineIntegration<TIntegration extends FarmIntegrationInput>(
   return {
     kind: "farm-integration",
     ...integration,
+    endpoints,
+    routes: allRoutes,
     api: derivedApi,
     category,
     slot: category,
-  } as unknown as DefinedIntegration<TIntegration>;
+  } as unknown as DefinedIntegration<TIntegration, TSchema>;
 }
 
 export function isFarmIntegration(value: unknown): value is FarmIntegration {
@@ -792,9 +1249,255 @@ export function getRegisteredIntegrationAPIManifest(): Record<string, FarmIntegr
   return Object.fromEntries(manifestEntries);
 }
 
+type IntegrationLifecycleCleanup = () => MaybePromise<void>;
+
+function getIntegrationRuntimeEnv(): Record<string, string | undefined> {
+  return typeof process !== "undefined" ? process.env : {};
+}
+
+function isIntegrationConfigDefinition(
+  value: unknown,
+): value is FarmIntegrationConfigDefinition<unknown> {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    ("schema" in value ||
+      "env" in value ||
+      "defaults" in value ||
+      "input" in value ||
+      "resolve" in value)
+  );
+}
+
+function mergeIntegrationConfigValue(current: unknown, next: unknown): unknown {
+  if (next === undefined) {
+    return current;
+  }
+
+  if (isPlainIntegrationConfigObject(current) && isPlainIntegrationConfigObject(next)) {
+    return {
+      ...current,
+      ...next,
+    };
+  }
+
+  return next;
+}
+
+function isPlainIntegrationConfigObject(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+async function resolveIntegrationConfigPart<TValue>(
+  value: TValue | ((context: FarmIntegrationConfigContext) => MaybePromise<TValue>) | undefined,
+  context: FarmIntegrationConfigContext,
+): Promise<TValue | undefined> {
+  if (typeof value === "function") {
+    return (value as (context: FarmIntegrationConfigContext) => MaybePromise<TValue>)(context);
+  }
+
+  return value;
+}
+
+function resolveIntegrationEnvConfig(
+  env: Record<string, string | readonly string[]> | undefined,
+): Record<string, string> | undefined {
+  if (!env) {
+    return undefined;
+  }
+
+  const runtimeEnv = getIntegrationRuntimeEnv();
+  const config: Record<string, string> = {};
+
+  for (const [key, names] of Object.entries(env)) {
+    const envNames = Array.isArray(names) ? names : [names];
+    const value = envNames.map((name) => runtimeEnv[name]).find((entry) => entry !== undefined);
+    if (value !== undefined) {
+      config[key] = value;
+    }
+  }
+
+  return config;
+}
+
+async function parseIntegrationConfigSchema<TConfig>(
+  integration: FarmIntegration<any, any>,
+  schema: FarmIntegrationInputSchema<TConfig>,
+  value: unknown,
+): Promise<TConfig> {
+  const parser = schema.safeParseAsync || schema.safeParse;
+  if (parser) {
+    const result = await parser.call(schema, value);
+    if (result.success) {
+      return result.data;
+    }
+
+    throw createIntegrationConfigValidationError(integration, result.error);
+  }
+
+  if (schema["~standard"]?.validate) {
+    const result = await schema["~standard"].validate(value);
+    if ("value" in result) {
+      return result.value;
+    }
+
+    throw createIntegrationConfigValidationError(integration, {
+      issues: result.issues,
+    });
+  }
+
+  if (schema.parse) {
+    try {
+      return await schema.parse(value);
+    } catch (error) {
+      throw createIntegrationConfigValidationError(
+        integration,
+        normalizeIntegrationValidationError(error),
+      );
+    }
+  }
+
+  throw new Error(
+    `Integration "${integration.type}" config schema must expose safeParse, safeParseAsync, parse, or ~standard.validate.`,
+  );
+}
+
+function createIntegrationConfigValidationError(
+  integration: FarmIntegration<any, any>,
+  error: FarmIntegrationValidationErrorLike,
+) {
+  const issues =
+    Array.isArray(error.issues) && error.issues.length > 0
+      ? error.issues
+          .map((issue) => {
+            const path = issue.path?.length ? `${issue.path.join(".")}: ` : "";
+            return `${path}${issue.message || "Invalid config"}`;
+          })
+          .join("; ")
+      : error.message || "Invalid config";
+
+  return new Error(`Integration "${integration.type}" config validation failed: ${issues}`);
+}
+
+async function resolveIntegrationConfig<TConfig>(
+  integration: FarmIntegration<any, TConfig>,
+  context: FarmIntegrationConfigContext,
+): Promise<TConfig> {
+  const config = integration.config;
+  if (!config) {
+    return undefined as TConfig;
+  }
+
+  if (!isIntegrationConfigDefinition(config)) {
+    return parseIntegrationConfigSchema(integration, config, {});
+  }
+
+  let value: unknown = {};
+  value = mergeIntegrationConfigValue(
+    value,
+    await resolveIntegrationConfigPart(config.defaults, context),
+  );
+  value = mergeIntegrationConfigValue(value, resolveIntegrationEnvConfig(config.env));
+  value = mergeIntegrationConfigValue(
+    value,
+    await resolveIntegrationConfigPart(config.input, context),
+  );
+  value = mergeIntegrationConfigValue(value, await config.resolve?.(context));
+
+  return config.schema
+    ? parseIntegrationConfigSchema(integration, config.schema, value)
+    : (value as TConfig);
+}
+
+function createIntegrationLifecycleLogger(
+  integration: FarmIntegration<any, any>,
+  phase: FarmIntegrationLogPhase,
+): FarmIntegrationLifecycleLogger {
+  const write = (
+    level: FarmIntegrationLifecycleLogLevel,
+    message: string,
+    meta?: Record<string, unknown>,
+  ) => {
+    if (!integration.log) {
+      return;
+    }
+
+    void Promise.resolve(
+      integration.log({
+        category: integration.category,
+        slot: integration.category,
+        type: integration.type,
+        phase,
+        level,
+        message,
+        meta,
+        context: new Map(),
+      }),
+    ).catch(() => {});
+  };
+
+  return {
+    info(message, meta) {
+      write("info", message, meta);
+    },
+    warn(message, meta) {
+      write("warn", message, meta);
+    },
+    error(message, meta) {
+      write("error", message, meta);
+    },
+  };
+}
+
 function createIntegrationPlugin(integrationKey: string, integration: FarmIntegration): FarmPlugin {
   const routes = normalizeIntegrationRoutes(integration.routes || []);
   const middleware = [...(integration.middleware || [])];
+  const cleanupCallbacks: IntegrationLifecycleCleanup[] = [];
+  let integrationConfigPromise: Promise<unknown> | undefined;
+
+  const runCleanup = async () => {
+    const callbacks = cleanupCallbacks.splice(0).reverse();
+    for (const callback of callbacks) {
+      await callback();
+    }
+  };
+
+  const createLifecycleContext = async (
+    context: FarmPluginContext,
+    phase: FarmIntegrationLogPhase,
+    options: { reason?: string } = {},
+  ): Promise<FarmIntegrationLifecycleContext> => {
+    const args = createIntegrationRouteArgs({
+      integration,
+      config: context.config,
+    });
+    const configContext: FarmIntegrationConfigContext = {
+      key: integrationKey,
+      integration,
+      appConfig: context.config,
+      config: context.config,
+      args,
+      env: getIntegrationRuntimeEnv(),
+      isDev: context.isDev,
+      isProd: context.isProd,
+    };
+    integrationConfigPromise ??= resolveIntegrationConfig(integration, configContext);
+
+    return {
+      ...configContext,
+      integrationConfig: await integrationConfigPromise,
+      log: createIntegrationLifecycleLogger(integration, phase),
+      reason: options.reason,
+      async cleanup(callback) {
+        if (callback) {
+          cleanupCallbacks.push(callback);
+          return;
+        }
+
+        await runCleanup();
+      },
+    };
+  };
 
   return {
     name: `farm:integration:${integration.category}:${integration.type}`,
@@ -807,6 +1510,16 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
         isDev: context.isDev,
         isProd: context.isProd,
       });
+
+      await createLifecycleContext(context, "validate");
+
+      if (integration.validate) {
+        await integration.validate(await createLifecycleContext(context, "validate"));
+      }
+
+      if (integration.setup) {
+        await integration.setup(await createLifecycleContext(context, "setup"));
+      }
 
       if (!integration.log) {
         return;
@@ -840,6 +1553,26 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           },
           context: new Map(),
         });
+      }
+    },
+
+    async ready(context) {
+      if (integration.ready) {
+        await integration.ready(await createLifecycleContext(context, "ready"));
+      }
+    },
+
+    async shutdown(payload, context) {
+      try {
+        if (integration.dispose) {
+          await integration.dispose(
+            await createLifecycleContext(context, "dispose", {
+              reason: payload.reason,
+            }),
+          );
+        }
+      } finally {
+        await runCleanup();
       }
     },
 
@@ -1049,7 +1782,45 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             }
           }
 
-          const response = await route.handler(request, handlerContext);
+          const beforeResponse = await runIntegrationRouteBeforeHooks(
+            route,
+            request,
+            handlerContext,
+          );
+          if (beforeResponse) {
+            const response = await runIntegrationRouteAfterHooks(
+              route,
+              request,
+              handlerContext,
+              beforeResponse,
+            );
+            await sendWebResponse(res, response);
+            await integration.log?.({
+              category: integration.category,
+              slot: integration.category,
+              type: integration.type,
+              phase: "request:end",
+              route: {
+                kind: "route",
+                path: route.path,
+                methods: route.methods,
+              },
+              request,
+              response,
+              requestId,
+              durationMs: Date.now() - startedAt,
+              context: handlerContext.requestContext.snapshot(),
+            });
+            return;
+          }
+
+          const handlerResponse = await route.handler(request, handlerContext);
+          const response = await runIntegrationRouteAfterHooks(
+            route,
+            request,
+            handlerContext,
+            handlerResponse,
+          );
           await sendWebResponse(res, response);
           await integration.log?.({
             category: integration.category,
@@ -1110,6 +1881,10 @@ function createIntegrationHandlerContext(input: {
     method: input.request.method,
     params: input.params,
     input: {},
+    args: createIntegrationRouteArgs({
+      integration: input.integration,
+      config: input.pluginContext.config,
+    }),
     integration: {
       category: input.integration.category,
       slot: input.integration.category,
@@ -1139,6 +1914,7 @@ function normalizeIntegrationRoutes(
   return routes.map((route) => ({
     ...route,
     methods: normalizeIntegrationRouteMethods(route),
+    input: normalizeIntegrationRouteInputSchemas(route),
   }));
 }
 
@@ -1151,6 +1927,24 @@ function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "met
         : ["ALL"];
 
   return input.map((method) => String(method).toUpperCase());
+}
+
+function normalizeIntegrationRouteInputSchemas<TBody, TQuery>(
+  route: Pick<FarmIntegrationRoute<TBody, TQuery>, "body" | "query" | "input">,
+): FarmIntegrationRouteInputSchemas<TBody, TQuery> | undefined {
+  const input: FarmIntegrationRouteInputSchemas<TBody, TQuery> = {
+    ...route.input,
+  };
+
+  if (route.body) {
+    input.body = route.body;
+  }
+
+  if (route.query) {
+    input.query = route.query;
+  }
+
+  return input.body || input.query ? input : undefined;
 }
 
 type IntegrationRouteInputValidationResult =
@@ -1238,29 +2032,64 @@ async function parseIntegrationInputSchema<TValue>(
     }
 > {
   const parser = schema.safeParseAsync || schema.safeParse;
-  if (!parser) {
+  if (parser) {
+    const result = await parser.call(schema, value);
+    if (result.success) {
+      return {
+        success: true,
+        data: result.data,
+      };
+    }
+
     return {
       success: false,
-      issues: [
-        {
-          source,
-          message: "Input schema must expose safeParse or safeParseAsync.",
-        },
-      ],
+      issues: normalizeIntegrationValidationIssues(source, result.error),
     };
   }
 
-  const result = await parser.call(schema, value);
-  if (result.success) {
+  if (schema["~standard"]?.validate) {
+    const result = await schema["~standard"].validate(value);
+    if ("value" in result) {
+      return {
+        success: true,
+        data: result.value,
+      };
+    }
+
     return {
-      success: true,
-      data: result.data,
+      success: false,
+      issues: normalizeIntegrationValidationIssues(source, {
+        issues: result.issues,
+      }),
     };
+  }
+
+  if (schema.parse) {
+    try {
+      return {
+        success: true,
+        data: await schema.parse(value),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        issues: normalizeIntegrationValidationIssues(
+          source,
+          normalizeIntegrationValidationError(error),
+        ),
+      };
+    }
   }
 
   return {
     success: false,
-    issues: normalizeIntegrationValidationIssues(source, result.error),
+    issues: [
+      {
+        source,
+        message:
+          "Input schema must expose safeParse, safeParseAsync, parse, or ~standard.validate.",
+      },
+    ],
   };
 }
 
@@ -1296,6 +2125,16 @@ function normalizeIntegrationValidationIssues(
       message: error.message || "Invalid input",
     },
   ];
+}
+
+function normalizeIntegrationValidationError(error: unknown): FarmIntegrationValidationErrorLike {
+  if (error && typeof error === "object") {
+    return error as FarmIntegrationValidationErrorLike;
+  }
+
+  return {
+    message: error instanceof Error ? error.message : String(error || "Invalid input"),
+  };
 }
 
 async function readIntegrationValidationBody(
@@ -1357,6 +2196,149 @@ async function readIntegrationValidationBody(
 
 function getIntegrationRouteBodyFormat(route: NormalizedIntegrationRoute) {
   return route.bodyFormat || route.__operation?.bodyFormat || "json";
+}
+
+function createIntegrationRouteArgs(input: {
+  integration: FarmIntegration;
+  config: FarmPluginContext["config"];
+}): FarmIntegrationRouteArgs {
+  let clientPromise: Promise<unknown | undefined> | undefined;
+  let ormPromise: Promise<unknown> | undefined;
+
+  const getClient = () => {
+    clientPromise ??= import("./storage").then(({ resolveStorageRuntimeClient }) =>
+      resolveStorageRuntimeClient(input.config.storage),
+    );
+    return clientPromise;
+  };
+
+  const getOrm = () => {
+    if (!input.integration.schema) {
+      throw new Error(
+        `Integration "${input.integration.type}" does not define a schema for ctx.args.db.`,
+      );
+    }
+
+    ormPromise ??= import("./integration-orm").then(({ createIntegrationOrm }) =>
+      createIntegrationOrm({
+        schema: input.integration.schema!,
+        config: input.config,
+      }),
+    );
+    return ormPromise;
+  };
+
+  return {
+    db: createLazyIntegrationOrmClient(getOrm) as never,
+    getDb: getOrm as never,
+    storage: {
+      getClient,
+      getOrm: getOrm as never,
+    },
+  };
+}
+
+function createLazyIntegrationOrmClient(resolveOrm: () => Promise<unknown>) {
+  const modelProxyCache = new Map<PropertyKey, unknown>();
+
+  return new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === "then") {
+          return undefined;
+        }
+
+        if (prop === "transaction" || prop === "batch") {
+          return async (...args: unknown[]) => {
+            const orm = (await resolveOrm()) as Record<PropertyKey, unknown>;
+            const member = orm[prop];
+            if (typeof member !== "function") {
+              throw new Error(`Integration ORM does not expose "${String(prop)}".`);
+            }
+            return member.apply(orm, args);
+          };
+        }
+
+        if (prop === "$driver") {
+          return undefined;
+        }
+
+        if (!modelProxyCache.has(prop)) {
+          modelProxyCache.set(prop, createLazyIntegrationOrmModel(resolveOrm, prop));
+        }
+
+        return modelProxyCache.get(prop);
+      },
+    },
+  );
+}
+
+function createLazyIntegrationOrmModel(resolveOrm: () => Promise<unknown>, modelName: PropertyKey) {
+  return new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === "then") {
+          return undefined;
+        }
+
+        return async (...args: unknown[]) => {
+          const orm = (await resolveOrm()) as Record<PropertyKey, Record<PropertyKey, unknown>>;
+          const model = orm[modelName];
+          const member = model?.[prop];
+          if (typeof member !== "function") {
+            throw new Error(
+              `Integration ORM model "${String(modelName)}" does not expose "${String(prop)}".`,
+            );
+          }
+          return member.apply(model, args);
+        };
+      },
+    },
+  );
+}
+
+async function runIntegrationRouteBeforeHooks(
+  route: NormalizedIntegrationRoute,
+  request: Request,
+  context: FarmIntegrationHandlerContext,
+): Promise<Response | undefined> {
+  const hookContext = context as FarmIntegrationRouteHookContext;
+  hookContext.response = undefined;
+
+  for (const hook of route.before || []) {
+    const response = await hook(request, hookContext);
+    if (response) {
+      hookContext.response = response;
+      return response;
+    }
+
+    if (hookContext.response) {
+      return hookContext.response;
+    }
+  }
+
+  return undefined;
+}
+
+async function runIntegrationRouteAfterHooks(
+  route: NormalizedIntegrationRoute,
+  request: Request,
+  context: FarmIntegrationHandlerContext,
+  response: Response,
+): Promise<Response> {
+  const hookContext = context as FarmIntegrationRouteHookContext;
+  let currentResponse = response;
+
+  for (const hook of route.after || []) {
+    hookContext.response = currentResponse;
+    const nextResponse = await hook(request, hookContext);
+    currentResponse = nextResponse || hookContext.response || currentResponse;
+  }
+
+  hookContext.response = currentResponse;
+  return currentResponse;
 }
 
 function createQueryInput(searchParams: URLSearchParams): Record<string, string | string[]> {
@@ -1584,7 +2566,40 @@ export async function dispatchIntegrationRequest(
         }
       }
 
-      const response = await route.handler(request, handlerContext);
+      const beforeResponse = await runIntegrationRouteBeforeHooks(route, request, handlerContext);
+      if (beforeResponse) {
+        const response = await runIntegrationRouteAfterHooks(
+          route,
+          request,
+          handlerContext,
+          beforeResponse,
+        );
+        await integration.log?.({
+          category: integration.category,
+          slot: integration.category,
+          type: integration.type,
+          phase: "request:end",
+          route: {
+            kind: "route",
+            path: route.path,
+            methods: route.methods,
+          },
+          request,
+          response,
+          requestId,
+          durationMs: Date.now() - startedAt,
+          context: handlerContext.requestContext.snapshot(),
+        });
+        return response;
+      }
+
+      const handlerResponse = await route.handler(request, handlerContext);
+      const response = await runIntegrationRouteAfterHooks(
+        route,
+        request,
+        handlerContext,
+        handlerResponse,
+      );
       await integration.log?.({
         category: integration.category,
         slot: integration.category,
@@ -1690,6 +2705,10 @@ function createServerIntegrationHandlerContext(input: {
     method: input.request.method,
     params: input.params,
     input: {},
+    args: createIntegrationRouteArgs({
+      integration: input.runtime.integration,
+      config: input.runtime.config,
+    }),
     integration: {
       category: input.runtime.integration.category,
       slot: input.runtime.integration.category,

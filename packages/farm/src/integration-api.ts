@@ -269,7 +269,11 @@ function normalizeRouteSegment(segment: string): string {
     return segment.slice(0, matcherIndex);
   }
 
-  return segment;
+  return camelCaseRouteSegment(segment);
+}
+
+function camelCaseRouteSegment(segment: string): string {
+  return segment.replace(/-([a-zA-Z0-9])/g, (_match, value: string) => value.toUpperCase());
 }
 
 function getRouteClientSegments(path: string): string[] {

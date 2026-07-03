@@ -133,6 +133,98 @@ describe("integrations runtime", () => {
     );
   });
 
+  it("runs flat integration config and lifecycle hooks", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+    const originalSecretKey = process.env.FARM_TEST_STRIPE_SECRET_KEY;
+    process.env.FARM_TEST_STRIPE_SECRET_KEY = "sk_test_lifecycle";
+
+    try {
+      const integration = defineIntegration({
+        category: "payment",
+        type: "stripe-lifecycle",
+        instance: {},
+        config: {
+          schema: z.object({
+            secretKey: z.string(),
+            mode: z.enum(["test", "live"]).default("test"),
+          }),
+          env: {
+            secretKey: "FARM_TEST_STRIPE_SECRET_KEY",
+          },
+        },
+        validate(ctx) {
+          expect(ctx.key).toBe("stripe");
+          expect(ctx.integrationConfig.secretKey).toBe("sk_test_lifecycle");
+          expect(ctx.integrationConfig.mode).toBe("test");
+          expectTypeOf(ctx.integrationConfig.secretKey).toEqualTypeOf<string>();
+          ctx.cleanup(() => {
+            calls.push("cleanup");
+          });
+          calls.push("validate");
+        },
+        async setup(ctx) {
+          expect(ctx.args.db).toBeDefined();
+          expect(ctx.integrationConfig.secretKey).toBe("sk_test_lifecycle");
+          calls.push("setup");
+        },
+        ready(ctx) {
+          expect(ctx.integrationConfig.mode).toBe("test");
+          calls.push("ready");
+        },
+        dispose(ctx) {
+          expect(ctx.reason).toBe("test");
+          calls.push("dispose");
+        },
+      });
+
+      manager.addPlugins(
+        resolveIntegrationPlugins({
+          stripe: integration,
+        }),
+      );
+
+      await manager.runHookParallel("init");
+      await manager.runHookParallel("ready");
+      await manager.runHookParallel("shutdown", { reason: "test" });
+
+      expect(calls).toEqual(["validate", "setup", "ready", "dispose", "cleanup"]);
+    } finally {
+      if (originalSecretKey === undefined) {
+        delete process.env.FARM_TEST_STRIPE_SECRET_KEY;
+      } else {
+        process.env.FARM_TEST_STRIPE_SECRET_KEY = originalSecretKey;
+      }
+    }
+  });
+
+  it("validates integration config during init without lifecycle hooks", async () => {
+    const manager = createManager();
+    const integration = defineIntegration({
+      category: "payment",
+      type: "missing-config",
+      instance: {},
+      config: {
+        schema: z.object({
+          secretKey: z.string(),
+        }),
+        env: {
+          secretKey: "FARM_TEST_MISSING_SECRET_KEY",
+        },
+      },
+    });
+
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        missingConfig: integration,
+      }),
+    );
+
+    await expect(manager.runHookParallel("init")).rejects.toThrow(
+      'Integration "missing-config" config validation failed',
+    );
+  });
+
   it("registers route integrations as pre-plugins and exposes shared handler context", async () => {
     const log = vi.fn();
     const manager = createManager();
@@ -424,6 +516,113 @@ describe("integrations runtime", () => {
     expect(routeMiddleware).toHaveBeenCalledTimes(1);
   });
 
+  it("supports Better Call-style Zod body and query schemas on integration routes", async () => {
+    const beforeHook = vi.fn();
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.post("/api/local-demo/direct-zod", {
+              body: z.object({
+                message: z.string().min(2),
+              }),
+              query: z.object({
+                count: z.coerce.number().int().positive(),
+              }),
+              before: [
+                (_request, context) => {
+                  expectTypeOf(context.input.body).toEqualTypeOf<
+                    | {
+                        message: string;
+                      }
+                    | undefined
+                  >();
+                  expectTypeOf(context.input.query).toEqualTypeOf<
+                    | {
+                        count: number;
+                      }
+                    | undefined
+                  >();
+                  beforeHook(context.input.body?.message, context.input.query?.count);
+                },
+              ],
+              handler(_request, context) {
+                expectTypeOf(context.input.body).toEqualTypeOf<
+                  | {
+                      message: string;
+                    }
+                  | undefined
+                >();
+                expectTypeOf(context.input.query).toEqualTypeOf<
+                  | {
+                      count: number;
+                    }
+                  | undefined
+                >();
+
+                return Response.json({
+                  message: context.input.body?.message,
+                  count: context.input.query?.count,
+                });
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+
+    const invalidReq = createRequest("/api/local-demo/direct-zod?count=bad", "POST");
+    const invalidRes = createResponse();
+    const invalidPromise = manager.runHookParallel(
+      "beforeRequest",
+      invalidReq as any,
+      invalidRes as any,
+    );
+    setImmediate(() => {
+      invalidReq.emit("data", Buffer.from(JSON.stringify({ message: "x" })));
+      invalidReq.emit("end");
+    });
+    const invalidEnded = await invalidPromise;
+
+    expect(invalidEnded).toBe(true);
+    expect(invalidRes.statusCode).toBe(400);
+    expect(JSON.parse(invalidRes.body.toString())).toEqual({
+      error: "Integration route input validation failed",
+      issues: expect.arrayContaining([
+        expect.objectContaining({
+          source: "body",
+          path: ["message"],
+        }),
+        expect.objectContaining({
+          source: "query",
+          path: ["count"],
+        }),
+      ]),
+    });
+    expect(beforeHook).not.toHaveBeenCalled();
+
+    const validReq = createRequest("/api/local-demo/direct-zod?count=3", "POST");
+    const validRes = createResponse();
+    const validPromise = manager.runHookParallel("beforeRequest", validReq as any, validRes as any);
+    setImmediate(() => {
+      validReq.emit("data", Buffer.from(JSON.stringify({ message: "hello" })));
+      validReq.emit("end");
+    });
+    const validEnded = await validPromise;
+
+    expect(validEnded).toBe(true);
+    expect(validRes.statusCode).toBe(200);
+    expect(JSON.parse(validRes.body.toString())).toEqual({
+      message: "hello",
+      count: 3,
+    });
+    expect(beforeHook).toHaveBeenCalledWith("hello", 3);
+  });
+
   it("validates route input schemas during server integration dispatch", async () => {
     const manager = createManager();
     manager.addPlugins(
@@ -533,6 +732,129 @@ describe("integrations runtime", () => {
     expect(JSON.parse(res.body.toString())).toEqual({
       middleware: ["first", "second"],
     });
+  });
+
+  it("runs route before and after hooks around the route handler", async () => {
+    const manager = createManager();
+    const handlerSpy = vi.fn();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.get<"/api/local-demo/hooks", { order: string[]; after: boolean }>(
+              "/api/local-demo/hooks",
+              {
+                before: [
+                  (_request, context) => {
+                    expect(context.response).toBeUndefined();
+                    context.requestContext.set("hook-order", ["before"]);
+                  },
+                ],
+                after: [
+                  async (_request, context) => {
+                    expect(context.response?.status).toBe(200);
+                    const body = (await context.response?.clone().json()) as { order: string[] };
+                    return Response.json(
+                      {
+                        order: [...body.order, "after"],
+                        after: true,
+                      },
+                      {
+                        headers: {
+                          "x-integration-after": "yes",
+                        },
+                      },
+                    );
+                  },
+                ],
+                handler(_request, context) {
+                  handlerSpy();
+                  const order = context.requestContext.get<string[]>("hook-order") || [];
+                  return Response.json({
+                    order: [...order, "handler"],
+                    after: false,
+                  });
+                },
+              },
+            ),
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/hooks");
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(res.getHeader("x-integration-after")).toBe("yes");
+    expect(JSON.parse(res.body.toString())).toEqual({
+      order: ["before", "handler", "after"],
+      after: true,
+    });
+    expect(handlerSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets route before hooks short-circuit and route after hooks inspect that response", async () => {
+    const manager = createManager();
+    const handlerSpy = vi.fn();
+    const integration = defineIntegration({
+      category: "custom",
+      type: "local-demo",
+      instance: {},
+      routes: [
+        integrationRoute.get("/api/local-demo/blocked", {
+          before: [
+            (_request, context) => {
+              context.requestContext.set("blocked", true);
+              return Response.json(
+                {
+                  blocked: context.requestContext.get("blocked"),
+                },
+                {
+                  status: 403,
+                },
+              );
+            },
+          ],
+          after: [
+            (_request, context) => {
+              expect(context.response?.status).toBe(403);
+              context.response?.headers.set("x-integration-after", "blocked");
+            },
+          ],
+          handler() {
+            handlerSpy();
+            return Response.json({ ok: true });
+          },
+        }),
+      ],
+    });
+
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: integration,
+      }),
+    );
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("localDemo");
+    expect(runtime).toBeDefined();
+
+    const response = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/local-demo/blocked"),
+    );
+
+    expect(response?.status).toBe(403);
+    expect(response?.headers.get("x-integration-after")).toBe("blocked");
+    expect(await response?.json()).toEqual({
+      blocked: true,
+    });
+    expect(handlerSpy).not.toHaveBeenCalled();
   });
 
   it("collects document navigation matchers from integrations", () => {

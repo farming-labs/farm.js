@@ -7,6 +7,7 @@ import {
   createRequestCookie,
   getCookieValue,
   getReturnTo,
+  integrationConfig,
   normalizeMatchers,
 } from "../utils/index.js";
 import type { WorkOSRedirectQuery, WorkOSRedirectResult, WorkOSSessionResult } from "./client.js";
@@ -27,6 +28,12 @@ export interface WorkOSIntegrationInput {
 }
 
 const DEV_COOKIE_PASSWORD = "farmjs-workos-cookie-password-development-2026";
+
+interface ResolvedWorkOSConfig {
+  clientId: string;
+  apiKey: string;
+  cookiePassword: string;
+}
 
 function createWorkOSApi(input: {
   loginPath: string;
@@ -54,7 +61,7 @@ function createWorkOSApi(input: {
   );
 }
 
-function resolveEnv(input: WorkOSIntegrationInput) {
+function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
   const clientId = input.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
   const apiKey = input.apiKey ?? process.env.WORKOS_API_KEY ?? "";
   const cookiePassword =
@@ -145,6 +152,20 @@ export function workos(input: WorkOSIntegrationInput = {}) {
       apiKey: "[redacted]",
       protectedRoutes: protectedMatchers,
     },
+    config: integrationConfig<ResolvedWorkOSConfig>({
+      label: "WorkOS integration",
+      env: {
+        clientId: "WORKOS_CLIENT_ID",
+        apiKey: "WORKOS_API_KEY",
+        cookiePassword: ["WORKOS_COOKIE_PASSWORD", "FARM_WORKOS_COOKIE_PASSWORD"],
+      },
+      input: {
+        clientId,
+        apiKey,
+        cookiePassword,
+      },
+      required: ["clientId", "apiKey", "cookiePassword"],
+    }),
     api: createWorkOSApi({
       loginPath,
       signUpPath,

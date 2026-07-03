@@ -10,6 +10,7 @@ import {
   type FarmIntegrationSchema,
 } from "@farmjs/core";
 import {
+  integrationConfig,
   normalizeWebhookConfig,
   resolveAppPath,
   toAbsoluteUrl,
@@ -3611,6 +3612,16 @@ export function stripe<TInput extends StripeIntegrationInput = {}>(
       sessionPath,
     }) as unknown as FarmIntegrationAPI,
     schema: integrationSchema,
+    config: integrationConfig<ResolvedStripeEnv>({
+      label: "Stripe integration",
+      env: {
+        secretKey: "STRIPE_SECRET_KEY",
+        webhookSecret: "STRIPE_WEBHOOK_SECRET",
+        appBaseUrl: "APP_BASE_URL",
+      },
+      input: env,
+      required: input.instance ? [] : ["secretKey"],
+    }),
     log: input.log,
     routes: [
       integrationRoute.get<typeof productsPath, StripeCatalogProduct[]>(productsPath, {

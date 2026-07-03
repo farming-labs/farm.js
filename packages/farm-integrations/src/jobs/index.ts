@@ -6,6 +6,7 @@ import {
 } from "@farmjs/core";
 import { api } from "@farmjs/core/client";
 import type { FarmIntegrationAPIOperation } from "@farmjs/core/client";
+import { integrationConfig } from "../utils/index.js";
 
 export type JobsRuntimeKind = "trigger" | "inngest";
 
@@ -285,6 +286,26 @@ export interface InngestJobsRuntimeDefinition {
 }
 
 export type JobsRuntimeDefinition = TriggerJobsRuntimeDefinition | InngestJobsRuntimeDefinition;
+
+interface ResolvedTriggerJobsConfig {
+  kind: "trigger";
+  projectRef: string;
+  apiKey: string;
+  webhookSecret: string;
+  apiBaseUrl: string;
+}
+
+interface ResolvedInngestJobsConfig {
+  kind: "inngest";
+  appId: string;
+  eventKey: string;
+  signingKey: string;
+  eventBaseUrl: string;
+  apiBaseUrl: string;
+  eventNamePrefix: string;
+}
+
+type ResolvedJobsConfig = ResolvedTriggerJobsConfig | ResolvedInngestJobsConfig;
 
 export interface JobsIntegrationInputBase<TTasks extends JobsTaskMap> {
   basePath?: string;
@@ -1280,6 +1301,48 @@ function createRuntime(runtime: JobsRuntimeDefinition) {
   return createInngestRuntime(runtime.config);
 }
 
+function resolveJobsIntegrationConfig(runtime: JobsRuntimeDefinition) {
+  if (runtime.kind === "trigger") {
+    const resolved = {
+      kind: "trigger" as const,
+      projectRef: runtime.config.projectRef ?? process.env.TRIGGER_PROJECT_REF ?? "",
+      apiKey: runtime.config.apiKey ?? process.env.TRIGGER_SECRET_KEY ?? "",
+      webhookSecret: runtime.config.webhookSecret ?? process.env.TRIGGER_WEBHOOK_SECRET ?? "",
+      apiBaseUrl: (runtime.config.apiBaseUrl ?? "https://api.trigger.dev").replace(/\/+$/g, ""),
+    };
+
+    return integrationConfig<ResolvedTriggerJobsConfig>({
+      label: "Trigger jobs runtime",
+      env: {
+        projectRef: "TRIGGER_PROJECT_REF",
+        apiKey: "TRIGGER_SECRET_KEY",
+        webhookSecret: "TRIGGER_WEBHOOK_SECRET",
+      },
+      input: resolved,
+    });
+  }
+
+  const resolved = {
+    kind: "inngest" as const,
+    appId: runtime.config.appId ?? process.env.INNGEST_APP_ID ?? "",
+    eventKey: runtime.config.eventKey ?? process.env.INNGEST_EVENT_KEY ?? "",
+    signingKey: runtime.config.signingKey ?? process.env.INNGEST_SIGNING_KEY ?? "",
+    eventBaseUrl: (runtime.config.eventBaseUrl ?? "https://inn.gs").replace(/\/+$/g, ""),
+    apiBaseUrl: (runtime.config.apiBaseUrl ?? "https://api.inngest.com").replace(/\/+$/g, ""),
+    eventNamePrefix: runtime.config.eventNamePrefix ?? "farm",
+  };
+
+  return integrationConfig<ResolvedInngestJobsConfig>({
+    label: "Inngest jobs runtime",
+    env: {
+      appId: "INNGEST_APP_ID",
+      eventKey: "INNGEST_EVENT_KEY",
+      signingKey: "INNGEST_SIGNING_KEY",
+    },
+    input: resolved,
+  });
+}
+
 function createJobsApi<TTasks extends JobsTaskMap>(
   tasks: readonly JobsNormalizedTask[],
   tasksPath: string,
@@ -1485,7 +1548,8 @@ function normalizeCancelInput(body: Record<string, unknown> | undefined) {
 export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInput<TTasks>) {
   const basePath = normalizeBasePath(input.basePath);
   const tasksPath = joinPath(basePath, "tasks");
-  const runtime = createRuntime(resolveRuntimeDefinition(input));
+  const runtimeDefinition = resolveRuntimeDefinition(input);
+  const runtime = createRuntime(runtimeDefinition);
   const normalizedTasks = normalizeTasks(input.tasks, basePath, runtime);
 
   return defineIntegration({
@@ -1496,6 +1560,7 @@ export function jobs<const TTasks extends JobsTaskMap>(input: JobsIntegrationInp
       configured: runtime.isConfigured(),
       tasks: normalizedTasks.map((task) => task.metadata),
     },
+    config: resolveJobsIntegrationConfig(runtimeDefinition),
     api: createJobsApi<TTasks>(normalizedTasks, tasksPath),
     log: input.log,
     routes: [

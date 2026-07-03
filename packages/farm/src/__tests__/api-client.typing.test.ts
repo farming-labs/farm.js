@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, it, vi } from "vitest";
-import { createAPIClient, type CacheKey } from "../api/client";
+import { createAPIClient, createServerAPIClient, type CacheKey } from "../api/client";
+import { endpoint } from "../integration-api";
 
 type APIRouter = {
   hello: {
@@ -51,6 +52,16 @@ type APIRouter = {
 };
 
 type UsersListResponse = APIRouter["users"]["get"]["__types"]["response"];
+type AppIntegrations = {
+  localDemo: {
+    message: {
+      get: ReturnType<typeof endpoint.get<{ ok: boolean; source: string }>>;
+      post: ReturnType<
+        typeof endpoint.post<{ message: string }, { ok: boolean; source: string }>
+      >;
+    };
+  };
+};
 type IsAny<T> = 0 extends 1 & T ? true : false;
 
 const buildResponse = (data: any, ok = true, status = 200) => ({
@@ -154,5 +165,58 @@ describe("createAPIClient typing", () => {
         },
       },
     );
+  });
+
+  it("adds typed integration namespaces to route API clients", async () => {
+    const api = createAPIClient<APIRouter, AppIntegrations>({ baseURL: "http://example.com" });
+
+    if (false) {
+      const routeResult = await api.hello.get({ query: { name: "Farm" } });
+      const integrationGet = await api.integrations.localDemo.message.get();
+      const integrationPost = await api.integrations.localDemo.message.post({
+        body: {
+          message: "hello",
+        },
+      });
+
+      expectTypeOf(routeResult.data?.message).toEqualTypeOf<string | undefined>();
+      expectTypeOf(integrationGet.data).toEqualTypeOf<
+        { ok: boolean; source: string } | null
+      >();
+      expectTypeOf(integrationPost.data?.source).toEqualTypeOf<string | undefined>();
+
+      // @ts-expect-error integration body schemas require the body wrapper.
+      await api.integrations.localDemo.message.post();
+      // @ts-expect-error unknown integration namespaces are rejected.
+      api.integrations.missing;
+    }
+  });
+
+  it("adds typed integration namespaces to server API clients", async () => {
+    const api = createServerAPIClient<{}, AppIntegrations>({});
+
+    if (false) {
+      expectTypeOf(api.integrations.localDemo.message.get).toBeCallableWith();
+      expectTypeOf(api.integrations.localDemo.message.post).toBeCallableWith({
+        body: {
+          message: "hello",
+        },
+      });
+
+      // @ts-expect-error server integration calls still preserve operation input types.
+      await api.integrations.localDemo.message.post({ body: { nope: "hello" } });
+    }
+  });
+
+  it("allows opting out of the reserved integrations namespace", () => {
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com", integrations: false });
+    const serverApi = createServerAPIClient<{}>({}, { integrations: false });
+
+    if (false) {
+      // @ts-expect-error integrations is not present when the namespace is disabled.
+      api.integrations;
+      // @ts-expect-error integrations is not present when the server namespace is disabled.
+      serverApi.integrations;
+    }
   });
 });

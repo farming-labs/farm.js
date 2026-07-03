@@ -3,9 +3,16 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it } from "vitest";
 import { createIntegrationOrm, farmIntegrationSchemaToOrmSchema } from "../integration-orm";
-import { defineIntegrationSchema } from "../integrations";
+import {
+  defineIntegration,
+  defineIntegrationSchema,
+  dispatchIntegrationRequest,
+  getRegisteredIntegrationRuntime,
+  resolveIntegrationPlugins,
+} from "../integrations";
+import { PluginManager } from "../plugin";
 
 type SqliteDatabase = {
   exec(sql: string): unknown;
@@ -202,6 +209,208 @@ describe("integration ORM storage", () => {
         id: "acct_2",
         ownerId: "user_2",
         status: "active",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("exposes schema-typed ORM on integration route args", async () => {
+    const dir = await createTempDir("farm-integration-route-orm-");
+    const db = await createSqliteDatabase(path.join(dir, "integration-route.sqlite"));
+
+    try {
+      db.exec(`
+        CREATE TABLE billing_account (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'free',
+          seat_quantity INTEGER,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(owner_id)
+        );
+
+        INSERT INTO billing_account (
+          id,
+          owner_id,
+          status,
+          seat_quantity
+        ) VALUES (
+          'acct_route_1',
+          'user_route_1',
+          'active',
+          7
+        );
+      `);
+
+      const integration = defineIntegration({
+        category: "custom",
+        type: "typed-storage",
+        instance: {},
+        schema: billingSchema,
+        routes: ({ route }) => [
+          route.get("/api/typed-storage/account", {
+            async handler(_request, context) {
+              const account = await context.args.db.billingAccount.findFirst({
+                where: {
+                  ownerId: "user_route_1",
+                },
+                select: {
+                  status: true,
+                  seatQuantity: true,
+                  createdAt: true,
+                },
+              });
+
+              expectTypeOf(account?.status).toEqualTypeOf<"free" | "active" | undefined>();
+              expectTypeOf(account?.seatQuantity).toEqualTypeOf<number | null | undefined>();
+              expectTypeOf(account?.createdAt).toEqualTypeOf<Date | undefined>();
+
+              return Response.json({
+                status: account?.status,
+                seatQuantity: account?.seatQuantity,
+                createdAtIsDate: account?.createdAt instanceof Date,
+              });
+            },
+          }),
+        ],
+      });
+
+      const manager = new PluginManager({
+        config: {
+          storage: {
+            client: db,
+          },
+          integrations: {
+            typedStorage: integration,
+          },
+        } as any,
+        isDev: true,
+        isProd: false,
+      });
+      manager.addPlugins(
+        resolveIntegrationPlugins({
+          typedStorage: integration,
+        }),
+      );
+      await manager.runHookParallel("init");
+
+      const runtime = getRegisteredIntegrationRuntime("typedStorage");
+      expect(runtime).toBeDefined();
+
+      const response = await dispatchIntegrationRequest(
+        runtime!,
+        new Request("http://localhost/api/typed-storage/account"),
+      );
+
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({
+        status: "active",
+        seatQuantity: 7,
+        createdAtIsDate: true,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("supports endpoint object definitions with schema-typed ORM route args", async () => {
+    const dir = await createTempDir("farm-integration-endpoint-orm-");
+    const db = await createSqliteDatabase(path.join(dir, "integration-endpoint.sqlite"));
+
+    try {
+      db.exec(`
+        CREATE TABLE billing_account (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'free',
+          seat_quantity INTEGER,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          UNIQUE(owner_id)
+        );
+
+        INSERT INTO billing_account (
+          id,
+          owner_id,
+          status,
+          seat_quantity
+        ) VALUES (
+          'acct_endpoint_1',
+          'user_endpoint_1',
+          'active',
+          11
+        );
+      `);
+
+      const integration = defineIntegration({
+        category: "custom",
+        type: "typed-storage-endpoints",
+        instance: {},
+        schema: billingSchema,
+        endpoints: ({ endpoint }) => ({
+          account: endpoint.get("/api/typed-storage/endpoint-account", {
+            async handler(_request, context) {
+              const account = await context.args.db.billingAccount.findFirst({
+                where: {
+                  ownerId: "user_endpoint_1",
+                },
+                select: {
+                  status: true,
+                  seatQuantity: true,
+                  createdAt: true,
+                },
+              });
+
+              expectTypeOf(account?.status).toEqualTypeOf<"free" | "active" | undefined>();
+              expectTypeOf(account?.seatQuantity).toEqualTypeOf<number | null | undefined>();
+              expectTypeOf(account?.createdAt).toEqualTypeOf<Date | undefined>();
+
+              return Response.json({
+                status: account?.status,
+                seatQuantity: account?.seatQuantity,
+                createdAtIsDate: account?.createdAt instanceof Date,
+              });
+            },
+          }),
+        }),
+      });
+
+      const endpointOperation = integration.api.endpointAccount.get;
+      expect(endpointOperation.path).toBe("/api/typed-storage/endpoint-account");
+      expect(integration.routes).toHaveLength(1);
+
+      const manager = new PluginManager({
+        config: {
+          storage: {
+            client: db,
+          },
+          integrations: {
+            typedStorageEndpoints: integration,
+          },
+        } as any,
+        isDev: true,
+        isProd: false,
+      });
+      manager.addPlugins(
+        resolveIntegrationPlugins({
+          typedStorageEndpoints: integration,
+        }),
+      );
+      await manager.runHookParallel("init");
+
+      const runtime = getRegisteredIntegrationRuntime("typedStorageEndpoints");
+      expect(runtime).toBeDefined();
+
+      const response = await dispatchIntegrationRequest(
+        runtime!,
+        new Request("http://localhost/api/typed-storage/endpoint-account"),
+      );
+
+      expect(response?.status).toBe(200);
+      expect(await response?.json()).toEqual({
+        status: "active",
+        seatQuantity: 11,
+        createdAtIsDate: true,
       });
     } finally {
       db.close();

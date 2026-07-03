@@ -7,6 +7,7 @@ import {
   createRequestCookie,
   getOrigin,
   getReturnTo,
+  integrationConfig,
   normalizeMatchers,
   parseCookieHeaderMap,
   resolveCallbackSettings,
@@ -388,6 +389,24 @@ export function auth0(input: Auth0IntegrationInput = {}) {
       clientId,
       protectedRoutes: protectedMatchers,
     },
+    config: integrationConfig<ResolvedAuth0Env>({
+      label: "Auth0 integration",
+      env: {
+        domain: "AUTH0_DOMAIN",
+        clientId: "AUTH0_CLIENT_ID",
+        clientSecret: "AUTH0_CLIENT_SECRET",
+        secret: "AUTH0_SECRET",
+        appBaseUrl: "APP_BASE_URL",
+      },
+      input: {
+        domain,
+        clientId,
+        clientSecret,
+        secret,
+        appBaseUrl,
+      },
+      required: ["domain", "clientId", "secret"],
+    }),
     api: createAuth0Api({
       loginPath,
       signUpPath,

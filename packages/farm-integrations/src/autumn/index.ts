@@ -20,7 +20,12 @@ import {
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
 } from "@farmjs/core";
-import { normalizeWebhookConfig, resolveAppPath, toAbsoluteUrl } from "../utils/index.js";
+import {
+  integrationConfig,
+  normalizeWebhookConfig,
+  resolveAppPath,
+  toAbsoluteUrl,
+} from "../utils/index.js";
 import type {
   FarmWebhookAckResult,
   FarmWebhookConfig,
@@ -261,6 +266,13 @@ export interface AutumnIntegrationInput extends AutumnClientPathOptions {
   webhooks?: AutumnWebhookConfig;
   billing: AutumnBillingOptions;
   log?: FarmIntegrationLogger;
+}
+
+interface ResolvedAutumnConfig {
+  secretKey?: string;
+  serverURL?: string;
+  appBaseUrl?: string;
+  webhookSecret?: string;
 }
 
 interface ResolvedAutumnProduct extends AutumnBillingProduct {
@@ -1143,6 +1155,8 @@ export function autumn<TInput extends AutumnIntegrationInput>(
   input: TInput,
 ): AutumnIntegrationResult<FarmIntegrationAPI> {
   const secretKey = input.secretKey ?? process.env.AUTUMN_SECRET_KEY ?? "";
+  const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
+  const webhookSecret = process.env.AUTUMN_WEBHOOK_SECRET ?? undefined;
   if (!input.instance && !secretKey) {
     throw new Error("Autumn integration requires AUTUMN_SECRET_KEY or an Autumn instance.");
   }
@@ -1203,7 +1217,7 @@ export function autumn<TInput extends AutumnIntegrationInput>(
     webhooks: input.webhooks,
     defaultName: "default",
     defaultPath: "/billing/webhook",
-    defaultSecret: process.env.AUTUMN_WEBHOOK_SECRET ?? undefined,
+    defaultSecret: webhookSecret,
   });
   const plans = billing.plans ?? {};
   const products = normalizeProducts(billing.products);
@@ -1299,6 +1313,21 @@ export function autumn<TInput extends AutumnIntegrationInput>(
         planId: product.planId ?? null,
       })),
     },
+    config: integrationConfig<ResolvedAutumnConfig>({
+      label: "Autumn integration",
+      env: {
+        secretKey: "AUTUMN_SECRET_KEY",
+        appBaseUrl: "APP_BASE_URL",
+        webhookSecret: "AUTUMN_WEBHOOK_SECRET",
+      },
+      input: {
+        secretKey,
+        serverURL: input.serverURL,
+        appBaseUrl,
+        webhookSecret,
+      },
+      required: input.instance ? [] : ["secretKey"],
+    }),
     api: createAutumnApi({
       productsPath,
       statusPath,
@@ -1953,7 +1982,6 @@ export function autumn<TInput extends AutumnIntegrationInput>(
           }
 
           const resolved = await requireOwner(ctx, billing, sdk);
-          const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL;
           const successPath = resolveAppPath(body.successPath, "Autumn checkout successPath");
           const successUrl = successPath
             ? toAbsoluteUrl(successPath, ctx.request, appBaseUrl).toString()
@@ -1994,7 +2022,6 @@ export function autumn<TInput extends AutumnIntegrationInput>(
         async handler(request, ctx) {
           const body = (await request.json().catch(() => ({}))) as AutumnPortalInput;
           const resolved = await requireOwner(ctx, billing, sdk);
-          const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL;
           const returnPath = resolveAppPath(body.returnTo, "Autumn portal returnTo");
           const returnUrl = returnPath
             ? toAbsoluteUrl(returnPath, ctx.request, appBaseUrl).toString()
