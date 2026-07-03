@@ -97,6 +97,7 @@ export interface BundleLifecyclePayload {
   preset: string;
   universal: boolean;
   distDir: string;
+  outputDir?: string;
 }
 
 export interface BundleResultPayload extends BundleLifecyclePayload {

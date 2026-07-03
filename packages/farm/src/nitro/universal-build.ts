@@ -1,4 +1,5 @@
 import type { ResolvedFarmConfig } from "../config";
+import { resolveDeployOutputPath } from "../config";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
@@ -119,6 +120,7 @@ export async function buildUniversal(
   const preset = options.preset || config.preset || "node-server";
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
+  const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const lifecyclePluginManager = options.pluginManager;
 
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
@@ -195,7 +197,7 @@ export async function buildUniversal(
     );
 
     logger.success("✅ Build completed successfully!");
-    logger.info(`📁 Output directory: ${path.join(root, distDir, ".output")}`);
+    logger.info(`📁 Output directory: ${deployOutputDir}`);
   } catch (error) {
     if (lifecyclePluginManager) {
       await lifecyclePluginManager.runHookParallel("onError", {
@@ -1753,12 +1755,8 @@ async function buildNitroUniversal(
 ) {
   const fs = await import("fs/promises");
 
-  // For Vercel preset, output to .vercel/output/ (Vercel Build Output API)
-  // For other presets, output to .farm/.output/
   const isVercel = preset === "vercel" || preset === "vercel-edge";
-  const outputDir = isVercel
-    ? path.join(root, ".vercel", "output")
-    : path.join(root, distDir, ".output");
+  const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const ssrOutputDir = path.join(root, distDir, "ssr");
 
   logger.info(`📦 Nitro output directory: ${outputDir}`);

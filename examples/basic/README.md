@@ -41,6 +41,21 @@ export default defineFarmConfig({
 
 `serverComponents: true` is the important part for the current loading/error boundary behavior in this example.
 
+The example also keeps deployment and Vite tweaks in the same file:
+
+```ts
+export default defineFarmConfig({
+  deploy: {
+    target: "vercel",
+  },
+  vite: {
+    // optional Vite customization
+  },
+});
+```
+
+No root `vite.config.ts` or `vercel.json` is required for the basic example.
+
 ### Monorepo note
 
 If you change code in `packages/farm` or `packages/farmjs-plugin`, rebuild the workspace packages before restarting this example:
@@ -57,6 +72,7 @@ The example consumes the built package output from `dist`, so source changes in 
 ## Project Structure
 
 ```
+farm.config.ts
 src/
   app/
     layout.tsx      # Root layout with navigation
@@ -96,4 +112,3 @@ After exploring this basic example, check out:
 - [With Database Example](../with-database) - Shows data fetching and database integration
 - [E-commerce Example](../e-commerce) - A full-featured e-commerce application
 - [Documentation](../../docs) - Complete Farm.js documentation
-

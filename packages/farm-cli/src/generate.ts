@@ -61,7 +61,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
   const userConfig = await loadConfig(root, options.configPath, "development");
 
   if (!userConfig) {
-    throw new Error("No farm.config.ts found. Please create a configuration file.");
+    throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
   }
 
   const schemas = getIntegrationSchemas(userConfig.integrations);

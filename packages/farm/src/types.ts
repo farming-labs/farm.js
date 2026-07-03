@@ -26,6 +26,27 @@ export interface FarmConfig {
   outDir?: string;
   basePath?: string;
   preset?: NitroPreset;
+  deploy?: {
+    target?: "vercel" | "cloudflare" | "netlify" | "node" | string;
+    preset?: NitroPreset;
+    outputDir?: string;
+    output?: string;
+    projectName?: string;
+    vercel?: {
+      outputDirectory?: string;
+      buildCommand?: string;
+      installCommand?: string;
+      framework?: string | null;
+    };
+    cloudflare?: {
+      outputDir?: string;
+      projectName?: string;
+    };
+    netlify?: {
+      outputDir?: string;
+      site?: string;
+    };
+  };
   storage?: FarmStorageUserConfig;
   integrations?: FarmIntegrationsUserConfig;
   /**
