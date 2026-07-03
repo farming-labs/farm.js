@@ -52,8 +52,27 @@ declare module "@farmjs/core" {
       };
 
   export interface FarmIntegrationInputSchema<TValue = unknown> {
+    _output?: TValue;
+    parse?(value: unknown): MaybePromise<TValue>;
     safeParse?(value: unknown): MaybePromise<FarmIntegrationValidationResult<TValue>>;
     safeParseAsync?(value: unknown): Promise<FarmIntegrationValidationResult<TValue>>;
+    "~standard"?: {
+      validate(value: unknown): MaybePromise<
+        | {
+            value: TValue;
+          }
+        | {
+            issues: readonly {
+              path?: readonly (string | number)[];
+              code?: string;
+              message: string;
+            }[];
+          }
+      >;
+      types?: {
+        output: TValue;
+      };
+    };
   }
 
   export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unknown> {
@@ -70,7 +89,90 @@ declare module "@farmjs/core" {
     snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
   }
 
-  export interface FarmIntegrationHandlerContext<TBody = unknown, TQuery = unknown> {
+  export type FarmIntegrationRouteDb<TSchema extends FarmIntegrationSchema | undefined> = Record<
+    string,
+    any
+  >;
+
+  export interface FarmIntegrationRouteStorageArgs<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
+    getClient(): Promise<unknown | undefined>;
+    getOrm(): Promise<FarmIntegrationRouteDb<TSchema>>;
+  }
+
+  export interface FarmIntegrationRouteArgs<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
+    db: FarmIntegrationRouteDb<TSchema>;
+    getDb(): Promise<FarmIntegrationRouteDb<TSchema>>;
+    storage: FarmIntegrationRouteStorageArgs<TSchema>;
+  }
+
+  export interface FarmIntegrationConfigContext<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
+    key: string;
+    integration: FarmIntegration<TSchema, any>;
+    appConfig: Record<string, unknown>;
+    config: Record<string, unknown>;
+    args: FarmIntegrationRouteArgs<TSchema>;
+    env: Record<string, string | undefined>;
+    isDev: boolean;
+    isProd: boolean;
+  }
+
+  export interface FarmIntegrationConfigDefinition<
+    TConfig = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
+    schema?: FarmIntegrationInputSchema<TConfig>;
+    env?: Record<string, string | readonly string[]>;
+    defaults?:
+      | Partial<TConfig>
+      | ((context: FarmIntegrationConfigContext<TSchema>) => MaybePromise<Partial<TConfig>>);
+    input?:
+      | Partial<TConfig>
+      | ((context: FarmIntegrationConfigContext<TSchema>) => MaybePromise<Partial<TConfig>>);
+    resolve?(
+      context: FarmIntegrationConfigContext<TSchema>,
+    ): MaybePromise<TConfig | Partial<TConfig> | undefined>;
+  }
+
+  export type FarmIntegrationConfigInput<
+    TConfig = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > = FarmIntegrationInputSchema<TConfig> | FarmIntegrationConfigDefinition<TConfig, TSchema>;
+
+  export type FarmIntegrationLifecycleLogLevel = "info" | "warn" | "error";
+
+  export interface FarmIntegrationLifecycleLogger {
+    info(message: string, meta?: Record<string, unknown>): void;
+    warn(message: string, meta?: Record<string, unknown>): void;
+    error(message: string, meta?: Record<string, unknown>): void;
+  }
+
+  export interface FarmIntegrationLifecycleContext<
+    TConfig = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > extends FarmIntegrationConfigContext<TSchema> {
+    integration: FarmIntegration<TSchema, TConfig>;
+    integrationConfig: TConfig;
+    log: FarmIntegrationLifecycleLogger;
+    reason?: string;
+    cleanup(callback?: () => MaybePromise<void>): Promise<void>;
+  }
+
+  export type FarmIntegrationLifecycleHook<
+    TConfig = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > = (context: FarmIntegrationLifecycleContext<TConfig, TSchema>) => MaybePromise<void>;
+
+  export interface FarmIntegrationHandlerContext<
+    TBody = unknown,
+    TQuery = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
     request: Request;
     requestId: string;
     url: URL;
@@ -78,6 +180,7 @@ declare module "@farmjs/core" {
     method: string;
     params: FarmIntegrationRouteParams;
     input: FarmIntegrationRouteInput<TBody, TQuery>;
+    args: FarmIntegrationRouteArgs<TSchema>;
     integration: {
       category: FarmIntegrationCategory;
       /** @deprecated Use category instead. */
@@ -96,24 +199,53 @@ declare module "@farmjs/core" {
     isProd: boolean;
   }
 
-  export interface FarmIntegrationRoute<TBody = unknown, TQuery = unknown> {
+  export interface FarmIntegrationRouteHookContext<
+    TBody = unknown,
+    TQuery = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > extends FarmIntegrationHandlerContext<TBody, TQuery, TSchema> {
+    response?: Response;
+  }
+
+  export type FarmIntegrationRouteHook<
+    TBody = unknown,
+    TQuery = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > = {
+    bivarianceHack(
+      request: Request,
+      context: FarmIntegrationRouteHookContext<TBody, TQuery, TSchema>,
+    ): Promise<Response | void> | Response | void;
+  }["bivarianceHack"];
+
+  export interface FarmIntegrationRoute<
+    TBody = unknown,
+    TQuery = unknown,
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
     path: string;
     method?: FarmIntegrationRouteMethod;
     methods?: readonly FarmIntegrationRouteMethod[];
-    middleware?: readonly FarmIntegrationRouteMiddleware[];
+    middleware?: readonly FarmIntegrationRouteMiddleware<TSchema>[];
+    before?: readonly FarmIntegrationRouteHook<TBody, TQuery, TSchema>[];
+    after?: readonly FarmIntegrationRouteHook<TBody, TQuery, TSchema>[];
     rawBody?: boolean;
     bodyFormat?: FarmIntegrationAPIBodyFormat;
+    body?: FarmIntegrationInputSchema<TBody>;
+    query?: FarmIntegrationInputSchema<TQuery>;
     input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
     handler(
       request: Request,
-      context: FarmIntegrationHandlerContext<TBody, TQuery>,
+      context: FarmIntegrationHandlerContext<TBody, TQuery, TSchema>,
     ): Promise<Response> | Response;
   }
 
-  export interface FarmIntegrationRouteMiddleware {
+  export interface FarmIntegrationRouteMiddleware<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
     handler(
       request: Request,
-      context: FarmIntegrationHandlerContext,
+      context: FarmIntegrationHandlerContext<unknown, unknown, TSchema>,
     ): Promise<Response | void> | Response | void;
   }
 
@@ -124,17 +256,20 @@ declare module "@farmjs/core" {
     TResponse = unknown,
     TServer extends boolean = false,
     TMethod extends FarmIntegrationAPIMethod = FarmIntegrationAPIMethod,
-  > extends FarmIntegrationRoute<TBody, TQuery> {
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > extends FarmIntegrationRoute<TBody, TQuery, TSchema> {
     path: TPath;
     method: TMethod;
     __operation: FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer>;
   }
 
-  export interface FarmIntegrationMiddleware {
+  export interface FarmIntegrationMiddleware<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > {
     matcher?: string | string[];
     handler(
       request: Request,
-      context: FarmIntegrationHandlerContext,
+      context: FarmIntegrationHandlerContext<unknown, unknown, TSchema>,
     ): Promise<Response | void> | Response | void;
   }
 
@@ -152,6 +287,29 @@ declare module "@farmjs/core" {
   export interface FarmIntegrationDocumentNavigation {
     matcher: string | readonly string[];
   }
+
+  export type FarmIntegrationEndpointValue<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > =
+    | FarmIntegrationRoute<any, any, TSchema>
+    | readonly FarmIntegrationEndpointValue<TSchema>[]
+    | {
+        readonly [key: string]: FarmIntegrationEndpointValue<TSchema> | undefined;
+      };
+
+  export type FarmIntegrationEndpoints<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > = {
+    readonly [key: string]: FarmIntegrationEndpointValue<TSchema> | undefined;
+  };
+
+  export type FarmIntegrationEndpointsFactory<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+  > = (context: {
+    endpoint: typeof integrationRoute;
+    route: typeof integrationRoute;
+    integrationRoute: typeof integrationRoute;
+  }) => FarmIntegrationEndpoints<TSchema>;
 
   export type FarmIntegrationSchemaFieldType =
     | "id"
@@ -231,8 +389,11 @@ declare module "@farmjs/core" {
     schema: TSchema,
   ): TSchema;
 
-  export interface CreateIntegrationOrmOptions<TClient = unknown> {
-    schema: FarmIntegrationSchema;
+  export interface CreateIntegrationOrmOptions<
+    TClient = unknown,
+    TSchema extends FarmIntegrationSchema = FarmIntegrationSchema,
+  > {
+    schema: TSchema;
     config?: {
       storage?: unknown;
     };
@@ -240,9 +401,10 @@ declare module "@farmjs/core" {
     client?: TClient | (() => TClient | Promise<TClient>);
   }
 
-  export function createIntegrationOrm<TClient = unknown>(
-    options: CreateIntegrationOrmOptions<TClient>,
-  ): Promise<Record<string, unknown>>;
+  export function createIntegrationOrm<
+    TClient = unknown,
+    TSchema extends FarmIntegrationSchema = FarmIntegrationSchema,
+  >(options: CreateIntegrationOrmOptions<TClient, TSchema>): Promise<Record<string, unknown>>;
 
   export type FarmIntegrationAPIMethod =
     | "GET"
@@ -370,6 +532,10 @@ declare module "@farmjs/core" {
 
   export type FarmIntegrationLogPhase =
     | "registered"
+    | "validate"
+    | "setup"
+    | "ready"
+    | "dispose"
     | "request:start"
     | "request:end"
     | "request:error";
@@ -390,12 +556,18 @@ declare module "@farmjs/core" {
     response?: Response;
     error?: unknown;
     durationMs?: number;
+    level?: FarmIntegrationLifecycleLogLevel;
+    message?: string;
+    meta?: Record<string, unknown>;
     context: Map<string, unknown>;
   }
 
   export type FarmIntegrationLogger = (event: FarmIntegrationLogEvent) => void | Promise<void>;
 
-  export interface FarmIntegration {
+  export interface FarmIntegration<
+    TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
+    TConfig = unknown,
+  > {
     readonly kind: "farm-integration";
     category: FarmIntegrationCategory;
     /** @deprecated Use category instead. */
@@ -403,17 +575,28 @@ declare module "@farmjs/core" {
     type: string;
     instance: unknown;
     api?: FarmIntegrationAPI;
-    schema?: FarmIntegrationSchema;
+    schema?: TSchema;
+    config?: FarmIntegrationConfigInput<TConfig, TSchema>;
+    validate?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
+    setup?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
+    ready?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
+    dispose?: FarmIntegrationLifecycleHook<TConfig, TSchema>;
     log?: FarmIntegrationLogger;
-    routes?: readonly FarmIntegrationRoute[];
-    middleware?: readonly FarmIntegrationMiddleware[];
+    routes?: readonly FarmIntegrationRoute<any, any, TSchema>[];
+    endpoints?: FarmIntegrationEndpoints<TSchema>;
+    middleware?: readonly FarmIntegrationMiddleware<TSchema>[];
     providers?: readonly FarmIntegrationProvider[];
     documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
     plugins?: readonly FarmPlugin[];
   }
 
-  export type FarmIntegrationInput = Omit<FarmIntegration, "kind" | "category" | "slot"> &
-    (
+  export type FarmIntegrationInput = Omit<
+    FarmIntegration,
+    "kind" | "category" | "slot" | "config" | "endpoints"
+  > & {
+    config?: FarmIntegrationConfigInput;
+    endpoints?: FarmIntegrationEndpoints | FarmIntegrationEndpointsFactory;
+  } & (
       | {
           category: FarmIntegrationCategory;
           slot?: FarmIntegrationCategory;
@@ -496,7 +679,10 @@ declare module "@farmjs/core" {
         credentials?: RequestCredentials;
         responseFormat?: FarmIntegrationAPIResponseFormat;
         isServer?: TServer;
+        query?: FarmIntegrationInputSchema<TQuery>;
         input?: FarmIntegrationRouteInputSchemas<never, TQuery>;
+        before?: readonly FarmIntegrationRouteHook<never, TQuery>[];
+        after?: readonly FarmIntegrationRouteHook<never, TQuery>[];
         handler(
           request: Request,
           context: FarmIntegrationHandlerContext<never, TQuery>,
@@ -519,7 +705,11 @@ declare module "@farmjs/core" {
         bodyFormat?: FarmIntegrationAPIBodyFormat;
         responseFormat?: FarmIntegrationAPIResponseFormat;
         isServer?: TServer;
+        body?: FarmIntegrationInputSchema<TBody>;
+        query?: FarmIntegrationInputSchema<TQuery>;
         input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
+        before?: readonly FarmIntegrationRouteHook<TBody, TQuery>[];
+        after?: readonly FarmIntegrationRouteHook<TBody, TQuery>[];
         handler(
           request: Request,
           context: FarmIntegrationHandlerContext<TBody, TQuery>,

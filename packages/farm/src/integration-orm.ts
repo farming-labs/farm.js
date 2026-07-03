@@ -1,6 +1,9 @@
 import type {
   AnyFieldBuilder,
   AnyModelDefinition,
+  FieldBuilder,
+  JsonValue,
+  ModelDefinition,
   OrmClient,
   SchemaDefinition,
   SchemaModels,
@@ -20,16 +23,88 @@ export type FarmIntegrationOrmSchema = SchemaDefinition<Record<string, AnyModelD
 
 export type FarmIntegrationOrmClient<TSchema extends FarmIntegrationOrmSchema> = OrmClient<TSchema>;
 
-export interface CreateIntegrationOrmOptions<TClient = unknown> {
-  schema: FarmIntegrationSchema;
+type FarmIntegrationOrmFieldKind<TField extends FarmIntegrationSchemaField> = TField["type"] extends
+  | "id"
+  | "uuid"
+  ? "id"
+  : TField["type"] extends "text"
+    ? "string"
+    : TField["type"] extends "number"
+      ? "decimal"
+      : Extract<TField["type"], "string" | "boolean" | "integer" | "datetime" | "json" | "enum">;
+
+type FarmIntegrationOrmFieldNullable<TField extends FarmIntegrationSchemaField> = TField extends {
+  nullable: true;
+}
+  ? true
+  : TField extends { required: false }
+    ? true
+    : false;
+
+type FarmIntegrationOrmEnumValue<TField extends FarmIntegrationSchemaField> = TField extends {
+  values: readonly (infer TValue extends string)[];
+}
+  ? TValue
+  : string;
+
+type FarmIntegrationOrmFieldValue<TField extends FarmIntegrationSchemaField> =
+  TField["type"] extends "id" | "uuid" | "string" | "text"
+    ? string
+    : TField["type"] extends "boolean"
+      ? boolean
+      : TField["type"] extends "integer"
+        ? number
+        : TField["type"] extends "number"
+          ? string
+          : TField["type"] extends "datetime"
+            ? Date
+            : TField["type"] extends "json"
+              ? JsonValue
+              : TField["type"] extends "enum"
+                ? FarmIntegrationOrmEnumValue<TField>
+                : never;
+
+export type InferFarmIntegrationOrmField<TField extends FarmIntegrationSchemaField> = FieldBuilder<
+  FarmIntegrationOrmFieldKind<TField>,
+  FarmIntegrationOrmFieldNullable<TField>,
+  FarmIntegrationOrmFieldValue<TField>
+>;
+
+export type InferFarmIntegrationOrmFields<TModel extends FarmIntegrationSchemaModel> = {
+  [TFieldKey in keyof TModel["fields"] & string]: InferFarmIntegrationOrmField<
+    Extract<TModel["fields"][TFieldKey], FarmIntegrationSchemaField>
+  >;
+};
+
+export type InferFarmIntegrationOrmSchema<TSchema extends FarmIntegrationSchema> =
+  SchemaDefinition<{
+    [TModelKey in keyof TSchema["models"] & string]: ModelDefinition<
+      InferFarmIntegrationOrmFields<
+        Extract<TSchema["models"][TModelKey], FarmIntegrationSchemaModel>
+      >,
+      {}
+    >;
+  }>;
+
+export type InferFarmIntegrationOrmClient<TSchema extends FarmIntegrationSchema | undefined> =
+  TSchema extends FarmIntegrationSchema ? OrmClient<InferFarmIntegrationOrmSchema<TSchema>> : never;
+
+export interface CreateIntegrationOrmOptions<
+  TClient = unknown,
+  TSchema extends FarmIntegrationSchema = FarmIntegrationSchema,
+> {
+  schema: TSchema;
   config?: Pick<FarmConfig, "storage">;
   storage?: FarmStorageUserConfig;
   client?: TClient | RuntimeClientFactory<TClient>;
 }
 
-export async function createIntegrationOrm<TClient = unknown>(
-  options: CreateIntegrationOrmOptions<TClient>,
-): Promise<FarmIntegrationOrmClient<FarmIntegrationOrmSchema>> {
+export async function createIntegrationOrm<
+  TClient = unknown,
+  TSchema extends FarmIntegrationSchema = FarmIntegrationSchema,
+>(
+  options: CreateIntegrationOrmOptions<TClient, TSchema>,
+): Promise<InferFarmIntegrationOrmClient<TSchema>> {
   const [schema, client] = await Promise.all([
     farmIntegrationSchemaToOrmSchema(options.schema),
     resolveIntegrationOrmRuntimeClient(options),
@@ -45,7 +120,7 @@ export async function createIntegrationOrm<TClient = unknown>(
   return createOrmFromRuntime({
     schema,
     client,
-  }) as Promise<FarmIntegrationOrmClient<FarmIntegrationOrmSchema>>;
+  }) as Promise<InferFarmIntegrationOrmClient<TSchema>>;
 }
 
 export async function resolveIntegrationOrmRuntimeClient<TClient = unknown>(

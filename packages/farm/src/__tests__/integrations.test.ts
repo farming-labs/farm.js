@@ -133,6 +133,71 @@ describe("integrations runtime", () => {
     );
   });
 
+  it("runs flat integration config and lifecycle hooks", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+    const originalSecretKey = process.env.FARM_TEST_STRIPE_SECRET_KEY;
+    process.env.FARM_TEST_STRIPE_SECRET_KEY = "sk_test_lifecycle";
+
+    try {
+      const integration = defineIntegration({
+        category: "payment",
+        type: "stripe-lifecycle",
+        instance: {},
+        config: {
+          schema: z.object({
+            secretKey: z.string(),
+            mode: z.enum(["test", "live"]).default("test"),
+          }),
+          env: {
+            secretKey: "FARM_TEST_STRIPE_SECRET_KEY",
+          },
+        },
+        validate(ctx) {
+          expect(ctx.key).toBe("stripe");
+          expect(ctx.integrationConfig.secretKey).toBe("sk_test_lifecycle");
+          expect(ctx.integrationConfig.mode).toBe("test");
+          expectTypeOf(ctx.integrationConfig.secretKey).toEqualTypeOf<string>();
+          ctx.cleanup(() => {
+            calls.push("cleanup");
+          });
+          calls.push("validate");
+        },
+        async setup(ctx) {
+          expect(ctx.args.db).toBeDefined();
+          expect(ctx.integrationConfig.secretKey).toBe("sk_test_lifecycle");
+          calls.push("setup");
+        },
+        ready(ctx) {
+          expect(ctx.integrationConfig.mode).toBe("test");
+          calls.push("ready");
+        },
+        dispose(ctx) {
+          expect(ctx.reason).toBe("test");
+          calls.push("dispose");
+        },
+      });
+
+      manager.addPlugins(
+        resolveIntegrationPlugins({
+          stripe: integration,
+        }),
+      );
+
+      await manager.runHookParallel("init");
+      await manager.runHookParallel("ready");
+      await manager.runHookParallel("shutdown", { reason: "test" });
+
+      expect(calls).toEqual(["validate", "setup", "ready", "dispose", "cleanup"]);
+    } finally {
+      if (originalSecretKey === undefined) {
+        delete process.env.FARM_TEST_STRIPE_SECRET_KEY;
+      } else {
+        process.env.FARM_TEST_STRIPE_SECRET_KEY = originalSecretKey;
+      }
+    }
+  });
+
   it("registers route integrations as pre-plugins and exposes shared handler context", async () => {
     const log = vi.fn();
     const manager = createManager();
