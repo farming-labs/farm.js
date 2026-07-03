@@ -168,6 +168,12 @@ declare module "@farmjs/core" {
     TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
   > = (context: FarmIntegrationLifecycleContext<TConfig, TSchema>) => MaybePromise<void>;
 
+  /**
+   * Small per-call integration metadata. Values received over HTTP are
+   * client-controlled and should be validated before authorization decisions.
+   */
+  export type FarmIntegrationData = Record<string, unknown>;
+
   export interface FarmIntegrationHandlerContext<
     TBody = unknown,
     TQuery = unknown,
@@ -181,6 +187,7 @@ declare module "@farmjs/core" {
     params: FarmIntegrationRouteParams;
     input: FarmIntegrationRouteInput<TBody, TQuery>;
     args: FarmIntegrationRouteArgs<TSchema>;
+    data: FarmIntegrationData;
     integration: {
       category: FarmIntegrationCategory;
       /** @deprecated Use category instead. */

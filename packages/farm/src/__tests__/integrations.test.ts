@@ -734,6 +734,140 @@ describe("integrations runtime", () => {
     });
   });
 
+  it("exposes serialized integration data on HTTP route contexts", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.get<"/api/local-demo/data", { data: Record<string, unknown> }>(
+              "/api/local-demo/data",
+              {
+                handler(_request, context) {
+                  return Response.json({
+                    data: context.data,
+                  });
+                },
+              },
+            ),
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/data");
+    req.headers["x-farm-integration-data"] = JSON.stringify({
+      tenantId: "tenant_browser",
+      locale: "en",
+    });
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      data: {
+        tenantId: "tenant_browser",
+        locale: "en",
+      },
+    });
+  });
+
+  it("sanitizes untrusted integration data headers", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.get<"/api/local-demo/data", { data: Record<string, unknown> }>(
+              "/api/local-demo/data",
+              {
+                handler(_request, context) {
+                  return Response.json({
+                    data: context.data,
+                    polluted: ({} as { polluted?: boolean }).polluted ?? null,
+                    hasProto: Object.prototype.hasOwnProperty.call(context.data, "__proto__"),
+                    hasConstructor: Object.prototype.hasOwnProperty.call(
+                      context.data,
+                      "constructor",
+                    ),
+                    hasPrototype: Object.prototype.hasOwnProperty.call(context.data, "prototype"),
+                  });
+                },
+              },
+            ),
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/data");
+    req.headers["x-farm-integration-data"] =
+      '{"tenantId":"tenant_browser","__proto__":{"polluted":true},"constructor":{"prototype":{"polluted":true}},"prototype":{"polluted":true},"nested":{"safe":true,"constructor":{"prototype":{"polluted":true}}}}';
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      data: {
+        tenantId: "tenant_browser",
+        nested: {
+          safe: true,
+        },
+      },
+      polluted: null,
+      hasProto: false,
+      hasConstructor: false,
+      hasPrototype: false,
+    });
+    expect(({} as { polluted?: boolean }).polluted).toBeUndefined();
+  });
+
+  it("ignores oversized integration data headers", async () => {
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "local-demo",
+          instance: {},
+          routes: [
+            integrationRoute.get<"/api/local-demo/data", { data: Record<string, unknown> }>(
+              "/api/local-demo/data",
+              {
+                handler(_request, context) {
+                  return Response.json({
+                    data: context.data,
+                  });
+                },
+              },
+            ),
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/data");
+    req.headers["x-farm-integration-data"] = JSON.stringify({
+      blob: "x".repeat(17 * 1024),
+    });
+    const res = createResponse();
+    const ended = await manager.runHookParallel("beforeRequest", req as any, res as any);
+
+    expect(ended).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      data: {},
+    });
+  });
+
   it("runs route before and after hooks around the route handler", async () => {
     const manager = createManager();
     const handlerSpy = vi.fn();

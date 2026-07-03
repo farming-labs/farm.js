@@ -63,6 +63,7 @@ function createContext(
     method,
     params: {},
     input: {},
+    data: {},
     integration: {
       category: "payment",
       slot: "payment",

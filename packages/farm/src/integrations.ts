@@ -195,6 +195,12 @@ export type FarmIntegrationLifecycleHook<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
 > = (context: FarmIntegrationLifecycleContext<TConfig, TSchema>) => MaybePromise<void>;
 
+/**
+ * Small per-call integration metadata. Values received over HTTP are
+ * client-controlled and should be validated before authorization decisions.
+ */
+export type FarmIntegrationData = Record<string, unknown>;
+
 export interface FarmIntegrationHandlerContext<
   TBody = unknown,
   TQuery = unknown,
@@ -208,6 +214,7 @@ export interface FarmIntegrationHandlerContext<
   params: FarmIntegrationRouteParams;
   input: FarmIntegrationRouteInput<TBody, TQuery>;
   args: FarmIntegrationRouteArgs<TSchema>;
+  data: FarmIntegrationData;
   integration: {
     category: FarmIntegrationCategory;
     /** @deprecated Use category instead. */
@@ -1449,6 +1456,82 @@ function createIntegrationLifecycleLogger(
   };
 }
 
+const INTEGRATION_DATA_HEADER = "x-farm-integration-data";
+const INTEGRATION_DATA_HEADER_MAX_LENGTH = 16 * 1024;
+const BLOCKED_INTEGRATION_DATA_KEYS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isFarmIntegrationData(value: unknown): value is FarmIntegrationData {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isPlainIntegrationDataObject(value: unknown): value is Record<string, unknown> {
+  if (!isFarmIntegrationData(value)) {
+    return false;
+  }
+
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function sanitizeIntegrationDataValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeIntegrationDataValue(item));
+  }
+
+  if (!isPlainIntegrationDataObject(value)) {
+    return value;
+  }
+
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (BLOCKED_INTEGRATION_DATA_KEYS.has(key)) {
+      continue;
+    }
+
+    sanitized[key] = sanitizeIntegrationDataValue(item);
+  }
+
+  return sanitized;
+}
+
+function normalizeIntegrationData(value: FarmIntegrationData | undefined): FarmIntegrationData {
+  if (!isFarmIntegrationData(value)) {
+    return {};
+  }
+
+  const sanitized = sanitizeIntegrationDataValue(value);
+  return isFarmIntegrationData(sanitized) ? sanitized : {};
+}
+
+function getIntegrationDataHeaderByteLength(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function parseIntegrationDataHeader(request: Request): FarmIntegrationData {
+  const raw = request.headers.get(INTEGRATION_DATA_HEADER);
+  if (!raw) {
+    return {};
+  }
+
+  if (getIntegrationDataHeaderByteLength(raw) > INTEGRATION_DATA_HEADER_MAX_LENGTH) {
+    return {};
+  }
+
+  try {
+    const value = JSON.parse(raw);
+    return normalizeIntegrationData(value);
+  } catch {
+    return {};
+  }
+}
+
+function resolveIntegrationData(request: Request, data?: FarmIntegrationData): FarmIntegrationData {
+  return {
+    ...parseIntegrationDataHeader(request),
+    ...normalizeIntegrationData(data),
+  };
+}
+
 function createIntegrationPlugin(integrationKey: string, integration: FarmIntegration): FarmPlugin {
   const routes = normalizeIntegrationRoutes(integration.routes || []);
   const middleware = [...(integration.middleware || [])];
@@ -1885,6 +1968,7 @@ function createIntegrationHandlerContext(input: {
       integration: input.integration,
       config: input.pluginContext.config,
     }),
+    data: resolveIntegrationData(input.request),
     integration: {
       category: input.integration.category,
       slot: input.integration.category,
@@ -2376,6 +2460,7 @@ export async function dispatchIntegrationRequest(
   request: Request,
   options: {
     currentRequest?: Request;
+    data?: FarmIntegrationData;
   } = {},
 ): Promise<Response | null> {
   const integration = runtime.integration;
@@ -2406,6 +2491,7 @@ export async function dispatchIntegrationRequest(
       pathname,
       requestId,
       currentRequest: options.currentRequest,
+      data: options.data,
     });
     const startedAt = Date.now();
 
@@ -2502,6 +2588,7 @@ export async function dispatchIntegrationRequest(
       pathname,
       requestId,
       currentRequest: options.currentRequest,
+      data: options.data,
     });
     const startedAt = Date.now();
 
@@ -2696,6 +2783,7 @@ function createServerIntegrationHandlerContext(input: {
   pathname: string;
   requestId: string;
   currentRequest?: Request;
+  data?: FarmIntegrationData;
 }): FarmIntegrationHandlerContext {
   return {
     request: input.request,
@@ -2709,6 +2797,7 @@ function createServerIntegrationHandlerContext(input: {
       integration: input.runtime.integration,
       config: input.runtime.config,
     }),
+    data: resolveIntegrationData(input.request, input.data),
     integration: {
       category: input.runtime.integration.category,
       slot: input.runtime.integration.category,

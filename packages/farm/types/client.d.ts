@@ -625,10 +625,17 @@ declare module "@farmjs/core/client" {
 
   export const endpoint: typeof api;
 
+  /**
+   * Small per-call integration metadata. When sent from a browser, values are
+   * client-controlled and should be validated before authorization decisions.
+   */
+  export type IntegrationClientData = Record<string, unknown>;
+
   export interface IntegrationClientOptions {
     baseURL?: string;
     headers?: Record<string, string>;
     credentials?: RequestCredentials;
+    data?: IntegrationClientData;
     isServer?: false | undefined;
   }
 
@@ -636,6 +643,7 @@ declare module "@farmjs/core/client" {
     headers?: Record<string, string>;
     signal?: AbortSignal;
     credentials?: RequestCredentials;
+    data?: IntegrationClientData;
   }
 
   export interface IntegrationClientRequestOptions extends IntegrationRequestOptionsBase {}
@@ -917,6 +925,23 @@ declare module "@farmjs/core/client" {
   ): IntegrationClients<TSources>;
 
   export function createIntegrationClients<TSources extends Record<string, any>>(
+    sources: { integrations: TSources },
+    clientOptions?: IntegrationClientOptions,
+    serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+  ): IntegrationClients<TSources>;
+
+  export function createIntegrations<TSources extends Record<string, any>>(
+    clientOptions?: IntegrationClientOptions,
+    serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+  ): IntegrationClients<TSources>;
+
+  export function createIntegrations<TSources extends Record<string, any>>(
+    sources: TSources,
+    clientOptions?: IntegrationClientOptions,
+    serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
+  ): IntegrationClients<TSources>;
+
+  export function createIntegrations<TSources extends Record<string, any>>(
     sources: { integrations: TSources },
     clientOptions?: IntegrationClientOptions,
     serverOptions?: Omit<IntegrationServerClientOptions, "isServer">,
