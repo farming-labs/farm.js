@@ -76,9 +76,29 @@ export type FarmIntegrationValidationResult<TValue> =
       error: FarmIntegrationValidationErrorLike;
     };
 
+export type FarmIntegrationStandardValidationResult<TValue> =
+  | {
+      value: TValue;
+    }
+  | {
+      issues: readonly {
+        path?: readonly (string | number)[];
+        code?: string;
+        message: string;
+      }[];
+    };
+
 export interface FarmIntegrationInputSchema<TValue = unknown> {
+  _output?: TValue;
+  parse?(value: unknown): MaybePromise<TValue>;
   safeParse?(value: unknown): MaybePromise<FarmIntegrationValidationResult<TValue>>;
   safeParseAsync?(value: unknown): Promise<FarmIntegrationValidationResult<TValue>>;
+  "~standard"?: {
+    validate(value: unknown): MaybePromise<FarmIntegrationStandardValidationResult<TValue>>;
+    types?: {
+      output: TValue;
+    };
+  };
 }
 
 export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unknown> {
@@ -121,13 +141,29 @@ export interface FarmIntegrationHandlerContext<TBody = unknown, TQuery = unknown
   isProd: boolean;
 }
 
+export interface FarmIntegrationRouteHookContext<
+  TBody = unknown,
+  TQuery = unknown,
+> extends FarmIntegrationHandlerContext<TBody, TQuery> {
+  response?: Response;
+}
+
+export type FarmIntegrationRouteHook<TBody = unknown, TQuery = unknown> = (
+  request: Request,
+  context: FarmIntegrationRouteHookContext<TBody, TQuery>,
+) => Promise<Response | void> | Response | void;
+
 export interface FarmIntegrationRoute<TBody = unknown, TQuery = unknown> {
   path: string;
   method?: FarmIntegrationRouteMethod;
   methods?: readonly FarmIntegrationRouteMethod[];
   middleware?: readonly FarmIntegrationRouteMiddleware[];
+  before?: readonly FarmIntegrationRouteHook<TBody, TQuery>[];
+  after?: readonly FarmIntegrationRouteHook<TBody, TQuery>[];
   rawBody?: boolean;
   bodyFormat?: FarmIntegrationAPIBodyFormat;
+  body?: FarmIntegrationInputSchema<TBody>;
+  query?: FarmIntegrationInputSchema<TQuery>;
   input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
   handler(
     request: Request,
@@ -306,12 +342,16 @@ export type FarmIntegrationsUserConfig = Record<string, FarmIntegration | undefi
 
 type IntegrationRouteBuilderOptions<TBody, TQuery, TServer extends boolean> = {
   middleware?: readonly FarmIntegrationRouteMiddleware[];
+  before?: readonly FarmIntegrationRouteHook<TBody, TQuery>[];
+  after?: readonly FarmIntegrationRouteHook<TBody, TQuery>[];
   rawBody?: boolean;
   headers?: Record<string, string>;
   credentials?: RequestCredentials;
   bodyFormat?: FarmIntegrationAPIBodyFormat;
   responseFormat?: FarmIntegrationAPIResponseFormat;
   isServer?: TServer;
+  body?: FarmIntegrationInputSchema<TBody>;
+  query?: FarmIntegrationInputSchema<TQuery>;
   input?: FarmIntegrationRouteInputSchemas<TBody, TQuery>;
   handler(
     request: Request,
@@ -335,9 +375,11 @@ function defineTypedIntegrationRoute<
     path,
     method,
     middleware: input.middleware,
+    before: input.before,
+    after: input.after,
     rawBody: input.rawBody,
     bodyFormat: input.bodyFormat,
-    input: input.input,
+    input: normalizeIntegrationRouteInputSchemas(input),
     handler: input.handler,
     __operation: defineIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, TMethod>({
       path,
@@ -1049,7 +1091,45 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             }
           }
 
-          const response = await route.handler(request, handlerContext);
+          const beforeResponse = await runIntegrationRouteBeforeHooks(
+            route,
+            request,
+            handlerContext,
+          );
+          if (beforeResponse) {
+            const response = await runIntegrationRouteAfterHooks(
+              route,
+              request,
+              handlerContext,
+              beforeResponse,
+            );
+            await sendWebResponse(res, response);
+            await integration.log?.({
+              category: integration.category,
+              slot: integration.category,
+              type: integration.type,
+              phase: "request:end",
+              route: {
+                kind: "route",
+                path: route.path,
+                methods: route.methods,
+              },
+              request,
+              response,
+              requestId,
+              durationMs: Date.now() - startedAt,
+              context: handlerContext.requestContext.snapshot(),
+            });
+            return;
+          }
+
+          const handlerResponse = await route.handler(request, handlerContext);
+          const response = await runIntegrationRouteAfterHooks(
+            route,
+            request,
+            handlerContext,
+            handlerResponse,
+          );
           await sendWebResponse(res, response);
           await integration.log?.({
             category: integration.category,
@@ -1139,6 +1219,7 @@ function normalizeIntegrationRoutes(
   return routes.map((route) => ({
     ...route,
     methods: normalizeIntegrationRouteMethods(route),
+    input: normalizeIntegrationRouteInputSchemas(route),
   }));
 }
 
@@ -1151,6 +1232,24 @@ function normalizeIntegrationRouteMethods(route: Pick<FarmIntegrationRoute, "met
         : ["ALL"];
 
   return input.map((method) => String(method).toUpperCase());
+}
+
+function normalizeIntegrationRouteInputSchemas<TBody, TQuery>(
+  route: Pick<FarmIntegrationRoute<TBody, TQuery>, "body" | "query" | "input">,
+): FarmIntegrationRouteInputSchemas<TBody, TQuery> | undefined {
+  const input: FarmIntegrationRouteInputSchemas<TBody, TQuery> = {
+    ...route.input,
+  };
+
+  if (route.body) {
+    input.body = route.body;
+  }
+
+  if (route.query) {
+    input.query = route.query;
+  }
+
+  return input.body || input.query ? input : undefined;
 }
 
 type IntegrationRouteInputValidationResult =
@@ -1238,29 +1337,64 @@ async function parseIntegrationInputSchema<TValue>(
     }
 > {
   const parser = schema.safeParseAsync || schema.safeParse;
-  if (!parser) {
+  if (parser) {
+    const result = await parser.call(schema, value);
+    if (result.success) {
+      return {
+        success: true,
+        data: result.data,
+      };
+    }
+
     return {
       success: false,
-      issues: [
-        {
-          source,
-          message: "Input schema must expose safeParse or safeParseAsync.",
-        },
-      ],
+      issues: normalizeIntegrationValidationIssues(source, result.error),
     };
   }
 
-  const result = await parser.call(schema, value);
-  if (result.success) {
+  if (schema["~standard"]?.validate) {
+    const result = await schema["~standard"].validate(value);
+    if ("value" in result) {
+      return {
+        success: true,
+        data: result.value,
+      };
+    }
+
     return {
-      success: true,
-      data: result.data,
+      success: false,
+      issues: normalizeIntegrationValidationIssues(source, {
+        issues: result.issues,
+      }),
     };
+  }
+
+  if (schema.parse) {
+    try {
+      return {
+        success: true,
+        data: await schema.parse(value),
+      };
+    } catch (error) {
+      return {
+        success: false,
+        issues: normalizeIntegrationValidationIssues(
+          source,
+          normalizeIntegrationValidationError(error),
+        ),
+      };
+    }
   }
 
   return {
     success: false,
-    issues: normalizeIntegrationValidationIssues(source, result.error),
+    issues: [
+      {
+        source,
+        message:
+          "Input schema must expose safeParse, safeParseAsync, parse, or ~standard.validate.",
+      },
+    ],
   };
 }
 
@@ -1296,6 +1430,16 @@ function normalizeIntegrationValidationIssues(
       message: error.message || "Invalid input",
     },
   ];
+}
+
+function normalizeIntegrationValidationError(error: unknown): FarmIntegrationValidationErrorLike {
+  if (error && typeof error === "object") {
+    return error as FarmIntegrationValidationErrorLike;
+  }
+
+  return {
+    message: error instanceof Error ? error.message : String(error || "Invalid input"),
+  };
 }
 
 async function readIntegrationValidationBody(
@@ -1357,6 +1501,48 @@ async function readIntegrationValidationBody(
 
 function getIntegrationRouteBodyFormat(route: NormalizedIntegrationRoute) {
   return route.bodyFormat || route.__operation?.bodyFormat || "json";
+}
+
+async function runIntegrationRouteBeforeHooks(
+  route: NormalizedIntegrationRoute,
+  request: Request,
+  context: FarmIntegrationHandlerContext,
+): Promise<Response | undefined> {
+  const hookContext = context as FarmIntegrationRouteHookContext;
+  hookContext.response = undefined;
+
+  for (const hook of route.before || []) {
+    const response = await hook(request, hookContext);
+    if (response) {
+      hookContext.response = response;
+      return response;
+    }
+
+    if (hookContext.response) {
+      return hookContext.response;
+    }
+  }
+
+  return undefined;
+}
+
+async function runIntegrationRouteAfterHooks(
+  route: NormalizedIntegrationRoute,
+  request: Request,
+  context: FarmIntegrationHandlerContext,
+  response: Response,
+): Promise<Response> {
+  const hookContext = context as FarmIntegrationRouteHookContext;
+  let currentResponse = response;
+
+  for (const hook of route.after || []) {
+    hookContext.response = currentResponse;
+    const nextResponse = await hook(request, hookContext);
+    currentResponse = nextResponse || hookContext.response || currentResponse;
+  }
+
+  hookContext.response = currentResponse;
+  return currentResponse;
 }
 
 function createQueryInput(searchParams: URLSearchParams): Record<string, string | string[]> {
@@ -1584,7 +1770,40 @@ export async function dispatchIntegrationRequest(
         }
       }
 
-      const response = await route.handler(request, handlerContext);
+      const beforeResponse = await runIntegrationRouteBeforeHooks(route, request, handlerContext);
+      if (beforeResponse) {
+        const response = await runIntegrationRouteAfterHooks(
+          route,
+          request,
+          handlerContext,
+          beforeResponse,
+        );
+        await integration.log?.({
+          category: integration.category,
+          slot: integration.category,
+          type: integration.type,
+          phase: "request:end",
+          route: {
+            kind: "route",
+            path: route.path,
+            methods: route.methods,
+          },
+          request,
+          response,
+          requestId,
+          durationMs: Date.now() - startedAt,
+          context: handlerContext.requestContext.snapshot(),
+        });
+        return response;
+      }
+
+      const handlerResponse = await route.handler(request, handlerContext);
+      const response = await runIntegrationRouteAfterHooks(
+        route,
+        request,
+        handlerContext,
+        handlerResponse,
+      );
       await integration.log?.({
         category: integration.category,
         slot: integration.category,
