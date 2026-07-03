@@ -11,6 +11,7 @@ import {
   escapeHtml,
   getOrigin,
   getReturnTo,
+  integrationConfig,
   normalizeMatchers,
   parseCookieHeaderList,
   resolveAppPath,
@@ -837,6 +838,22 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
       providers,
       pages,
     },
+    config: integrationConfig<ResolvedSupabaseEnv>({
+      label: "Supabase integration",
+      env: {
+        url: ["SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_URL"],
+        anonKey: [
+          "SUPABASE_ANON_KEY",
+          "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+          "SUPABASE_PUBLISHABLE_KEY",
+          "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+          "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_DEFAULT_KEY",
+        ],
+        appBaseUrl: "APP_BASE_URL",
+      },
+      input: env,
+      required: ["url", "anonKey"],
+    }),
     api,
     log: input.log,
     documentNavigations: [

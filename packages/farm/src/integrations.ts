@@ -1511,6 +1511,8 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
         isProd: context.isProd,
       });
 
+      await createLifecycleContext(context, "validate");
+
       if (integration.validate) {
         await integration.validate(await createLifecycleContext(context, "validate"));
       }

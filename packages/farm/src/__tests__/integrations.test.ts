@@ -198,6 +198,33 @@ describe("integrations runtime", () => {
     }
   });
 
+  it("validates integration config during init without lifecycle hooks", async () => {
+    const manager = createManager();
+    const integration = defineIntegration({
+      category: "payment",
+      type: "missing-config",
+      instance: {},
+      config: {
+        schema: z.object({
+          secretKey: z.string(),
+        }),
+        env: {
+          secretKey: "FARM_TEST_MISSING_SECRET_KEY",
+        },
+      },
+    });
+
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        missingConfig: integration,
+      }),
+    );
+
+    await expect(manager.runHookParallel("init")).rejects.toThrow(
+      'Integration "missing-config" config validation failed',
+    );
+  });
+
   it("registers route integrations as pre-plugins and exposes shared handler context", async () => {
     const log = vi.fn();
     const manager = createManager();

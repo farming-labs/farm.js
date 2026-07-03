@@ -1,6 +1,6 @@
 import { render, toPlainText } from "@react-email/render";
 import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farmjs/core";
-import { normalizeWebhookConfig } from "../utils/index.js";
+import { integrationConfig, normalizeWebhookConfig } from "../utils/index.js";
 import type { FarmWebhookConfig, FarmWebhookEvent } from "../utils/webhooks.js";
 import {
   createResendClientApi,
@@ -67,6 +67,13 @@ export interface ResendIntegrationInput<TTemplates extends EmailTemplates = Emai
   templates: TTemplates;
   webhooks?: ResendWebhookConfig;
   log?: FarmIntegrationLogger;
+}
+
+interface ResolvedResendConfig {
+  apiKey?: string;
+  from?: string;
+  replyTo?: string | string[];
+  webhookSecret?: string;
 }
 
 function createResendApi<
@@ -144,6 +151,7 @@ export function resend<const TTemplates extends EmailTemplates>(
     from: input.defaults?.from ?? process.env.RESEND_FROM_EMAIL ?? undefined,
     replyTo: input.defaults?.replyTo ?? process.env.RESEND_REPLY_TO_EMAIL ?? undefined,
   };
+  const webhookSecret = process.env.RESEND_WEBHOOK_SECRET ?? undefined;
 
   if (!input.instance && !apiKey) {
     throw new Error("Resend integration requires RESEND_API_KEY or an explicit instance.");
@@ -157,7 +165,7 @@ export function resend<const TTemplates extends EmailTemplates>(
     webhooks: input.webhooks,
     defaultName: "default",
     defaultPath: `${basePath}/webhook`,
-    defaultSecret: process.env.RESEND_WEBHOOK_SECRET ?? undefined,
+    defaultSecret: webhookSecret,
   });
 
   const sdk = input.instance ?? new ResendSdk(apiKey);
@@ -253,6 +261,22 @@ export function resend<const TTemplates extends EmailTemplates>(
       templateIds: templateEntries.map(([id]) => id),
       liveMode: !!apiKey,
     },
+    config: integrationConfig<ResolvedResendConfig>({
+      label: "Resend integration",
+      env: {
+        apiKey: "RESEND_API_KEY",
+        from: "RESEND_FROM_EMAIL",
+        replyTo: "RESEND_REPLY_TO_EMAIL",
+        webhookSecret: "RESEND_WEBHOOK_SECRET",
+      },
+      input: {
+        apiKey,
+        from: defaults.from,
+        replyTo: defaults.replyTo,
+        webhookSecret,
+      },
+      required: input.instance ? [] : ["apiKey"],
+    }),
     api: createResendApi<TTemplates>({
       sendPath,
       schedulePath,
