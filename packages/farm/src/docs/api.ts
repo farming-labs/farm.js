@@ -45,6 +45,10 @@ interface FarmDocsAPIContext {
 }
 
 type JsonRecord = Record<string, unknown>;
+type DocsAPIPathTarget = {
+  format?: string;
+  slug?: string;
+};
 type FarmDocsRuntimeConfig = {
   root?: string;
   srcDir?: string;
@@ -86,6 +90,12 @@ function text(content: string, contentType: string, init: ResponseInit = {}): Re
 
 function normalizeAction(value: string | null | undefined): string | undefined {
   return value?.trim().toLowerCase().replace(/_/g, "-") || undefined;
+}
+
+function getDocsTitle(docs: FarmDocsResolvedConfig): string {
+  return typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
+    ? String((docs.config.nav as { title?: unknown }).title || "Documentation")
+    : "Documentation";
 }
 
 function isDocsCloudServer(value: unknown): value is FarmDocsCloudServer {
@@ -177,19 +187,39 @@ function normalizeDocsApiSlug(value: string | null | undefined, docs: FarmDocsRe
   return decodeURIComponent(slug).replace(/\.(mdx?|markdown)$/i, "");
 }
 
+function getDocsAPIPathTarget(request: Request): DocsAPIPathTarget {
+  const pathname = new URL(request.url).pathname.replace(/\/+$/, "") || "/";
+  const prefix = "/api/docs";
+
+  if (pathname !== prefix && !pathname.startsWith(`${prefix}/`)) return {};
+
+  const rawValue = pathname === prefix ? "" : pathname.slice(prefix.length + 1);
+  const value = rawValue.replace(/^\/+|\/+$/g, "");
+  const normalizedValue = normalizeAction(value);
+
+  if (!value) return {};
+  if (normalizedValue === "agent" || normalizedValue === "agent.json" || normalizedValue === "agent/spec") {
+    return { format: "agent-spec" };
+  }
+  if (normalizedValue === "skill" || normalizedValue === "skill.md") return { format: "skill" };
+  if (normalizedValue === "llms.txt") return { format: "llms" };
+  if (normalizedValue === "llms-full.txt") return { format: "llms-full" };
+  if (normalizedValue === "sitemap.md") return { format: "sitemap-md" };
+  if (normalizedValue === "sitemap.xml") return { format: "sitemap-xml" };
+  if (normalizedValue === "robots.txt") return { format: "robots" };
+  if (/\.(mdx?|markdown)$/i.test(value)) return { format: "markdown", slug: value };
+
+  return { slug: value };
+}
+
 function getDocsAPIFormat(request: Request): string | undefined {
   const url = new URL(request.url);
-  return normalizeAction(url.searchParams.get("format") || url.searchParams.get("type"));
+  return normalizeAction(url.searchParams.get("format") || url.searchParams.get("type")) || getDocsAPIPathTarget(request).format;
 }
 
 function renderLlmsTxt(context: FarmDocsAPIContext, full: boolean): string {
   const pages = discoverFarmDocsPages(context.contentDir, context.docs);
-  const title =
-    typeof context.docs.config.nav === "object" &&
-    context.docs.config.nav &&
-    "title" in context.docs.config.nav
-      ? String((context.docs.config.nav as { title?: unknown }).title || "Documentation")
-      : "Documentation";
+  const title = getDocsTitle(context.docs);
 
   const lines = [`# ${title}`, ""];
   for (const page of pages) {
@@ -218,6 +248,84 @@ function renderSitemapXml(context: FarmDocsAPIContext, request: Request): string
     .join("\n");
 
   return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+}
+
+function renderSkillDocument(context: FarmDocsAPIContext, request: Request): string {
+  const url = new URL(request.url);
+  const title = getDocsTitle(context.docs);
+  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+  const lines = [
+    `# ${title}`,
+    "",
+    "Use this Farm docs surface to answer questions from the local documentation.",
+    "",
+    "## Routes",
+    "",
+    `- Human docs: ${context.docs.entry}`,
+    "- Search JSON: /api/docs?query=<term>",
+    "- Config JSON: /api/docs?format=config",
+    "- Markdown by query: /api/docs?format=markdown&path=<slug>",
+    "- Markdown by path: /api/docs/<slug>.md",
+    "- LLM summary: /api/docs?format=llms",
+    "- Full LLM document: /api/docs?format=llms-full",
+    "- Sitemap XML: /api/docs?format=sitemap-xml",
+    "- Agent spec JSON: /api/docs/agent/spec",
+    "",
+    "## Pages",
+    "",
+    ...pages.map((page) => `- [${page.title}](${url.origin}${page.href})${page.description ? `: ${page.description}` : ""}`),
+  ];
+
+  return `${lines.join("\n").trim()}\n`;
+}
+
+function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
+  const url = new URL(request.url);
+  const origin = url.origin;
+  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+
+  return {
+    name: getDocsTitle(context.docs),
+    entry: context.docs.entry,
+    routes: {
+      docs: `${origin}${context.docs.entry}`,
+      config: `${origin}/api/docs?format=config`,
+      search: `${origin}/api/docs?query=<term>`,
+      markdown: `${origin}/api/docs/<slug>.md`,
+      markdownQuery: `${origin}/api/docs?format=markdown&path=<slug>`,
+      llms: `${origin}/api/docs?format=llms`,
+      llmsFull: `${origin}/api/docs?format=llms-full`,
+      sitemapXml: `${origin}/api/docs?format=sitemap-xml`,
+      sitemapMarkdown: `${origin}/api/docs?format=sitemap-md`,
+      robots: `${origin}/api/docs?format=robots`,
+      skill: `${origin}/api/docs?format=skill`,
+      agentSpec: `${origin}/api/docs/agent/spec`,
+    },
+    capabilities: {
+      search: true,
+      markdown: true,
+      llms: true,
+      sitemap: true,
+      robots: true,
+      post: false,
+    },
+    pages,
+  };
+}
+
+function buildDiagnostics(context: FarmDocsAPIContext) {
+  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+
+  return {
+    enabled: context.docs.enabled,
+    entry: context.docs.entry,
+    root: context.root,
+    srcDir: context.srcDir,
+    contentDir: context.contentDir,
+    configPath: context.docs.configPath || null,
+    pageCount: pages.length,
+    pages,
+  };
 }
 
 function searchDocs(context: FarmDocsAPIContext, query: string) {
@@ -280,6 +388,7 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
 
   const url = new URL(request.url);
   const format = getDocsAPIFormat(request);
+  const pathTarget = getDocsAPIPathTarget(request);
 
   if (format === "config" || format === "docs-config") {
     return json({
@@ -289,17 +398,9 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
     });
   }
 
-  if (format === "markdown" || url.pathname.endsWith(".md")) {
-    const pathParam = url.searchParams.get("path");
-    const slug = normalizeDocsApiSlug(
-      pathParam ?? (url.pathname.endsWith(".md") ? url.pathname : ""),
-      context.docs,
-    );
-    const page = loadFarmDocsPage(context.contentDir, context.docs, slug);
-    if (!page) return text("Docs page not found\n", "text/plain; charset=utf-8", { status: 404 });
-    return text(`${page.body.trim()}\n`, "text/markdown; charset=utf-8");
-  }
-
+  if (format === "skill") return text(renderSkillDocument(context, request), "text/markdown; charset=utf-8");
+  if (format === "agent" || format === "agent-spec") return json(buildAgentSpec(context, request));
+  if (format === "diagnostics") return json(buildDiagnostics(context));
   if (format === "llms") return text(renderLlmsTxt(context, false), "text/plain; charset=utf-8");
   if (format === "llms-full") return text(renderLlmsTxt(context, true), "text/plain; charset=utf-8");
   if (format === "sitemap-md") return text(renderSitemapMarkdown(context), "text/markdown; charset=utf-8");
@@ -308,6 +409,14 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
   }
   if (format === "robots") {
     return text("User-agent: *\nAllow: /\n", "text/plain; charset=utf-8");
+  }
+
+  if (format === "markdown" || url.pathname.endsWith(".md")) {
+    const pathParam = url.searchParams.get("path") || url.searchParams.get("slug");
+    const slug = normalizeDocsApiSlug(pathParam ?? pathTarget.slug ?? "", context.docs);
+    const page = loadFarmDocsPage(context.contentDir, context.docs, slug);
+    if (!page) return text("Docs page not found\n", "text/plain; charset=utf-8", { status: 404 });
+    return text(`${page.body.trim()}\n`, "text/markdown; charset=utf-8");
   }
 
   const query = url.searchParams.get("query") || url.searchParams.get("q") || "";

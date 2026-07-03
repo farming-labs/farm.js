@@ -111,6 +111,36 @@ describe("createDocsAPI", () => {
       results: [expect.objectContaining({ title: "Guide" })],
     });
 
+    const pathMarkdownResponse = await handlers.GET(
+      new Request("http://farm.test/api/docs/guide.md"),
+    );
+    expect(pathMarkdownResponse.headers.get("content-type")).toContain("text/markdown");
+    await expect(pathMarkdownResponse.text()).resolves.toContain("Use `farm dev` to start.");
+
+    const skillResponse = await handlers.GET(new Request("http://farm.test/api/docs?format=skill"));
+    expect(skillResponse.headers.get("content-type")).toContain("text/markdown");
+    await expect(skillResponse.text()).resolves.toContain("Search JSON: /api/docs?query=<term>");
+
+    const skillPathResponse = await handlers.GET(new Request("http://farm.test/api/docs/skill.md"));
+    expect(skillPathResponse.headers.get("content-type")).toContain("text/markdown");
+    await expect(skillPathResponse.text()).resolves.toContain("Agent spec JSON: /api/docs/agent/spec");
+
+    const sitemapPathResponse = await handlers.GET(new Request("http://farm.test/api/docs/sitemap.md"));
+    expect(sitemapPathResponse.headers.get("content-type")).toContain("text/markdown");
+    await expect(sitemapPathResponse.text()).resolves.toContain("[Guide](/docs/guide)");
+
+    const agentResponse = await handlers.GET(new Request("http://farm.test/api/docs/agent/spec"));
+    await expect(agentResponse.json()).resolves.toMatchObject({
+      name: "Farm API Docs",
+      capabilities: {
+        search: true,
+        markdown: true,
+      },
+      routes: {
+        search: "http://farm.test/api/docs?query=<term>",
+      },
+    });
+
     const postResponse = await handlers.POST(
       new Request("http://farm.test/api/docs", { method: "POST" }),
     );

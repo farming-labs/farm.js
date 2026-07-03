@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from "fs";
 import { join, relative, dirname } from "path";
 
 export interface APIRouteInfo {
@@ -244,6 +244,7 @@ ${typeExports}
     const routes = this.scanAPIRoutes();
     const content = this.generateAPIRouter(routes);
 
+    mkdirSync(dirname(outputPath), { recursive: true });
     writeFileSync(outputPath, content, "utf-8");
     console.log(`✅ Generated API types for ${routes.length} routes`);
   }
