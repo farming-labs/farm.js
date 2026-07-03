@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { resolveDocsConfig } from "../config";
-import { createFarmDocsHandler } from "../docs";
+import { createDocsAPI, createFarmDocsHandler } from "../docs";
 
 describe("createFarmDocsHandler", () => {
   async function createDocsFixture() {
@@ -61,5 +61,85 @@ describe("createFarmDocsHandler", () => {
     const handler = createFarmDocsHandler({ ...docs, enabled: false }, { root, srcDir: "src" });
 
     await expect(handler(new Request("http://farm.test/docs"))).resolves.toBeNull();
+  });
+});
+
+describe("createDocsAPI", () => {
+  async function createDocsFixture() {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-api-"));
+    const docsDir = path.join(root, "src", "app", "docs");
+    await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "docs.json"),
+      JSON.stringify({
+        entry: "docs",
+        nav: { title: "Farm API Docs" },
+      }),
+    );
+    await fs.writeFile(path.join(docsDir, "page.md"), "# Farm API Docs\n\nWelcome docs.");
+    await fs.writeFile(
+      path.join(docsDir, "guide", "page.md"),
+      "# Guide\n\nUse `farm dev` to start.",
+    );
+    return root;
+  }
+
+  it("creates Next-style GET and POST route handlers for Farm API routes", async () => {
+    const root = await createDocsFixture();
+    const handlers = createDocsAPI({ rootDir: root, srcDir: "src" });
+
+    expect(Object.keys(handlers).sort()).toEqual(["GET", "POST"]);
+
+    const configResponse = await handlers.GET(new Request("http://farm.test/api/docs?format=config"));
+    await expect(configResponse.json()).resolves.toMatchObject({
+      entry: "/docs",
+      config: {
+        entry: "docs",
+        docsPath: "/docs",
+      },
+    });
+
+    const markdownResponse = await handlers.GET(
+      new Request("http://farm.test/api/docs?format=markdown&path=guide"),
+    );
+    expect(markdownResponse.headers.get("content-type")).toContain("text/markdown");
+    await expect(markdownResponse.text()).resolves.toContain("Use `farm dev` to start.");
+
+    const searchResponse = await handlers.GET(new Request("http://farm.test/api/docs?query=guide"));
+    await expect(searchResponse.json()).resolves.toMatchObject({
+      query: "guide",
+      results: [expect.objectContaining({ title: "Guide" })],
+    });
+
+    const postResponse = await handlers.POST(
+      new Request("http://farm.test/api/docs", { method: "POST" }),
+    );
+    expect(postResponse.status).toBe(501);
+  });
+
+  it("uses Farm's injected docs runtime config when route handlers are zero-config", async () => {
+    const root = await createDocsFixture();
+    const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
+    const previousRuntimeConfig = globalThis.__FARM_DOCS_RUNTIME_CONFIG__;
+
+    try {
+      globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
+        root,
+        srcDir: "src",
+        docs,
+      };
+
+      const handlers = createDocsAPI();
+      const response = await handlers.GET(new Request("http://farm.test/api/docs?format=config"));
+
+      await expect(response.json()).resolves.toMatchObject({
+        entry: "/docs",
+        config: {
+          nav: { title: "Farm API Docs" },
+        },
+      });
+    } finally {
+      globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = previousRuntimeConfig;
+    }
   });
 });

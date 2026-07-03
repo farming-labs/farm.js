@@ -1253,7 +1253,10 @@ function generateVirtualEntryCode(
 
   // Generate import for custom not-found page if exists
   const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
-  const apiRouterImport = apiRoutes.length > 0 ? `import { createRouter } from "better-call";` : "";
+  const apiRouteHelpersImport =
+    apiRoutes.length > 0
+      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "farm/api/route-manager";`
+      : "";
   const docsHandlerImport = config.docs?.enabled ? `import { createFarmDocsHandler } from "farm/docs";` : "";
   const integrationImports = configModulePath
     ? `
@@ -1264,36 +1267,47 @@ import { dispatchIntegrationRequest, matchIntegrationRoute } from "farm";
   const apiHandlerCode =
     apiRoutes.length > 0
       ? `
-function createAPIHandler() {
-  const allEndpoints = {};
+const apiRouteMap = new Map(apiRoutes.map((route) => [route.path, route]));
 
-  for (const route of apiRoutes) {
-    for (const method of route.methods) {
-      const handler = route.handlers[method];
-      if (handler) {
-        // Set path on handler for better-call
-        if (!handler.__path) {
-          handler.__path = route.path;
-        }
-        const key = \`\${method.toLowerCase()}_\${route.path.replace(/\\//g, "_").replace(/-/g, "_")}\`;
-        allEndpoints[key] = handler;
-      }
-    }
+async function handleAPIRequest(request) {
+  const url = new URL(request.url);
+  const method = request.method.toUpperCase();
+  const match = matchAPIRoute(apiRouteMap, url.pathname);
+
+  if (!match) {
+    return new Response(
+      JSON.stringify({ error: "API route not found", pathname: url.pathname }),
+      { status: 404, headers: { "Content-Type": "application/json" } }
+    );
   }
 
-  if (Object.keys(allEndpoints).length > 0) {
-    const router = createRouter(allEndpoints, { basePath: "" });
-    return router.handler;
+  const { route, params } = match;
+  const endpoint = route.handlers[method];
+  if (!endpoint) {
+    return new Response(
+      JSON.stringify({ error: "Method Not Allowed" }),
+      { status: 405, headers: { "Content-Type": "application/json" } }
+    );
   }
 
-  return null;
+  try {
+    return await invokeAPIRouteEndpoint(endpoint, request, params);
+  } catch (error) {
+    console.error(\`[API Error] \${url.pathname}:\`, error);
+    return new Response(
+      JSON.stringify({ error: error.message || "Internal Server Error" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
 }
-
-// Create the API handler at runtime
-const apiHandler = createAPIHandler();
 `
       : `
-const apiHandler = null;
+async function handleAPIRequest(request) {
+  return new Response(
+    JSON.stringify({ error: "API route not found", pathname: new URL(request.url).pathname }),
+    { status: 404, headers: { "Content-Type": "application/json" } }
+  );
+}
 `;
 
   return `
@@ -1304,7 +1318,7 @@ ${apiImports.join("\n")}
 ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
 ${notFoundImport}
-${apiRouterImport}
+${apiRouteHelpersImport}
 ${docsHandlerImport}
 ${integrationImports}
 
@@ -1316,6 +1330,11 @@ const farmUserConfig = ${
   };
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
+globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
+  root: ${JSON.stringify(config.root)},
+  srcDir: ${JSON.stringify(config.srcDir)},
+  docs: ${JSON.stringify(config.docs)},
+};
 const farmDocsHandler = ${
     config.docs?.enabled
       ? `createFarmDocsHandler(${JSON.stringify(config.docs)}, { root: ${JSON.stringify(config.root)}, srcDir: ${JSON.stringify(config.srcDir)} })`
@@ -1432,21 +1451,7 @@ async function handleRequest(request) {
 
   // Handle API routes
   if (pathname.startsWith("/api/")) {
-    if (apiHandler) {
-      try {
-        return await apiHandler(request);
-      } catch (error) {
-        return new Response(
-          JSON.stringify({ error: error.message || "Internal Server Error" }),
-          { status: 500, headers: { "Content-Type": "application/json" } }
-        );
-      }
-    }
-    
-    return new Response(
-      JSON.stringify({ error: "API route not found", pathname }),
-      { status: 404, headers: { "Content-Type": "application/json" } }
-    );
+    return handleAPIRequest(request);
   }
 
   // Handle page routes (SSR)

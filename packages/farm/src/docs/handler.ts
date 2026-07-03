@@ -15,7 +15,7 @@ export interface FarmDocsPage {
   sourcePath: string;
 }
 
-interface LoadedDocsPage extends FarmDocsPage {
+export interface LoadedFarmDocsPage extends FarmDocsPage {
   body: string;
   frontmatter: Record<string, string>;
 }
@@ -160,8 +160,11 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
-function loadPage(contentDir: string, docs: FarmDocsResolvedConfig, request: Request): LoadedDocsPage | null {
-  const slug = getRequestSlug(docs, request);
+export function loadFarmDocsPage(
+  contentDir: string,
+  docs: FarmDocsResolvedConfig,
+  slug: string,
+): LoadedFarmDocsPage | null {
   const sourcePath = findDocsPageFile(contentDir, slug);
   if (!sourcePath) return null;
 
@@ -203,7 +206,18 @@ function pathToSlug(contentDir: string, filePath: string): string | null {
   return withoutExtension;
 }
 
-function discoverPages(contentDir: string, docs: FarmDocsResolvedConfig): FarmDocsPage[] {
+function loadPage(
+  contentDir: string,
+  docs: FarmDocsResolvedConfig,
+  request: Request,
+): LoadedFarmDocsPage | null {
+  return loadFarmDocsPage(contentDir, docs, getRequestSlug(docs, request));
+}
+
+export function discoverFarmDocsPages(
+  contentDir: string,
+  docs: FarmDocsResolvedConfig,
+): FarmDocsPage[] {
   if (!existsSync(contentDir)) return [];
 
   const pages: FarmDocsPage[] = [];
@@ -332,7 +346,11 @@ function shouldReturnMarkdown(request: Request): boolean {
   );
 }
 
-function renderDocsHtml(page: LoadedDocsPage, pages: FarmDocsPage[], docs: FarmDocsResolvedConfig): string {
+function renderDocsHtml(
+  page: LoadedFarmDocsPage,
+  pages: FarmDocsPage[],
+  docs: FarmDocsResolvedConfig,
+): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
       ? String((docs.config.nav as { title?: unknown }).title || "Docs")
@@ -407,7 +425,7 @@ export function createFarmDocsHandler(docs: FarmDocsResolvedConfig | undefined, 
       });
     }
 
-    return new Response(renderDocsHtml(page, discoverPages(contentDir, docs), docs), {
+    return new Response(renderDocsHtml(page, discoverFarmDocsPages(contentDir, docs), docs), {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",

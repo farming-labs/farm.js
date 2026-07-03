@@ -358,7 +358,6 @@ export async function loadDocsConfig(
 ): Promise<{ config: Partial<DocsConfig>; configPath: string } | undefined> {
   const fs = await import("fs/promises");
   const { pathToFileURL } = await import("url");
-  const { build } = await import("esbuild");
   const root = rootDir || process.cwd();
   const resolvedPath = await findDocsConfigPath(root, configPath);
 
@@ -370,6 +369,7 @@ export async function loadDocsConfig(
       return { config: JSON.parse(content), configPath: resolvedPath };
     }
 
+    const { build } = await import("esbuild");
     const configCacheDir = path.join(root, ".farm", ".config-loader");
     await fs.mkdir(configCacheDir, { recursive: true });
     const modulePath = path.join(
