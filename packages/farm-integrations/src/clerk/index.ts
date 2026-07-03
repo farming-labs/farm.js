@@ -1,6 +1,10 @@
 import { createClerkClient, type ClerkClient } from "@clerk/backend";
 import { defineIntegration, type FarmIntegrationLogger } from "@farmjs/core";
-import { createDocumentNavigationMatchers, normalizeMatchers } from "../utils/index.js";
+import {
+  createDocumentNavigationMatchers,
+  integrationConfig,
+  normalizeMatchers,
+} from "../utils/index.js";
 
 export interface ClerkIntegrationInput {
   publishableKey?: string;
@@ -13,7 +17,12 @@ export interface ClerkIntegrationInput {
   log?: FarmIntegrationLogger;
 }
 
-function resolveClerkKeys(input: ClerkIntegrationInput) {
+interface ResolvedClerkConfig {
+  publishableKey: string;
+  secretKey: string;
+}
+
+function resolveClerkKeys(input: ClerkIntegrationInput): ResolvedClerkConfig {
   const publishableKey =
     input.publishableKey ??
     process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ??
@@ -60,6 +69,18 @@ export function clerk(input: ClerkIntegrationInput = {}) {
       secretKey: "[redacted]",
       protectedRoutes: protectedMatchers,
     },
+    config: integrationConfig<ResolvedClerkConfig>({
+      label: "Clerk integration",
+      env: {
+        publishableKey: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_PUBLISHABLE_KEY"],
+        secretKey: "CLERK_SECRET_KEY",
+      },
+      input: {
+        publishableKey,
+        secretKey,
+      },
+      required: ["publishableKey", "secretKey"],
+    }),
     log: input.log,
     providers: [
       {

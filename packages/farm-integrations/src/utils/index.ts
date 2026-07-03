@@ -1,4 +1,5 @@
 export { escapeHtml } from "./html.js";
+export { integrationConfig } from "./config.js";
 export {
   createAuthRouteIntegration,
   createPathInferredClientApi,
