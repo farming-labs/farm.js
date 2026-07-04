@@ -1,6 +1,26 @@
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  aiChatUIFeature,
+  auth0AuthUIFeature,
+  authjsUIFeature,
+  autumnBillingUIFeature,
+  betterAuthUIFeature,
+  clerkAuthUIFeature,
+  installUIFeature,
+  jobsUIFeature,
+  polarBillingUIFeature,
+  resendEmailUIFeature,
+  stripeBillingUIFeature,
+  supabaseAuthUIFeature,
+  unkeyApiKeysUIFeature,
+  workosAuthUIFeature,
+  type AddFarmIntegrationUIResult,
+  type UIFeatureDefinition,
+} from "./ui-feature-registry";
+
+export type { AddFarmIntegrationUIResult } from "./ui-feature-registry";
 
 type PackageManifest = {
   dependencies?: Record<string, string>;
@@ -15,6 +35,7 @@ export interface AddFarmIntegrationOptions {
   key?: string;
   integrationsFile?: string;
   routeFile?: string;
+  ui?: boolean;
   skipPackageJson?: boolean;
   skipConfig?: boolean;
   dryRun?: boolean;
@@ -36,6 +57,7 @@ export interface AddFarmIntegrationResult {
   skipped: string[];
   env: string[];
   notes: string[];
+  ui?: AddFarmIntegrationUIResult;
 }
 
 export type FarmIntegrationProvider =
@@ -51,6 +73,7 @@ export type FarmIntegrationProvider =
   | "resend"
   | "stripe"
   | "supabase"
+  | "unkey"
   | "workos";
 
 interface IntegrationProviderDefinition {
@@ -62,6 +85,7 @@ interface IntegrationProviderDefinition {
   description: string;
   env: readonly string[];
   notes?: readonly string[];
+  ui?: UIFeatureDefinition;
   template(): string;
 }
 
@@ -79,6 +103,7 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
       "Replace model with any AI SDK provider model or Vercel AI Gateway model id.",
       "No farm.config integration wiring is required for this route.",
     ],
+    ui: aiChatUIFeature(),
     template: () => `import { aiChatRoute } from "@farmjs/integrations/ai";
 
 export const POST = aiChatRoute({
@@ -106,6 +131,7 @@ export const stripeIntegration = stripe({
   },
 });
 `,
+    ui: stripeBillingUIFeature(),
   },
   {
     provider: "supabase",
@@ -115,6 +141,7 @@ export const stripeIntegration = stripe({
     exportName: "supabaseIntegration",
     description: "Supabase auth routes and middleware",
     env: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "APP_BASE_URL"],
+    ui: supabaseAuthUIFeature(),
     template: () => `import { supabase } from "@farmjs/integrations/supabase";
 
 export const supabaseIntegration = supabase({
@@ -138,6 +165,7 @@ export const supabaseIntegration = supabase({
     exportName: "workosIntegration",
     description: "WorkOS auth routes and protected route middleware",
     env: ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"],
+    ui: workosAuthUIFeature(),
     template: () => `import { workos } from "@farmjs/integrations/workos";
 
 export const workosIntegration = workos({
@@ -156,6 +184,7 @@ export const workosIntegration = workos({
     exportName: "auth0Integration",
     description: "Auth0 login, callback, logout, and profile routes",
     env: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET", "AUTH0_SECRET"],
+    ui: auth0AuthUIFeature(),
     template: () => `import { auth0 } from "@farmjs/integrations/auth0";
 
 export const auth0Integration = auth0({
@@ -175,6 +204,7 @@ export const auth0Integration = auth0({
     exportName: "clerkIntegration",
     description: "Clerk auth provider and protected route middleware",
     env: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
+    ui: clerkAuthUIFeature(),
     template: () => `import { clerk } from "@farmjs/integrations/clerk";
 
 export const clerkIntegration = clerk({
@@ -195,6 +225,7 @@ export const clerkIntegration = clerk({
     exportName: "resendIntegration",
     description: "Resend email send, preview, schedule, and webhook routes",
     env: ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_WEBHOOK_SECRET"],
+    ui: resendEmailUIFeature(),
     template: () => `import { createElement } from "react";
 import { resend, template } from "@farmjs/integrations/email";
 
@@ -240,6 +271,7 @@ export const resendIntegration = resend({
     description: "Jobs integration backed by Inngest",
     env: ["INNGEST_APP_ID", "INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"],
     notes: ["Add tasks to jobTasks before using the generated jobs API."],
+    ui: jobsUIFeature("inngest"),
     template: () => `import { defineTasks, inngest, jobs } from "@farmjs/integrations/jobs";
 
 export const jobTasks = defineTasks({});
@@ -266,6 +298,7 @@ export const jobsIntegration = jobs({
     description: "Jobs integration backed by Trigger.dev",
     env: ["TRIGGER_PROJECT_REF", "TRIGGER_SECRET_KEY", "TRIGGER_WEBHOOK_SECRET"],
     notes: ["Add tasks to jobTasks before using the generated jobs API."],
+    ui: jobsUIFeature("trigger"),
     template: () => `import { defineTasks, jobs, trigger } from "@farmjs/integrations/jobs";
 
 export const jobTasks = defineTasks({});
@@ -292,6 +325,7 @@ export const jobsIntegration = jobs({
     description: "Polar billing and checkout routes",
     env: ["POLAR_ACCESS_TOKEN", "POLAR_WEBHOOK_SECRET", "APP_BASE_URL"],
     notes: ["Replace resolveBillingOwner with your app user or organization lookup."],
+    ui: polarBillingUIFeature(),
     template: () => `import type { FarmIntegrationHandlerContext } from "@farmjs/core";
 import { polar } from "@farmjs/integrations/polar";
 
@@ -328,6 +362,7 @@ export const polarIntegration = polar({
     description: "Autumn billing and checkout routes",
     env: ["AUTUMN_SECRET_KEY", "AUTUMN_WEBHOOK_SECRET", "APP_BASE_URL"],
     notes: ["Replace resolveBillingOwner with your app user or organization lookup."],
+    ui: autumnBillingUIFeature(),
     template: () => `import type { FarmIntegrationHandlerContext } from "@farmjs/core";
 import { autumn } from "@farmjs/integrations/autumn";
 
@@ -363,6 +398,7 @@ export const autumnIntegration = autumn({
     description: "Better Auth route adapter",
     env: [],
     notes: ["This template expects src/lib/auth.ts to export a Better Auth instance named auth."],
+    ui: betterAuthUIFeature(),
     template: () => `import { betterAuth } from "@farmjs/integrations/better-auth";
 import { auth } from "../auth.ts";
 
@@ -383,6 +419,7 @@ export const betterAuthIntegration = betterAuth({
     description: "Auth.js route adapter",
     env: [],
     notes: ["This template expects src/lib/auth.ts to export an Auth.js instance named auth."],
+    ui: authjsUIFeature(),
     template: () => `import { authjs } from "@farmjs/integrations/authjs";
 import { auth } from "../auth.ts";
 
@@ -390,6 +427,28 @@ export const authjsIntegration = authjs({
   instance: auth,
   log(event) {
     console.log("[authjs]", event.phase, event.route?.path || "none");
+  },
+});
+`,
+  },
+  {
+    provider: "unkey",
+    aliases: ["api-keys", "apikeys", "keys", "unkey-api-keys"],
+    defaultKey: "apiKeys",
+    fileName: "unkey",
+    exportName: "unkeyIntegration",
+    description: "Unkey API key creation, verification, and route protection",
+    env: ["UNKEY_ROOT_KEY", "UNKEY_API_ID", "UNKEY_BASE_URL"],
+    ui: unkeyApiKeysUIFeature(),
+    template: () => `import { unkey } from "@farmjs/integrations/unkey";
+
+export const unkeyIntegration = unkey({
+  rootKey: process.env.UNKEY_ROOT_KEY,
+  apiId: process.env.UNKEY_API_ID,
+  baseUrl: process.env.UNKEY_BASE_URL,
+  protectedRoutes: ["/api/protected(.*)"],
+  log(event) {
+    console.log("[unkey]", event.phase, event.route?.path || "none");
   },
 });
 `,
@@ -403,6 +462,13 @@ export function listFarmIntegrationProviders() {
     defaultKey: provider.defaultKey,
     description: provider.description,
     env: [...provider.env],
+    ui: provider.ui
+      ? {
+          feature: provider.ui.name,
+          description: provider.ui.description,
+          components: [...provider.ui.components],
+        }
+      : undefined,
   }));
 }
 
@@ -417,6 +483,7 @@ export async function addFarmIntegration(
       root,
       definition,
       routeFile: options.routeFile,
+      ui: options.ui,
       skipPackageJson: options.skipPackageJson,
       dryRun: options.dryRun,
       force: options.force,
@@ -481,6 +548,18 @@ export async function addFarmIntegration(
     });
   }
 
+  if (options.ui) {
+    await installUIFeature({
+      root,
+      definition,
+      key,
+      dryRun: options.dryRun,
+      force: options.force,
+      skipPackageJson: options.skipPackageJson,
+      result,
+    });
+  }
+
   return result;
 }
 
@@ -488,6 +567,7 @@ async function addAIRouteIntegration(input: {
   root: string;
   definition: IntegrationProviderDefinition;
   routeFile?: string;
+  ui?: boolean;
   skipPackageJson?: boolean;
   dryRun?: boolean;
   force?: boolean;
@@ -523,6 +603,18 @@ async function addAIRouteIntegration(input: {
     await updatePackageJson({
       root: input.root,
       dryRun: input.dryRun,
+      result,
+    });
+  }
+
+  if (input.ui) {
+    await installUIFeature({
+      root: input.root,
+      definition: input.definition,
+      key: input.definition.defaultKey,
+      dryRun: input.dryRun,
+      force: input.force,
+      skipPackageJson: input.skipPackageJson,
       result,
     });
   }

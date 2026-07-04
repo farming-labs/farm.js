@@ -4,6 +4,7 @@ export {
   listFarmIntegrationProviders,
   type AddFarmIntegrationOptions,
   type AddFarmIntegrationResult,
+  type AddFarmIntegrationUIResult,
   type FarmIntegrationProvider,
 } from "./add-integration";
 export { buildFarm } from "./build";

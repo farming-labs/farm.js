@@ -90,6 +90,7 @@ addCommand
   .option("--force", "Overwrite an existing generated integration component")
   .option("--dry-run", "Show what would be added without writing files")
   .option("--route-file <file>", "Route file path for route-based integrations")
+  .option("--ui", "Also install the provider's shadcn-based Farm UI feature pack")
   .option("--skip-package-json", "Do not add @farmjs/integrations to package.json")
   .option("--skip-config", "Do not create or update farm.config")
   .option("-l, --list", "List supported integration providers")
@@ -118,6 +119,7 @@ addCommand
         key: options.key,
         integrationsFile: options.file,
         routeFile: options.routeFile,
+        ui: options.ui,
         dryRun: options.dryRun,
         force: options.force,
         skipPackageJson: options.skipPackageJson,
@@ -129,6 +131,13 @@ addCommand
         console.log(`${verb} ${result.provider} route at ${result.routePath || result.routeFile}`);
       } else {
         console.log(`${verb} ${result.provider} integration as appIntegrations.${result.key}`);
+      }
+
+      if (result.ui) {
+        console.log(`UI feature: ${result.ui.feature}`);
+        if (result.ui.components.length) {
+          console.log(`Shadcn components: ${result.ui.components.join(", ")}`);
+        }
       }
 
       if (result.created.length) {
