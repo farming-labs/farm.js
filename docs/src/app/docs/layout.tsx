@@ -1,43 +1,61 @@
 import type { LayoutProps } from "@farmjs/core";
-import { Link } from "@farmjs/core/client";
-
-const docLinks = [
-  { href: "/docs", label: "Introduction" },
-  { href: "/docs/getting-started", label: "Getting Started" },
-  { href: "/docs/routing", label: "Routing" },
-  { href: "/docs/query", label: "Query" },
-  { href: "/docs/api-client", label: "API Client" },
-  { href: "/docs/storage", label: "Storage" },
-  { href: "/docs/layouts", label: "Layouts" },
-  { href: "/docs/plugins", label: "Plugin Ecosystem" },
-  { href: "/docs/plugins/create-plugin", label: "Create a Plugin" },
-] as const;
+import { docSections } from "../../lib/docs";
 
 export default function DocsLayout({ children }: LayoutProps) {
   return (
-    <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
-      <div className="flex gap-12">
-        <aside className="hidden w-56 shrink-0 lg:block">
-          <nav className="sticky top-24 space-y-1">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-slate-500">
+    <div className="min-h-screen bg-white text-slate-950">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/90 backdrop-blur">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+          <a href="/" className="font-sans text-sm font-semibold text-slate-950">
+            Farm.js
+          </a>
+          <nav className="flex items-center gap-4 text-sm text-slate-600">
+            <a href="/docs" className="hover:text-slate-950">
+              Docs
+            </a>
+            <a href="/docs/examples" className="hover:text-slate-950">
+              Examples
+            </a>
+            <a href="/docs/reference" className="hover:text-slate-950">
+              Reference
+            </a>
+          </nav>
+        </div>
+      </header>
+
+      <div className="mx-auto grid max-w-7xl gap-10 px-4 py-8 sm:px-6 lg:grid-cols-[17rem_minmax(0,1fr)] lg:px-8">
+        <aside className="hidden lg:block">
+          <nav className="sticky top-24 max-h-[calc(100vh-7rem)] overflow-y-auto pr-2">
+            <a
+              href="/docs"
+              className="mb-5 block rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-950 hover:border-emerald-300"
+            >
               Documentation
-            </p>
-            {docLinks.map(({ href, label }) => (
-              <Link
-                key={href}
-                href={href}
-                className="block rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-              >
-                {label}
-              </Link>
-            ))}
+            </a>
+            <div className="space-y-6">
+              {docSections.map((section) => (
+                <div key={section.title}>
+                  <p className="px-3 text-xs font-semibold uppercase text-slate-500">
+                    {section.title}
+                  </p>
+                  <div className="mt-2 space-y-1">
+                    {section.pages.map((page) => (
+                      <a
+                        key={page.href}
+                        href={page.href}
+                        className="block rounded-md px-3 py-1.5 text-sm leading-5 text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+                      >
+                        {page.title}
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
           </nav>
         </aside>
-        <article className="min-w-0 flex-1">
-          <div className="prose prose-slate max-w-none prose-headings:font-semibold prose-a:text-emerald-600 prose-code:rounded prose-code:bg-slate-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:before:content-none prose-code:after:content-none">
-            {children}
-          </div>
-        </article>
+
+        <main className="min-w-0 pb-16">{children}</main>
       </div>
     </div>
   );
