@@ -18,6 +18,7 @@ export default defineConfig({
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",
     docs: "src/docs/index.ts",
+    markdown: "src/markdown.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

@@ -39,6 +39,9 @@
       "docs": [
         "./dist/docs.d.ts"
       ],
+      "markdown": [
+        "./dist/markdown.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -95,6 +98,11 @@
       "types": "./dist/docs.d.ts",
       "import": "./dist/docs.mjs",
       "require": "./dist/docs.cjs"
+    },
+    "./markdown": {
+      "types": "./dist/markdown.d.ts",
+      "import": "./dist/markdown.mjs",
+      "require": "./dist/markdown.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",

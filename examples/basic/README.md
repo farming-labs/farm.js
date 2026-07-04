@@ -56,6 +56,21 @@ export default defineFarmConfig({
 
 No root `vite.config.ts` or `vercel.json` is required for the basic example.
 
+### Markdown page mirrors
+
+This example exposes agent-readable markdown mirrors for a few normal pages:
+
+```ts
+export default defineFarmConfig({
+  md: {
+    expose: ["/", "/about", "/contact"],
+    cache: 60,
+  },
+});
+```
+
+With the dev server running, `/about.md` renders the same `/about` page as `text/markdown`.
+
 ### Monorepo note
 
 If you change code in `packages/farm` or `packages/farmjs-plugin`, rebuild the workspace packages before restarting this example:

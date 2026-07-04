@@ -2,12 +2,19 @@ import type { FarmConfig as BaseFarmConfig } from "./types";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
+import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
+import { resolveMarkdownConfig } from "./markdown";
 import path from "path";
 
 export type { FarmDocsConfigInput, FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
+export type {
+  FarmMarkdownResolvedConfig,
+  FarmMarkdownRouteInput,
+  FarmMarkdownUserConfig,
+} from "./markdown";
 
 export interface RedirectConfig {
   source: string;
@@ -117,6 +124,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
   docs?: FarmDocsUserConfig;
+  md?: FarmMarkdownUserConfig | boolean;
 
   trailingSlash?: boolean;
   redirects?: () => Promise<RedirectConfig[]> | RedirectConfig[];
@@ -159,12 +167,13 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
 }
 
 export interface ResolvedFarmConfig extends Required<
-  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs">
+  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs" | "md">
 > {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
   deploy: ResolvedFarmDeployConfig;
   docs: FarmDocsResolvedConfig;
+  md: FarmMarkdownResolvedConfig;
 }
 
 export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
@@ -513,6 +522,7 @@ export async function resolveConfig(
   const root = userConfig.root || process.cwd();
   const srcDir = userConfig.srcDir || "src";
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
+  const md = resolveMarkdownConfig(userConfig.md);
 
   const resolved: ResolvedFarmConfig = {
     root,
@@ -522,6 +532,7 @@ export async function resolveConfig(
     preset: deploy.preset || "node-server",
     deploy,
     docs,
+    md,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
