@@ -1,4 +1,4 @@
-import { integrationsClient, integrationsServer } from "@farmjs/core/client";
+import { createIntegrations } from "@farmjs/core/client";
 import { supabaseClient } from "@farmjs/integrations/supabase/client";
 import type { InferIntegrationAPIFromRoutes } from "@farmjs/core";
 import type { localDemoRoutes } from "./integrations/local-demo/index.ts";
@@ -24,5 +24,4 @@ type SupabaseIntegrationSources = {
   localDemo: InferIntegrationAPIFromRoutes<typeof localDemoRoutes>;
 };
 
-export const api = integrationsServer<SupabaseIntegrationSources>();
-export const apiClient = integrationsClient<SupabaseIntegrationSources>();
+export const { api, apiClient } = createIntegrations<SupabaseIntegrationSources>();
