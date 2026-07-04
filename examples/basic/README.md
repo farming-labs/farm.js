@@ -81,6 +81,8 @@ export const revalidate = 60;
 ```
 
 The first request returns `X-Farm-PPR: miss`; the next matching request returns `X-Farm-PPR: hit`.
+Cached hits serve the Suspense fallback shell first, then refresh the dynamic island with a
+same-origin bypass request.
 
 ### Monorepo note
 
