@@ -42,6 +42,9 @@
       "markdown": [
         "./dist/markdown.d.ts"
       ],
+      "observability": [
+        "./dist/observability.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -103,6 +106,11 @@
       "types": "./dist/markdown.d.ts",
       "import": "./dist/markdown.mjs",
       "require": "./dist/markdown.cjs"
+    },
+    "./observability": {
+      "types": "./dist/observability.d.ts",
+      "import": "./dist/observability.mjs",
+      "require": "./dist/observability.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",

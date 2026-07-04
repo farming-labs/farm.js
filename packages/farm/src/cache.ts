@@ -1,3 +1,5 @@
+import { emitFarmEvent } from "./observability";
+
 export type RevalidateTagProfile =
   | "max"
   | "default"
@@ -77,10 +79,34 @@ export class FarmDataCache {
     options: GetFarmCacheEntryOptions = {},
   ): FarmCacheEntry<T> | undefined {
     const entry = this.entries.get(key) as InternalFarmCacheEntry<T> | undefined;
-    if (!entry) return undefined;
-    if (!options.allowStale && this.isStale(entry, options.now)) {
+    if (!entry) {
+      emitFarmEvent({ type: "cache.miss", key });
       return undefined;
     }
+
+    const stale = this.isStale(entry, options.now);
+    if (stale) {
+      emitFarmEvent({
+        type: "cache.stale",
+        key,
+        tags: Array.from(entry.tags),
+        revalidate: entry.revalidate,
+      });
+    }
+
+    if (!options.allowStale && stale) {
+      emitFarmEvent({ type: "cache.miss", key, reason: "stale" });
+      return undefined;
+    }
+
+    emitFarmEvent({
+      type: "cache.hit",
+      key,
+      tags: Array.from(entry.tags),
+      revalidate: entry.revalidate,
+      stale,
+    });
+
     return this.toPublicEntry(entry);
   }
 
@@ -103,18 +129,28 @@ export class FarmDataCache {
     };
 
     this.entries.set(key, entry);
+    emitFarmEvent({
+      type: "cache.set",
+      key,
+      tags: Array.from(tags),
+      revalidate: entry.revalidate,
+    });
     return this.toPublicEntry(entry);
   }
 
   delete(key: string): boolean {
-    return this.entries.delete(key);
+    const deleted = this.entries.delete(key);
+    emitFarmEvent({ type: "cache.delete", key, deleted });
+    return deleted;
   }
 
   clear(): void {
+    const count = this.entries.size;
     this.entries.clear();
     this.inflight.clear();
     this.invalidatedTagVersions.clear();
     this.version = 0;
+    emitFarmEvent({ type: "cache.clear", count });
   }
 
   isStale(entry: FarmCacheStaleEntry, now = Date.now()): boolean {
@@ -140,14 +176,37 @@ export class FarmDataCache {
     return false;
   }
 
-  revalidateTag(tag: string): number {
+  revalidateTag(
+    tag: string,
+    options: { source?: "revalidateTag" | "updateTag"; profile?: RevalidateTagProfile } = {},
+  ): number {
     const normalized = normalizeCacheTag(tag);
-    this.invalidatedTagVersions.set(normalized, ++this.version);
-    return this.countEntriesForTag(normalized);
+    const count = this.invalidateTag(normalized);
+    emitFarmEvent(
+      options.source === "updateTag"
+        ? { type: "cache.updateTag", tag: normalized, count }
+        : { type: "cache.revalidateTag", tag: normalized, profile: options.profile, count },
+    );
+    return count;
   }
 
   revalidatePath(routePath: string): number {
-    return this.revalidateTag(createPathCacheTag(routePath));
+    const normalizedPath = normalizeRevalidatePath(routePath);
+    const pathTag = createPathCacheTag(normalizedPath);
+    const pprCount = this.countEntriesForTags([pathTag, "ppr"]);
+    const count = this.invalidateTag(pathTag);
+    emitFarmEvent({ type: "cache.revalidatePath", path: normalizedPath, count });
+
+    if (pprCount > 0) {
+      emitFarmEvent({
+        type: "ppr.shell.invalidated",
+        route: normalizedPath,
+        reason: "revalidatePath",
+        count: pprCount,
+      });
+    }
+
+    return count;
   }
 
   async getOrSet<T>(
@@ -162,6 +221,7 @@ export class FarmDataCache {
 
     const inflight = this.inflight.get(key) as Promise<T> | undefined;
     if (inflight) {
+      emitFarmEvent({ type: "cache.dedupe", key });
       return inflight;
     }
 
@@ -170,6 +230,10 @@ export class FarmDataCache {
       .then((value) => {
         this.set(key, value, options);
         return value;
+      })
+      .catch((error) => {
+        emitFarmEvent({ type: "cache.error", key, operation: "set", error });
+        throw error;
       })
       .finally(() => {
         this.inflight.delete(key);
@@ -187,6 +251,21 @@ export class FarmDataCache {
       }
     }
     return count;
+  }
+
+  private countEntriesForTags(tags: readonly string[]): number {
+    let count = 0;
+    for (const entry of this.entries.values()) {
+      if (tags.every((tag) => entry.tags.has(tag))) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private invalidateTag(normalizedTag: string): number {
+    this.invalidatedTagVersions.set(normalizedTag, ++this.version);
+    return this.countEntriesForTag(normalizedTag);
   }
 
   private toPublicEntry<T>(entry: InternalFarmCacheEntry<T>): FarmCacheEntry<T> {
@@ -226,11 +305,14 @@ export function unstable_cache<Args extends unknown[], Result>(
 }
 
 export function revalidateTag(_tag: string, _profile?: RevalidateTagProfile): void {
-  getFarmDataCache().revalidateTag(_tag);
+  getFarmDataCache().revalidateTag(_tag, {
+    source: "revalidateTag",
+    profile: _profile,
+  });
 }
 
 export function updateTag(tag: string): void {
-  getFarmDataCache().revalidateTag(tag);
+  getFarmDataCache().revalidateTag(tag, { source: "updateTag" });
 }
 
 export function revalidatePath(routePath: string): void {

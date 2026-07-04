@@ -19,6 +19,7 @@ export default defineConfig({
     cache: "src/cache.ts",
     docs: "src/docs/index.ts",
     markdown: "src/markdown.ts",
+    observability: "src/observability.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

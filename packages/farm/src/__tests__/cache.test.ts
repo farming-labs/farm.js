@@ -8,9 +8,15 @@ import {
   unstable_cache,
   updateTag,
 } from "../cache";
+import {
+  configureFarmObservability,
+  resetFarmObservability,
+  type FarmEvent,
+} from "../observability";
 
 describe("server cache primitives", () => {
   afterEach(() => {
+    resetFarmObservability();
     getFarmDataCache().clear();
     vi.useRealTimers();
   });
@@ -69,6 +75,8 @@ describe("server cache primitives", () => {
   });
 
   it("revalidates PPR shell entries through the shared path cache", () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ onEvent: (event) => events.push(event) });
     const cache = getFarmDataCache();
     const key = createFarmCacheKey(["ppr", normalizeRevalidatePath("/dashboard"), ""]);
 
@@ -79,6 +87,21 @@ describe("server cache primitives", () => {
     revalidatePath("/dashboard");
 
     expect(cache.getEntry(key)).toBeUndefined();
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "cache.revalidatePath",
+          path: "/dashboard",
+          count: 1,
+        }),
+        expect.objectContaining({
+          type: "ppr.shell.invalidated",
+          route: "/dashboard",
+          reason: "revalidatePath",
+          count: 1,
+        }),
+      ]),
+    );
   });
 
   it("supports updateTag as immediate tag invalidation", async () => {
@@ -130,6 +153,34 @@ describe("server cache primitives", () => {
     expect(first).toEqual({ calls: 1 });
     expect(second).toEqual({ calls: 1 });
     expect(calls).toBe(1);
+  });
+
+  it("emits hit, miss, set, and tag revalidation observability events", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ onEvent: (event) => events.push(event) });
+    let calls = 0;
+    const getProduct = unstable_cache(
+      async (id: string) => {
+        calls++;
+        return { id, calls };
+      },
+      ["observability-product"],
+      { tags: ["products"], revalidate: 60 },
+    );
+
+    await getProduct("a");
+    await getProduct("a");
+    revalidateTag("products", "max");
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "cache.miss", level: "debug" }),
+        expect.objectContaining({ type: "cache.set", tags: ["products"], revalidate: 60 }),
+        expect.objectContaining({ type: "cache.hit", tags: ["products"], stale: false }),
+        expect.objectContaining({ type: "cache.revalidateTag", tag: "products", count: 1 }),
+      ]),
+    );
+    expect(events.every((event) => typeof event.timestamp === "number")).toBe(true);
   });
 
   it("normalizes paths and stable cache keys", () => {
