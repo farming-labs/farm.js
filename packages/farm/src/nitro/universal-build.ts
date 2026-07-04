@@ -1261,6 +1261,9 @@ function generateVirtualEntryCode(
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
     : "";
+  const markdownHandlerImport = config.md?.enabled
+    ? `import { createMarkdownMirrorResponse } from "farm/markdown";`
+    : "";
   const integrationImports = configModulePath
     ? `
 import * as FarmUserConfigModule from "${configModulePath}";
@@ -1317,6 +1320,7 @@ ${layoutImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${docsHandlerImport}
+${markdownHandlerImport}
 ${integrationImports}
 
 // Custom 404 page component (if provided)
@@ -1327,6 +1331,7 @@ const farmUserConfig = ${
   };
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
+const farmMarkdownConfig = ${JSON.stringify(config.md)};
 globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
   root: ${JSON.stringify(config.root)},
   srcDir: ${JSON.stringify(config.srcDir)},
@@ -1448,6 +1453,18 @@ async function handleRequest(request) {
     const docsResponse = await farmDocsHandler(request.clone());
     if (docsResponse) {
       return docsResponse;
+    }
+  }
+
+  if (farmMarkdownConfig?.enabled) {
+    const markdownResponse = await createMarkdownMirrorResponse({
+      request: request.clone(),
+      config: farmMarkdownConfig,
+      routeExists: (targetPathname) => Boolean(matchPageRoute(targetPathname)),
+      renderPage: (targetRequest) => handleRequest(targetRequest),
+    });
+    if (markdownResponse) {
+      return markdownResponse;
     }
   }
 

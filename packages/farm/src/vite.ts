@@ -15,6 +15,7 @@ import {
   getFarmDocsRouteTypeEntries,
   isFarmDocsAPIRequest,
 } from "./docs";
+import { createMarkdownMirrorResponse } from "./markdown";
 import { sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
@@ -280,6 +281,7 @@ export function farmPlugin(
         const requestMethod = req.method || "GET";
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
         const requestPathname = new URL(fullUrl).pathname;
+        const currentConfig = farmApp?.getConfig() ?? options;
 
         // Handle OpenAPI docs route
         if (openAPIManager && req.url === options.openapi?.route) {
@@ -304,7 +306,20 @@ export function farmPlugin(
           return;
         }
 
-        const currentConfig = farmApp?.getConfig() ?? options;
+        const markdownResponse = await createMarkdownMirrorResponse({
+          request: new Request(fullUrl, {
+            method: requestMethod,
+            headers: docsHeaders,
+          }),
+          config: farmApp.getConfig().md,
+          routeExists: (pathname) => Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
+          renderPage: async (request) => fetch(request),
+        });
+        if (markdownResponse) {
+          await sendWebResponse(res, markdownResponse);
+          return;
+        }
+
         const configuredIntegrations = currentConfig.integrations;
 
         const tryConfiguredIntegrationRoute = async () => {

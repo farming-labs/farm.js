@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
+import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 
 export type NitroPreset =
   | "node-server"
@@ -51,6 +52,7 @@ export interface FarmConfig {
   storage?: FarmStorageUserConfig;
   integrations?: FarmIntegrationsUserConfig;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
+  md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   /**
    * When true, Link href is not strictly typed (accepts any string).
    * Use when you want to skip route-type errors on Link or don't use generated route types.

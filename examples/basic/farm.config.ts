@@ -154,6 +154,11 @@ export default defineFarmConfig({
     entry: '/docs',
   },
 
+  md: {
+    expose: ['/', '/about', '/contact'],
+    cache: 60,
+  },
+
   // Plugins
   plugins: [
     createLoggerPlugin({}),
