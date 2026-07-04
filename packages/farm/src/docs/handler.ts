@@ -1,4 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
 import {
   buildDocsAgentDiscoverySpec,
@@ -20,6 +21,7 @@ import {
   type DocsMarkdownPage,
   type DocsSitemapPageInput,
 } from "@farming-labs/docs";
+import { marked, Renderer } from "marked";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
@@ -492,14 +494,6 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderInlineMarkdown(value: string): string {
-  return escapeHtml(value)
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
-}
-
 function shouldReturnMarkdown(request: Request): boolean {
   const url = new URL(request.url);
   return (
@@ -533,170 +527,54 @@ function createSlugger() {
   };
 }
 
-function splitTableRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|/, "")
-    .replace(/\|$/, "")
-    .split("|")
-    .map((cell) => cell.trim().replace(/\\\|/g, "|"));
+function stripHtml(value: string): string {
+  return value.replace(/<[^>]+>/g, "");
 }
 
-function isTableSeparator(line: string): boolean {
-  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+function stripMdxRuntimeSyntax(body: string): string {
+  return body.replace(/^\s*import\s.+$/gm, "").replace(/^\s*export\s+(const|default)\s.+$/gm, "");
 }
 
-function isTableRow(line: string): boolean {
-  return line.includes("|") && !line.trim().startsWith("```");
-}
-
-function renderRichMarkdown(body: string): string {
-  const lines = body
-    .replace(/^\s*import\s.+$/gm, "")
-    .replace(/^\s*export\s+(const|default)\s.+$/gm, "")
-    .split(/\r?\n/);
-  const html: string[] = [];
+function renderMarkdownHtml(body: string): string {
   const slug = createSlugger();
-  let inCode = false;
-  let inUnorderedList = false;
-  let inOrderedList = false;
-  let paragraph: string[] = [];
+  const renderer = new Renderer();
 
-  const flushParagraph = () => {
-    if (paragraph.length === 0) return;
-    html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
-    paragraph = [];
-  };
-  const closeLists = () => {
-    if (inUnorderedList) {
-      html.push("</ul>");
-      inUnorderedList = false;
-    }
-    if (inOrderedList) {
-      html.push("</ol>");
-      inOrderedList = false;
-    }
+  renderer.heading = (text, level, raw) => {
+    const id = slug(raw || stripHtml(text));
+    return `<h${level} id="${escapeAttribute(id)}"><a class="heading-anchor" href="#${escapeAttribute(id)}">${text}</a></h${level}>\n`;
   };
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
+  renderer.code = (code, infostring, escaped) => {
+    const language = (infostring || "").match(/^\S*/)?.[0] || "";
+    const codeHtml = escaped ? code : escapeHtml(code);
+    return `<pre class="code-block">${language ? `<span class="code-language">${escapeHtml(language)}</span>` : ""}<code${language ? ` class="language-${escapeAttribute(language)}"` : ""}>${codeHtml}</code></pre>\n`;
+  };
 
-    if (line.startsWith("```")) {
-      flushParagraph();
-      closeLists();
-      if (inCode) {
-        html.push("</code></pre>");
-        inCode = false;
-      } else {
-        const language = line.slice(3).trim();
-        html.push(
-          `<pre class="code-block">${language ? `<span class="code-language">${escapeHtml(language)}</span>` : ""}<code${language ? ` class="language-${escapeAttribute(language)}"` : ""}>`,
-        );
-        inCode = true;
-      }
-      continue;
-    }
+  renderer.table = (header, body) =>
+    `<div class="table-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>\n`;
 
-    if (inCode) {
-      html.push(escapeHtml(line));
-      continue;
-    }
+  renderer.blockquote = (quote) => `<blockquote>${quote}</blockquote>\n`;
+  renderer.codespan = (code) => `<code>${escapeHtml(code)}</code>`;
 
-    if (isTableRow(line) && isTableSeparator(lines[index + 1] || "")) {
-      flushParagraph();
-      closeLists();
-      const headers = splitTableRow(line);
-      index += 2;
-      const rows: string[][] = [];
-      while (index < lines.length && isTableRow(lines[index]) && lines[index].trim()) {
-        rows.push(splitTableRow(lines[index]));
-        index += 1;
-      }
-      index -= 1;
-      html.push(
-        `<div class="table-wrap"><table><thead><tr>${headers
-          .map((header) => `<th>${renderInlineMarkdown(header)}</th>`)
-          .join("")}</tr></thead><tbody>${rows
-          .map(
-            (row) =>
-              `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join("")}</tr>`,
-          )
-          .join("")}</tbody></table></div>`,
-      );
-      continue;
-    }
+  renderer.link = (href, title, text) => {
+    const safeHref = href || "";
+    const titleAttribute = title ? ` title="${escapeAttribute(title)}"` : "";
+    return `<a href="${escapeAttribute(safeHref)}"${titleAttribute}>${text}</a>`;
+  };
 
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
-      flushParagraph();
-      closeLists();
-      const level = heading[1].length;
-      const label = heading[2].trim();
-      const id = slug(label);
-      html.push(
-        `<h${level} id="${escapeAttribute(id)}"><a class="heading-anchor" href="#${escapeAttribute(id)}">${renderInlineMarkdown(label)}</a></h${level}>`,
-      );
-      continue;
-    }
+  renderer.image = (href, title, text) => {
+    const titleAttribute = title ? ` title="${escapeAttribute(title)}"` : "";
+    return `<img src="${escapeAttribute(href)}" alt="${escapeAttribute(text)}"${titleAttribute}>`;
+  };
 
-    const blockquote = line.match(/^\s*>\s?(.*)$/);
-    if (blockquote) {
-      flushParagraph();
-      closeLists();
-      const quoteLines = [blockquote[1]];
-      while (index + 1 < lines.length) {
-        const next = lines[index + 1].match(/^\s*>\s?(.*)$/);
-        if (!next) break;
-        quoteLines.push(next[1]);
-        index += 1;
-      }
-      html.push(`<blockquote>${quoteLines.map(renderInlineMarkdown).join("<br>")}</blockquote>`);
-      continue;
-    }
+  const html = marked(stripMdxRuntimeSyntax(body), {
+    async: false,
+    breaks: false,
+    gfm: true,
+    renderer,
+  }) as string;
 
-    const unorderedItem = line.match(/^\s*[-*]\s+(.+)$/);
-    if (unorderedItem) {
-      flushParagraph();
-      if (inOrderedList) {
-        html.push("</ol>");
-        inOrderedList = false;
-      }
-      if (!inUnorderedList) {
-        html.push("<ul>");
-        inUnorderedList = true;
-      }
-      html.push(`<li>${renderInlineMarkdown(unorderedItem[1].trim())}</li>`);
-      continue;
-    }
-
-    const orderedItem = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (orderedItem) {
-      flushParagraph();
-      if (inUnorderedList) {
-        html.push("</ul>");
-        inUnorderedList = false;
-      }
-      if (!inOrderedList) {
-        html.push("<ol>");
-        inOrderedList = true;
-      }
-      html.push(`<li>${renderInlineMarkdown(orderedItem[1].trim())}</li>`);
-      continue;
-    }
-
-    if (!line.trim()) {
-      flushParagraph();
-      closeLists();
-      continue;
-    }
-
-    paragraph.push(line.trim());
-  }
-
-  flushParagraph();
-  closeLists();
-  if (inCode) html.push("</code></pre>");
-  return html.join("\n");
+  return html.trim();
 }
 
 interface TocItem {
@@ -745,24 +623,6 @@ function getThemeName(docs: FarmDocsResolvedConfig): string {
     : "farm-docs";
 }
 
-function getThemeColor(docs: FarmDocsResolvedConfig, key: string, fallback: string): string {
-  const colors = getThemeUI(docs).colors;
-  return colors && typeof colors === "object" && key in colors
-    ? String((colors as Record<string, unknown>)[key] || fallback)
-    : fallback;
-}
-
-function getThemeFont(
-  docs: FarmDocsResolvedConfig,
-  key: "sans" | "mono",
-  fallback: string,
-): string {
-  const style = getThemeUI(docs).typography?.font?.style;
-  return style && typeof style === "object" && key in style
-    ? String((style as Record<string, unknown>)[key] || fallback)
-    : fallback;
-}
-
 function getThemeLayoutValue(docs: FarmDocsResolvedConfig, key: string, fallback: number): number {
   const layout = getThemeUI(docs).layout;
   const value =
@@ -807,66 +667,98 @@ function renderPixelToc(items: TocItem[]): string {
     .join("\n");
 }
 
-function renderPixelDocsCss(docs: FarmDocsResolvedConfig): string {
-  const background = getThemeColor(docs, "background", "hsl(0 0% 2%)");
-  const foreground = getThemeColor(docs, "primary", "oklch(0.985 0.001 106.423)");
-  const muted = getThemeColor(docs, "muted", "hsl(0 0% 55%)");
-  const border = getThemeColor(docs, "border", "hsl(0 0% 15%)");
-  const sans = getThemeFont(docs, "sans", "system-ui, -apple-system, sans-serif");
-  const mono = getThemeFont(docs, "mono", "ui-monospace, monospace");
+const themeCssCache = new Map<string, string>();
+
+function readCssWithImports(filePath: string, seen = new Set<string>()): string {
+  const resolved = path.resolve(filePath);
+  if (seen.has(resolved)) return "";
+  seen.add(resolved);
+
+  const source = readFileSync(resolved, "utf8");
+  return source.replace(/@import\s+["']([^"']+)["'];?/g, (_match, importPath: string) => {
+    try {
+      const importedPath = importPath.startsWith(".")
+        ? path.resolve(path.dirname(resolved), importPath)
+        : createRequire(resolved).resolve(importPath);
+      return readCssWithImports(importedPath, seen);
+    } catch {
+      return "";
+    }
+  });
+}
+
+function resolvePixelBorderThemeCss(options: FarmDocsHandlerOptions): string {
+  const cacheKey = path.resolve(options.root);
+  const cached = themeCssCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  try {
+    const requireFromApp = createRequire(path.join(cacheKey, "package.json"));
+    const themeCssPath = requireFromApp.resolve("@farming-labs/theme/pixel-border/css");
+    const css = readCssWithImports(themeCssPath);
+    themeCssCache.set(cacheKey, css);
+    return css;
+  } catch {
+    themeCssCache.set(cacheKey, "");
+    return "";
+  }
+}
+
+function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   const sidebarWidth = getThemeLayoutValue(docs, "sidebarWidth", 320);
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
 
   return `
-    :root { color-scheme: dark; --color-fd-background: ${background}; --color-fd-foreground: ${foreground}; --color-fd-card: hsl(0 0% 4%); --color-fd-muted: hsl(0 0% 10%); --color-fd-muted-foreground: ${muted}; --color-fd-border: ${border}; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-nav-height: 56px; --fd-docs-font-sans: ${sans}; --fd-docs-font-mono: ${mono}; --radius: 0px; }
+    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-docs-font-sans: var(--font-sans, system-ui, -apple-system, sans-serif); --fd-docs-font-mono: var(--font-mono, ui-monospace, monospace); }
     * { box-sizing: border-box; }
-    html { background: var(--color-fd-background); scroll-padding-top: 76px; }
-    body { margin: 0; min-height: 100vh; background: var(--color-fd-background); color: var(--color-fd-foreground); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
-    ::selection { background: var(--color-fd-foreground); color: var(--color-fd-background); }
+    html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
+    body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
     a { color: inherit; }
-    #nd-docs-layout { display: grid; grid-template-columns: var(--fd-sidebar-width) minmax(0, 1fr) 240px; min-height: 100vh; border-top: 1px solid var(--color-fd-border); background: var(--color-fd-background); }
-    .topbar { position: sticky; top: 0; z-index: 20; grid-column: 2 / 4; height: var(--fd-nav-height); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border); background: color-mix(in srgb, var(--color-fd-background) 92%, transparent); backdrop-filter: blur(12px); padding: 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
-    .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground); }
-    .topbar a:hover { color: var(--color-fd-foreground); }
-    .route-pill { border: 1px solid var(--color-fd-border); padding: 6px 9px; background: var(--color-fd-card); color: var(--color-fd-foreground); }
-    aside#nd-sidebar { position: sticky; top: 0; grid-row: 1 / span 2; height: 100vh; overflow: auto; border-right: 1px solid var(--color-fd-border); background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground) 4%, transparent), color-mix(in srgb, var(--color-fd-foreground) 4%, transparent) 1px, transparent 1px, transparent 7px), var(--color-fd-background); padding: 18px; }
-    .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin-bottom: 18px; border: 1px solid var(--color-fd-border); background: var(--color-fd-card); padding: 0 12px; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template-columns: var(--fd-sidebar-width) minmax(0, 1fr) 240px !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
+    .topbar { position: sticky; top: 0; z-index: 20; grid-column: 2 / 4; height: var(--fd-nav-height, 56px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
+    .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    .route-pill { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 6px 9px; background: var(--color-fd-card, hsl(0 0% 4%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    aside#nd-sidebar { position: sticky; top: 0; grid-row: 1 / span 2; height: 100vh; overflow: auto; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); padding: 18px; }
+    .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin-bottom: 18px; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 0 12px; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
     .sidebar-brand a { text-decoration: none; }
-    .sidebar-section { border-top: 1px solid var(--color-fd-border); padding: 15px 0 10px; }
-    .sidebar-section p { margin: 0 0 8px; color: var(--color-fd-muted-foreground); font-family: var(--fd-docs-font-mono); font-size: 11px; text-transform: uppercase; }
-    .sidebar-section a { display: block; margin: 0 -8px; border-left: 1px solid transparent; padding: 7px 8px; color: var(--color-fd-muted-foreground); text-decoration: none; font-size: 14px; line-height: 1.35; }
-    .sidebar-section a:hover, .sidebar-section a[data-active="true"] { border-left-color: var(--color-fd-foreground); background: var(--color-fd-muted); color: var(--color-fd-foreground); }
+    .sidebar-section { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 15px 0 10px; }
+    .sidebar-section p { margin: 0 0 8px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; text-transform: uppercase; }
+    .sidebar-section a { display: block; margin: 0 -8px; border-left: 1px solid transparent; padding: 7px 8px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 14px; line-height: 1.35; }
+    .sidebar-section a:hover, .sidebar-section a[data-active="true"] { border-left-color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); background: var(--color-fd-muted, hsl(0 0% 10%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     main { grid-column: 2; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
-    .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
     .prose h1 { margin: 0 0 16px; font-size: 36px; line-height: 1.14; letter-spacing: 0; }
-    .prose h2 { margin: 44px 0 14px; border-top: 1px solid var(--color-fd-border); padding-top: 26px; font-size: 24px; line-height: 1.24; letter-spacing: 0; }
+    .prose h2 { margin: 44px 0 14px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 26px; font-size: 24px; line-height: 1.24; letter-spacing: 0; }
     .prose h3 { margin: 30px 0 12px; font-size: 20px; line-height: 1.3; letter-spacing: 0; }
     .prose h4, .prose h5, .prose h6 { margin: 24px 0 10px; letter-spacing: 0; }
     .heading-anchor { color: inherit; text-decoration: none; }
     .heading-anchor:hover { text-decoration: underline; text-underline-offset: 4px; }
-    .prose p { margin: 14px 0; color: color-mix(in srgb, var(--color-fd-foreground) 74%, transparent); font-size: 15.6px; line-height: 1.8; }
-    .prose ul, .prose ol { margin: 16px 0; padding-left: 24px; color: color-mix(in srgb, var(--color-fd-foreground) 78%, transparent); line-height: 1.75; }
+    .prose p { margin: 14px 0; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 74%, transparent); font-size: 15.6px; line-height: 1.8; }
+    .prose ul, .prose ol { margin: 16px 0; padding-left: 24px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); line-height: 1.75; }
     .prose li { margin: 6px 0; }
-    .prose code:not(pre code) { border: 1px solid var(--color-fd-border); background: var(--color-fd-card); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; }
-    .code-block { position: relative; margin: 18px 0; overflow: auto; border: 1px solid var(--color-fd-border); background: linear-gradient(180deg, color-mix(in srgb, var(--color-fd-foreground) 5%, transparent), transparent 34px), hsl(0 0% 3%); padding: 38px 16px 16px; font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.65; }
-    .code-language { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--color-fd-border); padding: 8px 12px; color: var(--color-fd-muted-foreground); font-size: 11px; text-transform: uppercase; }
-    blockquote { margin: 18px 0; border: 1px solid var(--color-fd-border); border-left: 3px solid var(--color-fd-foreground); background: var(--color-fd-card); padding: 14px 16px; color: color-mix(in srgb, var(--color-fd-foreground) 78%, transparent); }
-    .table-wrap { margin: 18px 0; overflow-x: auto; border: 1px solid var(--color-fd-border); }
+    .prose code:not(pre code) { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; }
+    .code-block { position: relative; margin: 18px 0; overflow: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: linear-gradient(180deg, color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent), transparent 34px), hsl(0 0% 3%); padding: 38px 16px 16px; font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.65; }
+    .code-language { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 8px 12px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 11px; text-transform: uppercase; }
+    blockquote { margin: 18px 0; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-left: 3px solid var(--color-fd-foreground, oklch(0.985 0.001 106.423)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 14px 16px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); }
+    .table-wrap { margin: 18px 0; overflow-x: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { border-bottom: 1px solid var(--color-fd-border); padding: 11px 12px; text-align: left; vertical-align: top; }
-    th { background: var(--color-fd-card); color: var(--color-fd-foreground); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    th, td { border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 11px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--color-fd-card, hsl(0 0% 4%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
     tr:last-child td { border-bottom: 0; }
-    .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 42px; border-top: 1px solid var(--color-fd-border); padding-top: 18px; }
-    .page-actions a { border: 1px solid var(--color-fd-border); background: var(--color-fd-card); padding: 8px 10px; color: var(--color-fd-muted-foreground); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
-    .page-actions a:hover { color: var(--color-fd-foreground); }
-    .toc { position: sticky; top: calc(var(--fd-nav-height) + 24px); grid-column: 3; align-self: start; max-height: calc(100vh - 92px); overflow: auto; border-left: 1px solid var(--color-fd-border); padding: 24px 20px; }
+    hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
+    img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
+    .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 42px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 18px; }
+    .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    .toc { position: sticky; top: calc(var(--fd-nav-height, 56px) + 24px); grid-column: 3; align-self: start; max-height: calc(100vh - 92px); overflow: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 24px 20px; }
     .toc strong { display: block; margin-bottom: 12px; font-family: var(--fd-docs-font-mono); font-size: 11px; text-transform: uppercase; }
-    .toc a { display: block; padding: 5px 0; color: var(--color-fd-muted-foreground); text-decoration: none; font-size: 13px; line-height: 1.35; }
-    .toc a:hover { color: var(--color-fd-foreground); }
+    .toc a { display: block; padding: 5px 0; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13px; line-height: 1.35; }
+    .toc a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     .toc-level-3 { padding-left: 12px !important; }
     .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 22px !important; }
-    .toc-empty { color: var(--color-fd-muted-foreground); font-size: 13px; }
+    .toc-empty { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; }
     @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); } main { padding: 30px 20px 64px; } .toc { display: none; } .prose h1 { font-size: 32px; } }
   `;
 }
@@ -875,6 +767,7 @@ function renderPixelDocsHtml(
   page: LoadedFarmDocsPage,
   pages: FarmDocsPage[],
   docs: FarmDocsResolvedConfig,
+  themeCss: string,
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -894,7 +787,8 @@ function renderPixelDocsHtml(
   <title>${escapeHtml(page.title)}</title>
   <link rel="icon" href="${FARM_DOCS_FAVICON}">
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
-  <style>${renderPixelDocsCss(docs)}</style>
+  <style>${themeCss}
+${renderFarmDocsBridgeCss(docs)}</style>
 </head>
 <body>
   <div id="nd-docs-layout">
@@ -913,7 +807,7 @@ function renderPixelDocsHtml(
     <main>
       <article id="nd-page" class="prose">
         <p class="page-kicker">Documentation / ${escapeHtml(page.slug || "overview")}</p>
-${renderRichMarkdown(page.body)}
+${renderMarkdownHtml(page.body)}
         <div class="page-actions">
           <a href="${escapeAttribute(markdownUrl)}">Markdown</a>
           <a href="/sitemap.md">Sitemap</a>
@@ -964,12 +858,20 @@ export function createFarmDocsHandler(
       );
     }
 
-    return new Response(renderPixelDocsHtml(page, discoverFarmDocsPages(contentDir, docs), docs), {
-      status: 200,
-      headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+    return new Response(
+      renderPixelDocsHtml(
+        page,
+        discoverFarmDocsPages(contentDir, docs),
+        docs,
+        resolvePixelBorderThemeCss(options),
+      ),
+      {
+        status: 200,
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+        },
       },
-    });
+    );
   };
 }
