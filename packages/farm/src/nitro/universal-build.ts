@@ -1464,7 +1464,8 @@ function canCachePPRShell(request) {
   return (
     (method === "GET" || method === "HEAD") &&
     !request.headers.get("cookie") &&
-    !request.headers.get("authorization")
+    !request.headers.get("authorization") &&
+    !request.headers.get("x-farm-ppr-refresh")
   );
 }
 

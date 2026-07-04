@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 
 export const experimental_ppr = true;
 export const revalidate = 60;
@@ -9,8 +9,6 @@ export const metadata = {
 };
 
 export default function PPRDemoPage() {
-  const renderedAt = new Date().toISOString();
-
   return (
     <main className="max-w-3xl mx-auto space-y-6">
       <section className="space-y-3">
@@ -23,11 +21,33 @@ export default function PPRDemoPage() {
       </section>
 
       <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-        <h2 className="text-xl font-semibold text-gray-900">Rendered at</h2>
-        <code className="mt-3 block rounded bg-gray-950 p-4 text-sm text-green-300">
-          {renderedAt}
-        </code>
+        <h2 className="text-xl font-semibold text-gray-900">Dynamic island</h2>
+        <Suspense fallback={<DynamicIslandFallback />}>
+          <DynamicIsland />
+        </Suspense>
       </section>
     </main>
+  );
+}
+
+function DynamicIslandFallback() {
+  return (
+    <div
+      data-farm-ppr-hole="dynamic-island"
+      className="mt-3 rounded bg-gray-100 p-4 text-sm text-gray-600"
+    >
+      Preparing live server content...
+    </div>
+  );
+}
+
+async function DynamicIsland() {
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  const renderedAt = new Date().toISOString();
+
+  return (
+    <code className="mt-3 block rounded bg-gray-950 p-4 text-sm text-green-300">
+      {renderedAt}
+    </code>
   );
 }

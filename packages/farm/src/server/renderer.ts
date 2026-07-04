@@ -37,6 +37,46 @@ interface PPRShellCacheOptions {
   revalidate?: number;
 }
 
+function hasRequestHeader(req: FarmRequest, name: string): boolean {
+  const value = req.headers[name.toLowerCase()];
+  return Array.isArray(value) ? value.length > 0 : Boolean(value);
+}
+
+function findPPRDynamicChunkIndex(chunk: string): number {
+  const markerIndexes = [
+    chunk.indexOf('id="S:'),
+    chunk.indexOf("id='S:"),
+    chunk.indexOf("$RC("),
+    chunk.indexOf("$RS("),
+    chunk.indexOf("$RV("),
+    chunk.indexOf("$RX("),
+  ].filter((index) => index >= 0);
+
+  if (markerIndexes.length === 0) {
+    return -1;
+  }
+
+  const markerIndex = Math.min(...markerIndexes);
+  const tagStart = chunk.lastIndexOf("<", markerIndex);
+  return tagStart >= 0 ? tagStart : markerIndex;
+}
+
+function createPPRRefreshScript(): string {
+  return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;current.innerHTML=next.innerHTML;}fetch(window.location.href,{credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
+}
+
+function createDocumentFooter(options: {
+  suspenseRevealFallback: string;
+  refreshPPR?: boolean;
+}): string {
+  return `</div>
+  ${options.suspenseRevealFallback}
+  ${options.refreshPPR ? createPPRRefreshScript() : ""}
+  <script type="module" src="/@farm/client.js"></script>
+</body>
+</html>`;
+}
+
 function toMiddlewareMap(input: unknown): Map<string, any> {
   if (input instanceof Map) {
     return new Map(input as Map<string, any>);
@@ -179,6 +219,10 @@ export class ServerRenderer {
     }
 
     if (req.headers.cookie || req.headers.authorization) {
+      return false;
+    }
+
+    if (hasRequestHeader(req, "x-farm-ppr-refresh")) {
       return false;
     }
 
@@ -556,6 +600,7 @@ export class ServerRenderer {
           // Render with middleware data available
           await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData, {
             responseHeaders: pprHeaders,
+            captureStaticShell: Boolean(pprShellOptions),
             onComplete:
               pprShellOptions && req.method !== "HEAD"
                 ? (html) => this.cachePPRShell(pprShellOptions, html)
@@ -695,6 +740,7 @@ export class ServerRenderer {
     options: {
       responseHeaders?: Record<string, string> | undefined;
       onComplete?: (html: string) => void | Promise<void>;
+      captureStaticShell?: boolean;
     } = {},
   ): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -708,6 +754,8 @@ export class ServerRenderer {
       }
 
       const htmlParts: string[] = [];
+      const staticShellParts: string[] | undefined = options.captureStaticShell ? [] : undefined;
+      let staticShellClosed = false;
       let didError = false;
 
       // Get the page path for client-side hydration
@@ -827,6 +875,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 <body class="">
   <div id="root">`;
           htmlParts.push(shell);
+          staticShellParts?.push(shell);
 
           let firstChunk = true;
           const writableStream = new Writable({
@@ -835,7 +884,21 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
                 console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
                 firstChunk = false;
               }
-              htmlParts.push(Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk));
+              const chunkText = Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk);
+              htmlParts.push(chunkText);
+
+              if (staticShellParts && !staticShellClosed) {
+                const dynamicIndex = findPPRDynamicChunkIndex(chunkText);
+                if (dynamicIndex >= 0) {
+                  if (dynamicIndex > 0) {
+                    staticShellParts.push(chunkText.slice(0, dynamicIndex));
+                  }
+                  staticShellClosed = true;
+                } else {
+                  staticShellParts.push(chunkText);
+                }
+              }
+
               res.write(chunk, encoding, () => {
                 if (typeof (res as any).flush === "function") (res as any).flush();
                 callback();
@@ -843,11 +906,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
             },
             final(callback) {
               const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-              const footer = `</div>
-  ${suspenseRevealFallback}
-  <script type="module" src="/@farm/client.js"></script>
-</body>
-</html>`;
+              const footer = createDocumentFooter({ suspenseRevealFallback });
               htmlParts.push(footer);
               res.write(footer);
               res.end();
@@ -856,7 +915,19 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
                 clearMiddlewareData();
               }
               if (!didError && options.onComplete) {
-                Promise.resolve(options.onComplete(htmlParts.join(""))).catch((error) => {
+                if (staticShellParts) {
+                  staticShellParts.push(
+                    createDocumentFooter({
+                      suspenseRevealFallback,
+                      refreshPPR: staticShellClosed,
+                    }),
+                  );
+                }
+
+                const cachedHtml = staticShellParts
+                  ? staticShellParts.join("")
+                  : htmlParts.join("");
+                Promise.resolve(options.onComplete(cachedHtml)).catch((error) => {
                   logger.warn(`Failed to cache PPR shell: ${error}`);
                 });
               }
