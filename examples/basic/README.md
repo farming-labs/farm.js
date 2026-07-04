@@ -84,6 +84,25 @@ The first request returns `X-Farm-PPR: miss`; the next matching request returns 
 Cached hits serve the Suspense fallback shell first, then refresh the dynamic island with a
 same-origin bypass request.
 
+### Cache and PPR observability
+
+Farm can emit runtime events for cache, PPR, rendering, routes, APIs, integrations, middleware,
+storage, build, plugins, and errors. This example can enable the default logs or send events to a
+custom handler from `farm.config.ts`:
+
+```ts
+export default defineFarmConfig({
+  observability: {
+    logs: true,
+    onEvent(event) {
+      if (event.type.startsWith("ppr.") || event.type.startsWith("cache.")) {
+        console.log(event);
+      }
+    },
+  },
+});
+```
+
 ### Monorepo note
 
 If you change code in `packages/farm` or `packages/farmjs-plugin`, rebuild the workspace packages before restarting this example:

@@ -74,7 +74,10 @@ describe("loadConfig", () => {
   it("throws when a discovered config file fails to import", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-env-"));
 
-    await fs.writeFile(path.join(root, "farm.config.mjs"), "throw new Error('broken config import');");
+    await fs.writeFile(
+      path.join(root, "farm.config.mjs"),
+      "throw new Error('broken config import');",
+    );
 
     await expect(loadConfig(root, undefined, "development")).rejects.toThrow(
       "Failed to load config from farm.config.mjs: broken config import",
@@ -124,6 +127,28 @@ describe("loadConfig", () => {
     expect(config).toMatchObject({
       srcDir: "src",
       deploy: { target: "vercel" },
+    });
+  });
+});
+
+describe("resolveConfig", () => {
+  it("preserves observability config and event callbacks", async () => {
+    const onEvent = () => {};
+    const config = await resolveConfig(
+      {
+        observability: {
+          logs: true,
+          onEvent,
+          events: ["cache.hit", "ppr.shell.cached"],
+        },
+      },
+      "development",
+    );
+
+    expect(config.observability).toMatchObject({
+      logs: true,
+      onEvent,
+      events: ["cache.hit", "ppr.shell.cached"],
     });
   });
 });

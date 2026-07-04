@@ -27,6 +27,7 @@ export * from "./query";
 export * from "./middleware";
 export * from "./docs";
 export * from "./markdown";
+export * from "./observability";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";

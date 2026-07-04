@@ -4,6 +4,7 @@ import type { FarmMarkdownResolvedConfig } from "./markdown";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
+import { configureFarmObservability } from "./observability";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
 import path from "path";
@@ -21,7 +22,13 @@ const defaultDocsConfig: FarmDocsResolvedConfig = {
 };
 
 function isResolvedDocsConfig(value: FarmConfig["docs"]): value is FarmDocsResolvedConfig {
-  return !!value && typeof value === "object" && "enabled" in value && "entry" in value && "config" in value;
+  return (
+    !!value &&
+    typeof value === "object" &&
+    "enabled" in value &&
+    "entry" in value &&
+    "config" in value
+  );
 }
 
 export class FarmApp {
@@ -32,6 +39,7 @@ export class FarmApp {
 
   constructor(config: FarmConfig = {}, viteServer?: ViteDevServer) {
     this.config = this.normalizeConfig(config);
+    configureFarmObservability(this.config.observability);
     this.viteServer = viteServer;
     this.routeManager = new RouteManager(this.config, viteServer);
     this.serverRenderer = new ServerRenderer(this.config, this.routeManager);
@@ -82,6 +90,7 @@ export class FarmApp {
       integrations: config.integrations || {},
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
+      observability: config.observability ?? false,
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? false,

@@ -13,6 +13,7 @@ import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
+import { emitFarmEvent } from "../observability";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -197,8 +198,9 @@ export class ServerRenderer {
   }
 
   private cachePPRShell(options: PPRShellCacheOptions, html: string): void {
+    const key = this.getPPRCacheKey(options.pathname, options.search);
     this.dataCache.set(
-      this.getPPRCacheKey(options.pathname, options.search),
+      key,
       { html },
       {
         paths: [options.pathname],
@@ -206,27 +208,45 @@ export class ServerRenderer {
         revalidate: options.revalidate ?? false,
       },
     );
+    emitFarmEvent({
+      type: "ppr.shell.cached",
+      route: options.pathname,
+      key,
+      revalidate: options.revalidate,
+    });
   }
 
-  private canCachePPRShell(
+  private getPPRShellBypassReason(
     req: FarmRequest,
     middlewareMap: Map<string, any>,
     pluginExposedContext: Map<string, any>,
-  ): boolean {
+  ): string | undefined {
     const method = (req.method || "GET").toUpperCase();
     if (method !== "GET" && method !== "HEAD") {
-      return false;
+      return "method";
     }
 
-    if (req.headers.cookie || req.headers.authorization) {
-      return false;
+    if (req.headers.cookie) {
+      return "cookie";
+    }
+
+    if (req.headers.authorization) {
+      return "authorization";
     }
 
     if (hasRequestHeader(req, "x-farm-ppr-refresh")) {
-      return false;
+      return "refresh";
     }
 
-    return middlewareMap.size === 0 && pluginExposedContext.size === 0;
+    if (middlewareMap.size > 0) {
+      return "middleware-data";
+    }
+
+    if (pluginExposedContext.size > 0) {
+      return "plugin-context";
+    }
+
+    return undefined;
   }
 
   private getPPRHeaders(status: "hit" | "miss" | "bypass", revalidate?: number) {
@@ -360,6 +380,7 @@ export class ServerRenderer {
   }
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
+    const renderStartTime = Date.now();
     let pathname = "/";
     let params: Record<string, string> = {};
     let layouts: Array<{ modulePath: string }> = [];
@@ -367,17 +388,32 @@ export class ServerRenderer {
     let middlewareMap = new Map<string, any>();
     let pluginExposedContext = new Map<string, any>();
     let errorBoundaryEntry: { modulePath: string } | null = null;
+    let pprRefreshRoute: string | null = null;
+
+    const completeRender = (status = res.statusCode || 200, route = pathname) => {
+      emitFarmEvent({
+        type: "render.complete",
+        route,
+        pathname,
+        status,
+        durationMs: Date.now() - renderStartTime,
+      });
+    };
 
     try {
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
       pathname = url.pathname;
+      emitFarmEvent({ type: "render.start", route: pathname, pathname });
 
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
         const ssgPage = this.shouldServeSSG(pathname);
         if (ssgPage) {
           const served = await this.serveSSGPage(req, res, ssgPage);
-          if (served) return;
+          if (served) {
+            completeRender(res.statusCode || 200, ssgPage.urlPath);
+            return;
+          }
         }
       }
 
@@ -388,9 +424,18 @@ export class ServerRenderer {
       layouts = match.layouts;
 
       if (!route) {
+        emitFarmEvent({ type: "route.notFound", pathname });
         await this.render404(req, res);
+        completeRender(404);
         return;
       }
+
+      emitFarmEvent({
+        type: "route.matched",
+        pathname,
+        route: route.pattern,
+        params,
+      });
 
       const loadingBoundaryEntry = this.routeManager.getMatchingLoading(pathname);
       errorBoundaryEntry = this.routeManager.getMatchingError(pathname);
@@ -433,8 +478,10 @@ export class ServerRenderer {
         routeModule,
         route.modulePath,
       );
-      const canCachePPRShell =
-        renderingConfig.ppr && this.canCachePPRShell(req, middlewareMap, pluginExposedContext);
+      const pprBypassReason = renderingConfig.ppr
+        ? this.getPPRShellBypassReason(req, middlewareMap, pluginExposedContext)
+        : undefined;
+      const canCachePPRShell = renderingConfig.ppr && !pprBypassReason;
       const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
         ? {
             pathname,
@@ -443,12 +490,26 @@ export class ServerRenderer {
           }
         : undefined;
 
+      if (renderingConfig.ppr && pprBypassReason) {
+        emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
+        emitFarmEvent({ type: "cache.bypass", route: pathname, reason: pprBypassReason });
+
+        if (pprBypassReason === "refresh") {
+          pprRefreshRoute = pathname;
+          emitFarmEvent({ type: "ppr.refresh.start", route: pathname });
+        }
+      }
+
       if (pprShellOptions) {
+        const pprCacheKey = this.getPPRCacheKey(pathname, url.search);
         const cachedPPRShell = this.getCachedPPRShell(pathname, url.search);
         if (cachedPPRShell) {
+          emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
           this.serveCachedPPRShell(res, cachedPPRShell.value, renderingConfig.revalidate);
+          completeRender(res.statusCode || 200, pathname);
           return;
         }
+        emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
       }
 
       let LoadingFallbackComponent: React.ComponentType<any> | null = null;
@@ -601,14 +662,30 @@ export class ServerRenderer {
           await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData, {
             responseHeaders: pprHeaders,
             captureStaticShell: Boolean(pprShellOptions),
+            observabilityRoute: pathname,
+            onSuspenseHoleDetected: pprShellOptions
+              ? () => emitFarmEvent({ type: "ppr.suspense.holeDetected", route: pathname })
+              : undefined,
             onComplete:
               pprShellOptions && req.method !== "HEAD"
                 ? (html) => this.cachePPRShell(pprShellOptions, html)
                 : undefined,
           });
+          if (pprRefreshRoute) {
+            emitFarmEvent({
+              type: "ppr.refresh.complete",
+              route: pprRefreshRoute,
+              durationMs: Date.now() - renderStartTime,
+            });
+          }
+          completeRender(res.statusCode || 200, pathname);
         });
       });
     } catch (error) {
+      emitFarmEvent({ type: "render.error", route: pathname, error });
+      if (pprRefreshRoute) {
+        emitFarmEvent({ type: "ppr.refresh.error", route: pprRefreshRoute, error });
+      }
       logger.error(`Error rendering page: ${error}`);
 
       if (res.headersSent || (res as any).writableEnded) {
@@ -741,10 +818,15 @@ export class ServerRenderer {
       responseHeaders?: Record<string, string> | undefined;
       onComplete?: (html: string) => void | Promise<void>;
       captureStaticShell?: boolean;
+      observabilityRoute?: string;
+      onSuspenseHoleDetected?: () => void;
     } = {},
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const streamStartTime = Date.now();
+      const observabilityRoute =
+        options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
+      emitFarmEvent({ type: "render.stream.start", route: observabilityRoute });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
         res.setHeader(key, value);
@@ -756,6 +838,7 @@ export class ServerRenderer {
       const htmlParts: string[] = [];
       const staticShellParts: string[] | undefined = options.captureStaticShell ? [] : undefined;
       let staticShellClosed = false;
+      let suspenseHoleEmitted = false;
       let didError = false;
 
       // Get the page path for client-side hydration
@@ -858,6 +941,11 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
       const { pipe, abort } = renderToPipeableStream(streamRoot, {
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
+          emitFarmEvent({
+            type: "render.stream.shellReady",
+            route: observabilityRoute,
+            durationMs: shellReadyMs,
+          });
           if (process.env.FARM_VERBOSE) {
             console.log(`[FARM STREAM] onShellReady at ${shellReadyMs}ms`);
           }
@@ -894,6 +982,10 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
                     staticShellParts.push(chunkText.slice(0, dynamicIndex));
                   }
                   staticShellClosed = true;
+                  if (!suspenseHoleEmitted) {
+                    suspenseHoleEmitted = true;
+                    options.onSuspenseHoleDetected?.();
+                  }
                 } else {
                   staticShellParts.push(chunkText);
                 }
@@ -931,6 +1023,11 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
                   logger.warn(`Failed to cache PPR shell: ${error}`);
                 });
               }
+              emitFarmEvent({
+                type: "render.stream.complete",
+                route: observabilityRoute,
+                durationMs: Date.now() - streamStartTime,
+              });
               resolve();
             },
           });
@@ -947,6 +1044,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
         onShellError(error) {
           didError = true;
           logger.error(`SSR shell error: ${error}`);
+          emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
 
           if (clearMiddlewareData) {
             clearMiddlewareData();
@@ -957,6 +1055,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
         onError(error) {
           didError = true;
           logger.error(`SSR streaming error: ${error}`);
+          emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
         },
       });
     });

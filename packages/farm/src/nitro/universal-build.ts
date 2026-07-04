@@ -84,7 +84,16 @@ function hasProjectPostcssConfig(root: string): boolean {
 
 async function findFarmConfigPath(root: string): Promise<string | null> {
   const fs = await import("fs/promises");
-  const candidates = ["farm.config.ts", "farm.config.js", "farm.config.mjs"];
+  const candidates = [
+    "farm.config.ts",
+    "farm.config.mts",
+    "farm.config.js",
+    "farm.config.mjs",
+    "config.ts",
+    "config.mts",
+    "config.js",
+    "config.mjs",
+  ];
 
   for (const candidate of candidates) {
     const resolvedPath = path.join(root, candidate);
@@ -1052,7 +1061,12 @@ async function buildSSRInMemory(
   );
 
   const hasConfiguredIntegrations = Object.keys(config.integrations || {}).length > 0;
-  const configModulePath = hasConfiguredIntegrations ? await findFarmConfigPath(root) : null;
+  const hasObservabilityHandler =
+    !!config.observability &&
+    typeof config.observability === "object" &&
+    "onEvent" in config.observability;
+  const configModulePath =
+    hasConfiguredIntegrations || hasObservabilityHandler ? await findFarmConfigPath(root) : null;
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
@@ -1259,6 +1273,7 @@ function generateVirtualEntryCode(
       ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "farm/api/route-manager";`
       : "";
   const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
+  const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
     : "";
@@ -1321,6 +1336,7 @@ ${layoutImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${cacheHelpersImport}
+${observabilityHelpersImport}
 ${docsHandlerImport}
 ${markdownHandlerImport}
 ${integrationImports}
@@ -1334,6 +1350,10 @@ const farmUserConfig = ${
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
 const farmMarkdownConfig = ${JSON.stringify(config.md)};
+const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringify(
+    config.observability ?? false,
+  )};
+configureFarmObservability(farmObservabilityConfig);
 globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
   root: ${JSON.stringify(config.root)},
   srcDir: ${JSON.stringify(config.srcDir)},
@@ -1459,14 +1479,13 @@ function resolvePPRConfig(routeModule) {
   return { enabled, revalidate };
 }
 
-function canCachePPRShell(request) {
+function getPPRShellBypassReason(request) {
   const method = request.method.toUpperCase();
-  return (
-    (method === "GET" || method === "HEAD") &&
-    !request.headers.get("cookie") &&
-    !request.headers.get("authorization") &&
-    !request.headers.get("x-farm-ppr-refresh")
-  );
+  if (method !== "GET" && method !== "HEAD") return "method";
+  if (request.headers.get("cookie")) return "cookie";
+  if (request.headers.get("authorization")) return "authorization";
+  if (request.headers.get("x-farm-ppr-refresh")) return "refresh";
+  return undefined;
 }
 
 function getPPRShellCacheKey(url) {
@@ -1505,6 +1524,7 @@ function getCachedPPRShell(cacheKey) {
 async function handleRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
+  const requestStartTime = Date.now();
 
   const integrationResponse = await handleIntegrationRequest(request.clone());
   if (integrationResponse) {
@@ -1551,17 +1571,35 @@ async function handleRequest(request) {
   }
 
   // Handle page routes (SSR)
+  emitFarmEvent({ type: "render.start", route: pathname, pathname });
   const matchedRoute = matchPageRoute(pathname);
   if (matchedRoute) {
     const { route, params } = matchedRoute;
+    emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
     
     try {
       const pprConfig = resolvePPRConfig(route.module);
-      const pprCanCache = pprConfig.enabled && canCachePPRShell(request);
+      const pprBypassReason = pprConfig.enabled ? getPPRShellBypassReason(request) : undefined;
+      const pprCanCache = pprConfig.enabled && !pprBypassReason;
       const pprCacheKey = pprCanCache ? getPPRShellCacheKey(url) : null;
+      if (pprConfig.enabled && pprBypassReason) {
+        emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
+        emitFarmEvent({ type: "cache.bypass", route: pathname, reason: pprBypassReason });
+        if (pprBypassReason === "refresh") {
+          emitFarmEvent({ type: "ppr.refresh.start", route: pathname });
+        }
+      }
       if (pprCacheKey) {
         const cachedPPRShell = getCachedPPRShell(pprCacheKey);
         if (cachedPPRShell) {
+          emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
+          emitFarmEvent({
+            type: "render.complete",
+            route: pathname,
+            pathname,
+            status: 200,
+            durationMs: Date.now() - requestStartTime,
+          });
           return new Response(cachedPPRShell, {
             status: 200,
             headers: {
@@ -1570,6 +1608,7 @@ async function handleRequest(request) {
             },
           });
         }
+        emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
       }
 
       // Get the page component and metadata
@@ -1718,7 +1757,29 @@ async function handleRequest(request) {
               revalidate: pprConfig.revalidate ?? false,
             }
           );
+          emitFarmEvent({
+            type: "ppr.shell.cached",
+            route: pathname,
+            key: pprCacheKey,
+            revalidate: pprConfig.revalidate,
+          });
         }
+
+        if (pprBypassReason === "refresh") {
+          emitFarmEvent({
+            type: "ppr.refresh.complete",
+            route: pathname,
+            durationMs: Date.now() - requestStartTime,
+          });
+        }
+
+        emitFarmEvent({
+          type: "render.complete",
+          route: pathname,
+          pathname,
+          status: 200,
+          durationMs: Date.now() - requestStartTime,
+        });
 
         return new Response(
           fullHtml,
@@ -1729,6 +1790,7 @@ async function handleRequest(request) {
         );
       }
     } catch (error) {
+      emitFarmEvent({ type: "render.error", route: pathname, error });
       console.error("SSR Error:", error);
       return new Response(
         \`<html><body><h1>Error</h1><p>\${error.message}</p><pre>\${error.stack}</pre></body></html>\`,
@@ -1738,6 +1800,7 @@ async function handleRequest(request) {
   }
 
   // 404 fallback - render proper HTML page
+  emitFarmEvent({ type: "route.notFound", pathname });
   try {
     const ReactDOMServer = await import("react-dom/server");
     const React = await import("react");
@@ -1863,6 +1926,14 @@ async function handleRequest(request) {
 </html>\`;
     }
     
+    emitFarmEvent({
+      type: "render.complete",
+      route: pathname,
+      pathname,
+      status: 404,
+      durationMs: Date.now() - requestStartTime,
+    });
+
     return new Response(fullHtml, {
       status: 404,
       headers: { "Content-Type": "text/html; charset=utf-8" }

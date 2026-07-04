@@ -3,6 +3,7 @@ import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
+import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
@@ -125,6 +126,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   deploy?: FarmDeployConfig;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
+  observability?: FarmObservabilityUserConfig;
 
   trailingSlash?: boolean;
   redirects?: () => Promise<RedirectConfig[]> | RedirectConfig[];
@@ -283,7 +285,11 @@ export const DOCS_CONFIG_FILENAMES = [
 function normalizeDocsRoute(value: string | undefined, fallback = "/docs"): string {
   const raw = (value || fallback).trim();
   if (!raw || raw === "/") return "/";
-  const normalized = raw.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/?/, "/").replace(/\/+$/, "");
+  const normalized = raw
+    .replace(/\\/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^\/?/, "/")
+    .replace(/\/+$/, "");
   return normalized || "/";
 }
 
@@ -339,7 +345,10 @@ function sanitizeDocsConfig(config: Partial<DocsConfig>): Partial<DocsConfig> {
   return cloneSerializable(config) || {};
 }
 
-export async function findDocsConfigPath(rootDir: string, configPath?: string): Promise<string | undefined> {
+export async function findDocsConfigPath(
+  rootDir: string,
+  configPath?: string,
+): Promise<string | undefined> {
   const { existsSync } = await import("fs");
   const root = rootDir || process.cwd();
 
@@ -472,8 +481,10 @@ export async function resolveDocsConfig(
   };
 
   const explicitRoute = typeof docsOptions.entry === "string" ? docsOptions.entry : undefined;
-  const configuredDocsPath = typeof mergedDocsConfig.docsPath === "string" ? mergedDocsConfig.docsPath : undefined;
-  const configuredEntry = typeof mergedDocsConfig.entry === "string" ? mergedDocsConfig.entry : undefined;
+  const configuredDocsPath =
+    typeof mergedDocsConfig.docsPath === "string" ? mergedDocsConfig.docsPath : undefined;
+  const configuredEntry =
+    typeof mergedDocsConfig.entry === "string" ? mergedDocsConfig.entry : undefined;
   const entryRoute = normalizeDocsRoute(
     configuredDocsPath || explicitRoute || (configuredEntry ? `/${configuredEntry}` : undefined),
   );
@@ -533,6 +544,7 @@ export async function resolveConfig(
     deploy,
     docs,
     md,
+    observability: userConfig.observability ?? false,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
