@@ -11,6 +11,7 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
+    "@farming-labs/docs": "^0.2.44",
     "@farmjs/core": "workspace:*",
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",

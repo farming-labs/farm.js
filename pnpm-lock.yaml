@@ -51,6 +51,9 @@ importers:
 
   docs:
     dependencies:
+      '@farming-labs/docs':
+        specifier: ^0.2.44
+        version: 0.2.44(react@19.2.4)(supports-color@10.2.2)
       '@farmjs/core':
         specifier: workspace:*
         version: link:../packages/farm
@@ -3963,7 +3966,7 @@ packages:
       express: 5.2.1(supports-color@10.2.2)
       express-rate-limit: 8.5.2(express@5.2.1)
       hono: 4.12.27
-      jose: 6.2.1
+      jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.1
       raw-body: 3.0.2

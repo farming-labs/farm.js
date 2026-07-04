@@ -42,6 +42,8 @@ export interface LoadedFarmDocsPage extends FarmDocsPage {
 
 const DOCS_FILE_NAMES = ["page.mdx", "page.md", "index.mdx", "index.md"];
 const DOCS_FILE_EXTENSIONS = [".mdx", ".md"];
+const FARM_DOCS_FAVICON =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
@@ -498,14 +500,66 @@ function renderInlineMarkdown(value: string): string {
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
 }
 
-function renderMarkdown(body: string): string {
+function shouldReturnMarkdown(request: Request): boolean {
+  const url = new URL(request.url);
+  return (
+    url.pathname.endsWith(".md") ||
+    request.headers.get("accept")?.includes("text/markdown") === true ||
+    request.headers.get("accept")?.includes("text/plain") === true
+  );
+}
+
+function escapeAttribute(value: string): string {
+  return escapeHtml(value).replace(/'/g, "&#39;");
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/<[^>]+>/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function createSlugger() {
+  const seen = new Map<string, number>();
+
+  return (value: string) => {
+    const base = slugify(value) || "section";
+    const count = seen.get(base) || 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base}-${count + 1}`;
+  };
+}
+
+function splitTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim().replace(/\\\|/g, "|"));
+}
+
+function isTableSeparator(line: string): boolean {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function isTableRow(line: string): boolean {
+  return line.includes("|") && !line.trim().startsWith("```");
+}
+
+function renderRichMarkdown(body: string): string {
   const lines = body
     .replace(/^\s*import\s.+$/gm, "")
     .replace(/^\s*export\s+(const|default)\s.+$/gm, "")
     .split(/\r?\n/);
   const html: string[] = [];
+  const slug = createSlugger();
   let inCode = false;
-  let inList = false;
+  let inUnorderedList = false;
+  let inOrderedList = false;
   let paragraph: string[] = [];
 
   const flushParagraph = () => {
@@ -513,21 +567,31 @@ function renderMarkdown(body: string): string {
     html.push(`<p>${renderInlineMarkdown(paragraph.join(" "))}</p>`);
     paragraph = [];
   };
-  const closeList = () => {
-    if (!inList) return;
-    html.push("</ul>");
-    inList = false;
+  const closeLists = () => {
+    if (inUnorderedList) {
+      html.push("</ul>");
+      inUnorderedList = false;
+    }
+    if (inOrderedList) {
+      html.push("</ol>");
+      inOrderedList = false;
+    }
   };
 
-  for (const line of lines) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+
     if (line.startsWith("```")) {
       flushParagraph();
-      closeList();
+      closeLists();
       if (inCode) {
         html.push("</code></pre>");
         inCode = false;
       } else {
-        html.push("<pre><code>");
+        const language = line.slice(3).trim();
+        html.push(
+          `<pre class="code-block">${language ? `<span class="code-language">${escapeHtml(language)}</span>` : ""}<code${language ? ` class="language-${escapeAttribute(language)}"` : ""}>`,
+        );
         inCode = true;
       }
       continue;
@@ -538,29 +602,91 @@ function renderMarkdown(body: string): string {
       continue;
     }
 
-    const heading = line.match(/^(#{1,6})\s+(.+)$/);
-    if (heading) {
+    if (isTableRow(line) && isTableSeparator(lines[index + 1] || "")) {
       flushParagraph();
-      closeList();
-      const level = heading[1].length;
-      html.push(`<h${level}>${renderInlineMarkdown(heading[2].trim())}</h${level}>`);
+      closeLists();
+      const headers = splitTableRow(line);
+      index += 2;
+      const rows: string[][] = [];
+      while (index < lines.length && isTableRow(lines[index]) && lines[index].trim()) {
+        rows.push(splitTableRow(lines[index]));
+        index += 1;
+      }
+      index -= 1;
+      html.push(
+        `<div class="table-wrap"><table><thead><tr>${headers
+          .map((header) => `<th>${renderInlineMarkdown(header)}</th>`)
+          .join("")}</tr></thead><tbody>${rows
+          .map(
+            (row) =>
+              `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join("")}</tr>`,
+          )
+          .join("")}</tbody></table></div>`,
+      );
       continue;
     }
 
-    const listItem = line.match(/^\s*[-*]\s+(.+)$/);
-    if (listItem) {
+    const heading = line.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
       flushParagraph();
-      if (!inList) {
-        html.push("<ul>");
-        inList = true;
+      closeLists();
+      const level = heading[1].length;
+      const label = heading[2].trim();
+      const id = slug(label);
+      html.push(
+        `<h${level} id="${escapeAttribute(id)}"><a class="heading-anchor" href="#${escapeAttribute(id)}">${renderInlineMarkdown(label)}</a></h${level}>`,
+      );
+      continue;
+    }
+
+    const blockquote = line.match(/^\s*>\s?(.*)$/);
+    if (blockquote) {
+      flushParagraph();
+      closeLists();
+      const quoteLines = [blockquote[1]];
+      while (index + 1 < lines.length) {
+        const next = lines[index + 1].match(/^\s*>\s?(.*)$/);
+        if (!next) break;
+        quoteLines.push(next[1]);
+        index += 1;
       }
-      html.push(`<li>${renderInlineMarkdown(listItem[1].trim())}</li>`);
+      html.push(`<blockquote>${quoteLines.map(renderInlineMarkdown).join("<br>")}</blockquote>`);
+      continue;
+    }
+
+    const unorderedItem = line.match(/^\s*[-*]\s+(.+)$/);
+    if (unorderedItem) {
+      flushParagraph();
+      if (inOrderedList) {
+        html.push("</ol>");
+        inOrderedList = false;
+      }
+      if (!inUnorderedList) {
+        html.push("<ul>");
+        inUnorderedList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(unorderedItem[1].trim())}</li>`);
+      continue;
+    }
+
+    const orderedItem = line.match(/^\s*\d+\.\s+(.+)$/);
+    if (orderedItem) {
+      flushParagraph();
+      if (inUnorderedList) {
+        html.push("</ul>");
+        inUnorderedList = false;
+      }
+      if (!inOrderedList) {
+        html.push("<ol>");
+        inOrderedList = true;
+      }
+      html.push(`<li>${renderInlineMarkdown(orderedItem[1].trim())}</li>`);
       continue;
     }
 
     if (!line.trim()) {
       flushParagraph();
-      closeList();
+      closeLists();
       continue;
     }
 
@@ -568,21 +694,184 @@ function renderMarkdown(body: string): string {
   }
 
   flushParagraph();
-  closeList();
+  closeLists();
   if (inCode) html.push("</code></pre>");
   return html.join("\n");
 }
 
-function shouldReturnMarkdown(request: Request): boolean {
-  const url = new URL(request.url);
-  return (
-    url.pathname.endsWith(".md") ||
-    request.headers.get("accept")?.includes("text/markdown") === true ||
-    request.headers.get("accept")?.includes("text/plain") === true
-  );
+interface TocItem {
+  id: string;
+  title: string;
+  level: number;
 }
 
-function renderDocsHtml(
+function extractTocItems(body: string, depth: number): TocItem[] {
+  const slug = createSlugger();
+  const maxLevel = Math.max(2, Math.min(depth, 6));
+
+  return body
+    .split(/\r?\n/)
+    .map((line) => line.match(/^(#{2,6})\s+(.+)$/))
+    .filter((match): match is RegExpMatchArray => Boolean(match))
+    .map((match) => ({
+      id: slug(match[2].trim()),
+      title: match[2].trim(),
+      level: match[1].length,
+    }))
+    .filter((item) => item.level <= maxLevel);
+}
+
+function titleFromGroup(value: string): string {
+  if (!value) return "Overview";
+  if (value === "api") return "API";
+  return value
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function getThemeUI(docs: FarmDocsResolvedConfig): Record<string, any> {
+  const theme = docs.config.theme;
+  return theme && typeof theme === "object" && "ui" in theme && typeof theme.ui === "object"
+    ? (theme.ui as Record<string, any>)
+    : {};
+}
+
+function getThemeName(docs: FarmDocsResolvedConfig): string {
+  const theme = docs.config.theme;
+  return theme && typeof theme === "object" && "name" in theme
+    ? String((theme as { name?: unknown }).name || "farm-docs")
+    : "farm-docs";
+}
+
+function getThemeColor(docs: FarmDocsResolvedConfig, key: string, fallback: string): string {
+  const colors = getThemeUI(docs).colors;
+  return colors && typeof colors === "object" && key in colors
+    ? String((colors as Record<string, unknown>)[key] || fallback)
+    : fallback;
+}
+
+function getThemeFont(
+  docs: FarmDocsResolvedConfig,
+  key: "sans" | "mono",
+  fallback: string,
+): string {
+  const style = getThemeUI(docs).typography?.font?.style;
+  return style && typeof style === "object" && key in style
+    ? String((style as Record<string, unknown>)[key] || fallback)
+    : fallback;
+}
+
+function getThemeLayoutValue(docs: FarmDocsResolvedConfig, key: string, fallback: number): number {
+  const layout = getThemeUI(docs).layout;
+  const value =
+    layout && typeof layout === "object" ? (layout as Record<string, unknown>)[key] : undefined;
+  return typeof value === "number" ? value : fallback;
+}
+
+function getThemeTocDepth(docs: FarmDocsResolvedConfig): number {
+  const toc = getThemeUI(docs).layout?.toc;
+  return toc && typeof toc === "object" && typeof toc.depth === "number" ? toc.depth : 3;
+}
+
+function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string {
+  const groups = new Map<string, FarmDocsPage[]>();
+  for (const item of pages) {
+    const group = item.slug.split("/").filter(Boolean)[0] || "";
+    const entries = groups.get(group) || [];
+    entries.push(item);
+    groups.set(group, entries);
+  }
+
+  return Array.from(groups.entries())
+    .map(([group, items]) => {
+      const links = items
+        .map(
+          (item) =>
+            `<a${item.href === activeHref ? ' data-active="true"' : ""} href="${escapeAttribute(item.href)}">${escapeHtml(item.title)}</a>`,
+        )
+        .join("\n");
+      return `<section class="sidebar-section"><p>${escapeHtml(titleFromGroup(group))}</p>${links}</section>`;
+    })
+    .join("\n");
+}
+
+function renderPixelToc(items: TocItem[]): string {
+  if (items.length === 0) return '<p class="toc-empty">No sections</p>';
+  return items
+    .map(
+      (item) =>
+        `<a class="toc-level-${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
+    )
+    .join("\n");
+}
+
+function renderPixelDocsCss(docs: FarmDocsResolvedConfig): string {
+  const background = getThemeColor(docs, "background", "hsl(0 0% 2%)");
+  const foreground = getThemeColor(docs, "primary", "oklch(0.985 0.001 106.423)");
+  const muted = getThemeColor(docs, "muted", "hsl(0 0% 55%)");
+  const border = getThemeColor(docs, "border", "hsl(0 0% 15%)");
+  const sans = getThemeFont(docs, "sans", "system-ui, -apple-system, sans-serif");
+  const mono = getThemeFont(docs, "mono", "ui-monospace, monospace");
+  const sidebarWidth = getThemeLayoutValue(docs, "sidebarWidth", 320);
+  const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
+
+  return `
+    :root { color-scheme: dark; --color-fd-background: ${background}; --color-fd-foreground: ${foreground}; --color-fd-card: hsl(0 0% 4%); --color-fd-muted: hsl(0 0% 10%); --color-fd-muted-foreground: ${muted}; --color-fd-border: ${border}; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-nav-height: 56px; --fd-docs-font-sans: ${sans}; --fd-docs-font-mono: ${mono}; --radius: 0px; }
+    * { box-sizing: border-box; }
+    html { background: var(--color-fd-background); scroll-padding-top: 76px; }
+    body { margin: 0; min-height: 100vh; background: var(--color-fd-background); color: var(--color-fd-foreground); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
+    ::selection { background: var(--color-fd-foreground); color: var(--color-fd-background); }
+    a { color: inherit; }
+    #nd-docs-layout { display: grid; grid-template-columns: var(--fd-sidebar-width) minmax(0, 1fr) 240px; min-height: 100vh; border-top: 1px solid var(--color-fd-border); background: var(--color-fd-background); }
+    .topbar { position: sticky; top: 0; z-index: 20; grid-column: 2 / 4; height: var(--fd-nav-height); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border); background: color-mix(in srgb, var(--color-fd-background) 92%, transparent); backdrop-filter: blur(12px); padding: 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground); }
+    .topbar a:hover { color: var(--color-fd-foreground); }
+    .route-pill { border: 1px solid var(--color-fd-border); padding: 6px 9px; background: var(--color-fd-card); color: var(--color-fd-foreground); }
+    aside#nd-sidebar { position: sticky; top: 0; grid-row: 1 / span 2; height: 100vh; overflow: auto; border-right: 1px solid var(--color-fd-border); background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground) 4%, transparent), color-mix(in srgb, var(--color-fd-foreground) 4%, transparent) 1px, transparent 1px, transparent 7px), var(--color-fd-background); padding: 18px; }
+    .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin-bottom: 18px; border: 1px solid var(--color-fd-border); background: var(--color-fd-card); padding: 0 12px; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .sidebar-brand a { text-decoration: none; }
+    .sidebar-section { border-top: 1px solid var(--color-fd-border); padding: 15px 0 10px; }
+    .sidebar-section p { margin: 0 0 8px; color: var(--color-fd-muted-foreground); font-family: var(--fd-docs-font-mono); font-size: 11px; text-transform: uppercase; }
+    .sidebar-section a { display: block; margin: 0 -8px; border-left: 1px solid transparent; padding: 7px 8px; color: var(--color-fd-muted-foreground); text-decoration: none; font-size: 14px; line-height: 1.35; }
+    .sidebar-section a:hover, .sidebar-section a[data-active="true"] { border-left-color: var(--color-fd-foreground); background: var(--color-fd-muted); color: var(--color-fd-foreground); }
+    main { grid-column: 2; min-width: 0; padding: 46px 40px 80px; }
+    article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
+    .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .prose h1 { margin: 0 0 16px; font-size: 36px; line-height: 1.14; letter-spacing: 0; }
+    .prose h2 { margin: 44px 0 14px; border-top: 1px solid var(--color-fd-border); padding-top: 26px; font-size: 24px; line-height: 1.24; letter-spacing: 0; }
+    .prose h3 { margin: 30px 0 12px; font-size: 20px; line-height: 1.3; letter-spacing: 0; }
+    .prose h4, .prose h5, .prose h6 { margin: 24px 0 10px; letter-spacing: 0; }
+    .heading-anchor { color: inherit; text-decoration: none; }
+    .heading-anchor:hover { text-decoration: underline; text-underline-offset: 4px; }
+    .prose p { margin: 14px 0; color: color-mix(in srgb, var(--color-fd-foreground) 74%, transparent); font-size: 15.6px; line-height: 1.8; }
+    .prose ul, .prose ol { margin: 16px 0; padding-left: 24px; color: color-mix(in srgb, var(--color-fd-foreground) 78%, transparent); line-height: 1.75; }
+    .prose li { margin: 6px 0; }
+    .prose code:not(pre code) { border: 1px solid var(--color-fd-border); background: var(--color-fd-card); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; }
+    .code-block { position: relative; margin: 18px 0; overflow: auto; border: 1px solid var(--color-fd-border); background: linear-gradient(180deg, color-mix(in srgb, var(--color-fd-foreground) 5%, transparent), transparent 34px), hsl(0 0% 3%); padding: 38px 16px 16px; font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.65; }
+    .code-language { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--color-fd-border); padding: 8px 12px; color: var(--color-fd-muted-foreground); font-size: 11px; text-transform: uppercase; }
+    blockquote { margin: 18px 0; border: 1px solid var(--color-fd-border); border-left: 3px solid var(--color-fd-foreground); background: var(--color-fd-card); padding: 14px 16px; color: color-mix(in srgb, var(--color-fd-foreground) 78%, transparent); }
+    .table-wrap { margin: 18px 0; overflow-x: auto; border: 1px solid var(--color-fd-border); }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { border-bottom: 1px solid var(--color-fd-border); padding: 11px 12px; text-align: left; vertical-align: top; }
+    th { background: var(--color-fd-card); color: var(--color-fd-foreground); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 42px; border-top: 1px solid var(--color-fd-border); padding-top: 18px; }
+    .page-actions a { border: 1px solid var(--color-fd-border); background: var(--color-fd-card); padding: 8px 10px; color: var(--color-fd-muted-foreground); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
+    .page-actions a:hover { color: var(--color-fd-foreground); }
+    .toc { position: sticky; top: calc(var(--fd-nav-height) + 24px); grid-column: 3; align-self: start; max-height: calc(100vh - 92px); overflow: auto; border-left: 1px solid var(--color-fd-border); padding: 24px 20px; }
+    .toc strong { display: block; margin-bottom: 12px; font-family: var(--fd-docs-font-mono); font-size: 11px; text-transform: uppercase; }
+    .toc a { display: block; padding: 5px 0; color: var(--color-fd-muted-foreground); text-decoration: none; font-size: 13px; line-height: 1.35; }
+    .toc a:hover { color: var(--color-fd-foreground); }
+    .toc-level-3 { padding-left: 12px !important; }
+    .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 22px !important; }
+    .toc-empty { color: var(--color-fd-muted-foreground); font-size: 13px; }
+    @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); } main { padding: 30px 20px 64px; } .toc { display: none; } .prose h1 { font-size: 32px; } }
+  `;
+}
+
+function renderPixelDocsHtml(
   page: LoadedFarmDocsPage,
   pages: FarmDocsPage[],
   docs: FarmDocsResolvedConfig,
@@ -592,53 +881,50 @@ function renderDocsHtml(
       ? String((docs.config.nav as { title?: unknown }).title || "Docs")
       : "Docs";
   const description = page.description || docs.config.metadata?.description || "";
-  const navItems = pages
-    .map(
-      (item) =>
-        `<a class="${item.href === page.href ? "active" : ""}" href="${escapeHtml(item.href)}">${escapeHtml(item.title)}</a>`,
-    )
-    .join("\n");
+  const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
+  const markdownUrl = `${page.href}.md`;
+  const themeName = getThemeName(docs);
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html class="dark" lang="en" data-docs-theme="${escapeAttribute(themeName)}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
+  <link rel="icon" href="${FARM_DOCS_FAVICON}">
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
-  <style>
-    :root { color-scheme: light dark; --bg: #ffffff; --text: #17211b; --muted: #607067; --border: #dfe8e2; --accent: #1d8f52; --panel: #f7faf8; }
-    @media (prefers-color-scheme: dark) { :root { --bg: #101512; --text: #edf6f0; --muted: #9baea3; --border: #27342c; --accent: #61d394; --panel: #151d19; } }
-    * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    .shell { display: grid; grid-template-columns: minmax(180px, 260px) minmax(0, 1fr); min-height: 100vh; }
-    nav { border-right: 1px solid var(--border); padding: 28px 20px; background: var(--panel); }
-    nav strong { display: block; margin-bottom: 18px; font-size: 15px; }
-    nav a { display: block; color: var(--muted); text-decoration: none; padding: 8px 0; font-size: 14px; }
-    nav a.active, nav a:hover { color: var(--accent); }
-    main { width: min(860px, 100%); padding: 52px min(7vw, 72px); }
-    article { line-height: 1.72; font-size: 16px; }
-    h1 { font-size: clamp(34px, 6vw, 56px); line-height: 1; margin: 0 0 18px; }
-    h2, h3 { margin-top: 36px; line-height: 1.2; }
-    p { color: var(--muted); }
-    code { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 2px 5px; }
-    pre { overflow: auto; border: 1px solid var(--border); border-radius: 8px; padding: 16px; background: var(--panel); }
-    a { color: var(--accent); }
-    @media (max-width: 760px) { .shell { display: block; } nav { border-right: 0; border-bottom: 1px solid var(--border); } main { padding: 34px 22px; } }
-  </style>
+  <style>${renderPixelDocsCss(docs)}</style>
 </head>
 <body>
-  <div class="shell">
-    <nav>
-      <strong>${escapeHtml(navTitle)}</strong>
-      ${navItems}
-    </nav>
+  <div id="nd-docs-layout">
+    <aside id="nd-sidebar">
+      <div class="sidebar-brand">
+        <a href="/">${escapeHtml(navTitle)}</a>
+        <span>/ docs</span>
+      </div>
+      ${renderPixelNavItems(pages, page.href)}
+    </aside>
+    <header class="topbar">
+      <a href="/">Farm.js</a>
+      <span class="route-pill">${escapeHtml(page.href)}</span>
+      <a href="/llms.txt">llms.txt</a>
+    </header>
     <main>
-      <article>
-${renderMarkdown(page.body)}
+      <article id="nd-page" class="prose">
+        <p class="page-kicker">Documentation / ${escapeHtml(page.slug || "overview")}</p>
+${renderRichMarkdown(page.body)}
+        <div class="page-actions">
+          <a href="${escapeAttribute(markdownUrl)}">Markdown</a>
+          <a href="/sitemap.md">Sitemap</a>
+          <a href="/AGENTS.md">Agents</a>
+        </div>
       </article>
     </main>
+    <nav class="toc" aria-label="On this page">
+      <strong>On This Page</strong>
+      ${renderPixelToc(tocItems)}
+    </nav>
   </div>
 </body>
 </html>`;
@@ -678,7 +964,7 @@ export function createFarmDocsHandler(
       );
     }
 
-    return new Response(renderDocsHtml(page, discoverFarmDocsPages(contentDir, docs), docs), {
+    return new Response(renderPixelDocsHtml(page, discoverFarmDocsPages(contentDir, docs), docs), {
       status: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",

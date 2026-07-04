@@ -50,7 +50,11 @@ describe("createFarmDocsHandler", () => {
 
     expect(response?.status).toBe(200);
     expect(response?.headers.get("content-type")).toContain("text/html");
-    await expect(response?.text()).resolves.toContain("<h1>Farm Docs</h1>");
+    const html = await response?.text();
+    expect(html).toContain('data-docs-theme="farm-docs"');
+    expect(html).toContain('id="nd-docs-layout"');
+    expect(html).toContain('id="farm-docs"');
+    expect(html).toContain('href="#farm-docs"');
   });
 
   it("serves markdown when requested by markdown URL", async () => {

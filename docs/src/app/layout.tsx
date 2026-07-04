@@ -42,9 +42,13 @@ const fontFaceCss = `
 }
 `;
 
+const favicon =
+  "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
+
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <>
+      <link rel="icon" href={favicon} />
       <link rel="preload" href={geistSansUrl} as="font" type="font/woff2" crossOrigin="anonymous" />
       <link rel="preload" href={geistMonoUrl} as="font" type="font/woff2" crossOrigin="anonymous" />
       <link
