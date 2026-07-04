@@ -1,5 +1,25 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
+import {
+  buildDocsAgentDiscoverySpec,
+  buildDocsSitemapManifest,
+  isDocsAgentDiscoveryRequest,
+  isDocsAgentsRequest,
+  isDocsSkillRequest,
+  renderDocsAgentsDocument,
+  renderDocsLlmsTxt,
+  renderDocsMarkdownDocument,
+  renderDocsRobotsTxt,
+  renderDocsSitemapMarkdown,
+  renderDocsSitemapXml,
+  renderDocsSkillDocument,
+  resolveDocsLlmsTxtFormat,
+  resolveDocsRobotsRequest,
+  resolveDocsSitemapRequest,
+  type DocsLlmsTxtPageInput,
+  type DocsMarkdownPage,
+  type DocsSitemapPageInput,
+} from "@farming-labs/docs";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
@@ -61,13 +81,18 @@ export function isFarmDocsRequest(docs: FarmDocsResolvedConfig | undefined, requ
   return pathname === entry || pathname === `${entry}.md` || pathname.startsWith(`${entry}/`);
 }
 
-export function resolveFarmDocsContentDir(docs: FarmDocsResolvedConfig, options: FarmDocsHandlerOptions): string {
+export function resolveFarmDocsContentDir(
+  docs: FarmDocsResolvedConfig,
+  options: FarmDocsHandlerOptions,
+): string {
   const root = path.resolve(options.root);
   const srcDir = options.srcDir || "src";
   const configuredContentDir = docs.contentDir || docs.config.contentDir;
 
   if (configuredContentDir) {
-    return path.isAbsolute(configuredContentDir) ? configuredContentDir : path.join(root, configuredContentDir);
+    return path.isAbsolute(configuredContentDir)
+      ? configuredContentDir
+      : path.join(root, configuredContentDir);
   }
 
   const entryDir = docs.config.entry || trimSlashes(docs.entry) || "docs";
@@ -250,8 +275,219 @@ export function discoverFarmDocsPages(
   return pages.sort((a, b) => a.href.localeCompare(b.href));
 }
 
+export function toFarmDocsMarkdownPage(page: LoadedFarmDocsPage): DocsMarkdownPage {
+  const lastModified = page.frontmatter.lastModified || page.frontmatter.lastmod;
+
+  return {
+    slug: page.slug,
+    url: page.href,
+    title: page.title,
+    description: page.description,
+    lastModified,
+    lastmod: lastModified,
+    content: page.body,
+    rawContent: page.body,
+  };
+}
+
+function getDocsTitle(docs: FarmDocsResolvedConfig): string {
+  return typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
+    ? String((docs.config.nav as { title?: unknown }).title || "Documentation")
+    : "Documentation";
+}
+
+function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
+  return docs.config.metadata?.description;
+}
+
+function getLoadedDocsPages(
+  contentDir: string,
+  docs: FarmDocsResolvedConfig,
+): LoadedFarmDocsPage[] {
+  return discoverFarmDocsPages(contentDir, docs)
+    .map((page) => loadFarmDocsPage(contentDir, docs, page.slug))
+    .filter((page): page is LoadedFarmDocsPage => Boolean(page));
+}
+
+function toDocsLlmsPage(page: LoadedFarmDocsPage): DocsLlmsTxtPageInput {
+  return toFarmDocsMarkdownPage(page);
+}
+
+function toDocsSitemapPage(page: LoadedFarmDocsPage): DocsSitemapPageInput {
+  return {
+    ...toFarmDocsMarkdownPage(page),
+    sourcePath: page.sourcePath,
+  };
+}
+
+function getDocsLlmsOptions(docs: FarmDocsResolvedConfig, request: Request) {
+  const configured =
+    typeof docs.config.llmsTxt === "object" && docs.config.llmsTxt !== null
+      ? docs.config.llmsTxt
+      : {};
+  return {
+    enabled: true,
+    baseUrl: new URL(request.url).origin,
+    siteTitle: getDocsTitle(docs),
+    siteDescription: getDocsDescription(docs),
+    ...configured,
+  };
+}
+
+function getDocsDiscoveryOptions(docs: FarmDocsResolvedConfig, request: Request) {
+  return {
+    origin: new URL(request.url).origin,
+    entry: docs.entry,
+    i18n: null,
+    search: docs.config.search ?? true,
+    mcp: {
+      enabled: false,
+      route: "/api/docs/mcp",
+      name: `${getDocsTitle(docs)} MCP`,
+      version: "1",
+      tools: {
+        listDocs: false,
+        listPages: false,
+        readPage: false,
+        searchDocs: false,
+        getNavigation: false,
+        getCodeExamples: false,
+        getConfigSchema: false,
+      },
+    },
+    feedback: undefined,
+    llms: getDocsLlmsOptions(docs, request),
+    sitemap: docs.config.sitemap ?? true,
+    robots: docs.config.robots ?? true,
+    openapi: undefined,
+    markdown: {
+      acceptHeader: true,
+      signatureAgentHeader: true,
+    },
+  };
+}
+
+function createFarmDocsPublicResponse(
+  contentDir: string,
+  docs: FarmDocsResolvedConfig,
+  request: Request,
+): Response | null {
+  const url = new URL(request.url);
+  const loadedPages = getLoadedDocsPages(contentDir, docs);
+  const sitemapManifest = () =>
+    buildDocsSitemapManifest({
+      pages: loadedPages.map(toDocsSitemapPage),
+      entry: docs.entry,
+      siteTitle: getDocsTitle(docs),
+      baseUrl: url.origin,
+    });
+  const textHeaders = (contentType: string) => ({
+    "Content-Type": contentType,
+    "Cache-Control": "public, max-age=60",
+  });
+
+  const llmsFormat = resolveDocsLlmsTxtFormat(url);
+  if (llmsFormat) {
+    const generated = renderDocsLlmsTxt(
+      loadedPages.map(toDocsLlmsPage),
+      getDocsLlmsOptions(docs, request),
+    );
+    return new Response(llmsFormat === "llms-full" ? generated.llmsFullTxt : generated.llmsTxt, {
+      status: 200,
+      headers: textHeaders("text/plain; charset=utf-8"),
+    });
+  }
+
+  const sitemapFormat = resolveDocsSitemapRequest(url, docs.config.sitemap ?? true);
+  if (sitemapFormat === "xml") {
+    return new Response(
+      renderDocsSitemapXml(sitemapManifest(), {
+        baseUrl: url.origin,
+        includeLastmod: true,
+      }),
+      {
+        status: 200,
+        headers: textHeaders("application/xml; charset=utf-8"),
+      },
+    );
+  }
+  if (sitemapFormat === "markdown") {
+    return new Response(
+      renderDocsSitemapMarkdown(sitemapManifest(), {
+        includeDescriptions: true,
+      }),
+      {
+        status: 200,
+        headers: textHeaders("text/markdown; charset=utf-8"),
+      },
+    );
+  }
+
+  if (resolveDocsRobotsRequest(url, docs.config.robots ?? true)) {
+    return new Response(
+      renderDocsRobotsTxt({
+        entry: docs.entry,
+        sitemap: docs.config.sitemap ?? true,
+        robots: docs.config.robots ?? true,
+        baseUrl: url.origin,
+      }),
+      {
+        status: 200,
+        headers: textHeaders("text/plain; charset=utf-8"),
+      },
+    );
+  }
+
+  if (isDocsAgentDiscoveryRequest(url)) {
+    const spec = buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(docs, request));
+    const title = getDocsTitle(docs);
+    return new Response(
+      JSON.stringify({
+        ...spec,
+        name: title,
+        site: {
+          ...spec.site,
+          title,
+          description: getDocsDescription(docs),
+          entry: docs.entry,
+        },
+      }),
+      {
+        status: 200,
+        headers: textHeaders("application/json; charset=utf-8"),
+      },
+    );
+  }
+
+  if (isDocsAgentsRequest(url)) {
+    return new Response(
+      `${renderDocsAgentsDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
+      {
+        status: 200,
+        headers: textHeaders("text/markdown; charset=utf-8"),
+      },
+    );
+  }
+
+  if (isDocsSkillRequest(url)) {
+    return new Response(
+      `${renderDocsSkillDocument(getDocsDiscoveryOptions(docs, request)).trim()}\n`,
+      {
+        status: 200,
+        headers: textHeaders("text/markdown; charset=utf-8"),
+      },
+    );
+  }
+
+  return null;
+}
+
 function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
 }
 
 function renderInlineMarkdown(value: string): string {
@@ -368,6 +604,7 @@ function renderDocsHtml(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   <style>
@@ -407,22 +644,38 @@ ${renderMarkdown(page.body)}
 </html>`;
 }
 
-export function createFarmDocsHandler(docs: FarmDocsResolvedConfig | undefined, options: FarmDocsHandlerOptions) {
+export function createFarmDocsHandler(
+  docs: FarmDocsResolvedConfig | undefined,
+  options: FarmDocsHandlerOptions,
+) {
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
-    if (!docs?.enabled || !isFarmDocsRequest(docs, request)) return null;
+    if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
 
     const contentDir = resolveFarmDocsContentDir(docs, options);
+    const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
+    if (publicResponse) return publicResponse;
+
+    if (!isFarmDocsRequest(docs, request)) return null;
+
     const page = loadPage(contentDir, docs, request);
     if (!page) return null;
 
     if (shouldReturnMarkdown(request)) {
-      return new Response(page.body, {
-        status: 200,
-        headers: {
-          "Content-Type": "text/markdown; charset=utf-8",
-          "Cache-Control": "public, max-age=60",
+      const origin = new URL(request.url).origin;
+      return new Response(
+        renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
+          origin,
+          llms: docs.config.llmsTxt ?? true,
+          sitemap: docs.config.sitemap,
+        }),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/markdown; charset=utf-8",
+            "Cache-Control": "public, max-age=60",
+          },
         },
-      });
+      );
     }
 
     return new Response(renderDocsHtml(page, discoverFarmDocsPages(contentDir, docs), docs), {

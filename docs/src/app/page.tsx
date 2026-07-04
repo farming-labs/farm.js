@@ -1,7 +1,6 @@
 import type { PageProps } from "@farmjs/core";
 import { ConsoleAscii } from "../components/console-ascii";
 import { DitherShader } from "../components/ui/dither-shader";
-import { featuredDocPages } from "../lib/docs";
 
 export const metadata = {
   title: "farmjs.dev - React framework for integrated apps",
@@ -55,6 +54,39 @@ const frameworkFeatures = [
   "Runtime events for cache, PPR, routes, API, storage, builds",
   "Docs engine, markdown mirrors, and OpenAPI reference",
   "Deployment targets for Vercel, Cloudflare, Netlify, and Node",
+] as const;
+
+const featuredDocPages = [
+  {
+    href: "/docs/getting-started",
+    title: "Getting Started",
+    description: "Create an app, understand the files that matter, and run the dev server.",
+  },
+  {
+    href: "/docs/routing",
+    title: "Routing",
+    description: "Use static routes, dynamic segments, catch-all routes, and typed links.",
+  },
+  {
+    href: "/docs/api-client",
+    title: "API Client",
+    description: "Call app routes with api.hello.get style inference from route files.",
+  },
+  {
+    href: "/docs/integrations",
+    title: "Integrations",
+    description: "Register auth, billing, email, jobs, API keys, UI, middleware, and storage.",
+  },
+  {
+    href: "/docs/cache-ppr",
+    title: "Cache and PPR",
+    description: "Use shared cache, tag invalidation, shell caching, and PPR boundaries.",
+  },
+  {
+    href: "/docs/deployment",
+    title: "Deployment",
+    description: "Build deployable output for Vercel, Cloudflare, Netlify, and Node.",
+  },
 ] as const;
 
 const integrationRows = [

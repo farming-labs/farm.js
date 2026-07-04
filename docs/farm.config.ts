@@ -145,6 +145,9 @@ function createDocsContextDemoPlugin(
 export default {
   srcDir: "src",
   preset: "vercel",
+  docs: {
+    entry: "/docs",
+  },
   // suppressLintOnLink: true, // set to true to allow any string on <Link href="..."> (no route-type errors)
   notFound: {
     component: "./src/app/not-found.tsx",

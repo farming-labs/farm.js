@@ -1,10 +1,29 @@
-import type { DocsConfig } from "@farming-labs/docs";
+import {
+  buildDocsAgentDiscoverySpec,
+  buildDocsConfigMap,
+  buildDocsDiagnostics as buildFarmingDocsDiagnostics,
+  buildDocsSitemapManifest,
+  performDocsSearch,
+  renderDocsAgentsDocument,
+  renderDocsLlmsTxt,
+  renderDocsMarkdownDocument,
+  renderDocsRobotsTxt,
+  renderDocsSitemapMarkdown,
+  renderDocsSitemapXml,
+  renderDocsSkillDocument,
+  type DocsConfig,
+  type DocsLlmsTxtPageInput,
+  type DocsSearchSourcePage,
+  type DocsSitemapPageInput,
+} from "@farming-labs/docs";
 import { resolveDocsConfig } from "../config";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./types";
 import {
   discoverFarmDocsPages,
+  type LoadedFarmDocsPage,
   loadFarmDocsPage,
   resolveFarmDocsContentDir,
+  toFarmDocsMarkdownPage,
 } from "./handler";
 
 export interface FarmDocsAPIOptions {
@@ -152,9 +171,9 @@ function isDocsCloudGetRequest(request: Request): boolean {
 function isDocsCloudAction(action: string | undefined): boolean {
   return Boolean(
     action &&
-      ["analytics", "track", "track-event", "event", "ask-ai", "ai", "chat", "docs-cloud"].includes(
-        action,
-      ),
+    ["analytics", "track", "track-event", "event", "ask-ai", "ai", "chat", "docs-cloud"].includes(
+      action,
+    ),
   );
 }
 
@@ -186,7 +205,10 @@ async function isDocsCloudPostRequest(request: Request): Promise<boolean> {
   return false;
 }
 
-function normalizeDocsApiSlug(value: string | null | undefined, docs: FarmDocsResolvedConfig): string {
+function normalizeDocsApiSlug(
+  value: string | null | undefined,
+  docs: FarmDocsResolvedConfig,
+): string {
   const entry = docs.entry.replace(/^\/+|\/+$/g, "");
   let slug = (value || "").trim().replace(/^\/+|\/+$/g, "");
 
@@ -209,8 +231,19 @@ function getDocsAPIPathTarget(request: Request): DocsAPIPathTarget {
   const normalizedValue = normalizeAction(value);
 
   if (!value) return {};
-  if (normalizedValue === "agent" || normalizedValue === "agent.json" || normalizedValue === "agent/spec") {
+  if (
+    normalizedValue === "agent" ||
+    normalizedValue === "agent.json" ||
+    normalizedValue === "agent/spec"
+  ) {
     return { format: "agent-spec" };
+  }
+  if (
+    normalizedValue === "agents" ||
+    normalizedValue === "agents.md" ||
+    normalizedValue === "agent.md"
+  ) {
+    return { format: "agents" };
   }
   if (normalizedValue === "skill" || normalizedValue === "skill.md") return { format: "skill" };
   if (normalizedValue === "llms.txt") return { format: "llms" };
@@ -225,54 +258,109 @@ function getDocsAPIPathTarget(request: Request): DocsAPIPathTarget {
 
 function getDocsAPIFormat(request: Request): string | undefined {
   const url = new URL(request.url);
-  return normalizeAction(url.searchParams.get("format") || url.searchParams.get("type")) || getDocsAPIPathTarget(request).format;
+  return (
+    normalizeAction(url.searchParams.get("format") || url.searchParams.get("type")) ||
+    getDocsAPIPathTarget(request).format
+  );
 }
 
-function renderLlmsTxt(context: FarmDocsAPIContext, full: boolean): string {
-  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
-  const title = getDocsTitle(context.docs);
-
-  const lines = [`# ${title}`, ""];
-  for (const page of pages) {
-    lines.push(`- [${page.title}](${page.href})${page.description ? `: ${page.description}` : ""}`);
-    if (full) {
-      const loadedPage = loadFarmDocsPage(context.contentDir, context.docs, page.slug);
-      if (loadedPage?.body) {
-        lines.push("", `## ${loadedPage.title}`, "", loadedPage.body.trim(), "");
-      }
-    }
-  }
-
-  return `${lines.join("\n").trim()}\n`;
+function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
+  return docs.config.metadata?.description;
 }
 
-function renderSitemapMarkdown(context: FarmDocsAPIContext): string {
-  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
-  return `${["# Docs Sitemap", "", ...pages.map((page) => `- [${page.title}](${page.href})`)].join("\n")}\n`;
+function getLoadedDocsPages(context: FarmDocsAPIContext): LoadedFarmDocsPage[] {
+  return discoverFarmDocsPages(context.contentDir, context.docs)
+    .map((page) => loadFarmDocsPage(context.contentDir, context.docs, page.slug))
+    .filter((page): page is LoadedFarmDocsPage => Boolean(page));
 }
 
-function renderSitemapXml(context: FarmDocsAPIContext, request: Request): string {
+function toDocsSourcePage(page: LoadedFarmDocsPage): DocsSearchSourcePage {
+  return {
+    ...toFarmDocsMarkdownPage(page),
+    sourcePath: page.sourcePath,
+  };
+}
+
+function toDocsSitemapPage(page: LoadedFarmDocsPage): DocsSitemapPageInput {
+  return {
+    ...toFarmDocsMarkdownPage(page),
+    sourcePath: page.sourcePath,
+  };
+}
+
+function toDocsLlmsPage(page: LoadedFarmDocsPage): DocsLlmsTxtPageInput {
+  return toFarmDocsMarkdownPage(page);
+}
+
+function getDocsLlmsOptions(context: FarmDocsAPIContext, request: Request) {
+  const configured = isRecord(context.docs.config.llmsTxt) ? context.docs.config.llmsTxt : {};
+  return {
+    enabled: true,
+    baseUrl: new URL(request.url).origin,
+    siteTitle: getDocsTitle(context.docs),
+    siteDescription: getDocsDescription(context.docs),
+    ...configured,
+  };
+}
+
+function getDocsDiscoveryOptions(context: FarmDocsAPIContext, request: Request) {
   const origin = new URL(request.url).origin;
-  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
-  const urls = pages
-    .map((page) => `  <url><loc>${origin}${page.href}</loc></url>`)
-    .join("\n");
 
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`;
+  return {
+    origin,
+    entry: context.docs.entry,
+    i18n: null,
+    search: context.docs.config.search ?? true,
+    mcp: {
+      enabled: false,
+      route: "/api/docs/mcp",
+      name: `${getDocsTitle(context.docs)} MCP`,
+      version: "1",
+      tools: {
+        listDocs: false,
+        listPages: false,
+        readPage: false,
+        searchDocs: false,
+        getNavigation: false,
+        getCodeExamples: false,
+        getConfigSchema: false,
+      },
+    },
+    feedback: undefined,
+    llms: getDocsLlmsOptions(context, request),
+    sitemap: context.docs.config.sitemap ?? true,
+    robots: context.docs.config.robots ?? true,
+    openapi: context.docs.config.apiReference,
+    markdown: {
+      acceptHeader: true,
+      signatureAgentHeader: true,
+    },
+  };
+}
+
+function buildSitemapManifest(context: FarmDocsAPIContext, request: Request) {
+  const origin = new URL(request.url).origin;
+  return buildDocsSitemapManifest({
+    pages: getLoadedDocsPages(context).map(toDocsSitemapPage),
+    entry: context.docs.entry,
+    siteTitle: getDocsTitle(context.docs),
+    baseUrl: origin,
+  });
+}
+
+function renderLlmsTxt(context: FarmDocsAPIContext, request: Request, full: boolean): string {
+  const generated = renderDocsLlmsTxt(
+    getLoadedDocsPages(context).map(toDocsLlmsPage),
+    getDocsLlmsOptions(context, request),
+  );
+
+  return full ? generated.llmsFullTxt : generated.llmsTxt;
 }
 
 function renderSkillDocument(context: FarmDocsAPIContext, request: Request): string {
-  const url = new URL(request.url);
-  const title = getDocsTitle(context.docs);
-  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
-  const lines = [
-    `# ${title}`,
+  const farmAliases = [
+    "## Farm API Route Aliases",
     "",
-    "Use this Farm docs surface to answer questions from the local documentation.",
-    "",
-    "## Routes",
-    "",
-    `- Human docs: ${context.docs.entry}`,
     "- Search JSON: /api/docs?query=<term>",
     "- Config JSON: /api/docs?format=config",
     "- Markdown by query: /api/docs?format=markdown&path=<slug>",
@@ -281,22 +369,31 @@ function renderSkillDocument(context: FarmDocsAPIContext, request: Request): str
     "- Full LLM document: /api/docs?format=llms-full",
     "- Sitemap XML: /api/docs?format=sitemap-xml",
     "- Agent spec JSON: /api/docs/agent/spec",
-    "",
-    "## Pages",
-    "",
-    ...pages.map((page) => `- [${page.title}](${url.origin}${page.href})${page.description ? `: ${page.description}` : ""}`),
-  ];
+  ].join("\n");
 
-  return `${lines.join("\n").trim()}\n`;
+  return `${renderDocsSkillDocument(getDocsDiscoveryOptions(context, request)).trim()}\n\n${farmAliases}\n`;
+}
+
+function renderAgentsDocument(context: FarmDocsAPIContext, request: Request): string {
+  return `${renderDocsAgentsDocument(getDocsDiscoveryOptions(context, request)).trim()}\n`;
 }
 
 function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
   const url = new URL(request.url);
   const origin = url.origin;
   const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+  const spec = buildDocsAgentDiscoverySpec(getDocsDiscoveryOptions(context, request));
+  const title = getDocsTitle(context.docs);
 
   return {
-    name: getDocsTitle(context.docs),
+    ...spec,
+    name: title,
+    site: {
+      ...spec.site,
+      title,
+      description: getDocsDescription(context.docs),
+      entry: context.docs.entry,
+    },
     entry: context.docs.entry,
     routes: {
       docs: `${origin}${context.docs.entry}`,
@@ -310,14 +407,16 @@ function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
       sitemapMarkdown: `${origin}/api/docs?format=sitemap-md`,
       robots: `${origin}/api/docs?format=robots`,
       skill: `${origin}/api/docs?format=skill`,
+      agents: `${origin}/api/docs?format=agents`,
       agentSpec: `${origin}/api/docs/agent/spec`,
     },
     capabilities: {
-      search: true,
-      markdown: true,
-      llms: true,
-      sitemap: true,
-      robots: true,
+      ...spec.capabilities,
+      search: spec.capabilities.search,
+      markdown: spec.capabilities.markdownRoutes,
+      llms: spec.capabilities.llms,
+      sitemap: spec.capabilities.sitemap,
+      robots: spec.capabilities.robots,
       post: false,
     },
     pages,
@@ -326,8 +425,27 @@ function buildAgentSpec(context: FarmDocsAPIContext, request: Request) {
 
 function buildDiagnostics(context: FarmDocsAPIContext) {
   const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+  const diagnostics = buildFarmingDocsDiagnostics(context.docs.config, {
+    entry: context.docs.entry,
+    mcp: {
+      enabled: false,
+      route: "/api/docs/mcp",
+      name: `${getDocsTitle(context.docs)} MCP`,
+      version: "1",
+      tools: {
+        listDocs: false,
+        listPages: false,
+        readPage: false,
+        searchDocs: false,
+        getNavigation: false,
+        getCodeExamples: false,
+        getConfigSchema: false,
+      },
+    },
+  });
 
   return {
+    ...diagnostics,
     enabled: context.docs.enabled,
     entry: context.docs.entry,
     root: context.root,
@@ -339,20 +457,35 @@ function buildDiagnostics(context: FarmDocsAPIContext) {
   };
 }
 
-function searchDocs(context: FarmDocsAPIContext, query: string) {
-  const normalizedQuery = query.trim().toLowerCase();
-  const pages = discoverFarmDocsPages(context.contentDir, context.docs);
+async function searchDocs(context: FarmDocsAPIContext, request: Request, query: string) {
+  const loadedPages = getLoadedDocsPages(context);
+  const sourcePages = loadedPages.map(toDocsSourcePage);
+  const sourcePageByUrl = new Map(sourcePages.map((page) => [page.url, page]));
+  const resultLimit =
+    isRecord(context.docs.config.search) &&
+    typeof context.docs.config.search.maxResults === "number"
+      ? context.docs.config.search.maxResults
+      : undefined;
 
-  return pages
-    .map((page) => {
-      const loadedPage = loadFarmDocsPage(context.contentDir, context.docs, page.slug);
-      const haystack = `${page.title}\n${page.description || ""}\n${loadedPage?.body || ""}`.toLowerCase();
-      return {
-        ...page,
-        score: normalizedQuery && haystack.includes(normalizedQuery) ? 1 : 0,
-      };
-    })
-    .filter((page) => !normalizedQuery || page.score > 0);
+  const results = await performDocsSearch({
+    pages: sourcePages,
+    query,
+    search: context.docs.config.search ?? true,
+    pathname: new URL(request.url).pathname,
+    siteTitle: getDocsTitle(context.docs),
+    limit: resultLimit,
+  });
+
+  return results.map((result) => {
+    const pageUrl = result.url.split("#")[0];
+    const page = sourcePageByUrl.get(pageUrl);
+    return {
+      ...result,
+      title: page?.title || result.content,
+      href: page?.url || pageUrl,
+      description: result.description || page?.description,
+    };
+  });
 }
 
 async function resolveAPIContext(options: FarmDocsAPIOptions): Promise<FarmDocsAPIContext> {
@@ -406,20 +539,50 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
       entry: context.docs.entry,
       contentDir: context.docs.contentDir || context.docs.config.contentDir || null,
       config: context.docs.config,
+      map: buildDocsConfigMap(context.docs.config, {
+        file: context.docs.configPath || "farm.config.ts",
+      }),
     });
   }
 
-  if (format === "skill") return text(renderSkillDocument(context, request), "text/markdown; charset=utf-8");
+  if (format === "skill")
+    return text(renderSkillDocument(context, request), "text/markdown; charset=utf-8");
+  if (format === "agents")
+    return text(renderAgentsDocument(context, request), "text/markdown; charset=utf-8");
   if (format === "agent" || format === "agent-spec") return json(buildAgentSpec(context, request));
   if (format === "diagnostics") return json(buildDiagnostics(context));
-  if (format === "llms") return text(renderLlmsTxt(context, false), "text/plain; charset=utf-8");
-  if (format === "llms-full") return text(renderLlmsTxt(context, true), "text/plain; charset=utf-8");
-  if (format === "sitemap-md") return text(renderSitemapMarkdown(context), "text/markdown; charset=utf-8");
+  if (format === "llms")
+    return text(renderLlmsTxt(context, request, false), "text/plain; charset=utf-8");
+  if (format === "llms-full")
+    return text(renderLlmsTxt(context, request, true), "text/plain; charset=utf-8");
+  if (format === "sitemap-md") {
+    return text(
+      renderDocsSitemapMarkdown(buildSitemapManifest(context, request), {
+        includeDescriptions: true,
+      }),
+      "text/markdown; charset=utf-8",
+    );
+  }
   if (format === "sitemap-xml" || format === "sitemap") {
-    return text(renderSitemapXml(context, request), "application/xml; charset=utf-8");
+    const origin = new URL(request.url).origin;
+    return text(
+      renderDocsSitemapXml(buildSitemapManifest(context, request), {
+        baseUrl: origin,
+        includeLastmod: true,
+      }),
+      "application/xml; charset=utf-8",
+    );
   }
   if (format === "robots") {
-    return text("User-agent: *\nAllow: /\n", "text/plain; charset=utf-8");
+    return text(
+      renderDocsRobotsTxt({
+        entry: context.docs.entry,
+        sitemap: context.docs.config.sitemap ?? true,
+        robots: context.docs.config.robots ?? true,
+        baseUrl: new URL(request.url).origin,
+      }),
+      "text/plain; charset=utf-8",
+    );
   }
 
   if (format === "markdown" || url.pathname.endsWith(".md")) {
@@ -427,13 +590,20 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
     const slug = normalizeDocsApiSlug(pathParam ?? pathTarget.slug ?? "", context.docs);
     const page = loadFarmDocsPage(context.contentDir, context.docs, slug);
     if (!page) return text("Docs page not found\n", "text/plain; charset=utf-8", { status: 404 });
-    return text(`${page.body.trim()}\n`, "text/markdown; charset=utf-8");
+    return text(
+      renderDocsMarkdownDocument(toFarmDocsMarkdownPage(page), {
+        origin: new URL(request.url).origin,
+        llms: getDocsLlmsOptions(context, request),
+        sitemap: context.docs.config.sitemap,
+      }),
+      "text/markdown; charset=utf-8",
+    );
   }
 
   const query = url.searchParams.get("query") || url.searchParams.get("q") || "";
   return json({
     query,
-    results: searchDocs(context, query),
+    results: await searchDocs(context, request, query),
   });
 }
 

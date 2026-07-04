@@ -30,7 +30,10 @@ describe("createFarmDocsHandler", () => {
         "Welcome to **Farm** docs.",
       ].join("\n"),
     );
-    await fs.writeFile(path.join(docsDir, "guide", "page.md"), ["# Guide", "", "Use `farm dev` to start."].join("\n"));
+    await fs.writeFile(
+      path.join(docsDir, "guide", "page.md"),
+      ["# Guide", "", "Use `farm dev` to start."].join("\n"),
+    );
     const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
     return { root, docs };
   }
@@ -59,6 +62,37 @@ describe("createFarmDocsHandler", () => {
     expect(response?.status).toBe(200);
     expect(response?.headers.get("content-type")).toContain("text/markdown");
     await expect(response?.text()).resolves.toContain("Use `farm dev` to start.");
+  });
+
+  it("serves public @farming-labs/docs discovery routes", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const llmsResponse = await handler(new Request("http://farm.test/llms.txt"));
+    expect(llmsResponse?.status).toBe(200);
+    expect(llmsResponse?.headers.get("content-type")).toContain("text/plain");
+    await expect(llmsResponse?.text()).resolves.toContain(
+      "[Guide](http://farm.test/docs/guide.md)",
+    );
+
+    const agentsResponse = await handler(new Request("http://farm.test/AGENTS.md"));
+    expect(agentsResponse?.status).toBe(200);
+    expect(agentsResponse?.headers.get("content-type")).toContain("text/markdown");
+    await expect(agentsResponse?.text()).resolves.toContain("# Agent Instructions");
+
+    const agentSpecResponse = await handler(new Request("http://farm.test/.well-known/agent.json"));
+    expect(agentSpecResponse?.status).toBe(200);
+    await expect(agentSpecResponse?.json()).resolves.toMatchObject({
+      name: "Documentation",
+      capabilities: {
+        markdownRoutes: true,
+      },
+    });
+
+    const docsSitemapResponse = await handler(new Request("http://farm.test/docs/sitemap.md"));
+    expect(docsSitemapResponse?.status).toBe(200);
+    expect(docsSitemapResponse?.headers.get("content-type")).toContain("text/markdown");
+    await expect(docsSitemapResponse?.text()).resolves.toContain("[Guide](/docs/guide)");
   });
 
   it("returns null when docs are disabled", async () => {
@@ -115,7 +149,9 @@ describe("createDocsAPI", () => {
 
     expect(Object.keys(handlers).sort()).toEqual(["GET", "POST"]);
 
-    const configResponse = await handlers.GET(new Request("http://farm.test/api/docs?format=config"));
+    const configResponse = await handlers.GET(
+      new Request("http://farm.test/api/docs?format=config"),
+    );
     await expect(configResponse.json()).resolves.toMatchObject({
       entry: "/docs",
       config: {
@@ -131,10 +167,12 @@ describe("createDocsAPI", () => {
     await expect(markdownResponse.text()).resolves.toContain("Use `farm dev` to start.");
 
     const searchResponse = await handlers.GET(new Request("http://farm.test/api/docs?query=guide"));
-    await expect(searchResponse.json()).resolves.toMatchObject({
-      query: "guide",
-      results: [expect.objectContaining({ title: "Guide" })],
-    });
+    await expect(searchResponse.json()).resolves.toEqual(
+      expect.objectContaining({
+        query: "guide",
+        results: expect.arrayContaining([expect.objectContaining({ title: "Guide" })]),
+      }),
+    );
 
     const pathMarkdownResponse = await handlers.GET(
       new Request("http://farm.test/api/docs/guide.md"),
@@ -148,9 +186,13 @@ describe("createDocsAPI", () => {
 
     const skillPathResponse = await handlers.GET(new Request("http://farm.test/api/docs/skill.md"));
     expect(skillPathResponse.headers.get("content-type")).toContain("text/markdown");
-    await expect(skillPathResponse.text()).resolves.toContain("Agent spec JSON: /api/docs/agent/spec");
+    await expect(skillPathResponse.text()).resolves.toContain(
+      "Agent spec JSON: /api/docs/agent/spec",
+    );
 
-    const sitemapPathResponse = await handlers.GET(new Request("http://farm.test/api/docs/sitemap.md"));
+    const sitemapPathResponse = await handlers.GET(
+      new Request("http://farm.test/api/docs/sitemap.md"),
+    );
     expect(sitemapPathResponse.headers.get("content-type")).toContain("text/markdown");
     await expect(sitemapPathResponse.text()).resolves.toContain("[Guide](/docs/guide)");
 

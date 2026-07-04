@@ -1,0 +1,22 @@
+{
+  "entry": "docs",
+  "docsPath": "/docs",
+  "metadata": {
+    "description": "Farm.js framework documentation powered by @farming-labs/docs."
+  },
+  "nav": {
+    "title": "Farm.js Docs"
+  },
+  "search": {
+    "provider": "simple",
+    "enabled": true,
+    "maxResults": 12
+  },
+  "llmsTxt": {
+    "enabled": true,
+    "siteTitle": "Farm.js Docs",
+    "siteDescription": "Complete Farm.js framework documentation."
+  },
+  "sitemap": true,
+  "robots": true
+}
