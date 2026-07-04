@@ -1178,6 +1178,7 @@ async function buildSSRInMemory(
         : undefined,
       resolve: {
         alias: {
+          "@": path.resolve(root, "src"),
           // Ensure imports can resolve farm modules
           farm: path.resolve(root, "node_modules", "@farmjs", "core", "src"),
         },

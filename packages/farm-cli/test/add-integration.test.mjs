@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
 import test from "node:test";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { addFarmIntegration, listFarmIntegrationProviders } = require("../dist/add-integration.js");
+const execFileAsync = promisify(execFile);
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const cliBin = path.resolve(testDir, "../bin/farm.js");
 
 test("lists official integration providers", () => {
   const providers = listFarmIntegrationProviders().map((provider) => provider.name);
@@ -14,7 +20,16 @@ test("lists official integration providers", () => {
   assert.ok(providers.includes("stripe"));
   assert.ok(providers.includes("ai"));
   assert.ok(providers.includes("supabase"));
+  assert.ok(providers.includes("unkey"));
   assert.ok(providers.includes("jobs-inngest"));
+});
+
+test("all official integration providers expose opt-in UI metadata", () => {
+  for (const provider of listFarmIntegrationProviders()) {
+    assert.ok(provider.ui, `${provider.name} should expose a --ui feature pack`);
+    assert.ok(provider.ui.feature, `${provider.name} should name its UI feature pack`);
+    assert.ok(provider.ui.components.length, `${provider.name} should declare shadcn components`);
+  }
 });
 
 test("adds a supabase integration to a new app", async () => {
@@ -107,6 +122,125 @@ export default defineFarmConfig({
     assert.match(config, /import \{ appIntegrations \}/);
     assert.match(config, /integrations: appIntegrations/);
     assert.match(config, /vite:/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("adds a stripe integration with the shadcn UI feature pack", async () => {
+  const root = await createTempProject({
+    packageJson: {
+      type: "module",
+      dependencies: {
+        "@farmjs/core": "workspace:*",
+      },
+    },
+  });
+
+  try {
+    const result = await addFarmIntegration({
+      root,
+      provider: "stripe",
+      ui: true,
+    });
+
+    const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    const componentsJson = JSON.parse(await readFile(path.join(root, "components.json"), "utf8"));
+    const tsconfig = JSON.parse(await readFile(path.join(root, "tsconfig.json"), "utf8"));
+    const globals = await readFile(path.join(root, "src/app/globals.css"), "utf8");
+    const api = await readFile(path.join(root, "src/lib/api.ts"), "utf8");
+    const pricing = await readFile(
+      path.join(root, "src/components/farm/stripe-billing.tsx"),
+      "utf8",
+    );
+    const button = await readFile(path.join(root, "src/components/ui/button.tsx"), "utf8");
+    const page = await readFile(path.join(root, "src/app/integrations/stripe/page.tsx"), "utf8");
+
+    assert.deepEqual(result.ui, {
+      feature: "stripe-billing",
+      components: ["badge", "button", "card"],
+      files: result.ui.files,
+    });
+    assert.equal(packageJson.dependencies["@farmjs/integrations"], "workspace:*");
+    assert.equal(packageJson.dependencies["class-variance-authority"], "^0.7.1");
+    assert.equal(packageJson.dependencies.clsx, "^2.1.1");
+    assert.equal(packageJson.dependencies["tailwind-merge"], "^3.3.1");
+    assert.equal(componentsJson.aliases.ui, "@/components/ui");
+    assert.equal(componentsJson.registries.farm.url, "https://farmjs.dev/r/{name}.json");
+    assert.deepEqual(tsconfig.compilerOptions.paths["@/*"], ["./src/*"]);
+    assert.match(globals, /--color-background/);
+    assert.match(api, /createIntegrations<AppIntegrations>/);
+    assert.match(pricing, /apiClient\.billing\.products/);
+    assert.match(pricing, /apiClient\.billing\.checkout/);
+    assert.match(pricing, /from "@\/components\/ui\/button"/);
+    assert.match(button, /class-variance-authority/);
+    assert.match(button, /from "@\/lib\/utils"/);
+    assert.match(page, /from "@\/components\/farm\/stripe-billing"/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prepares UI files for every built-in integration provider", async () => {
+  for (const provider of listFarmIntegrationProviders()) {
+    const root = await createTempProject({
+      packageJson: {
+        type: "module",
+        dependencies: {
+          "@farmjs/core": "workspace:*",
+        },
+      },
+    });
+
+    try {
+      const result = await addFarmIntegration({
+        root,
+        provider: provider.name,
+        ui: true,
+        dryRun: true,
+      });
+
+      assert.ok(result.ui, `${provider.name} should install a UI feature`);
+      assert.equal(result.ui.feature, provider.ui.feature);
+      assert.deepEqual(result.ui.components, provider.ui.components);
+      assert.ok(
+        result.created.some((file) => file.includes(path.join("src", "components", "farm"))),
+        `${provider.name} should prepare a Farm UI component`,
+      );
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("runs farm add integration stripe --ui through the CLI", async () => {
+  const root = await createTempProject({
+    packageJson: {
+      type: "module",
+      dependencies: {
+        "@farmjs/core": "workspace:*",
+      },
+    },
+  });
+
+  try {
+    const { stdout } = await execFileAsync(process.execPath, [
+      cliBin,
+      "add",
+      "integration",
+      "stripe",
+      "--ui",
+      "--root",
+      root,
+    ]);
+
+    assert.match(stdout, /Added stripe integration as appIntegrations\.billing/);
+    assert.match(stdout, /UI feature: stripe-billing/);
+    assert.match(stdout, /Shadcn components: badge, button, card/);
+    assert.match(
+      await readFile(path.join(root, "src/components/farm/stripe-billing.tsx"), "utf8"),
+      /apiClient\.billing\.checkout/,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }

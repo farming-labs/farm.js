@@ -2032,6 +2032,7 @@ function generateClientManifest(bundle: any): Record<string, any> {
 
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
+  const appRoot = path.resolve(config.root || process.cwd());
 
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
@@ -2247,6 +2248,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
       // Stub out problematic server-only modules during dev mode
       alias: {
+        "@": path.resolve(appRoot, "src"),
         // Nitro internals that should not be resolved in browser
         "supports-color":
           "data:text/javascript,export default false; export const supportsColor = false; export const stdout = false; export const stderr = false;",
