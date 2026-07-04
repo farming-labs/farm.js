@@ -89,6 +89,8 @@ declare module "@farmjs/core" {
     snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
   }
 
+  export const FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY: "farm.integration.internalDispatch";
+
   export type FarmIntegrationRouteDb<TSchema extends FarmIntegrationSchema | undefined> = Record<
     string,
     any
@@ -447,7 +449,7 @@ declare module "@farmjs/core" {
   }
 
   export type FarmIntegrationAPI = {
-    [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any>;
+    [key: string]: FarmIntegrationAPI | FarmIntegrationAPIOperation<any, any, any, any, any>;
   };
 
   export type FarmIntegrationRouteOperationCarrier<

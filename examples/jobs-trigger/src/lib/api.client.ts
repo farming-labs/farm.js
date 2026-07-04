@@ -1,4 +1,4 @@
-import { integrationsClient } from "@farmjs/core/client";
+import { createIntegrations } from "@farmjs/core/client";
 import type { AppIntegrations } from "./integrations";
 
-export const apiClient = integrationsClient<AppIntegrations>();
+export const { apiClient } = createIntegrations<AppIntegrations>();

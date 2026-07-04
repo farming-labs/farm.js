@@ -117,6 +117,8 @@ export interface FarmIntegrationRequestContextStore {
   snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
 }
 
+export const FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY = "farm.integration.internalDispatch";
+
 export type FarmIntegrationRouteDb<TSchema extends FarmIntegrationSchema | undefined> =
   InferFarmIntegrationOrmClient<TSchema>;
 
@@ -2461,6 +2463,7 @@ export async function dispatchIntegrationRequest(
   options: {
     currentRequest?: Request;
     data?: FarmIntegrationData;
+    internal?: boolean;
   } = {},
 ): Promise<Response | null> {
   const integration = runtime.integration;
@@ -2492,6 +2495,7 @@ export async function dispatchIntegrationRequest(
       requestId,
       currentRequest: options.currentRequest,
       data: options.data,
+      internal: options.internal === true,
     });
     const startedAt = Date.now();
 
@@ -2589,6 +2593,7 @@ export async function dispatchIntegrationRequest(
       requestId,
       currentRequest: options.currentRequest,
       data: options.data,
+      internal: options.internal === true,
     });
     const startedAt = Date.now();
 
@@ -2784,7 +2789,17 @@ function createServerIntegrationHandlerContext(input: {
   requestId: string;
   currentRequest?: Request;
   data?: FarmIntegrationData;
+  internal?: boolean;
 }): FarmIntegrationHandlerContext {
+  const requestContext = createServerIntegrationRequestContextStore(
+    input.request,
+    input.currentRequest,
+  );
+
+  if (input.internal) {
+    requestContext.set(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY, true);
+  }
+
   return {
     request: input.request,
     requestId: input.requestId,
@@ -2805,7 +2820,7 @@ function createServerIntegrationHandlerContext(input: {
       instance: input.runtime.integration.instance,
     },
     route: input.route,
-    requestContext: createServerIntegrationRequestContextStore(input.request, input.currentRequest),
+    requestContext,
     config: input.runtime.config,
     isDev: input.runtime.isDev,
     isProd: input.runtime.isProd,

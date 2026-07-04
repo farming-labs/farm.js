@@ -1,4 +1,4 @@
-import { integrationsClient, integrationsServer } from "@farmjs/core/client";
+import { createIntegrations } from "@farmjs/core/client";
 import { auth0Client } from "@farmjs/integrations/auth0/client";
 
 const auth0Api = {
@@ -20,5 +20,4 @@ type Auth0IntegrationSources = {
   auth: typeof auth0Api;
 };
 
-export const api = integrationsServer<Auth0IntegrationSources>();
-export const apiClient = integrationsClient<Auth0IntegrationSources>();
+export const { api, apiClient } = createIntegrations<Auth0IntegrationSources>();

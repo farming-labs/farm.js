@@ -21,6 +21,7 @@ export { workos } from "./workos/index.js";
 export { workosClient } from "./workos/client.js";
 export { supabase } from "./supabase/index.js";
 export { supabaseClient, supabaseAuthFormFields } from "./supabase/client.js";
+export { createUnkeyClient, unkey, UnkeyAPIError } from "./unkey/index.js";
 export {
   drizzleStorageAdapter,
   prismaStorageAdapter,
@@ -28,6 +29,25 @@ export {
   stripe,
   stripeSchema,
 } from "./stripe/index.js";
+export type {
+  UnkeyAPIEnvelope,
+  UnkeyClient,
+  UnkeyClientOptions,
+  UnkeyCreateKeyInput,
+  UnkeyCreateKeyResult,
+  UnkeyCreditsInput,
+  UnkeyDeleteKeyInput,
+  UnkeyIntegrationInput,
+  UnkeyIntegrationPaths,
+  UnkeyProtectionOptions,
+  UnkeyRatelimitRequest,
+  UnkeyRatelimitState,
+  UnkeyRevokeKeyInput,
+  UnkeyUpdateKeyInput,
+  UnkeyVerificationIdentity,
+  UnkeyVerifyKeyInput,
+  UnkeyVerifyKeyResult,
+} from "./unkey/index.js";
 export type {
   AIChatPrepareContext,
   AIChatRequestBody,

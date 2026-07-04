@@ -45,11 +45,10 @@ The integration owns:
 Create the shared callers once and reuse them in your pages:
 
 ```ts
-import { integrationsClient, integrationsServer } from "@farmjs/core/client";
+import { createIntegrations } from "@farmjs/core/client";
 import type { AppIntegrations } from "./src/lib/integrations";
 
-export const api = integrationsServer<AppIntegrations>();
-export const apiClient = integrationsClient<AppIntegrations>();
+export const { api, apiClient } = createIntegrations<AppIntegrations>();
 ```
 
 Client usage:
