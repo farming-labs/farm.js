@@ -71,6 +71,17 @@ export default defineFarmConfig({
 
 With the dev server running, `/about.md` renders the same `/about` page as `text/markdown`.
 
+### PPR static shell
+
+The `/ppr-demo` page opts into static-shell caching:
+
+```ts
+export const experimental_ppr = true;
+export const revalidate = 60;
+```
+
+The first request returns `X-Farm-PPR: miss`; the next matching request returns `X-Farm-PPR: hit`.
+
 ### Monorepo note
 
 If you change code in `packages/farm` or `packages/farmjs-plugin`, rebuild the workspace packages before restarting this example:

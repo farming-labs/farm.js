@@ -9,7 +9,7 @@ import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
 import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
-import { isSSGModule, matchSSGPage } from "../ssg";
+import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
@@ -25,6 +25,16 @@ const importRuntimeModule = new Function("specifier", "return import(specifier);
 interface CachedSSGPage {
   html: string;
   document: boolean;
+}
+
+interface CachedPPRShell {
+  html: string;
+}
+
+interface PPRShellCacheOptions {
+  pathname: string;
+  search: string;
+  revalidate?: number;
 }
 
 function toMiddlewareMap(input: unknown): Map<string, any> {
@@ -115,6 +125,10 @@ export class ServerRenderer {
     return createFarmCacheKey(["ssg", normalizeRevalidatePath(urlPath)]);
   }
 
+  private getPPRCacheKey(pathname: string, search = ""): string {
+    return createFarmCacheKey(["ppr", normalizeRevalidatePath(pathname), search]);
+  }
+
   private getCachedSSGPage(urlPath: string) {
     return this.dataCache.getEntry<CachedSSGPage>(this.getSSGCacheKey(urlPath), {
       allowStale: true,
@@ -136,6 +150,65 @@ export class ServerRenderer {
         revalidate: page.revalidate ?? false,
       },
     );
+  }
+
+  private getCachedPPRShell(pathname: string, search: string) {
+    return this.dataCache.getEntry<CachedPPRShell>(this.getPPRCacheKey(pathname, search));
+  }
+
+  private cachePPRShell(options: PPRShellCacheOptions, html: string): void {
+    this.dataCache.set(
+      this.getPPRCacheKey(options.pathname, options.search),
+      { html },
+      {
+        paths: [options.pathname],
+        tags: ["ppr"],
+        revalidate: options.revalidate ?? false,
+      },
+    );
+  }
+
+  private canCachePPRShell(
+    req: FarmRequest,
+    middlewareMap: Map<string, any>,
+    pluginExposedContext: Map<string, any>,
+  ): boolean {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      return false;
+    }
+
+    if (req.headers.cookie || req.headers.authorization) {
+      return false;
+    }
+
+    return middlewareMap.size === 0 && pluginExposedContext.size === 0;
+  }
+
+  private getPPRHeaders(status: "hit" | "miss" | "bypass", revalidate?: number) {
+    const headers: Record<string, string> = {
+      "X-Farm-PPR": status,
+    };
+
+    if (status === "bypass") {
+      headers["Cache-Control"] = "private, no-store";
+      return headers;
+    }
+
+    if (typeof revalidate === "number" && revalidate > 0) {
+      headers["Cache-Control"] = `s-maxage=${revalidate}, stale-while-revalidate`;
+    }
+
+    return headers;
+  }
+
+  private serveCachedPPRShell(res: FarmResponse, shell: CachedPPRShell, revalidate?: number): void {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    for (const [key, value] of Object.entries(this.getPPRHeaders("hit", revalidate))) {
+      res.setHeader(key, value);
+    }
+    res.write(shell.html);
+    res.end();
   }
 
   /**
@@ -312,6 +385,28 @@ export class ServerRenderer {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
       }
 
+      const renderingConfig = await resolveRouteRenderingConfigFromFile(
+        routeModule,
+        route.modulePath,
+      );
+      const canCachePPRShell =
+        renderingConfig.ppr && this.canCachePPRShell(req, middlewareMap, pluginExposedContext);
+      const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
+        ? {
+            pathname,
+            search: url.search,
+            revalidate: renderingConfig.revalidate,
+          }
+        : undefined;
+
+      if (pprShellOptions) {
+        const cachedPPRShell = this.getCachedPPRShell(pathname, url.search);
+        if (cachedPPRShell) {
+          this.serveCachedPPRShell(res, cachedPPRShell.value, renderingConfig.revalidate);
+          return;
+        }
+      }
+
       let LoadingFallbackComponent: React.ComponentType<any> | null = null;
       if (loadingBoundaryEntry) {
         const loadingModule = await this.routeManager.loadRouteModule(
@@ -454,9 +549,18 @@ export class ServerRenderer {
           }
 
           const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
+          const pprHeaders = renderingConfig.ppr
+            ? this.getPPRHeaders(pprShellOptions ? "miss" : "bypass", renderingConfig.revalidate)
+            : undefined;
 
           // Render with middleware data available
-          await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData);
+          await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData, {
+            responseHeaders: pprHeaders,
+            onComplete:
+              pprShellOptions && req.method !== "HEAD"
+                ? (html) => this.cachePPRShell(pprShellOptions, html)
+                : undefined,
+          });
         });
       });
     } catch (error) {
@@ -588,10 +692,17 @@ export class ServerRenderer {
     req: FarmRequest,
     res: FarmResponse,
     clearMiddlewareData?: () => void,
+    options: {
+      responseHeaders?: Record<string, string> | undefined;
+      onComplete?: (html: string) => void | Promise<void>;
+    } = {},
   ): Promise<void> {
     return new Promise((resolve, reject) => {
       const streamStartTime = Date.now();
       res.setHeader("Content-Type", "text/html; charset=utf-8");
+      for (const [key, value] of Object.entries(options.responseHeaders || {})) {
+        res.setHeader(key, value);
+      }
       if (typeof res.flushHeaders === "function") {
         res.flushHeaders();
       }
@@ -715,6 +826,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 </head>
 <body class="">
   <div id="root">`;
+          htmlParts.push(shell);
 
           let firstChunk = true;
           const writableStream = new Writable({
@@ -723,6 +835,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
                 console.log(`[FARM STREAM] first pipe chunk at ${Date.now() - streamStartTime}ms`);
                 firstChunk = false;
               }
+              htmlParts.push(Buffer.isBuffer(chunk) ? chunk.toString() : String(chunk));
               res.write(chunk, encoding, () => {
                 if (typeof (res as any).flush === "function") (res as any).flush();
                 callback();
@@ -730,15 +843,22 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
             },
             final(callback) {
               const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-              res.write(`</div>
+              const footer = `</div>
   ${suspenseRevealFallback}
   <script type="module" src="/@farm/client.js"></script>
 </body>
-</html>`);
+</html>`;
+              htmlParts.push(footer);
+              res.write(footer);
               res.end();
               callback();
               if (clearMiddlewareData) {
                 clearMiddlewareData();
+              }
+              if (!didError && options.onComplete) {
+                Promise.resolve(options.onComplete(htmlParts.join(""))).catch((error) => {
+                  logger.warn(`Failed to cache PPR shell: ${error}`);
+                });
               }
               resolve();
             },
