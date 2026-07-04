@@ -37,6 +37,10 @@
  * export const dynamic = "force-static";
  * export const revalidate = 60;
  *
+ * // PPR/static-shell route
+ * export const experimental_ppr = true;
+ * export const revalidate = 60;
+ *
  * // Directive config
  * "use ssg; 60";
  * export default function DocsPage() {
@@ -59,6 +63,7 @@ export type RouteRenderingDynamic = NonNullable<RouteModule["dynamic"]>;
 
 export interface RouteRenderingConfig {
   ssg: boolean;
+  ppr: boolean;
   revalidate?: number;
   dynamic?: RouteRenderingDynamic;
   directive?: string;
@@ -66,6 +71,7 @@ export interface RouteRenderingConfig {
 
 interface DirectiveRenderingConfig {
   ssg: boolean;
+  ppr: boolean;
   revalidate?: number;
   dynamic?: RouteRenderingDynamic;
   directive: string;
@@ -81,19 +87,26 @@ export function resolveRouteRenderingConfig(
 ): RouteRenderingConfig {
   const directiveConfig = parseRouteRenderingDirective(source);
   let ssg = directiveConfig?.ssg ?? false;
+  let ppr = directiveConfig?.ppr ?? false;
   let revalidate = directiveConfig?.revalidate;
   const moduleDynamic = normalizeDynamicMode(mod?.dynamic);
   const dynamic = moduleDynamic ?? directiveConfig?.dynamic;
   const hasExplicitSsg = typeof mod?.ssg === "boolean";
+  const hasExplicitPPR =
+    typeof mod?.ppr === "boolean" || typeof mod?.experimental_ppr === "boolean";
 
   if (hasExplicitSsg) {
     ssg = mod!.ssg === true;
   }
 
+  if (hasExplicitPPR) {
+    ppr = mod?.ppr === true || mod?.experimental_ppr === true;
+  }
+
   if (typeof mod?.revalidate === "number") {
     if (mod.revalidate > 0) {
       revalidate = mod.revalidate;
-      if (!hasExplicitSsg) {
+      if (!hasExplicitSsg && !ppr) {
         ssg = true;
       }
     } else {
@@ -108,14 +121,17 @@ export function resolveRouteRenderingConfig(
 
   if (moduleDynamic === "force-static" || moduleDynamic === "error") {
     ssg = true;
+    ppr = false;
   } else if (moduleDynamic === "force-dynamic") {
     ssg = false;
+    ppr = false;
     revalidate = undefined;
   }
 
   return {
     ssg,
-    revalidate: ssg ? revalidate : undefined,
+    ppr: ssg ? false : ppr,
+    revalidate: ssg || ppr ? revalidate : undefined,
     dynamic,
     directive: directiveConfig?.directive,
   };
@@ -148,7 +164,9 @@ export function parseRouteRenderingDirective(
 
 function parseKnownRenderingDirective(directive: string): DirectiveRenderingConfig | undefined {
   const normalized = directive.trim().toLowerCase();
-  const match = normalized.match(/^use\s+(ssg|static|isr|ssr|dynamic)(?:\s*[;:]\s*(\d+))?\s*;?$/);
+  const match = normalized.match(
+    /^use\s+(ssg|static|isr|ssr|dynamic|ppr)(?:\s*[;:]\s*(\d+))?\s*;?$/,
+  );
 
   if (!match?.[1]) {
     return undefined;
@@ -160,13 +178,24 @@ function parseKnownRenderingDirective(directive: string): DirectiveRenderingConf
   if (mode === "ssr" || mode === "dynamic") {
     return {
       ssg: false,
+      ppr: false,
       dynamic: "force-dynamic",
+      directive,
+    };
+  }
+
+  if (mode === "ppr") {
+    return {
+      ssg: false,
+      ppr: true,
+      revalidate: typeof revalidate === "number" && revalidate > 0 ? revalidate : undefined,
       directive,
     };
   }
 
   return {
     ssg: true,
+    ppr: false,
     dynamic: "force-static",
     revalidate: typeof revalidate === "number" && revalidate > 0 ? revalidate : undefined,
     directive,
@@ -378,6 +407,13 @@ export function hasISR(mod: RouteModule | null | undefined): boolean {
  */
 export function getRevalidateInterval(mod: RouteModule | null | undefined): number | undefined {
   return resolveRouteRenderingConfig(mod).revalidate;
+}
+
+/**
+ * Check if a route module has PPR/static-shell caching enabled.
+ */
+export function hasPPR(mod: RouteModule | null | undefined): boolean {
+  return resolveRouteRenderingConfig(mod).ppr;
 }
 
 /**

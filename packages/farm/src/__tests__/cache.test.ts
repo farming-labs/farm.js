@@ -68,6 +68,19 @@ describe("server cache primitives", () => {
     await expect(getDashboard()).resolves.toEqual({ calls: 2 });
   });
 
+  it("revalidates PPR shell entries through the shared path cache", () => {
+    const cache = getFarmDataCache();
+    const key = createFarmCacheKey(["ppr", normalizeRevalidatePath("/dashboard"), ""]);
+
+    cache.set(key, { html: "<html>dashboard</html>" }, { paths: ["/dashboard"], tags: ["ppr"] });
+
+    expect(cache.getEntry<{ html: string }>(key)?.value.html).toContain("dashboard");
+
+    revalidatePath("/dashboard");
+
+    expect(cache.getEntry(key)).toBeUndefined();
+  });
+
   it("supports updateTag as immediate tag invalidation", async () => {
     let calls = 0;
     const getUser = unstable_cache(

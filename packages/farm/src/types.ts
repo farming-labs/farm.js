@@ -247,6 +247,12 @@ export interface RouteModule {
    */
   dynamic?: "auto" | "force-static" | "force-dynamic" | "error";
   /**
+   * Opt into Partial Prerendering/static-shell caching for this route.
+   * Compatible with Farm's `ppr` export and Next.js `experimental_ppr`.
+   */
+  ppr?: boolean;
+  experimental_ppr?: boolean;
+  /**
    * Return all paths to pre-render for dynamic SSG routes
    * Required for dynamic routes (e.g., [slug]) when ssg = true
    */

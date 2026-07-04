@@ -54,6 +54,23 @@ describe("route rendering config", () => {
     });
   });
 
+  it("supports PPR and Next-compatible experimental_ppr without forcing SSG", () => {
+    expect(resolveRouteRenderingConfig({ experimental_ppr: true, revalidate: 60 })).toMatchObject({
+      ssg: false,
+      ppr: true,
+      revalidate: 60,
+    });
+    expect(resolveRouteRenderingConfig({ ppr: true })).toMatchObject({
+      ssg: false,
+      ppr: true,
+    });
+    expect(resolveRouteRenderingConfig({ ppr: true, dynamic: "force-dynamic" })).toMatchObject({
+      ssg: false,
+      ppr: false,
+      dynamic: "force-dynamic",
+    });
+  });
+
   it("parses top-of-file rendering directives", () => {
     expect(
       parseRouteRenderingDirective(`
@@ -73,7 +90,14 @@ describe("route rendering config", () => {
 
     expect(parseRouteRenderingDirective(`'use ssr';`)).toMatchObject({
       ssg: false,
+      ppr: false,
       dynamic: "force-dynamic",
+    });
+
+    expect(parseRouteRenderingDirective(`"use ppr; 30";`)).toMatchObject({
+      ssg: false,
+      ppr: true,
+      revalidate: 30,
     });
   });
 

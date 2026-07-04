@@ -1258,6 +1258,7 @@ function generateVirtualEntryCode(
     apiRoutes.length > 0
       ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "farm/api/route-manager";`
       : "";
+  const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
     : "";
@@ -1319,6 +1320,7 @@ ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
+${cacheHelpersImport}
 ${docsHandlerImport}
 ${markdownHandlerImport}
 ${integrationImports}
@@ -1437,6 +1439,65 @@ function getApplicableLayouts(pathname) {
   return applicable;
 }
 
+const pprShellCache = getFarmDataCache();
+
+function resolvePPRConfig(routeModule) {
+  if (!routeModule || routeModule.dynamic === "force-dynamic") {
+    return { enabled: false };
+  }
+
+  if (routeModule.dynamic === "force-static" || routeModule.dynamic === "error") {
+    return { enabled: false };
+  }
+
+  const enabled = routeModule.ppr === true || routeModule.experimental_ppr === true;
+  const revalidate =
+    typeof routeModule.revalidate === "number" && routeModule.revalidate > 0
+      ? routeModule.revalidate
+      : undefined;
+
+  return { enabled, revalidate };
+}
+
+function canCachePPRShell(request) {
+  const method = request.method.toUpperCase();
+  return (
+    (method === "GET" || method === "HEAD") &&
+    !request.headers.get("cookie") &&
+    !request.headers.get("authorization")
+  );
+}
+
+function getPPRShellCacheKey(url) {
+  return createFarmCacheKey(["ppr", normalizeRevalidatePath(url.pathname), url.search]);
+}
+
+function getPPRHeaders(status, config) {
+  const headers = {
+    "X-Farm-PPR": status,
+  };
+
+  if (status === "bypass") {
+    headers["Cache-Control"] = "private, no-store";
+    return headers;
+  }
+
+  if (typeof config.revalidate === "number" && config.revalidate > 0) {
+    headers["Cache-Control"] = \`s-maxage=\${config.revalidate}, stale-while-revalidate\`;
+  }
+
+  return headers;
+}
+
+function getCachedPPRShell(cacheKey) {
+  const entry = pprShellCache.getEntry(cacheKey);
+  if (!entry) {
+    return null;
+  }
+
+  return entry.value.html;
+}
+
 /**
  * Main request handler - created at runtime with bundled routes
  */
@@ -1494,6 +1555,22 @@ async function handleRequest(request) {
     const { route, params } = matchedRoute;
     
     try {
+      const pprConfig = resolvePPRConfig(route.module);
+      const pprCanCache = pprConfig.enabled && canCachePPRShell(request);
+      const pprCacheKey = pprCanCache ? getPPRShellCacheKey(url) : null;
+      if (pprCacheKey) {
+        const cachedPPRShell = getCachedPPRShell(pprCacheKey);
+        if (cachedPPRShell) {
+          return new Response(cachedPPRShell, {
+            status: 200,
+            headers: {
+              "Content-Type": "text/html; charset=utf-8",
+              ...getPPRHeaders("hit", pprConfig),
+            },
+          });
+        }
+      }
+
       // Get the page component and metadata
       const PageComponent = route.module.default;
       const pageMetadata = route.module.metadata || {};
@@ -1624,14 +1701,29 @@ async function handleRequest(request) {
         // Include client CSS and hydration script
         // Add caching headers for edge caching (Vercel, Cloudflare, etc.)
         // s-maxage: cache at edge for 60s, stale-while-revalidate: serve stale while updating
+        const responseHeaders = {
+          "Content-Type": "text/html; charset=utf-8",
+          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          ...(pprConfig.enabled ? getPPRHeaders(pprCanCache ? "miss" : "bypass", pprConfig) : {}),
+        };
+
+        if (pprCacheKey && request.method.toUpperCase() !== "HEAD") {
+          pprShellCache.set(
+            pprCacheKey,
+            { html: fullHtml },
+            {
+              paths: [pathname],
+              tags: ["ppr"],
+              revalidate: pprConfig.revalidate ?? false,
+            }
+          );
+        }
+
         return new Response(
           fullHtml,
           { 
             status: 200, 
-            headers: { 
-              "Content-Type": "text/html; charset=utf-8",
-              "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
-            } 
+            headers: responseHeaders
           }
         );
       }
