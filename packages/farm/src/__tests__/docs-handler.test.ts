@@ -107,6 +107,7 @@ describe("createFarmDocsHandler", () => {
     );
     expect(html).toContain("data-toc-thumb");
     expect(html).toContain('data-active="true" data-toc-item');
+    expect(html).toContain(".code-block pre { margin: 0; max-width: 100%;");
     expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');

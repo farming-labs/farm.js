@@ -967,7 +967,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .code-block-plain:hover .code-copy-floating, .code-block-plain:focus-within .code-copy-floating { opacity: 1; }
     .code-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .code-copy:hover { color: var(--color-fd-foreground, #fff); background: var(--color-fd-muted, hsl(0 0% 10%)); }
-    .code-block pre { margin: 20px 22px 22px; max-width: calc(100% - 44px); overflow-x: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 18px 20px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.6; }
+    .code-block pre { margin: 0; max-width: 100%; overflow-x: auto; border: 0; background: transparent; padding: 18px 20px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.6; }
     #nd-docs-layout figure.shiki.code-block pre { padding: 18px 20px !important; }
     .code-block code { display: block; min-width: max-content; font-family: inherit; white-space: normal; }
     .sh__line { display: block; min-height: 1.6em; white-space: pre; }
