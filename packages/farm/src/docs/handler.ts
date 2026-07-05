@@ -600,10 +600,6 @@ function parseCodeInfo(info: string | undefined): {
   return { language, label: explicitLabel || language, hasExplicitLabel: Boolean(explicitLabel) };
 }
 
-function isShellLikeLanguage(language: string): boolean {
-  return /^(?:bash|sh|shell|zsh|console|command|cmd|terminal|powershell|ps1)$/i.test(language);
-}
-
 function highlightCodeBlock(code: string): string {
   return highlight(code.replace(/\n$/, "")).replace(/<\/span>\n<span/g, "</span><span");
 }
@@ -625,7 +621,7 @@ function renderMarkdownHtml(body: string): string {
     const { language, label, hasExplicitLabel } = parseCodeInfo(infostring);
     const rawCode = escaped ? unescapeHtml(code) : code;
     const highlighted = highlightCodeBlock(rawCode);
-    const shouldRenderHeader = hasExplicitLabel || !isShellLikeLanguage(language);
+    const shouldRenderHeader = hasExplicitLabel;
     const header = shouldRenderHeader
       ? `<div class="code-block-header">
     <span class="code-block-title">${escapeHtml(label)}</span>
@@ -963,7 +959,8 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 30px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--fd-code-header-bg); background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); padding: 4px 8px 4px 10px; }
     .code-block-title { overflow: hidden; color: color-mix(in srgb, var(--color-fd-foreground, #fff) 50%, transparent); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
     .code-copy { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: 0 0 auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, #000) 80%, transparent); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); cursor: pointer; padding: 0; }
-    .code-copy-floating { position: absolute; top: 8px; right: 8px; z-index: 2; opacity: 0; transition: opacity 150ms ease; }
+    .code-copy-floating { position: absolute; top: 8px; right: 8px; z-index: 2; opacity: 0.72; transition: opacity 150ms ease; }
+    #nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72; }
     .code-block-plain:hover .code-copy-floating, .code-block-plain:focus-within .code-copy-floating { opacity: 1; }
     .code-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .code-copy:hover { color: var(--color-fd-foreground, #fff); background: var(--color-fd-muted, hsl(0 0% 10%)); }

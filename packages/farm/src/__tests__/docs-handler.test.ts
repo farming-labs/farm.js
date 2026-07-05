@@ -39,7 +39,7 @@ describe("createFarmDocsHandler", () => {
         "",
         "## Usage",
         "",
-        "```ts",
+        '```ts title="hello.ts"',
         'export const hello = "world";',
         "console.log(hello);",
         "```",
@@ -111,6 +111,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("background: var(--fd-code-body-bg);");
     expect(html).toContain(
       ".code-block code { display: block; min-width: max-content; border: 0 !important;",
+    );
+    expect(html).toContain(
+      "#nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72;",
     );
     expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
