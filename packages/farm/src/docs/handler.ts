@@ -794,6 +794,36 @@ const SIDEBAR_SECTION_ORDER = [
   "Reference",
 ];
 
+const SIDEBAR_ICON_PATHS: Record<string, string> = {
+  activity: '<path d="M22 12h-4l-3 7L9 5l-3 7H2"></path>',
+  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4v15.5A2.5 2.5 0 0 1 6.5 22H20V6a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 6.5"></path>',
+  box: '<path d="m21 16-9 5-9-5V8l9-5 9 5z"></path><path d="m3.3 7.3 8.7 5 8.7-5"></path><path d="M12 22V12"></path>',
+  braces: '<path d="M8 3H7a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h1"></path><path d="M16 3h1a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-1"></path>',
+  card: '<rect x="2" y="5" width="20" height="14" rx="2"></rect><path d="M2 10h20"></path>',
+  circle: '<circle cx="12" cy="12" r="9"></circle>',
+  cloud: '<path d="M17.5 19H8a6 6 0 1 1 5.5-8.5A4.5 4.5 0 1 1 17.5 19Z"></path>',
+  database: '<ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>',
+  folder: '<path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>',
+  gauge: '<path d="M12 14 16 9"></path><path d="M4 20a9 9 0 1 1 16 0"></path>',
+  key: '<circle cx="7.5" cy="14.5" r="3.5"></circle><path d="M10 12 21 3"></path><path d="m16 8 2 2"></path><path d="m19 5 2 2"></path>',
+  layout: '<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path>',
+  lock: '<rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
+  mail: '<rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path>',
+  monitor: '<rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path>',
+  plug: '<path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M7 8h10v4a5 5 0 0 1-10 0z"></path>',
+  rocket: '<path d="M4.5 16.5 3 21l4.5-1.5"></path><path d="M9 15 4 10l6-6c4-4 9-1 10 0 1 1 4 6 0 10l-6 6-5-5Z"></path><path d="M15 9h.01"></path>',
+  route: '<circle cx="6" cy="19" r="3"></circle><circle cx="18" cy="5" r="3"></circle><path d="M9 19h4a5 5 0 0 0 5-5V8"></path>',
+  search: '<circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path>',
+  server: '<rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 8h.01"></path><path d="M7 17h.01"></path>',
+  settings: '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .2 1.7 1.7 0 0 0-.8 1.7V22H9.2v-.3a1.7 1.7 0 0 0-.8-1.7 1.7 1.7 0 0 0-2-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.1H3v-3.8h.2A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.7 1.7 0 0 0 2-.2 1.7 1.7 0 0 0 .8-1.7V2h5.6v.3a1.7 1.7 0 0 0 .8 1.7 1.7 1.7 0 0 0 2 .2l.2-.1 2 3.4-.1.1A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.4 1.1h.2v3.8h-.2a1.7 1.7 0 0 0-1.4 1.1Z"></path>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>',
+  sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z"></path>',
+  terminal: '<path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path>',
+  wrench: '<path d="M14.7 6.3a4 4 0 0 0 5 5L10 21l-5-5 9.7-9.7Z"></path>',
+  zap: '<path d="M13 2 3 14h8l-1 8 10-12h-8z"></path>',
+};
+
 const SIDEBAR_PAGE_ORDER = new Map(
   [
     "",
@@ -810,6 +840,8 @@ const SIDEBAR_PAGE_ORDER = new Map(
     "storage",
     "integrations",
     "integrations/stripe",
+    "integrations/autumn",
+    "integrations/polar",
     "integrations/auth",
     "integrations/email",
     "integrations/jobs",
@@ -830,6 +862,26 @@ const SIDEBAR_PAGE_ORDER = new Map(
   ].map((slug, index) => [slug, index]),
 );
 
+const SIDEBAR_INTEGRATION_GROUP_ORDER = [
+  "Payment",
+  "Auth",
+  "Messaging",
+  "Workflows",
+  "API Keys",
+  "Interface",
+  "Storage",
+];
+
+const SIDEBAR_INTEGRATION_GROUPS: Record<string, { label: string; icon: string }> = {
+  Payment: { label: "Payment", icon: "card" },
+  Auth: { label: "Auth", icon: "lock" },
+  Messaging: { label: "Messaging", icon: "mail" },
+  Workflows: { label: "Workflows", icon: "activity" },
+  "API Keys": { label: "API Keys", icon: "key" },
+  Interface: { label: "Interface", icon: "layout" },
+  Storage: { label: "Storage", icon: "database" },
+};
+
 function compareSidebarPages(a: FarmDocsPage, b: FarmDocsPage): number {
   const aOrder = SIDEBAR_PAGE_ORDER.get(a.slug) ?? 1000;
   const bOrder = SIDEBAR_PAGE_ORDER.get(b.slug) ?? 1000;
@@ -847,14 +899,146 @@ function sidebarIdFor(section: string): string {
   return `sidebar-${slugify(section)}`;
 }
 
+function renderSidebarIcon(icon: string, className = "sidebar-icon"): string {
+  const path = SIDEBAR_ICON_PATHS[icon] ?? SIDEBAR_ICON_PATHS.circle;
+  return `<span class="${className}" data-sidebar-icon="${escapeAttribute(icon)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${path}</svg></span>`;
+}
+
+function renderSidebarLabel(icon: string, label: string, className: string): string {
+  return `<span class="${className}">${renderSidebarIcon(icon)}<span class="sidebar-label-text">${escapeHtml(label)}</span></span>`;
+}
+
+function getSidebarSectionIcon(section: string): string {
+  const icons: Record<string, string> = {
+    Start: "sparkles",
+    Core: "box",
+    "Data and APIs": "database",
+    Integrations: "plug",
+    Runtime: "gauge",
+    Content: "file",
+    Extending: "wrench",
+    Reference: "book",
+  };
+  return icons[section] ?? "circle";
+}
+
+function getSidebarPageLabel(item: FarmDocsPage): string {
+  if (item.slug === "") return "Why?";
+  if (item.slug === "integrations") return "Overview";
+  if (item.slug === "integrations/ui-registry") return "UI Registry";
+  if (item.slug === "integrations/orm-storage") return "ORM Storage";
+  if (item.slug.startsWith("integrations/")) {
+    return item.title.replace(/\s+Integrations?$/i, "");
+  }
+  return item.title;
+}
+
+function getSidebarPageIcon(item: FarmDocsPage): string {
+  const icons: Record<string, string> = {
+    "": "sparkles",
+    "getting-started": "rocket",
+    "project-structure": "folder",
+    configuration: "settings",
+    routing: "route",
+    layouts: "layout",
+    "server-rendering": "monitor",
+    middleware: "shield",
+    query: "search",
+    "api-routes": "server",
+    "api-client": "terminal",
+    storage: "database",
+    integrations: "plug",
+    "integrations/stripe": "card",
+    "integrations/autumn": "card",
+    "integrations/polar": "card",
+    "integrations/auth": "lock",
+    "integrations/email": "mail",
+    "integrations/jobs": "activity",
+    "integrations/unkey": "key",
+    "integrations/ui-registry": "layout",
+    "integrations/orm-storage": "database",
+    "cache-ppr": "zap",
+    observability: "activity",
+    deployment: "cloud",
+    "docs-engine": "book",
+    markdown: "file",
+    openapi: "braces",
+    plugins: "plug",
+    "plugins/create-plugin": "wrench",
+    cli: "terminal",
+    examples: "box",
+    reference: "book",
+  };
+  return icons[item.slug] ?? "file";
+}
+
+function getSidebarIntegrationGroup(item: FarmDocsPage): string | null {
+  const groups: Record<string, string> = {
+    "integrations/stripe": "Payment",
+    "integrations/autumn": "Payment",
+    "integrations/polar": "Payment",
+    "integrations/auth": "Auth",
+    "integrations/email": "Messaging",
+    "integrations/jobs": "Workflows",
+    "integrations/unkey": "API Keys",
+    "integrations/ui-registry": "Interface",
+    "integrations/orm-storage": "Storage",
+  };
+  return groups[item.slug] ?? null;
+}
+
 function renderSidebarLink(item: FarmDocsPage, activeHref: string): string {
   const active = item.href === activeHref;
   const isOverview = item.slug === "";
-  return `<a data-active="${active ? "true" : "false"}"${isOverview ? ' data-active-marker="false"' : ""} href="${escapeAttribute(item.href)}">${escapeHtml(isOverview ? "Why?" : item.title)}</a>`;
+  return `<a data-active="${active ? "true" : "false"}"${isOverview ? ' data-active-marker="false"' : ""} href="${escapeAttribute(item.href)}">${renderSidebarLabel(getSidebarPageIcon(item), getSidebarPageLabel(item), "sidebar-link-label")}</a>`;
 }
 
 function getOrderedSidebarPages(pages: FarmDocsPage[]): FarmDocsPage[] {
   return [...pages].sort(compareSidebarPages);
+}
+
+function renderSidebarSectionItems(
+  section: string,
+  items: FarmDocsPage[],
+  activeHref: string,
+): string {
+  const sortedItems = [...items].sort(compareSidebarPages);
+  if (section !== "Integrations") {
+    return sortedItems.map((item) => renderSidebarLink(item, activeHref)).join("\n");
+  }
+
+  const overviewItems = sortedItems.filter((item) => !getSidebarIntegrationGroup(item));
+  const groupedItems = new Map<string, FarmDocsPage[]>();
+  for (const item of sortedItems) {
+    const group = getSidebarIntegrationGroup(item);
+    if (!group) continue;
+    const entries = groupedItems.get(group) ?? [];
+    entries.push(item);
+    groupedItems.set(group, entries);
+  }
+
+  const renderedOverview = overviewItems.map((item) => renderSidebarLink(item, activeHref));
+  const renderedGroups = Array.from(groupedItems.entries())
+    .sort(([a], [b]) => {
+      const aOrder = SIDEBAR_INTEGRATION_GROUP_ORDER.indexOf(a);
+      const bOrder = SIDEBAR_INTEGRATION_GROUP_ORDER.indexOf(b);
+      return (aOrder === -1 ? 100 : aOrder) - (bOrder === -1 ? 100 : bOrder) || a.localeCompare(b);
+    })
+    .map(([group, entries]) => {
+      const meta = SIDEBAR_INTEGRATION_GROUPS[group] ?? { label: group, icon: "circle" };
+      const links = entries
+        .sort(compareSidebarPages)
+        .map((item) => renderSidebarLink(item, activeHref))
+        .join("\n");
+      return `<div class="sidebar-subgroup" data-sidebar-subgroup="${escapeAttribute(slugify(group))}">
+  <div class="sidebar-subgroup-title">${renderSidebarLabel(meta.icon, meta.label, "sidebar-subgroup-label")}</div>
+  <div class="sidebar-subgroup-content">
+${links}
+  </div>
+</div>`;
+    });
+
+  return [...renderedOverview, ...renderedGroups].join("\n");
 }
 
 function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string {
@@ -874,12 +1058,9 @@ function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string 
     })
     .map(([section, items]) => {
       const id = sidebarIdFor(section);
-      const links = items
-        .sort(compareSidebarPages)
-        .map((item) => renderSidebarLink(item, activeHref))
-        .join("\n");
+      const links = renderSidebarSectionItems(section, items, activeHref);
       return `<div class="sidebar-folder" data-state="open">
-  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${escapeHtml(section)}</button>
+  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(getSidebarSectionIcon(section), section, "sidebar-folder-label")}</button>
   <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content" data-state="open">
 ${links}
   </div>
@@ -981,7 +1162,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   return `
     @font-face { font-family: "Geist Sans"; src: url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
     @font-face { font-family: "Geist Mono"; src: url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); }
+    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-guide-x) + 20px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-link-x) + 20px); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
     body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
@@ -1004,16 +1185,27 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-tree > a[data-active], .sidebar-folder { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree > .sidebar-folder { margin-left: 0 !important; margin-right: 0 !important; padding: 0 !important; }
     .sidebar-tree > :last-child { border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: block; width: auto !important; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px; line-height: 1.45; background: transparent !important; transition: color 150ms ease; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: flex; width: auto !important; min-width: 0; align-items: center; gap: 8px; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px; line-height: 1.45; background: transparent !important; transition: color 150ms ease; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active] { padding-left: var(--fd-sidebar-edge) !important; padding-top: 12px !important; padding-bottom: 12px !important; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active]::before { content: ""; position: absolute !important; left: var(--fd-sidebar-guide-x) !important; top: 50% !important; width: 2px !important; height: 0 !important; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; transform: translateY(-50%) !important; transition: height 150ms ease; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before { display: none !important; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-subgroup-content a[data-active] { padding-left: var(--fd-sidebar-sub-link-x) !important; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-subgroup-content a[data-active]::before { left: var(--fd-sidebar-sub-guide-x) !important; }
     .sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active="true"]::before { height: 16px !important; }
     .sidebar-tree a[data-active="false"]:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)) !important; }
-    #nd-docs-layout aside#nd-sidebar .sidebar-folder-trigger { display: flex !important; width: 100% !important; align-items: center; justify-content: space-between; border: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)) !important; background: transparent !important; margin: 0 !important; transform: none !important; padding: 8px var(--fd-sidebar-edge) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-sans); font-size: 12px !important; font-weight: 600; letter-spacing: 0 !important; text-align: left; text-transform: none; cursor: default; }
+    .sidebar-icon { display: inline-flex; width: 14px; height: 14px; flex: 0 0 14px; color: currentColor; opacity: 0.72; }
+    .sidebar-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-link-label, .sidebar-folder-label, .sidebar-subgroup-label { display: inline-flex; min-width: 0; align-items: center; gap: 8px; }
+    .sidebar-folder-label .sidebar-icon, .sidebar-subgroup-label .sidebar-icon { width: 13px; height: 13px; flex-basis: 13px; }
+    .sidebar-label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-tree a[data-active="true"] .sidebar-icon, .sidebar-tree a:hover .sidebar-icon { opacity: 1; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-folder-trigger { display: flex !important; width: 100% !important; min-width: 0; align-items: center; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)) !important; background: transparent !important; margin: 0 !important; transform: none !important; padding: 8px var(--fd-sidebar-edge) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-sans); font-size: 12px !important; font-weight: 600; letter-spacing: 0 !important; text-align: left; text-transform: none; cursor: default; }
     .sidebar-folder-content { position: relative; padding: 0 0 6px; overflow: hidden; }
     .sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 8px; bottom: 6px; width: 1px; background: var(--color-fd-border, hsl(0 0% 15%)); opacity: 0.9; pointer-events: none; }
+    .sidebar-subgroup { padding: 4px 0 2px; }
+    .sidebar-subgroup-title { display: flex; min-width: 0; align-items: center; padding: 7px var(--fd-sidebar-edge) 4px var(--fd-sidebar-link-x); color: color-mix(in srgb, var(--color-fd-foreground, #fff) 48%, transparent); font-size: 11.5px; font-weight: 600; line-height: 1.35; }
+    .sidebar-subgroup-content { position: relative; }
     main { grid-area: main; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
     article#nd-page .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; line-height: 1.4; letter-spacing: 0.03em; text-transform: uppercase; }
