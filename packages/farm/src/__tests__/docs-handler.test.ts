@@ -118,6 +118,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain("<p><strong>src/app/dashboard/middleware.ts</strong></p>");
     expect(html).toContain("sh__token--keyword");
     expect(html).toContain('aria-label="Copy code"');
+    expect(html).toContain('class="code-copy-check"');
+    expect(html).toContain('data-copied="true"');
+    expect(html).toContain("4500");
     expect(html).toContain("querySelector('code').innerText");
     expect(html).toContain(
       'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
@@ -132,6 +135,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       "#nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72;",
     );
+    expect(html).toContain("text-transform: lowercase");
+    expect(html).toContain('.code-copy[data-copied="true"] .code-copy-check { display: block; }');
     expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');
