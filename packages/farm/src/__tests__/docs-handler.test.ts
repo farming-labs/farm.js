@@ -139,6 +139,11 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("window.__farmDocsRuntime");
     expect(html).toContain("farmdocs:sidebar-scroll");
     expect(html).toContain("window.sessionStorage");
+    expect(html).toContain("x-farm-docs-navigate");
+    expect(html).toContain("DOMParser");
+    expect(html).toContain("history.pushState");
+    expect(html).toContain("farmDocsNavigating");
+    expect(html).toContain("farmDocsRuntimeId");
     expect(html).not.toContain('class="route-pill"');
     expect(html).toContain('data-sidebar-icon="sparkles"');
     expect(html).toContain('data-sidebar-icon="brand-stripe"');
