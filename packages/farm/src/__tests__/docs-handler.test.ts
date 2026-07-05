@@ -30,7 +30,35 @@ describe("createFarmDocsHandler", () => {
         "Welcome to **Farm** docs.",
       ].join("\n"),
     );
-    await fs.writeFile(path.join(docsDir, "guide", "page.md"), ["# Guide", "", "Use `farm dev` to start."].join("\n"));
+    await fs.writeFile(
+      path.join(docsDir, "guide", "page.md"),
+      [
+        "# Guide",
+        "",
+        "Use `farm dev` to start.",
+        "",
+        "## Usage",
+        "",
+        "**src/app/dashboard/middleware.ts**",
+        "",
+        "```ts",
+        'export const area = "dashboard";',
+        "```",
+        "",
+        '```ts title="hello.ts"',
+        'export const hello = "world";',
+        "console.log(hello);",
+        "```",
+        "",
+        "```bash",
+        "farm dev",
+        "```",
+        "",
+        "| Option | Value |",
+        "| --- | --- |",
+        "| Runtime | Farm |",
+      ].join("\n"),
+    );
     const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
     return { root, docs };
   }
@@ -47,7 +75,71 @@ describe("createFarmDocsHandler", () => {
 
     expect(response?.status).toBe(200);
     expect(response?.headers.get("content-type")).toContain("text/html");
-    await expect(response?.text()).resolves.toContain("<h1>Farm Docs</h1>");
+    const html = await response?.text();
+    expect(html).toContain('data-docs-theme="farm-docs"');
+    expect(html).toContain('id="nd-docs-layout"');
+    expect(html).toContain('id="nd-toc"');
+    expect(html).toContain('class="fd-toc sticky');
+    expect(html).toContain('class="fd-toc-title inline-flex');
+    expect(html).toContain("window.__farmDocsToc");
+    expect(html).not.toContain('class="route-pill"');
+    expect(html).toContain(
+      '<a data-active="true" data-active-marker="false" href="/docs">Why?</a>',
+    );
+    expect(html).toContain(
+      '#nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before',
+    );
+    expect(html).not.toContain('href="/docs">Farm Docs</a>');
+    expect(html).toContain('<p class="page-kicker">DOCUMENTATION / OVERVIEW</p>');
+    expect(html).toContain("article#nd-page .page-kicker");
+    expect(html).toContain("--fd-docs-font-mono: var(--font-geist-mono");
+    expect(html).toContain("text-transform: uppercase");
+    expect(html).toContain('id="farm-docs"');
+    expect(html).toContain('href="#farm-docs"');
+    expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
+    expect(html).toContain('href="/docs/guide"');
+  });
+
+  it("renders highlighted code blocks without doubled line gaps", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const response = await handler(
+      new Request("http://farm.test/docs/guide", {
+        headers: { accept: "text/html" },
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = await response?.text();
+    expect(html).toContain('figure class="shiki code-block code-block-framed"');
+    expect(html).toContain('figure class="shiki code-block code-block-plain"');
+    expect(html).toContain('<span class="code-block-title">src/app/dashboard/middleware.ts</span>');
+    expect(html).not.toContain("<p><strong>src/app/dashboard/middleware.ts</strong></p>");
+    expect(html).toContain("sh__token--keyword");
+    expect(html).toContain('aria-label="Copy code"');
+    expect(html).toContain('class="code-copy-check"');
+    expect(html).toContain('data-copied="true"');
+    expect(html).toContain("4500");
+    expect(html).toContain("querySelector('code').innerText");
+    expect(html).toContain(
+      'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
+    );
+    expect(html).toContain("data-toc-thumb");
+    expect(html).toContain('data-active="true" data-toc-item');
+    expect(html).toContain(".code-block pre { margin: 0; max-width: 100%;");
+    expect(html).toContain("background: var(--fd-code-body-bg);");
+    expect(html).toContain(
+      ".code-block code { display: block; min-width: max-content; border: 0 !important;",
+    );
+    expect(html).toContain(
+      "#nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72;",
+    );
+    expect(html).toContain("text-transform: lowercase");
+    expect(html).toContain('.code-copy[data-copied="true"] .code-copy-check { display: block; }');
+    expect(html).not.toContain('<span class="code-block-title">bash</span>');
+    expect(html).not.toContain(">Copy</button>");
+    expect(html).not.toContain('</span>\n<span class="sh__line"');
   });
 
   it("serves markdown when requested by markdown URL", async () => {
@@ -59,6 +151,37 @@ describe("createFarmDocsHandler", () => {
     expect(response?.status).toBe(200);
     expect(response?.headers.get("content-type")).toContain("text/markdown");
     await expect(response?.text()).resolves.toContain("Use `farm dev` to start.");
+  });
+
+  it("serves public @farming-labs/docs discovery routes", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const llmsResponse = await handler(new Request("http://farm.test/llms.txt"));
+    expect(llmsResponse?.status).toBe(200);
+    expect(llmsResponse?.headers.get("content-type")).toContain("text/plain");
+    await expect(llmsResponse?.text()).resolves.toContain(
+      "[Guide](http://farm.test/docs/guide.md)",
+    );
+
+    const agentsResponse = await handler(new Request("http://farm.test/AGENTS.md"));
+    expect(agentsResponse?.status).toBe(200);
+    expect(agentsResponse?.headers.get("content-type")).toContain("text/markdown");
+    await expect(agentsResponse?.text()).resolves.toContain("# Agent Instructions");
+
+    const agentSpecResponse = await handler(new Request("http://farm.test/.well-known/agent.json"));
+    expect(agentSpecResponse?.status).toBe(200);
+    await expect(agentSpecResponse?.json()).resolves.toMatchObject({
+      name: "Documentation",
+      capabilities: {
+        markdownRoutes: true,
+      },
+    });
+
+    const docsSitemapResponse = await handler(new Request("http://farm.test/docs/sitemap.md"));
+    expect(docsSitemapResponse?.status).toBe(200);
+    expect(docsSitemapResponse?.headers.get("content-type")).toContain("text/markdown");
+    await expect(docsSitemapResponse?.text()).resolves.toContain("[Guide](/docs/guide)");
   });
 
   it("returns null when docs are disabled", async () => {
@@ -115,7 +238,9 @@ describe("createDocsAPI", () => {
 
     expect(Object.keys(handlers).sort()).toEqual(["GET", "POST"]);
 
-    const configResponse = await handlers.GET(new Request("http://farm.test/api/docs?format=config"));
+    const configResponse = await handlers.GET(
+      new Request("http://farm.test/api/docs?format=config"),
+    );
     await expect(configResponse.json()).resolves.toMatchObject({
       entry: "/docs",
       config: {
@@ -131,10 +256,12 @@ describe("createDocsAPI", () => {
     await expect(markdownResponse.text()).resolves.toContain("Use `farm dev` to start.");
 
     const searchResponse = await handlers.GET(new Request("http://farm.test/api/docs?query=guide"));
-    await expect(searchResponse.json()).resolves.toMatchObject({
-      query: "guide",
-      results: [expect.objectContaining({ title: "Guide" })],
-    });
+    await expect(searchResponse.json()).resolves.toEqual(
+      expect.objectContaining({
+        query: "guide",
+        results: expect.arrayContaining([expect.objectContaining({ title: "Guide" })]),
+      }),
+    );
 
     const pathMarkdownResponse = await handlers.GET(
       new Request("http://farm.test/api/docs/guide.md"),
@@ -148,9 +275,13 @@ describe("createDocsAPI", () => {
 
     const skillPathResponse = await handlers.GET(new Request("http://farm.test/api/docs/skill.md"));
     expect(skillPathResponse.headers.get("content-type")).toContain("text/markdown");
-    await expect(skillPathResponse.text()).resolves.toContain("Agent spec JSON: /api/docs/agent/spec");
+    await expect(skillPathResponse.text()).resolves.toContain(
+      "Agent spec JSON: /api/docs/agent/spec",
+    );
 
-    const sitemapPathResponse = await handlers.GET(new Request("http://farm.test/api/docs/sitemap.md"));
+    const sitemapPathResponse = await handlers.GET(
+      new Request("http://farm.test/api/docs/sitemap.md"),
+    );
     expect(sitemapPathResponse.headers.get("content-type")).toContain("text/markdown");
     await expect(sitemapPathResponse.text()).resolves.toContain("[Guide](/docs/guide)");
 

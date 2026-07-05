@@ -1,0 +1,35 @@
+{
+  "$schema": "https://docs.farming-labs.dev/schema/docs.json",
+  "version": 1,
+  "entry": "docs",
+  "docsPath": "/docs",
+  "docs": {
+    "mode": "framework",
+    "runtime": "farm",
+    "root": "."
+  },
+  "content": {
+    "docsRoot": "src/app/docs"
+  },
+  "site": {
+    "name": "Farm.js Docs"
+  },
+  "metadata": {
+    "description": "Farm.js framework documentation powered by @farming-labs/docs."
+  },
+  "nav": {
+    "title": "Farm.js Docs"
+  },
+  "search": {
+    "provider": "simple",
+    "enabled": true,
+    "maxResults": 12
+  },
+  "llmsTxt": {
+    "enabled": true,
+    "siteTitle": "Farm.js Docs",
+    "siteDescription": "Complete Farm.js framework documentation."
+  },
+  "sitemap": true,
+  "robots": true
+}
