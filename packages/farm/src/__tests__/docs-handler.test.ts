@@ -193,13 +193,18 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       ".sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x);",
     );
+    expect(html).toContain(
+      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after',
+    );
+    expect(html).toContain(
+      "height: 2px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423));",
+    );
     expect(html).toContain("var(--fd-sidebar-nested-icon-gap)");
     expect(html).toContain(".sidebar-subgroup-title { position: relative;");
     expect(html).toContain("font-size: 13.5px; font-weight: 400;");
     expect(html).toContain(".sidebar-subgroup::before");
-    expect(html).toContain(
-      '#nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before',
-    );
+    expect(html).not.toContain("data-active-marker");
+    expect(html).not.toContain('.sidebar-tree a[data-active="true"]::before');
     expect(html).not.toContain('href="/docs">Farm Docs</a>');
     expect(html).toContain('<p class="page-kicker">DOCUMENTATION / OVERVIEW</p>');
     expect(html).toContain("article#nd-page .page-kicker");
