@@ -132,7 +132,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
-    expect(html).toContain("window.__farmDocsToc");
+    expect(html).toContain("window.__farmDocsRuntime");
+    expect(html).toContain("farmdocs:sidebar-scroll");
+    expect(html).toContain("window.sessionStorage");
     expect(html).not.toContain('class="route-pill"');
     expect(html).toContain('data-sidebar-icon="sparkles"');
     expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
@@ -147,7 +149,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
-    expect(html).toContain('class="fd-page-nav-link fd-page-nav-next"');
+    expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
+    expect(html).toContain('class="fd-page-nav-description');
     expect(html).toContain('href="/docs/guide"');
   });
 

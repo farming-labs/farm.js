@@ -1171,18 +1171,22 @@ function renderPixelPageNav(
   const next = orderedPages[activeIndex + 1];
   if (!previous && !next) return "";
 
-  const renderLink = (item: FarmDocsPage, direction: "previous" | "next") =>
-    `<a class="fd-page-nav-link fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
-  <span class="fd-page-nav-label">${direction === "previous" ? "Previous" : "Next"}</span>
+  const renderDescription = (item: FarmDocsPage) =>
+    item.description
+      ? `<span class="fd-page-nav-description">${escapeHtml(item.description)}</span>`
+      : '<span class="fd-page-nav-description fd-page-nav-description-empty" aria-hidden="true">&nbsp;</span>';
+  const renderCard = (item: FarmDocsPage, direction: "prev" | "next") =>
+    `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
+  <span class="fd-page-nav-label">${direction === "prev" ? '<span aria-hidden="true">&larr;</span>Previous' : 'Next<span aria-hidden="true">&rarr;</span>'}</span>
   <span class="fd-page-nav-title">${escapeHtml(item.title)}</span>
+  ${renderDescription(item)}
 </a>`;
 
-  return `<footer class="fd-page-footer">
-  <nav class="fd-page-nav" aria-label="Page navigation">
-    ${previous ? renderLink(previous, "previous") : '<span class="fd-page-nav-spacer"></span>'}
-    ${next ? renderLink(next, "next") : '<span class="fd-page-nav-spacer"></span>'}
-  </nav>
-</footer>`;
+  const style = previous && next ? "" : ' style="grid-template-columns: 1fr;"';
+  return `<nav class="not-prose fd-page-nav" aria-label="Page navigation"${style}>
+  ${previous ? renderCard(previous, "prev") : ""}
+  ${next ? renderCard(next, "next") : ""}
+</nav>`;
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -1201,7 +1205,7 @@ ${items
 }
 
 function renderDocsRuntimeScript(): string {
-  return `<script>(()=>{if(window.__farmDocsToc)return;window.__farmDocsToc=true;const init=()=>{const toc=document.getElementById("nd-toc");if(!toc)return;const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath=\`polygon(0 \${top}px,100% \${top}px,100% \${bottom}px,0 \${bottom}px)\`;};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",()=>setTimeout(schedule,0));update()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
+  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;const initToc=()=>{const toc=document.getElementById("nd-toc");if(!toc)return;const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",()=>setTimeout(schedule,0));update()};const initSidebarScroll=()=>{const sidebar=document.getElementById("nd-sidebar");if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const ensureActiveVisible=()=>{const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)active.scrollIntoView({block:"center"})};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};const init=()=>{initToc();initSidebarScroll()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
 
 const themeCssCache = new Map<string, string>();
@@ -1333,15 +1337,14 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-footer { width: 100%; margin-top: 46px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 20px; }
-    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav-link, .fd-page-nav-spacer { min-height: 76px; }
-    .fd-page-nav-link { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 5px; padding: 13px 15px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background 150ms ease, color 150ms ease; }
-    .fd-page-nav-link + .fd-page-nav-link, .fd-page-nav-spacer + .fd-page-nav-link { border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav-link:hover { background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); }
+    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1.5rem; }
+    .fd-page-nav-card { display: flex; min-width: 0; min-height: 8.75rem; flex-direction: column; justify-content: flex-start; gap: 0.375rem; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 0 !important; background: transparent; padding: 1rem; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease; }
+    .fd-page-nav-card:hover { border-color: color-mix(in srgb, var(--color-fd-foreground, #fff) 22%, transparent); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); }
     .fd-page-nav-next { align-items: flex-end; text-align: right; }
-    .fd-page-nav-label { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
-    .fd-page-nav-title { display: -webkit-box; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 14px; font-weight: 600; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+    .fd-page-nav-label { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
+    .fd-page-nav-title { display: -webkit-box; overflow: hidden; min-height: calc(1.4em * 2); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 600; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+    .fd-page-nav-description { display: -webkit-box; overflow: hidden; min-height: calc(1.5em * 2); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+    .fd-page-nav-description-empty { visibility: hidden; }
     .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; border-top: 0; padding-top: 0; }
     .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
