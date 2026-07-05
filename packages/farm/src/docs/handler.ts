@@ -852,7 +852,7 @@ function renderPixelPageNav(pages: FarmDocsPage[], activeHref: string): string {
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
   return `<div class="relative">
-  <div class="absolute inset-y-0 inset-s-0 bg-fd-primary w-px transition-[clip-path]" style="clip-path: polygon(0 0px, 100% 0px, 100% 32px, 0 32px);"></div>
+  <div class="absolute inset-y-0 inset-s-0 bg-fd-primary w-px transition-[clip-path]" data-toc-thumb style="clip-path: polygon(0 0px, 100% 0px, 100% 32px, 0 32px);"></div>
   <div class="flex flex-col border-s border-fd-foreground/10">
 ${items
   .map(
@@ -862,6 +862,10 @@ ${items
   .join("\n")}
   </div>
 </div>`;
+}
+
+function renderDocsRuntimeScript(): string {
+  return `<script>(()=>{if(window.__farmDocsToc)return;window.__farmDocsToc=true;const init=()=>{const toc=document.getElementById("nd-toc");if(!toc)return;const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath=\`polygon(0 \${top}px,100% \${top}px,100% \${bottom}px,0 \${bottom}px)\`;};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",()=>setTimeout(schedule,0));update()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
 
 const themeCssCache = new Map<string, string>();
@@ -917,9 +921,10 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template: "sidebar header header" var(--fd-nav-height, 56px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
     #nd-docs-layout.grid { grid-template: "sidebar header header" var(--fd-nav-height, 56px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; }
     #nd-docs-layout, #nd-docs-layout * { border-radius: 0 !important; }
-    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 56px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 56px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 0 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    .topbar a:last-child { display: inline-flex; height: 100%; align-items: center; margin-left: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 28px; }
     aside#nd-sidebar { position: sticky; top: 0; grid-area: sidebar; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 18px var(--fd-sidebar-edge); }
     aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
     aside#nd-sidebar > * { position: relative; z-index: 1; }
@@ -953,7 +958,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .prose li { margin: 6px 0; }
     .prose code:not(pre code) { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; overflow-wrap: break-word; word-break: break-word; }
     .sh-code { --sh-class: #e5c07b; --sh-identifier: #c8ccd4; --sh-string: #98c379; --sh-keyword: #c678dd; --sh-comment: #5c6370; --sh-property: #e06c75; --sh-sign: #c8ccd4; --sh-space: inherit; }
-    .code-block { position: relative; margin: 20px 0; overflow: hidden; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono); }
+    .code-block { position: relative; margin: 20px 0; overflow: hidden; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono); }
     #nd-docs-layout figure.shiki.code-block { box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)) !important; }
     .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 30px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: transparent; background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); padding: 4px 8px 4px 10px; }
     .code-block-title { overflow: hidden; color: color-mix(in srgb, var(--color-fd-foreground, #fff) 50%, transparent); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
@@ -962,7 +967,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .code-block-plain:hover .code-copy-floating, .code-block-plain:focus-within .code-copy-floating { opacity: 1; }
     .code-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .code-copy:hover { color: var(--color-fd-foreground, #fff); background: var(--color-fd-muted, hsl(0 0% 10%)); }
-    .code-block pre { margin: 0; max-width: 100%; overflow-x: auto; padding: 18px 20px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.6; }
+    .code-block pre { margin: 20px 22px 22px; max-width: calc(100% - 44px); overflow-x: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 8%, var(--color-fd-background, #000)); padding: 18px 20px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.6; }
     #nd-docs-layout figure.shiki.code-block pre { padding: 18px 20px !important; }
     .code-block code { display: block; min-width: max-content; font-family: inherit; white-space: normal; }
     .sh__line { display: block; min-height: 1.6em; white-space: pre; }
@@ -1051,6 +1056,7 @@ ${renderMarkdownHtml(page.body)}
       </div>
     </nav>
   </div>
+  ${renderDocsRuntimeScript()}
 </body>
 </html>`;
 }

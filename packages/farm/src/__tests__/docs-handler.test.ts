@@ -37,6 +37,8 @@ describe("createFarmDocsHandler", () => {
         "",
         "Use `farm dev` to start.",
         "",
+        "## Usage",
+        "",
         "```ts",
         'export const hello = "world";',
         "console.log(hello);",
@@ -73,6 +75,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
+    expect(html).toContain("window.__farmDocsToc");
     expect(html).not.toContain('class="route-pill"');
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
@@ -100,6 +103,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
     );
+    expect(html).toContain("data-toc-thumb");
+    expect(html).toContain('data-active="true" data-toc-item');
     expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');
