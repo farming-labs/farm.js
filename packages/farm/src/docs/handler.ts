@@ -851,12 +851,16 @@ function renderPixelPageNav(pages: FarmDocsPage[], activeHref: string): string {
 
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
-  return items
-    .map(
-      (item) =>
-        `<a class="fd-toc-item toc-level-${item.level}" data-toc-item href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
-    )
-    .join("\n");
+  return `<div class="relative">
+  <div class="flex flex-col border-s border-fd-foreground/10">
+${items
+  .map(
+    (item) =>
+      `<a class="prose py-1.5 text-sm text-fd-muted-foreground scroll-m-4 transition-colors wrap-anywhere first:pt-0 last:pb-0 data-[active=true]:text-fd-primary hover:text-fd-accent-foreground ${item.level <= 2 ? "ps-3" : item.level === 3 ? "ps-6" : "ps-8"}" data-toc-item data-depth="${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
+  )
+  .join("\n")}
+  </div>
+</div>`;
 }
 
 const themeCssCache = new Map<string, string>();
@@ -887,7 +891,9 @@ function resolvePixelBorderThemeCss(options: FarmDocsHandlerOptions): string {
   try {
     const requireFromApp = createRequire(path.join(cacheKey, "package.json"));
     const themeCssPath = requireFromApp.resolve("@farming-labs/theme/pixel-border/css");
-    const css = readCssWithImports(themeCssPath);
+    const requireFromTheme = createRequire(themeCssPath);
+    const fumadocsCssPath = requireFromTheme.resolve("fumadocs-ui/style.css");
+    const css = `${readCssWithImports(fumadocsCssPath)}\n${readCssWithImports(themeCssPath)}`;
     themeCssCache.set(cacheKey, css);
     return css;
   } catch {
@@ -901,19 +907,18 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
 
   return `
-    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-docs-font-sans: var(--font-sans, system-ui, -apple-system, sans-serif); --fd-docs-font-mono: var(--font-mono, ui-monospace, monospace); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); }
+    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-sans, system-ui, -apple-system, sans-serif); --fd-docs-font-mono: var(--font-mono, ui-monospace, monospace); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
     body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
     ::selection { background: var(--color-fd-foreground, #fff); color: var(--color-fd-background, #000); }
     a { color: inherit; }
-    #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template-columns: var(--fd-sidebar-width) minmax(0, 1fr) 240px !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
+    #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template: "sidebar header toc" var(--fd-nav-height, 56px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
     #nd-docs-layout, #nd-docs-layout * { border-radius: 0 !important; }
-    .topbar { position: sticky; top: 0; z-index: 20; grid-column: 2 / 4; height: var(--fd-nav-height, 56px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 56px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
-    .route-pill { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 5px 9px; background: transparent; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); }
-    aside#nd-sidebar { position: sticky; top: 0; grid-row: 1 / span 2; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 18px var(--fd-sidebar-edge); }
+    aside#nd-sidebar { position: sticky; top: 0; grid-area: sidebar; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 18px var(--fd-sidebar-edge); }
     aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
     aside#nd-sidebar > * { position: relative; z-index: 1; }
     .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin: -2px calc(-1 * var(--fd-sidebar-edge)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 var(--fd-sidebar-edge); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
@@ -932,7 +937,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     #nd-docs-layout aside#nd-sidebar .sidebar-folder-trigger { display: flex !important; width: 100% !important; align-items: center; justify-content: space-between; border: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)) !important; background: transparent !important; margin: 0 !important; transform: none !important; padding: 8px var(--fd-sidebar-edge) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-sans); font-size: 12px !important; font-weight: 600; letter-spacing: 0 !important; text-align: left; text-transform: none; cursor: default; }
     .sidebar-folder-content { position: relative; padding: 0 0 12px; overflow: hidden; }
     .sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 8px; bottom: 12px; width: 1px; background: var(--color-fd-border, hsl(0 0% 15%)); opacity: 0.9; pointer-events: none; }
-    main { grid-column: 2; min-width: 0; padding: 46px 40px 80px; }
+    main { grid-area: main; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
     .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
     .prose h1 { margin: 0 0 16px; font-size: 36px; line-height: 1.14; letter-spacing: -0.02em; }
@@ -979,16 +984,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; border-top: 0; padding-top: 0; }
     .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
-    .toc { position: sticky; top: calc(var(--fd-nav-height, 56px) + 24px); grid-column: 3; align-self: start; max-height: calc(100vh - 92px); overflow: hidden; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 18px 24px; }
-    .toc-inner { display: flex; max-height: inherit; flex-direction: column; padding-top: 2px; }
-    #toc-title { display: inline-flex; align-items: center; min-height: 28px; margin: 0 0 8px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.4; text-transform: none; }
-    .toc-scroll { display: flex; overflow: auto; flex-direction: column; gap: 1px; padding-bottom: 4px; }
-    .toc a { display: block; margin-left: -1px; border-left: 1px solid transparent; padding: 5px 0 5px 12px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13px; line-height: 1.35; }
-    .toc a:hover { border-left-color: var(--color-fd-border, hsl(0 0% 15%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
-    .toc-level-3 { padding-left: 22px !important; }
-    .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 32px !important; }
-    .toc-empty { margin: 0; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; }
-    @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .toc { display: none; } .prose h1 { font-size: 32px; } }
+    @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .fd-toc { display: none; } .prose h1 { font-size: 32px; } }
   `;
 }
 
@@ -1020,7 +1016,7 @@ function renderPixelDocsHtml(
 ${renderFarmDocsBridgeCss(docs)}</style>
 </head>
 <body>
-  <div id="nd-docs-layout">
+  <div id="nd-docs-layout" class="grid">
     <aside id="nd-sidebar">
       <div class="sidebar-brand">
         <a href="/">${escapeHtml(navTitle)}</a>
@@ -1030,7 +1026,6 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     </aside>
     <header class="topbar">
       <a href="/">Farm.js</a>
-      <span class="route-pill">${escapeHtml(page.href)}</span>
       <a href="/llms.txt">llms.txt</a>
     </header>
     <main>
@@ -1045,10 +1040,10 @@ ${renderMarkdownHtml(page.body)}
         </div>
       </article>
     </main>
-    <nav id="nd-toc" class="fd-toc toc" data-toc aria-labelledby="toc-title">
-      <div class="toc-inner">
-        <h3 id="toc-title">On this page</h3>
-        <div class="toc-scroll">
+    <nav id="nd-toc" class="fd-toc sticky top-(--fd-docs-row-1) h-[calc(var(--fd-docs-height)-var(--fd-docs-row-1))] flex flex-col [grid-area:toc] w-(--fd-toc-width) pt-12 pe-4 pb-2 max-xl:hidden" data-toc aria-labelledby="toc-title">
+      <div class="fd-toc-inner">
+        <h3 id="toc-title" class="fd-toc-title inline-flex items-center gap-1.5 text-sm text-fd-muted-foreground">On this page</h3>
+        <div class="relative min-h-0 text-sm ms-px overflow-auto [scrollbar-width:none] mask-[linear-gradient(to_bottom,transparent,white_16px,white_calc(100%-16px),transparent)] py-3">
           ${renderPixelToc(tocItems)}
         </div>
       </div>
