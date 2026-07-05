@@ -39,6 +39,12 @@ describe("createFarmDocsHandler", () => {
         "",
         "## Usage",
         "",
+        "**src/app/dashboard/middleware.ts**",
+        "",
+        "```ts",
+        'export const area = "dashboard";',
+        "```",
+        "",
         '```ts title="hello.ts"',
         'export const hello = "world";',
         "console.log(hello);",
@@ -108,6 +114,8 @@ describe("createFarmDocsHandler", () => {
     const html = await response?.text();
     expect(html).toContain('figure class="shiki code-block code-block-framed"');
     expect(html).toContain('figure class="shiki code-block code-block-plain"');
+    expect(html).toContain('<span class="code-block-title">src/app/dashboard/middleware.ts</span>');
+    expect(html).not.toContain("<p><strong>src/app/dashboard/middleware.ts</strong></p>");
     expect(html).toContain("sh__token--keyword");
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain("querySelector('code').innerText");

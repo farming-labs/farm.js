@@ -600,6 +600,79 @@ function parseCodeInfo(info: string | undefined): {
   return { language, label: explicitLabel || language, hasExplicitLabel: Boolean(explicitLabel) };
 }
 
+function getStandaloneCodeLabel(line: string): string | null {
+  const trimmed = line.trim();
+  const match = /^(?:\*\*([^*]+)\*\*|__([^_]+)__|`([^`]+)`)$/u.exec(trimmed);
+  const label = match?.[1] || match?.[2] || match?.[3];
+  return label?.trim() || null;
+}
+
+function hasCodeFenceTitle(info: string): boolean {
+  return /\b(?:title|filename|file|label|name)=["'][^"']+["']/.test(info);
+}
+
+function escapeCodeFenceTitle(value: string): string {
+  return value.replace(/"/g, "&quot;");
+}
+
+function addTitleToCodeFence(line: string, title: string): string {
+  const match = /^(\s{0,3})(`{3,}|~{3,})(.*)$/u.exec(line);
+  if (!match) return line;
+  const [, indent, marker, infoSource] = match;
+  const info = infoSource.trim();
+  if (hasCodeFenceTitle(info)) return line;
+  const suffix = `title="${escapeCodeFenceTitle(title)}"`;
+  return `${indent}${marker}${info ? `${info} ${suffix}` : `text ${suffix}`}`;
+}
+
+function attachCodeBlockLabels(body: string): string {
+  const lines = body.split("\n");
+  const output: string[] = [];
+  let fence: { marker: "`" | "~"; length: number } | null = null;
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] || "";
+    const nextFence = getCodeFence(line);
+
+    if (fence) {
+      output.push(line);
+      if (nextFence && nextFence.marker === fence.marker && isClosingCodeFence(line, fence)) {
+        fence = null;
+      }
+      continue;
+    }
+
+    if (nextFence) {
+      fence = nextFence;
+      output.push(line);
+      continue;
+    }
+
+    const label = getStandaloneCodeLabel(line);
+    if (!label) {
+      output.push(line);
+      continue;
+    }
+
+    let fenceIndex = index + 1;
+    while (fenceIndex < lines.length && (lines[fenceIndex] || "").trim() === "") {
+      fenceIndex += 1;
+    }
+
+    const labeledFence = getCodeFence(lines[fenceIndex] || "");
+    if (!labeledFence) {
+      output.push(line);
+      continue;
+    }
+
+    output.push(addTitleToCodeFence(lines[fenceIndex] || "", label));
+    fence = labeledFence;
+    index = fenceIndex;
+  }
+
+  return output.join("\n");
+}
+
 function highlightCodeBlock(code: string): string {
   return highlight(code.replace(/\n$/, "")).replace(/<\/span>\n<span/g, "</span><span");
 }
@@ -652,7 +725,7 @@ function renderMarkdownHtml(body: string): string {
     return `<img src="${escapeAttribute(href)}" alt="${escapeAttribute(text)}"${titleAttribute}>`;
   };
 
-  const html = marked(stripMdxRuntimeSyntax(body), {
+  const html = marked(attachCodeBlockLabels(stripMdxRuntimeSyntax(body)), {
     async: false,
     breaks: false,
     gfm: true,
