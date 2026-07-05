@@ -64,6 +64,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="nd-docs-layout"');
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
+    expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
+    expect(html).toContain('href="/docs/guide"');
   });
 
   it("renders highlighted code blocks without doubled line gaps", async () => {
@@ -80,7 +82,9 @@ describe("createFarmDocsHandler", () => {
     const html = await response?.text();
     expect(html).toContain('figure class="shiki code-block"');
     expect(html).toContain("sh__token--keyword");
+    expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain("querySelector('code').innerText");
+    expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');
   });
 
