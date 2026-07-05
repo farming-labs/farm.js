@@ -776,7 +776,8 @@ function sidebarIdFor(section: string): string {
 
 function renderSidebarLink(item: FarmDocsPage, activeHref: string): string {
   const active = item.href === activeHref;
-  return `<a data-active="${active ? "true" : "false"}" href="${escapeAttribute(item.href)}">${escapeHtml(item.title)}</a>`;
+  const isOverview = item.slug === "";
+  return `<a data-active="${active ? "true" : "false"}"${isOverview ? ' data-active-marker="false"' : ""} href="${escapeAttribute(item.href)}">${escapeHtml(isOverview ? "Why?" : item.title)}</a>`;
 }
 
 function getOrderedSidebarPages(pages: FarmDocsPage[]): FarmDocsPage[] {
@@ -784,11 +785,9 @@ function getOrderedSidebarPages(pages: FarmDocsPage[]): FarmDocsPage[] {
 }
 
 function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string {
-  const overview = pages.find((item) => item.slug === "");
   const groups = new Map<string, FarmDocsPage[]>();
   for (const item of pages) {
-    if (item.slug === "") continue;
-    const group = getSidebarSection(item);
+    const group = item.slug === "" ? "Start" : getSidebarSection(item);
     const entries = groups.get(group) ?? [];
     entries.push(item);
     groups.set(group, entries);
@@ -817,7 +816,6 @@ ${links}
 
   return `<div class="sidebar-scroll overscroll-contain">
   <div class="sidebar-tree">
-    ${overview ? renderSidebarLink(overview, activeHref) : ""}
 ${renderedSections}
   </div>
 </div>`;
@@ -908,7 +906,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
 
   return `
-    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-sans, system-ui, -apple-system, sans-serif); --fd-docs-font-mono: var(--font-mono, ui-monospace, monospace); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-root-marker-x: calc(var(--fd-sidebar-edge) - 10px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); }
+    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-sans, system-ui, -apple-system, sans-serif); --fd-docs-font-mono: var(--font-mono, ui-monospace, monospace); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
     body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
@@ -934,7 +932,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: block; width: auto !important; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px; line-height: 1.45; background: transparent !important; transition: color 150ms ease; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active] { padding-left: var(--fd-sidebar-edge) !important; padding-top: 12px !important; padding-bottom: 12px !important; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active]::before { content: ""; position: absolute !important; left: var(--fd-sidebar-guide-x) !important; top: 50% !important; width: 2px !important; height: 0 !important; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; transform: translateY(-50%) !important; transition: height 150ms ease; }
-    #nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active]::before { left: var(--fd-sidebar-root-marker-x) !important; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before { display: none !important; }
     .sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active="true"]::before { height: 16px !important; }
     .sidebar-tree a[data-active="false"]:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)) !important; }
