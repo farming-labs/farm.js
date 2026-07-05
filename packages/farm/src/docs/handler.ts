@@ -22,6 +22,7 @@ import {
   type DocsSitemapPageInput,
 } from "@farming-labs/docs";
 import { marked, Renderer } from "marked";
+import { highlight } from "sugar-high";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
@@ -33,6 +34,7 @@ export interface FarmDocsPage {
   slug: string;
   title: string;
   description?: string;
+  section?: string;
   href: string;
   sourcePath: string;
 }
@@ -269,6 +271,7 @@ export function discoverFarmDocsPages(
         slug,
         title: frontmatter.title || titleFromMarkdown(body, titleFromSlug(slug)),
         description: frontmatter.description,
+        section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
       });
@@ -535,6 +538,23 @@ function stripMdxRuntimeSyntax(body: string): string {
   return body.replace(/^\s*import\s.+$/gm, "").replace(/^\s*export\s+(const|default)\s.+$/gm, "");
 }
 
+function unescapeHtml(value: string): string {
+  return value
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+
+function parseCodeInfo(info: string | undefined): { language: string; label: string } {
+  const source = (info || "").trim();
+  const language = source.match(/^\S+/)?.[0] || "text";
+  const label =
+    source.match(/\b(?:title|filename|file|label|name)=["']([^"']+)["']/)?.[1]?.trim() || language;
+  return { language, label };
+}
+
 function renderMarkdownHtml(body: string): string {
   const slug = createSlugger();
   const renderer = new Renderer();
@@ -545,9 +565,16 @@ function renderMarkdownHtml(body: string): string {
   };
 
   renderer.code = (code, infostring, escaped) => {
-    const language = (infostring || "").match(/^\S*/)?.[0] || "";
-    const codeHtml = escaped ? code : escapeHtml(code);
-    return `<pre class="code-block">${language ? `<span class="code-language">${escapeHtml(language)}</span>` : ""}<code${language ? ` class="language-${escapeAttribute(language)}"` : ""}>${codeHtml}</code></pre>\n`;
+    const { language, label } = parseCodeInfo(infostring);
+    const rawCode = escaped ? unescapeHtml(code) : code;
+    const highlighted = highlight(rawCode);
+    return `<figure class="shiki code-block" data-language="${escapeAttribute(language)}">
+  <div class="code-block-header">
+    <span class="code-block-title">${escapeHtml(label)}</span>
+    <button class="code-copy" type="button" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').textContent)">Copy</button>
+  </div>
+  <pre><code class="sh-code language-${escapeAttribute(language)}">${highlighted}</code></pre>
+</figure>\n`;
   };
 
   renderer.table = (header, body) =>
@@ -599,16 +626,6 @@ function extractTocItems(body: string, depth: number): TocItem[] {
     .filter((item) => item.level <= maxLevel);
 }
 
-function titleFromGroup(value: string): string {
-  if (!value) return "Overview";
-  if (value === "api") return "API";
-  return value
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function getThemeUI(docs: FarmDocsResolvedConfig): Record<string, any> {
   const theme = docs.config.theme;
   return theme && typeof theme === "object" && "ui" in theme && typeof theme.ui === "object"
@@ -635,26 +652,113 @@ function getThemeTocDepth(docs: FarmDocsResolvedConfig): number {
   return toc && typeof toc === "object" && typeof toc.depth === "number" ? toc.depth : 3;
 }
 
+const SIDEBAR_SECTION_ORDER = [
+  "Start",
+  "Core",
+  "Data and APIs",
+  "Integrations",
+  "Runtime",
+  "Content",
+  "Extending",
+  "Reference",
+];
+
+const SIDEBAR_PAGE_ORDER = new Map(
+  [
+    "",
+    "getting-started",
+    "project-structure",
+    "configuration",
+    "routing",
+    "layouts",
+    "server-rendering",
+    "middleware",
+    "query",
+    "api-routes",
+    "api-client",
+    "storage",
+    "integrations",
+    "integrations/stripe",
+    "integrations/auth",
+    "integrations/email",
+    "integrations/jobs",
+    "integrations/unkey",
+    "integrations/ui-registry",
+    "integrations/orm-storage",
+    "cache-ppr",
+    "observability",
+    "deployment",
+    "docs-engine",
+    "markdown",
+    "openapi",
+    "plugins",
+    "plugins/create-plugin",
+    "cli",
+    "examples",
+    "reference",
+  ].map((slug, index) => [slug, index]),
+);
+
+function compareSidebarPages(a: FarmDocsPage, b: FarmDocsPage): number {
+  const aOrder = SIDEBAR_PAGE_ORDER.get(a.slug) ?? 1000;
+  const bOrder = SIDEBAR_PAGE_ORDER.get(b.slug) ?? 1000;
+  return aOrder - bOrder || a.title.localeCompare(b.title);
+}
+
+function getSidebarSection(page: FarmDocsPage): string {
+  if (page.section) return page.section;
+  if (page.slug.startsWith("integrations/")) return "Integrations";
+  if (page.slug.startsWith("plugins/")) return "Extending";
+  return "Reference";
+}
+
+function sidebarIdFor(section: string): string {
+  return `sidebar-${slugify(section)}`;
+}
+
+function renderSidebarLink(item: FarmDocsPage, activeHref: string): string {
+  const active = item.href === activeHref;
+  return `<a data-active="${active ? "true" : "false"}" href="${escapeAttribute(item.href)}">${escapeHtml(item.title)}</a>`;
+}
+
 function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string {
+  const overview = pages.find((item) => item.slug === "");
   const groups = new Map<string, FarmDocsPage[]>();
   for (const item of pages) {
-    const group = item.slug.split("/").filter(Boolean)[0] || "";
-    const entries = groups.get(group) || [];
+    if (item.slug === "") continue;
+    const group = getSidebarSection(item);
+    const entries = groups.get(group) ?? [];
     entries.push(item);
     groups.set(group, entries);
   }
 
-  return Array.from(groups.entries())
-    .map(([group, items]) => {
+  const renderedSections = Array.from(groups.entries())
+    .sort(([a], [b]) => {
+      const aOrder = SIDEBAR_SECTION_ORDER.indexOf(a);
+      const bOrder = SIDEBAR_SECTION_ORDER.indexOf(b);
+      return (aOrder === -1 ? 100 : aOrder) - (bOrder === -1 ? 100 : bOrder) || a.localeCompare(b);
+    })
+    .map(([section, items]) => {
+      const id = sidebarIdFor(section);
       const links = items
-        .map(
-          (item) =>
-            `<a${item.href === activeHref ? ' data-active="true"' : ""} href="${escapeAttribute(item.href)}">${escapeHtml(item.title)}</a>`,
-        )
+        .sort(compareSidebarPages)
+        .map((item) => renderSidebarLink(item, activeHref))
         .join("\n");
-      return `<section class="sidebar-section"><p>${escapeHtml(titleFromGroup(group))}</p>${links}</section>`;
+      return `<div class="sidebar-folder" data-state="open">
+  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${escapeHtml(section)}</button>
+  <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content" data-state="open">
+${links}
+  </div>
+</div>`;
     })
     .join("\n");
+
+  return `<div class="sidebar-scroll overscroll-contain">
+  <div class="sidebar-tree">
+    ${overview ? renderSidebarLink(overview, activeHref) : ""}
+${renderedSections}
+  </div>
+</div>`;
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -728,14 +832,20 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     aside#nd-sidebar > * { position: relative; z-index: 1; }
     .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin: -2px calc(-1 * (var(--fd-pixel-rail-width) + 18px)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 calc(var(--fd-pixel-rail-width) + 18px); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .sidebar-brand a { text-decoration: none; }
-    .sidebar-section { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 0 calc(-1 * (var(--fd-pixel-rail-width) + 18px)); padding: 13px calc(var(--fd-pixel-rail-width) + 18px) 12px; }
-    .sidebar-section:last-child { border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .sidebar-section p { margin: 0 0 6px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 10.5px; letter-spacing: 0.04em; text-transform: uppercase; }
-    .sidebar-section a { position: relative; display: block; margin: 0 -10px; padding: 7px 10px 7px 20px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 14px; line-height: 1.45; transition: color 150ms ease; }
-    .sidebar-section a::before { content: ""; position: absolute; left: 8px; top: 50%; width: 2px; height: 0; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); transform: translateY(-50%); transition: height 150ms ease; }
-    .sidebar-section a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
-    .sidebar-section a[data-active="true"] { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)); font-weight: 600; }
-    .sidebar-section a[data-active="true"]::before { height: 42%; }
+    .sidebar-scroll { margin: 0 calc(-1 * (var(--fd-pixel-rail-width) + 18px)); overflow: visible; }
+    .sidebar-tree { margin-top: 0 !important; }
+    .sidebar-tree > a[data-active], .sidebar-folder { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
+    #nd-docs-layout aside#nd-sidebar .sidebar-tree > .sidebar-folder { margin-left: 0 !important; margin-right: 0 !important; padding: 0 !important; }
+    .sidebar-tree > :last-child { border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
+    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: block; width: auto !important; margin: 0 !important; padding: 6px calc(var(--fd-pixel-rail-width) + 18px) 6px calc(var(--fd-pixel-rail-width) + 30px) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px; line-height: 1.45; background: transparent !important; transition: color 150ms ease; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active] { padding-top: 12px !important; padding-bottom: 12px !important; }
+    .sidebar-tree a[data-active]::before { content: ""; position: absolute; left: calc(var(--fd-pixel-rail-width) + 18px); top: 50%; width: 2px; height: 0; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); transform: translateY(-50%); transition: height 150ms ease; }
+    .sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }
+    .sidebar-tree a[data-active="true"]::before { height: 42%; }
+    .sidebar-tree a[data-active="false"]:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)) !important; }
+    .sidebar-folder-trigger { display: flex; width: 100%; align-items: center; justify-content: space-between; border: 0; background: transparent !important; padding: 12px calc(var(--fd-pixel-rail-width) + 18px) 6px !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-mono); font-size: 10.5px !important; font-weight: 500; letter-spacing: 0.04em !important; text-align: left; text-transform: uppercase; cursor: default; }
+    .sidebar-folder-content { position: relative; padding: 0 0 11px; overflow: hidden; }
+    .sidebar-folder-content::before { content: ""; position: absolute; left: calc(var(--fd-pixel-rail-width) + 21px); top: 2px; bottom: 8px; width: 1px; background: var(--color-fd-border, hsl(0 0% 15%)); opacity: 0.9; }
     main { grid-column: 2; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
     .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
@@ -749,8 +859,16 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .prose ul, .prose ol { margin: 16px 0; padding-left: 24px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); line-height: 1.75; }
     .prose li { margin: 6px 0; }
     .prose code:not(pre code) { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; overflow-wrap: break-word; word-break: break-word; }
-    .code-block { position: relative; margin: 18px 0; overflow: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); padding: 38px 16px 16px; font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.65; }
-    .code-language { position: absolute; top: 0; left: 0; right: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 8px 12px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 11px; text-transform: uppercase; }
+    .sh-code { --sh-class: #e5c07b; --sh-identifier: #c8ccd4; --sh-string: #98c379; --sh-keyword: #c678dd; --sh-comment: #5c6370; --sh-property: #e06c75; --sh-sign: #c8ccd4; --sh-space: inherit; }
+    .code-block { position: relative; margin: 20px 0; overflow: hidden; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono); }
+    #nd-docs-layout figure.shiki.code-block { box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)) !important; }
+    .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: transparent; background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); padding: 9px 12px; }
+    .code-block-title { overflow: hidden; color: color-mix(in srgb, var(--color-fd-foreground, #fff) 50%, transparent); font-size: 11px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+    .code-copy { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, #000) 80%, transparent); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); cursor: pointer; font-family: var(--fd-docs-font-mono); font-size: 10.5px; letter-spacing: 0.04em; padding: 4px 7px; text-transform: uppercase; }
+    .code-copy:hover { color: var(--color-fd-foreground, #fff); background: var(--color-fd-muted, hsl(0 0% 10%)); }
+    .code-block pre { margin: 0; max-width: 100%; overflow-x: auto; padding: 14px 16px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.7; }
+    .code-block code { display: block; min-width: max-content; font-family: inherit; }
+    .sh__line { display: block; min-height: 1.7em; }
     blockquote { margin: 18px 0; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-left: 3px solid var(--color-fd-foreground, oklch(0.985 0.001 106.423)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); padding: 14px 16px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); }
     .table-wrap { margin: 18px 0; overflow-x: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -769,7 +887,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .toc-level-3 { padding-left: 12px !important; }
     .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 22px !important; }
     .toc-empty { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; }
-    @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-section { margin-left: 0; margin-right: 0; padding-left: 0; padding-right: 0; } main { padding: 30px 20px 64px; } .toc { display: none; } .prose h1 { font-size: 32px; } }
+    @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .toc { display: none; } .prose h1 { font-size: 32px; } }
   `;
 }
 

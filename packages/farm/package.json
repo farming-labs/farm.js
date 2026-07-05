@@ -195,6 +195,7 @@
     "react-dom": "^19.0.0",
     "react-server-dom-webpack": "^18.3.0-canary-670c8dfb8-20231204",
     "sirv": "^2.0.4",
+    "sugar-high": "^0.9.5",
     "supports-color": "^10.2.2",
     "tailwindcss": "^4.0.0",
     "unstorage": "^2.0.0-alpha.3",
