@@ -84,8 +84,10 @@ describe("createFarmDocsHandler", () => {
       '#nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before',
     );
     expect(html).not.toContain('href="/docs">Farm Docs</a>');
-    expect(html).toContain('<p class="page-kicker">documentation / overview</p>');
+    expect(html).toContain('<p class="page-kicker">DOCUMENTATION / OVERVIEW</p>');
     expect(html).toContain("article#nd-page .page-kicker");
+    expect(html).toContain("--fd-docs-font-mono: var(--font-geist-mono");
+    expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
     expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
