@@ -77,6 +77,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-toc-title inline-flex');
     expect(html).toContain("window.__farmDocsToc");
     expect(html).not.toContain('class="route-pill"');
+    expect(html).toContain("--fd-sidebar-root-marker-x");
+    expect(html).toContain(
+      "#nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active]::before",
+    );
     expect(html).toContain('<p class="page-kicker">documentation / overview</p>');
     expect(html).toContain("article#nd-page .page-kicker");
     expect(html).toContain('id="farm-docs"');
