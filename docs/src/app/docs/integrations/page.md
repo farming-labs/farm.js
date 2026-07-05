@@ -53,9 +53,9 @@ export const { api, apiClient } = createIntegrations<AppIntegrations>({
 ## Built-in groups
 
 - Payment: Stripe, Autumn, and Polar integrations share checkout, subscription, portal, webhook, entitlement, and billing snapshot patterns.
-- Auth: Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase can expose routes, providers, and typed session helpers.
-- Messaging: Email integrations can render templates, send transactional mail, preview messages, and receive provider webhooks.
-- Workflows: Jobs integrations expose trigger, schedule, batch, status, and cancel APIs for task backends.
+- Auth: Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase expose routes, providers, and typed session helpers.
+- Messaging: Resend renders React Email templates, sends transactional mail, previews messages, and receives provider webhooks.
+- Workflows: Trigger.dev and Inngest runtimes expose trigger, schedule, batch, status, and cancel APIs for task backends.
 - API Keys: Unkey integrations create, verify, revoke, update, and delete customer or service keys.
 - Interface: UI registry entries can scaffold shadcn-style screens for built-in integrations when `--ui` is enabled.
 - Storage: ORM storage keeps integration schema reads and writes behind ctx.args.db.

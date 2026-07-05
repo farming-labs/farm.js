@@ -1,10 +1,10 @@
 ---
-title: "Email Integration"
+title: "Resend Integration"
 description: "Render React Email templates, send with Resend, schedule messages, preview templates, and receive webhooks."
 section: "Integrations"
 ---
 
-# Email Integration
+# Resend Integration
 
 Render React Email templates, send with Resend, schedule messages, preview templates, and receive webhooks.
 

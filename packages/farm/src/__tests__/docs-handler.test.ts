@@ -80,6 +80,8 @@ describe("createFarmDocsHandler", () => {
         config: {
           icons: {
             book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>',
+            "brand-stripe":
+              '<svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" stroke="none" d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409"></path></svg>',
             card: '<rect x="2" y="5" width="20" height="14"></rect>',
             plug: '<path d="M12 22v-5"></path>',
             sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"></path>',
@@ -101,7 +103,9 @@ describe("createFarmDocsHandler", () => {
                   {
                     label: "Payment",
                     icon: "card",
-                    children: [{ label: "Stripe", slug: "integrations/stripe", icon: "card" }],
+                    children: [
+                      { label: "Stripe", slug: "integrations/stripe", icon: "brand-stripe" },
+                    ],
                   },
                 ],
               },
@@ -137,6 +141,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("window.sessionStorage");
     expect(html).not.toContain('class="route-pill"');
     expect(html).toContain('data-sidebar-icon="sparkles"');
+    expect(html).toContain('data-sidebar-icon="brand-stripe"');
+    expect(html).toContain('.sidebar-icon[data-sidebar-icon^="brand-"] svg');
     expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
     expect(html).toContain('data-sidebar-subgroup="payment"');
     expect(html).toContain(

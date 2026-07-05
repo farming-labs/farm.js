@@ -1288,6 +1288,8 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-tree a[data-active="false"]:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)) !important; }
     .sidebar-icon { display: inline-flex; width: 14px; height: 14px; flex: 0 0 14px; color: currentColor; opacity: 0.72; }
     .sidebar-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-icon[data-sidebar-icon^="brand-"] svg { fill: currentColor; stroke: none; }
+    .sidebar-icon[data-sidebar-icon^="brand-"] svg * { stroke: none; }
     .sidebar-link-label, .sidebar-folder-label, .sidebar-subgroup-label { display: inline-flex; min-width: 0; align-items: center; gap: 8px; }
     .sidebar-folder-label .sidebar-icon, .sidebar-subgroup-label .sidebar-icon { width: 13px; height: 13px; flex-basis: 13px; }
     .sidebar-label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
