@@ -17,6 +17,7 @@ describe("createFarmDocsHandler", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-handler-"));
     const docsDir = path.join(root, "src", "app", "docs");
     await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+    await fs.mkdir(path.join(docsDir, "integrations", "stripe"), { recursive: true });
     await fs.writeFile(
       path.join(docsDir, "page.md"),
       [
@@ -59,7 +60,57 @@ describe("createFarmDocsHandler", () => {
         "| Runtime | Farm |",
       ].join("\n"),
     );
-    const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
+    await fs.writeFile(
+      path.join(docsDir, "integrations", "stripe", "page.md"),
+      [
+        "---",
+        "title: Stripe Integration",
+        "description: Billing docs",
+        "section: Integrations",
+        "---",
+        "",
+        "# Stripe Integration",
+        "",
+        "Create checkout sessions.",
+      ].join("\n"),
+    );
+    const docs = await resolveDocsConfig(
+      {
+        entry: "/docs",
+        config: {
+          icons: {
+            book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>',
+            card: '<rect x="2" y="5" width="20" height="14"></rect>',
+            plug: '<path d="M12 22v-5"></path>',
+            sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"></path>',
+          },
+          navigation: {
+            sidebar: [
+              {
+                label: "Start",
+                icon: "sparkles",
+                children: [
+                  { label: "Why?", slug: "", icon: "sparkles" },
+                  { label: "Guide", slug: "guide", icon: "book" },
+                ],
+              },
+              {
+                label: "Integrations",
+                icon: "plug",
+                children: [
+                  {
+                    label: "Payment",
+                    icon: "card",
+                    children: [{ label: "Stripe", slug: "integrations/stripe", icon: "card" }],
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      },
+      { root, srcDir: "src" },
+    );
     return { root, docs };
   }
 
@@ -83,9 +134,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-toc-title inline-flex');
     expect(html).toContain("window.__farmDocsToc");
     expect(html).not.toContain('class="route-pill"');
-    expect(html).toContain(
-      '<a data-active="true" data-active-marker="false" href="/docs">Why?</a>',
-    );
+    expect(html).toContain('data-sidebar-icon="sparkles"');
+    expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
+    expect(html).toContain('data-sidebar-subgroup="payment"');
     expect(html).toContain(
       '#nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before',
     );
@@ -96,7 +147,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
-    expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
+    expect(html).toContain('class="fd-page-nav-link fd-page-nav-next"');
     expect(html).toContain('href="/docs/guide"');
   });
 

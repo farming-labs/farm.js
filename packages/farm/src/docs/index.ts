@@ -7,11 +7,7 @@ export {
   resolveFarmDocsContentDir,
 } from "./handler";
 export { createDocsAPI, createFarmDocsAPIHandler, isFarmDocsAPIRequest } from "./api";
-export type {
-  FarmDocsHandlerOptions,
-  FarmDocsPage,
-  LoadedFarmDocsPage,
-} from "./handler";
+export type { FarmDocsHandlerOptions, FarmDocsPage, LoadedFarmDocsPage } from "./handler";
 export type {
   FarmDocsAPIHandler,
   FarmDocsAPIOptions,
@@ -20,4 +16,10 @@ export type {
   FarmDocsCloudRouteOptions,
   FarmDocsCloudServer,
 } from "./api";
-export type { FarmDocsConfigInput, FarmDocsResolvedConfig, FarmDocsUserConfig } from "./types";
+export type {
+  FarmDocsConfigInput,
+  FarmDocsNavigationConfig,
+  FarmDocsResolvedConfig,
+  FarmDocsSidebarItem,
+  FarmDocsUserConfig,
+} from "./types";

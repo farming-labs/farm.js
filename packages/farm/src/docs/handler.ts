@@ -794,36 +794,6 @@ const SIDEBAR_SECTION_ORDER = [
   "Reference",
 ];
 
-const SIDEBAR_ICON_PATHS: Record<string, string> = {
-  activity: '<path d="M22 12h-4l-3 7L9 5l-3 7H2"></path>',
-  book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M4 4v15.5A2.5 2.5 0 0 1 6.5 22H20V6a2 2 0 0 0-2-2H6.5A2.5 2.5 0 0 0 4 6.5"></path>',
-  box: '<path d="m21 16-9 5-9-5V8l9-5 9 5z"></path><path d="m3.3 7.3 8.7 5 8.7-5"></path><path d="M12 22V12"></path>',
-  braces: '<path d="M8 3H7a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h1"></path><path d="M16 3h1a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-1"></path>',
-  card: '<rect x="2" y="5" width="20" height="14" rx="2"></rect><path d="M2 10h20"></path>',
-  circle: '<circle cx="12" cy="12" r="9"></circle>',
-  cloud: '<path d="M17.5 19H8a6 6 0 1 1 5.5-8.5A4.5 4.5 0 1 1 17.5 19Z"></path>',
-  database: '<ellipse cx="12" cy="5" rx="8" ry="3"></ellipse><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"></path><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"></path>',
-  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><path d="M14 2v6h6"></path>',
-  folder: '<path d="M3 6h6l2 2h10v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>',
-  gauge: '<path d="M12 14 16 9"></path><path d="M4 20a9 9 0 1 1 16 0"></path>',
-  key: '<circle cx="7.5" cy="14.5" r="3.5"></circle><path d="M10 12 21 3"></path><path d="m16 8 2 2"></path><path d="m19 5 2 2"></path>',
-  layout: '<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path>',
-  lock: '<rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
-  mail: '<rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path>',
-  monitor: '<rect x="3" y="4" width="18" height="13" rx="2"></rect><path d="M8 21h8"></path><path d="M12 17v4"></path>',
-  plug: '<path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M7 8h10v4a5 5 0 0 1-10 0z"></path>',
-  rocket: '<path d="M4.5 16.5 3 21l4.5-1.5"></path><path d="M9 15 4 10l6-6c4-4 9-1 10 0 1 1 4 6 0 10l-6 6-5-5Z"></path><path d="M15 9h.01"></path>',
-  route: '<circle cx="6" cy="19" r="3"></circle><circle cx="18" cy="5" r="3"></circle><path d="M9 19h4a5 5 0 0 0 5-5V8"></path>',
-  search: '<circle cx="11" cy="11" r="7"></circle><path d="m21 21-4.3-4.3"></path>',
-  server: '<rect x="3" y="4" width="18" height="7" rx="2"></rect><rect x="3" y="13" width="18" height="7" rx="2"></rect><path d="M7 8h.01"></path><path d="M7 17h.01"></path>',
-  settings: '<path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2 3.4-.2-.1a1.7 1.7 0 0 0-2 .2 1.7 1.7 0 0 0-.8 1.7V22H9.2v-.3a1.7 1.7 0 0 0-.8-1.7 1.7 1.7 0 0 0-2-.2l-.2.1-2-3.4.1-.1A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.4-1.1H3v-3.8h.2A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.3-1.9l-.1-.1 2-3.4.2.1a1.7 1.7 0 0 0 2-.2 1.7 1.7 0 0 0 .8-1.7V2h5.6v.3a1.7 1.7 0 0 0 .8 1.7 1.7 1.7 0 0 0 2 .2l.2-.1 2 3.4-.1.1A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.4 1.1h.2v3.8h-.2a1.7 1.7 0 0 0-1.4 1.1Z"></path>',
-  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"></path>',
-  sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"></path><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8Z"></path>',
-  terminal: '<path d="m4 17 6-6-6-6"></path><path d="M12 19h8"></path>',
-  wrench: '<path d="M14.7 6.3a4 4 0 0 0 5 5L10 21l-5-5 9.7-9.7Z"></path>',
-  zap: '<path d="M13 2 3 14h8l-1 8 10-12h-8z"></path>',
-};
-
 const SIDEBAR_PAGE_ORDER = new Map(
   [
     "",
@@ -862,25 +832,19 @@ const SIDEBAR_PAGE_ORDER = new Map(
   ].map((slug, index) => [slug, index]),
 );
 
-const SIDEBAR_INTEGRATION_GROUP_ORDER = [
-  "Payment",
-  "Auth",
-  "Messaging",
-  "Workflows",
-  "API Keys",
-  "Interface",
-  "Storage",
-];
-
-const SIDEBAR_INTEGRATION_GROUPS: Record<string, { label: string; icon: string }> = {
-  Payment: { label: "Payment", icon: "card" },
-  Auth: { label: "Auth", icon: "lock" },
-  Messaging: { label: "Messaging", icon: "mail" },
-  Workflows: { label: "Workflows", icon: "activity" },
-  "API Keys": { label: "API Keys", icon: "key" },
-  Interface: { label: "Interface", icon: "layout" },
-  Storage: { label: "Storage", icon: "database" },
+type SidebarNavigationItem = {
+  label?: string;
+  icon?: string;
+  slug?: string;
+  href?: string;
+  children: SidebarNavigationItem[];
 };
+
+function isSidebarNavigationItem(
+  value: SidebarNavigationItem | null,
+): value is SidebarNavigationItem {
+  return value !== null;
+}
 
 function compareSidebarPages(a: FarmDocsPage, b: FarmDocsPage): number {
   const aOrder = SIDEBAR_PAGE_ORDER.get(a.slug) ?? 1000;
@@ -899,30 +863,108 @@ function sidebarIdFor(section: string): string {
   return `sidebar-${slugify(section)}`;
 }
 
-function renderSidebarIcon(icon: string, className = "sidebar-icon"): string {
-  const path = SIDEBAR_ICON_PATHS[icon] ?? SIDEBAR_ICON_PATHS.circle;
-  return `<span class="${className}" data-sidebar-icon="${escapeAttribute(icon)}" aria-hidden="true"><svg viewBox="0 0 24 24" focusable="false">${path}</svg></span>`;
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
 }
 
-function renderSidebarLabel(icon: string, label: string, className: string): string {
-  return `<span class="${className}">${renderSidebarIcon(icon)}<span class="sidebar-label-text">${escapeHtml(label)}</span></span>`;
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function getSidebarSectionIcon(section: string): string {
-  const icons: Record<string, string> = {
-    Start: "sparkles",
-    Core: "box",
-    "Data and APIs": "database",
-    Integrations: "plug",
-    Runtime: "gauge",
-    Content: "file",
-    Extending: "wrench",
-    Reference: "book",
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
+function normalizeSidebarSlug(value: string): string {
+  if (value === "/" || value === ".") return "";
+  return trimSlashes(value);
+}
+
+function getSidebarNavigation(docs: FarmDocsResolvedConfig): SidebarNavigationItem[] {
+  const navigation = docs.config.navigation;
+  if (!isObjectRecord(navigation) || !Array.isArray(navigation.sidebar)) return [];
+  return navigation.sidebar.map(normalizeSidebarNavigationItem).filter(isSidebarNavigationItem);
+}
+
+function normalizeSidebarNavigationItem(value: unknown): SidebarNavigationItem | null {
+  if (!isObjectRecord(value)) return null;
+
+  const label = readString(value.label) ?? readString(value.title);
+  const icon = readString(value.icon);
+  const slug = readOptionalString(value.slug) ?? readOptionalString(value.path);
+  const href = readString(value.href) ?? readString(value.url);
+  const rawChildren = Array.isArray(value.children)
+    ? value.children
+    : Array.isArray(value.items)
+      ? value.items
+      : [];
+  const children = rawChildren.map(normalizeSidebarNavigationItem).filter(isSidebarNavigationItem);
+
+  if (!label && !slug && !href && children.length === 0) return null;
+  return {
+    ...(label ? { label } : {}),
+    ...(icon ? { icon } : {}),
+    ...(slug !== undefined ? { slug: normalizeSidebarSlug(slug) } : {}),
+    ...(href ? { href } : {}),
+    children,
   };
-  return icons[section] ?? "circle";
 }
 
-function getSidebarPageLabel(item: FarmDocsPage): string {
+function createSidebarPageMaps(pages: FarmDocsPage[]) {
+  return {
+    bySlug: new Map(pages.map((page) => [page.slug, page])),
+    byHref: new Map(pages.map((page) => [page.href, page])),
+  };
+}
+
+function resolveConfiguredSidebarPage(
+  item: SidebarNavigationItem,
+  maps: ReturnType<typeof createSidebarPageMaps>,
+): FarmDocsPage | undefined {
+  if (item.slug !== undefined) return maps.bySlug.get(item.slug);
+  if (item.href) return maps.byHref.get(item.href);
+  return undefined;
+}
+
+function getSidebarIconRegistry(docs: FarmDocsResolvedConfig): Record<string, unknown> {
+  return isObjectRecord(docs.config.icons) ? docs.config.icons : {};
+}
+
+function renderConfiguredIconSvg(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const icon = value.trim();
+  if (!icon) return "";
+  if (/^<svg[\s>]/i.test(icon)) return icon;
+  if (/^<(path|circle|rect|line|polyline|polygon|ellipse|g)\b/i.test(icon)) {
+    return `<svg viewBox="0 0 24 24" focusable="false">${icon}</svg>`;
+  }
+  return "";
+}
+
+function renderSidebarIcon(
+  docs: FarmDocsResolvedConfig,
+  icon: string | undefined,
+  className = "sidebar-icon",
+): string {
+  if (!icon) return "";
+  const iconRegistry = getSidebarIconRegistry(docs);
+  const configuredIcon = iconRegistry[icon] ?? icon;
+  const svg = renderConfiguredIconSvg(configuredIcon);
+  if (!svg) return "";
+  return `<span class="${className}" data-sidebar-icon="${escapeAttribute(icon)}" aria-hidden="true">${svg}</span>`;
+}
+
+function renderSidebarLabel(
+  docs: FarmDocsResolvedConfig,
+  icon: string | undefined,
+  label: string,
+  className: string,
+): string {
+  return `<span class="${className}">${renderSidebarIcon(docs, icon)}<span class="sidebar-label-text">${escapeHtml(label)}</span></span>`;
+}
+
+function getSidebarPageLabel(item: FarmDocsPage, configured?: SidebarNavigationItem): string {
+  if (configured?.label) return configured.label;
   if (item.slug === "") return "Why?";
   if (item.slug === "integrations") return "Overview";
   if (item.slug === "integrations/ui-registry") return "UI Registry";
@@ -933,115 +975,156 @@ function getSidebarPageLabel(item: FarmDocsPage): string {
   return item.title;
 }
 
-function getSidebarPageIcon(item: FarmDocsPage): string {
-  const icons: Record<string, string> = {
-    "": "sparkles",
-    "getting-started": "rocket",
-    "project-structure": "folder",
-    configuration: "settings",
-    routing: "route",
-    layouts: "layout",
-    "server-rendering": "monitor",
-    middleware: "shield",
-    query: "search",
-    "api-routes": "server",
-    "api-client": "terminal",
-    storage: "database",
-    integrations: "plug",
-    "integrations/stripe": "card",
-    "integrations/autumn": "card",
-    "integrations/polar": "card",
-    "integrations/auth": "lock",
-    "integrations/email": "mail",
-    "integrations/jobs": "activity",
-    "integrations/unkey": "key",
-    "integrations/ui-registry": "layout",
-    "integrations/orm-storage": "database",
-    "cache-ppr": "zap",
-    observability: "activity",
-    deployment: "cloud",
-    "docs-engine": "book",
-    markdown: "file",
-    openapi: "braces",
-    plugins: "plug",
-    "plugins/create-plugin": "wrench",
-    cli: "terminal",
-    examples: "box",
-    reference: "book",
-  };
-  return icons[item.slug] ?? "file";
-}
-
-function getSidebarIntegrationGroup(item: FarmDocsPage): string | null {
-  const groups: Record<string, string> = {
-    "integrations/stripe": "Payment",
-    "integrations/autumn": "Payment",
-    "integrations/polar": "Payment",
-    "integrations/auth": "Auth",
-    "integrations/email": "Messaging",
-    "integrations/jobs": "Workflows",
-    "integrations/unkey": "API Keys",
-    "integrations/ui-registry": "Interface",
-    "integrations/orm-storage": "Storage",
-  };
-  return groups[item.slug] ?? null;
-}
-
-function renderSidebarLink(item: FarmDocsPage, activeHref: string): string {
+function renderSidebarLink(
+  item: FarmDocsPage,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+  configured?: SidebarNavigationItem,
+): string {
   const active = item.href === activeHref;
   const isOverview = item.slug === "";
-  return `<a data-active="${active ? "true" : "false"}"${isOverview ? ' data-active-marker="false"' : ""} href="${escapeAttribute(item.href)}">${renderSidebarLabel(getSidebarPageIcon(item), getSidebarPageLabel(item), "sidebar-link-label")}</a>`;
+  return `<a data-active="${active ? "true" : "false"}"${isOverview ? ' data-active-marker="false"' : ""} href="${escapeAttribute(item.href)}">${renderSidebarLabel(docs, configured?.icon, getSidebarPageLabel(item, configured), "sidebar-link-label")}</a>`;
 }
 
-function getOrderedSidebarPages(pages: FarmDocsPage[]): FarmDocsPage[] {
-  return [...pages].sort(compareSidebarPages);
+function collectConfiguredSidebarPages(
+  items: SidebarNavigationItem[],
+  maps: ReturnType<typeof createSidebarPageMaps>,
+  seen = new Set<string>(),
+): FarmDocsPage[] {
+  const ordered: FarmDocsPage[] = [];
+  for (const item of items) {
+    const page = resolveConfiguredSidebarPage(item, maps);
+    if (page && !seen.has(page.slug)) {
+      seen.add(page.slug);
+      ordered.push(page);
+    }
+    ordered.push(...collectConfiguredSidebarPages(item.children, maps, seen));
+  }
+  return ordered;
 }
 
-function renderSidebarSectionItems(
-  section: string,
-  items: FarmDocsPage[],
+function getOrderedSidebarPages(
+  pages: FarmDocsPage[],
+  docs?: FarmDocsResolvedConfig,
+): FarmDocsPage[] {
+  if (!docs) return [...pages].sort(compareSidebarPages);
+
+  const maps = createSidebarPageMaps(pages);
+  const configuredPages = collectConfiguredSidebarPages(getSidebarNavigation(docs), maps);
+  if (configuredPages.length === 0) return [...pages].sort(compareSidebarPages);
+
+  const configuredSlugs = new Set(configuredPages.map((page) => page.slug));
+  const remainingPages = pages
+    .filter((page) => !configuredSlugs.has(page.slug))
+    .sort(compareSidebarPages);
+  return [...configuredPages, ...remainingPages];
+}
+
+function renderExternalSidebarLink(
+  item: SidebarNavigationItem,
   activeHref: string,
+  docs: FarmDocsResolvedConfig,
 ): string {
-  const sortedItems = [...items].sort(compareSidebarPages);
-  if (section !== "Integrations") {
-    return sortedItems.map((item) => renderSidebarLink(item, activeHref)).join("\n");
-  }
+  if (!item.href || !item.label) return "";
+  const active = item.href === activeHref;
+  return `<a data-active="${active ? "true" : "false"}" href="${escapeAttribute(item.href)}">${renderSidebarLabel(docs, item.icon, item.label, "sidebar-link-label")}</a>`;
+}
 
-  const overviewItems = sortedItems.filter((item) => !getSidebarIntegrationGroup(item));
-  const groupedItems = new Map<string, FarmDocsPage[]>();
-  for (const item of sortedItems) {
-    const group = getSidebarIntegrationGroup(item);
-    if (!group) continue;
-    const entries = groupedItems.get(group) ?? [];
-    entries.push(item);
-    groupedItems.set(group, entries);
-  }
-
-  const renderedOverview = overviewItems.map((item) => renderSidebarLink(item, activeHref));
-  const renderedGroups = Array.from(groupedItems.entries())
-    .sort(([a], [b]) => {
-      const aOrder = SIDEBAR_INTEGRATION_GROUP_ORDER.indexOf(a);
-      const bOrder = SIDEBAR_INTEGRATION_GROUP_ORDER.indexOf(b);
-      return (aOrder === -1 ? 100 : aOrder) - (bOrder === -1 ? 100 : bOrder) || a.localeCompare(b);
-    })
-    .map(([group, entries]) => {
-      const meta = SIDEBAR_INTEGRATION_GROUPS[group] ?? { label: group, icon: "circle" };
-      const links = entries
-        .sort(compareSidebarPages)
-        .map((item) => renderSidebarLink(item, activeHref))
-        .join("\n");
-      return `<div class="sidebar-subgroup" data-sidebar-subgroup="${escapeAttribute(slugify(group))}">
-  <div class="sidebar-subgroup-title">${renderSidebarLabel(meta.icon, meta.label, "sidebar-subgroup-label")}</div>
+function renderConfiguredSidebarSubgroup(
+  item: SidebarNavigationItem,
+  childHtml: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const label = item.label;
+  if (!label) return childHtml;
+  return `<div class="sidebar-subgroup" data-sidebar-subgroup="${escapeAttribute(slugify(label))}">
+  <div class="sidebar-subgroup-title">${renderSidebarLabel(docs, item.icon, label, "sidebar-subgroup-label")}</div>
   <div class="sidebar-subgroup-content">
+${childHtml}
+  </div>
+</div>`;
+}
+
+function renderConfiguredSidebarItems(
+  items: SidebarNavigationItem[],
+  maps: ReturnType<typeof createSidebarPageMaps>,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const renderedItems: string[] = [];
+  for (const item of items) {
+    const page = resolveConfiguredSidebarPage(item, maps);
+    const childHtml = renderConfiguredSidebarItems(item.children, maps, activeHref, docs);
+
+    if (item.children.length > 0) {
+      renderedItems.push(renderConfiguredSidebarSubgroup(item, childHtml, docs));
+      continue;
+    }
+
+    const linkHtml = page
+      ? renderSidebarLink(page, activeHref, docs, item)
+      : renderExternalSidebarLink(item, activeHref, docs);
+    if (linkHtml) renderedItems.push(linkHtml);
+  }
+  return renderedItems.join("\n");
+}
+
+function renderConfiguredSidebarSection(
+  section: SidebarNavigationItem,
+  maps: ReturnType<typeof createSidebarPageMaps>,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const label = section.label || "Docs";
+  const id = sidebarIdFor(label);
+  const links = renderConfiguredSidebarItems(section.children, maps, activeHref, docs);
+  return `<div class="sidebar-folder" data-state="open">
+  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(docs, section.icon, label, "sidebar-folder-label")}</button>
+  <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content" data-state="open">
 ${links}
   </div>
 </div>`;
-    });
-
-  return [...renderedOverview, ...renderedGroups].join("\n");
 }
 
-function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string {
+function renderAutoSidebarSectionItems(
+  items: FarmDocsPage[],
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  return [...items]
+    .sort(compareSidebarPages)
+    .map((item) => renderSidebarLink(item, activeHref, docs))
+    .join("\n");
+}
+
+function renderPixelNavItems(
+  pages: FarmDocsPage[],
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const configuredSidebar = getSidebarNavigation(docs);
+  if (configuredSidebar.length > 0) {
+    const maps = createSidebarPageMaps(pages);
+    const renderedSections = configuredSidebar
+      .map((section) => {
+        if (section.children.length > 0) {
+          return renderConfiguredSidebarSection(section, maps, activeHref, docs);
+        }
+        const page = resolveConfiguredSidebarPage(section, maps);
+        return page
+          ? renderSidebarLink(page, activeHref, docs, section)
+          : renderExternalSidebarLink(section, activeHref, docs);
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    return `<div class="sidebar-scroll overscroll-contain">
+  <div class="sidebar-tree">
+${renderedSections}
+  </div>
+</div>`;
+  }
+
   const groups = new Map<string, FarmDocsPage[]>();
   for (const item of pages) {
     const group = item.slug === "" ? "Start" : getSidebarSection(item);
@@ -1058,9 +1141,9 @@ function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string 
     })
     .map(([section, items]) => {
       const id = sidebarIdFor(section);
-      const links = renderSidebarSectionItems(section, items, activeHref);
+      const links = renderAutoSidebarSectionItems(items, activeHref, docs);
       return `<div class="sidebar-folder" data-state="open">
-  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(getSidebarSectionIcon(section), section, "sidebar-folder-label")}</button>
+  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(docs, undefined, section, "sidebar-folder-label")}</button>
   <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content" data-state="open">
 ${links}
   </div>
@@ -1075,8 +1158,12 @@ ${renderedSections}
 </div>`;
 }
 
-function renderPixelPageNav(pages: FarmDocsPage[], activeHref: string): string {
-  const orderedPages = getOrderedSidebarPages(pages);
+function renderPixelPageNav(
+  pages: FarmDocsPage[],
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const orderedPages = getOrderedSidebarPages(pages, docs);
   const activeIndex = orderedPages.findIndex((item) => item.href === activeHref);
   if (activeIndex === -1) return "";
 
@@ -1084,17 +1171,18 @@ function renderPixelPageNav(pages: FarmDocsPage[], activeHref: string): string {
   const next = orderedPages[activeIndex + 1];
   if (!previous && !next) return "";
 
-  const renderCard = (item: FarmDocsPage, direction: "previous" | "next") =>
-    `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
-  <span class="fd-page-nav-label">${direction === "previous" ? "&larr; Previous" : "Next &rarr;"}</span>
+  const renderLink = (item: FarmDocsPage, direction: "previous" | "next") =>
+    `<a class="fd-page-nav-link fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
+  <span class="fd-page-nav-label">${direction === "previous" ? "Previous" : "Next"}</span>
   <span class="fd-page-nav-title">${escapeHtml(item.title)}</span>
-  ${item.description ? `<span class="fd-page-nav-description">${escapeHtml(item.description)}</span>` : '<span class="fd-page-nav-description fd-page-nav-description-empty">&nbsp;</span>'}
 </a>`;
 
-  return `<nav class="fd-page-nav" aria-label="Page navigation">
-  ${previous ? renderCard(previous, "previous") : '<span class="fd-page-nav-spacer"></span>'}
-  ${next ? renderCard(next, "next") : '<span class="fd-page-nav-spacer"></span>'}
-</nav>`;
+  return `<footer class="fd-page-footer">
+  <nav class="fd-page-nav" aria-label="Page navigation">
+    ${previous ? renderLink(previous, "previous") : '<span class="fd-page-nav-spacer"></span>'}
+    ${next ? renderLink(next, "next") : '<span class="fd-page-nav-spacer"></span>'}
+  </nav>
+</footer>`;
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -1245,15 +1333,15 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 42px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 18px; }
-    .fd-page-nav-card, .fd-page-nav-spacer { min-height: 96px; }
-    .fd-page-nav-card { display: flex; min-width: 0; flex-direction: column; gap: 6px; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 12px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; }
-    .fd-page-nav-card:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
+    .fd-page-footer { width: 100%; margin-top: 46px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 20px; }
+    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
+    .fd-page-nav-link, .fd-page-nav-spacer { min-height: 76px; }
+    .fd-page-nav-link { display: flex; min-width: 0; flex-direction: column; justify-content: center; gap: 5px; padding: 13px 15px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background 150ms ease, color 150ms ease; }
+    .fd-page-nav-link + .fd-page-nav-link, .fd-page-nav-spacer + .fd-page-nav-link { border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
+    .fd-page-nav-link:hover { background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); }
     .fd-page-nav-next { align-items: flex-end; text-align: right; }
-    .fd-page-nav-label { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-    .fd-page-nav-title { display: -webkit-box; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 15px; font-weight: 600; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description { display: -webkit-box; overflow: hidden; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description-empty { visibility: hidden; }
+    .fd-page-nav-label { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+    .fd-page-nav-title { display: -webkit-box; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 14px; font-weight: 600; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
     .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; border-top: 0; padding-top: 0; }
     .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
@@ -1295,7 +1383,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
         <a href="/">${escapeHtml(navTitle)}</a>
         <span>/ docs</span>
       </div>
-      ${renderPixelNavItems(pages, page.href)}
+      ${renderPixelNavItems(pages, page.href, docs)}
     </aside>
     <header class="topbar">
       <a href="/">Farm.js</a>
@@ -1305,12 +1393,12 @@ ${renderFarmDocsBridgeCss(docs)}</style>
       <article id="nd-page" class="prose">
         <p class="page-kicker">DOCUMENTATION / ${escapeHtml((page.slug || "overview").toUpperCase())}</p>
 ${renderMarkdownHtml(page.body)}
-        ${renderPixelPageNav(pages, page.href)}
         <div class="page-actions">
           <a href="${escapeAttribute(markdownUrl)}">Markdown</a>
           <a href="/sitemap.md">Sitemap</a>
           <a href="/AGENTS.md">Agents</a>
         </div>
+        ${renderPixelPageNav(pages, page.href, docs)}
       </article>
     </main>
     <nav id="nd-toc" class="fd-toc sticky top-(--fd-docs-row-1) h-[calc(var(--fd-docs-height)-var(--fd-docs-row-1))] flex flex-col [grid-area:toc] w-(--fd-toc-width) pt-12 pe-4 pb-2 max-xl:hidden" data-toc aria-labelledby="toc-title">
