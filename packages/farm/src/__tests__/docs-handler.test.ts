@@ -111,6 +111,22 @@ describe("createFarmDocsHandler", () => {
               },
             ],
           },
+          readingTime: {
+            enabled: true,
+            wordsPerMinute: 200,
+          },
+          lastUpdated: {
+            enabled: true,
+            label: "Last updated at",
+            position: "footer",
+          },
+          pageActions: {
+            copyMarkdown: {
+              enabled: true,
+              copiedLabel: "Copied page",
+            },
+            alignment: "right",
+          },
         },
       },
       { root, srcDir: "src" },
@@ -144,6 +160,21 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("history.pushState");
     expect(html).toContain("farmDocsNavigating");
     expect(html).toContain("farmDocsRuntimeId");
+    expect(html).toContain("window.__farmDocsPageActionsRuntime");
+    expect(html).toContain('data-page-action="copy-markdown"');
+    expect(html).toContain('data-markdown-url="/docs.md"');
+    expect(html).toContain('data-actions-alignment="right"');
+    expect(html).toContain("Copy page");
+    expect(html).toContain("Copied page");
+    expect(html).toContain("navigator.clipboard");
+    expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
+    expect(html).toContain("4500");
+    expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
+    expect(html).toContain('class="not-prose fd-page-footer"');
+    expect(html).toContain("Last updated at");
+    expect(html).not.toContain('href="/sitemap.md"');
+    expect(html).not.toContain('href="/AGENTS.md"');
+    expect(html).not.toContain(">Markdown</a>");
     expect(html).not.toContain('class="route-pill"');
     expect(html).toContain('data-sidebar-icon="sparkles"');
     expect(html).toContain('data-sidebar-icon="brand-stripe"');

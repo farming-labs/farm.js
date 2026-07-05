@@ -265,6 +265,11 @@ const config = {
     enabled: true,
     wordsPerMinute: 220,
   },
+  lastUpdated: {
+    enabled: true,
+    label: "Last updated at",
+    position: "footer",
+  },
   pageActions: {
     copyMarkdown: {
       enabled: true,

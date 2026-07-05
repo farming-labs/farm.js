@@ -37,6 +37,7 @@ export interface FarmDocsPage {
   section?: string;
   href: string;
   sourcePath: string;
+  lastModified?: string;
 }
 
 export interface LoadedFarmDocsPage extends FarmDocsPage {
@@ -191,6 +192,17 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
+function getPageLastModified(sourcePath: string, frontmatter: Record<string, string>): string {
+  const configured =
+    frontmatter.lastModified ||
+    frontmatter.lastmod ||
+    frontmatter.lastUpdated ||
+    frontmatter.updatedAt;
+  if (configured) return configured;
+
+  return statSync(sourcePath).mtime.toISOString();
+}
+
 export function loadFarmDocsPage(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
@@ -210,6 +222,7 @@ export function loadFarmDocsPage(
     description: frontmatter.description,
     href,
     sourcePath,
+    lastModified: getPageLastModified(sourcePath, frontmatter),
     frontmatter,
     body,
   };
@@ -274,6 +287,7 @@ export function discoverFarmDocsPages(
         section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
+        lastModified: getPageLastModified(absolutePath, frontmatter),
       });
     }
   };
@@ -283,7 +297,8 @@ export function discoverFarmDocsPages(
 }
 
 export function toFarmDocsMarkdownPage(page: LoadedFarmDocsPage): DocsMarkdownPage {
-  const lastModified = page.frontmatter.lastModified || page.frontmatter.lastmod;
+  const lastModified =
+    page.lastModified || page.frontmatter.lastModified || page.frontmatter.lastmod;
 
   return {
     slug: page.slug,
@@ -325,6 +340,197 @@ function toDocsSitemapPage(page: LoadedFarmDocsPage): DocsSitemapPageInput {
     ...toFarmDocsMarkdownPage(page),
     sourcePath: page.sourcePath,
   };
+}
+
+type CopyMarkdownActionConfig = {
+  format: "markdown" | "text";
+  includeTitle: boolean;
+  label: string;
+  copiedLabel: string;
+};
+
+type LastUpdatedDisplayConfig = {
+  enabled: boolean;
+  label: string;
+  position: "footer" | "below-title";
+};
+
+type ReadingTimeDisplayConfig = {
+  wordsPerMinute: number;
+  format: "long" | "short";
+  includeCode: boolean;
+};
+
+function resolvePageActionsConfig(docs: FarmDocsResolvedConfig): Record<string, unknown> {
+  return isObjectRecord(docs.config.pageActions) ? docs.config.pageActions : {};
+}
+
+function resolvePageActionsAlignment(docs: FarmDocsResolvedConfig): "left" | "right" {
+  return resolvePageActionsConfig(docs).alignment === "right" ? "right" : "left";
+}
+
+function resolveCopyMarkdownActionConfig(
+  docs: FarmDocsResolvedConfig,
+): CopyMarkdownActionConfig | null {
+  const raw = resolvePageActionsConfig(docs).copyMarkdown;
+  if (raw === undefined || raw === false) return null;
+
+  const options = isObjectRecord(raw) ? raw : {};
+  if (isObjectRecord(raw) && raw.enabled === false) return null;
+
+  return {
+    format: options.format === "text" ? "text" : "markdown",
+    includeTitle: options.includeTitle === true,
+    label: readString(options.label) ?? "Copy page",
+    copiedLabel: readString(options.copiedLabel) ?? "Copied!",
+  };
+}
+
+function resolveLastUpdatedDisplayConfig(docs: FarmDocsResolvedConfig): LastUpdatedDisplayConfig {
+  const raw = docs.config.lastUpdated;
+  const options = isObjectRecord(raw) ? raw : {};
+
+  return {
+    enabled: raw !== false && (!isObjectRecord(raw) || raw.enabled !== false),
+    label: typeof options.label === "string" ? options.label : "Last updated",
+    position: options.position === "below-title" ? "below-title" : "footer",
+  };
+}
+
+function formatLastModifiedDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function renderLastUpdatedText(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+  position: "footer" | "below-title",
+): string {
+  const config = resolveLastUpdatedDisplayConfig(docs);
+  const formatted = formatLastModifiedDate(page.lastModified);
+  if (!config.enabled || config.position !== position || !formatted) return "";
+
+  const time = `<time datetime="${escapeAttribute(page.lastModified || "")}">${escapeHtml(formatted)}</time>`;
+  const label = config.label.trim();
+  return label ? `${escapeHtml(label)} ${time}` : time;
+}
+
+function resolveReadingTimeDisplayConfig(
+  docs: FarmDocsResolvedConfig,
+): ReadingTimeDisplayConfig | null {
+  const raw = docs.config.readingTime;
+  if (raw === undefined || raw === false) return null;
+
+  const options = isObjectRecord(raw) ? raw : {};
+  if (isObjectRecord(raw) && options.enabled === false) return null;
+
+  const wordsPerMinute =
+    typeof options.wordsPerMinute === "number" && options.wordsPerMinute > 0
+      ? options.wordsPerMinute
+      : 220;
+
+  return {
+    wordsPerMinute,
+    format: options.format === "short" ? "short" : "long",
+    includeCode: options.includeCode === true,
+  };
+}
+
+function countMarkdownWords(body: string, includeCode: boolean): number {
+  const readable = (
+    includeCode ? body : body.replace(/```[\s\S]*?```/g, " ").replace(/`[^`]*`/g, " ")
+  )
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[#>*_~`|:-]/g, " ");
+
+  return readable.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g)?.length ?? 0;
+}
+
+function renderReadingTimeMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const config = resolveReadingTimeDisplayConfig(docs);
+  if (!config) return "";
+
+  const words = countMarkdownWords(page.body, config.includeCode);
+  const minutes = Math.max(1, Math.ceil(words / config.wordsPerMinute));
+  const label = config.format === "short" ? `${minutes} min` : `${minutes} min read`;
+
+  return `<div class="fd-page-meta not-prose" data-page-reading-time>
+  <span class="fd-page-meta-dot" aria-hidden="true">·</span>
+  <span class="fd-page-meta-item">${escapeHtml(label)}</span>
+</div>`;
+}
+
+function renderPixelPageActions(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const copyMarkdown = resolveCopyMarkdownActionConfig(docs);
+  if (!copyMarkdown) return "";
+
+  const markdownUrl = `${page.href}.md`;
+  const includeTitle = copyMarkdown.includeTitle ? "true" : "false";
+
+  return `<div class="fd-page-actions" data-page-actions data-actions-alignment="${resolvePageActionsAlignment(docs)}">
+  <button
+    type="button"
+    class="fd-page-action-btn"
+    data-page-action="copy-markdown"
+    data-copied="false"
+    data-markdown-url="${escapeAttribute(markdownUrl)}"
+    data-copy-markdown-format="${copyMarkdown.format}"
+    data-copy-markdown-include-title="${includeTitle}"
+    data-copy-label="${escapeAttribute(copyMarkdown.label)}"
+    data-copied-label="${escapeAttribute(copyMarkdown.copiedLabel)}"
+    aria-label="${escapeAttribute(copyMarkdown.label)}"
+    title="${escapeAttribute(copyMarkdown.label)}"
+  >
+    <svg class="fd-page-action-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+    <svg class="fd-page-action-check-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg>
+    <span data-page-action-label>${escapeHtml(copyMarkdown.label)}</span>
+  </button>
+</div>`;
+}
+
+function renderBelowTitleMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const lastUpdated = renderLastUpdatedText(page, docs, "below-title");
+  const actions = renderPixelPageActions(page, docs);
+  const readingTime = renderReadingTimeMeta(page, docs);
+  if (!lastUpdated && !actions && !readingTime) return "";
+
+  return `<div class="fd-below-title-block not-prose">
+  ${lastUpdated ? `<p class="fd-last-updated-inline">${lastUpdated}</p>` : ""}
+  ${actions}
+  ${readingTime}
+</div>`;
+}
+
+function renderMarkdownHtmlWithTitleMeta(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const html = renderMarkdownHtml(page.body);
+  const meta = renderBelowTitleMeta(page, docs);
+  if (!meta) return html;
+
+  const withTitleMeta = html.replace(/(<h1\b[\s\S]*?<\/h1>)/, `$1\n${meta}`);
+  return withTitleMeta === html ? `${meta}\n${html}` : withTitleMeta;
+}
+
+function renderPixelPageFooter(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const lastUpdated = renderLastUpdatedText(page, docs, "footer");
+  if (!lastUpdated) return "";
+
+  return `<div class="not-prose fd-page-footer">
+  <span class="fd-last-updated-footer">${lastUpdated}</span>
+</div>`;
 }
 
 function getDocsLlmsOptions(docs: FarmDocsResolvedConfig, request: Request) {
@@ -1209,6 +1415,15 @@ function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig): string {
   return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)active.scrollIntoView({block:"center"})};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;currentArticle.replaceWith(document.importNode(nextArticle,true));const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll)window.scrollTo({top:0,left:0});return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
 
+function renderDocsPageActionsRuntimeScript(): string {
+  return `<script>(()=>{if(window.__farmDocsPageActionsRuntime)return;window.__farmDocsPageActionsRuntime=true;const readArticleText=()=>{const article=document.getElementById("nd-page");if(!article)return"";const clone=article.cloneNode(true);if(!(clone instanceof HTMLElement))return article.innerText||"";clone.querySelectorAll("[data-page-actions],.fd-page-footer,.fd-page-nav").forEach((node)=>node.remove());return clone.innerText||""};const withTitle=(content,format,includeTitle)=>{if(!includeTitle)return content;const title=document.querySelector("#nd-page h1")?.textContent?.trim()||document.title.trim();if(!title)return content;const trimmed=content.trimStart();if(trimmed.startsWith(title)||trimmed.startsWith("# "+title))return content;return format==="markdown"?"# "+title+"\\n\\n"+content:title+"\\n\\n"+content};const writeClipboard=async(text)=>{if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return}catch{}}const textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","");textarea.style.position="fixed";textarea.style.opacity="0";textarea.style.pointerEvents="none";document.body.appendChild(textarea);textarea.select();document.execCommand("copy");textarea.remove()};const markCopied=(button)=>{const label=button.querySelector("[data-page-action-label]");button.dataset.copied="true";button.setAttribute("aria-label",button.dataset.copiedLabel||"Copied!");button.title=button.dataset.copiedLabel||"Copied!";if(label)label.textContent=button.dataset.copiedLabel||"Copied!";const previous=Number(button.dataset.copyTimeout||0);if(previous)clearTimeout(previous);button.dataset.copyTimeout=String(setTimeout(()=>{button.dataset.copied="false";button.setAttribute("aria-label",button.dataset.copyLabel||"Copy page");button.title=button.dataset.copyLabel||"Copy page";if(label)label.textContent=button.dataset.copyLabel||"Copy page";button.dataset.copyTimeout="0"},4500))};document.addEventListener("click",async(event)=>{const target=event.target instanceof Element?event.target.closest('[data-page-action="copy-markdown"]'):null;if(!(target instanceof HTMLButtonElement))return;event.preventDefault();const format=target.dataset.copyMarkdownFormat==="text"?"text":"markdown";const includeTitle=target.dataset.copyMarkdownIncludeTitle==="true";let content="";target.disabled=true;try{if(format==="markdown"&&target.dataset.markdownUrl){try{const response=await fetch(target.dataset.markdownUrl,{headers:{Accept:"text/markdown"}});if(response.ok)content=await response.text()}catch{}}if(!content)content=readArticleText();content=withTitle(content,format,includeTitle);if(content.trim()){await writeClipboard(content);markCopied(target)}}finally{target.disabled=false}})})();</script>`;
+}
+
+function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
+  return `${renderDocsRuntimeScript(docs)}
+${renderDocsPageActionsRuntimeScript()}`;
+}
+
 const themeCssCache = new Map<string, string>();
 
 function readCssWithImports(filePath: string, seen = new Set<string>()): string {
@@ -1353,9 +1568,19 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-page-nav-title { display: -webkit-box; overflow: hidden; min-height: calc(1.4em * 2); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 600; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
     .fd-page-nav-description { display: -webkit-box; overflow: hidden; min-height: calc(1.5em * 2); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
     .fd-page-nav-description-empty { visibility: hidden; }
-    .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; border-top: 0; padding-top: 0; }
-    .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
-    .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
+    .fd-below-title-block { display: flex; flex-direction: column; align-items: flex-start; gap: 0.625rem; margin: 0 0 1.25rem; }
+    .fd-below-title-block .fd-page-actions { margin: 0; }
+    .fd-below-title-block .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
+    .fd-page-meta { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.8125rem; line-height: 1.5; }
+    .fd-page-meta-dot { color: color-mix(in srgb, var(--color-fd-muted-foreground, hsl(0 0% 55%)) 60%, transparent); }
+    .fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.75rem; line-height: 1.5; }
+    .fd-page-action-btn { border-radius: 0 !important; box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono) !important; font-size: 0.75rem; letter-spacing: 0.03em; text-transform: uppercase; }
+    .fd-page-action-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .fd-page-action-btn .fd-page-action-check-icon { display: none; }
+    .fd-page-action-btn[data-copied="true"] .fd-page-action-copy-icon { display: none; }
+    .fd-page-action-btn[data-copied="true"] .fd-page-action-check-icon { display: block; }
+    .fd-page-footer { display: flex; align-items: center; gap: 0.75rem 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1rem; }
+    .fd-page-footer .fd-last-updated-footer { margin-left: auto; font-family: var(--fd-docs-font-mono); }
     @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .fd-toc { display: none; } .prose h1 { font-size: 32px; } }
   `;
 }
@@ -1372,7 +1597,6 @@ function renderPixelDocsHtml(
       : "Docs";
   const description = page.description || docs.config.metadata?.description || "";
   const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
-  const markdownUrl = `${page.href}.md`;
   const themeName = getThemeName(docs);
 
   return `<!DOCTYPE html>
@@ -1403,12 +1627,8 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     <main>
       <article id="nd-page" class="prose">
         <p class="page-kicker">DOCUMENTATION / ${escapeHtml((page.slug || "overview").toUpperCase())}</p>
-${renderMarkdownHtml(page.body)}
-        <div class="page-actions">
-          <a href="${escapeAttribute(markdownUrl)}">Markdown</a>
-          <a href="/sitemap.md">Sitemap</a>
-          <a href="/AGENTS.md">Agents</a>
-        </div>
+${renderMarkdownHtmlWithTitleMeta(page, docs)}
+        ${renderPixelPageFooter(page, docs)}
         ${renderPixelPageNav(pages, page.href, docs)}
       </article>
     </main>
@@ -1421,7 +1641,7 @@ ${renderMarkdownHtml(page.body)}
       </div>
     </nav>
   </div>
-  ${renderDocsRuntimeScript(docs)}
+  ${renderDocsRuntimeScripts(docs)}
 </body>
 </html>`;
 }
