@@ -32,7 +32,16 @@ describe("createFarmDocsHandler", () => {
     );
     await fs.writeFile(
       path.join(docsDir, "guide", "page.md"),
-      ["# Guide", "", "Use `farm dev` to start."].join("\n"),
+      [
+        "# Guide",
+        "",
+        "Use `farm dev` to start.",
+        "",
+        "```ts",
+        'export const hello = "world";',
+        "console.log(hello);",
+        "```",
+      ].join("\n"),
     );
     const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
     return { root, docs };
@@ -55,6 +64,24 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="nd-docs-layout"');
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
+  });
+
+  it("renders highlighted code blocks without doubled line gaps", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const response = await handler(
+      new Request("http://farm.test/docs/guide", {
+        headers: { accept: "text/html" },
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = await response?.text();
+    expect(html).toContain('figure class="shiki code-block"');
+    expect(html).toContain("sh__token--keyword");
+    expect(html).toContain("querySelector('code').innerText");
+    expect(html).not.toContain('</span>\n<span class="sh__line"');
   });
 
   it("serves markdown when requested by markdown URL", async () => {

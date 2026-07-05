@@ -534,8 +534,48 @@ function stripHtml(value: string): string {
   return value.replace(/<[^>]+>/g, "");
 }
 
+function getCodeFence(line: string): { marker: "`" | "~"; length: number } | null {
+  const match = /^(?: {0,3})(`{3,}|~{3,})/.exec(line);
+  const value = match?.[1];
+  if (!value) return null;
+  return { marker: value[0] as "`" | "~", length: value.length };
+}
+
+function isClosingCodeFence(line: string, fence: { marker: "`" | "~"; length: number }): boolean {
+  const trimmed = line.trim();
+  return (
+    trimmed.length >= fence.length && Array.from(trimmed).every((char) => char === fence.marker)
+  );
+}
+
 function stripMdxRuntimeSyntax(body: string): string {
-  return body.replace(/^\s*import\s.+$/gm, "").replace(/^\s*export\s+(const|default)\s.+$/gm, "");
+  const output: string[] = [];
+  let fence: { marker: "`" | "~"; length: number } | null = null;
+
+  for (const line of body.split("\n")) {
+    const nextFence = getCodeFence(line);
+    if (fence) {
+      output.push(line);
+      if (nextFence && nextFence.marker === fence.marker && isClosingCodeFence(line, fence)) {
+        fence = null;
+      }
+      continue;
+    }
+
+    if (nextFence) {
+      fence = nextFence;
+      output.push(line);
+      continue;
+    }
+
+    if (/^\s*import\s.+$/.test(line) || /^\s*export\s+(const|default)\s.+$/.test(line)) {
+      continue;
+    }
+
+    output.push(line);
+  }
+
+  return output.join("\n");
 }
 
 function unescapeHtml(value: string): string {
@@ -555,6 +595,10 @@ function parseCodeInfo(info: string | undefined): { language: string; label: str
   return { language, label };
 }
 
+function highlightCodeBlock(code: string): string {
+  return highlight(code.replace(/\n$/, "")).replace(/<\/span>\n<span/g, "</span><span");
+}
+
 function renderMarkdownHtml(body: string): string {
   const slug = createSlugger();
   const renderer = new Renderer();
@@ -567,11 +611,11 @@ function renderMarkdownHtml(body: string): string {
   renderer.code = (code, infostring, escaped) => {
     const { language, label } = parseCodeInfo(infostring);
     const rawCode = escaped ? unescapeHtml(code) : code;
-    const highlighted = highlight(rawCode);
+    const highlighted = highlightCodeBlock(rawCode);
     return `<figure class="shiki code-block" data-language="${escapeAttribute(language)}">
   <div class="code-block-header">
     <span class="code-block-title">${escapeHtml(label)}</span>
-    <button class="code-copy" type="button" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').textContent)">Copy</button>
+    <button class="code-copy" type="button" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').innerText)">Copy</button>
   </div>
   <pre><code class="sh-code language-${escapeAttribute(language)}">${highlighted}</code></pre>
 </figure>\n`;
@@ -866,9 +910,9 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .code-block-title { overflow: hidden; color: color-mix(in srgb, var(--color-fd-foreground, #fff) 50%, transparent); font-size: 11px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
     .code-copy { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, #000) 80%, transparent); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); cursor: pointer; font-family: var(--fd-docs-font-mono); font-size: 10.5px; letter-spacing: 0.04em; padding: 4px 7px; text-transform: uppercase; }
     .code-copy:hover { color: var(--color-fd-foreground, #fff); background: var(--color-fd-muted, hsl(0 0% 10%)); }
-    .code-block pre { margin: 0; max-width: 100%; overflow-x: auto; padding: 14px 16px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.7; }
-    .code-block code { display: block; min-width: max-content; font-family: inherit; }
-    .sh__line { display: block; min-height: 1.7em; }
+    .code-block pre { margin: 0; max-width: 100%; overflow-x: auto; padding: 14px 16px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.6; }
+    .code-block code { display: block; min-width: max-content; font-family: inherit; white-space: normal; }
+    .sh__line { display: block; min-height: 1.6em; white-space: pre; }
     blockquote { margin: 18px 0; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-left: 3px solid var(--color-fd-foreground, oklch(0.985 0.001 106.423)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); padding: 14px 16px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); }
     .table-wrap { margin: 18px 0; overflow-x: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
     table { width: 100%; border-collapse: collapse; font-size: 14px; }
