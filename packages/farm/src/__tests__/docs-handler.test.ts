@@ -152,12 +152,13 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('data-sidebar-subgroup="payment"');
     expect(html).toContain("--fd-sidebar-line-color");
     expect(html).toContain("--fd-sidebar-branch-gap: 8px");
+    expect(html).toContain("--fd-sidebar-nested-branch-gap: 14px");
     expect(html).toContain(
       ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
     );
     expect(html).toContain("left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap))");
     expect(html).toContain(
-      "left: calc(var(--fd-sidebar-sub-guide-x) + var(--fd-sidebar-branch-gap))",
+      "left: calc(var(--fd-sidebar-sub-guide-x) + var(--fd-sidebar-nested-branch-gap))",
     );
     expect(html).toContain(".sidebar-subgroup-title { position: relative;");
     expect(html).toContain("font-size: 13.5px; font-weight: 400;");
