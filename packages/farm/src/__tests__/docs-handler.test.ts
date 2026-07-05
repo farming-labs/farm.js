@@ -41,6 +41,14 @@ describe("createFarmDocsHandler", () => {
         'export const hello = "world";',
         "console.log(hello);",
         "```",
+        "",
+        "```bash",
+        "farm dev",
+        "```",
+        "",
+        "| Option | Value |",
+        "| --- | --- |",
+        "| Runtime | Farm |",
       ].join("\n"),
     );
     const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
@@ -62,6 +70,7 @@ describe("createFarmDocsHandler", () => {
     const html = await response?.text();
     expect(html).toContain('data-docs-theme="farm-docs"');
     expect(html).toContain('id="nd-docs-layout"');
+    expect(html).toContain('id="nd-toc"');
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
     expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
@@ -80,10 +89,15 @@ describe("createFarmDocsHandler", () => {
 
     expect(response?.status).toBe(200);
     const html = await response?.text();
-    expect(html).toContain('figure class="shiki code-block"');
+    expect(html).toContain('figure class="shiki code-block code-block-framed"');
+    expect(html).toContain('figure class="shiki code-block code-block-plain"');
     expect(html).toContain("sh__token--keyword");
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain("querySelector('code').innerText");
+    expect(html).toContain(
+      'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
+    );
+    expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');
   });

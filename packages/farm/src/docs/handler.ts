@@ -587,16 +587,29 @@ function unescapeHtml(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
-function parseCodeInfo(info: string | undefined): { language: string; label: string } {
+function parseCodeInfo(info: string | undefined): {
+  language: string;
+  label: string;
+  hasExplicitLabel: boolean;
+} {
   const source = (info || "").trim();
   const language = source.match(/^\S+/)?.[0] || "text";
-  const label =
-    source.match(/\b(?:title|filename|file|label|name)=["']([^"']+)["']/)?.[1]?.trim() || language;
-  return { language, label };
+  const explicitLabel = source
+    .match(/\b(?:title|filename|file|label|name)=["']([^"']+)["']/)?.[1]
+    ?.trim();
+  return { language, label: explicitLabel || language, hasExplicitLabel: Boolean(explicitLabel) };
+}
+
+function isShellLikeLanguage(language: string): boolean {
+  return /^(?:bash|sh|shell|zsh|console|command|cmd|terminal|powershell|ps1)$/i.test(language);
 }
 
 function highlightCodeBlock(code: string): string {
   return highlight(code.replace(/\n$/, "")).replace(/<\/span>\n<span/g, "</span><span");
+}
+
+function renderCodeCopyButton(className = "code-copy"): string {
+  return `<button class="${className}" type="button" aria-label="Copy code" title="Copy code" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').innerText)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>`;
 }
 
 function renderMarkdownHtml(body: string): string {
@@ -609,20 +622,25 @@ function renderMarkdownHtml(body: string): string {
   };
 
   renderer.code = (code, infostring, escaped) => {
-    const { language, label } = parseCodeInfo(infostring);
+    const { language, label, hasExplicitLabel } = parseCodeInfo(infostring);
     const rawCode = escaped ? unescapeHtml(code) : code;
     const highlighted = highlightCodeBlock(rawCode);
-    return `<figure class="shiki code-block" data-language="${escapeAttribute(language)}">
-  <div class="code-block-header">
+    const shouldRenderHeader = hasExplicitLabel || !isShellLikeLanguage(language);
+    const header = shouldRenderHeader
+      ? `<div class="code-block-header">
     <span class="code-block-title">${escapeHtml(label)}</span>
-    <button class="code-copy" type="button" aria-label="Copy code" title="Copy code" onclick="navigator.clipboard?.writeText(this.closest('figure').querySelector('code').innerText)"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg></button>
-  </div>
+    ${renderCodeCopyButton()}
+  </div>`
+      : renderCodeCopyButton("code-copy code-copy-floating");
+
+    return `<figure class="shiki code-block ${shouldRenderHeader ? "code-block-framed" : "code-block-plain"}" data-language="${escapeAttribute(language)}">
+  ${header}
   <pre><code class="sh-code language-${escapeAttribute(language)}">${highlighted}</code></pre>
 </figure>\n`;
   };
 
   renderer.table = (header, body) =>
-    `<div class="table-wrap"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>\n`;
+    `<div class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"><table><thead>${header}</thead><tbody>${body}</tbody></table></div>\n`;
 
   renderer.blockquote = (quote) => `<blockquote>${quote}</blockquote>\n`;
   renderer.codespan = (code) => `<code>${escapeHtml(code)}</code>`;
@@ -836,7 +854,7 @@ function renderPixelToc(items: TocItem[]): string {
   return items
     .map(
       (item) =>
-        `<a class="toc-level-${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
+        `<a class="fd-toc-item toc-level-${item.level}" data-toc-item href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
     )
     .join("\n");
 }
@@ -895,10 +913,8 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     .route-pill { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 5px 9px; background: transparent; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); }
-    aside#nd-sidebar { position: sticky; top: 0; grid-row: 1 / span 2; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); padding: 18px var(--fd-sidebar-edge); }
-    aside#nd-sidebar::before, aside#nd-sidebar::after { content: ""; position: absolute; top: 0; bottom: 0; width: var(--fd-pixel-rail-width); pointer-events: none; z-index: 0; background-color: color-mix(in srgb, var(--color-fd-background, #000) 94%, transparent); background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); }
-    aside#nd-sidebar::before { left: 0; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    aside#nd-sidebar::after { right: 0; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
+    aside#nd-sidebar { position: sticky; top: 0; grid-row: 1 / span 2; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 18px var(--fd-sidebar-edge); }
+    aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
     aside#nd-sidebar > * { position: relative; z-index: 1; }
     .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin: -2px calc(-1 * var(--fd-sidebar-edge)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 var(--fd-sidebar-edge); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .sidebar-brand a { text-decoration: none; }
@@ -935,6 +951,8 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 30px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: transparent; background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); padding: 4px 8px 4px 10px; }
     .code-block-title { overflow: hidden; color: color-mix(in srgb, var(--color-fd-foreground, #fff) 50%, transparent); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
     .code-copy { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: 0 0 auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, #000) 80%, transparent); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); cursor: pointer; padding: 0; }
+    .code-copy-floating { position: absolute; top: 8px; right: 8px; z-index: 2; opacity: 0; transition: opacity 150ms ease; }
+    .code-block-plain:hover .code-copy-floating, .code-block-plain:focus-within .code-copy-floating { opacity: 1; }
     .code-copy svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .code-copy:hover { color: var(--color-fd-foreground, #fff); background: var(--color-fd-muted, hsl(0 0% 10%)); }
     .code-block pre { margin: 0; max-width: 100%; overflow-x: auto; padding: 18px 20px; color: var(--color-fd-foreground, #fff); font-family: var(--fd-docs-font-mono); font-size: 13px; line-height: 1.6; }
@@ -942,11 +960,11 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .code-block code { display: block; min-width: max-content; font-family: inherit; white-space: normal; }
     .sh__line { display: block; min-height: 1.6em; white-space: pre; }
     blockquote { margin: 18px 0; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-left: 3px solid var(--color-fd-foreground, oklch(0.985 0.001 106.423)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); padding: 14px 16px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); }
-    .table-wrap { margin: 18px 0; overflow-x: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    table { width: 100%; border-collapse: collapse; font-size: 14px; }
-    th, td { border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 11px 12px; text-align: left; vertical-align: top; }
-    th { background: var(--color-fd-card, hsl(0 0% 4%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-mono); font-size: 12px; text-transform: uppercase; }
-    tr:last-child td { border-bottom: 0; }
+    .fd-table-wrapper { margin: 24px 0; overflow-x: auto; }
+    .fd-table-wrapper table { width: 100%; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-collapse: collapse; font-size: 14px; }
+    .fd-table-wrapper th, .fd-table-wrapper td { border-color: var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 10px 12px; text-align: left; vertical-align: top; }
+    .fd-table-wrapper th { background: var(--color-fd-muted, hsl(0 0% 10%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: inherit; font-size: 13px; font-weight: 500; text-transform: none; }
+    .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
     .fd-page-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 42px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 18px; }
@@ -961,13 +979,15 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; border-top: 0; padding-top: 0; }
     .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
-    .toc { position: sticky; top: calc(var(--fd-nav-height, 56px) + 24px); grid-column: 3; align-self: start; max-height: calc(100vh - 92px); overflow: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 24px 20px; }
-    .toc strong { display: block; margin-bottom: 12px; font-family: var(--fd-docs-font-mono); font-size: 11px; text-transform: uppercase; }
-    .toc a { display: block; padding: 5px 0; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13px; line-height: 1.35; }
-    .toc a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
-    .toc-level-3 { padding-left: 12px !important; }
-    .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 22px !important; }
-    .toc-empty { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; }
+    .toc { position: sticky; top: calc(var(--fd-nav-height, 56px) + 24px); grid-column: 3; align-self: start; max-height: calc(100vh - 92px); overflow: hidden; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 18px 24px; }
+    .toc-inner { display: flex; max-height: inherit; flex-direction: column; padding-top: 2px; }
+    #toc-title { display: inline-flex; align-items: center; min-height: 28px; margin: 0 0 8px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: inherit; font-size: 14px; font-weight: 500; line-height: 1.4; text-transform: none; }
+    .toc-scroll { display: flex; overflow: auto; flex-direction: column; gap: 1px; padding-bottom: 4px; }
+    .toc a { display: block; margin-left: -1px; border-left: 1px solid transparent; padding: 5px 0 5px 12px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13px; line-height: 1.35; }
+    .toc a:hover { border-left-color: var(--color-fd-border, hsl(0 0% 15%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    .toc-level-3 { padding-left: 22px !important; }
+    .toc-level-4, .toc-level-5, .toc-level-6 { padding-left: 32px !important; }
+    .toc-empty { margin: 0; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; }
     @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .toc { display: none; } .prose h1 { font-size: 32px; } }
   `;
 }
@@ -1025,9 +1045,13 @@ ${renderMarkdownHtml(page.body)}
         </div>
       </article>
     </main>
-    <nav class="toc" aria-label="On this page">
-      <strong>On This Page</strong>
-      ${renderPixelToc(tocItems)}
+    <nav id="nd-toc" class="fd-toc toc" data-toc aria-labelledby="toc-title">
+      <div class="toc-inner">
+        <h3 id="toc-title">On this page</h3>
+        <div class="toc-scroll">
+          ${renderPixelToc(tocItems)}
+        </div>
+      </div>
     </nav>
   </div>
 </body>
