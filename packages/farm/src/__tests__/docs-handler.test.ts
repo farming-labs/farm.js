@@ -156,6 +156,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("farmdocs:sidebar-scroll");
     expect(html).toContain("window.sessionStorage");
     expect(html).toContain("x-farm-docs-navigate");
+    expect(html).toContain('cache:"no-store"');
+    expect(html).toContain("const getPageKey=");
+    expect(html).toContain("renderedArticle===currentArticle");
     expect(html).toContain("DOMParser");
     expect(html).toContain("history.pushState");
     expect(html).toContain("farmDocsNavigating");
