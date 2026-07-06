@@ -201,16 +201,17 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('data-sidebar-subgroup="payment"');
     expect(html).toContain("--fd-sidebar-line-color");
     expect(html).toContain("--fd-sidebar-branch-gap: 0px");
+    expect(html).toContain("--fd-sidebar-line-overlap: 2px");
     expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px)");
     expect(html).toContain("--fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px)");
     expect(html).toContain("--fd-sidebar-nested-icon-gap: 0px");
     expect(html).toContain(
       ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
     );
-    expect(html).toContain(".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap));");
-    expect(html).toContain(".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap));");
+    expect(html).toContain(".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) - var(--fd-sidebar-line-overlap) + var(--fd-sidebar-branch-gap));");
+    expect(html).toContain(".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) - var(--fd-sidebar-line-overlap) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap) + var(--fd-sidebar-line-overlap) + var(--fd-sidebar-line-overlap));");
     expect(html).toContain(
-      ".sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x);",
+      ".sidebar-subgroup-content a[data-active]::after { left: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-line-overlap));",
     );
     expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);");
     expect(html).toContain(
