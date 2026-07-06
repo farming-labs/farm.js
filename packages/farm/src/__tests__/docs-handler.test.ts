@@ -172,6 +172,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
+    expect(html).toContain(
+      ".fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);",
+    );
+    expect(html).toContain("letter-spacing: 0.03em; line-height: 1.5; text-transform: uppercase;");
     expect(html).not.toContain('href="/sitemap.md"');
     expect(html).not.toContain('href="/AGENTS.md"');
     expect(html).not.toContain(">Markdown</a>");

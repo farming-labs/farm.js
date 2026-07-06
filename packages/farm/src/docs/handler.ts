@@ -1569,14 +1569,14 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-below-title-block .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
     .fd-page-meta { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.8125rem; line-height: 1.5; }
     .fd-page-meta-dot { color: color-mix(in srgb, var(--color-fd-muted-foreground, hsl(0 0% 55%)) 60%, transparent); }
-    .fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.75rem; line-height: 1.5; }
+    .fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; letter-spacing: 0.03em; line-height: 1.5; text-transform: uppercase; }
     .fd-page-action-btn { border-radius: 0 !important; box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono) !important; font-size: 0.75rem; letter-spacing: 0.03em; text-transform: uppercase; }
     .fd-page-action-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .fd-page-action-btn .fd-page-action-check-icon { display: none; }
     .fd-page-action-btn[data-copied="true"] .fd-page-action-copy-icon { display: none; }
     .fd-page-action-btn[data-copied="true"] .fd-page-action-check-icon { display: block; }
     .fd-page-footer { display: flex; align-items: center; gap: 0.75rem 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1rem; }
-    .fd-page-footer .fd-last-updated-footer { margin-left: auto; font-family: var(--fd-docs-font-mono); }
+    .fd-page-footer .fd-last-updated-footer { margin-left: auto; }
     @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .fd-toc { display: none; } .prose h1 { font-size: 32px; } }
   `;
 }
