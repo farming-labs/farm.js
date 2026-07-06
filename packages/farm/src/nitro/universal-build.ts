@@ -585,11 +585,41 @@ const spaRouter = {
     // Swap root content
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
-    if (!newRoot || !currentRoot) return false;
+    if (!newRoot || !currentRoot) return this.swapDocument(doc);
     currentRoot.innerHTML = newRoot.innerHTML;
     return true;
   },
-  
+
+  swapDocument: function(doc) {
+    if (!doc.documentElement || !doc.body) return false;
+
+    Array.from(document.documentElement.attributes).forEach(function(attr) {
+      if (!doc.documentElement.hasAttribute(attr.name)) {
+        document.documentElement.removeAttribute(attr.name);
+      }
+    });
+    Array.from(doc.documentElement.attributes).forEach(function(attr) {
+      document.documentElement.setAttribute(attr.name, attr.value);
+    });
+
+    document.head.innerHTML = doc.head ? doc.head.innerHTML : "";
+    document.body.innerHTML = doc.body.innerHTML;
+    delete window.__farmDocsRuntime;
+    delete window.__farmDocsPageActionsRuntime;
+
+    setTimeout(function() {
+      Array.from(document.querySelectorAll("script")).forEach(function(script) {
+        const freshScript = document.createElement("script");
+        Array.from(script.attributes).forEach(function(attr) {
+          freshScript.setAttribute(attr.name, attr.value);
+        });
+        freshScript.textContent = script.textContent || "";
+        script.replaceWith(freshScript);
+      });
+    }, 0);
+
+    return true;
+  },
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) return;
@@ -625,6 +655,7 @@ window.__FARM_SPA_ROUTER__ = spaRouter;
 
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
+  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
   spaRouter.fetchPage(window.location.pathname + window.location.search)
     .then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })
     .catch(function() { window.location.reload(); });
@@ -641,6 +672,7 @@ document.addEventListener("click", function(e) {
   if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
+  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
   if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
   if (e.button !== 0) return;
   if (e.defaultPrevented) return;
@@ -885,7 +917,7 @@ const spaRouter = {
     // Swap root content
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
-    if (!newRoot || !currentRoot) return false;
+    if (!newRoot || !currentRoot) return this.swapDocument(doc);
     currentRoot.innerHTML = newRoot.innerHTML;
 
     // Check if new page has a client component
@@ -907,7 +939,37 @@ const spaRouter = {
     }
     return true;
   },
-  
+
+  swapDocument: function(doc) {
+    if (!doc.documentElement || !doc.body) return false;
+
+    Array.from(document.documentElement.attributes).forEach(function(attr) {
+      if (!doc.documentElement.hasAttribute(attr.name)) {
+        document.documentElement.removeAttribute(attr.name);
+      }
+    });
+    Array.from(doc.documentElement.attributes).forEach(function(attr) {
+      document.documentElement.setAttribute(attr.name, attr.value);
+    });
+
+    document.head.innerHTML = doc.head ? doc.head.innerHTML : "";
+    document.body.innerHTML = doc.body.innerHTML;
+    delete window.__farmDocsRuntime;
+    delete window.__farmDocsPageActionsRuntime;
+
+    setTimeout(function() {
+      Array.from(document.querySelectorAll("script")).forEach(function(script) {
+        const freshScript = document.createElement("script");
+        Array.from(script.attributes).forEach(function(attr) {
+          freshScript.setAttribute(attr.name, attr.value);
+        });
+        freshScript.textContent = script.textContent || "";
+        script.replaceWith(freshScript);
+      });
+    }, 0);
+
+    return true;
+  },
   prefetch: function(href) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) return;
@@ -943,6 +1005,7 @@ window.__FARM_SPA_ROUTER__ = spaRouter;
 
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
+  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
   const pathname = window.location.pathname;
   const matched = matchRoute(pathname);
   
@@ -977,6 +1040,7 @@ document.addEventListener("click", function(e) {
   if (href.startsWith("http://") || href.startsWith("https://") || href.startsWith("//")) return;
   if (href.startsWith("#")) return;
   if (anchor.target && anchor.target !== "_self") return;
+  if (document.documentElement.dataset.farmDocsRuntime === "true") return;
   if (e.metaKey || e.altKey || e.ctrlKey || e.shiftKey) return;
   if (e.button !== 0) return;
   if (e.defaultPrevented) return;

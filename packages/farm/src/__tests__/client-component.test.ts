@@ -128,7 +128,7 @@ describe("client component path resolution", () => {
     expect(shouldHydrateModule(pageFile, root)).toBe(true);
   });
 
-  it("falls back when generated SPA navigation cannot swap an app root", () => {
+  it("uses a document swap when generated SPA navigation leaves the app root", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
       "utf-8",
@@ -136,7 +136,12 @@ describe("client component path resolution", () => {
 
     expect(source).toContain("if (!this.swapContent(html))");
     expect(source).toContain("window.location.href = href;");
-    expect(source).toContain("if (!newRoot || !currentRoot) return false;");
+    expect(source).toContain("if (!newRoot || !currentRoot) return this.swapDocument(doc);");
+    expect(source).toContain("swapDocument: function(doc)");
+    expect(source).toContain("document.body.innerHTML = doc.body.innerHTML;");
+    expect(source).toContain("delete window.__farmDocsRuntime;");
+    expect(source).toContain("script.replaceWith(freshScript);");
+    expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
     expect(source).toContain(
       ".then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })",
     );

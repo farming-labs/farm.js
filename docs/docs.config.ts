@@ -114,7 +114,7 @@ const sidebar = [
     icon: "box",
     children: [
       { label: "Routing", slug: "routing", icon: "route" },
-      { label: "Layouts and Route Boundaries", slug: "layouts", icon: "layout" },
+      { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
       { label: "Middleware", slug: "middleware", icon: "shield" },
     ],
