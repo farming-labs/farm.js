@@ -160,6 +160,15 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("history.pushState");
     expect(html).toContain("farmDocsNavigating");
     expect(html).toContain("farmDocsRuntimeId");
+    expect(html).toContain('class="mobile-topbar"');
+    expect(html).toContain('data-sidebar-toggle');
+    expect(html).toContain('data-sidebar-backdrop');
+    expect(html).toContain("initMobileSidebar");
+    expect(html).toContain("closeMobileSidebar");
+    expect(html).toContain('data-farm-docs-sidebar="open"');
+    expect(html).toContain('#nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar');
+    expect(html).toContain(".topbar { display: none !important; }");
+    expect(html).toContain("#nd-docs-layout .fd-toc { display: none !important; }");
     expect(html).toContain("window.__farmDocsPageActionsRuntime");
     expect(html).toContain('data-page-action="copy-markdown"');
     expect(html).toContain('data-markdown-url="/docs.md"');
