@@ -4,6 +4,7 @@ import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
+import type { FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
 
 export type NitroPreset =
@@ -54,6 +55,7 @@ export interface FarmConfig {
   integrations?: FarmIntegrationsUserConfig;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
+  mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
   observability?: FarmObservabilityUserConfig;
   /**
    * When true, Link href is not strictly typed (accepts any string).
@@ -263,11 +265,13 @@ export interface RouteModule {
    * @deprecated Use getStaticPaths instead
    */
   generateStaticParams?: () => Promise<Record<string, string>[]> | Record<string, string>[];
+  metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: PageProps) => Promise<Metadata> | Metadata;
 }
 
 export interface LayoutModule {
   default: Layout;
+  metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: { params: Record<string, string> }) => Promise<Metadata> | Metadata;
 }
 

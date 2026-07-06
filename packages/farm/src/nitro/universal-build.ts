@@ -8,15 +8,22 @@ import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import os from "os";
 import path from "path";
+import { readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
+import { isFarmMarkdownPageFile } from "../app-markdown";
 import { virtualBundlePlugin } from "./virtual-bundle-plugin";
 import type { NitroConfig } from "nitro/config";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
+type UniversalPageRoute = {
+  pattern: string;
+  modulePath: string;
+  source?: string;
+};
 
 // Get __dirname equivalent for ESM
 const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
@@ -136,11 +143,14 @@ export async function buildUniversal(
 
   try {
     // Get page routes first (needed for both client and SSR builds)
-    const pageRoutes: Array<{ pattern: string; modulePath: string }> = [];
+    const pageRoutes: UniversalPageRoute[] = [];
     for (const [pattern, entry] of routeManager.getRoutes()) {
       pageRoutes.push({
         pattern,
         modulePath: entry.modulePath,
+        ...(isFarmMarkdownPageFile(entry.modulePath)
+          ? { source: readFileSync(entry.modulePath, "utf8") }
+          : {}),
       });
     }
     logger.info(`📋 Found ${pageRoutes.length} page routes`);
@@ -231,7 +241,7 @@ async function buildClient(
   root: string,
   srcDir: string,
   outputDir: string,
-  pageRoutes: Array<{ pattern: string; modulePath: string }>,
+  pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
 ) {
   const { farmPlugin } = await import("../vite");
@@ -249,6 +259,9 @@ async function buildClient(
   const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
 
   for (const route of pageRoutes) {
+    if (isFarmMarkdownPageFile(route.modulePath)) {
+      continue;
+    }
     try {
       const metadata = getClientModuleMetadata(route.modulePath, root);
       if (metadata.shouldHydrate) {
@@ -986,11 +999,14 @@ async function buildSSRInMemory(
 
   // Generate route manifest from managers
   // This captures route patterns and module paths
-  const pageRoutes: Array<{ pattern: string; modulePath: string }> = [];
+  const pageRoutes: UniversalPageRoute[] = [];
   for (const [pattern, entry] of routeManager.getRoutes()) {
     pageRoutes.push({
       pattern,
       modulePath: entry.modulePath,
+      ...(isFarmMarkdownPageFile(entry.modulePath)
+        ? { source: await fs.readFile(entry.modulePath, "utf8") }
+        : {}),
     });
   }
 
@@ -1065,8 +1081,11 @@ async function buildSSRInMemory(
     !!config.observability &&
     typeof config.observability === "object" &&
     "onEvent" in config.observability;
+  const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const configModulePath =
-    hasConfiguredIntegrations || hasObservabilityHandler ? await findFarmConfigPath(root) : null;
+    hasConfiguredIntegrations || hasObservabilityHandler || hasMdxComponentConfig
+      ? await findFarmConfigPath(root)
+      : null;
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
@@ -1217,7 +1236,7 @@ async function buildSSRInMemory(
  */
 function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
-  pageRoutes: Array<{ pattern: string; modulePath: string }>,
+  pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   notFoundPath: string | null,
   config: ResolvedFarmConfig,
@@ -1244,6 +1263,24 @@ function generateVirtualEntryCode(
 
   pageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
+    if (route.source !== undefined || isFarmMarkdownPageFile(route.modulePath)) {
+      pageRegistrations.push(`
+  {
+    pattern: ${JSON.stringify(route.pattern)},
+    module: createFarmMarkdownRouteModule({
+      source: ${JSON.stringify(route.source ?? "")},
+      filePath: ${JSON.stringify(route.modulePath)},
+      components: farmMdxComponents,
+      config: farmMdxConfig,
+    }),
+    markdownSource: {
+      source: ${JSON.stringify(route.source ?? "")},
+      filePath: ${JSON.stringify(route.modulePath)},
+    },
+  }`);
+      return;
+    }
+
     pageImports.push(`import * as ${varName} from "${route.modulePath}";`);
     pageRegistrations.push(`
   {
@@ -1279,6 +1316,16 @@ function generateVirtualEntryCode(
     : "";
   const markdownHandlerImport = config.md?.enabled
     ? `import { createMarkdownMirrorResponse } from "farm/markdown";`
+    : "";
+  const appMarkdownImport = `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "farm/app-markdown";`;
+  const mdxComponentsPath =
+    typeof config.mdx?.components === "string"
+      ? path.isAbsolute(config.mdx.components)
+        ? config.mdx.components
+        : path.join(config.root, config.mdx.components)
+      : null;
+  const mdxComponentsImport = mdxComponentsPath
+    ? `import * as FarmMdxComponentsModule from "${mdxComponentsPath.replace(/\\/g, "/")}";`
     : "";
   const integrationImports = configModulePath
     ? `
@@ -1339,6 +1386,8 @@ ${cacheHelpersImport}
 ${observabilityHelpersImport}
 ${docsHandlerImport}
 ${markdownHandlerImport}
+${appMarkdownImport}
+${mdxComponentsImport}
 ${integrationImports}
 
 // Custom 404 page component (if provided)
@@ -1350,6 +1399,16 @@ const farmUserConfig = ${
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
 const farmMarkdownConfig = ${JSON.stringify(config.md)};
+const farmMdxConfig = ${JSON.stringify({
+    ...config.mdx,
+    components: typeof config.mdx?.components === "string" ? config.mdx.components : undefined,
+  })};
+const configuredFarmMdxComponents = farmUserConfig?.mdx?.components;
+const farmMdxComponents = ${
+    mdxComponentsPath
+      ? `(FarmMdxComponentsModule.components || Reflect.get(FarmMdxComponentsModule, "default") || {})`
+      : `(configuredFarmMdxComponents && typeof configuredFarmMdxComponents === "object" ? configuredFarmMdxComponents : {})`
+  };
 const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringify(
     config.observability ?? false,
   )};
@@ -1536,6 +1595,18 @@ async function handleRequest(request) {
     if (docsResponse) {
       return docsResponse;
     }
+  }
+
+  const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
+    request: request.clone(),
+    config: farmMdxConfig,
+    resolveSource: (targetPathname) => {
+      const match = matchPageRoute(targetPathname);
+      return match?.route?.markdownSource || null;
+    },
+  });
+  if (markdownSourceResponse) {
+    return markdownSourceResponse;
   }
 
   if (farmMarkdownConfig?.enabled) {

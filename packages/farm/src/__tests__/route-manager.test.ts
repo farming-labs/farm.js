@@ -33,6 +33,10 @@ describe("RouteManager", () => {
         serverComponents: true,
         serverActions: true,
       },
+      mdx: {
+        markdownRoutes: true,
+        className: "farm-markdown",
+      },
       vite: {},
     };
     routeManager = new RouteManager(mockConfig);
@@ -101,7 +105,7 @@ describe("RouteManager", () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
         if (pattern.includes("page")) {
-          return ["page.tsx", "about/page.tsx"];
+          return ["page.tsx", "about/page.tsx", "docs/page.mdx"];
         }
         if (pattern.includes("layout")) {
           return ["layout.tsx"];
@@ -122,10 +126,23 @@ describe("RouteManager", () => {
       const loadings = routeManager.getLoadings();
       const errors = routeManager.getErrors();
 
-      expect(routes.size).toBe(2);
+      expect(routes.size).toBe(3);
       expect(layouts.size).toBe(1);
       expect(loadings.size).toBe(2);
       expect(errors.size).toBe(2);
+      expect(routes.get("/docs")?.modulePath).toBe("/test/src/app/docs/page.mdx");
+    });
+
+    it("should reject duplicate page files for one route segment", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["about/page.tsx", "about/page.mdx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/about"');
     });
   });
 

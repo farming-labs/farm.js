@@ -8,6 +8,55 @@ section: "Content"
 
 Expose markdown versions of app pages so agents, crawlers, docs tools, and support workflows can read rendered content as text.
 
+Farm supports two markdown flows:
+
+- `page.md` and `page.mdx` are source-authored app pages.
+- `md` mirrors convert rendered `page.tsx` routes back into markdown.
+
+Use source-authored pages for static content such as about pages, policies, changelogs, and content-heavy marketing pages. Use mirrors when the canonical source is a React route.
+
+## Markdown app pages
+
+**src/app/about/page.mdx**
+
+```mdx
+---
+title: About Farm
+description: A markdown-first static page.
+---
+
+# About Farm
+
+<Callout>Farm can render MDX from the app router.</Callout>
+```
+
+This creates `/about` automatically. Because the route is source-authored markdown, Farm also serves the raw source at `/about.md` by default.
+
+## Configure MDX components
+
+**farm.config.ts**
+
+```ts
+export default defineFarmConfig({
+  mdx: {
+    components: "./src/markdown-components.tsx",
+    markdownRoutes: true,
+  },
+});
+```
+
+**src/markdown-components.tsx**
+
+```tsx
+import { Callout } from "./components/callout";
+
+export const components = {
+  Callout,
+};
+```
+
+Set `mdx.markdownRoutes` to `false` when source-authored pages should render as HTML only.
+
 ## Expose pages
 
 **farm.config.ts**
@@ -82,4 +131,5 @@ curl http://localhost:3000/pricing.md
 - Expose only pages that are safe for agents and crawlers.
 - Keep authenticated dashboards out of `md.expose`.
 - Use `cache` for stable public pages.
+- Use `page.md` or `page.mdx` when markdown is the source of truth.
 - Use markdown mirrors for docs, pricing, policies, changelogs, release notes, and help center pages.

@@ -71,7 +71,10 @@ export type RoutePath = string;
   }
 
   const glob = await import("fast-glob");
-  const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx}", { cwd: appDir, absolute: false });
+  const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx,md,mdx}", {
+    cwd: appDir,
+    absolute: false,
+  });
 
   const patterns = new Set<string>();
   for (const file of pageFiles) {

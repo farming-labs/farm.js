@@ -7,6 +7,12 @@ import type {
 } from "../types";
 import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
 import { collectSSGPages, resolveRouteRenderingConfigFromFile } from "../ssg";
+import {
+  createFarmMarkdownRouteModuleFromFile,
+  isFarmMarkdownPageFile,
+  loadFarmMdxComponents,
+  resolveMdxConfig,
+} from "../app-markdown";
 import path from "path";
 import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
@@ -40,7 +46,7 @@ export class RouteManager {
     const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
 
     // Find all page and layout files
-    const pageFiles = await globFiles("**/page.{ts,tsx,js,jsx}", appDir);
+    const pageFiles = await globFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
     const layoutFiles = await globFiles("**/layout.{ts,tsx,js,jsx}", appDir);
     const loadingFiles = await globFiles("**/loading.{ts,tsx,js,jsx}", appDir);
     const errorFiles = await globFiles("**/error.{ts,tsx,js,jsx}", appDir);
@@ -55,6 +61,14 @@ export class RouteManager {
       const route = parseRoutePath(file);
       const modulePath = path.join(appDir, file);
       const pattern = this.createRoutePattern(route);
+
+      const existing = this.routes.get(pattern);
+      if (existing) {
+        throw new Error(
+          `Duplicate page route "${pattern}". Found both ${existing.modulePath} and ${modulePath}. ` +
+            "Use only one page file per route segment.",
+        );
+      }
 
       this.routes.set(pattern, {
         route,
@@ -240,6 +254,20 @@ export class RouteManager {
    */
   async loadRouteModule(modulePath: string): Promise<RouteModule> {
     try {
+      if (isFarmMarkdownPageFile(modulePath)) {
+        const mdxConfig = resolveMdxConfig(this.config.mdx);
+        const components = await loadFarmMdxComponents(mdxConfig, {
+          root: this.config.root,
+          loadModule: this.viteServer
+            ? (componentModulePath) => this.viteServer!.ssrLoadModule(componentModulePath)
+            : undefined,
+        });
+        return await createFarmMarkdownRouteModuleFromFile(modulePath, {
+          components,
+          config: mdxConfig,
+        });
+      }
+
       if (this.viteServer) {
         const module = await this.viteServer.ssrLoadModule(modulePath);
         return module as RouteModule;

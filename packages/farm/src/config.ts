@@ -8,6 +8,11 @@ import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
+import {
+  resolveMdxConfig,
+  type FarmMdxResolvedConfig,
+  type FarmMdxUserConfig,
+} from "./app-markdown";
 import path from "path";
 
 export type {
@@ -22,6 +27,7 @@ export type {
   FarmMarkdownRouteInput,
   FarmMarkdownUserConfig,
 } from "./markdown";
+export type { FarmMdxComponents, FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
 
 export interface RedirectConfig {
   source: string;
@@ -132,6 +138,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   deploy?: FarmDeployConfig;
   docs?: FarmDocsUserConfig;
   md?: FarmMarkdownUserConfig | boolean;
+  mdx?: FarmMdxUserConfig;
   observability?: FarmObservabilityUserConfig;
 
   trailingSlash?: boolean;
@@ -175,13 +182,14 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
 }
 
 export interface ResolvedFarmConfig extends Required<
-  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs" | "md">
+  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx">
 > {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
   deploy: ResolvedFarmDeployConfig;
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
+  mdx: FarmMdxResolvedConfig;
 }
 
 export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
@@ -540,6 +548,7 @@ export async function resolveConfig(
   const srcDir = userConfig.srcDir || "src";
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
   const md = resolveMarkdownConfig(userConfig.md);
+  const mdx = resolveMdxConfig(userConfig.mdx);
 
   const resolved: ResolvedFarmConfig = {
     root,
@@ -550,6 +559,7 @@ export async function resolveConfig(
     deploy,
     docs,
     md,
+    mdx,
     observability: userConfig.observability ?? false,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
