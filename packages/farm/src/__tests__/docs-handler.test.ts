@@ -200,7 +200,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
     expect(html).toContain('data-sidebar-subgroup="payment"');
     expect(html).toContain("--fd-sidebar-line-color");
-    expect(html).toContain("--fd-sidebar-branch-gap: 8px");
+    expect(html).toContain("--fd-sidebar-branch-gap: 0px");
     expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px)");
     expect(html).toContain("--fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px)");
     expect(html).toContain("--fd-sidebar-nested-icon-gap: 8px");
