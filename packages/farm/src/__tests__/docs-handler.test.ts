@@ -172,10 +172,12 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
-    expect(html).toContain(
-      ".fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);",
-    );
-    expect(html).toContain("letter-spacing: 0.03em; line-height: 1.5; text-transform: uppercase;");
+    expect(html).toContain(".fd-last-updated-inline,");
+    expect(html).toContain(".fd-last-updated-footer {");
+    expect(html).toContain("font-family: var(--fd-docs-font-mono);");
+    expect(html).toContain("font-size: 0.6875rem;");
+    expect(html).toContain("letter-spacing: 0.04em;");
+    expect(html).toContain("text-transform: uppercase;");
     expect(html).not.toContain('href="/sitemap.md"');
     expect(html).not.toContain('href="/AGENTS.md"');
     expect(html).not.toContain(">Markdown</a>");
@@ -219,6 +221,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
     expect(html).toContain('class="fd-page-nav-description');
     expect(html).toContain('href="/docs/guide"');
+    expect(html).toContain("Farm docs pixel-border bridge");
+    expect(html).toContain('class="toc-scroll"');
+    expect(html).toContain('class="toc-empty"');
   });
 
   it("renders highlighted code blocks without doubled line gaps", async () => {
@@ -247,6 +252,8 @@ describe("createFarmDocsHandler", () => {
       'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
     );
     expect(html).toContain("data-toc-thumb");
+    expect(html).toContain('class="toc-track"');
+    expect(html).toContain('class="toc-link" data-active="true" data-toc-item');
     expect(html).toContain('data-active="true" data-toc-item');
     expect(html).toContain(".code-block pre { margin: 0; max-width: 100%;");
     expect(html).toContain("background: var(--fd-code-body-bg);");

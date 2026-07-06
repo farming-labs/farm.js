@@ -50,6 +50,31 @@ const DOCS_FILE_EXTENSIONS = [".mdx", ".md"];
 const FARM_DOCS_FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
 
+function readFarmDocsPixelBorderCss(): string {
+  const candidates: Array<string | URL> = [];
+  try {
+    candidates.push(new URL("./pixel-border.css", import.meta.url));
+  } catch {
+    // CJS builds fall back to __dirname below.
+  }
+
+  if (typeof __dirname === "string") {
+    candidates.push(path.join(__dirname, "pixel-border.css"));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return readFileSync(candidate, "utf8");
+    } catch {
+      // Try the next source/dist layout.
+    }
+  }
+
+  return "";
+}
+
+const farmDocsPixelBorderCss = readFarmDocsPixelBorderCss();
+
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
 }
@@ -1396,13 +1421,13 @@ function renderPixelPageNav(
 
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
-  return `<div class="relative">
-  <div class="absolute inset-y-0 inset-s-0 bg-fd-primary w-px transition-[clip-path]" data-toc-thumb style="clip-path: polygon(0 0px, 100% 0px, 100% 32px, 0 32px);"></div>
-  <div class="flex flex-col border-s border-fd-foreground/10">
+  return `<div class="toc-track">
+  <div class="toc-thumb" data-toc-thumb style="clip-path: polygon(0 0px, 100% 0px, 100% 32px, 0 32px);"></div>
+  <div class="toc-links">
 ${items
   .map(
     (item) =>
-      `<a class="prose py-1.5 text-sm text-fd-muted-foreground scroll-m-4 transition-colors wrap-anywhere first:pt-0 last:pb-0 data-[active=true]:text-fd-primary hover:text-fd-accent-foreground ${item.level <= 2 ? "ps-3" : item.level === 3 ? "ps-6" : "ps-8"}" data-active="${items[0] === item ? "true" : "false"}" data-toc-item data-depth="${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
+      `<a class="toc-link" data-active="${items[0] === item ? "true" : "false"}" data-toc-item data-depth="${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
   )
   .join("\n")}
   </div>
@@ -1578,6 +1603,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-page-footer { display: flex; align-items: center; gap: 0.75rem 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1rem; }
     .fd-page-footer .fd-last-updated-footer { margin-left: auto; }
     @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .fd-toc { display: none; } .prose h1 { font-size: 32px; } }
+${farmDocsPixelBorderCss}
   `;
 }
 
@@ -1631,7 +1657,7 @@ ${renderMarkdownHtmlWithTitleMeta(page, docs)}
     <nav id="nd-toc" class="fd-toc sticky top-(--fd-docs-row-1) h-[calc(var(--fd-docs-height)-var(--fd-docs-row-1))] flex flex-col [grid-area:toc] w-(--fd-toc-width) pt-12 pe-4 pb-2 max-xl:hidden" data-toc aria-labelledby="toc-title">
       <div class="fd-toc-inner">
         <h3 id="toc-title" class="fd-toc-title inline-flex items-center gap-1.5 text-sm text-fd-muted-foreground"><svg class="size-4" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h16"></path></svg>On this page</h3>
-        <div class="relative min-h-0 text-sm ms-px overflow-auto [scrollbar-width:none] mask-[linear-gradient(to_bottom,transparent,white_16px,white_calc(100%-16px),transparent)] py-3">
+        <div class="toc-scroll">
           ${renderPixelToc(tocItems)}
         </div>
       </div>
