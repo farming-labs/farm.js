@@ -74,6 +74,8 @@ function readFarmDocsPixelBorderCss(): string {
 }
 
 const farmDocsPixelBorderCss = readFarmDocsPixelBorderCss();
+const GEIST_SANS_FONT_URL = "/assets/Geist-Variable-CrgPqtmy.woff2";
+const GEIST_MONO_FONT_URL = "/assets/GeistMono-Variable-BNLlm6Cd.woff2";
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
@@ -1419,6 +1421,45 @@ function renderPixelPageNav(
 </nav>`;
 }
 
+function titleizePathSegment(value: string): string {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function isBreadcrumbEnabled(docs: FarmDocsResolvedConfig): boolean {
+  const breadcrumb = docs.config.breadcrumb;
+  if (breadcrumb === false) return false;
+  if (breadcrumb && typeof breadcrumb === "object" && "enabled" in breadcrumb) {
+    return (breadcrumb as { enabled?: unknown }).enabled !== false;
+  }
+  return true;
+}
+
+function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  if (!isBreadcrumbEnabled(docs)) return "";
+
+  const segments = trimSlashes(page.slug).split("/").filter(Boolean);
+  if (segments.length < 2) return "";
+
+  const parentSegments = segments.slice(0, -1);
+  const parentSegment = parentSegments[parentSegments.length - 1];
+  const currentSegment = segments[segments.length - 1];
+  const entry = normalizeEntry(docs.entry);
+  const parentPath = parentSegments.join("/");
+  const parentHref = entry === "/" ? `/${parentPath}` : `${entry}/${parentPath}`;
+
+  return `<nav class="fd-breadcrumb" aria-label="Breadcrumb">
+  <span class="fd-breadcrumb-item">
+    <a class="fd-breadcrumb-parent fd-breadcrumb-link" href="${escapeAttribute(parentHref)}">${escapeHtml(titleizePathSegment(parentSegment))}</a>
+  </span>
+  <span class="fd-breadcrumb-item">
+    <span class="fd-breadcrumb-sep">/</span>
+    <span class="fd-breadcrumb-current">${escapeHtml(titleizePathSegment(currentSegment))}</span>
+  </span>
+</nav>`;
+}
+
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
   return `<div class="toc-track">
@@ -1492,9 +1533,9 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
 
   return `
-    @font-face { font-family: "Geist Sans"; src: url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    @font-face { font-family: "Geist Mono"; src: url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 8px; --fd-sidebar-nested-icon-gap: 8px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
+    @font-face { font-family: "Geist Sans"; src: local("Geist Sans"), url("${GEIST_SANS_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
+    @font-face { font-family: "Geist Mono"; src: local("Geist Mono"), url("${GEIST_MONO_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
+    :root { color-scheme: dark; --font-geist-sans: "Geist Sans"; --font-geist-mono: "Geist Mono"; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 8px; --fd-sidebar-nested-icon-gap: 8px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
     html[data-farm-docs-sidebar="open"], html[data-farm-docs-sidebar="open"] body { overflow: hidden; }
@@ -1569,7 +1610,13 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x); width: calc(var(--fd-sidebar-sub-link-x) - var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-nested-icon-gap)); }
     main { grid-area: main; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
-    article#nd-page .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; line-height: 1.4; letter-spacing: 0.03em; text-transform: uppercase; }
+    article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; line-height: 1.4; letter-spacing: 0.01em; text-transform: uppercase; }
+    article#nd-page .fd-breadcrumb-item { display: inline-flex; min-width: 0; align-items: center; }
+    article#nd-page .fd-breadcrumb-link { color: inherit; font-family: var(--fd-docs-font-mono); text-decoration: none; }
+    article#nd-page .fd-breadcrumb-link:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    article#nd-page .fd-breadcrumb-parent { opacity: 0.6; font-weight: 400; }
+    article#nd-page .fd-breadcrumb-sep { margin: 0 0.375rem; opacity: 0.4; font-size: 0.75rem; }
+    article#nd-page .fd-breadcrumb-current { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-mono); font-weight: 500; }
     .prose h1 { margin: 0 0 16px; font-size: 36px; line-height: 1.14; letter-spacing: -0.02em; }
     .prose h2 { margin: 44px 0 14px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 26px; font-size: 24px; line-height: 1.24; letter-spacing: -0.01em; }
     .prose h3 { margin: 30px 0 12px; font-size: 20px; line-height: 1.3; letter-spacing: 0; }
@@ -1681,6 +1728,8 @@ function renderPixelDocsHtml(
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
   <link rel="icon" href="${FARM_DOCS_FAVICON}">
+  <link rel="preload" href="${GEIST_SANS_FONT_URL}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="${GEIST_MONO_FONT_URL}" as="font" type="font/woff2" crossorigin>
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   <style>${themeCss}
 ${renderFarmDocsBridgeCss(docs)}</style>
@@ -1708,7 +1757,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     </header>
     <main>
       <article id="nd-page" class="prose">
-        <p class="page-kicker">DOCUMENTATION / ${escapeHtml((page.slug || "overview").toUpperCase())}</p>
+        ${renderPixelBreadcrumb(page, docs)}
 ${renderMarkdownHtmlWithTitleMeta(page, docs)}
         ${renderPixelPageFooter(page, docs)}
         ${renderPixelPageNav(pages, page.href, docs)}

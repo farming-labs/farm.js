@@ -178,6 +178,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("navigator.clipboard");
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
+    expect(html).toContain('url("/assets/GeistMono-Variable-BNLlm6Cd.woff2") format("woff2")');
+    expect(html).toContain("--font-geist-mono: \"Geist Mono\"");
+    expect(html).toContain('<link rel="preload" href="/assets/GeistMono-Variable-BNLlm6Cd.woff2"');
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
@@ -221,8 +224,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain("data-active-marker");
     expect(html).not.toContain('.sidebar-tree a[data-active="true"]::before');
     expect(html).not.toContain('href="/docs">Farm Docs</a>');
-    expect(html).toContain('<p class="page-kicker">DOCUMENTATION / OVERVIEW</p>');
-    expect(html).toContain("article#nd-page .page-kicker");
+    expect(html).not.toContain('class="page-kicker"');
+    expect(html).not.toContain("DOCUMENTATION / OVERVIEW");
+    expect(html).toContain("article#nd-page .fd-breadcrumb");
+    expect(html).toContain("article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);");
     expect(html).toContain("--fd-docs-font-mono: var(--font-geist-mono");
     expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
@@ -233,6 +238,31 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("renders docs-style breadcrumbs only for nested docs pages", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const topLevelResponse = await handler(
+      new Request("http://farm.test/docs/guide", {
+        headers: { accept: "text/html" },
+      }),
+    );
+    await expect(topLevelResponse?.text()).resolves.not.toContain('class="fd-breadcrumb"');
+
+    const nestedResponse = await handler(
+      new Request("http://farm.test/docs/integrations/stripe", {
+        headers: { accept: "text/html" },
+      }),
+    );
+
+    const nestedHtml = await nestedResponse?.text();
+    expect(nestedHtml).toContain('<nav class="fd-breadcrumb" aria-label="Breadcrumb">');
+    expect(nestedHtml).toContain(
+      '<a class="fd-breadcrumb-parent fd-breadcrumb-link" href="/docs/integrations">Integrations</a>',
+    );
+    expect(nestedHtml).toContain('<span class="fd-breadcrumb-current">Stripe</span>');
   });
 
   it("renders highlighted code blocks without doubled line gaps", async () => {
