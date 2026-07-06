@@ -17,6 +17,7 @@ describe("createFarmDocsHandler", () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-handler-"));
     const docsDir = path.join(root, "src", "app", "docs");
     await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
+    await fs.mkdir(path.join(docsDir, "integrations", "stripe"), { recursive: true });
     await fs.writeFile(
       path.join(docsDir, "page.md"),
       [
@@ -59,7 +60,77 @@ describe("createFarmDocsHandler", () => {
         "| Runtime | Farm |",
       ].join("\n"),
     );
-    const docs = await resolveDocsConfig({ entry: "/docs" }, { root, srcDir: "src" });
+    await fs.writeFile(
+      path.join(docsDir, "integrations", "stripe", "page.md"),
+      [
+        "---",
+        "title: Stripe Integration",
+        "description: Billing docs",
+        "section: Integrations",
+        "---",
+        "",
+        "# Stripe Integration",
+        "",
+        "Create checkout sessions.",
+      ].join("\n"),
+    );
+    const docs = await resolveDocsConfig(
+      {
+        entry: "/docs",
+        config: {
+          icons: {
+            book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path>',
+            "brand-stripe":
+              '<svg viewBox="0 0 24 24" focusable="false"><path fill="currentColor" stroke="none" d="M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409"></path></svg>',
+            card: '<rect x="2" y="5" width="20" height="14"></rect>',
+            plug: '<path d="M12 22v-5"></path>',
+            sparkles: '<path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5Z"></path>',
+          },
+          navigation: {
+            sidebar: [
+              {
+                label: "Start",
+                icon: "sparkles",
+                children: [
+                  { label: "Why?", slug: "", icon: "sparkles" },
+                  { label: "Guide", slug: "guide", icon: "book" },
+                ],
+              },
+              {
+                label: "Integrations",
+                icon: "plug",
+                children: [
+                  {
+                    label: "Payment",
+                    icon: "card",
+                    children: [
+                      { label: "Stripe", slug: "integrations/stripe", icon: "brand-stripe" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          readingTime: {
+            enabled: true,
+            wordsPerMinute: 200,
+          },
+          lastUpdated: {
+            enabled: true,
+            label: "Last updated at",
+            position: "footer",
+          },
+          pageActions: {
+            copyMarkdown: {
+              enabled: true,
+              copiedLabel: "Copied page",
+            },
+            alignment: "right",
+          },
+        },
+      },
+      { root, srcDir: "src" },
+    );
     return { root, docs };
   }
 
@@ -81,14 +152,65 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
-    expect(html).toContain("window.__farmDocsToc");
+    expect(html).toContain("window.__farmDocsRuntime");
+    expect(html).toContain("farmdocs:sidebar-scroll");
+    expect(html).toContain("window.sessionStorage");
+    expect(html).toContain("x-farm-docs-navigate");
+    expect(html).toContain("DOMParser");
+    expect(html).toContain("history.pushState");
+    expect(html).toContain("farmDocsNavigating");
+    expect(html).toContain("farmDocsRuntimeId");
+    expect(html).toContain("window.__farmDocsPageActionsRuntime");
+    expect(html).toContain('data-page-action="copy-markdown"');
+    expect(html).toContain('data-markdown-url="/docs.md"');
+    expect(html).toContain('data-actions-alignment="right"');
+    expect(html).toContain("Copy page");
+    expect(html).toContain("Copied page");
+    expect(html).toContain("navigator.clipboard");
+    expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
+    expect(html).toContain("4500");
+    expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
+    expect(html).toContain('class="not-prose fd-page-footer"');
+    expect(html).toContain("Last updated at");
+    expect(html).toContain(".fd-last-updated-inline,");
+    expect(html).toContain(".fd-last-updated-footer {");
+    expect(html).toContain("font-family: var(--fd-docs-font-mono);");
+    expect(html).toContain("font-size: 0.6875rem;");
+    expect(html).toContain("letter-spacing: 0.04em;");
+    expect(html).toContain("text-transform: uppercase;");
+    expect(html).not.toContain('href="/sitemap.md"');
+    expect(html).not.toContain('href="/AGENTS.md"');
+    expect(html).not.toContain(">Markdown</a>");
     expect(html).not.toContain('class="route-pill"');
+    expect(html).toContain('data-sidebar-icon="sparkles"');
+    expect(html).toContain('data-sidebar-icon="brand-stripe"');
+    expect(html).toContain('.sidebar-icon[data-sidebar-icon^="brand-"] svg');
+    expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
+    expect(html).toContain('data-sidebar-subgroup="payment"');
+    expect(html).toContain("--fd-sidebar-line-color");
+    expect(html).toContain("--fd-sidebar-branch-gap: 8px");
+    expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px)");
+    expect(html).toContain("--fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px)");
+    expect(html).toContain("--fd-sidebar-nested-icon-gap: 8px");
     expect(html).toContain(
-      '<a data-active="true" data-active-marker="false" href="/docs">Why?</a>',
+      ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
+    );
+    expect(html).toContain("left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap))");
+    expect(html).toContain(
+      ".sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x);",
     );
     expect(html).toContain(
-      '#nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before',
+      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after',
     );
+    expect(html).toContain(
+      "height: 2px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423));",
+    );
+    expect(html).toContain("var(--fd-sidebar-nested-icon-gap)");
+    expect(html).toContain(".sidebar-subgroup-title { position: relative;");
+    expect(html).toContain("font-size: 13.5px; font-weight: 400;");
+    expect(html).toContain(".sidebar-subgroup::before");
+    expect(html).not.toContain("data-active-marker");
+    expect(html).not.toContain('.sidebar-tree a[data-active="true"]::before');
     expect(html).not.toContain('href="/docs">Farm Docs</a>');
     expect(html).toContain('<p class="page-kicker">DOCUMENTATION / OVERVIEW</p>');
     expect(html).toContain("article#nd-page .page-kicker");
@@ -97,7 +219,11 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
     expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
+    expect(html).toContain('class="fd-page-nav-description');
     expect(html).toContain('href="/docs/guide"');
+    expect(html).toContain("Farm docs pixel-border bridge");
+    expect(html).toContain('class="toc-scroll"');
+    expect(html).toContain('class="toc-empty"');
   });
 
   it("renders highlighted code blocks without doubled line gaps", async () => {
@@ -126,6 +252,8 @@ describe("createFarmDocsHandler", () => {
       'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
     );
     expect(html).toContain("data-toc-thumb");
+    expect(html).toContain('class="toc-track"');
+    expect(html).toContain('class="toc-link" data-active="true" data-toc-item');
     expect(html).toContain('data-active="true" data-toc-item');
     expect(html).toContain(".code-block pre { margin: 0; max-width: 100%;");
     expect(html).toContain("background: var(--fd-code-body-bg);");

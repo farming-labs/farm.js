@@ -10,7 +10,13 @@ import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import path from "path";
 
-export type { FarmDocsConfigInput, FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
+export type {
+  FarmDocsConfigInput,
+  FarmDocsNavigationConfig,
+  FarmDocsResolvedConfig,
+  FarmDocsSidebarItem,
+  FarmDocsUserConfig,
+} from "./docs/types";
 export type {
   FarmMarkdownResolvedConfig,
   FarmMarkdownRouteInput,

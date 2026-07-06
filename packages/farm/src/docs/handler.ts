@@ -37,6 +37,7 @@ export interface FarmDocsPage {
   section?: string;
   href: string;
   sourcePath: string;
+  lastModified?: string;
 }
 
 export interface LoadedFarmDocsPage extends FarmDocsPage {
@@ -48,6 +49,31 @@ const DOCS_FILE_NAMES = ["page.mdx", "page.md", "index.mdx", "index.md"];
 const DOCS_FILE_EXTENSIONS = [".mdx", ".md"];
 const FARM_DOCS_FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
+
+function readFarmDocsPixelBorderCss(): string {
+  const candidates: Array<string | URL> = [];
+  try {
+    candidates.push(new URL("./pixel-border.css", import.meta.url));
+  } catch {
+    // CJS builds fall back to __dirname below.
+  }
+
+  if (typeof __dirname === "string") {
+    candidates.push(path.join(__dirname, "pixel-border.css"));
+  }
+
+  for (const candidate of candidates) {
+    try {
+      return readFileSync(candidate, "utf8");
+    } catch {
+      // Try the next source/dist layout.
+    }
+  }
+
+  return "";
+}
+
+const farmDocsPixelBorderCss = readFarmDocsPixelBorderCss();
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
@@ -191,6 +217,17 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
+function getPageLastModified(sourcePath: string, frontmatter: Record<string, string>): string {
+  const configured =
+    frontmatter.lastModified ||
+    frontmatter.lastmod ||
+    frontmatter.lastUpdated ||
+    frontmatter.updatedAt;
+  if (configured) return configured;
+
+  return statSync(sourcePath).mtime.toISOString();
+}
+
 export function loadFarmDocsPage(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
@@ -210,6 +247,7 @@ export function loadFarmDocsPage(
     description: frontmatter.description,
     href,
     sourcePath,
+    lastModified: getPageLastModified(sourcePath, frontmatter),
     frontmatter,
     body,
   };
@@ -274,6 +312,7 @@ export function discoverFarmDocsPages(
         section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
+        lastModified: getPageLastModified(absolutePath, frontmatter),
       });
     }
   };
@@ -283,7 +322,8 @@ export function discoverFarmDocsPages(
 }
 
 export function toFarmDocsMarkdownPage(page: LoadedFarmDocsPage): DocsMarkdownPage {
-  const lastModified = page.frontmatter.lastModified || page.frontmatter.lastmod;
+  const lastModified =
+    page.lastModified || page.frontmatter.lastModified || page.frontmatter.lastmod;
 
   return {
     slug: page.slug,
@@ -325,6 +365,197 @@ function toDocsSitemapPage(page: LoadedFarmDocsPage): DocsSitemapPageInput {
     ...toFarmDocsMarkdownPage(page),
     sourcePath: page.sourcePath,
   };
+}
+
+type CopyMarkdownActionConfig = {
+  format: "markdown" | "text";
+  includeTitle: boolean;
+  label: string;
+  copiedLabel: string;
+};
+
+type LastUpdatedDisplayConfig = {
+  enabled: boolean;
+  label: string;
+  position: "footer" | "below-title";
+};
+
+type ReadingTimeDisplayConfig = {
+  wordsPerMinute: number;
+  format: "long" | "short";
+  includeCode: boolean;
+};
+
+function resolvePageActionsConfig(docs: FarmDocsResolvedConfig): Record<string, unknown> {
+  return isObjectRecord(docs.config.pageActions) ? docs.config.pageActions : {};
+}
+
+function resolvePageActionsAlignment(docs: FarmDocsResolvedConfig): "left" | "right" {
+  return resolvePageActionsConfig(docs).alignment === "right" ? "right" : "left";
+}
+
+function resolveCopyMarkdownActionConfig(
+  docs: FarmDocsResolvedConfig,
+): CopyMarkdownActionConfig | null {
+  const raw = resolvePageActionsConfig(docs).copyMarkdown;
+  if (raw === undefined || raw === false) return null;
+
+  const options = isObjectRecord(raw) ? raw : {};
+  if (isObjectRecord(raw) && raw.enabled === false) return null;
+
+  return {
+    format: options.format === "text" ? "text" : "markdown",
+    includeTitle: options.includeTitle === true,
+    label: readString(options.label) ?? "Copy page",
+    copiedLabel: readString(options.copiedLabel) ?? "Copied!",
+  };
+}
+
+function resolveLastUpdatedDisplayConfig(docs: FarmDocsResolvedConfig): LastUpdatedDisplayConfig {
+  const raw = docs.config.lastUpdated;
+  const options = isObjectRecord(raw) ? raw : {};
+
+  return {
+    enabled: raw !== false && (!isObjectRecord(raw) || raw.enabled !== false),
+    label: typeof options.label === "string" ? options.label : "Last updated",
+    position: options.position === "below-title" ? "below-title" : "footer",
+  };
+}
+
+function formatLastModifiedDate(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function renderLastUpdatedText(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+  position: "footer" | "below-title",
+): string {
+  const config = resolveLastUpdatedDisplayConfig(docs);
+  const formatted = formatLastModifiedDate(page.lastModified);
+  if (!config.enabled || config.position !== position || !formatted) return "";
+
+  const time = `<time datetime="${escapeAttribute(page.lastModified || "")}">${escapeHtml(formatted)}</time>`;
+  const label = config.label.trim();
+  return label ? `${escapeHtml(label)} ${time}` : time;
+}
+
+function resolveReadingTimeDisplayConfig(
+  docs: FarmDocsResolvedConfig,
+): ReadingTimeDisplayConfig | null {
+  const raw = docs.config.readingTime;
+  if (raw === undefined || raw === false) return null;
+
+  const options = isObjectRecord(raw) ? raw : {};
+  if (isObjectRecord(raw) && options.enabled === false) return null;
+
+  const wordsPerMinute =
+    typeof options.wordsPerMinute === "number" && options.wordsPerMinute > 0
+      ? options.wordsPerMinute
+      : 220;
+
+  return {
+    wordsPerMinute,
+    format: options.format === "short" ? "short" : "long",
+    includeCode: options.includeCode === true,
+  };
+}
+
+function countMarkdownWords(body: string, includeCode: boolean): number {
+  const readable = (
+    includeCode ? body : body.replace(/```[\s\S]*?```/g, " ").replace(/`[^`]*`/g, " ")
+  )
+    .replace(/!\[[^\]]*]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[#>*_~`|:-]/g, " ");
+
+  return readable.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/g)?.length ?? 0;
+}
+
+function renderReadingTimeMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const config = resolveReadingTimeDisplayConfig(docs);
+  if (!config) return "";
+
+  const words = countMarkdownWords(page.body, config.includeCode);
+  const minutes = Math.max(1, Math.ceil(words / config.wordsPerMinute));
+  const label = config.format === "short" ? `${minutes} min` : `${minutes} min read`;
+
+  return `<div class="fd-page-meta not-prose" data-page-reading-time>
+  <span class="fd-page-meta-dot" aria-hidden="true">·</span>
+  <span class="fd-page-meta-item">${escapeHtml(label)}</span>
+</div>`;
+}
+
+function renderPixelPageActions(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const copyMarkdown = resolveCopyMarkdownActionConfig(docs);
+  if (!copyMarkdown) return "";
+
+  const markdownUrl = `${page.href}.md`;
+  const includeTitle = copyMarkdown.includeTitle ? "true" : "false";
+
+  return `<div class="fd-page-actions" data-page-actions data-actions-alignment="${resolvePageActionsAlignment(docs)}">
+  <button
+    type="button"
+    class="fd-page-action-btn"
+    data-page-action="copy-markdown"
+    data-copied="false"
+    data-markdown-url="${escapeAttribute(markdownUrl)}"
+    data-copy-markdown-format="${copyMarkdown.format}"
+    data-copy-markdown-include-title="${includeTitle}"
+    data-copy-label="${escapeAttribute(copyMarkdown.label)}"
+    data-copied-label="${escapeAttribute(copyMarkdown.copiedLabel)}"
+    aria-label="${escapeAttribute(copyMarkdown.label)}"
+    title="${escapeAttribute(copyMarkdown.label)}"
+  >
+    <svg class="fd-page-action-copy-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+    <svg class="fd-page-action-check-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 6 9 17l-5-5"></path></svg>
+    <span data-page-action-label>${escapeHtml(copyMarkdown.label)}</span>
+  </button>
+</div>`;
+}
+
+function renderBelowTitleMeta(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const lastUpdated = renderLastUpdatedText(page, docs, "below-title");
+  const actions = renderPixelPageActions(page, docs);
+  const readingTime = renderReadingTimeMeta(page, docs);
+  if (!lastUpdated && !actions && !readingTime) return "";
+
+  return `<div class="fd-below-title-block not-prose">
+  ${lastUpdated ? `<p class="fd-last-updated-inline">${lastUpdated}</p>` : ""}
+  ${actions}
+  ${readingTime}
+</div>`;
+}
+
+function renderMarkdownHtmlWithTitleMeta(
+  page: LoadedFarmDocsPage,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const html = renderMarkdownHtml(page.body);
+  const meta = renderBelowTitleMeta(page, docs);
+  if (!meta) return html;
+
+  const withTitleMeta = html.replace(/(<h1\b[\s\S]*?<\/h1>)/, `$1\n${meta}`);
+  return withTitleMeta === html ? `${meta}\n${html}` : withTitleMeta;
+}
+
+function renderPixelPageFooter(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  const lastUpdated = renderLastUpdatedText(page, docs, "footer");
+  if (!lastUpdated) return "";
+
+  return `<div class="not-prose fd-page-footer">
+  <span class="fd-last-updated-footer">${lastUpdated}</span>
+</div>`;
 }
 
 function getDocsLlmsOptions(docs: FarmDocsResolvedConfig, request: Request) {
@@ -810,6 +1041,8 @@ const SIDEBAR_PAGE_ORDER = new Map(
     "storage",
     "integrations",
     "integrations/stripe",
+    "integrations/autumn",
+    "integrations/polar",
     "integrations/auth",
     "integrations/email",
     "integrations/jobs",
@@ -830,6 +1063,20 @@ const SIDEBAR_PAGE_ORDER = new Map(
   ].map((slug, index) => [slug, index]),
 );
 
+type SidebarNavigationItem = {
+  label?: string;
+  icon?: string;
+  slug?: string;
+  href?: string;
+  children: SidebarNavigationItem[];
+};
+
+function isSidebarNavigationItem(
+  value: SidebarNavigationItem | null,
+): value is SidebarNavigationItem {
+  return value !== null;
+}
+
 function compareSidebarPages(a: FarmDocsPage, b: FarmDocsPage): number {
   const aOrder = SIDEBAR_PAGE_ORDER.get(a.slug) ?? 1000;
   const bOrder = SIDEBAR_PAGE_ORDER.get(b.slug) ?? 1000;
@@ -847,17 +1094,267 @@ function sidebarIdFor(section: string): string {
   return `sidebar-${slugify(section)}`;
 }
 
-function renderSidebarLink(item: FarmDocsPage, activeHref: string): string {
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() : undefined;
+}
+
+function normalizeSidebarSlug(value: string): string {
+  if (value === "/" || value === ".") return "";
+  return trimSlashes(value);
+}
+
+function getSidebarNavigation(docs: FarmDocsResolvedConfig): SidebarNavigationItem[] {
+  const navigation = docs.config.navigation;
+  if (!isObjectRecord(navigation) || !Array.isArray(navigation.sidebar)) return [];
+  return navigation.sidebar.map(normalizeSidebarNavigationItem).filter(isSidebarNavigationItem);
+}
+
+function normalizeSidebarNavigationItem(value: unknown): SidebarNavigationItem | null {
+  if (!isObjectRecord(value)) return null;
+
+  const label = readString(value.label) ?? readString(value.title);
+  const icon = readString(value.icon);
+  const slug = readOptionalString(value.slug) ?? readOptionalString(value.path);
+  const href = readString(value.href) ?? readString(value.url);
+  const rawChildren = Array.isArray(value.children)
+    ? value.children
+    : Array.isArray(value.items)
+      ? value.items
+      : [];
+  const children = rawChildren.map(normalizeSidebarNavigationItem).filter(isSidebarNavigationItem);
+
+  if (!label && !slug && !href && children.length === 0) return null;
+  return {
+    ...(label ? { label } : {}),
+    ...(icon ? { icon } : {}),
+    ...(slug !== undefined ? { slug: normalizeSidebarSlug(slug) } : {}),
+    ...(href ? { href } : {}),
+    children,
+  };
+}
+
+function createSidebarPageMaps(pages: FarmDocsPage[]) {
+  return {
+    bySlug: new Map(pages.map((page) => [page.slug, page])),
+    byHref: new Map(pages.map((page) => [page.href, page])),
+  };
+}
+
+function resolveConfiguredSidebarPage(
+  item: SidebarNavigationItem,
+  maps: ReturnType<typeof createSidebarPageMaps>,
+): FarmDocsPage | undefined {
+  if (item.slug !== undefined) return maps.bySlug.get(item.slug);
+  if (item.href) return maps.byHref.get(item.href);
+  return undefined;
+}
+
+function getSidebarIconRegistry(docs: FarmDocsResolvedConfig): Record<string, unknown> {
+  return isObjectRecord(docs.config.icons) ? docs.config.icons : {};
+}
+
+function renderConfiguredIconSvg(value: unknown): string {
+  if (typeof value !== "string") return "";
+  const icon = value.trim();
+  if (!icon) return "";
+  if (/^<svg[\s>]/i.test(icon)) return icon;
+  if (/^<(path|circle|rect|line|polyline|polygon|ellipse|g)\b/i.test(icon)) {
+    return `<svg viewBox="0 0 24 24" focusable="false">${icon}</svg>`;
+  }
+  return "";
+}
+
+function renderSidebarIcon(
+  docs: FarmDocsResolvedConfig,
+  icon: string | undefined,
+  className = "sidebar-icon",
+): string {
+  if (!icon) return "";
+  const iconRegistry = getSidebarIconRegistry(docs);
+  const configuredIcon = iconRegistry[icon] ?? icon;
+  const svg = renderConfiguredIconSvg(configuredIcon);
+  if (!svg) return "";
+  return `<span class="${className}" data-sidebar-icon="${escapeAttribute(icon)}" aria-hidden="true">${svg}</span>`;
+}
+
+function renderSidebarLabel(
+  docs: FarmDocsResolvedConfig,
+  icon: string | undefined,
+  label: string,
+  className: string,
+): string {
+  return `<span class="${className}">${renderSidebarIcon(docs, icon)}<span class="sidebar-label-text">${escapeHtml(label)}</span></span>`;
+}
+
+function getSidebarPageLabel(item: FarmDocsPage, configured?: SidebarNavigationItem): string {
+  if (configured?.label) return configured.label;
+  if (item.slug === "") return "Why?";
+  if (item.slug === "integrations") return "Overview";
+  if (item.slug === "integrations/ui-registry") return "UI Registry";
+  if (item.slug === "integrations/orm-storage") return "ORM Storage";
+  if (item.slug.startsWith("integrations/")) {
+    return item.title.replace(/\s+Integrations?$/i, "");
+  }
+  return item.title;
+}
+
+function renderSidebarLink(
+  item: FarmDocsPage,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+  configured?: SidebarNavigationItem,
+): string {
   const active = item.href === activeHref;
-  const isOverview = item.slug === "";
-  return `<a data-active="${active ? "true" : "false"}"${isOverview ? ' data-active-marker="false"' : ""} href="${escapeAttribute(item.href)}">${escapeHtml(isOverview ? "Why?" : item.title)}</a>`;
+  return `<a data-active="${active ? "true" : "false"}" href="${escapeAttribute(item.href)}">${renderSidebarLabel(docs, configured?.icon, getSidebarPageLabel(item, configured), "sidebar-link-label")}</a>`;
 }
 
-function getOrderedSidebarPages(pages: FarmDocsPage[]): FarmDocsPage[] {
-  return [...pages].sort(compareSidebarPages);
+function collectConfiguredSidebarPages(
+  items: SidebarNavigationItem[],
+  maps: ReturnType<typeof createSidebarPageMaps>,
+  seen = new Set<string>(),
+): FarmDocsPage[] {
+  const ordered: FarmDocsPage[] = [];
+  for (const item of items) {
+    const page = resolveConfiguredSidebarPage(item, maps);
+    if (page && !seen.has(page.slug)) {
+      seen.add(page.slug);
+      ordered.push(page);
+    }
+    ordered.push(...collectConfiguredSidebarPages(item.children, maps, seen));
+  }
+  return ordered;
 }
 
-function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string {
+function getOrderedSidebarPages(
+  pages: FarmDocsPage[],
+  docs?: FarmDocsResolvedConfig,
+): FarmDocsPage[] {
+  if (!docs) return [...pages].sort(compareSidebarPages);
+
+  const maps = createSidebarPageMaps(pages);
+  const configuredPages = collectConfiguredSidebarPages(getSidebarNavigation(docs), maps);
+  if (configuredPages.length === 0) return [...pages].sort(compareSidebarPages);
+
+  const configuredSlugs = new Set(configuredPages.map((page) => page.slug));
+  const remainingPages = pages
+    .filter((page) => !configuredSlugs.has(page.slug))
+    .sort(compareSidebarPages);
+  return [...configuredPages, ...remainingPages];
+}
+
+function renderExternalSidebarLink(
+  item: SidebarNavigationItem,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  if (!item.href || !item.label) return "";
+  const active = item.href === activeHref;
+  return `<a data-active="${active ? "true" : "false"}" href="${escapeAttribute(item.href)}">${renderSidebarLabel(docs, item.icon, item.label, "sidebar-link-label")}</a>`;
+}
+
+function renderConfiguredSidebarSubgroup(
+  item: SidebarNavigationItem,
+  childHtml: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const label = item.label;
+  if (!label) return childHtml;
+  return `<div class="sidebar-subgroup" data-sidebar-subgroup="${escapeAttribute(slugify(label))}">
+  <div class="sidebar-subgroup-title">${renderSidebarLabel(docs, item.icon, label, "sidebar-subgroup-label")}</div>
+  <div class="sidebar-subgroup-content">
+${childHtml}
+  </div>
+</div>`;
+}
+
+function renderConfiguredSidebarItems(
+  items: SidebarNavigationItem[],
+  maps: ReturnType<typeof createSidebarPageMaps>,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const renderedItems: string[] = [];
+  for (const item of items) {
+    const page = resolveConfiguredSidebarPage(item, maps);
+    const childHtml = renderConfiguredSidebarItems(item.children, maps, activeHref, docs);
+
+    if (item.children.length > 0) {
+      renderedItems.push(renderConfiguredSidebarSubgroup(item, childHtml, docs));
+      continue;
+    }
+
+    const linkHtml = page
+      ? renderSidebarLink(page, activeHref, docs, item)
+      : renderExternalSidebarLink(item, activeHref, docs);
+    if (linkHtml) renderedItems.push(linkHtml);
+  }
+  return renderedItems.join("\n");
+}
+
+function renderConfiguredSidebarSection(
+  section: SidebarNavigationItem,
+  maps: ReturnType<typeof createSidebarPageMaps>,
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const label = section.label || "Docs";
+  const id = sidebarIdFor(label);
+  const links = renderConfiguredSidebarItems(section.children, maps, activeHref, docs);
+  return `<div class="sidebar-folder" data-state="open">
+  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(docs, section.icon, label, "sidebar-folder-label")}</button>
+  <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content" data-state="open">
+${links}
+  </div>
+</div>`;
+}
+
+function renderAutoSidebarSectionItems(
+  items: FarmDocsPage[],
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  return [...items]
+    .sort(compareSidebarPages)
+    .map((item) => renderSidebarLink(item, activeHref, docs))
+    .join("\n");
+}
+
+function renderPixelNavItems(
+  pages: FarmDocsPage[],
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const configuredSidebar = getSidebarNavigation(docs);
+  if (configuredSidebar.length > 0) {
+    const maps = createSidebarPageMaps(pages);
+    const renderedSections = configuredSidebar
+      .map((section) => {
+        if (section.children.length > 0) {
+          return renderConfiguredSidebarSection(section, maps, activeHref, docs);
+        }
+        const page = resolveConfiguredSidebarPage(section, maps);
+        return page
+          ? renderSidebarLink(page, activeHref, docs, section)
+          : renderExternalSidebarLink(section, activeHref, docs);
+      })
+      .filter(Boolean)
+      .join("\n");
+
+    return `<div class="sidebar-scroll overscroll-contain">
+  <div class="sidebar-tree">
+${renderedSections}
+  </div>
+</div>`;
+  }
+
   const groups = new Map<string, FarmDocsPage[]>();
   for (const item of pages) {
     const group = item.slug === "" ? "Start" : getSidebarSection(item);
@@ -874,12 +1371,9 @@ function renderPixelNavItems(pages: FarmDocsPage[], activeHref: string): string 
     })
     .map(([section, items]) => {
       const id = sidebarIdFor(section);
-      const links = items
-        .sort(compareSidebarPages)
-        .map((item) => renderSidebarLink(item, activeHref))
-        .join("\n");
+      const links = renderAutoSidebarSectionItems(items, activeHref, docs);
       return `<div class="sidebar-folder" data-state="open">
-  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${escapeHtml(section)}</button>
+  <button class="text-fd-muted-foreground sidebar-folder-trigger" type="button" aria-controls="${escapeAttribute(id)}" aria-expanded="true">${renderSidebarLabel(docs, undefined, section, "sidebar-folder-label")}</button>
   <div id="${escapeAttribute(id)}" class="overflow-hidden sidebar-folder-content" data-state="open">
 ${links}
   </div>
@@ -894,8 +1388,12 @@ ${renderedSections}
 </div>`;
 }
 
-function renderPixelPageNav(pages: FarmDocsPage[], activeHref: string): string {
-  const orderedPages = getOrderedSidebarPages(pages);
+function renderPixelPageNav(
+  pages: FarmDocsPage[],
+  activeHref: string,
+  docs: FarmDocsResolvedConfig,
+): string {
+  const orderedPages = getOrderedSidebarPages(pages, docs);
   const activeIndex = orderedPages.findIndex((item) => item.href === activeHref);
   if (activeIndex === -1) return "";
 
@@ -903,36 +1401,51 @@ function renderPixelPageNav(pages: FarmDocsPage[], activeHref: string): string {
   const next = orderedPages[activeIndex + 1];
   if (!previous && !next) return "";
 
-  const renderCard = (item: FarmDocsPage, direction: "previous" | "next") =>
+  const renderDescription = (item: FarmDocsPage) =>
+    item.description
+      ? `<span class="fd-page-nav-description">${escapeHtml(item.description)}</span>`
+      : '<span class="fd-page-nav-description fd-page-nav-description-empty" aria-hidden="true">&nbsp;</span>';
+  const renderCard = (item: FarmDocsPage, direction: "prev" | "next") =>
     `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
-  <span class="fd-page-nav-label">${direction === "previous" ? "&larr; Previous" : "Next &rarr;"}</span>
+  <span class="fd-page-nav-label">${direction === "prev" ? '<span aria-hidden="true">&larr;</span>Previous' : 'Next<span aria-hidden="true">&rarr;</span>'}</span>
   <span class="fd-page-nav-title">${escapeHtml(item.title)}</span>
-  ${item.description ? `<span class="fd-page-nav-description">${escapeHtml(item.description)}</span>` : '<span class="fd-page-nav-description fd-page-nav-description-empty">&nbsp;</span>'}
+  ${renderDescription(item)}
 </a>`;
 
-  return `<nav class="fd-page-nav" aria-label="Page navigation">
-  ${previous ? renderCard(previous, "previous") : '<span class="fd-page-nav-spacer"></span>'}
-  ${next ? renderCard(next, "next") : '<span class="fd-page-nav-spacer"></span>'}
+  const style = previous && next ? "" : ' style="grid-template-columns: 1fr;"';
+  return `<nav class="not-prose fd-page-nav" aria-label="Page navigation"${style}>
+  ${previous ? renderCard(previous, "prev") : ""}
+  ${next ? renderCard(next, "next") : ""}
 </nav>`;
 }
 
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
-  return `<div class="relative">
-  <div class="absolute inset-y-0 inset-s-0 bg-fd-primary w-px transition-[clip-path]" data-toc-thumb style="clip-path: polygon(0 0px, 100% 0px, 100% 32px, 0 32px);"></div>
-  <div class="flex flex-col border-s border-fd-foreground/10">
+  return `<div class="toc-track">
+  <div class="toc-thumb" data-toc-thumb style="clip-path: polygon(0 0px, 100% 0px, 100% 32px, 0 32px);"></div>
+  <div class="toc-links">
 ${items
   .map(
     (item) =>
-      `<a class="prose py-1.5 text-sm text-fd-muted-foreground scroll-m-4 transition-colors wrap-anywhere first:pt-0 last:pb-0 data-[active=true]:text-fd-primary hover:text-fd-accent-foreground ${item.level <= 2 ? "ps-3" : item.level === 3 ? "ps-6" : "ps-8"}" data-active="${items[0] === item ? "true" : "false"}" data-toc-item data-depth="${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
+      `<a class="toc-link" data-active="${items[0] === item ? "true" : "false"}" data-toc-item data-depth="${item.level}" href="#${escapeAttribute(item.id)}">${escapeHtml(item.title)}</a>`,
   )
   .join("\n")}
   </div>
 </div>`;
 }
 
-function renderDocsRuntimeScript(): string {
-  return `<script>(()=>{if(window.__farmDocsToc)return;window.__farmDocsToc=true;const init=()=>{const toc=document.getElementById("nd-toc");if(!toc)return;const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath=\`polygon(0 \${top}px,100% \${top}px,100% \${bottom}px,0 \${bottom}px)\`;};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",()=>setTimeout(schedule,0));update()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
+function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig): string {
+  const docsEntry = JSON.stringify(normalizeEntry(docs.entry));
+  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)active.scrollIntoView({block:"center"})};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;currentArticle.replaceWith(document.importNode(nextArticle,true));const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll)window.scrollTo({top:0,left:0});return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
+}
+
+function renderDocsPageActionsRuntimeScript(): string {
+  return `<script>(()=>{if(window.__farmDocsPageActionsRuntime)return;window.__farmDocsPageActionsRuntime=true;const readArticleText=()=>{const article=document.getElementById("nd-page");if(!article)return"";const clone=article.cloneNode(true);if(!(clone instanceof HTMLElement))return article.innerText||"";clone.querySelectorAll("[data-page-actions],.fd-page-footer,.fd-page-nav").forEach((node)=>node.remove());return clone.innerText||""};const withTitle=(content,format,includeTitle)=>{if(!includeTitle)return content;const title=document.querySelector("#nd-page h1")?.textContent?.trim()||document.title.trim();if(!title)return content;const trimmed=content.trimStart();if(trimmed.startsWith(title)||trimmed.startsWith("# "+title))return content;return format==="markdown"?"# "+title+"\\n\\n"+content:title+"\\n\\n"+content};const writeClipboard=async(text)=>{if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return}catch{}}const textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","");textarea.style.position="fixed";textarea.style.opacity="0";textarea.style.pointerEvents="none";document.body.appendChild(textarea);textarea.select();document.execCommand("copy");textarea.remove()};const markCopied=(button)=>{const label=button.querySelector("[data-page-action-label]");button.dataset.copied="true";button.setAttribute("aria-label",button.dataset.copiedLabel||"Copied!");button.title=button.dataset.copiedLabel||"Copied!";if(label)label.textContent=button.dataset.copiedLabel||"Copied!";const previous=Number(button.dataset.copyTimeout||0);if(previous)clearTimeout(previous);button.dataset.copyTimeout=String(setTimeout(()=>{button.dataset.copied="false";button.setAttribute("aria-label",button.dataset.copyLabel||"Copy page");button.title=button.dataset.copyLabel||"Copy page";if(label)label.textContent=button.dataset.copyLabel||"Copy page";button.dataset.copyTimeout="0"},4500))};document.addEventListener("click",async(event)=>{const target=event.target instanceof Element?event.target.closest('[data-page-action="copy-markdown"]'):null;if(!(target instanceof HTMLButtonElement))return;event.preventDefault();const format=target.dataset.copyMarkdownFormat==="text"?"text":"markdown";const includeTitle=target.dataset.copyMarkdownIncludeTitle==="true";let content="";target.disabled=true;try{if(format==="markdown"&&target.dataset.markdownUrl){try{const response=await fetch(target.dataset.markdownUrl,{headers:{Accept:"text/markdown"}});if(response.ok)content=await response.text()}catch{}}if(!content)content=readArticleText();content=withTitle(content,format,includeTitle);if(content.trim()){await writeClipboard(content);markCopied(target)}}finally{target.disabled=false}})})();</script>`;
+}
+
+function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
+  return `${renderDocsRuntimeScript(docs)}
+${renderDocsPageActionsRuntimeScript()}`;
 }
 
 const themeCssCache = new Map<string, string>();
@@ -981,7 +1494,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   return `
     @font-face { font-family: "Geist Sans"; src: url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
     @font-face { font-family: "Geist Mono"; src: url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); }
+    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 8px; --fd-sidebar-nested-icon-gap: 8px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
     body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
@@ -1004,16 +1517,31 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-tree > a[data-active], .sidebar-folder { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree > .sidebar-folder { margin-left: 0 !important; margin-right: 0 !important; padding: 0 !important; }
     .sidebar-tree > :last-child { border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: block; width: auto !important; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px; line-height: 1.45; background: transparent !important; transition: color 150ms ease; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: flex; width: auto !important; min-width: 0; align-items: center; gap: 8px; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px !important; line-height: 1.45 !important; background: transparent !important; transition: color 150ms ease; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active] { padding-left: var(--fd-sidebar-edge) !important; padding-top: 12px !important; padding-bottom: 12px !important; }
-    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active]::before { content: ""; position: absolute !important; left: var(--fd-sidebar-guide-x) !important; top: 50% !important; width: 2px !important; height: 0 !important; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; transform: translateY(-50%) !important; transition: height 150ms ease; }
-    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active][data-active-marker="false"]::before { display: none !important; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-subgroup-content a[data-active] { padding-left: var(--fd-sidebar-sub-link-x) !important; }
     .sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }
-    #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active="true"]::before { height: 16px !important; }
     .sidebar-tree a[data-active="false"]:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)) !important; }
-    #nd-docs-layout aside#nd-sidebar .sidebar-folder-trigger { display: flex !important; width: 100% !important; align-items: center; justify-content: space-between; border: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)) !important; background: transparent !important; margin: 0 !important; transform: none !important; padding: 8px var(--fd-sidebar-edge) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-sans); font-size: 12px !important; font-weight: 600; letter-spacing: 0 !important; text-align: left; text-transform: none; cursor: default; }
+    .sidebar-icon { display: inline-flex; width: 14px; height: 14px; flex: 0 0 14px; color: currentColor; opacity: 0.72; }
+    .sidebar-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-icon[data-sidebar-icon^="brand-"] svg { fill: currentColor; stroke: none; }
+    .sidebar-icon[data-sidebar-icon^="brand-"] svg * { stroke: none; }
+    .sidebar-link-label, .sidebar-folder-label, .sidebar-subgroup-label { display: inline-flex; min-width: 0; align-items: center; gap: 8px; }
+    .sidebar-folder-label .sidebar-icon { width: 13px; height: 13px; flex-basis: 13px; }
+    .sidebar-subgroup-label .sidebar-icon { width: 14px; height: 14px; flex-basis: 14px; }
+    .sidebar-label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-tree a[data-active="true"] .sidebar-icon, .sidebar-tree a:hover .sidebar-icon { opacity: 1; }
+    #nd-docs-layout aside#nd-sidebar .sidebar-folder-trigger { display: flex !important; width: 100% !important; min-width: 0; align-items: center; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)) !important; background: transparent !important; margin: 0 !important; transform: none !important; padding: 8px var(--fd-sidebar-edge) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-sans); font-size: 12px !important; font-weight: 600; letter-spacing: 0 !important; text-align: left; text-transform: none; cursor: default; }
     .sidebar-folder-content { position: relative; padding: 0 0 6px; overflow: hidden; }
-    .sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 8px; bottom: 6px; width: 1px; background: var(--color-fd-border, hsl(0 0% 15%)); opacity: 0.9; pointer-events: none; }
+    .sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 8px; bottom: 6px; width: 1px; background: var(--fd-sidebar-line-color); pointer-events: none; }
+    .sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after { content: ""; position: absolute; top: 50%; height: 1px; background: var(--fd-sidebar-line-color); transform: translateY(-50%); pointer-events: none; transition: background-color 150ms ease, height 150ms ease, box-shadow 150ms ease; }
+    .sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-link-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap)); }
+    .sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { height: 2px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-fd-primary, oklch(0.985 0.001 106.423)) 18%, transparent); }
+    .sidebar-subgroup { position: relative; padding: 2px 0 4px; }
+    .sidebar-subgroup::before { content: ""; position: absolute; left: var(--fd-sidebar-sub-guide-x); top: 17px; bottom: 19px; width: 1px; background: var(--fd-sidebar-line-color); pointer-events: none; }
+    .sidebar-subgroup-title { position: relative; display: flex; min-width: 0; align-items: center; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13.5px; font-weight: 400; line-height: 1.45; }
+    .sidebar-subgroup-content { position: relative; padding: 0 0 4px; }
+    .sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x); width: calc(var(--fd-sidebar-sub-link-x) - var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-nested-icon-gap)); }
     main { grid-area: main; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
     article#nd-page .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; line-height: 1.4; letter-spacing: 0.03em; text-transform: uppercase; }
@@ -1053,19 +1581,29 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 42px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 18px; }
-    .fd-page-nav-card, .fd-page-nav-spacer { min-height: 96px; }
-    .fd-page-nav-card { display: flex; min-width: 0; flex-direction: column; gap: 6px; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 12px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; }
-    .fd-page-nav-card:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
+    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1.5rem; }
+    .fd-page-nav-card { display: flex; min-width: 0; min-height: 8.75rem; flex-direction: column; justify-content: flex-start; gap: 0.375rem; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 0 !important; background: transparent; padding: 1rem; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease; }
+    .fd-page-nav-card:hover { border-color: color-mix(in srgb, var(--color-fd-foreground, #fff) 22%, transparent); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); }
     .fd-page-nav-next { align-items: flex-end; text-align: right; }
-    .fd-page-nav-label { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
-    .fd-page-nav-title { display: -webkit-box; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 15px; font-weight: 600; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description { display: -webkit-box; overflow: hidden; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+    .fd-page-nav-label { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
+    .fd-page-nav-title { display: -webkit-box; overflow: hidden; min-height: calc(1.4em * 2); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 600; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+    .fd-page-nav-description { display: -webkit-box; overflow: hidden; min-height: calc(1.5em * 2); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
     .fd-page-nav-description-empty { visibility: hidden; }
-    .page-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; border-top: 0; padding-top: 0; }
-    .page-actions a { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); box-shadow: 2px 2px 0 0 var(--fd-pixel-modal-shadow, color-mix(in srgb, var(--color-fd-foreground) 8%, transparent)); padding: 8px 10px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
-    .page-actions a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
+    .fd-below-title-block { display: flex; flex-direction: column; align-items: flex-start; gap: 0.625rem; margin: 0 0 1.25rem; }
+    .fd-below-title-block .fd-page-actions { margin: 0; }
+    .fd-below-title-block .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
+    .fd-page-meta { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.8125rem; line-height: 1.5; }
+    .fd-page-meta-dot { color: color-mix(in srgb, var(--color-fd-muted-foreground, hsl(0 0% 55%)) 60%, transparent); }
+    .fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; letter-spacing: 0.03em; line-height: 1.5; text-transform: uppercase; }
+    .fd-page-action-btn { border-radius: 0 !important; box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono) !important; font-size: 0.75rem; letter-spacing: 0.03em; text-transform: uppercase; }
+    .fd-page-action-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .fd-page-action-btn .fd-page-action-check-icon { display: none; }
+    .fd-page-action-btn[data-copied="true"] .fd-page-action-copy-icon { display: none; }
+    .fd-page-action-btn[data-copied="true"] .fd-page-action-check-icon { display: block; }
+    .fd-page-footer { display: flex; align-items: center; gap: 0.75rem 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1rem; }
+    .fd-page-footer .fd-last-updated-footer { margin-left: auto; }
     @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .fd-toc { display: none; } .prose h1 { font-size: 32px; } }
+${farmDocsPixelBorderCss}
   `;
 }
 
@@ -1081,7 +1619,6 @@ function renderPixelDocsHtml(
       : "Docs";
   const description = page.description || docs.config.metadata?.description || "";
   const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
-  const markdownUrl = `${page.href}.md`;
   const themeName = getThemeName(docs);
 
   return `<!DOCTYPE html>
@@ -1103,7 +1640,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
         <a href="/">${escapeHtml(navTitle)}</a>
         <span>/ docs</span>
       </div>
-      ${renderPixelNavItems(pages, page.href)}
+      ${renderPixelNavItems(pages, page.href, docs)}
     </aside>
     <header class="topbar">
       <a href="/">Farm.js</a>
@@ -1112,25 +1649,21 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     <main>
       <article id="nd-page" class="prose">
         <p class="page-kicker">DOCUMENTATION / ${escapeHtml((page.slug || "overview").toUpperCase())}</p>
-${renderMarkdownHtml(page.body)}
-        ${renderPixelPageNav(pages, page.href)}
-        <div class="page-actions">
-          <a href="${escapeAttribute(markdownUrl)}">Markdown</a>
-          <a href="/sitemap.md">Sitemap</a>
-          <a href="/AGENTS.md">Agents</a>
-        </div>
+${renderMarkdownHtmlWithTitleMeta(page, docs)}
+        ${renderPixelPageFooter(page, docs)}
+        ${renderPixelPageNav(pages, page.href, docs)}
       </article>
     </main>
     <nav id="nd-toc" class="fd-toc sticky top-(--fd-docs-row-1) h-[calc(var(--fd-docs-height)-var(--fd-docs-row-1))] flex flex-col [grid-area:toc] w-(--fd-toc-width) pt-12 pe-4 pb-2 max-xl:hidden" data-toc aria-labelledby="toc-title">
       <div class="fd-toc-inner">
         <h3 id="toc-title" class="fd-toc-title inline-flex items-center gap-1.5 text-sm text-fd-muted-foreground"><svg class="size-4" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h16"></path></svg>On this page</h3>
-        <div class="relative min-h-0 text-sm ms-px overflow-auto [scrollbar-width:none] mask-[linear-gradient(to_bottom,transparent,white_16px,white_calc(100%-16px),transparent)] py-3">
+        <div class="toc-scroll">
           ${renderPixelToc(tocItems)}
         </div>
       </div>
     </nav>
   </div>
-  ${renderDocsRuntimeScript()}
+  ${renderDocsRuntimeScripts(docs)}
 </body>
 </html>`;
 }
