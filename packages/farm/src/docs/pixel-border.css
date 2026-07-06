@@ -367,8 +367,8 @@ code:not(pre code) {
     --fd-sidebar-edge: 20px;
     --fd-sidebar-guide-x: 58px;
     --fd-sidebar-link-x: 88px;
-    --fd-sidebar-sub-guide-x: 106px;
-    --fd-sidebar-sub-link-x: 136px;
+    --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px);
+    --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);
   }
 
   html {
