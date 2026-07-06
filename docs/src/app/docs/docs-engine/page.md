@@ -34,3 +34,53 @@ When docs.entry is enabled, Farm can serve the docs entry and /api/docs machine 
 ## Config discovery
 
 Farm scans docs.config.ts, docs.config.js, docs.config.mjs, docs.config.cjs, and docs.json by default. Inline config in farm.config.ts can override discovered values.
+
+## docs.config.ts shape
+
+**docs.config.ts**
+
+```ts
+import { defineDocs } from "@farming-labs/docs";
+import { pixelBorder } from "@farming-labs/theme/pixel-border";
+
+export default defineDocs({
+  entry: "docs",
+  docsPath: "/docs",
+  nav: {
+    title: "Farm.js Docs",
+  },
+  search: {
+    provider: "simple",
+    enabled: true,
+  },
+  pageActions: {
+    copyMarkdown: {
+      enabled: true,
+    },
+  },
+  theme: pixelBorder(),
+});
+```
+
+## Agent-readable output
+
+The docs runtime can serve human pages and machine-readable output from the same markdown source:
+
+- `.md` mirrors for individual pages.
+- `llms.txt` style summary output.
+- Sitemap output.
+- Agent discovery/spec routes.
+- Search metadata.
+
+That means docs content only needs to be written once.
+
+## Override behavior
+
+When `docs.entry` is enabled in `farm.config.ts`, Farm can mount docs pages and docs API routes automatically. Add explicit route wrappers only when the app wants to override default rendering, authentication, or response behavior.
+
+## Production notes
+
+- Keep docs content in markdown so human pages and agent-readable pages stay in sync.
+- Use `docs.config.ts` for navigation, page actions, icons, theme, and metadata.
+- Keep generated docs routes public unless product docs require auth.
+- Verify docs build output before publishing package docs.

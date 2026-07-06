@@ -183,8 +183,8 @@ import { z } from "zod";
 
 const createCheckoutBody = z.object({
   priceId: z.string(),
-  successUrl: z.string().url(),
-  cancelUrl: z.string().url(),
+  successPath: z.string(),
+  cancelPath: z.string(),
 });
 
 export const billing = defineIntegration({
@@ -195,14 +195,14 @@ export const billing = defineIntegration({
     integrationRoute.post<
       "/api/billing/checkout",
       z.output<typeof createCheckoutBody>,
-      { url: string }
+      { redirectTo: string }
     >("/api/billing/checkout", {
       body: createCheckoutBody,
       async handler(_request, ctx) {
         const checkout = await createCheckoutSession(ctx.input.body!);
 
         return Response.json({
-          url: checkout.url,
+          redirectTo: checkout.url,
         });
       },
     }),

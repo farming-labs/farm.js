@@ -44,3 +44,40 @@ export default defineFarmConfig({
 ## Supported drivers
 
 - memory, local filesystem, SQLite, libSQL, PGlite, Postgres, MySQL, Redis, Upstash Redis, MongoDB, S3, and Vercel KV.
+
+## Runtime clients for integrations
+
+`storage.client` can also carry an app-owned database client for schema-backed integrations.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+import { DatabaseSync } from "node:sqlite";
+
+const db = new DatabaseSync("farm.sqlite");
+
+export default defineFarmConfig({
+  storage: {
+    client: db,
+  },
+});
+```
+
+When an integration defines a schema, Farm exposes a typed ORM layer at `ctx.args.db`. The integration does not need to know whether the app passed SQLite, Postgres, or another supported runtime client.
+
+## Storage client or runtime client
+
+| Config | Use it for |
+| --- | --- |
+| `sqliteStorage(...)` | Farm key/value storage with a Farm storage client. |
+| `redisStorage(...)` | Cache, rate-limit, or queue-like key/value data. |
+| `storage.mounts` | Multiple named key/value stores. |
+| `storage.client` with a Farm storage client | Reuse a created Farm storage client as the root store. |
+| `storage.client` with a DB/runtime object | Give integrations a runtime database client. |
+
+## Production notes
+
+- Use durable storage for production state.
+- Keep local/memory storage for development and tests.
+- Pass one runtime client through config so integrations do not each invent storage options.
+- Create physical tables/migrations that match integration schemas.
+- Close database clients during app shutdown when the underlying driver requires it.
