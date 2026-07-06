@@ -39,7 +39,55 @@ export const integrations = {
 **Caller**
 
 ```ts
-await api.jobs.trigger.post({
-  body: { task: "send-welcome-email", input: { userId: "user_123" } },
+await api.jobs.sendWelcomeEmail.trigger({
+  body: {
+    input: {
+      userId: "user_123",
+    },
+  },
 });
 ```
+
+## Farm task mapping
+
+Trigger.dev is mounted through the Jobs integration. Define tasks once with `defineTasks`, then choose `trigger(...)` as the runtime.
+
+```ts
+export const tasks = defineTasks({
+  sendWelcomeEmail: task({
+    id: "send-welcome-email",
+    async run(input: { userId: string }) {
+      return {
+        sent: true,
+        userId: input.userId,
+      };
+    },
+  }),
+});
+```
+
+Farm turns `sendWelcomeEmail` into typed callers such as:
+
+```ts
+await api.jobs.sendWelcomeEmail.trigger({
+  body: {
+    input: {
+      userId: "user_123",
+    },
+  },
+});
+
+await api.jobs.sendWelcomeEmail.status({
+  query: {
+    handleId: "run_123",
+  },
+});
+```
+
+## Production notes
+
+- Set the Trigger.dev secret/project config required by your runtime.
+- Use queues and retry defaults on the task definition for predictable load.
+- Keep task IDs stable because provider dashboards and Farm callers depend on them.
+- Store returned `handleId` when users need status polling.
+- Use batch trigger for bulk work instead of loops from the browser.

@@ -26,3 +26,26 @@ A compact map of the main package exports and where to learn more.
 3. Add API Routes, API Client, and Query.
 4. Choose integrations and storage once your product needs them.
 5. Finish with Deployment, Observability, and Reference.
+
+## Integration exports
+
+| Package | Exports |
+| --- | --- |
+| `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineFarmConfig`. |
+| `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
+| `@farmjs/core/storage` | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`. |
+| `@farmjs/integrations/stripe` | Stripe billing integration. |
+| `@farmjs/integrations/auth` | Better Auth, Auth.js, Clerk, Auth0, WorkOS helpers when using the auth barrel. |
+| `@farmjs/integrations/supabase` | Supabase auth integration. |
+| `@farmjs/integrations/email` | Resend integration and email template helper. |
+| `@farmjs/integrations/jobs` | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime. |
+| `@farmjs/integrations/unkey` | Unkey API key integration. |
+
+## Mental model
+
+- Pages and layouts are app UI.
+- API routes are app-owned HTTP handlers.
+- API clients are typed callers for app routes.
+- Integrations are provider or feature packages that can own routes, callers, schemas, providers, config, and lifecycle.
+- Plugins are framework-level hooks for request, render, build, and runtime behavior.
+- Storage is the shared place to pass key/value stores and runtime database clients.

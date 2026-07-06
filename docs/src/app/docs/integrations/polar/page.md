@@ -40,7 +40,7 @@ const checkout = await api.billing.checkout.post({
   body: {
     productId: "pro",
     customerEmail: user.email,
-    successUrl: "/dashboard",
+    successPath: "/dashboard",
   },
 });
 ```
@@ -48,3 +48,54 @@ const checkout = await api.billing.checkout.post({
 ## Storage-aware billing
 
 Polar callbacks can read and write through ctx.args.db, so webhook snapshots, subscription state, and customer entitlement checks share the same storage-agnostic integration layer.
+
+## What Polar adds
+
+| Area | Details |
+| --- | --- |
+| Products | Public product metadata for pricing and account screens. |
+| Checkout | Polar checkout sessions for one-time and subscription products. |
+| Portal | Customer sessions for billing management. |
+| Billing status | Current customer, plan, features, limits, and active product state. |
+| Usage | Meter and entitlement helpers for usage-aware products. |
+| Webhooks | Subscription and order events that update local billing state. |
+
+## Common callers
+
+```ts
+const products = await api.billing.products.get();
+const status = await api.billing.status.get();
+
+const checkout = await api.billing.checkout.post({
+  body: {
+    productId: "pro",
+    successPath: "/dashboard",
+    cancelPath: "/pricing",
+  },
+});
+```
+
+## Portal flow
+
+```ts
+const portal = await api.billing.portal.post({
+  body: {
+    returnTo: "/settings/billing",
+  },
+});
+
+if (portal.data?.redirectTo) {
+  window.location.href = portal.data.redirectTo;
+}
+```
+
+## When Polar is a good fit
+
+Polar works especially well when the product is developer-facing, open-source, sponsor-backed, or selling digital access. The Farm integration keeps the same caller shape as other billing providers, so moving between Stripe, Autumn, and Polar does not force your app UI to learn a new local API style.
+
+## Production notes
+
+- Set `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_SERVER`, and `APP_BASE_URL`.
+- Use sandbox/server config for local testing and production config for live billing.
+- Store the external customer ID with the billing owner so portal and status reads stay stable.
+- Test checkout return URLs, portal return URLs, webhook signatures, and entitlement checks.

@@ -40,3 +40,88 @@ export default function HomePage(_props: PageProps) {
   return <h1>Hello from Farm.js</h1>;
 }
 ```
+
+## Add a layout
+
+Every route can share chrome through `layout.tsx`. Start with a root layout, then add nested layouts only when a section needs its own navigation or data shell.
+
+**src/app/layout.tsx**
+
+```tsx
+import type { LayoutProps } from "@farmjs/core";
+import "./globals.css";
+
+export default function RootLayout({ children }: LayoutProps) {
+  return (
+    <main>
+      <header>Farm.js</header>
+      {children}
+    </main>
+  );
+}
+```
+
+## Add an API route
+
+Farm API routes live beside pages and use the same route tree. Define an endpoint, add Zod input when needed, then call it through the generated API client.
+
+**src/app/api/hello/route.ts**
+
+```ts
+import { createEndpoint } from "@farmjs/core/api";
+import { z } from "zod";
+
+export const POST = createEndpoint({
+  body: z.object({
+    name: z.string().min(1),
+  }),
+  async handler({ input }) {
+    return Response.json({
+      message: `Hello ${input.body.name}`,
+    });
+  },
+});
+```
+
+**src/components/hello-button.tsx**
+
+```tsx
+"use client";
+
+import { apiClient } from "@/lib/api";
+
+export function HelloButton() {
+  return (
+    <button
+      onClick={async () => {
+        const result = await apiClient.hello.post({
+          body: { name: "Ada" },
+        });
+
+        console.log(result.data?.message);
+      }}
+    >
+      Say hello
+    </button>
+  );
+}
+```
+
+## Add integrations later
+
+Keep the first app small. When a feature becomes provider-shaped, add it as an integration:
+
+```bash
+farm add integration stripe --ui
+farm add integration better-auth --ui
+farm add integration unkey
+```
+
+Integrations can contribute typed callers, routes, providers, middleware, storage schema, CLI registry components, config validation, and lifecycle hooks.
+
+## Next steps
+
+- Read Project Structure when you want the compact file layout.
+- Read Routing and Layouts when you start nesting pages.
+- Read API Routes and API Client when you need typed server/client calls.
+- Read Integrations when provider features should be packaged instead of copied route-by-route.
