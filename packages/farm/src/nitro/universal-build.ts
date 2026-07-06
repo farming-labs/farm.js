@@ -8,7 +8,7 @@ import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import os from "os";
 import path from "path";
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
 import { logger } from "../utils";
@@ -61,6 +61,29 @@ function isNitroRollupExternal(id: string): boolean {
     normalizedId.includes("/node_modules/@prisma/client/") ||
     normalizedId.includes("/node_modules/.prisma/client/")
   );
+}
+
+function trimSlashes(value: string): string {
+  return value.replace(/^\/+|\/+$/g, "");
+}
+
+function resolveBuildDocsContentDir(config: ResolvedFarmConfig, root: string): string | null {
+  if (!config.docs?.enabled) return null;
+
+  const configuredContentDir = config.docs.contentDir || config.docs.config.contentDir;
+  if (typeof configuredContentDir === "string" && configuredContentDir.trim()) {
+    const contentDir = path.isAbsolute(configuredContentDir)
+      ? configuredContentDir
+      : path.join(root, configuredContentDir);
+    return existsSync(contentDir) ? contentDir : null;
+  }
+
+  const entryDir = config.docs.config.entry || trimSlashes(config.docs.entry) || "docs";
+  const appDocsDir = path.join(root, config.srcDir || "src", "app", entryDir);
+  if (existsSync(appDocsDir)) return appDocsDir;
+
+  const rootDocsDir = path.join(root, entryDir);
+  return existsSync(rootDocsDir) ? rootDocsDir : null;
 }
 
 function hasProjectPostcssConfig(root: string): boolean {
@@ -1314,6 +1337,11 @@ function generateVirtualEntryCode(
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
     : "";
+  const docsRuntimeImport = config.docs?.enabled
+    ? `import { existsSync as farmDocsExistsSync } from "node:fs";
+import { dirname as farmDocsDirname, join as farmDocsJoin } from "node:path";
+import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
+    : "";
   const markdownHandlerImport = config.md?.enabled
     ? `import { createMarkdownMirrorResponse } from "farm/markdown";`
     : "";
@@ -1385,6 +1413,7 @@ ${apiRouteHelpersImport}
 ${cacheHelpersImport}
 ${observabilityHelpersImport}
 ${docsHandlerImport}
+${docsRuntimeImport}
 ${markdownHandlerImport}
 ${appMarkdownImport}
 ${mdxComponentsImport}
@@ -1413,19 +1442,51 @@ const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringif
     config.observability ?? false,
   )};
 configureFarmObservability(farmObservabilityConfig);
+const farmDocsBundledContentDir = ${
+    config.docs?.enabled
+      ? `(() => {
+  try {
+    const currentDir = farmDocsDirname(farmDocsFileURLToPath(import.meta.url));
+    const candidates = [
+      farmDocsJoin(currentDir, "farm-docs-content"),
+      farmDocsJoin(currentDir, "..", "farm-docs-content"),
+      farmDocsJoin(currentDir, "..", "..", "farm-docs-content"),
+    ];
+    return candidates.find((candidate) => farmDocsExistsSync(candidate)) || null;
+  } catch {
+    return null;
+  }
+})()`
+      : "null"
+  };
+const farmDocsResolvedConfig = ${
+    config.docs?.enabled
+      ? `farmDocsBundledContentDir
+  ? {
+      ...${JSON.stringify(config.docs)},
+      contentDir: farmDocsBundledContentDir,
+      config: {
+        ...${JSON.stringify(config.docs.config)},
+        contentDir: farmDocsBundledContentDir,
+      },
+    }
+  : ${JSON.stringify(config.docs)}`
+      : "null"
+  };
+const farmDocsRuntimeRoot = farmDocsBundledContentDir || ${JSON.stringify(config.root)};
 globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
-  root: ${JSON.stringify(config.root)},
+  root: farmDocsRuntimeRoot,
   srcDir: ${JSON.stringify(config.srcDir)},
-  docs: ${JSON.stringify(config.docs)},
+  docs: farmDocsResolvedConfig,
 };
 const farmDocsHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsHandler(${JSON.stringify(config.docs)}, { root: ${JSON.stringify(config.root)}, srcDir: ${JSON.stringify(config.srcDir)} })`
+      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)} })`
       : "null"
   };
 const farmDocsAPIHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsAPIHandler({ rootDir: ${JSON.stringify(config.root)}, srcDir: ${JSON.stringify(config.srcDir)}, docs: ${JSON.stringify(config.docs)} })`
+      ? `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig })`
       : "null"
   };
 
@@ -2162,7 +2223,7 @@ export default fromWebHandler(handler.fetch)
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json
   if (isVercel) {
-    await postProcessVercelOutput(root, outputDir, fs);
+    await postProcessVercelOutput(root, outputDir, fs, config);
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
@@ -2176,6 +2237,7 @@ async function postProcessVercelOutput(
   root: string,
   outputDir: string,
   fs: typeof import("fs/promises"),
+  config: ResolvedFarmConfig,
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -2207,10 +2269,10 @@ async function postProcessVercelOutput(
   // Update config.json routes to point to the function
   const configPath = path.join(outputDir, "config.json");
   const configContent = await fs.readFile(configPath, "utf-8");
-  const config = JSON.parse(configContent);
+  const vercelConfig = JSON.parse(configContent);
 
   // Update routes to use the correct function path
-  config.routes = [
+  vercelConfig.routes = [
     // Serve static files first
     {
       handle: "filesystem",
@@ -2232,10 +2294,28 @@ async function postProcessVercelOutput(
     },
   ];
 
-  await fs.writeFile(configPath, JSON.stringify(config, null, 2));
+  await fs.writeFile(configPath, JSON.stringify(vercelConfig, null, 2));
+  await copyFarmDocsContentForVercel(config, root, nitroFuncDir, fs);
   await copyPrismaClientForVercel(root, nitroFuncDir, fs);
 
   logger.info("✅ Post-processed Vercel output for Build Output API v3");
+}
+
+async function copyFarmDocsContentForVercel(
+  config: ResolvedFarmConfig,
+  root: string,
+  nitroFuncDir: string,
+  fs: typeof import("fs/promises"),
+) {
+  const docsContentDir = resolveBuildDocsContentDir(config, root);
+  if (!docsContentDir) return;
+
+  const bundledContentDir = path.join(nitroFuncDir, "chunks", "nitro", "farm-docs-content");
+  await fs.rm(bundledContentDir, { recursive: true, force: true });
+  await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
+  await fs.cp(docsContentDir, bundledContentDir, { recursive: true, force: true });
+
+  logger.info(`📚 Bundled docs content for Vercel: ${path.relative(root, docsContentDir)}`);
 }
 
 async function copyPrismaClientForVercel(
