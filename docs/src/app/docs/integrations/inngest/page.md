@@ -40,7 +40,56 @@ export const integrations = {
 **Caller**
 
 ```ts
-await api.jobs.trigger.post({
-  body: { task: "sync-customer", input: { customerId: "cus_123" } },
+await api.jobs.syncCustomer.trigger({
+  body: {
+    input: {
+      customerId: "cus_123",
+    },
+  },
 });
 ```
+
+## Farm task mapping
+
+Inngest is mounted through the Jobs integration. Define tasks once, then choose `inngest(...)` as the runtime.
+
+```ts
+export const tasks = defineTasks({
+  syncCustomer: task({
+    id: "sync-customer",
+    description: "Sync one customer after a billing event.",
+    async run(input: { customerId: string }) {
+      return {
+        synced: true,
+        customerId: input.customerId,
+      };
+    },
+  }),
+});
+```
+
+The app keeps the same Farm caller shape:
+
+```ts
+const run = await api.jobs.syncCustomer.trigger({
+  body: {
+    input: {
+      customerId: "cus_123",
+    },
+  },
+});
+
+await api.jobs.syncCustomer.status({
+  query: {
+    handleId: run.data!.handleId,
+  },
+});
+```
+
+## Production notes
+
+- Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
+- Prefer event-shaped task input when the workflow is driven by product events.
+- Use retries for network/provider calls and idempotency for mutation-heavy jobs.
+- Store handle IDs when the UI needs status reads.
+- Test local development, signing, retries, and scheduled runs before shipping.
