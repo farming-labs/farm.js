@@ -127,4 +127,18 @@ describe("client component path resolution", () => {
     expect(isClientComponentModule(pageFile, root)).toBe(false);
     expect(shouldHydrateModule(pageFile, root)).toBe(true);
   });
+
+  it("falls back when generated SPA navigation cannot swap an app root", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain("if (!this.swapContent(html))");
+    expect(source).toContain("window.location.href = href;");
+    expect(source).toContain("if (!newRoot || !currentRoot) return false;");
+    expect(source).toContain(
+      ".then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })",
+    );
+  });
 });

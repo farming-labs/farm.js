@@ -535,10 +535,13 @@ const spaRouter = {
       window.location.href = href;
       return;
     }
-    
+
     try {
       const html = await this.fetchPage(url.pathname + url.search);
-      this.swapContent(html);
+      if (!this.swapContent(html)) {
+        window.location.href = href;
+        return;
+      }
       window.history.pushState({}, "", href);
     } catch (error) {
       console.error("[Farm.js] Navigation error:", error);
@@ -582,9 +585,9 @@ const spaRouter = {
     // Swap root content
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
-    if (newRoot && currentRoot) {
-      currentRoot.innerHTML = newRoot.innerHTML;
-    }
+    if (!newRoot || !currentRoot) return false;
+    currentRoot.innerHTML = newRoot.innerHTML;
+    return true;
   },
   
   prefetch: function(href) {
@@ -623,7 +626,7 @@ window.__FARM_SPA_ROUTER__ = spaRouter;
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
   spaRouter.fetchPage(window.location.pathname + window.location.search)
-    .then(function(html) { spaRouter.swapContent(html); })
+    .then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })
     .catch(function() { window.location.reload(); });
 });
 
@@ -834,7 +837,10 @@ const spaRouter = {
     // Server component - fetch HTML
     try {
       const html = await this.fetchPage(url.pathname + url.search);
-      this.swapContent(html);
+      if (!this.swapContent(html)) {
+        window.location.href = href;
+        return;
+      }
       window.history.pushState({}, "", href);
       currentPathname = pathname;
     } catch (error) {
@@ -879,27 +885,27 @@ const spaRouter = {
     // Swap root content
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
-    if (newRoot && currentRoot) {
-      currentRoot.innerHTML = newRoot.innerHTML;
+    if (!newRoot || !currentRoot) return false;
+    currentRoot.innerHTML = newRoot.innerHTML;
+
+    // Check if new page has a client component
+    const newPathname = window.location.pathname;
+    const matched = matchRoute(newPathname);
+    if (matched) {
+      // Re-hydrate the client component
+      const Component = matched.route.Component;
+      const params = matched.params;
+      const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+      const props = { params: params, searchParams: Promise.resolve(searchParams) };
       
-      // Check if new page has a client component
-      const newPathname = window.location.pathname;
-      const matched = matchRoute(newPathname);
-      if (matched) {
-        // Re-hydrate the client component
-        const Component = matched.route.Component;
-        const params = matched.params;
-        const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
-        const props = { params: params, searchParams: Promise.resolve(searchParams) };
-        
-        if (!reactRoot) {
-          reactRoot = createRoot(currentRoot);
-        }
-        const pageElement = React.createElement(Component, props);
-        const wrappedElement = wrapWithLayouts(pageElement, newPathname, params);
-        reactRoot.render(wrappedElement);
+      if (!reactRoot) {
+        reactRoot = createRoot(currentRoot);
       }
+      const pageElement = React.createElement(Component, props);
+      const wrappedElement = wrapWithLayouts(pageElement, newPathname, params);
+      reactRoot.render(wrappedElement);
     }
+    return true;
   },
   
   prefetch: function(href) {
@@ -955,7 +961,7 @@ window.addEventListener("popstate", function() {
     }
   } else {
     spaRouter.fetchPage(pathname + window.location.search)
-      .then(function(html) { spaRouter.swapContent(html); })
+      .then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })
       .catch(function() { window.location.reload(); });
   }
 });
