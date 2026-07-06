@@ -204,6 +204,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px)");
     expect(html).toContain("--fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px)");
     expect(html).toContain("--fd-sidebar-nested-icon-gap: 0px");
+    expect(html).toContain(".sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }");
     expect(html).toContain(
       '.sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 0; bottom: 0;',
     );
