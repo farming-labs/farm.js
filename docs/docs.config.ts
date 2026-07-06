@@ -135,6 +135,17 @@ const sidebar = [
     children: [
       { label: "Overview", slug: "integrations", icon: "plug" },
       {
+        label: "Build",
+        icon: "braces",
+        children: [
+          {
+            label: "Custom Integrations",
+            slug: "integrations/custom",
+            icon: "braces",
+          },
+        ],
+      },
+      {
         label: "Payment",
         icon: "card",
         children: [

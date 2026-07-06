@@ -6,7 +6,9 @@ section: "Integrations"
 
 # Integrations
 
-Register services once, get owned routes, typed callers, providers, middleware, storage access, lifecycle hooks, and validation.
+Integrations are the Farm layer for connecting product services to your app. A payment provider, auth system, email service, job runner, API-key platform, UI registry, or internal company SDK can register everything it owns in one place: route handlers, typed client/server callers, request middleware, React providers, storage schemas, lifecycle hooks, and runtime logs.
+
+Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
 ## Register integrations
 
@@ -15,18 +17,25 @@ Register services once, get owned routes, typed callers, providers, middleware, 
 ```ts
 import { defineFarmConfig } from "@farmjs/core";
 import { stripe } from "@farmjs/integrations/stripe";
+import { betterAuth } from "@farmjs/integrations/better-auth";
 
 export default defineFarmConfig({
   integrations: {
     billing: stripe({
       secretKey: process.env.STRIPE_SECRET_KEY,
-      products: [],
+      webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+    }),
+    auth: betterAuth({
+      baseURL: process.env.BETTER_AUTH_URL,
+      secret: process.env.BETTER_AUTH_SECRET,
     }),
   },
 });
 ```
 
-## Create shared callers
+The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
+
+## Create callers
 
 **src/lib/api.ts**
 
@@ -41,21 +50,180 @@ export const { api, apiClient } = createIntegrations<AppIntegrations>({
 });
 ```
 
-## What an integration can contribute
+`apiClient` is the browser caller. `api` is the server caller. Both preserve the same integration namespace so a route like `/api/billing/checkout` can become `api.billing.checkout.post(...)`, and a single-method endpoint can be called directly when there is only one method.
 
-- api: typed client and server callable operations.
-- routes and endpoints: HTTP handlers with zod or standard-schema input validation.
-- middleware: request behavior for protected routes, rate limits, webhooks, and redirects.
-- providers: app wrappers for client SDKs or context providers.
-- schema: models used by Farm's integration ORM layer.
-- config, validate, setup, ready, dispose: lifecycle and configuration validation.
+## Integration surface
+
+An integration can contribute any of these pieces:
+
+| Surface | What it is for |
+| --- | --- |
+| `api` | A typed client/server callable API tree. |
+| `routes` | HTTP route handlers declared as an array or factory. |
+| `endpoints` | A nested object version of routes that also derives API callers. |
+| `middleware` | Integration-owned request behavior for matchers outside a single endpoint. |
+| `providers` | React provider metadata and optional wrapper components. |
+| `schema` | Storage models used by `ctx.args.db` through the ORM layer. |
+| `config` | Schema-validated config from defaults, env, input, and resolver output. |
+| `validate` | Early checks before the integration starts. |
+| `setup` | Bootstrapping work such as storage checks or webhook registration. |
+| `ready` | Post-start work once the app is ready. |
+| `dispose` | Shutdown cleanup. |
+| `log` | Runtime events for registration, request start, request end, request error, and lifecycle messages. |
+| `plugins` | Extra Farm plugins that ship with the integration. |
+| `documentNavigations` | Route matchers that tell docs/navigation systems where the integration owns pages. |
+
+## Route ownership
+
+Integration routes use the same web primitives as normal route handlers. The handler receives the `Request` and a context object with params, parsed input, request metadata, shared request context, integration metadata, and `args` for storage.
+
+**src/integrations/local-demo.ts**
+
+```ts
+import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { z } from "zod";
+
+export const localDemo = defineIntegration({
+  category: "custom",
+  type: "local-demo",
+  instance: {},
+  routes: [
+    integrationRoute.post<
+      "/api/local-demo/messages",
+      { message: string },
+      { message: string; count: number },
+      { count: number }
+    >("/api/local-demo/messages", {
+      body: z.object({
+        message: z.string().min(2),
+      }),
+      query: z.object({
+        count: z.coerce.number().int().positive(),
+      }),
+      handler(_request, ctx) {
+        return Response.json({
+          message: ctx.input.body?.message,
+          count: ctx.input.query?.count ?? 1,
+        });
+      },
+    }),
+  ],
+});
+```
+
+Farm validates the body and query before route middleware, `before` hooks, or the handler run. Invalid input returns a `400` response with validation issues.
+
+## Caller shape
+
+Typed routes can derive their caller tree from their path:
+
+**src/lib/api.ts**
+
+```ts
+import { createIntegrations } from "@farmjs/core/client";
+import { localDemo } from "../integrations/local-demo";
+
+export const { api, apiClient } = createIntegrations({
+  localDemo,
+});
+```
+
+**client component**
+
+```tsx
+"use client";
+
+import { apiClient } from "../lib/api";
+
+export function SendMessageButton() {
+  async function send() {
+    const result = await apiClient.localDemo.messages.post({
+      body: {
+        message: "hello",
+      },
+      query: {
+        count: 2,
+      },
+    });
+
+    if (result.error) {
+      throw result.error;
+    }
+
+    console.log(result.data.message);
+  }
+
+  return <button onClick={send}>Send</button>;
+}
+```
+
+**server code**
+
+```ts
+import { api } from "../lib/api";
+
+export async function loadMessage() {
+  const result = await api.localDemo.messages.post({
+    body: {
+      message: "server hello",
+    },
+  });
+
+  return result.data;
+}
+```
+
+On the server, Farm first tries to dispatch to the registered integration runtime directly. If no runtime is available, it falls back to `fetch` with forwarded request headers.
+
+## Shared data
+
+`createIntegrations({ data })` adds small per-call metadata to integration requests. It is useful for tenant IDs, locale, analytics context, or feature flags.
+
+```ts
+export const { apiClient } = createIntegrations<AppIntegrations>({
+  data: {
+    tenantId: "tenant_123",
+    locale: "en",
+  },
+});
+
+await apiClient.billing.checkout.post(
+  {
+    body: {
+      priceId: "price_123",
+    },
+  },
+  {
+    data: {
+      source: "settings-page",
+    },
+  },
+);
+```
+
+The route reads that value from `ctx.data`. Browser-provided data is client controlled, size limited, and sanitized before it reaches the handler. Validate it before using it for authorization.
 
 ## Built-in groups
 
-- Payment: Stripe, Autumn, and Polar integrations share checkout, subscription, portal, webhook, entitlement, and billing snapshot patterns.
-- Auth: Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase expose routes, providers, and typed session helpers.
-- Messaging: Resend renders React Email templates, sends transactional mail, previews messages, and receives provider webhooks.
-- Workflows: Trigger.dev and Inngest runtimes expose trigger, schedule, batch, status, and cancel APIs for task backends.
-- API Keys: Unkey integrations create, verify, revoke, update, and delete customer or service keys.
-- Interface: UI registry entries can scaffold shadcn-style screens for built-in integrations when `--ui` is enabled.
-- Storage: ORM storage keeps integration schema reads and writes behind ctx.args.db.
+| Group | Built-ins |
+| --- | --- |
+| Payment | Stripe, Autumn, and Polar expose checkout, subscription, portal, webhook, entitlement, and billing snapshot patterns. |
+| Auth | Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase expose routes, providers, session helpers, and auth middleware. |
+| Messaging | Resend sends transactional mail, previews templates, and receives provider webhooks. |
+| Workflows | Trigger.dev and Inngest expose trigger, schedule, batch, status, and cancel APIs. |
+| API Keys | Unkey can create, verify, revoke, update, and delete customer or service keys. |
+| Interface | UI registry entries scaffold shadcn-style integration screens when `--ui` is enabled. |
+| Storage | ORM storage gives schema-backed integrations a provider-neutral `ctx.args.db`. |
+
+## When to build your own
+
+Create a custom integration when a service needs one or more of these:
+
+- Routes or webhooks that should be mounted automatically.
+- Typed client/server functions that should not be hand-written in each app.
+- Config validation that should fail during startup.
+- Storage models shared by routes, hooks, and built-in UI.
+- Request middleware that belongs to the service.
+- Setup or teardown work such as webhook registration, queue consumers, or health checks.
+
+For the full authoring interface, see [Custom Integrations](/docs/integrations/custom).
