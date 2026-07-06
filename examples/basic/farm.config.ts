@@ -159,6 +159,10 @@ export default defineFarmConfig({
     cache: 60,
   },
 
+  mdx: {
+    components: './src/markdown-components.tsx',
+  },
+
   // Plugins
   plugins: [
     createLoggerPlugin({}),

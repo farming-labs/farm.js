@@ -11,6 +11,7 @@ describe("generateRouteTypes", () => {
     tmpDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "farm-route-types-"));
     const appDir = path.join(tmpDir, "src", "app");
     await fs.promises.mkdir(path.join(appDir, "about"), { recursive: true });
+    await fs.promises.mkdir(path.join(appDir, "content"), { recursive: true });
     await fs.promises.mkdir(path.join(appDir, "users", "[id]"), { recursive: true });
     await fs.promises.writeFile(
       path.join(appDir, "page.tsx"),
@@ -20,6 +21,7 @@ describe("generateRouteTypes", () => {
       path.join(appDir, "about", "page.tsx"),
       "export default function About() { return null; }",
     );
+    await fs.promises.writeFile(path.join(appDir, "content", "page.mdx"), "# Content");
     await fs.promises.writeFile(
       path.join(appDir, "users", "[id]", "page.tsx"),
       "export default function User() { return null; }",
@@ -38,6 +40,7 @@ describe("generateRouteTypes", () => {
     expect(content).toContain("export type RoutePath =");
     expect(content).toContain('"/"');
     expect(content).toContain('"/about"');
+    expect(content).toContain('"/content"');
     expect(content).toContain("LinkDefaultRoute");
     expect(content).toContain('declare module "@farmjs/core/client"');
     expect(content).toContain('declare module "@farmjs/core"');

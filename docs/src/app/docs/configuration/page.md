@@ -27,6 +27,9 @@ export default defineFarmConfig({
     expose: ["/", "/pricing"],
     cache: 60,
   },
+  mdx: {
+    components: "./src/markdown-components.tsx",
+  },
 });
 ```
 
@@ -39,6 +42,7 @@ export default defineFarmConfig({
 | storage | Providing storage clients and mounts for framework and integration code. |
 | docs | Serving the built-in docs runtime and docs API. |
 | md | Exposing markdown mirrors like /pricing.md. |
+| mdx | Rendering `page.md` and `page.mdx` app routes, plus MDX components. |
 | deploy | Selecting a target, preset, and output directory. |
 | openapi | Publishing API reference docs. |
 

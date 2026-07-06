@@ -1,6 +1,8 @@
 import type { FarmConfig } from "./types";
 import type { FarmDocsResolvedConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig } from "./markdown";
+import type { FarmMdxResolvedConfig } from "./app-markdown";
+import { resolveMdxConfig } from "./app-markdown";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
@@ -13,6 +15,7 @@ import type { ViteDevServer } from "vite";
 type NormalizedFarmConfig = Required<FarmConfig> & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
+  mdx: FarmMdxResolvedConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -90,6 +93,7 @@ export class FarmApp {
       integrations: config.integrations || {},
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
+      mdx: resolveMdxConfig(config.mdx),
       observability: config.observability ?? false,
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {

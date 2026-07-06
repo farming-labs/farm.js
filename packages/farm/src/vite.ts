@@ -16,6 +16,7 @@ import {
   isFarmDocsAPIRequest,
 } from "./docs";
 import { createMarkdownMirrorResponse } from "./markdown";
+import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
 import { sendWebResponse } from "./server/response";
 import {
   getClientModuleMetadata,
@@ -126,7 +127,7 @@ export function farmPlugin(
       const appDirSlug = path.join(farmConfig.root, farmConfig.srcDir, "app").replace(/\\/g, "/");
       const isPageFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx)$/.test(normalized);
+        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized);
       };
       let routeTypeGenScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleRouteTypeGen = () => {
@@ -303,6 +304,28 @@ export function farmPlugin(
         );
         if (docsResponse) {
           await sendWebResponse(res, docsResponse);
+          return;
+        }
+
+        const markdownSourceResponse = await createFarmMarkdownSourceResponse({
+          request: new Request(fullUrl, {
+            method: requestMethod,
+            headers: docsHeaders,
+          }),
+          config: farmApp.getConfig().mdx,
+          resolveSource: async (pathname) => {
+            const match = farmApp.getRouteManager().matchRoute(pathname);
+            if (!match.route || !isFarmMarkdownPageFile(match.route.modulePath)) {
+              return null;
+            }
+            return {
+              source: await fs.promises.readFile(match.route.modulePath, "utf8"),
+              filePath: match.route.modulePath,
+            };
+          },
+        });
+        if (markdownSourceResponse) {
+          await sendWebResponse(res, markdownSourceResponse);
           return;
         }
 

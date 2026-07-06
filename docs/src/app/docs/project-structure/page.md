@@ -44,6 +44,7 @@ Use vite.config.ts only when you need custom Vite behavior. Use platform files o
 | File | Used for |
 | --- | --- |
 | `page.tsx` | The route UI. |
+| `page.md` / `page.mdx` | Markdown-first static app pages. |
 | `layout.tsx` | Shared shell for every child segment. |
 | `loading.tsx` | Pending UI for async route work. |
 | `error.tsx` | Segment-level error UI. |
@@ -65,6 +66,8 @@ my-app/
       dashboard/
         layout.tsx
         page.tsx
+      about/
+        page.mdx
       layout.tsx
       page.tsx
     components/

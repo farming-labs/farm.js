@@ -132,6 +132,25 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it("resolves MDX app page config", async () => {
+    const config = await resolveConfig(
+      {
+        mdx: {
+          components: "./src/markdown-components.tsx",
+          markdownRoutes: false,
+          className: "prose",
+        },
+      },
+      "development",
+    );
+
+    expect(config.mdx).toMatchObject({
+      components: "./src/markdown-components.tsx",
+      markdownRoutes: false,
+      className: "prose",
+    });
+  });
+
   it("preserves observability config and event callbacks", async () => {
     const onEvent = () => {};
     const config = await resolveConfig(

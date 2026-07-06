@@ -47,7 +47,7 @@ export function parseRoutePath(filePath: string): ParsedRoute {
 }
 
 function getRouteType(fileName: string): ParsedRoute["type"] {
-  const baseName = fileName.replace(/\.(tsx?|jsx?)$/, "");
+  const baseName = fileName.replace(/\.(tsx?|jsx?|mdx?|markdown)$/, "");
 
   switch (baseName) {
     case "page":

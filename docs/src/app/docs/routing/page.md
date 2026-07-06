@@ -14,6 +14,7 @@ Farm uses an app directory routing model with static routes, dynamic segments, c
 | --- | --- |
 | src/app/page.tsx | / |
 | src/app/about/page.tsx | /about |
+| src/app/about/page.mdx | /about |
 | src/app/blog/[slug]/page.tsx | /blog/:slug |
 | src/app/docs/[...slug]/page.tsx | /docs/:slug* |
 
@@ -70,6 +71,20 @@ src/app/
 ```
 
 This creates `/`, `/dashboard`, `/dashboard/settings`, `/blog/:slug`, and `/docs/:slug*`.
+
+## Markdown pages
+
+Use `page.md` or `page.mdx` for static content routes. They behave like app pages, participate in layouts, and get route types.
+
+**src/app/about/page.mdx**
+
+```mdx
+# About
+
+This page renders at `/about` and exposes source at `/about.md`.
+```
+
+Do not place `page.tsx` and `page.mdx` in the same folder. Farm treats that as a duplicate route and asks you to choose one page source.
 
 ## Catch-all routes
 
