@@ -9,6 +9,7 @@ import type {
   MiddlewareModule,
   MiddlewareResult,
 } from "./types";
+import { emitFarmEvent } from "../observability";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -643,27 +644,65 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         ctx.params = { ...ctx.params, ...configMatch.params };
       }
 
-      const returnedResponse = await executeHandlers(entry.handlers, ctx);
-      currentRequest = contextState.getRequest();
+      const middlewareStartTime = Date.now();
+      const middlewareEvent = {
+        route: entry.path,
+        pathname: initialPathname,
+        name: entry.filePath,
+      };
+      emitFarmEvent({ type: "middleware.start", ...middlewareEvent });
 
-      if (returnedResponse) {
-        return {
-          request: currentRequest,
-          response: applyProductionMiddlewareHeaders(returnedResponse, mapToHeaders(ctx.headers)),
-          data: new Map(ctx.data),
-          headers: mapToHeaders(ctx.headers),
-          handled: true,
-        };
-      }
+      try {
+        const returnedResponse = await executeHandlers(entry.handlers, ctx);
+        currentRequest = contextState.getRequest();
 
-      if (ctx._handled) {
-        return {
-          request: currentRequest,
-          response: contextState.getResponse() || new Response(null),
-          data: new Map(ctx.data),
-          headers: mapToHeaders(ctx.headers),
-          handled: true,
-        };
+        if (returnedResponse) {
+          const response = applyProductionMiddlewareHeaders(
+            returnedResponse,
+            mapToHeaders(ctx.headers),
+          );
+          emitFarmEvent({
+            type: "middleware.shortCircuit",
+            ...middlewareEvent,
+            status: response.status,
+          });
+          return {
+            request: currentRequest,
+            response,
+            data: new Map(ctx.data),
+            headers: mapToHeaders(ctx.headers),
+            handled: true,
+          };
+        }
+
+        if (ctx._handled) {
+          const response = contextState.getResponse() || new Response(null);
+          emitFarmEvent({
+            type: "middleware.shortCircuit",
+            ...middlewareEvent,
+            status: response.status,
+          });
+          return {
+            request: currentRequest,
+            response,
+            data: new Map(ctx.data),
+            headers: mapToHeaders(ctx.headers),
+            handled: true,
+          };
+        }
+
+        emitFarmEvent({
+          type: "middleware.complete",
+          ...middlewareEvent,
+          durationMs: Date.now() - middlewareStartTime,
+        });
+      } catch (error) {
+        emitFarmEvent({
+          type: "middleware.error",
+          ...middlewareEvent,
+          error,
+        });
+        throw error;
       }
 
       parentData = {

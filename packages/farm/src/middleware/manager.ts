@@ -20,6 +20,7 @@ import type {
 import { createContext } from "./context";
 import { logger } from "../utils";
 import { sendWebResponse } from "../server/response";
+import { emitFarmEvent } from "../observability";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -265,38 +266,71 @@ export class MiddlewareManager {
         }
       }
 
-      // Execute all handlers in this middleware
-      let handlerIndex = 0;
-      let returnedResponse: Response | undefined;
-      const executeNext = async (): Promise<MiddlewareResult> => {
-        if (handlerIndex < mw.handlers.length) {
-          const handler = mw.handlers[handlerIndex++];
-          const result = await handler(ctx, executeNext);
-          if (isMiddlewareResponse(result)) {
-            returnedResponse = result;
-            return result;
-          }
-        }
-        return returnedResponse;
+      const middlewareStartTime = Date.now();
+      const middlewareEvent = {
+        route: mw.path,
+        pathname,
+        name: mw.filePath,
       };
+      emitFarmEvent({ type: "middleware.start", ...middlewareEvent });
 
-      const result = await executeNext();
-      const response = isMiddlewareResponse(result) ? result : returnedResponse;
-      if (response) {
-        if (!res.headersSent && !res.writableEnded) {
-          for (const [key, value] of ctx.headers) {
-            try {
-              res.setHeader(key, value);
-            } catch (error) {}
+      try {
+        // Execute all handlers in this middleware
+        let handlerIndex = 0;
+        let returnedResponse: Response | undefined;
+        const executeNext = async (): Promise<MiddlewareResult> => {
+          if (handlerIndex < mw.handlers.length) {
+            const handler = mw.handlers[handlerIndex++];
+            const result = await handler(ctx, executeNext);
+            if (isMiddlewareResponse(result)) {
+              returnedResponse = result;
+              return result;
+            }
           }
-        }
-        await sendWebResponse(res, response);
-        return true;
-      }
+          return returnedResponse;
+        };
 
-      // Check if response has been sent or handled by middleware helpers.
-      if (ctx._handled || res.headersSent || res.writableEnded) {
-        return true;
+        const result = await executeNext();
+        const response = isMiddlewareResponse(result) ? result : returnedResponse;
+        if (response) {
+          if (!res.headersSent && !res.writableEnded) {
+            for (const [key, value] of ctx.headers) {
+              try {
+                res.setHeader(key, value);
+              } catch (error) {}
+            }
+          }
+          emitFarmEvent({
+            type: "middleware.shortCircuit",
+            ...middlewareEvent,
+            status: response.status,
+          });
+          await sendWebResponse(res, response);
+          return true;
+        }
+
+        // Check if response has been sent or handled by middleware helpers.
+        if (ctx._handled || res.headersSent || res.writableEnded) {
+          emitFarmEvent({
+            type: "middleware.shortCircuit",
+            ...middlewareEvent,
+            status: res.statusCode,
+          });
+          return true;
+        }
+
+        emitFarmEvent({
+          type: "middleware.complete",
+          ...middlewareEvent,
+          durationMs: Date.now() - middlewareStartTime,
+        });
+      } catch (error) {
+        emitFarmEvent({
+          type: "middleware.error",
+          ...middlewareEvent,
+          error,
+        });
+        throw error;
       }
 
       parentData = {

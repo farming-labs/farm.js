@@ -28,6 +28,20 @@ export default {
   deploy: {
     target: "vercel",
   },
+  observability: {
+    onEvent(event) {
+      if (!event.type.startsWith("middleware.")) return;
+      globalThis.__farmMiddlewareEvents ||= [];
+      globalThis.__farmMiddlewareEvents.push({
+        type: event.type,
+        route: event.route,
+        pathname: event.pathname,
+        name: event.name,
+        status: event.status,
+        durationMs: event.durationMs,
+      });
+    },
+  },
   middleware: [
     {
       matcher: "/dashboard/config-response",
@@ -109,6 +123,7 @@ describe("production middleware runtime", () => {
           "index.mjs",
         );
         const serverModule = await import(`${pathToFileURL(entryPath).href}?t=${Date.now()}`);
+        (globalThis as any).__farmMiddlewareEvents = [];
         const response = await serverModule.default.fetch(
           new Request("https://example.test/dashboard/settings"),
         );
@@ -119,13 +134,30 @@ describe("production middleware runtime", () => {
         expect(html).toContain(
           "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
         );
+        expect(
+          (globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type),
+        ).toEqual([
+          "middleware.start",
+          "middleware.complete",
+          "middleware.start",
+          "middleware.complete",
+        ]);
 
+        (globalThis as any).__farmMiddlewareEvents = [];
         const configResponse = await serverModule.default.fetch(
           new Request("https://example.test/dashboard/config-response"),
         );
         expect(configResponse.status).toBe(302);
         expect(configResponse.headers.get("location")).toBe("https://example.test/sign-in");
+        expect(
+          (globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type),
+        ).toEqual(["middleware.start", "middleware.shortCircuit"]);
+        expect((globalThis as any).__farmMiddlewareEvents[1]).toMatchObject({
+          route: "/",
+          status: 302,
+        });
 
+        (globalThis as any).__farmMiddlewareEvents = [];
         const fileResponse = await serverModule.default.fetch(
           new Request("https://example.test/dashboard/file-response"),
         );
@@ -133,7 +165,20 @@ describe("production middleware runtime", () => {
         expect(fileResponse.headers.get("x-file-response")).toBe("yes");
         expect(fileResponse.headers.get("x-farm-middleware")).toBe("yes");
         await expect(fileResponse.text()).resolves.toBe("blocked by file middleware");
+        expect(
+          (globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type),
+        ).toEqual([
+          "middleware.start",
+          "middleware.complete",
+          "middleware.start",
+          "middleware.shortCircuit",
+        ]);
+        expect((globalThis as any).__farmMiddlewareEvents[3]).toMatchObject({
+          route: "/dashboard",
+          status: 418,
+        });
       } finally {
+        delete (globalThis as any).__farmMiddlewareEvents;
         await fs.rm(root, { recursive: true, force: true });
       }
     },

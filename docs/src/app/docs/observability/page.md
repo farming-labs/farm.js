@@ -31,6 +31,7 @@ onFarmEvent((event) => {
 | Rendering | render.start, render.complete, render.stream.shellReady, render.error |
 | Cache | cache.hit, cache.miss, cache.set, cache.revalidateTag |
 | PPR | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated |
+| Middleware | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
 | Integrations | integration.ready, integration.api.call.start, integration.webhook.verified |
 | Storage | storage.query.start, storage.schema.ready |
 | Build | build.start, routes.generated, types.generated, manifest.generated |
@@ -83,6 +84,8 @@ unsubscribe();
 | Integrations | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
 | Middleware | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error` |
 | Storage | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error` |
+
+Middleware events include the matched middleware route, request pathname, middleware file/config name, duration for completes, status for short circuits, and the thrown error for failures.
 
 ## Production notes
 
