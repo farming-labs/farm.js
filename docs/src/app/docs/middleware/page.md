@@ -23,9 +23,18 @@ export default middleware().use(async (ctx, next) => {
 });
 ```
 
-## Config matchers
+## Config middleware
 
-Use farm.config.ts when middleware behavior should be described globally. A matcher-only object gates discovered middleware files; a list of entries can pair matchers with handlers.
+Use farm.config.ts when middleware behavior should be described globally. This is useful for cross-cutting behavior that should be visible from the project control plane, while route middleware files can stay close to the pages or API routes they protect.
+
+Config middleware supports two shapes:
+
+| Shape                                | Behavior                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------- |
+| `middleware: { matcher }`            | Acts as a global gate for discovered `src/app/**/middleware.ts` files. |
+| `middleware: [{ matcher, handler }]` | Runs config-defined handlers when the matcher meets the request path.  |
+
+Config-defined handlers run before discovered route middleware. Data placed in `ctx.data` is passed to later middleware files and then to page rendering.
 
 **farm.config.ts**
 
@@ -44,6 +53,53 @@ export default defineFarmConfig({
   ],
 });
 ```
+
+## Matcher syntax
+
+Matchers can be strings, regular expressions, or functions. String matchers support the common route patterns used by Farm:
+
+| Pattern                | Matches                                                          |
+| ---------------------- | ---------------------------------------------------------------- |
+| `/dashboard/:path*`    | `/dashboard`, `/dashboard/settings`, `/dashboard/reports/weekly` |
+| `/dashboard/[section]` | `/dashboard/settings` with `ctx.params.section === "settings"`   |
+| `/docs/[...slug]`      | `/docs`, `/docs/getting-started`, nested docs paths              |
+| `/api/**`              | Every nested path below `/api`                                   |
+| `/api/*`               | One segment below `/api`                                         |
+| `/auth(.*)`            | `/auth` and nested auth paths                                    |
+
+When a matcher has params, the handler can read them from `ctx.params`.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  middleware: [
+    {
+      matcher: "/dashboard/:path*",
+      async handler(ctx, next) {
+        ctx.data.set("dashboard.path", ctx.params.path ?? "");
+        await next();
+      },
+    },
+  ],
+});
+```
+
+## Matcher-only gates
+
+Use a matcher-only config when you want every discovered middleware file to run only inside a route area.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  middleware: {
+    matcher: "/dashboard/:path*",
+  },
+});
+```
+
+With that config, `src/app/middleware.ts` and nested middleware files are skipped for `/marketing`, but can run for `/dashboard` and `/dashboard/settings`.
 
 ## Protect a route area
 
@@ -65,6 +121,31 @@ export default middleware().use(async (ctx, next) => {
   ctx.data.set("user.id", session.user.id);
 
   await next();
+});
+```
+
+The same protection can live in config when the rule should be managed globally.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  middleware: [
+    {
+      matcher: "/dashboard/:path*",
+      async handler(ctx, next) {
+        const session = await readSession(ctx.request);
+
+        if (!session) {
+          ctx.redirect("/sign-in");
+          return;
+        }
+
+        ctx.data.set("user.id", session.user.id);
+        await next();
+      },
+    },
+  ],
 });
 ```
 
