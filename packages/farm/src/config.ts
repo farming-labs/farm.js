@@ -151,7 +151,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   i18n?: I18nConfig;
   openapi?: OpenAPIConfig;
 
-  middleware?: MiddlewareConfig;
+  middleware?: FarmMiddlewareConfig;
 
   notFound?: NotFoundConfig;
 
