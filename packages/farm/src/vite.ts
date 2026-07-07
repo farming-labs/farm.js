@@ -47,6 +47,7 @@ import {
   type FarmDiscoveredWorkflow,
 } from "./workflows";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
+import { createFarmDevtoolsSnapshot, renderFarmDevtoolsHtml } from "./devtools";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -689,6 +690,36 @@ export function farmPlugin(
           res.setHeader("Content-Type", "font/woff2");
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
           fs.createReadStream(farmDocsFontPath).pipe(res);
+          return;
+        }
+
+        if (
+          requestMethod === "GET" &&
+          (requestPathname === "/__farm/devtools" || requestPathname === "/__farm/devtools.json")
+        ) {
+          const snapshot = createFarmDevtoolsSnapshot({
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            routeManager: farmApp.getRouteManager(),
+            apiRouteManager,
+            middlewareManager,
+            integrations: currentConfig.integrations,
+            docs: farmConfig.docs,
+          });
+
+          res.statusCode = 200;
+          res.setHeader(
+            "Content-Type",
+            requestPathname.endsWith(".json")
+              ? "application/json; charset=utf-8"
+              : "text/html; charset=utf-8",
+          );
+          res.setHeader("Cache-Control", "no-store");
+          res.end(
+            requestPathname.endsWith(".json")
+              ? JSON.stringify(snapshot, null, 2)
+              : renderFarmDevtoolsHtml(snapshot),
+          );
           return;
         }
 
