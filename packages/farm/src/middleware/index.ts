@@ -9,6 +9,10 @@ export { createContext } from "./context";
 export { MiddlewareManager } from "./manager";
 export { getMiddlewareData, getMiddlewareValue } from "./server";
 export { unwrapMiddleware, getFromMiddleware, hasMiddlewareData } from "./helpers";
+export {
+  createProductionMiddlewareRunner,
+  applyProductionMiddlewareHeaders,
+} from "./production-runtime";
 export * from "./vite-plugin";
 
 export type {
@@ -22,4 +26,5 @@ export type {
   RateLimitStorage,
   RateLimitStatus,
   NextFunction,
+  FarmMiddlewareConfig,
 } from "./types";

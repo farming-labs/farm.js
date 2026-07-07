@@ -24,6 +24,10 @@ type UniversalPageRoute = {
   modulePath: string;
   source?: string;
 };
+type UniversalMiddlewareRoute = {
+  path: string;
+  filePath: string;
+};
 
 // Get __dirname equivalent for ESM
 const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
@@ -136,6 +140,62 @@ async function findFarmConfigPath(root: string): Promise<string | null> {
   }
 
   return null;
+}
+
+function hasFarmMiddlewareConfig(config: ResolvedFarmConfig["middleware"]): boolean {
+  if (!config) return false;
+  if (Array.isArray(config)) return config.length > 0;
+
+  const configRecord = config as Record<string, unknown>;
+  return Boolean(
+    configRecord.matcher ||
+      configRecord.exclude ||
+      configRecord.runtime ||
+      configRecord.handler ||
+      (Array.isArray(configRecord.handlers) && configRecord.handlers.length > 0),
+  );
+}
+
+async function discoverMiddlewareRoutes(appDir: string): Promise<UniversalMiddlewareRoute[]> {
+  const fs = await import("fs/promises");
+  const routes: UniversalMiddlewareRoute[] = [];
+
+  async function walk(dir: string, routePath: string): Promise<void> {
+    let entries: import("fs").Dirent[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    const middlewareFile = entries.find(
+      (entry) => entry.isFile() && /^middleware\.(tsx?|jsx?)$/.test(entry.name),
+    );
+
+    if (middlewareFile) {
+      routes.push({
+        path: routePath,
+        filePath: path.join(dir, middlewareFile.name),
+      });
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.name.startsWith(".") || entry.name.startsWith("_")) {
+        continue;
+      }
+
+      const childRoutePath = routePath === "/" ? `/${entry.name}` : `${routePath}/${entry.name}`;
+      await walk(path.join(dir, entry.name), childRoutePath);
+    }
+  }
+
+  await walk(appDir, "/");
+
+  return routes.sort((a, b) => {
+    const depthA = a.path.split("/").filter(Boolean).length;
+    const depthB = b.path.split("/").filter(Boolean).length;
+    return depthA - depthB || a.path.localeCompare(b.path);
+  });
 }
 
 /**
@@ -1115,8 +1175,8 @@ async function buildSSRInMemory(
 
   // Discover layout files by scanning the source directory
   const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
-  const fsSync = await import("fs");
   const appDir = path.join(root, srcDir, "app");
+  const middlewareRoutes = await discoverMiddlewareRoutes(appDir);
 
   async function findLayouts(dir: string, routePrefix: string = "/"): Promise<void> {
     try {
@@ -1166,7 +1226,7 @@ async function buildSSRInMemory(
   });
 
   logger.info(
-    `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, and ${apiRoutes.length} API routes`,
+    `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, ${apiRoutes.length} API routes, and ${middlewareRoutes.length} middleware files`,
   );
 
   const hasConfiguredIntegrations = Object.keys(config.integrations || {}).length > 0;
@@ -1175,8 +1235,9 @@ async function buildSSRInMemory(
     typeof config.observability === "object" &&
     "onEvent" in config.observability;
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
+  const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
   const configModulePath =
-    hasConfiguredIntegrations || hasObservabilityHandler || hasMdxComponentConfig
+    hasConfiguredIntegrations || hasObservabilityHandler || hasMdxComponentConfig || hasMiddlewareConfig
       ? await findFarmConfigPath(root)
       : null;
 
@@ -1186,6 +1247,7 @@ async function buildSSRInMemory(
     apiRoutes,
     pageRoutes,
     layoutRoutes,
+    middlewareRoutes,
     notFoundPath,
     config,
     configModulePath,
@@ -1331,6 +1393,7 @@ function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
+  middlewareRoutes: UniversalMiddlewareRoute[],
   notFoundPath: string | null,
   config: ResolvedFarmConfig,
   configModulePath: string | null,
@@ -1396,6 +1459,21 @@ function generateVirtualEntryCode(
   }`);
   });
 
+  // Generate imports for all app middleware files
+  const middlewareImports: string[] = [];
+  const middlewareRegistrations: string[] = [];
+
+  middlewareRoutes.forEach((middlewareRoute, index) => {
+    const varName = `fileMiddleware${index}`;
+    middlewareImports.push(`import * as ${varName} from "${middlewareRoute.filePath}";`);
+    middlewareRegistrations.push(`
+  {
+    path: ${JSON.stringify(middlewareRoute.path)},
+    filePath: ${JSON.stringify(middlewareRoute.filePath)},
+    module: ${varName},
+  }`);
+  });
+
   // Generate import for custom not-found page if exists
   const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
   const apiRouteHelpersImport =
@@ -1404,6 +1482,7 @@ function generateVirtualEntryCode(
       : "";
   const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
+  const middlewareRuntimeImport = `import { applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
     : "";
@@ -1478,10 +1557,12 @@ async function handleAPIRequest(request) {
 ${apiImports.join("\n")}
 ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
+${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${cacheHelpersImport}
 ${observabilityHelpersImport}
+${middlewareRuntimeImport}
 ${docsHandlerImport}
 ${docsRuntimeImport}
 ${markdownHandlerImport}
@@ -1571,6 +1652,15 @@ const pageRoutes = [${pageRegistrations.join(",")}
 // Layout routes bundled at build time (sorted by depth, root first)
 const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
+
+// App middleware files bundled at build time (sorted by depth, root first)
+const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
+];
+
+const farmMiddlewareRunner = createProductionMiddlewareRunner({
+  config: farmUserConfig?.middleware,
+  modules: fileMiddlewareModules,
+});
 
 ${apiHandlerCode}
 
@@ -1712,8 +1802,8 @@ function getCachedPPRShell(cacheKey) {
  * Main request handler - created at runtime with bundled routes
  */
 async function handleRequest(request) {
-  const url = new URL(request.url);
-  const pathname = url.pathname;
+  let url = new URL(request.url);
+  let pathname = url.pathname;
   const requestStartTime = Date.now();
 
   const integrationResponse = await handleIntegrationRequest(request.clone());
@@ -1752,24 +1842,34 @@ async function handleRequest(request) {
     }
   }
 
+  const middlewareResult = await farmMiddlewareRunner(request);
+  if (middlewareResult.response) {
+    return middlewareResult.response;
+  }
+  request = middlewareResult.request;
+  const middlewareData = middlewareResult.data;
+  const middlewareHeaders = middlewareResult.headers;
+  url = new URL(request.url);
+  pathname = url.pathname;
+
   // Handle API routes
   if (pathname.startsWith("/api/")) {
     const apiResponse = await handleAPIRequest(request.clone());
     if (apiResponse) {
-      return apiResponse;
+      return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
     }
 
     if (farmDocsAPIHandler) {
       const docsAPIResponse = await farmDocsAPIHandler(request.clone());
       if (docsAPIResponse) {
-        return docsAPIResponse;
+        return applyProductionMiddlewareHeaders(docsAPIResponse, middlewareHeaders);
       }
     }
 
-    return new Response(
+    return applyProductionMiddlewareHeaders(new Response(
       JSON.stringify({ error: "API route not found", pathname }),
       { status: 404, headers: { "Content-Type": "application/json" } }
-    );
+    ), middlewareHeaders);
   }
 
   // Handle page routes (SSR)
@@ -1802,13 +1902,13 @@ async function handleRequest(request) {
             status: 200,
             durationMs: Date.now() - requestStartTime,
           });
-          return new Response(cachedPPRShell, {
+          return applyProductionMiddlewareHeaders(new Response(cachedPPRShell, {
             status: 200,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
               ...getPPRHeaders("hit", pprConfig),
             },
-          });
+          }), middlewareHeaders);
         }
         emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
       }
@@ -1832,7 +1932,12 @@ async function handleRequest(request) {
         const searchParams = Promise.resolve(searchParamsObj);
         
         // Render the page component
-        const pageProps = { params, searchParams };
+        const pageProps = {
+          params,
+          searchParams,
+          path: pathname,
+          ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
+        };
         
         // First, render the page content
         let pageElement;
@@ -1983,21 +2088,21 @@ async function handleRequest(request) {
           durationMs: Date.now() - requestStartTime,
         });
 
-        return new Response(
+        return applyProductionMiddlewareHeaders(new Response(
           fullHtml,
           { 
             status: 200, 
             headers: responseHeaders
           }
-        );
+        ), middlewareHeaders);
       }
     } catch (error) {
       emitFarmEvent({ type: "render.error", route: pathname, error });
       console.error("SSR Error:", error);
-      return new Response(
+      return applyProductionMiddlewareHeaders(new Response(
         \`<html><body><h1>Error</h1><p>\${error.message}</p><pre>\${error.stack}</pre></body></html>\`,
         { status: 500, headers: { "Content-Type": "text/html" } }
-      );
+      ), middlewareHeaders);
     }
   }
 
@@ -2136,16 +2241,16 @@ async function handleRequest(request) {
       durationMs: Date.now() - requestStartTime,
     });
 
-    return new Response(fullHtml, {
+    return applyProductionMiddlewareHeaders(new Response(fullHtml, {
       status: 404,
       headers: { "Content-Type": "text/html; charset=utf-8" }
-    });
+    }), middlewareHeaders);
   } catch (error) {
     console.error("404 render error:", error);
-    return new Response(
+    return applyProductionMiddlewareHeaders(new Response(
       \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
       { status: 404, headers: { "Content-Type": "text/html" } }
-    );
+    ), middlewareHeaders);
   }
 }
 
