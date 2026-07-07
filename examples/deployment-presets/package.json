@@ -1,0 +1,29 @@
+{
+  "name": "farm-deployment-presets-example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "build:vercel": "FARM_DEPLOY_TARGET=vercel farm build",
+    "build:cloudflare": "FARM_DEPLOY_TARGET=cloudflare farm build",
+    "build:netlify": "FARM_DEPLOY_TARGET=netlify farm build",
+    "deploy:vercel": "farm deploy --vercel --prod",
+    "deploy:cloudflare": "farm deploy --cloudflare",
+    "deploy:netlify": "farm deploy --netlify",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@farmjs/cli": "workspace:*",
+    "@types/react": "^18.2.45",
+    "@types/react-dom": "^18.2.18",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10"
+  }
+}

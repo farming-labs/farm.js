@@ -30,6 +30,54 @@ export default defineFarmConfig({
 | netlify | netlify | .output |
 | node | node-server | .output |
 
+## Preset showcase
+
+Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.
+
+| Platform | Config | Build command | Deploy command | Output to inspect |
+| --- | --- | --- | --- | --- |
+| Vercel | `target: "vercel"` | `farm build --target vercel` | `farm deploy --vercel --prod` | `.vercel/output` |
+| Cloudflare Pages | `target: "cloudflare"` | `farm build --target cloudflare` | `farm deploy --cloudflare` | `.output/public` |
+| Netlify | `target: "netlify"` | `farm build --target netlify` | `farm deploy --netlify` | `.output` |
+
+**farm.config.ts**
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+const target = process.env.FARM_DEPLOY_TARGET ?? "vercel";
+
+export default defineFarmConfig({
+  deploy: {
+    target,
+    cloudflare: {
+      projectName: process.env.CLOUDFLARE_PAGES_PROJECT,
+    },
+    netlify: {
+      site: process.env.NETLIFY_SITE_ID,
+    },
+  },
+});
+```
+
+**package.json**
+
+```json
+{
+  "scripts": {
+    "build": "farm build",
+    "build:vercel": "FARM_DEPLOY_TARGET=vercel farm build",
+    "build:cloudflare": "FARM_DEPLOY_TARGET=cloudflare farm build",
+    "build:netlify": "FARM_DEPLOY_TARGET=netlify farm build",
+    "deploy:vercel": "farm deploy --vercel --prod",
+    "deploy:cloudflare": "farm deploy --cloudflare",
+    "deploy:netlify": "farm deploy --netlify"
+  }
+}
+```
+
+The same shape lives in `examples/deployment-presets` so the preset behavior can be tested from a real app.
+
 ## Build
 
 **Terminal**

@@ -13,6 +13,7 @@ Use the examples folder as executable docs for routing, RSC, docs, markdown, aut
 | Example | Shows |
 | --- | --- |
 | examples/basic | Core routing, layouts, deployment config, markdown mirrors, PPR. |
+| examples/deployment-presets | Vercel, Cloudflare Pages, and Netlify deployment target presets. |
 | examples/ssr-ssg-demo | SSR, SSG, ISR, API routes, middleware. |
 | examples/docs-integration | Docs runtime and /api/docs machine routes. |
 | examples/stripe-integration | Stripe checkout, portal, session, webhooks. |
