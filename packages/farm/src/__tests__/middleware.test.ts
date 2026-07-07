@@ -1908,6 +1908,29 @@ describe("Middleware Manager Data Flow", () => {
     }
   });
 
+  it("passes dynamic route params to file middleware", async () => {
+    const manager = new MiddlewareManager("/tmp");
+    (manager as any).middleware = [
+      {
+        path: "/users/[id]",
+        filePath: "/tmp/app/users/[id]/middleware.ts",
+        handlers: [
+          async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+            ctx.data.set("userId", ctx.params.id);
+            await next();
+          },
+        ],
+      },
+    ];
+
+    const req = createMockRequest("/users/42/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(false);
+    expect((req as any).__FARM_MIDDLEWARE_DATA__.get("userId")).toBe("42");
+  });
+
   it("should share middleware context across middleware chain and expose to page request data", async () => {
     const req = createMockRequest("/docs/getting-started");
     const res = createMockResponse();

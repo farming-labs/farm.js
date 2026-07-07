@@ -444,9 +444,28 @@ function matchesConfig(
   return { matched: true };
 }
 
-function matchesRoutePath(pathname: string, middlewarePath: string): boolean {
-  if (middlewarePath === "/") return true;
-  return pathname === middlewarePath || pathname.startsWith(`${middlewarePath}/`);
+function matchRoutePath(
+  pathname: string,
+  middlewarePath: string,
+): { matched: boolean; params?: Record<string, string> } {
+  if (middlewarePath === "/") return { matched: true };
+
+  const exactMatch = matchPattern(middlewarePath, pathname);
+  if (exactMatch.matched) {
+    return exactMatch;
+  }
+
+  const nestedMatch = matchPattern(`${middlewarePath}/:__farmRest*`, pathname);
+  if (!nestedMatch.matched) {
+    return { matched: false };
+  }
+
+  const params = { ...(nestedMatch.params || {}) };
+  delete params.__farmRest;
+  return {
+    matched: true,
+    params: Object.keys(params).length > 0 ? params : undefined,
+  };
 }
 
 function getConfigHandlers(
@@ -613,9 +632,15 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       }
     }
 
-    const applicable = entries.filter(
-      (entry) => entry.source === "config" || matchesRoutePath(initialPathname, entry.path),
-    );
+    const applicable = entries
+      .map((entry) => ({
+        entry,
+        routeMatch:
+          entry.source === "config"
+            ? { matched: true }
+            : matchRoutePath(initialPathname, entry.path),
+      }))
+      .filter((candidate) => candidate.routeMatch.matched);
 
     if (applicable.length === 0) {
       return {
@@ -627,7 +652,8 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       };
     }
 
-    for (const entry of applicable) {
+    for (const candidate of applicable) {
+      const { entry, routeMatch } = candidate;
       const configMatch = entry.config
         ? matchesConfig(initialPathname, entry.config, ctx)
         : { matched: true };
@@ -640,6 +666,9 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         ctx = contextState.ctx;
       }
 
+      if (routeMatch.params) {
+        ctx.params = { ...ctx.params, ...routeMatch.params };
+      }
       if (configMatch.params) {
         ctx.params = { ...ctx.params, ...configMatch.params };
       }

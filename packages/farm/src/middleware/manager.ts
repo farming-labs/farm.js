@@ -219,9 +219,14 @@ export class MiddlewareManager {
     }
 
     // Find applicable middleware (config entries first, then cascading files)
-    const applicable = [
-      ...this.configMiddleware,
-      ...this.middleware.filter((mw) => this.matchesRoutePath(pathname, mw.path)),
+    const applicable: Array<{
+      mw: DiscoveredMiddleware;
+      routeMatch: { matched: boolean; params?: Record<string, string> };
+    }> = [
+      ...this.configMiddleware.map((mw) => ({ mw, routeMatch: { matched: true } })),
+      ...this.middleware
+        .map((mw) => ({ mw, routeMatch: this.matchRoutePath(pathname, mw.path) }))
+        .filter((entry) => entry.routeMatch.matched),
     ];
 
     if (applicable.length === 0) {
@@ -229,7 +234,7 @@ export class MiddlewareManager {
     }
     try {
       const pc = require("picocolors");
-      const middlewarePaths = applicable.map((mw) => mw.path).join(", ");
+      const middlewarePaths = applicable.map(({ mw }) => mw.path).join(", ");
       const log = [
         pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
         pc.dim("[") + pc.bold(pc.magenta("MIDDLEWARE")) + pc.dim("]"),
@@ -246,13 +251,17 @@ export class MiddlewareManager {
     }
 
     // Execute middleware in cascade order
-    for (const mw of applicable) {
+    for (const entry of applicable) {
       // Check matcher configuration
+      const { mw, routeMatch } = entry;
       const configMatch = mw.config
         ? this.matchesConfig(pathname, mw.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;
+      }
+      if (routeMatch.params) {
+        ctx.params = { ...ctx.params, ...routeMatch.params };
       }
       if (configMatch.params) {
         ctx.params = { ...ctx.params, ...configMatch.params };
@@ -261,6 +270,9 @@ export class MiddlewareManager {
       // Create new context with parent data
       if (parentData) {
         ctx = createContext(req, res, this.viteServer, parentData);
+        if (routeMatch.params) {
+          ctx.params = { ...ctx.params, ...routeMatch.params };
+        }
         if (configMatch.params) {
           ctx.params = { ...ctx.params, ...configMatch.params };
         }
@@ -440,9 +452,28 @@ export class MiddlewareManager {
     return [...this.configMiddleware, ...this.middleware];
   }
 
-  private matchesRoutePath(pathname: string, middlewarePath: string): boolean {
-    if (middlewarePath === "/") return true;
-    return pathname === middlewarePath || pathname.startsWith(`${middlewarePath}/`);
+  private matchRoutePath(
+    pathname: string,
+    middlewarePath: string,
+  ): { matched: boolean; params?: Record<string, string> } {
+    if (middlewarePath === "/") return { matched: true };
+
+    const exactMatch = this.matchPattern(middlewarePath, pathname);
+    if (exactMatch.matched) {
+      return exactMatch;
+    }
+
+    const nestedMatch = this.matchPattern(`${middlewarePath}/:__farmRest*`, pathname);
+    if (!nestedMatch.matched) {
+      return { matched: false };
+    }
+
+    const params = { ...(nestedMatch.params || {}) };
+    delete params.__farmRest;
+    return {
+      matched: true,
+      params: Object.keys(params).length > 0 ? params : undefined,
+    };
   }
 
   private toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {

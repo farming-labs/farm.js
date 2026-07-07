@@ -16,6 +16,9 @@ async function createProductionMiddlewareFixture(): Promise<string> {
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
 
   await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "app", "users", "[id]", "settings"), {
+    recursive: true,
+  });
   await fs.writeFile(
     path.join(root, "package.json"),
     JSON.stringify({ type: "module" }, null, 2),
@@ -99,6 +102,29 @@ export default async function dashboardMiddleware(ctx: any, next: () => Promise<
 }
 `.trim(),
   );
+  await fs.writeFile(
+    path.join(root, "src", "app", "users", "[id]", "middleware.ts"),
+    `
+export default async function userMiddleware(ctx: any, next: () => Promise<void>) {
+  ctx.data.set("file.userId", ctx.params.id || "missing-id");
+  await next();
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "users", "[id]", "settings", "page.tsx"),
+    `
+import React from "react";
+
+export default function UserSettingsPage(props: any) {
+  return React.createElement(
+    "main",
+    null,
+    \`user settings: \${props.middleware?.data.get("file.userId") || "missing"} / \${props.params.id}\`
+  );
+}
+`.trim(),
+  );
 
   return root;
 }
@@ -176,6 +202,18 @@ describe("production middleware runtime", () => {
         expect((globalThis as any).__farmMiddlewareEvents[3]).toMatchObject({
           route: "/dashboard",
           status: 418,
+        });
+
+        (globalThis as any).__farmMiddlewareEvents = [];
+        const userResponse = await serverModule.default.fetch(
+          new Request("https://example.test/users/42/settings"),
+        );
+        const userHtml = await userResponse.text();
+        expect(userResponse.status).toBe(200);
+        expect(userHtml).toContain("user settings: 42 / 42");
+        expect((globalThis as any).__farmMiddlewareEvents[0]).toMatchObject({
+          route: "/users/[id]",
+          pathname: "/users/42/settings",
         });
       } finally {
         delete (globalThis as any).__farmMiddlewareEvents;
