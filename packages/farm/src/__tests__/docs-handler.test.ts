@@ -230,7 +230,13 @@ describe("createFarmDocsHandler", () => {
       '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after',
     );
     expect(html).toContain(
-      "height: 2px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423));",
+      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); }',
+    );
+    expect(html).not.toContain(
+      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { height: 2px;',
+    );
+    expect(html).not.toContain(
+      "transition: background-color 150ms ease, height 150ms ease, box-shadow 150ms ease;",
     );
     expect(html).toContain("var(--fd-sidebar-nested-icon-gap)");
     expect(html).toContain(".sidebar-subgroup-title { position: relative;");
