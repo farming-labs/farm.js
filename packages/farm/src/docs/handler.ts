@@ -820,6 +820,55 @@ function unescapeHtml(value: string): string {
     .replace(/&amp;/g, "&");
 }
 
+const CODE_LANGUAGE_LABELS = new Set([
+  "bash",
+  "cjs",
+  "cmd",
+  "console",
+  "css",
+  "html",
+  "javascript",
+  "js",
+  "json",
+  "jsx",
+  "md",
+  "mdx",
+  "shell",
+  "sh",
+  "terminal",
+  "text",
+  "ts",
+  "tsx",
+  "txt",
+  "typescript",
+  "yaml",
+  "yml",
+  "zsh",
+]);
+
+const EXTENSIONLESS_CODE_FILENAMES = new Set([
+  "dockerfile",
+  "makefile",
+  "procfile",
+  "readme",
+  "license",
+]);
+
+function isCodePathLabel(label: string): boolean {
+  const trimmed = label.trim();
+  if (!trimmed || /\s/.test(trimmed)) return false;
+
+  const lower = trimmed.toLowerCase();
+  if (CODE_LANGUAGE_LABELS.has(lower)) return false;
+
+  const fileName = trimmed.split(/[\\/]/).filter(Boolean).pop() || trimmed;
+  const lowerFileName = fileName.toLowerCase();
+  if (EXTENSIONLESS_CODE_FILENAMES.has(lowerFileName)) return true;
+  if (fileName.startsWith(".") && fileName.length > 1) return true;
+
+  return /\.[a-z0-9][a-z0-9-]*$/i.test(fileName);
+}
+
 function parseCodeInfo(info: string | undefined): {
   language: string;
   label: string;
@@ -927,7 +976,7 @@ function renderMarkdownHtml(body: string): string {
     const { language, label, hasExplicitLabel } = parseCodeInfo(infostring);
     const rawCode = escaped ? unescapeHtml(code) : code;
     const highlighted = highlightCodeBlock(rawCode);
-    const shouldRenderHeader = hasExplicitLabel;
+    const shouldRenderHeader = hasExplicitLabel && isCodePathLabel(label);
     const header = shouldRenderHeader
       ? `<div class="code-block-header">
     <span class="code-block-title">${escapeHtml(label)}</span>

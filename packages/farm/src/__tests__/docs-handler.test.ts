@@ -51,8 +51,16 @@ describe("createFarmDocsHandler", () => {
         "console.log(hello);",
         "```",
         "",
+        "**Terminal**",
+        "",
         "```bash",
         "farm dev",
+        "```",
+        "",
+        '```tsx title="tsx"',
+        "export function Demo() {",
+        "  return <p>demo</p>;",
+        "}",
         "```",
         "",
         "| Option | Value |",
@@ -301,7 +309,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('figure class="shiki code-block code-block-framed"');
     expect(html).toContain('figure class="shiki code-block code-block-plain"');
     expect(html).toContain('<span class="code-block-title">src/app/dashboard/middleware.ts</span>');
+    expect(html).toContain('<span class="code-block-title">hello.ts</span>');
     expect(html).not.toContain("<p><strong>src/app/dashboard/middleware.ts</strong></p>");
+    expect(html).not.toContain('<span class="code-block-title">Terminal</span>');
+    expect(html).not.toContain('<span class="code-block-title">tsx</span>');
     expect(html).toContain("sh__token--keyword");
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('class="code-copy-check"');
