@@ -149,6 +149,23 @@ export default defineFarmConfig({
 });
 ```
 
+Middleware handlers can also return a Web `Response`. Returned responses stop the middleware chain and are sent directly.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  middleware: [
+    {
+      matcher: "/dashboard/:path*",
+      handler(ctx) {
+        return Response.redirect(new URL("/sign-in", ctx.url));
+      },
+    },
+  ],
+});
+```
+
 **src/app/dashboard/page.tsx**
 
 ```tsx

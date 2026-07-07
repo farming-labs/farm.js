@@ -1742,6 +1742,53 @@ describe("Middleware Manager Data Flow", () => {
     expect(res.end).toHaveBeenCalledWith("blocked");
   });
 
+  it("returns handled when config middleware returns a Response", async () => {
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        handler(ctx) {
+          return Response.redirect(new URL("/sign-in", ctx.url));
+        },
+      },
+    ]);
+
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(302);
+    expect(res.setHeader).toHaveBeenCalledWith("location", "http://localhost:3000/sign-in");
+  });
+
+  it("returns handled when file middleware returns a Response", async () => {
+    const manager = new MiddlewareManager("/tmp");
+    (manager as any).middleware = [
+      {
+        path: "/dashboard",
+        filePath: "/tmp/app/dashboard/middleware.ts",
+        handlers: [
+          (ctx: MiddlewareContext) => {
+            return new Response(null, {
+              status: 204,
+              headers: {
+                "x-middleware": ctx.pathname,
+              },
+            });
+          },
+        ],
+      },
+    ];
+
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(204);
+    expect(res.setHeader).toHaveBeenCalledWith("x-middleware", "/dashboard/settings");
+  });
+
   it("should share middleware context across middleware chain and expose to page request data", async () => {
     const req = createMockRequest("/docs/getting-started");
     const res = createMockResponse();

@@ -7,6 +7,7 @@ import type {
   MiddlewareFunction,
   MiddlewareMatcher,
   MiddlewareModule,
+  MiddlewareResult,
 } from "./types";
 
 export interface ProductionMiddlewareModuleEntry {
@@ -125,6 +126,10 @@ function mapToHeaders(map: Map<string, string>): Headers {
 
 function headersToRecord(headers: Map<string, string>): Record<string, string> {
   return Object.fromEntries(headers);
+}
+
+function isMiddlewareResponse(value: unknown): value is Response {
+  return value instanceof Response;
 }
 
 function createResponseShim(headers: Map<string, string>): Record<string, any> {
@@ -546,16 +551,26 @@ function normalizeFileMiddleware(
   return entries;
 }
 
-async function executeHandlers(handlers: MiddlewareFunction[], ctx: MiddlewareContext) {
+async function executeHandlers(
+  handlers: MiddlewareFunction[],
+  ctx: MiddlewareContext,
+): Promise<Response | undefined> {
   let handlerIndex = 0;
-  const executeNext = async (): Promise<void> => {
+  let returnedResponse: Response | undefined;
+  const executeNext = async (): Promise<MiddlewareResult> => {
     if (handlerIndex < handlers.length) {
       const handler = handlers[handlerIndex++];
-      await handler(ctx, executeNext);
+      const result = await handler(ctx, executeNext);
+      if (isMiddlewareResponse(result)) {
+        returnedResponse = result;
+        return result;
+      }
     }
+    return returnedResponse;
   };
 
-  await executeNext();
+  const result = await executeNext();
+  return isMiddlewareResponse(result) ? result : returnedResponse;
 }
 
 function emptyResult(request: Request): ProductionMiddlewareResult {
@@ -628,8 +643,18 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         ctx.params = { ...ctx.params, ...configMatch.params };
       }
 
-      await executeHandlers(entry.handlers, ctx);
+      const returnedResponse = await executeHandlers(entry.handlers, ctx);
       currentRequest = contextState.getRequest();
+
+      if (returnedResponse) {
+        return {
+          request: currentRequest,
+          response: applyProductionMiddlewareHeaders(returnedResponse, mapToHeaders(ctx.headers)),
+          data: new Map(ctx.data),
+          headers: mapToHeaders(ctx.headers),
+          handled: true,
+        };
+      }
 
       if (ctx._handled) {
         return {

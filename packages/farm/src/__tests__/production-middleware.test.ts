@@ -30,6 +30,12 @@ export default {
   },
   middleware: [
     {
+      matcher: "/dashboard/config-response",
+      handler(ctx) {
+        return Response.redirect(new URL("/sign-in", ctx.url));
+      },
+    },
+    {
       matcher: "/dashboard/:path*",
       async handler(ctx, next) {
         ctx.data.set("config.area", "dashboard");
@@ -67,6 +73,14 @@ export default function DashboardPage(props: any) {
 export default async function dashboardMiddleware(ctx: any, next: () => Promise<void>) {
   ctx.data.set("file.area", "dashboard-file");
   ctx.headers.set("x-farm-middleware", "yes");
+  if (ctx.pathname === "/dashboard/file-response") {
+    return new Response("blocked by file middleware", {
+      status: 418,
+      headers: {
+        "x-file-response": "yes",
+      },
+    });
+  }
   await next();
 }
 `.trim(),
@@ -105,6 +119,20 @@ describe("production middleware runtime", () => {
         expect(html).toContain(
           "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
         );
+
+        const configResponse = await serverModule.default.fetch(
+          new Request("https://example.test/dashboard/config-response"),
+        );
+        expect(configResponse.status).toBe(302);
+        expect(configResponse.headers.get("location")).toBe("https://example.test/sign-in");
+
+        const fileResponse = await serverModule.default.fetch(
+          new Request("https://example.test/dashboard/file-response"),
+        );
+        expect(fileResponse.status).toBe(418);
+        expect(fileResponse.headers.get("x-file-response")).toBe("yes");
+        expect(fileResponse.headers.get("x-farm-middleware")).toBe("yes");
+        await expect(fileResponse.text()).resolves.toBe("blocked by file middleware");
       } finally {
         await fs.rm(root, { recursive: true, force: true });
       }

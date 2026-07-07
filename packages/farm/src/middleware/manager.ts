@@ -15,9 +15,11 @@ import type {
   MiddlewareModule,
   MiddlewareConfig,
   MiddlewareContext,
+  MiddlewareResult,
 } from "./types";
 import { createContext } from "./context";
 import { logger } from "../utils";
+import { sendWebResponse } from "../server/response";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -25,6 +27,10 @@ export interface DiscoveredMiddleware {
   handlers: MiddlewareFunction[];
   config?: MiddlewareConfig;
   source?: "config" | "file";
+}
+
+function isMiddlewareResponse(value: unknown): value is Response {
+  return value instanceof Response;
 }
 
 /**
@@ -261,14 +267,32 @@ export class MiddlewareManager {
 
       // Execute all handlers in this middleware
       let handlerIndex = 0;
-      const executeNext = async (): Promise<void> => {
+      let returnedResponse: Response | undefined;
+      const executeNext = async (): Promise<MiddlewareResult> => {
         if (handlerIndex < mw.handlers.length) {
           const handler = mw.handlers[handlerIndex++];
-          await handler(ctx, executeNext);
+          const result = await handler(ctx, executeNext);
+          if (isMiddlewareResponse(result)) {
+            returnedResponse = result;
+            return result;
+          }
         }
+        return returnedResponse;
       };
 
-      await executeNext();
+      const result = await executeNext();
+      const response = isMiddlewareResponse(result) ? result : returnedResponse;
+      if (response) {
+        if (!res.headersSent && !res.writableEnded) {
+          for (const [key, value] of ctx.headers) {
+            try {
+              res.setHeader(key, value);
+            } catch (error) {}
+          }
+        }
+        await sendWebResponse(res, response);
+        return true;
+      }
 
       // Check if response has been sent or handled by middleware helpers.
       if (ctx._handled || res.headersSent || res.writableEnded) {
