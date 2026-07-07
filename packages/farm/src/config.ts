@@ -4,6 +4,7 @@ import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
+import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmPlugin } from "./plugin";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
@@ -84,9 +85,7 @@ export interface OpenAPIConfig {
   };
 }
 
-export interface MiddlewareConfig {
-  matcher?: string | string[];
-}
+export type MiddlewareConfig = FarmMiddlewareConfig;
 
 export interface NotFoundConfig {
   /** Path to a custom 404 page component (e.g., "./src/app/not-found.tsx") */

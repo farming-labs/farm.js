@@ -6,7 +6,6 @@
 
 import type { IncomingMessage, ServerResponse } from "http";
 import type { ViteDevServer } from "vite";
-import type { FarmConfig } from "../types";
 
 /**
  * Next function type for middleware chain
@@ -71,11 +70,23 @@ export interface RateLimitStatus {
 /**
  * Middleware configuration
  */
+export type MiddlewareMatcher = string | RegExp | ((ctx: MiddlewareContext) => boolean);
+
 export interface MiddlewareConfig {
-  matcher?: (string | RegExp | ((ctx: MiddlewareContext) => boolean))[];
+  matcher?: MiddlewareMatcher | MiddlewareMatcher[];
   exclude?: (string | RegExp)[];
   runtime?: "nodejs" | "edge";
 }
+
+export interface MiddlewareConfigEntry extends MiddlewareConfig {
+  handler?: MiddlewareFunction;
+  handlers?: MiddlewareFunction[];
+}
+
+export type FarmMiddlewareConfig =
+  | MiddlewareConfig
+  | MiddlewareConfigEntry
+  | MiddlewareConfigEntry[];
 
 /**
  * Middleware context - the main object passed to middleware functions

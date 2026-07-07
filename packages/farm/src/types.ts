@@ -6,6 +6,7 @@ import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
 import type { FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
+import type { FarmMiddlewareConfig } from "./middleware/types";
 
 export type NitroPreset =
   | "node-server"
@@ -53,6 +54,7 @@ export interface FarmConfig {
   };
   storage?: FarmStorageUserConfig;
   integrations?: FarmIntegrationsUserConfig;
+  middleware?: FarmMiddlewareConfig;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;

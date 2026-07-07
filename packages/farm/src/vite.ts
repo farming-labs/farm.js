@@ -188,7 +188,7 @@ export function farmPlugin(
         }
       }
 
-      middlewareManager = new MiddlewareManager(appDir, server);
+      middlewareManager = new MiddlewareManager(appDir, server, options.middleware);
       await middlewareManager.discover();
       if (pm) {
         for (const middleware of middlewareManager.getMiddlewares()) {
