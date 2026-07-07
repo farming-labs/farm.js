@@ -30,6 +30,9 @@
         "./types/middleware.d.ts",
         "./dist/middleware.d.ts"
       ],
+      "router": [
+        "./dist/router.d.ts"
+      ],
       "storage": [
         "./dist/storage.d.ts"
       ],
@@ -169,6 +172,11 @@
       "types": "./dist/api.d.ts",
       "import": "./dist/api.mjs",
       "require": "./dist/api.cjs"
+    },
+    "./router": {
+      "types": "./dist/router.d.ts",
+      "import": "./dist/router.mjs",
+      "require": "./dist/router.cjs"
     }
   },
   "scripts": {

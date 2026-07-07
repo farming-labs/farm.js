@@ -25,6 +25,7 @@ export { APITypeGenerator } from "./type-generator";
 export * from "./openapi";
 export * from "./query";
 export * from "./middleware";
+export * from "./router";
 export * from "./docs";
 export * from "./markdown";
 export * from "./app-markdown";

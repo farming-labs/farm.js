@@ -14,6 +14,7 @@ export default defineConfig({
     "query/server": "src/query/server.ts",
     middleware: "src/middleware/index.ts",
     api: "src/api/index.ts",
+    router: "src/router.ts",
     plugin: "src/plugin.ts",
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",

@@ -14,6 +14,7 @@ A compact map of the main package exports and where to learn more.
 | --- | --- |
 | @farmjs/core | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache. |
 | @farmjs/core/client | Link, router helpers, API client, integration client. |
+| @farmjs/core/router | Lightweight route matching, href building, and active-route checks. |
 | @farmjs/core/query | Query and route param types. |
 | @farmjs/core/storage | Storage clients and mount helpers. |
 | @farmjs/core/cache | Data cache, revalidation, cache keys. |
@@ -33,6 +34,7 @@ A compact map of the main package exports and where to learn more.
 | --- | --- |
 | `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineFarmConfig`. |
 | `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
+| `@farmjs/core/router` | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`. |
 | `@farmjs/core/storage` | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`. |
 | `@farmjs/integrations/stripe` | Stripe billing integration. |
 | `@farmjs/integrations/auth` | Better Auth, Auth.js, Clerk, Auth0, WorkOS helpers when using the auth barrel. |
