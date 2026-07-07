@@ -25,6 +25,32 @@ export type NitroPreset =
   | "farm"
   | string;
 
+export type FarmMigrationCommand =
+  | string
+  | {
+      /** Shell command to run for this migration step. */
+      command: string;
+      /** Optional label printed by the CLI before running the command. */
+      name?: string;
+      /** Working directory for this command, relative to the project root unless absolute. */
+      cwd?: string;
+      /** Additional environment variables for this command. */
+      env?: Record<string, string | undefined>;
+      /** Skip this command without removing it from config. */
+      skip?: boolean;
+    };
+
+export interface FarmMigrationsConfig {
+  /** One-shot commands that create or update app/integration schemas. */
+  commands?: FarmMigrationCommand[];
+}
+
+export type FarmMigrationsUserConfig = FarmMigrationsConfig | FarmMigrationCommand[];
+
+export interface ResolvedFarmMigrationsConfig {
+  commands: FarmMigrationCommand[];
+}
+
 export interface FarmConfig {
   root?: string;
   srcDir?: string;
@@ -54,6 +80,7 @@ export interface FarmConfig {
   };
   storage?: FarmStorageUserConfig;
   integrations?: FarmIntegrationsUserConfig;
+  migrations?: FarmMigrationsUserConfig;
   middleware?: FarmMiddlewareConfig;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;

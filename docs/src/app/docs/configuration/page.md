@@ -40,6 +40,7 @@ export default defineFarmConfig({
 | srcDir | Changing the app source folder from the default src. |
 | integrations | Registering built-in or custom integrations. |
 | storage | Providing storage clients and mounts for framework and integration code. |
+| migrations | Running one-shot schema/provider commands with `farm migrate`. |
 | docs | Serving the built-in docs runtime and docs API. |
 | md | Exposing markdown mirrors like /pricing.md. |
 | mdx | Rendering `page.md` and `page.mdx` app routes, plus MDX components. |
@@ -104,6 +105,37 @@ export default defineFarmConfig({
 
 The keys become typed namespaces. `billing` becomes `api.billing`, and `auth` becomes `api.auth`.
 
+## One-shot migrations
+
+Use `migrations.commands` when the app needs a predictable command before build or deploy. This keeps schema setup close to the storage and integration config without turning the framework into a migration engine.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  migrations: {
+    commands: [
+      "pnpm drizzle-kit migrate",
+      {
+        name: "integration schema",
+        command: "farm generate --orm sqlite --output ./farm-integrations.sql",
+        env: {
+          FARM_SCHEMA: "integrations",
+        },
+      },
+    ],
+  },
+});
+```
+
+Run them with:
+
+```bash
+farm migrate
+```
+
+Each command runs from the project root unless it sets `cwd`. Commands run in order and the CLI stops on the first failure.
+
 ## Deployment config
 
 ```ts
@@ -121,6 +153,7 @@ export default defineFarmConfig({
 
 - Keep secrets in environment variables, not committed config.
 - Use `storage.client` when integrations need schema-backed persistence.
+- Use `migrations.commands` for schema setup that should be explicit in CI.
 - Use `docs.entry` when the docs runtime should be mounted automatically.
 - Prefer route-level exports such as `dynamic`, `revalidate`, and `ppr` when behavior belongs to one page.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.

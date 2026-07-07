@@ -10,3 +10,4 @@ export {
 export { buildFarm } from "./build";
 export { deployFarm } from "./deploy";
 export { generateFarmArtifacts } from "./generate";
+export { migrateFarm } from "./migrate";

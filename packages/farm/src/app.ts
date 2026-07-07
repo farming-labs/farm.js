@@ -91,6 +91,7 @@ export class FarmApp {
       deploy: config.deploy || {},
       storage: config.storage || {},
       integrations: config.integrations || {},
+      migrations: config.migrations || { commands: [] },
       middleware: config.middleware || {},
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
