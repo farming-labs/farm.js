@@ -87,6 +87,31 @@ unsubscribe();
 
 Middleware events include the matched middleware route, request pathname, middleware file/config name, duration for completes, status for short circuits, and the thrown error for failures.
 
+## Middleware event payloads
+
+Middleware events are emitted for both `farm.config.ts` middleware entries and `src/app/**/middleware.ts` files in development and production.
+
+| Event | Payload |
+| --- | --- |
+| `middleware.start` | `route`, `pathname`, `name` |
+| `middleware.complete` | `route`, `pathname`, `name`, `durationMs` |
+| `middleware.shortCircuit` | `route`, `pathname`, `name`, `status` |
+| `middleware.error` | `route`, `pathname`, `name`, `error` |
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  observability: {
+    onEvent(event) {
+      if (event.type === "middleware.shortCircuit") {
+        console.log(event.pathname, event.status);
+      }
+    },
+  },
+});
+```
+
 ## Production notes
 
 - Filter high-volume events before shipping them to a log drain.
