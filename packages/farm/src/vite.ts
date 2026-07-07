@@ -29,6 +29,7 @@ import {
   getIntegrationProviders,
   matchIntegrationRoute,
 } from "./integrations";
+import { createFarmDevtoolsSnapshot, renderFarmDevtoolsHtml } from "./devtools";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -283,6 +284,36 @@ export function farmPlugin(
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
         const requestPathname = new URL(fullUrl).pathname;
         const currentConfig = farmApp?.getConfig() ?? options;
+
+        if (
+          requestMethod === "GET" &&
+          (requestPathname === "/__farm/devtools" || requestPathname === "/__farm/devtools.json")
+        ) {
+          const snapshot = createFarmDevtoolsSnapshot({
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            routeManager: farmApp.getRouteManager(),
+            apiRouteManager,
+            middlewareManager,
+            integrations: currentConfig.integrations,
+            docs: farmConfig.docs,
+          });
+
+          res.statusCode = 200;
+          res.setHeader(
+            "Content-Type",
+            requestPathname.endsWith(".json")
+              ? "application/json; charset=utf-8"
+              : "text/html; charset=utf-8",
+          );
+          res.setHeader("Cache-Control", "no-store");
+          res.end(
+            requestPathname.endsWith(".json")
+              ? JSON.stringify(snapshot, null, 2)
+              : renderFarmDevtoolsHtml(snapshot),
+          );
+          return;
+        }
 
         // Handle OpenAPI docs route
         if (openAPIManager && req.url === options.openapi?.route) {
