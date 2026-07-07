@@ -10,7 +10,8 @@ import type { ViteDevServer } from "vite";
 /**
  * Next function type for middleware chain
  */
-export type NextFunction = () => Promise<void>;
+export type MiddlewareResult = void | Response;
+export type NextFunction = () => Promise<MiddlewareResult>;
 
 /**
  * Middleware function signature
@@ -18,7 +19,7 @@ export type NextFunction = () => Promise<void>;
 export type MiddlewareFunction = (
   ctx: MiddlewareContext,
   next: NextFunction,
-) => void | Promise<void>;
+) => MiddlewareResult | Promise<MiddlewareResult>;
 
 /**
  * Cookie options

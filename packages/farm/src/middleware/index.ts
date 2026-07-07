@@ -26,5 +26,6 @@ export type {
   RateLimitStorage,
   RateLimitStatus,
   NextFunction,
+  MiddlewareResult,
   FarmMiddlewareConfig,
 } from "./types";
