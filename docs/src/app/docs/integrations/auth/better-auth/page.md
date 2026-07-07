@@ -54,9 +54,9 @@ Better Auth is mounted at `/api/auth/[...auth]` with `GET` and `POST` handlers. 
 **src/lib/auth.ts**
 
 ```ts
-import { betterAuth as createBetterAuth } from "better-auth";
+import { betterAuth } from "better-auth";
 
-export const auth = createBetterAuth({
+export const auth = betterAuth({
   database: {
     provider: "sqlite",
     url: "file:./auth.sqlite",
