@@ -9,7 +9,9 @@ import * as path from "path";
 import type { ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import type {
+  FarmMiddlewareConfig,
   MiddlewareFunction,
+  MiddlewareMatcher,
   MiddlewareModule,
   MiddlewareConfig,
   MiddlewareContext,
@@ -22,6 +24,7 @@ export interface DiscoveredMiddleware {
   filePath: string;
   handlers: MiddlewareFunction[];
   config?: MiddlewareConfig;
+  source?: "config" | "file";
 }
 
 /**
@@ -29,13 +32,44 @@ export interface DiscoveredMiddleware {
  */
 export class MiddlewareManager {
   private middleware: DiscoveredMiddleware[] = [];
+  private configMiddleware: DiscoveredMiddleware[] = [];
+  private globalConfig?: MiddlewareConfig;
   private viteServer?: ViteDevServer;
 
   constructor(
     private appDir: string,
     viteServer?: ViteDevServer,
+    config?: FarmMiddlewareConfig,
   ) {
     this.viteServer = viteServer;
+    this.configure(config);
+  }
+
+  configure(config?: FarmMiddlewareConfig): void {
+    this.configMiddleware = [];
+    this.globalConfig = undefined;
+
+    if (!config) return;
+
+    const entries = Array.isArray(config) ? config : [config];
+
+    for (const [index, entry] of entries.entries()) {
+      const handlers = this.getConfigHandlers(entry);
+      const middlewareConfig = this.toMiddlewareConfig(entry);
+
+      if (handlers.length === 0) {
+        this.globalConfig = middlewareConfig;
+        continue;
+      }
+
+      this.configMiddleware.push({
+        path: "/",
+        filePath: `farm.config.ts#middleware-${index}`,
+        handlers,
+        config: middlewareConfig,
+        source: "config",
+      });
+    }
   }
 
   /**
@@ -147,6 +181,7 @@ export class MiddlewareManager {
         filePath,
         handlers,
         config: middlewareModule.config,
+        source: "file",
       };
     } catch (error) {
       logger.error(`Failed to load middleware ${filePath}: ${error}`);
@@ -162,14 +197,25 @@ export class MiddlewareManager {
     const pathname = url.pathname;
     const method = req.method || "GET";
     const startTime = Date.now();
-    // Find applicable middleware (cascading from root to specific)
-    const applicable = this.middleware.filter((mw) => {
-      // Root middleware (/) applies to everything
-      if (mw.path === "/") return true;
 
-      // Middleware applies to its path and all sub-paths
-      return pathname.startsWith(mw.path) || pathname === mw.path;
-    });
+    let parentData: MiddlewareContext["parent"] | undefined;
+    let ctx = createContext(req, res, this.viteServer);
+
+    if (this.globalConfig) {
+      const globalMatch = this.matchesConfig(pathname, this.globalConfig, ctx);
+      if (!globalMatch.matched) {
+        return false;
+      }
+      if (globalMatch.params) {
+        ctx.params = { ...ctx.params, ...globalMatch.params };
+      }
+    }
+
+    // Find applicable middleware (config entries first, then cascading files)
+    const applicable = [
+      ...this.configMiddleware,
+      ...this.middleware.filter((mw) => this.matchesRoutePath(pathname, mw.path)),
+    ];
 
     if (applicable.length === 0) {
       return false; // No middleware to run
@@ -191,20 +237,26 @@ export class MiddlewareManager {
         `[FARM] [MIDDLEWARE] [${method}] Executing ${pathname} (${applicable.length} middleware)`,
       );
     }
-    // Create root context
-    let parentData: MiddlewareContext["parent"] | undefined;
-    let ctx = createContext(req, res, this.viteServer);
 
     // Execute middleware in cascade order
     for (const mw of applicable) {
       // Check matcher configuration
-      if (mw.config?.matcher && !this.matchesConfig(pathname, mw.config)) {
+      const configMatch = mw.config
+        ? this.matchesConfig(pathname, mw.config, ctx)
+        : { matched: true };
+      if (!configMatch.matched) {
         continue;
+      }
+      if (configMatch.params) {
+        ctx.params = { ...ctx.params, ...configMatch.params };
       }
 
       // Create new context with parent data
       if (parentData) {
         ctx = createContext(req, res, this.viteServer, parentData);
+        if (configMatch.params) {
+          ctx.params = { ...ctx.params, ...configMatch.params };
+        }
       }
 
       // Execute all handlers in this middleware
@@ -218,8 +270,8 @@ export class MiddlewareManager {
 
       await executeNext();
 
-      // Check if response has been sent (auto-detect, no need for ctx._handled)
-      if (res.headersSent || res.writableEnded) {
+      // Check if response has been sent or handled by middleware helpers.
+      if (ctx._handled || res.headersSent || res.writableEnded) {
         return true;
       }
 
@@ -245,52 +297,78 @@ export class MiddlewareManager {
   /**
    * Check if pathname matches middleware config
    */
-  private matchesConfig(pathname: string, config: MiddlewareConfig): boolean {
+  private matchesConfig(
+    pathname: string,
+    config: MiddlewareConfig,
+    ctx: MiddlewareContext,
+  ): { matched: boolean; params?: Record<string, string> } {
     // Check exclusions
     if (config.exclude) {
       for (const pattern of config.exclude) {
-        if (this.matchPattern(pattern, pathname)) {
-          return false;
+        if (this.matchPattern(pattern, pathname).matched) {
+          return { matched: false };
         }
       }
     }
 
     // Check matchers
     if (config.matcher) {
-      for (const matcher of config.matcher) {
+      for (const matcher of this.toMatcherList(config.matcher)) {
         if (typeof matcher === "string" || matcher instanceof RegExp) {
-          if (this.matchPattern(matcher, pathname)) {
-            return true;
+          const result = this.matchPattern(matcher, pathname);
+          if (result.matched) {
+            return result;
           }
         } else if (typeof matcher === "function") {
-          // For function matchers, we'd need the full context
-          // For now, allow it through
-          return true;
+          return { matched: matcher(ctx) };
         }
       }
-      return false;
+      return { matched: false };
     }
 
-    return true;
+    return { matched: true };
   }
 
   /**
    * Match a pattern against pathname
    */
-  private matchPattern(pattern: string | RegExp, pathname: string): boolean {
+  private matchPattern(
+    pattern: string | RegExp,
+    pathname: string,
+  ): { matched: boolean; params?: Record<string, string> } {
     if (pattern instanceof RegExp) {
-      return pattern.test(pathname);
+      pattern.lastIndex = 0;
+      const match = pattern.exec(pathname);
+      return {
+        matched: !!match,
+        params: match?.groups ? { ...match.groups } : undefined,
+      };
     }
 
-    // Convert glob-style pattern to regex
-    const regexPattern = pattern
-      .replace(/\*\*/g, "__DOUBLE_STAR__")
-      .replace(/\*/g, "[^/]+")
-      .replace(/__DOUBLE_STAR__/g, ".*")
-      .replace(/\//g, "\\/");
+    if (pattern === "*" || pattern === "/(.*)") {
+      return { matched: true };
+    }
 
-    const regex = new RegExp(`^${regexPattern}$`);
-    return regex.test(pathname);
+    if (pattern.endsWith("(.*)")) {
+      const prefix = pattern.slice(0, -4);
+      return { matched: pathname === prefix || pathname.startsWith(`${prefix}/`) };
+    }
+
+    const { regex, params } = this.compilePathPattern(pattern);
+    const match = regex.exec(pathname);
+    if (!match) {
+      return { matched: false };
+    }
+
+    const values: Record<string, string> = {};
+    params.forEach((param, index) => {
+      values[param] = decodeURIComponent(match[index + 1] || "");
+    });
+
+    return {
+      matched: true,
+      params: Object.keys(values).length > 0 ? values : undefined,
+    };
   }
 
   /**
@@ -301,6 +379,107 @@ export class MiddlewareManager {
   }
 
   getMiddlewares(): DiscoveredMiddleware[] {
-    return [...this.middleware];
+    return [...this.configMiddleware, ...this.middleware];
+  }
+
+  private matchesRoutePath(pathname: string, middlewarePath: string): boolean {
+    if (middlewarePath === "/") return true;
+    return pathname === middlewarePath || pathname.startsWith(`${middlewarePath}/`);
+  }
+
+  private toMatcherList(matcher: MiddlewareConfig["matcher"]): MiddlewareMatcher[] {
+    if (!matcher) return [];
+    return Array.isArray(matcher) ? matcher : [matcher];
+  }
+
+  private getConfigHandlers(
+    entry:
+      | MiddlewareConfig
+      | (MiddlewareConfig & {
+          handler?: MiddlewareFunction;
+          handlers?: MiddlewareFunction[];
+        }),
+  ): MiddlewareFunction[] {
+    const handlers: MiddlewareFunction[] = [];
+    if ("handler" in entry && typeof entry.handler === "function") {
+      handlers.push(entry.handler);
+    }
+    if ("handlers" in entry && Array.isArray(entry.handlers)) {
+      handlers.push(...entry.handlers.filter((handler) => typeof handler === "function"));
+    }
+    return handlers;
+  }
+
+  private toMiddlewareConfig(
+    entry: MiddlewareConfig & {
+      handler?: MiddlewareFunction;
+      handlers?: MiddlewareFunction[];
+    },
+  ): MiddlewareConfig {
+    const { matcher, exclude, runtime } = entry;
+    return { matcher, exclude, runtime };
+  }
+
+  private compilePathPattern(pattern: string): { regex: RegExp; params: string[] } {
+    const params: string[] = [];
+    const segments = pattern.split("/").filter(Boolean);
+
+    if (segments.length === 0) {
+      return { regex: /^\/$/, params };
+    }
+
+    const parts = segments.map((segment) => {
+      if (segment === "**") {
+        return "(?:/.*)?";
+      }
+
+      if (segment === "*") {
+        return "/[^/]+";
+      }
+
+      if (segment.startsWith(":")) {
+        const { name, modifier } = this.parseColonParam(segment);
+        params.push(name);
+
+        if (modifier === "*") {
+          return "(?:/(.*))?";
+        }
+        if (modifier === "+") {
+          return "/(.+)";
+        }
+        return "/([^/]+)";
+      }
+
+      if (segment.startsWith("[...") && segment.endsWith("]")) {
+        params.push(segment.slice(4, -1));
+        return "(?:/(.*))?";
+      }
+
+      if (segment.startsWith("[") && segment.endsWith("]")) {
+        params.push(segment.slice(1, -1));
+        return "/([^/]+)";
+      }
+
+      return `/${this.escapeRegex(segment).replace(/\\\*/g, "[^/]*")}`;
+    });
+
+    return {
+      regex: new RegExp(`^${parts.join("")}$`),
+      params,
+    };
+  }
+
+  private parseColonParam(segment: string): { name: string; modifier?: string } {
+    const raw = segment.slice(1);
+    const last = raw[raw.length - 1];
+    const modifier = last === "*" || last === "+" || last === "?" ? last : undefined;
+    return {
+      name: modifier ? raw.slice(0, -1) : raw,
+      modifier,
+    };
+  }
+
+  private escapeRegex(value: string): string {
+    return value.replace(/[|\\{}()[\]^$+?.]/g, "\\$&");
   }
 }

@@ -1640,6 +1640,108 @@ describe("Middleware Data Access (getMiddlewareData)", () => {
 });
 
 describe("Middleware Manager Data Flow", () => {
+  it("executes farm.config middleware entries when their matcher matches", async () => {
+    const seen: string[] = [];
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        async handler(ctx, next) {
+          seen.push(`config:${ctx.params.path}`);
+          ctx.data.set("fromConfig", "yes");
+          await next();
+        },
+      },
+    ]);
+
+    (manager as any).middleware = [
+      {
+        path: "/dashboard",
+        filePath: "/tmp/app/dashboard/middleware.ts",
+        handlers: [
+          async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+            seen.push(`file:${ctx.data.get("fromConfig")}`);
+            ctx.data.set("fromFile", "yes");
+            await next();
+          },
+        ],
+      },
+    ];
+
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(false);
+    expect(seen).toEqual(["config:settings", "file:yes"]);
+    expect((req as any).__FARM_MIDDLEWARE_DATA__.get("fromFile")).toBe("yes");
+  });
+
+  it("skips farm.config middleware entries when their matcher does not match", async () => {
+    const seen: string[] = [];
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        async handler(ctx, next) {
+          seen.push("config");
+          await next();
+        },
+      },
+    ]);
+
+    const req = createMockRequest("/marketing");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(false);
+    expect(seen).toEqual([]);
+  });
+
+  it("uses a matcher-only farm.config middleware object as a global gate", async () => {
+    const seen: string[] = [];
+    const manager = new MiddlewareManager("/tmp", undefined, {
+      matcher: "/dashboard/:path*",
+    });
+
+    (manager as any).middleware = [
+      {
+        path: "/",
+        filePath: "/tmp/app/middleware.ts",
+        handlers: [
+          async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+            seen.push(ctx.params.path);
+            await next();
+          },
+        ],
+      },
+    ];
+
+    await manager.execute(createMockRequest("/marketing"), createMockResponse());
+    await manager.execute(createMockRequest("/dashboard/reports/weekly"), createMockResponse());
+
+    expect(seen).toEqual(["reports/weekly"]);
+  });
+
+  it("returns handled when config middleware short-circuits the response", async () => {
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        handler(ctx) {
+          ctx.text("blocked", 401);
+        },
+      },
+    ]);
+
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(true);
+    expect(res.writeHead).toHaveBeenCalledWith(401, {
+      "Content-Type": "text/plain",
+    });
+    expect(res.end).toHaveBeenCalledWith("blocked");
+  });
+
   it("should share middleware context across middleware chain and expose to page request data", async () => {
     const req = createMockRequest("/docs/getting-started");
     const res = createMockResponse();

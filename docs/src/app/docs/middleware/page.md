@@ -15,17 +15,17 @@ Middleware can live near the routes it protects. Use it for auth, request metada
 **src/app/dashboard/middleware.ts**
 
 ```ts
-import { defineMiddleware } from "@farmjs/core/middleware";
+import { middleware } from "@farmjs/core/middleware";
 
-export default defineMiddleware(async ({ request, next, context }) => {
-  context.data.set("request.startedAt", Date.now(), { exposeToPage: true });
-  return next(request);
+export default middleware().use(async (ctx, next) => {
+  ctx.data.set("request.startedAt", Date.now());
+  await next();
 });
 ```
 
 ## Config matchers
 
-Use farm.config.ts when middleware behavior should be described globally.
+Use farm.config.ts when middleware behavior should be described globally. A matcher-only object gates discovered middleware files; a list of entries can pair matchers with handlers.
 
 **farm.config.ts**
 
@@ -33,9 +33,15 @@ Use farm.config.ts when middleware behavior should be described globally.
 import { defineFarmConfig } from "@farmjs/core";
 
 export default defineFarmConfig({
-  middleware: {
-    matcher: ["/dashboard/:path*"],
-  },
+  middleware: [
+    {
+      matcher: ["/dashboard/:path*"],
+      async handler(ctx, next) {
+        ctx.data.set("area", "dashboard");
+        await next();
+      },
+    },
+  ],
 });
 ```
 
@@ -46,20 +52,19 @@ Middleware can short-circuit with a redirect or response before the page/API han
 **src/app/dashboard/middleware.ts**
 
 ```ts
-import { defineMiddleware } from "@farmjs/core/middleware";
+import { middleware } from "@farmjs/core/middleware";
 
-export default defineMiddleware(async ({ request, next, context }) => {
-  const session = await readSession(request);
+export default middleware().use(async (ctx, next) => {
+  const session = await readSession(ctx.request);
 
   if (!session) {
-    return Response.redirect(new URL("/sign-in", request.url));
+    ctx.redirect("/sign-in");
+    return;
   }
 
-  context.data.set("user.id", session.user.id, {
-    exposeToPage: true,
-  });
+  ctx.data.set("user.id", session.user.id);
 
-  return next(request);
+  await next();
 });
 ```
 
@@ -76,12 +81,12 @@ export default function DashboardPage(props: PageProps) {
 
 ## Common uses
 
-| Use case | Pattern |
-| --- | --- |
-| Auth | Redirect signed-out users or return `401` for private APIs. |
-| Request context | Attach request IDs, user IDs, tenant IDs, and feature flags. |
-| Security | Add headers, block invalid origins, or rate-limit an API area. |
-| Localization | Rewrite to a locale route or expose locale data to pages. |
+| Use case        | Pattern                                                        |
+| --------------- | -------------------------------------------------------------- |
+| Auth            | Redirect signed-out users or return `401` for private APIs.    |
+| Request context | Attach request IDs, user IDs, tenant IDs, and feature flags.   |
+| Security        | Add headers, block invalid origins, or rate-limit an API area. |
+| Localization    | Rewrite to a locale route or expose locale data to pages.      |
 
 ## Production notes
 
