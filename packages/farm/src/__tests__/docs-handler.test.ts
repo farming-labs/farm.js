@@ -156,10 +156,22 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("farmdocs:sidebar-scroll");
     expect(html).toContain("window.sessionStorage");
     expect(html).toContain("x-farm-docs-navigate");
+    expect(html).toContain('cache:"no-store"');
+    expect(html).toContain("const getPageKey=");
+    expect(html).toContain("renderedArticle===currentArticle");
     expect(html).toContain("DOMParser");
     expect(html).toContain("history.pushState");
     expect(html).toContain("farmDocsNavigating");
     expect(html).toContain("farmDocsRuntimeId");
+    expect(html).toContain('class="mobile-topbar"');
+    expect(html).toContain('data-sidebar-toggle');
+    expect(html).toContain('data-sidebar-backdrop');
+    expect(html).toContain("initMobileSidebar");
+    expect(html).toContain("closeMobileSidebar");
+    expect(html).toContain('data-farm-docs-sidebar="open"');
+    expect(html).toContain('#nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar');
+    expect(html).toContain(".topbar { display: none !important; }");
+    expect(html).toContain("#nd-docs-layout .fd-toc { display: none !important; }");
     expect(html).toContain("window.__farmDocsPageActionsRuntime");
     expect(html).toContain('data-page-action="copy-markdown"');
     expect(html).toContain('data-markdown-url="/docs.md"');
@@ -169,6 +181,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("navigator.clipboard");
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
+    expect(html).toContain('url("/assets/GeistMono-Variable-BNLlm6Cd.woff2") format("woff2")');
+    expect(html).toContain("--font-geist-mono: \"Geist Mono\"");
+    expect(html).toContain('<link rel="preload" href="/assets/GeistMono-Variable-BNLlm6Cd.woff2"');
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
@@ -188,22 +203,40 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
     expect(html).toContain('data-sidebar-subgroup="payment"');
     expect(html).toContain("--fd-sidebar-line-color");
-    expect(html).toContain("--fd-sidebar-branch-gap: 8px");
+    expect(html).toContain("--fd-sidebar-branch-gap: 0px");
     expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px)");
     expect(html).toContain("--fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px)");
-    expect(html).toContain("--fd-sidebar-nested-icon-gap: 8px");
+    expect(html).toContain("--fd-sidebar-nested-icon-gap: 0px");
+    expect(html).toContain(
+      '.sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; }',
+    );
+    expect(html).not.toContain(
+      '.sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }',
+    );
+    expect(html).toContain(".sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }");
+    expect(html).toContain(
+      '.sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 0; bottom: 0;',
+    );
     expect(html).toContain(
       ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
     );
-    expect(html).toContain("left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap))");
+    expect(html).toContain(".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap));");
+    expect(html).toContain(".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap));");
     expect(html).toContain(
       ".sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x);",
     );
+    expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);");
     expect(html).toContain(
       '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after',
     );
     expect(html).toContain(
-      "height: 2px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423));",
+      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); }',
+    );
+    expect(html).not.toContain(
+      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { height: 2px;',
+    );
+    expect(html).not.toContain(
+      "transition: background-color 150ms ease, height 150ms ease, box-shadow 150ms ease;",
     );
     expect(html).toContain("var(--fd-sidebar-nested-icon-gap)");
     expect(html).toContain(".sidebar-subgroup-title { position: relative;");
@@ -212,8 +245,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain("data-active-marker");
     expect(html).not.toContain('.sidebar-tree a[data-active="true"]::before');
     expect(html).not.toContain('href="/docs">Farm Docs</a>');
-    expect(html).toContain('<p class="page-kicker">DOCUMENTATION / OVERVIEW</p>');
-    expect(html).toContain("article#nd-page .page-kicker");
+    expect(html).not.toContain('class="page-kicker"');
+    expect(html).not.toContain("DOCUMENTATION / OVERVIEW");
+    expect(html).toContain("article#nd-page .fd-breadcrumb");
+    expect(html).toContain("article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);");
     expect(html).toContain("--fd-docs-font-mono: var(--font-geist-mono");
     expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
@@ -224,6 +259,31 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("renders docs-style breadcrumbs only for nested docs pages", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const topLevelResponse = await handler(
+      new Request("http://farm.test/docs/guide", {
+        headers: { accept: "text/html" },
+      }),
+    );
+    await expect(topLevelResponse?.text()).resolves.not.toContain('class="fd-breadcrumb"');
+
+    const nestedResponse = await handler(
+      new Request("http://farm.test/docs/integrations/stripe", {
+        headers: { accept: "text/html" },
+      }),
+    );
+
+    const nestedHtml = await nestedResponse?.text();
+    expect(nestedHtml).toContain('<nav class="fd-breadcrumb" aria-label="Breadcrumb">');
+    expect(nestedHtml).toContain(
+      '<a class="fd-breadcrumb-parent fd-breadcrumb-link" href="/docs/integrations">Integrations</a>',
+    );
+    expect(nestedHtml).toContain('<span class="fd-breadcrumb-current">Stripe</span>');
   });
 
   it("renders highlighted code blocks without doubled line gaps", async () => {

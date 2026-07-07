@@ -74,6 +74,8 @@ function readFarmDocsPixelBorderCss(): string {
 }
 
 const farmDocsPixelBorderCss = readFarmDocsPixelBorderCss();
+const GEIST_SANS_FONT_URL = "/assets/Geist-Variable-CrgPqtmy.woff2";
+const GEIST_MONO_FONT_URL = "/assets/GeistMono-Variable-BNLlm6Cd.woff2";
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
@@ -1419,6 +1421,45 @@ function renderPixelPageNav(
 </nav>`;
 }
 
+function titleizePathSegment(value: string): string {
+  return value
+    .replace(/[-_]+/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function isBreadcrumbEnabled(docs: FarmDocsResolvedConfig): boolean {
+  const breadcrumb = docs.config.breadcrumb;
+  if (breadcrumb === false) return false;
+  if (breadcrumb && typeof breadcrumb === "object" && "enabled" in breadcrumb) {
+    return (breadcrumb as { enabled?: unknown }).enabled !== false;
+  }
+  return true;
+}
+
+function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedConfig): string {
+  if (!isBreadcrumbEnabled(docs)) return "";
+
+  const segments = trimSlashes(page.slug).split("/").filter(Boolean);
+  if (segments.length < 2) return "";
+
+  const parentSegments = segments.slice(0, -1);
+  const parentSegment = parentSegments[parentSegments.length - 1];
+  const currentSegment = segments[segments.length - 1];
+  const entry = normalizeEntry(docs.entry);
+  const parentPath = parentSegments.join("/");
+  const parentHref = entry === "/" ? `/${parentPath}` : `${entry}/${parentPath}`;
+
+  return `<nav class="fd-breadcrumb" aria-label="Breadcrumb">
+  <span class="fd-breadcrumb-item">
+    <a class="fd-breadcrumb-parent fd-breadcrumb-link" href="${escapeAttribute(parentHref)}">${escapeHtml(titleizePathSegment(parentSegment))}</a>
+  </span>
+  <span class="fd-breadcrumb-item">
+    <span class="fd-breadcrumb-sep">/</span>
+    <span class="fd-breadcrumb-current">${escapeHtml(titleizePathSegment(currentSegment))}</span>
+  </span>
+</nav>`;
+}
+
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
   return `<div class="toc-track">
@@ -1436,7 +1477,7 @@ ${items
 
 function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig): string {
   const docsEntry = JSON.stringify(normalizeEntry(docs.entry));
-  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)active.scrollIntoView({block:"center"})};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;currentArticle.replaceWith(document.importNode(nextArticle,true));const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll)window.scrollTo({top:0,left:0});return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
+  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};let closeMobileSidebar=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)active.scrollIntoView({block:"center"})};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initMobileSidebar=()=>{const layout=document.getElementById("nd-docs-layout");const sidebar=getSidebar();const toggle=document.querySelector("[data-sidebar-toggle]");const backdrop=document.querySelector("[data-sidebar-backdrop]");if(!layout||!sidebar||!(toggle instanceof HTMLButtonElement))return;const setOpen=(open)=>{layout.dataset.sidebarOpen=open?"true":"false";document.documentElement.dataset.farmDocsSidebar=open?"open":"closed";toggle.setAttribute("aria-expanded",open?"true":"false");toggle.setAttribute("aria-label",open?"Close menu":"Open menu")};const toggleOpen=()=>setOpen(layout.dataset.sidebarOpen!=="true");closeMobileSidebar=()=>setOpen(false);toggle.addEventListener("click",(event)=>{event.preventDefault();toggleOpen()});backdrop?.addEventListener("click",()=>closeMobileSidebar());document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeMobileSidebar()});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(target)closeMobileSidebar()});closeMobileSidebar()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const getPageKey=(root)=>{const article=root.getElementById("nd-page");if(!article)return"";return article.querySelector("h1")?.textContent?.trim()||article.textContent?.replace(/\\s+/g," ").trim().slice(0,160)||""};const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;const nextKey=getPageKey(nextDoc);const importedArticle=document.importNode(nextArticle,true);currentArticle.replaceWith(importedArticle);const renderedArticle=document.getElementById("nd-page");if(!renderedArticle||renderedArticle===currentArticle||(nextKey&&getPageKey(document)!==nextKey))return false;const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();closeMobileSidebar();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{cache:"no-store",headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll)window.scrollTo({top:0,left:0});return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initMobileSidebar();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
 
 function renderDocsPageActionsRuntimeScript(): string {
@@ -1492,11 +1533,12 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
 
   return `
-    @font-face { font-family: "Geist Sans"; src: url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    @font-face { font-family: "Geist Mono"; src: url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    :root { color-scheme: dark; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 8px; --fd-sidebar-nested-icon-gap: 8px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
+    @font-face { font-family: "Geist Sans"; src: local("Geist Sans"), url("${GEIST_SANS_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
+    @font-face { font-family: "Geist Mono"; src: local("Geist Mono"), url("${GEIST_MONO_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
+    :root { color-scheme: dark; --font-geist-sans: "Geist Sans"; --font-geist-mono: "Geist Mono"; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 0px; --fd-sidebar-nested-icon-gap: 0px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
+    html[data-farm-docs-sidebar="open"], html[data-farm-docs-sidebar="open"] body { overflow: hidden; }
     body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
     ::selection { background: var(--color-fd-foreground, #fff); color: var(--color-fd-background, #000); }
     a { color: inherit; }
@@ -1507,6 +1549,30 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     .topbar a:last-child { display: inline-flex; height: 100%; align-items: center; margin-left: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 28px; }
+    .mobile-topbar { display: none; }
+    .sidebar-backdrop { display: none; }
+    .fd-mobile-nav-btn { display: inline-flex; width: var(--fd-mobile-nav-height, 56px); height: 100%; flex: 0 0 var(--fd-mobile-nav-height, 56px); align-items: center; justify-content: center; border: 0; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); cursor: pointer; padding: 0; appearance: none; }
+    .fd-mobile-nav-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    .mobile-topbar-brand, .mobile-topbar-link { display: inline-flex; height: 100%; min-width: 0; align-items: center; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-decoration: none; text-transform: uppercase; }
+    .mobile-topbar-brand { padding: 0 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-topbar-link { margin-left: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 14px; }
+    #nd-docs-layout .fd-toc { position: sticky; top: var(--fd-docs-row-1); grid-area: toc; display: flex; width: var(--fd-toc-width); height: calc(var(--fd-docs-height) - var(--fd-docs-row-1)); max-height: calc(100vh - var(--fd-docs-row-1)); flex-direction: column; align-self: start; overflow: hidden; padding: 48px 16px 8px 0; }
+    #nd-docs-layout .fd-toc-inner { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
+    #nd-docs-layout .fd-toc-title { display: inline-flex; align-items: center; gap: 0.375rem; margin: 0 0 1rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-sans); font-size: 0.875rem; font-weight: 500; line-height: 1.4; }
+    #nd-docs-layout .fd-toc-title svg { width: 1rem; height: 1rem; flex: 0 0 1rem; color: currentColor; }
+    #nd-docs-layout .toc-scroll { min-height: 0; overflow: auto; padding: 0.75rem 0; scrollbar-width: none; }
+    #nd-docs-layout .toc-scroll::-webkit-scrollbar { display: none; }
+    #nd-docs-layout .toc-track { position: relative; min-width: 0; }
+    #nd-docs-layout .toc-thumb { position: absolute; inset-block: 0; inset-inline-start: 0; width: 1px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); transition: clip-path 150ms ease; }
+    #nd-docs-layout .toc-links { display: flex; min-width: 0; flex-direction: column; border-inline-start: 1px solid color-mix(in srgb, var(--color-fd-foreground, #fff) 10%, transparent); }
+    #nd-docs-layout .toc-link { display: block; min-width: 0; padding: 0.375rem 0 0.375rem 0.75rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.45; text-decoration: none; overflow-wrap: anywhere; transition: color 150ms ease; }
+    #nd-docs-layout .toc-link:first-child { padding-top: 0; }
+    #nd-docs-layout .toc-link:last-child { padding-bottom: 0; }
+    #nd-docs-layout .toc-link[data-depth="3"] { padding-left: 1.5rem; font-size: 0.8125rem; }
+    #nd-docs-layout .toc-link[data-depth="4"], #nd-docs-layout .toc-link[data-depth="5"], #nd-docs-layout .toc-link[data-depth="6"] { padding-left: 2rem; font-size: 0.8125rem; }
+    #nd-docs-layout .toc-link[data-active="true"] { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)); }
+    #nd-docs-layout .toc-link:hover { color: var(--color-fd-accent-foreground, oklch(0.985 0.001 106.423)); }
+    #nd-docs-layout .toc-empty { margin: 0; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; }
     aside#nd-sidebar { position: sticky; top: 0; grid-area: sidebar; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 18px var(--fd-sidebar-edge); }
     aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
     aside#nd-sidebar > * { position: relative; z-index: 1; }
@@ -1520,7 +1586,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     #nd-docs-layout aside#nd-sidebar .sidebar-tree a[data-active] { position: relative; display: flex; width: auto !important; min-width: 0; align-items: center; gap: 8px; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); text-decoration: none; font-size: 13.5px !important; line-height: 1.45 !important; background: transparent !important; transition: color 150ms ease; }
     #nd-docs-layout aside#nd-sidebar .sidebar-tree > a[data-active] { padding-left: var(--fd-sidebar-edge) !important; padding-top: 12px !important; padding-bottom: 12px !important; }
     #nd-docs-layout aside#nd-sidebar .sidebar-subgroup-content a[data-active] { padding-left: var(--fd-sidebar-sub-link-x) !important; }
-    .sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }
+    .sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; }
     .sidebar-tree a[data-active="false"]:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)) !important; }
     .sidebar-icon { display: inline-flex; width: 14px; height: 14px; flex: 0 0 14px; color: currentColor; opacity: 0.72; }
     .sidebar-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
@@ -1532,11 +1598,12 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-label-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-tree a[data-active="true"] .sidebar-icon, .sidebar-tree a:hover .sidebar-icon { opacity: 1; }
     #nd-docs-layout aside#nd-sidebar .sidebar-folder-trigger { display: flex !important; width: 100% !important; min-width: 0; align-items: center; justify-content: flex-start; border: 0; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)) !important; background: transparent !important; margin: 0 !important; transform: none !important; padding: 8px var(--fd-sidebar-edge) !important; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)) !important; font-family: var(--fd-docs-font-sans); font-size: 12px !important; font-weight: 600; letter-spacing: 0 !important; text-align: left; text-transform: none; cursor: default; }
-    .sidebar-folder-content { position: relative; padding: 0 0 6px; overflow: hidden; }
-    .sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 8px; bottom: 6px; width: 1px; background: var(--fd-sidebar-line-color); pointer-events: none; }
-    .sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after { content: ""; position: absolute; top: 50%; height: 1px; background: var(--fd-sidebar-line-color); transform: translateY(-50%); pointer-events: none; transition: background-color 150ms ease, height 150ms ease, box-shadow 150ms ease; }
-    .sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-link-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap)); }
-    .sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { height: 2px; background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-fd-primary, oklch(0.985 0.001 106.423)) 18%, transparent); }
+    .sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }
+    .sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 0; bottom: 0; width: 1px; background: var(--fd-sidebar-line-color); pointer-events: none; }
+    .sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after { content: ""; position: absolute; top: 50%; height: 1px; background: var(--fd-sidebar-line-color); transform: translateY(-50%); pointer-events: none; transition: background-color 150ms ease; }
+    .sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-link-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap)); }
+    .sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap)); }
+    .sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); }
     .sidebar-subgroup { position: relative; padding: 2px 0 4px; }
     .sidebar-subgroup::before { content: ""; position: absolute; left: var(--fd-sidebar-sub-guide-x); top: 17px; bottom: 19px; width: 1px; background: var(--fd-sidebar-line-color); pointer-events: none; }
     .sidebar-subgroup-title { position: relative; display: flex; min-width: 0; align-items: center; margin: 0 !important; padding: 6px var(--fd-sidebar-edge) 6px var(--fd-sidebar-link-x); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 13.5px; font-weight: 400; line-height: 1.45; }
@@ -1544,7 +1611,13 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x); width: calc(var(--fd-sidebar-sub-link-x) - var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-nested-icon-gap)); }
     main { grid-area: main; min-width: 0; padding: 46px 40px 80px; }
     article#nd-page { width: min(100%, var(--fd-content-width)); margin: 0 auto; }
-    article#nd-page .page-kicker { margin: 0 0 18px; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 11px; line-height: 1.4; letter-spacing: 0.03em; text-transform: uppercase; }
+    article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; line-height: 1.4; letter-spacing: 0.01em; text-transform: uppercase; }
+    article#nd-page .fd-breadcrumb-item { display: inline-flex; min-width: 0; align-items: center; }
+    article#nd-page .fd-breadcrumb-link { color: inherit; font-family: var(--fd-docs-font-mono); text-decoration: none; }
+    article#nd-page .fd-breadcrumb-link:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    article#nd-page .fd-breadcrumb-parent { opacity: 0.6; font-weight: 400; }
+    article#nd-page .fd-breadcrumb-sep { margin: 0 0.375rem; opacity: 0.4; font-size: 0.75rem; }
+    article#nd-page .fd-breadcrumb-current { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-mono); font-weight: 500; }
     .prose h1 { margin: 0 0 16px; font-size: 36px; line-height: 1.14; letter-spacing: -0.02em; }
     .prose h2 { margin: 44px 0 14px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 26px; font-size: 24px; line-height: 1.24; letter-spacing: -0.01em; }
     .prose h3 { margin: 30px 0 12px; font-size: 20px; line-height: 1.3; letter-spacing: 0; }
@@ -1590,19 +1663,46 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-page-nav-description { display: -webkit-box; overflow: hidden; min-height: calc(1.5em * 2); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
     .fd-page-nav-description-empty { visibility: hidden; }
     .fd-below-title-block { display: flex; flex-direction: column; align-items: flex-start; gap: 0.625rem; margin: 0 0 1.25rem; }
+    .fd-page-actions { display: flex; width: 100%; align-items: center; gap: 0.5rem; }
+    .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
     .fd-below-title-block .fd-page-actions { margin: 0; }
-    .fd-below-title-block .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
     .fd-page-meta { display: inline-flex; align-items: center; gap: 0.375rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.8125rem; line-height: 1.5; }
     .fd-page-meta-dot { color: color-mix(in srgb, var(--color-fd-muted-foreground, hsl(0 0% 55%)) 60%, transparent); }
     .fd-last-updated-inline, .fd-last-updated-footer { color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; letter-spacing: 0.03em; line-height: 1.5; text-transform: uppercase; }
-    .fd-page-action-btn { border-radius: 0 !important; box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono) !important; font-size: 0.75rem; letter-spacing: 0.03em; text-transform: uppercase; }
-    .fd-page-action-btn svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .fd-page-action-btn .fd-page-action-check-icon { display: none; }
-    .fd-page-action-btn[data-copied="true"] .fd-page-action-copy-icon { display: none; }
-    .fd-page-action-btn[data-copied="true"] .fd-page-action-check-icon { display: block; }
+    #nd-docs-layout .fd-page-action-btn { display: inline-flex; min-height: 2.125rem; align-items: center; justify-content: center; gap: 0.5rem; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, var(--color-fd-background, #000)); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); padding: 0 0.75rem; box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)); cursor: pointer; font-family: var(--fd-docs-font-mono) !important; font-size: 0.75rem; font-weight: 500; letter-spacing: 0.03em; line-height: 1; text-transform: uppercase; transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease; appearance: none; }
+    #nd-docs-layout .fd-page-action-btn:hover { border-color: color-mix(in srgb, var(--color-fd-foreground, #fff) 22%, transparent); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 8%, var(--color-fd-background, #000)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    #nd-docs-layout .fd-page-action-btn:disabled { cursor: wait; opacity: 0.72; }
+    #nd-docs-layout .fd-page-action-btn svg { width: 14px; height: 14px; flex: 0 0 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+    #nd-docs-layout .fd-page-action-btn .fd-page-action-check-icon { display: none; }
+    #nd-docs-layout .fd-page-action-btn[data-copied="true"] .fd-page-action-copy-icon { display: none; }
+    #nd-docs-layout .fd-page-action-btn[data-copied="true"] .fd-page-action-check-icon { display: block; }
     .fd-page-footer { display: flex; align-items: center; gap: 0.75rem 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1rem; }
     .fd-page-footer .fd-last-updated-footer { margin-left: auto; }
-    @media (max-width: 1020px) { #nd-docs-layout { display: block; } .topbar { grid-column: auto; } aside#nd-sidebar { position: relative; height: auto; max-height: 48vh; border-right: 0; border-bottom: 1px solid var(--color-fd-border); padding-left: 20px; padding-right: 20px; } aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; } .sidebar-brand, .sidebar-scroll { margin-left: 0; margin-right: 0; } main { padding: 30px 20px 64px; } .fd-toc { display: none; } .prose h1 { font-size: 32px; } }
+    @media (max-width: 1020px) {
+      :root { --fd-mobile-nav-height: 56px; --fd-sidebar-edge: 20px; --fd-sidebar-guide-x: 58px; --fd-sidebar-link-x: 88px; --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); }
+      html { scroll-padding-top: calc(var(--fd-mobile-nav-height, 56px) + 24px); }
+      body { overflow-x: hidden; }
+      #nd-docs-layout { display: block !important; min-height: 100dvh; border-top: 0; padding-top: var(--fd-mobile-nav-height, 56px); }
+      .mobile-topbar { position: fixed; inset: 0 0 auto 0; z-index: 80; display: flex; height: var(--fd-mobile-nav-height, 56px); align-items: stretch; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 94%, transparent); backdrop-filter: blur(12px); }
+      .mobile-topbar a:hover, .fd-mobile-nav-btn:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+      .topbar { display: none !important; }
+      .sidebar-backdrop { position: fixed; inset: 0; z-index: 70; display: block; background: color-mix(in srgb, var(--color-fd-background, #000) 72%, transparent); opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
+      #nd-docs-layout[data-sidebar-open="true"] .sidebar-backdrop { opacity: 1; pointer-events: auto; }
+      aside#nd-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 90; width: min(342px, calc(100vw - 42px)); height: 100dvh; max-height: none; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 0; transform: translate3d(-100%, 0, 0); transition: transform 180ms ease; will-change: transform; }
+      #nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar { transform: translate3d(0, 0, 0); }
+      aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
+      .sidebar-brand { min-height: 38px; margin-top: -2px; }
+      main { padding: 34px 20px 64px; }
+      article#nd-page { width: 100%; margin: 0; }
+      #nd-docs-layout .fd-toc { display: none !important; }
+      .prose h1 { font-size: 32px; line-height: 1.16; letter-spacing: 0; }
+      .prose h2 { margin-top: 34px; padding-top: 22px; font-size: 23px; }
+      #nd-docs-layout figure.shiki.code-block pre, .code-block pre { padding: 16px 14px !important; font-size: 12.5px; }
+      .fd-page-nav { grid-template-columns: 1fr !important; }
+      .fd-page-nav-next { align-items: flex-start; text-align: left; }
+      .fd-page-footer { align-items: flex-start; flex-direction: column; }
+      .fd-page-footer .fd-last-updated-footer { margin-left: 0; }
+    }
 ${farmDocsPixelBorderCss}
   `;
 }
@@ -1629,12 +1729,22 @@ function renderPixelDocsHtml(
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
   <link rel="icon" href="${FARM_DOCS_FAVICON}">
+  <link rel="preload" href="${GEIST_SANS_FONT_URL}" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="${GEIST_MONO_FONT_URL}" as="font" type="font/woff2" crossorigin>
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   <style>${themeCss}
 ${renderFarmDocsBridgeCss(docs)}</style>
 </head>
 <body>
   <div id="nd-docs-layout" class="grid">
+    <header class="mobile-topbar" aria-label="Mobile docs navigation">
+      <button class="fd-mobile-nav-btn" type="button" data-sidebar-toggle aria-controls="nd-sidebar" aria-expanded="false" aria-label="Open menu">
+        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+      </button>
+      <a class="mobile-topbar-brand" href="/">Farm.js</a>
+      <a class="mobile-topbar-link" href="/llms.txt">llms.txt</a>
+    </header>
+    <div class="sidebar-backdrop" data-sidebar-backdrop></div>
     <aside id="nd-sidebar">
       <div class="sidebar-brand">
         <a href="/">${escapeHtml(navTitle)}</a>
@@ -1648,7 +1758,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     </header>
     <main>
       <article id="nd-page" class="prose">
-        <p class="page-kicker">DOCUMENTATION / ${escapeHtml((page.slug || "overview").toUpperCase())}</p>
+        ${renderPixelBreadcrumb(page, docs)}
 ${renderMarkdownHtmlWithTitleMeta(page, docs)}
         ${renderPixelPageFooter(page, docs)}
         ${renderPixelPageNav(pages, page.href, docs)}
