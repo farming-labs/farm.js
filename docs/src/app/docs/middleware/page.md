@@ -23,6 +23,19 @@ export default middleware().use(async (ctx, next) => {
 });
 ```
 
+Dynamic route segments from the middleware file path are available on `ctx.params`.
+
+**src/app/users/[id]/middleware.ts**
+
+```ts
+import { middleware } from "@farmjs/core/middleware";
+
+export default middleware().use(async (ctx, next) => {
+  ctx.data.set("user.id", ctx.params.id);
+  await next();
+});
+```
+
 ## Config middleware
 
 Use farm.config.ts when middleware behavior should be described globally. This is useful for cross-cutting behavior that should be visible from the project control plane, while route middleware files can stay close to the pages or API routes they protect.
