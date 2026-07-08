@@ -1,0 +1,18 @@
+{
+  "name": "farm-preview-gateway-vercel",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "corepack pnpm --filter @farmjs/preview-gateway build",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farmjs/preview-gateway": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}

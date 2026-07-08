@@ -19,6 +19,16 @@ export {
   type PreviewTarget,
   type PreviewTunnelPlan,
 } from "./preview";
+export {
+  createGatewaySession,
+  createPreviewGatewayPlan,
+  forwardGatewayRequest,
+  runPreviewGateway,
+  type PreviewGatewayPlan,
+  type PreviewGatewayRequest,
+  type PreviewGatewayResponse,
+  type PreviewGatewaySession,
+} from "./preview-gateway";
 export { generateFarmArtifacts } from "./generate";
 export {
   createFrameworkMigrationPlan,

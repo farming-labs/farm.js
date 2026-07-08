@@ -1,6 +1,13 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadConfig, logger } from "@farmjs/core";
+import {
+  createPreviewGatewayPlan,
+  formatGatewayPlan,
+  runPreviewGateway,
+  type PreviewGatewayPlan,
+  type PreviewGatewaySession,
+} from "./preview-gateway";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -8,10 +15,12 @@ export interface PreviewFarmOptions {
   port?: number | string;
   host?: string;
   url?: string;
+  gatewayUrl?: string;
   name?: string;
   dryRun?: boolean;
   noProbe?: boolean;
   timeoutMs?: number;
+  provider?: "farm" | "local";
 }
 
 export interface PreviewTarget {
@@ -32,8 +41,9 @@ export interface PreviewTunnelPlan {
 
 export interface PreviewFarmResult {
   target: PreviewTarget;
-  plan: PreviewTunnelPlan;
+  plan: PreviewTunnelPlan | PreviewGatewayPlan;
   publicUrl?: string;
+  session?: PreviewGatewaySession;
 }
 
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
@@ -41,10 +51,28 @@ const PREVIEW_URL_PATTERN = /https:\/\/[^\s"')\]}]+/g;
 
 export async function previewFarm(options: PreviewFarmOptions = {}): Promise<PreviewFarmResult> {
   const target = await resolvePreviewTarget(options);
-  const plan = createPreviewTunnelPlan(target, options);
 
   logger.info("Creating public preview for the running app...");
   logger.info(`Local:  ${target.localUrl}`);
+
+  if (shouldUseManagedGateway(options)) {
+    const plan = createPreviewGatewayPlan(target, options);
+
+    if (options.dryRun) {
+      logger.info(formatGatewayPlan(plan));
+      logger.success("Preview gateway dry run completed.");
+      return { target, plan };
+    }
+
+    logger.info(`Gateway: ${plan.gatewayUrl}`);
+    logger.info("Opening Farm preview gateway session...");
+    const session = await runPreviewGateway(plan, {
+      timeoutMs: options.timeoutMs,
+    });
+    return { target, plan, publicUrl: session.publicUrl, session };
+  }
+
+  const plan = createPreviewTunnelPlan(target, options);
 
   if (options.dryRun) {
     logger.info(`Command: ${formatCommand(plan)}`);
@@ -55,6 +83,16 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
   logger.info("Opening public tunnel...");
   const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
   return { target, plan, publicUrl };
+}
+
+function shouldUseManagedGateway(options: PreviewFarmOptions) {
+  if (options.provider === "farm" || process.env.FARM_PREVIEW_PROVIDER === "farm") {
+    return true;
+  }
+  if (options.provider === "local" || process.env.FARM_PREVIEW_PROVIDER === "local") {
+    return false;
+  }
+  return !process.env.FARM_PREVIEW_TUNNEL_COMMAND;
 }
 
 export async function resolvePreviewTarget(
@@ -193,6 +231,7 @@ export function parsePreviewPublicUrl(output: string, preferredHostname?: string
       const host = new URL(value).hostname;
       return (
         host.endsWith(".trycloudflare.com") ||
+        host.endsWith(".loca.lt") ||
         host.endsWith(".localtunnel.me") ||
         host.endsWith(".ngrok.app") ||
         host.endsWith(".ngrok-free.app") ||

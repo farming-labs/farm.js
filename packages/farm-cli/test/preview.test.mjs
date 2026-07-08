@@ -9,7 +9,9 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const {
+  createPreviewGatewayPlan,
   createPreviewTunnelPlan,
+  forwardGatewayRequest,
   parsePreviewPublicUrl,
   resolvePreviewTarget,
 } = require("../dist/index.js");
@@ -28,6 +30,10 @@ test("parses public preview urls from tunnel output", () => {
       "stripe-demo.preview.farming-labs.dev",
     ),
     "https://stripe-demo.preview.farming-labs.dev",
+  );
+  assert.equal(
+    parsePreviewPublicUrl("docs: https://example.com\nready: https://stripe-demo.loca.lt"),
+    "https://stripe-demo.loca.lt",
   );
 });
 
@@ -78,6 +84,108 @@ test("creates a tunnel plan from the preview command template", () => {
   }
 });
 
+test("creates a managed gateway preview plan by default", () => {
+  const previousGateway = process.env.FARM_PREVIEW_GATEWAY_URL;
+  const previousDomain = process.env.FARM_PREVIEW_DOMAIN;
+  process.env.FARM_PREVIEW_GATEWAY_URL = "https://preview.farming-labs.dev";
+  process.env.FARM_PREVIEW_DOMAIN = "preview.farming-labs.dev";
+
+  try {
+    const plan = createPreviewGatewayPlan(
+      {
+        localUrl: "http://localhost:3000",
+        host: "localhost",
+        port: 3000,
+        source: "port",
+      },
+      {
+        name: "Stripe Webhook",
+      },
+    );
+
+    assert.equal(plan.provider, "farm-gateway");
+    assert.equal(plan.gatewayUrl, "https://preview.farming-labs.dev");
+    assert.equal(plan.requestedPublicUrl, "https://stripe-webhook.preview.farming-labs.dev");
+  } finally {
+    restoreEnv("FARM_PREVIEW_GATEWAY_URL", previousGateway);
+    restoreEnv("FARM_PREVIEW_DOMAIN", previousDomain);
+  }
+});
+
+test("forwards a gateway request to the local target", async () => {
+  const server = await createTestServer((req, res) => {
+    res.statusCode = 201;
+    res.setHeader("content-type", "application/json");
+    res.end(JSON.stringify({ method: req.method, url: req.url }));
+  });
+
+  try {
+    const response = await forwardGatewayRequest(
+      {
+        localUrl: `http://localhost:${server.port}`,
+        host: "localhost",
+        port: server.port,
+        source: "port",
+      },
+      {
+        id: "req_1",
+        method: "POST",
+        path: "/api/hello?from=gateway",
+        headers: {
+          "content-type": "text/plain",
+        },
+        body: Buffer.from("hello").toString("base64"),
+        encoding: "base64",
+      },
+    );
+
+    assert.equal(response.status, 201);
+    assert.equal(response.encoding, "base64");
+    assert.deepEqual(JSON.parse(Buffer.from(response.body, "base64").toString()), {
+      method: "POST",
+      url: "/api/hello?from=gateway",
+    });
+  } finally {
+    await server.close();
+  }
+});
+
+test("runs farm preview dry-run through the managed gateway by default", async () => {
+  const server = await createTestServer();
+
+  try {
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        cliBin,
+        "preview",
+        "--port",
+        String(server.port),
+        "--name",
+        "checkout-test",
+        "--gateway",
+        "https://preview.farming-labs.dev",
+        "--dry-run",
+      ],
+      {
+        env: {
+          ...process.env,
+          FARM_PREVIEW_PROVIDER: "",
+          FARM_PREVIEW_TUNNEL_COMMAND: "",
+        },
+      },
+    );
+
+    assert.match(stdout, /Creating public preview/);
+    assert.match(stdout, /Gateway: https:\/\/preview\.farming-labs\.dev/);
+    assert.match(stdout, new RegExp(`Local:\\s+http://localhost:${server.port}`));
+    assert.match(stdout, /checkout-test\.preview\.farming-labs\.dev/);
+    assert.match(stdout, /gateway dry run completed/i);
+  } finally {
+    await server.close();
+  }
+});
+
 test("runs farm preview dry-run through the CLI", async () => {
   const server = await createTestServer();
 
@@ -112,11 +220,11 @@ test("runs farm preview dry-run through the CLI", async () => {
   }
 });
 
-async function createTestServer() {
-  const server = createServer((_req, res) => {
+async function createTestServer(handler) {
+  const server = createServer(handler || ((_req, res) => {
     res.statusCode = 200;
     res.end("ok");
-  });
+  }));
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);

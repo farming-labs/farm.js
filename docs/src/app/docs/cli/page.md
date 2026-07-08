@@ -101,11 +101,12 @@ Commands run sequentially and stop on the first failure. `--dry-run` prints the 
 farm preview
 farm preview --port 3000
 farm preview --name stripe-webhook
+farm preview --gateway https://preview.farming-labs.dev
 ```
 
 `farm preview` exposes the app that is already running locally. It does not build or deploy the app. Use it when a teammate, webhook provider, OAuth provider, mobile device, or browser automation tool needs a public URL for the current `farm dev` session.
 
-Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. The command keeps forwarding traffic until you press Ctrl+C.
+Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. By default it connects to the Farm Preview gateway and returns a URL such as `https://stripe-webhook.preview.farming-labs.dev`. The command keeps forwarding traffic until you press Ctrl+C.
 
 ## Build
 

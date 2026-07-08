@@ -90,7 +90,9 @@ program
   .option("-p, --port <port>", "Port of the running local app")
   .option("--host <host>", "Host of the running local app", "localhost")
   .option("--url <url>", "Full local URL to expose")
-  .option("--name <name>", "Readable preview name to request when supported")
+  .option("--gateway <url>", "Farm Preview gateway URL", process.env.FARM_PREVIEW_GATEWAY_URL)
+  .option("--provider <provider>", "Preview provider to use (farm, local)", process.env.FARM_PREVIEW_PROVIDER)
+  .option("--name <name>", "Readable preview URL name")
   .option("--dry-run", "Validate target detection and print the tunnel command without opening it")
   .option("--no-probe", "Skip local reachability check when --port is provided")
   .action(async (options) => {
@@ -102,9 +104,11 @@ program
         port: options.port,
         host: options.host,
         url: options.url,
+        gatewayUrl: options.gateway,
         name: options.name,
         dryRun: options.dryRun,
         noProbe: options.noProbe,
+        provider: options.provider,
       });
     } catch (error) {
       console.error("Failed to create preview:", error);
