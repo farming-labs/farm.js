@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -9,7 +9,8 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { migrateFarm } = require("../dist/index.js");
+const { createFrameworkMigrationPlan, inspectFrameworkMigrations, migrateFarm } =
+  require("../dist/index.js");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const cliBin = path.resolve(testDir, "../bin/farm.js");
@@ -99,11 +100,147 @@ test("runs farm migrate through the CLI", async () => {
   }
 });
 
-async function createTempProject() {
+test("inspects framework migration sources", async () => {
+  const root = await createTempProject({
+    dependencies: {
+      next: "latest",
+      "@tanstack/react-router": "latest",
+    },
+  });
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+    await mkdir(path.join(root, "src", "routes"), { recursive: true });
+
+    const detections = await inspectFrameworkMigrations(root);
+
+    assert.ok(detections.some((entry) => entry.source === "next"));
+    assert.ok(detections.some((entry) => entry.source === "tanstack"));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("runs framework migration inspection through the CLI", async () => {
+  const root = await createTempProject({
+    dependencies: {
+      next: "latest",
+    },
+  });
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      cliBin,
+      "migrate",
+      "inspect",
+      "--root",
+      root,
+    ]);
+
+    assert.match(stdout, /next: \d+% confidence/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prepares and applies a code-first Next app migration", async () => {
+  const root = await createTempProject({
+    scripts: {
+      dev: "next dev",
+      build: "next build",
+      start: "next start",
+    },
+    dependencies: {
+      next: "latest",
+      react: "latest",
+      "react-dom": "latest",
+    },
+  });
+
+  try {
+    await mkdir(path.join(root, "app", "about"), { recursive: true });
+    await writeFile(
+      path.join(root, "app", "about", "page.tsx"),
+      `import FarmLink from "next/link";
+
+export default function AboutPage() {
+  return <FarmLink href="/">Home</FarmLink>;
+}
+`,
+      "utf8",
+    );
+
+    const dryRunPlan = await createFrameworkMigrationPlan(root, "next");
+    assert.ok(dryRunPlan.operations.some((operation) => operation.description.includes("Copy Next")));
+    await assert.rejects(() => readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8"));
+
+    await migrateFarm({ root, source: "next", write: true });
+
+    const page = await readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8");
+    assert.match(page, /import \{ Link as FarmLink \} from "@farmjs\/core\/client";/);
+    assert.match(await readFile(path.join(root, "farm.config.ts"), "utf8"), /defineFarmConfig/);
+
+    const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(packageJson.scripts.dev, "farm dev");
+    assert.equal(packageJson.scripts.build, "farm build");
+    assert.equal(packageJson.scripts.start, "node .output/server/index.mjs");
+    assert.equal(packageJson.dependencies["@farmjs/core"], "latest");
+    assert.equal(packageJson.devDependencies["@farmjs/cli"], "latest");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("applies a simple TanStack file-route migration", async () => {
+  const root = await createTempProject({
+    scripts: {
+      dev: "vite",
+      build: "vite build",
+    },
+    dependencies: {
+      "@tanstack/react-router": "latest",
+      react: "latest",
+      "react-dom": "latest",
+    },
+  });
+
+  try {
+    await mkdir(path.join(root, "src", "routes"), { recursive: true });
+    await writeFile(
+      path.join(root, "src", "routes", "posts.$postId.tsx"),
+      `import { createFileRoute } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/posts/$postId")({
+  component: PostPage,
+});
+
+function PostPage() {
+  return <h1>Post</h1>;
+}
+`,
+      "utf8",
+    );
+
+    await migrateFarm({ root, source: "tanstack", write: true });
+
+    const page = await readFile(path.join(root, "src", "app", "posts", "[postId]", "page.tsx"), "utf8");
+    assert.match(page, /export default PostPage;/);
+
+    const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    assert.equal(packageJson.scripts.dev, "farm dev");
+    assert.equal(packageJson.scripts.build, "farm build");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+async function createTempProject(packageJson = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-migrate-"));
   await writeFile(
     path.join(root, "package.json"),
-    JSON.stringify({ type: "module", dependencies: {} }, null, 2),
+    JSON.stringify({ type: "module", dependencies: {}, ...packageJson }, null, 2),
     "utf8",
   );
   return root;

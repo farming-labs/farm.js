@@ -10,4 +10,12 @@ export {
 export { buildFarm } from "./build";
 export { deployFarm } from "./deploy";
 export { generateFarmArtifacts } from "./generate";
-export { migrateFarm } from "./migrate";
+export {
+  createFrameworkMigrationPlan,
+  inspectFrameworkMigrations,
+  migrateFarm,
+  type FarmFrameworkMigrationSource,
+  type FrameworkDetection,
+  type FrameworkMigrationOperation,
+  type FrameworkMigrationPlan,
+} from "./migrate";

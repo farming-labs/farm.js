@@ -83,13 +83,15 @@ program
   });
 
 program
-  .command("migrate")
-  .description("Run one-shot migration commands from farm.config.ts")
+  .command("migrate [source]")
+  .description("Run one-shot migration commands or migrate from another framework")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-c, --config <config>", "Path to farm config file")
   .option("--command <command>", "Migration command to run; can be repeated", collectOption, [])
   .option("--dry-run", "Print migration commands without running them")
-  .action(async (options) => {
+  .option("--write", "Apply framework migration changes; framework migrations are dry-run by default")
+  .option("--force", "Overwrite existing files during framework migrations")
+  .action(async (source, options) => {
     try {
       const { migrateFarm } = require("../dist/index.js");
       await migrateFarm({
@@ -97,6 +99,9 @@ program
         configPath: options.config,
         commands: options.command,
         dryRun: options.dryRun,
+        source,
+        write: options.write,
+        force: options.force,
       });
     } catch (error) {
       console.error("Failed to run migrations:", error);
