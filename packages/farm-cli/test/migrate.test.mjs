@@ -9,7 +9,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { createFrameworkMigrationPlan, inspectFrameworkMigrations, migrateFarm } =
+const { createFrameworkMigrationDiff, createFrameworkMigrationPlan, inspectFrameworkMigrations, migrateFarm } =
   require("../dist/index.js");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -174,6 +174,9 @@ export default function AboutPage() {
 
     const dryRunPlan = await createFrameworkMigrationPlan(root, "next");
     assert.ok(dryRunPlan.operations.some((operation) => operation.description.includes("Copy Next")));
+    const diff = await createFrameworkMigrationDiff(dryRunPlan, { maxLinesPerFile: 80 });
+    assert.match(diff, /\+\+\+ src\/app\/about\/page\.tsx/);
+    assert.match(diff, /\+import \{ Link as FarmLink \} from "@farmjs\/core\/client";/);
     await assert.rejects(() => readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8"));
 
     await migrateFarm({ root, source: "next", write: true });
@@ -188,6 +191,46 @@ export default function AboutPage() {
     assert.equal(packageJson.scripts.start, "node .output/server/index.mjs");
     assert.equal(packageJson.dependencies["@farmjs/core"], "latest");
     assert.equal(packageJson.devDependencies["@farmjs/cli"], "latest");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prints framework migration diffs through the CLI", async () => {
+  const root = await createTempProject({
+    dependencies: {
+      next: "latest",
+      react: "latest",
+      "react-dom": "latest",
+    },
+  });
+
+  try {
+    await mkdir(path.join(root, "app"), { recursive: true });
+    await writeFile(
+      path.join(root, "app", "page.tsx"),
+      `import Link from "next/link";
+
+export default function Page() {
+  return <Link href="/docs">Docs</Link>;
+}
+`,
+      "utf8",
+    );
+
+    const { stdout } = await execFileAsync(process.execPath, [
+      cliBin,
+      "migrate",
+      "next",
+      "--root",
+      root,
+      "--diff",
+    ]);
+
+    assert.match(stdout, /Diff:/);
+    assert.match(stdout, /\+\+\+ src\/app\/page\.tsx/);
+    assert.match(stdout, /\+import \{ Link \} from "@farmjs\/core\/client";/);
+    await assert.rejects(() => readFile(path.join(root, "src", "app", "page.tsx"), "utf8"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

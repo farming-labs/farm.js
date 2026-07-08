@@ -11,10 +11,12 @@ export { buildFarm } from "./build";
 export { deployFarm } from "./deploy";
 export { generateFarmArtifacts } from "./generate";
 export {
+  createFrameworkMigrationDiff,
   createFrameworkMigrationPlan,
   inspectFrameworkMigrations,
   migrateFarm,
   type FarmFrameworkMigrationSource,
+  type FrameworkMigrationDiffOptions,
   type FrameworkDetection,
   type FrameworkMigrationOperation,
   type FrameworkMigrationPlan,

@@ -21,6 +21,7 @@ export interface MigrateFarmOptions {
   configPath?: string;
   commands?: string[];
   dryRun?: boolean;
+  diff?: boolean;
   source?: FarmFrameworkMigrationSource | "inspect";
   write?: boolean;
   force?: boolean;
@@ -63,6 +64,11 @@ export interface FrameworkMigrationPlan {
   manual: string[];
 }
 
+export interface FrameworkMigrationDiffOptions {
+  contextLines?: number;
+  maxLinesPerFile?: number;
+}
+
 export async function migrateFarm(options: MigrateFarmOptions = {}) {
   const root = path.resolve(options.root || process.cwd());
 
@@ -85,6 +91,9 @@ export async function migrateFarm(options: MigrateFarmOptions = {}) {
     printFrameworkMigrationPlan(plan, Boolean(options.write && !options.dryRun));
 
     if (!options.write || options.dryRun) {
+      if (options.diff) {
+        await printFrameworkMigrationDiff(plan);
+      }
       logger.info(`Dry run only. Re-run with "farm migrate ${options.source} --write" to apply.`);
       return plan;
     }
@@ -491,6 +500,36 @@ async function applyFrameworkMigrationPlan(plan: FrameworkMigrationPlan) {
   }
 }
 
+export async function createFrameworkMigrationDiff(
+  plan: FrameworkMigrationPlan,
+  options: FrameworkMigrationDiffOptions = {},
+) {
+  const chunks: string[] = [];
+  const contextLines = options.contextLines ?? 3;
+  const maxLinesPerFile = options.maxLinesPerFile ?? 120;
+
+  for (const operation of plan.operations) {
+    if (operation.skipped || operation.content === undefined) continue;
+
+    const exists = existsSync(operation.path);
+    const before = exists ? await readFile(operation.path, "utf8") : "";
+    if (before === operation.content) continue;
+
+    chunks.push(
+      createFileDiff({
+        before,
+        after: operation.content,
+        exists,
+        maxLines: maxLinesPerFile,
+        path: toPosix(path.relative(plan.root, operation.path)),
+        contextLines,
+      }),
+    );
+  }
+
+  return chunks.filter(Boolean).join("\n");
+}
+
 function printFrameworkInspection(root: string, detections: FrameworkDetection[]) {
   logger.info(`Migration inspection for ${root}`);
 
@@ -504,6 +543,19 @@ function printFrameworkInspection(root: string, detections: FrameworkDetection[]
     for (const evidence of detection.evidence) {
       logger.info(`  - ${evidence}`);
     }
+  }
+}
+
+async function printFrameworkMigrationDiff(plan: FrameworkMigrationPlan) {
+  const diff = await createFrameworkMigrationDiff(plan);
+  if (!diff.trim()) {
+    logger.info("Diff: no file content changes to show.");
+    return;
+  }
+
+  logger.info("Diff:");
+  for (const line of diff.split("\n")) {
+    logger.info(line);
   }
 }
 
@@ -547,6 +599,75 @@ function printFrameworkMigrationPlan(plan: FrameworkMigrationPlan, willWrite: bo
       logger.info(`  - ${note}`);
     }
   }
+}
+
+function createFileDiff(options: {
+  path: string;
+  before: string;
+  after: string;
+  exists: boolean;
+  contextLines: number;
+  maxLines: number;
+}) {
+  const beforeLines = splitDiffLines(options.before);
+  const afterLines = splitDiffLines(options.after);
+  const header = [`--- ${options.exists ? options.path : "/dev/null"}`, `+++ ${options.path}`];
+
+  if (!options.exists) {
+    return limitDiffLines([...header, ...afterLines.map((line) => `+${line}`)], options.maxLines).join(
+      "\n",
+    );
+  }
+
+  let prefix = 0;
+  while (
+    prefix < beforeLines.length &&
+    prefix < afterLines.length &&
+    beforeLines[prefix] === afterLines[prefix]
+  ) {
+    prefix++;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < beforeLines.length - prefix &&
+    suffix < afterLines.length - prefix &&
+    beforeLines[beforeLines.length - suffix - 1] === afterLines[afterLines.length - suffix - 1]
+  ) {
+    suffix++;
+  }
+
+  const beforeEnd = beforeLines.length - suffix;
+  const afterEnd = afterLines.length - suffix;
+  const contextStart = Math.max(0, prefix - options.contextLines);
+  const contextEnd = Math.min(beforeLines.length, beforeEnd + options.contextLines);
+
+  const lines = [
+    ...header,
+    "@@",
+    ...beforeLines.slice(contextStart, prefix).map((line) => ` ${line}`),
+    ...beforeLines.slice(prefix, beforeEnd).map((line) => `-${line}`),
+    ...afterLines.slice(prefix, afterEnd).map((line) => `+${line}`),
+    ...beforeLines.slice(beforeEnd, contextEnd).map((line) => ` ${line}`),
+  ];
+
+  return limitDiffLines(lines, options.maxLines).join("\n");
+}
+
+function splitDiffLines(value: string) {
+  const lines = value.replace(/\r\n/g, "\n").split("\n");
+  if (lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+  return lines;
+}
+
+function limitDiffLines(lines: string[], maxLines: number) {
+  if (lines.length <= maxLines) return lines;
+  return [
+    ...lines.slice(0, maxLines),
+    `... diff truncated (${lines.length - maxLines} more line${lines.length - maxLines === 1 ? "" : "s"})`,
+  ];
 }
 
 function detectNext(root: string, packageJson: any): FrameworkDetection {
