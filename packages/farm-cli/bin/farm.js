@@ -90,10 +90,10 @@ program
   .option("-p, --port <port>", "Port of the running local app")
   .option("--host <host>", "Host of the running local app", "localhost")
   .option("--url <url>", "Full local URL to expose")
-  .option("--gateway <url>", "Farm Preview gateway URL", process.env.FARM_PREVIEW_GATEWAY_URL)
-  .option("--provider <provider>", "Preview provider to use (farm, local)", process.env.FARM_PREVIEW_PROVIDER)
+  .option("--gateway <url>", "Advanced: override the hosted Farm Preview gateway URL", process.env.FARM_PREVIEW_GATEWAY_URL)
+  .option("--provider <provider>", "Advanced: preview provider to use (farm, local)", process.env.FARM_PREVIEW_PROVIDER)
   .option("--name <name>", "Readable preview URL name")
-  .option("--dry-run", "Validate target detection and print the tunnel command without opening it")
+  .option("--dry-run", "Validate target detection and print the preview plan without opening it")
   .option("--no-probe", "Skip local reachability check when --port is provided")
   .action(async (options) => {
     try {

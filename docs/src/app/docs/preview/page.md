@@ -13,7 +13,7 @@ farm dev
 farm preview
 ```
 
-`farm preview` does not build or deploy the app. It is an instant tunnel for the current local server, so it works well for Stripe webhooks, auth callbacks, mobile device testing, design review, and letting another person try the app without pushing a deployment.
+`farm preview` does not build or deploy the app. It connects the current local server to the hosted Farm Preview gateway, so it works well for Stripe webhooks, auth callbacks, mobile device testing, design review, and letting another person try the app without pushing a deployment.
 
 ## Usage
 
@@ -43,50 +43,29 @@ Forwarding requests until Ctrl+C.
 | `--port <port>` | Expose a specific local port. |
 | `--host <host>` | Expose a specific local host. Defaults to `localhost`. |
 | `--url <url>` | Expose a full local URL. |
-| `--gateway <url>` | Use a specific Farm Preview gateway. Defaults to `https://preview.farming-labs.dev`. |
-| `--provider <provider>` | Use `farm` for the managed gateway or `local` for local tunnel fallback. |
 | `--name <name>` | Request a readable preview URL name. |
-| `--dry-run` | Validate detection and print the gateway or tunnel plan without opening it. |
+| `--dry-run` | Validate detection and print the preview plan without opening it. |
 | `--no-probe` | Skip local reachability checks when `--port` is provided. |
+| `--gateway <url>` | Advanced: use a different Farm Preview gateway. |
+| `--provider <provider>` | Advanced: use `farm` for the hosted gateway or `local` for a custom local provider. |
 
-## Vercel Gateway
+## Hosted Gateway
 
-The default provider is the Farm Preview gateway. The gateway is a small Vercel app that you deploy to `preview.farming-labs.dev` and `*.preview.farming-labs.dev`.
+The default gateway is operated by Farming Labs at `https://preview.farming-labs.dev`. App developers do not need a Vercel account, DNS changes, Redis setup, `cloudflared`, ngrok, or another tunnel binary.
 
 ```bash
-cd examples/preview-gateway
-vercel --prod
+farm preview --name stripe-webhook
 ```
 
-Attach both domains to the Vercel project:
+That returns a URL like:
 
 ```txt
-preview.farming-labs.dev
-*.preview.farming-labs.dev
+https://stripe-webhook.preview.farming-labs.dev
 ```
 
-For production, configure a shared Redis-compatible REST store so every Vercel function invocation sees the same sessions and queued requests:
+The hosted gateway owns the wildcard domain, TLS, Vercel deployment, session store, and request relay. The local CLI only opens outbound HTTPS requests to that gateway and forwards traffic to the local app.
 
-```txt
-UPSTASH_REDIS_REST_URL
-UPSTASH_REDIS_REST_TOKEN
-```
-
-or:
-
-```txt
-KV_REST_API_URL
-KV_REST_API_TOKEN
-```
-
-Set the gateway env:
-
-```txt
-FARM_PREVIEW_DOMAIN=preview.farming-labs.dev
-FARM_PREVIEW_GATEWAY_URL=https://preview.farming-labs.dev
-```
-
-The CLI sends outbound HTTPS polling requests to the gateway, so developers do not need `cloudflared`, ngrok, or another tunnel binary installed locally.
+The gateway source lives in `examples/preview-gateway` for Farming Labs maintainers or anyone self-hosting their own gateway. Regular Farm apps do not need to copy or deploy it.
 
 ## Custom Providers
 

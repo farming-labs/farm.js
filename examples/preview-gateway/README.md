@@ -2,6 +2,8 @@
 
 This is the Vercel gateway behind `farm preview`.
 
+This example is for Farming Labs maintainers or teams self-hosting their own gateway. Regular Farm app developers do not need to copy, deploy, or configure this app. The default `farm preview` command is backed by the hosted Farming Labs gateway.
+
 It accepts public requests on `*.preview.farming-labs.dev`, hands them to the local `farm preview` CLI over outbound HTTPS polling, and returns the local app response to the public caller. No `cloudflared`, ngrok, or local tunnel binary is required on the developer machine.
 
 ## Deploy
