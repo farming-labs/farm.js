@@ -56,7 +56,7 @@ Cache, PPR, observability, and deployment output.
 
 - [Cache and PPR](/docs/cache-ppr): Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation, and static shell caching for PPR pages.
 - [Observability](/docs/observability): Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, storage, cache, PPR, builds, plugins, and errors.
-- [Deployment](/docs/deployment): Build deployable output for Vercel, Cloudflare Pages, Netlify, or Node with Farm's deploy config and Nitro presets.
+- [Deployment](/docs/deployment): Build deployable output with Farm's deploy config and Nitro presets, from first-class targets to custom Nitro output.
 
 ### Content
 
