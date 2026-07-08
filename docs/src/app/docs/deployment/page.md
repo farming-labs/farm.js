@@ -41,6 +41,7 @@ Use `deploy.target` when you want one config file to control the platform output
 | Vercel | `target: "vercel"` | `FARM_DEPLOY_TARGET=vercel farm build` | `farm deploy --vercel --prod` | `.vercel/output` |
 | Cloudflare Pages | `target: "cloudflare"` | `FARM_DEPLOY_TARGET=cloudflare farm build` | `farm deploy --cloudflare` | `.output/public` |
 | Netlify | `target: "netlify"` | `FARM_DEPLOY_TARGET=netlify farm build` | `farm deploy --netlify` | `.output` |
+| Self-hosted Node | `target: "node"` | `FARM_DEPLOY_TARGET=node farm build` | `node .output/server/index.mjs` | `.output` |
 
 **farm.config.ts**
 
@@ -71,6 +72,8 @@ export default defineFarmConfig({
     "build:vercel": "FARM_DEPLOY_TARGET=vercel farm build",
     "build:cloudflare": "FARM_DEPLOY_TARGET=cloudflare farm build",
     "build:netlify": "FARM_DEPLOY_TARGET=netlify farm build",
+    "build:self-host": "FARM_DEPLOY_TARGET=node farm build",
+    "start:self-host": "node .output/server/index.mjs",
     "deploy:vercel": "farm deploy --vercel --prod",
     "deploy:cloudflare": "farm deploy --cloudflare",
     "deploy:netlify": "farm deploy --netlify"
@@ -79,6 +82,43 @@ export default defineFarmConfig({
 ```
 
 The same shape lives in `examples/deployment-presets` so the preset behavior can be tested from a real app.
+
+## Self-host a Farm app
+
+Use `target: "node"` when you want to run the app on your own server, VPS, container, or platform that expects a long-running Node process. Farm builds the app with Nitro's Node server preset.
+
+**farm.config.ts**
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  deploy: {
+    target: "node",
+    output: ".output",
+  },
+});
+```
+
+**package.json**
+
+```json
+{
+  "scripts": {
+    "build": "farm build",
+    "start": "node .output/server/index.mjs"
+  }
+}
+```
+
+Build once, then run the generated server:
+
+```bash
+pnpm build
+HOST=0.0.0.0 PORT=3000 pnpm start
+```
+
+For Docker, copy the app, install production dependencies, run `farm build`, expose the selected port, and start `node .output/server/index.mjs`. For a VPS, run the same start command behind nginx, Caddy, systemd, or a process manager such as PM2. Environment variables should be provided by the host at runtime, not committed into the bundle.
 
 ## Nitro preset pass-through
 
@@ -167,6 +207,7 @@ export default defineFarmConfig({
 | Command | What it expects |
 | --- | --- |
 | `FARM_DEPLOY_TARGET=vercel farm build` | Builds `.vercel/output` for Vercel prebuilt deploys. |
+| `FARM_DEPLOY_TARGET=node farm build` | Builds `.output/server/index.mjs` for self-hosted Node. |
 | `farm build --preset <nitro-preset>` | Builds with any Nitro preset that Nitro can resolve. |
 | `farm deploy --vercel` | Uses `vercel deploy --prebuilt`. |
 | `farm deploy --cloudflare` | Deploys the Cloudflare Pages output with Wrangler. |
@@ -191,6 +232,7 @@ export default defineFarmConfig({
 ## Production checklist
 
 - Run `farm build` before `farm deploy`.
+- For self-hosting, run `node .output/server/index.mjs` behind your process manager or container runtime.
 - Confirm the selected target or preset matches `deploy.target`, `deploy.preset`, or the CLI/env override.
 - For non-first-class platforms, confirm the Nitro preset name and provider deploy command from Nitro's docs.
 - Check generated output exists at the resolved output directory.

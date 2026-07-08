@@ -8,6 +8,7 @@ This example shows how one `farm.config.ts` can build deployable output for Verc
 pnpm build:vercel
 pnpm build:cloudflare
 pnpm build:netlify
+pnpm build:self-host
 NITRO_PRESET=aws-lambda pnpm build:nitro
 ```
 
@@ -20,6 +21,15 @@ pnpm deploy:netlify
 ```
 
 For other Nitro-supported providers, build with `NITRO_PRESET` and then use that provider's own deploy command or CI workflow.
+
+## Self-host locally
+
+```bash
+pnpm build:self-host
+HOST=0.0.0.0 PORT=3000 pnpm start:self-host
+```
+
+This runs the Nitro Node server at `.output/server/index.mjs`, which is the same entrypoint you can put behind Docker, systemd, nginx, Caddy, or a process manager.
 
 ## Environment
 

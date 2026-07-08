@@ -15,6 +15,11 @@ const presetRows = [
     output: ".output",
   },
   {
+    platform: "Self-hosted Node",
+    command: "pnpm build:self-host",
+    output: ".output/server/index.mjs",
+  },
+  {
     platform: "Any Nitro preset",
     command: "NITRO_PRESET=aws-lambda pnpm build:nitro",
     output: ".output",
@@ -29,6 +34,7 @@ export default function DeploymentPresetShowcase() {
       <p style={{ maxWidth: "680px", color: "#404040" }}>
         This example uses <code>FARM_DEPLOY_TARGET</code> to switch between Vercel,
         Cloudflare Pages, and Netlify without adding provider config files to the app.
+        Use <code>FARM_DEPLOY_TARGET=node</code> for a self-hosted Nitro server.
         For advanced platforms, <code>NITRO_PRESET</code> passes a preset through to Nitro.
       </p>
       <table style={{ borderCollapse: "collapse", marginTop: "32px", minWidth: "720px" }}>
