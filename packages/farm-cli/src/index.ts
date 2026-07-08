@@ -9,6 +9,16 @@ export {
 } from "./add-integration";
 export { buildFarm } from "./build";
 export { deployFarm } from "./deploy";
+export {
+  createPreviewTunnelPlan,
+  parsePreviewPublicUrl,
+  previewFarm,
+  resolvePreviewTarget,
+  type PreviewFarmOptions,
+  type PreviewFarmResult,
+  type PreviewTarget,
+  type PreviewTunnelPlan,
+} from "./preview";
 export { generateFarmArtifacts } from "./generate";
 export {
   createFrameworkMigrationPlan,

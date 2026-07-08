@@ -83,6 +83,36 @@ program
   });
 
 program
+  .command("preview")
+  .description("Create a public URL for a running local Farm app")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-p, --port <port>", "Port of the running local app")
+  .option("--host <host>", "Host of the running local app", "localhost")
+  .option("--url <url>", "Full local URL to expose")
+  .option("--name <name>", "Readable preview name to request when supported")
+  .option("--dry-run", "Validate target detection and print the tunnel command without opening it")
+  .option("--no-probe", "Skip local reachability check when --port is provided")
+  .action(async (options) => {
+    try {
+      const { previewFarm } = require("../dist/index.js");
+      await previewFarm({
+        root: options.root,
+        configPath: options.config,
+        port: options.port,
+        host: options.host,
+        url: options.url,
+        name: options.name,
+        dryRun: options.dryRun,
+        noProbe: options.noProbe,
+      });
+    } catch (error) {
+      console.error("Failed to create preview:", error);
+      process.exit(1);
+    }
+  });
+
+program
   .command("migrate [source]")
   .description("Run one-shot migration commands or migrate from another framework")
   .option("-r, --root <root>", "Root directory", process.cwd())
