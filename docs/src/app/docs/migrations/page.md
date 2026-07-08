@@ -15,11 +15,23 @@ Framework migrations are code-first codemods. They inspect the current project, 
 ```bash
 farm migrate inspect
 farm migrate next
+farm migrate next --diff
 farm migrate next --write
 farm migrate tanstack --write
 ```
 
-`farm migrate next` and `farm migrate tanstack` are dry-run by default. They print detected framework evidence, planned file writes, warnings, and the manual review list. Use `--force` only when you intentionally want generated files to overwrite existing Farm files.
+`farm migrate next` and `farm migrate tanstack` are dry-run by default. They print detected framework evidence, planned file writes, warnings, and the manual review list. Add `--diff` when you want to inspect the exact generated file contents before applying the plan. Use `--force` only when you intentionally want generated files to overwrite existing Farm files.
+
+## Dry-run diffs
+
+Use `--diff` to preview the concrete edits Farm would make while still leaving the app untouched.
+
+```bash
+farm migrate next --diff
+farm migrate tanstack --diff
+```
+
+The diff includes generated app files, `farm.config.ts`, root layout scaffolding, and `package.json` script/dependency updates. Skipped files are not diffed because Farm will not write them unless you pass `--force`.
 
 ## Next.js migration
 
@@ -129,6 +141,7 @@ Use command migrations for app-owned database migrations, integration schema set
 
 - Framework migrations never delete source files.
 - Framework migrations default to dry-run and require `--write`.
+- `--diff` prints generated file content during dry-runs without writing to disk.
 - Existing target files are skipped unless `--force` is passed.
 - Package dependencies for the previous framework are left in place until the app owner removes them.
 - The report is part of the feature: unsupported APIs are called out instead of guessed.

@@ -89,6 +89,7 @@ program
   .option("-c, --config <config>", "Path to farm config file")
   .option("--command <command>", "Migration command to run; can be repeated", collectOption, [])
   .option("--dry-run", "Print migration commands without running them")
+  .option("--diff", "Show a compact file diff for framework migration dry-runs")
   .option("--write", "Apply framework migration changes; framework migrations are dry-run by default")
   .option("--force", "Overwrite existing files during framework migrations")
   .action(async (source, options) => {
@@ -99,6 +100,7 @@ program
         configPath: options.config,
         commands: options.command,
         dryRun: options.dryRun,
+        diff: options.diff,
         source,
         write: options.write,
         force: options.force,
