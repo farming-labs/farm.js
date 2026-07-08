@@ -10,6 +10,11 @@ import {
   _runWithMiddlewareData,
 } from "../middleware/server";
 import type { MiddlewareContext, RateLimitStorage } from "../middleware/types";
+import {
+  configureFarmObservability,
+  resetFarmObservability,
+  type FarmEvent,
+} from "../observability";
 import { IncomingMessage, ServerResponse } from "http";
 import { Socket } from "net";
 
@@ -1740,6 +1745,190 @@ describe("Middleware Manager Data Flow", () => {
       "Content-Type": "text/plain",
     });
     expect(res.end).toHaveBeenCalledWith("blocked");
+  });
+
+  it("returns handled when config middleware returns a Response", async () => {
+    const manager = new MiddlewareManager("/tmp", undefined, [
+      {
+        matcher: "/dashboard/:path*",
+        handler(ctx) {
+          return Response.redirect(new URL("/sign-in", ctx.url));
+        },
+      },
+    ]);
+
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(302);
+    expect(res.setHeader).toHaveBeenCalledWith("location", "http://localhost:3000/sign-in");
+  });
+
+  it("returns handled when file middleware returns a Response", async () => {
+    const manager = new MiddlewareManager("/tmp");
+    (manager as any).middleware = [
+      {
+        path: "/dashboard",
+        filePath: "/tmp/app/dashboard/middleware.ts",
+        handlers: [
+          (ctx: MiddlewareContext) => {
+            return new Response(null, {
+              status: 204,
+              headers: {
+                "x-middleware": ctx.pathname,
+              },
+            });
+          },
+        ],
+      },
+    ];
+
+    const req = createMockRequest("/dashboard/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(true);
+    expect(res.statusCode).toBe(204);
+    expect(res.setHeader).toHaveBeenCalledWith("x-middleware", "/dashboard/settings");
+  });
+
+  it("emits middleware observability events", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ onEvent: (event) => events.push(event) });
+
+    try {
+      const manager = new MiddlewareManager("/tmp", undefined, [
+        {
+          matcher: "/dashboard/:path*",
+          async handler(ctx, next) {
+            ctx.data.set("fromConfig", "yes");
+            await next();
+          },
+        },
+      ]);
+
+      (manager as any).middleware = [
+        {
+          path: "/dashboard",
+          filePath: "/tmp/app/dashboard/middleware.ts",
+          handlers: [
+            async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+              ctx.data.set("fromFile", "yes");
+              await next();
+            },
+          ],
+        },
+      ];
+
+      const handled = await manager.execute(
+        createMockRequest("/dashboard/settings"),
+        createMockResponse(),
+      );
+
+      expect(handled).toBe(false);
+      expect(events.map((event) => event.type)).toEqual([
+        "middleware.start",
+        "middleware.complete",
+        "middleware.start",
+        "middleware.complete",
+      ]);
+      expect(events[0]).toMatchObject({
+        route: "/",
+        pathname: "/dashboard/settings",
+        name: "farm.config.ts#middleware-0",
+      });
+      expect(events[1]).toMatchObject({
+        route: "/",
+        pathname: "/dashboard/settings",
+        name: "farm.config.ts#middleware-0",
+        durationMs: expect.any(Number),
+      });
+      expect(events[2]).toMatchObject({
+        route: "/dashboard",
+        pathname: "/dashboard/settings",
+        name: "/tmp/app/dashboard/middleware.ts",
+      });
+    } finally {
+      resetFarmObservability();
+    }
+  });
+
+  it("emits shortCircuit and error middleware observability events", async () => {
+    const events: FarmEvent[] = [];
+    configureFarmObservability({ onEvent: (event) => events.push(event) });
+
+    try {
+      const shortCircuitManager = new MiddlewareManager("/tmp", undefined, [
+        {
+          matcher: "/dashboard/:path*",
+          handler(ctx) {
+            return Response.redirect(new URL("/sign-in", ctx.url));
+          },
+        },
+      ]);
+
+      const handled = await shortCircuitManager.execute(
+        createMockRequest("/dashboard/settings"),
+        createMockResponse(),
+      );
+      expect(handled).toBe(true);
+      expect(events.map((event) => event.type)).toEqual([
+        "middleware.start",
+        "middleware.shortCircuit",
+      ]);
+      expect(events[1]).toMatchObject({
+        status: 302,
+        route: "/",
+      });
+
+      events.length = 0;
+      const error = new Error("middleware failed");
+      const errorManager = new MiddlewareManager("/tmp", undefined, [
+        {
+          matcher: "/dashboard/:path*",
+          handler() {
+            throw error;
+          },
+        },
+      ]);
+
+      await expect(
+        errorManager.execute(createMockRequest("/dashboard/settings"), createMockResponse()),
+      ).rejects.toThrow("middleware failed");
+
+      expect(events.map((event) => event.type)).toEqual(["middleware.start", "middleware.error"]);
+      expect(events[1]).toMatchObject({
+        error,
+        route: "/",
+      });
+    } finally {
+      resetFarmObservability();
+    }
+  });
+
+  it("passes dynamic route params to file middleware", async () => {
+    const manager = new MiddlewareManager("/tmp");
+    (manager as any).middleware = [
+      {
+        path: "/users/[id]",
+        filePath: "/tmp/app/users/[id]/middleware.ts",
+        handlers: [
+          async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+            ctx.data.set("userId", ctx.params.id);
+            await next();
+          },
+        ],
+      },
+    ];
+
+    const req = createMockRequest("/users/42/settings");
+    const res = createMockResponse();
+    const handled = await manager.execute(req, res);
+
+    expect(handled).toBe(false);
+    expect((req as any).__FARM_MIDDLEWARE_DATA__.get("userId")).toBe("42");
   });
 
   it("should share middleware context across middleware chain and expose to page request data", async () => {

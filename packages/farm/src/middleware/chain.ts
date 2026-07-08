@@ -10,6 +10,7 @@ import type {
   RateLimitConfig,
   RateLimitStorage,
   RateLimitStatus,
+  MiddlewareResult,
 } from "./types";
 import { getStorage } from "../storage";
 import type { Storage } from "unstorage";
@@ -70,7 +71,7 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
   const windowMs = parseTimeWindow(config.window);
   const storage = config.storage || defaultRateLimitStorage;
 
-  return async (ctx: MiddlewareContext, next: () => Promise<void>) => {
+  return async (ctx: MiddlewareContext, next) => {
     const key = config.keyGenerator
       ? config.keyGenerator(ctx)
       : `${ctx.request.socket.remoteAddress}:${ctx.pathname}`;
@@ -94,8 +95,7 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
         },
         ttlSeconds,
       );
-      await next();
-      return;
+      return next();
     }
 
     if (current.count >= config.requests) {
@@ -116,7 +116,7 @@ function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction 
 
     current.count++;
     await storage.set(key, current, ttlSeconds);
-    await next();
+    return next();
   };
 }
 
@@ -193,28 +193,37 @@ class MiddlewareChainImpl implements MiddlewareChain {
       const shouldRun = typeof condition === "function" ? condition(ctx) : condition;
 
       if (!shouldRun) {
-        await next();
-        return;
+        return next();
       }
 
       if (typeof fn === "function" && fn.length === 2) {
-        await (fn as MiddlewareFunction)(ctx, next);
+        return (fn as MiddlewareFunction)(ctx, next);
       } else {
         const subChain = middleware(this.basePath);
         (fn as (chain: MiddlewareChain) => void)(subChain);
         const { handlers } = subChain.build();
 
         let index = 0;
-        const executeNext = async (): Promise<void> => {
+        let returnedResponse: Response | undefined;
+        const executeNext = async (): Promise<MiddlewareResult> => {
           if (index < handlers.length) {
             const handler = handlers[index++];
-            await handler(ctx, executeNext);
+            const result = await handler(ctx, executeNext);
+            if (result instanceof Response) {
+              returnedResponse = result;
+              return result;
+            }
           } else {
-            await next();
+            const result = await next();
+            if (result instanceof Response) {
+              returnedResponse = result;
+              return result;
+            }
           }
+          return returnedResponse;
         };
 
-        await executeNext();
+        return executeNext();
       }
     };
     this.handlers.push(conditionalMiddleware);
@@ -234,7 +243,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
         ctx.redirect(destination, permanent ? 308 : 307);
         return;
       }
-      await next();
+      return next();
     };
 
     this.handlers.push(redirectMiddleware);
@@ -267,8 +276,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
       if (condition !== undefined) {
         const shouldRewrite = typeof condition === "function" ? condition(ctx) : condition;
         if (!shouldRewrite) {
-          await next();
-          return;
+          return next();
         }
       }
 
@@ -290,7 +298,7 @@ class MiddlewareChainImpl implements MiddlewareChain {
         // Only rewrite if pathname matches exactly (edge case)
         ctx.rewrite(destination);
       }
-      await next();
+      return next();
     };
 
     this.handlers.push(rewriteMiddleware);

@@ -1,85 +1,20 @@
 // @vitest-environment node
 
-import fs from "node:fs/promises";
 import path from "node:path";
-import { pathToFileURL, fileURLToPath } from "node:url";
+import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
-
-const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-
-async function createProductionMiddlewareFixture(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-middleware-"));
-
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), { recursive: true });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
-
-  await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), { recursive: true });
-  await fs.writeFile(
-    path.join(root, "package.json"),
-    JSON.stringify({ type: "module" }, null, 2),
-  );
-  await fs.writeFile(
-    path.join(root, "farm.config.ts"),
-    `
-export default {
-  srcDir: "src",
-  deploy: {
-    target: "vercel",
-  },
-  middleware: [
-    {
-      matcher: "/dashboard/:path*",
-      async handler(ctx, next) {
-        ctx.data.set("config.area", "dashboard");
-        ctx.data.set("config.path", ctx.params.path || "");
-        await next();
-      },
-    },
-  ],
-};
-`.trim(),
-  );
-  await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
-  await fs.writeFile(
-    path.join(root, "src", "app", "dashboard", "settings", "page.tsx"),
-    `
-import React from "react";
-
-export default function DashboardPage(props: any) {
-  const middlewareData = props.middleware?.data;
-  const configArea = middlewareData?.get("config.area") || "missing-config";
-  const configPath = middlewareData?.get("config.path") || "missing-path";
-  const fileArea = middlewareData?.get("file.area") || "missing-file";
-
-  return React.createElement(
-    "main",
-    null,
-    \`production middleware: \${configArea} / \${configPath} / \${fileArea} / \${props.path}\`
-  );
-}
-`.trim(),
-  );
-  await fs.writeFile(
-    path.join(root, "src", "app", "dashboard", "middleware.ts"),
-    `
-export default async function dashboardMiddleware(ctx: any, next: () => Promise<void>) {
-  ctx.data.set("file.area", "dashboard-file");
-  ctx.headers.set("x-farm-middleware", "yes");
-  await next();
-}
-`.trim(),
-  );
-
-  return root;
-}
+import {
+  cleanupMiddlewareProductionFixture,
+  createMiddlewareProductionFixture,
+} from "./fixtures/middleware-production-fixture";
 
 describe("production middleware runtime", () => {
   it(
     "runs farm.config middleware and app middleware in a production build",
     async () => {
-      const root = await createProductionMiddlewareFixture();
+      const root = await createMiddlewareProductionFixture();
 
       try {
         const userConfig = await loadConfig(root, undefined, "production");
@@ -95,6 +30,7 @@ describe("production middleware runtime", () => {
           "index.mjs",
         );
         const serverModule = await import(`${pathToFileURL(entryPath).href}?t=${Date.now()}`);
+        (globalThis as any).__farmMiddlewareEvents = [];
         const response = await serverModule.default.fetch(
           new Request("https://example.test/dashboard/settings"),
         );
@@ -105,8 +41,64 @@ describe("production middleware runtime", () => {
         expect(html).toContain(
           "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
         );
+        expect(
+          (globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type),
+        ).toEqual([
+          "middleware.start",
+          "middleware.complete",
+          "middleware.start",
+          "middleware.complete",
+        ]);
+
+        (globalThis as any).__farmMiddlewareEvents = [];
+        const configResponse = await serverModule.default.fetch(
+          new Request("https://example.test/dashboard/config-response"),
+        );
+        expect(configResponse.status).toBe(302);
+        expect(configResponse.headers.get("location")).toBe("https://example.test/sign-in");
+        expect(
+          (globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type),
+        ).toEqual(["middleware.start", "middleware.shortCircuit"]);
+        expect((globalThis as any).__farmMiddlewareEvents[1]).toMatchObject({
+          route: "/",
+          status: 302,
+        });
+
+        (globalThis as any).__farmMiddlewareEvents = [];
+        const fileResponse = await serverModule.default.fetch(
+          new Request("https://example.test/dashboard/file-response"),
+        );
+        expect(fileResponse.status).toBe(418);
+        expect(fileResponse.headers.get("x-file-response")).toBe("yes");
+        expect(fileResponse.headers.get("x-farm-middleware")).toBe("yes");
+        await expect(fileResponse.text()).resolves.toBe("blocked by file middleware");
+        expect(
+          (globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type),
+        ).toEqual([
+          "middleware.start",
+          "middleware.complete",
+          "middleware.start",
+          "middleware.shortCircuit",
+        ]);
+        expect((globalThis as any).__farmMiddlewareEvents[3]).toMatchObject({
+          route: "/dashboard",
+          status: 418,
+        });
+
+        (globalThis as any).__farmMiddlewareEvents = [];
+        const userResponse = await serverModule.default.fetch(
+          new Request("https://example.test/users/42/settings"),
+        );
+        const userHtml = await userResponse.text();
+        expect(userResponse.status).toBe(200);
+        expect(userHtml).toContain("user settings: 42 / 42");
+        expect((globalThis as any).__farmMiddlewareEvents[0]).toMatchObject({
+          route: "/users/[id]",
+          pathname: "/users/42/settings",
+        });
       } finally {
-        await fs.rm(root, { recursive: true, force: true });
+        delete (globalThis as any).__farmMiddlewareEvents;
+        await cleanupMiddlewareProductionFixture(root);
       }
     },
     120_000,
