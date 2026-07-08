@@ -621,13 +621,16 @@ async function collectFiles(dir: string): Promise<string[]> {
 }
 
 function transformNextContent(content: string) {
-  return content.replace(
-    /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/link["'];?/g,
-    (_match, localName) =>
-      localName === "Link"
-        ? `import { Link } from "@farmjs/core/client";`
-        : `import { Link as ${localName} } from "@farmjs/core/client";`,
-  );
+  return content
+    .replace(
+      /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/link["'];?/g,
+      (_match, localName) =>
+        localName === "Link"
+          ? `import { Link } from "@farmjs/core/client";`
+          : `import { Link as ${localName} } from "@farmjs/core/client";`,
+    )
+    .replace(/from\s+["']next\/navigation["']/g, `from "@farmjs/core/navigation"`)
+    .replace(/from\s+["']next\/headers["']/g, `from "@farmjs/core/headers"`);
 }
 
 function collectNextManualNotes(relative: string, content: string, plan: FrameworkMigrationPlan) {

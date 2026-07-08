@@ -33,17 +33,45 @@ The Next.js migrator focuses on the App Router path because Farm uses the same r
 | middleware.ts | src/app/middleware.ts |
 | package scripts | farm dev, farm build, node .output/server/index.mjs |
 
-The migrator also creates `farm.config.ts`, creates a minimal root layout when one is missing, adds `@farmjs/core` and `@farmjs/cli`, and rewrites `next/link` imports to Farm's typed client `Link`.
+The migrator also creates `farm.config.ts`, creates a minimal root layout when one is missing, adds `@farmjs/core` and `@farmjs/cli`, and rewrites supported Next imports to Farm compatibility entries.
 
 ```tsx
 import { Link } from "@farmjs/core/client";
+import { redirect } from "@farmjs/core/navigation";
+import { cookies } from "@farmjs/core/headers";
 
 export default function Page() {
+  if (!cookies().has("session")) redirect("/sign-in");
   return <Link href="/docs">Docs</Link>;
 }
 ```
 
-Some Next.js APIs need review because they are framework-specific. The migration report calls out `next/image`, `next/font`, `next/navigation`, `next/headers`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
+Supported rewrites include:
+
+| Next import | Farm import |
+| --- | --- |
+| next/link | @farmjs/core/client |
+| next/navigation | @farmjs/core/navigation |
+| next/headers | @farmjs/core/headers |
+
+Some Next.js APIs still need review because they are framework-specific. The migration report calls out `next/image`, `next/font`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
+
+## Next compatibility layer
+
+Farm keeps the compatibility layer intentionally small. It covers common App Router APIs that map cleanly onto Farm's runtime:
+
+| API | Runtime |
+| --- | --- |
+| `redirect()` | Throws a redirect signal that Farm turns into a redirect response. |
+| `permanentRedirect()` | Same redirect signal with status 308. |
+| `notFound()` | Throws a not-found signal that Farm turns into a 404. |
+| `useRouter()` | Client hook backed by Farm's lightweight router. |
+| `usePathname()` | Client hook for the current pathname. |
+| `useSearchParams()` | Client hook for current URL search params. |
+| `headers()` | Server helper that reads the current request headers. |
+| `cookies()` | Server helper that reads current request cookies. |
+
+This is not a full Next.js clone. APIs such as image optimization, fonts, server actions, route segment config edge cases, and platform-specific middleware behavior stay explicit migration review items until Farm has native equivalents.
 
 ## TanStack Router migration
 

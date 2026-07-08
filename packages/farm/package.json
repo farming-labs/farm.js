@@ -39,6 +39,12 @@
       "cache": [
         "./dist/cache.d.ts"
       ],
+      "navigation": [
+        "./dist/navigation.d.ts"
+      ],
+      "headers": [
+        "./dist/headers.d.ts"
+      ],
       "docs": [
         "./dist/docs.d.ts"
       ],
@@ -102,6 +108,16 @@
       "types": "./dist/cache.d.ts",
       "import": "./dist/cache.mjs",
       "require": "./dist/cache.cjs"
+    },
+    "./navigation": {
+      "types": "./dist/navigation.d.ts",
+      "import": "./dist/navigation.mjs",
+      "require": "./dist/navigation.cjs"
+    },
+    "./headers": {
+      "types": "./dist/headers.d.ts",
+      "import": "./dist/headers.mjs",
+      "require": "./dist/headers.cjs"
     },
     "./docs": {
       "types": "./dist/docs.d.ts",
