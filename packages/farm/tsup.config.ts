@@ -20,6 +20,7 @@ export default defineConfig({
     cache: "src/cache.ts",
     navigation: "src/navigation.ts",
     headers: "src/headers.ts",
+    image: "src/image.ts",
     docs: "src/docs/index.ts",
     markdown: "src/markdown.ts",
     "app-markdown": "src/app-markdown.ts",

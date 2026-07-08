@@ -164,6 +164,7 @@ test("prepares and applies a code-first Next app migration", async () => {
     await writeFile(
       path.join(root, "app", "about", "page.tsx"),
       `import FarmLink from "next/link";
+import NextImage from "next/image";
 import { redirect, usePathname } from "next/navigation";
 import { cookies, headers } from "next/headers";
 
@@ -171,7 +172,7 @@ export default function AboutPage() {
   if (cookies().has("session")) redirect("/dashboard");
   const pathname = usePathname();
   headers().get("x-demo");
-  return <FarmLink href="/">Home</FarmLink>;
+  return <FarmLink href="/"><NextImage src="/hero.png" alt={pathname} width={1200} height={630} />Home</FarmLink>;
 }
 `,
       "utf8",
@@ -185,6 +186,7 @@ export default function AboutPage() {
 
     const page = await readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8");
     assert.match(page, /import \{ Link as FarmLink \} from "@farmjs\/core\/client";/);
+    assert.match(page, /import \{ Image as NextImage \} from "@farmjs\/core\/image";/);
     assert.match(page, /from "@farmjs\/core\/navigation";/);
     assert.match(page, /from "@farmjs\/core\/headers";/);
     assert.doesNotMatch(page, /from "next\//);

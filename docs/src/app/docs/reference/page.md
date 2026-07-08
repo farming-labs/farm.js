@@ -14,6 +14,7 @@ A compact map of the main package exports and where to learn more.
 | --- | --- |
 | @farmjs/core | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache. |
 | @farmjs/core/client | Link, router helpers, API client, integration client. |
+| @farmjs/core/image | Next-compatible Image component that renders a normal img during migration. |
 | @farmjs/core/navigation | Next-compatible redirect, notFound, and client navigation hooks. |
 | @farmjs/core/headers | Next-compatible request headers and cookies helpers. |
 | @farmjs/core/router | Lightweight route matching, href building, and active-route checks. |
@@ -36,6 +37,7 @@ A compact map of the main package exports and where to learn more.
 | --- | --- |
 | `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineFarmConfig`. |
 | `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
+| `@farmjs/core/image` | `Image`, `ImageProps`, `StaticImageData`, `ImageLoader`. |
 | `@farmjs/core/navigation` | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`. |
 | `@farmjs/core/headers` | `headers`, `cookies`. |
 | `@farmjs/core/router` | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`. |

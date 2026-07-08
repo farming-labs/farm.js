@@ -629,6 +629,13 @@ function transformNextContent(content: string) {
           ? `import { Link } from "@farmjs/core/client";`
           : `import { Link as ${localName} } from "@farmjs/core/client";`,
     )
+    .replace(
+      /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/image["'];?/g,
+      (_match, localName) =>
+        localName === "Image"
+          ? `import { Image } from "@farmjs/core/image";`
+          : `import { Image as ${localName} } from "@farmjs/core/image";`,
+    )
     .replace(/from\s+["']next\/navigation["']/g, `from "@farmjs/core/navigation"`)
     .replace(/from\s+["']next\/headers["']/g, `from "@farmjs/core/headers"`);
 }

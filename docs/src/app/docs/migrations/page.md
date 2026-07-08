@@ -37,12 +37,18 @@ The migrator also creates `farm.config.ts`, creates a minimal root layout when o
 
 ```tsx
 import { Link } from "@farmjs/core/client";
+import { Image } from "@farmjs/core/image";
 import { redirect } from "@farmjs/core/navigation";
 import { cookies } from "@farmjs/core/headers";
 
 export default function Page() {
   if (!cookies().has("session")) redirect("/sign-in");
-  return <Link href="/docs">Docs</Link>;
+  return (
+    <Link href="/docs">
+      <Image src="/hero.png" alt="Docs" width={1200} height={630} />
+      Docs
+    </Link>
+  );
 }
 ```
 
@@ -51,10 +57,11 @@ Supported rewrites include:
 | Next import | Farm import |
 | --- | --- |
 | next/link | @farmjs/core/client |
+| next/image | @farmjs/core/image |
 | next/navigation | @farmjs/core/navigation |
 | next/headers | @farmjs/core/headers |
 
-Some Next.js APIs still need review because they are framework-specific. The migration report calls out `next/image`, `next/font`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
+Some Next.js APIs still need review because they are framework-specific. The migration report calls out `next/font`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
 
 ## Next compatibility layer
 
@@ -70,8 +77,9 @@ Farm keeps the compatibility layer intentionally small. It covers common App Rou
 | `useSearchParams()` | Client hook for current URL search params. |
 | `headers()` | Server helper that reads the current request headers. |
 | `cookies()` | Server helper that reads current request cookies. |
+| `Image` | Client-safe image component that renders a normal `<img>` and accepts common Next Image props during migration. |
 
-This is not a full Next.js clone. APIs such as image optimization, fonts, server actions, route segment config edge cases, and platform-specific middleware behavior stay explicit migration review items until Farm has native equivalents.
+This is not a full Next.js clone. `@farmjs/core/image` does not optimize images by itself; it preserves the component API shape while you decide whether to serve static images, use a CDN loader, or add a provider-specific optimizer. APIs such as fonts, server actions, route segment config edge cases, and platform-specific middleware behavior stay explicit migration review items until Farm has native equivalents.
 
 ## TanStack Router migration
 

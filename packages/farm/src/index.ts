@@ -31,6 +31,8 @@ export * from "./docs";
 export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
+export { Image } from "./image";
+export type { ImageLoader, ImageLoaderProps, ImageProps, ImageSource, StaticImageData } from "./image";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
