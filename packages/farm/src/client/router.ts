@@ -1,4 +1,5 @@
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { createFarmRouter, type FarmRouter, type FarmRouterRouteInput } from "../router";
 
 interface RouterState {
   pathname: string;
@@ -6,45 +7,38 @@ interface RouterState {
   params: Record<string, string>;
 }
 
+export interface UseRouterOptions {
+  basePath?: string;
+  routes?: FarmRouterRouteInput[];
+}
+
 /**
  * Hook for accessing router state and navigation
  */
-export function useRouter() {
-  // Base path is typically "/" for most apps
-  // TODO: Support configurable base path via context
-  const basePath = "";
+export function useRouter(options: UseRouterOptions = {}) {
+  const basePath = options.basePath || "";
+  const routes = options.routes;
+  const routeKey =
+    routes?.map((route) => (typeof route === "string" ? route : route.path)).join("\n") || "";
+  const routeMatcher = useMemo(
+    () => (routeKey ? createFarmRouter(routeKey.split("\n")) : null),
+    [routeKey],
+  );
   const [state, setState] = useState<RouterState>(() => {
-    if (typeof window === "undefined") {
-      return {
-        pathname: "/",
-        searchParams: new URLSearchParams(),
-        params: {},
-      };
-    }
-
-    const url = new URL(window.location.href);
-    return {
-      pathname: url.pathname.replace(basePath, "") || "/",
-      searchParams: url.searchParams,
-      params: {}, // This would be populated by the route matcher
-    };
+    return readRouterState(basePath, routeMatcher);
   });
 
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     const handlePopState = () => {
-      const url = new URL(window.location.href);
-      setState({
-        pathname: url.pathname.replace(basePath, "") || "/",
-        searchParams: url.searchParams,
-        params: {}, // This would be populated by the route matcher
-      });
+      setState(readRouterState(basePath, routeMatcher));
     };
 
+    handlePopState();
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
-  }, [basePath]);
+  }, [basePath, routeMatcher]);
 
   const push = (href: string) => {
     if (typeof window === "undefined") return;
@@ -81,4 +75,30 @@ export function useRouter() {
     back,
     forward,
   };
+}
+
+function readRouterState(basePath: string, routeMatcher: FarmRouter | null): RouterState {
+  if (typeof window === "undefined") {
+    return {
+      pathname: "/",
+      searchParams: new URLSearchParams(),
+      params: {},
+    };
+  }
+
+  const url = new URL(window.location.href);
+  const pathname = normalizeClientPathname(url.pathname, basePath);
+  return {
+    pathname,
+    searchParams: url.searchParams,
+    params: routeMatcher?.match(pathname)?.params || {},
+  };
+}
+
+function normalizeClientPathname(pathname: string, basePath: string) {
+  const normalizedBase = basePath.replace(/\/+$/, "");
+  const isUnderBase =
+    normalizedBase && (pathname === normalizedBase || pathname.startsWith(`${normalizedBase}/`));
+  const withoutBase = isUnderBase ? pathname.slice(normalizedBase.length) || "/" : pathname;
+  return withoutBase || "/";
 }

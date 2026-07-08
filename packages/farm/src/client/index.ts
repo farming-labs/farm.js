@@ -14,6 +14,20 @@ export type {
   ExternalHref,
 } from "./link";
 export { useRouter } from "./router";
+export type { UseRouterOptions } from "./router";
+export { buildFarmRoutePath, createFarmRouter, isFarmRouteActive, matchFarmRoute } from "../router";
+export type {
+  FarmRouter,
+  FarmRouterActiveOptions,
+  FarmRouterBuildOptions,
+  FarmRouterMatch,
+  FarmRouterParams,
+  FarmRouterPathParam,
+  FarmRouterPathParams,
+  FarmRouterQueryValue,
+  FarmRouterRoute,
+  FarmRouterRouteInput,
+} from "../router";
 export { createAPIClient, createServerAPIClient } from "../api/client";
 export type {
   APIClient,

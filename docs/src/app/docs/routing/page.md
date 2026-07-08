@@ -49,6 +49,56 @@ export function Nav() {
 }
 ```
 
+## Lightweight router helpers
+
+Use the lightweight router when client components, layouts, breadcrumbs, tabs, or tests need to match app routes without adding a separate routing library.
+
+**src/lib/router.ts**
+
+```ts
+import { createFarmRouter } from "@farmjs/core/router";
+
+export const router = createFarmRouter([
+  "/",
+  "/dashboard",
+  "/users/[id]",
+  "/docs/[[...slug]]",
+]);
+```
+
+```ts
+const match = router.match("/users/ada?tab=settings");
+
+if (match) {
+  console.log(match.route.path); // /users/[id]
+  console.log(match.params.id); // ada
+}
+```
+
+Build hrefs from the same route patterns:
+
+```ts
+const href = router.build("/docs/[[...slug]]", {
+  slug: ["core", "routing"],
+});
+```
+
+This returns `/docs/core/routing`. Optional catch-all params can be omitted, static routes win over dynamic routes, and route groups such as `(marketing)` do not appear in the URL.
+
+Client components can pass the same route list to `useRouter` when they want current route params:
+
+```tsx
+import { useRouter } from "@farmjs/core/client";
+
+export function CurrentUserTab() {
+  const router = useRouter({
+    routes: ["/users/[id]", "/users/[id]/settings"],
+  });
+
+  return <span>{router.params.id}</span>;
+}
+```
+
 ## Nested segments
 
 Folders become URL segments. Use normal folders for visible path segments and dynamic folders when the value comes from the URL.
