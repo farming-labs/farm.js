@@ -1,12 +1,12 @@
 ---
 title: "Deployment"
-description: "Build deployable output for Vercel, Cloudflare Pages, Netlify, or Node with Farm's deploy config and Nitro presets."
+description: "Build deployable output with Farm's deploy config and Nitro presets, from first-class targets to custom Nitro output."
 section: "Runtime"
 ---
 
 # Deployment
 
-Build deployable output for Vercel, Cloudflare Pages, Netlify, or Node with Farm's deploy config and Nitro presets.
+Build deployable output with Farm's deploy config and Nitro presets. Farm owns route discovery, framework conventions, and app bundling; Nitro owns the final server output shape.
 
 ## Target-based deploy config
 
@@ -21,7 +21,7 @@ export default defineFarmConfig({
 });
 ```
 
-## Targets
+## First-class targets
 
 | Target | Preset | Default output |
 | --- | --- | --- |
@@ -30,15 +30,17 @@ export default defineFarmConfig({
 | netlify | netlify | .output |
 | node | node-server | .output |
 
+These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
+
 ## Preset showcase
 
 Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.
 
 | Platform | Config | Build command | Deploy command | Output to inspect |
 | --- | --- | --- | --- | --- |
-| Vercel | `target: "vercel"` | `farm build --target vercel` | `farm deploy --vercel --prod` | `.vercel/output` |
-| Cloudflare Pages | `target: "cloudflare"` | `farm build --target cloudflare` | `farm deploy --cloudflare` | `.output/public` |
-| Netlify | `target: "netlify"` | `farm build --target netlify` | `farm deploy --netlify` | `.output` |
+| Vercel | `target: "vercel"` | `FARM_DEPLOY_TARGET=vercel farm build` | `farm deploy --vercel --prod` | `.vercel/output` |
+| Cloudflare Pages | `target: "cloudflare"` | `FARM_DEPLOY_TARGET=cloudflare farm build` | `farm deploy --cloudflare` | `.output/public` |
+| Netlify | `target: "netlify"` | `FARM_DEPLOY_TARGET=netlify farm build` | `farm deploy --netlify` | `.output` |
 
 **farm.config.ts**
 
@@ -78,13 +80,54 @@ export default defineFarmConfig({
 
 The same shape lives in `examples/deployment-presets` so the preset behavior can be tested from a real app.
 
+## Nitro preset pass-through
+
+Farm can also build for any Nitro preset that Nitro can resolve. Use `deploy.preset` when the target is not one of Farm's first-class shortcuts, or pass `--preset` from the CLI for a one-off build.
+
+**farm.config.ts**
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  deploy: {
+    preset: process.env.NITRO_PRESET || "node-server",
+    output: ".output",
+  },
+});
+```
+
+**Terminal**
+
+```bash
+NITRO_PRESET=aws-lambda farm build
+# Or, in an app that does not also set deploy.target:
+farm build --preset deno-deploy
+farm build --preset my-company-preset
+```
+
+For built-in Nitro presets, the generated output follows Nitro's provider shape. For custom presets, Farm passes the preset name through to Nitro, so the preset must be installed or otherwise resolvable by Nitro in the project.
+
+## Nitro coverage
+
+Nitro's official deploy docs list these runtime and provider families. Farm's first-class deploy commands cover the common Vercel, Cloudflare Pages, and Netlify path, while `deploy.preset` / `farm build --preset` lets advanced apps target the rest.
+
+| Family | Nitro supports |
+| --- | --- |
+| Runtimes | Node.js, Bun, Deno |
+| Zero-config providers in Nitro CI/CD | AWS Amplify, Azure, Cloudflare, Firebase App Hosting, Netlify, StormKit, Vercel, Zeabur |
+| Other Nitro provider docs | Alwaysdata, AWS Lambda, Cleavr, Deno Deploy, DigitalOcean, EdgeOne Pages, Firebase, Flightcontrol, Genezio, GitHub Pages, GitLab Pages, Heroku, IIS, Koyeb, Platform.sh, Render.com, Zephyr Cloud, Zerops |
+
+Common preset names include `node-server`, `bun`, `deno-server`, `deno-deploy`, `aws-lambda`, `aws-amplify`, `azure-swa`, `cloudflare-pages`, `cloudflare-module`, `firebase-app-hosting`, `github-pages`, `gitlab-pages`, `netlify`, `netlify-edge`, `vercel`, `zeabur`, and `zerops`. Nitro can add or rename presets over time, so check Nitro's deploy docs when targeting a provider directly.
+
 ## Build
 
 **Terminal**
 
 ```bash
 pnpm build
-farm build --target vercel
+FARM_DEPLOY_TARGET=vercel farm build
+farm build --preset aws-lambda
 farm deploy --cloudflare
 ```
 
@@ -104,7 +147,7 @@ export default defineFarmConfig({
 });
 ```
 
-When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Output API output to `.vercel/output`. Other targets default to `.farm/.output` unless you override `output` or `outputDir`.
+When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Output API output to `.vercel/output`. Other targets default to `.farm/.output` unless you override `output` or `outputDir`. When `preset` is set directly, Farm passes that value through to Nitro.
 
 ## Override output
 
@@ -123,10 +166,13 @@ export default defineFarmConfig({
 
 | Command | What it expects |
 | --- | --- |
-| `farm build --target vercel` | Builds `.vercel/output` for Vercel prebuilt deploys. |
+| `FARM_DEPLOY_TARGET=vercel farm build` | Builds `.vercel/output` for Vercel prebuilt deploys. |
+| `farm build --preset <nitro-preset>` | Builds with any Nitro preset that Nitro can resolve. |
 | `farm deploy --vercel` | Uses `vercel deploy --prebuilt`. |
 | `farm deploy --cloudflare` | Deploys the Cloudflare Pages output with Wrangler. |
 | `farm deploy --netlify` | Deploys the Netlify output with Netlify CLI. |
+
+For other Nitro presets, use the host's documented deploy command or CI workflow after `farm build` writes the Nitro output.
 
 ## Environment variables
 
@@ -145,7 +191,8 @@ export default defineFarmConfig({
 ## Production checklist
 
 - Run `farm build` before `farm deploy`.
-- Confirm the selected target matches `deploy.target` or the CLI flag.
+- Confirm the selected target or preset matches `deploy.target`, `deploy.preset`, or the CLI/env override.
+- For non-first-class platforms, confirm the Nitro preset name and provider deploy command from Nitro's docs.
 - Check generated output exists at the resolved output directory.
 - Run provider-specific login commands such as `vercel login`, `wrangler login`, or `netlify login` before deploying.
 - Keep provider secrets out of client bundles and UI registry components.

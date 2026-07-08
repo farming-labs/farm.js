@@ -9,6 +9,7 @@
     "build:vercel": "FARM_DEPLOY_TARGET=vercel farm build",
     "build:cloudflare": "FARM_DEPLOY_TARGET=cloudflare farm build",
     "build:netlify": "FARM_DEPLOY_TARGET=netlify farm build",
+    "build:nitro": "NITRO_PRESET=${NITRO_PRESET:-node-server} farm build",
     "deploy:vercel": "farm deploy --vercel --prod",
     "deploy:cloudflare": "farm deploy --cloudflare",
     "deploy:netlify": "farm deploy --netlify",

@@ -1,10 +1,13 @@
 import { defineFarmConfig } from "@farmjs/core";
 
-const target = process.env.FARM_DEPLOY_TARGET || "vercel";
+const preset = process.env.NITRO_PRESET;
+const target = preset ? undefined : process.env.FARM_DEPLOY_TARGET || "vercel";
 
 export default defineFarmConfig({
   deploy: {
     target,
+    preset,
+    ...(preset ? { output: ".output" } : {}),
     cloudflare: {
       projectName: process.env.CLOUDFLARE_PAGES_PROJECT,
     },
