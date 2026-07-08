@@ -471,6 +471,7 @@ async function buildClient(
               id === "@farmjs/core/server" ||
               id === "@farmjs/core/api" ||
               id === "@farmjs/core/middleware" ||
+              id === "@farmjs/core/headers" ||
               id === "@farmjs/core/config" ||
               id.includes("@farmjs/core/middleware") ||
               id.includes("@farmjs/core/query/server")
@@ -512,6 +513,7 @@ async function buildClient(
                 "// Farm.js Client Exports - Safe for browser bundling",
                 'export { Link } from "@farmjs/core/client";',
                 'export { useRouter } from "@farmjs/core/client";',
+                'export { usePathname, useSearchParams } from "@farmjs/core/navigation";',
                 'export { createAPIClient } from "@farmjs/core/client";',
               ].join("\n");
             }
@@ -532,7 +534,12 @@ async function buildClient(
       },
       // Optimize dependencies - exclude server-side code from client bundle
       optimizeDeps: {
-        exclude: ["@farmjs/core/server", "@farmjs/core/api", "@farmjs/core/middleware"],
+        exclude: [
+          "@farmjs/core/server",
+          "@farmjs/core/api",
+          "@farmjs/core/middleware",
+          "@farmjs/core/headers",
+        ],
       },
     });
   } finally {
@@ -1481,6 +1488,7 @@ function generateVirtualEntryCode(
       ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "farm/api/route-manager";`
       : "";
   const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
+  const navigationHelpersImport = `import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "farm/navigation";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
   const middlewareRuntimeImport = `import { applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
@@ -1561,6 +1569,7 @@ ${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${cacheHelpersImport}
+${navigationHelpersImport}
 ${observabilityHelpersImport}
 ${middlewareRuntimeImport}
 ${docsHandlerImport}
@@ -1953,6 +1962,9 @@ async function handleRequest(request) {
               pageElement = React.createElement("div", null, String(result));
             }
           } catch (asyncError) {
+            if (isFarmRedirectError(asyncError) || isFarmNotFoundError(asyncError)) {
+              throw asyncError;
+            }
             // If async rendering fails, try sync rendering as fallback
             pageElement = React.createElement(PageComponent, pageProps);
           }
@@ -2097,6 +2109,44 @@ async function handleRequest(request) {
         ), middlewareHeaders);
       }
     } catch (error) {
+      if (isFarmRedirectError(error)) {
+        const redirect = getFarmRedirectError(error);
+        emitFarmEvent({
+          type: "route.redirect",
+          from: pathname,
+          to: redirect.url,
+          status: redirect.status,
+        });
+        emitFarmEvent({
+          type: "render.complete",
+          route: pathname,
+          pathname,
+          status: redirect.status,
+          durationMs: Date.now() - requestStartTime,
+        });
+        return applyProductionMiddlewareHeaders(new Response(null, {
+          status: redirect.status,
+          headers: {
+            Location: redirect.url,
+          },
+        }), middlewareHeaders);
+      }
+
+      if (isFarmNotFoundError(error)) {
+        emitFarmEvent({ type: "route.notFound", pathname });
+        emitFarmEvent({
+          type: "render.complete",
+          route: pathname,
+          pathname,
+          status: 404,
+          durationMs: Date.now() - requestStartTime,
+        });
+        return applyProductionMiddlewareHeaders(new Response("Not Found", {
+          status: 404,
+          headers: { "Content-Type": "text/plain; charset=utf-8" },
+        }), middlewareHeaders);
+      }
+
       emitFarmEvent({ type: "render.error", route: pathname, error });
       console.error("SSR Error:", error);
       return applyProductionMiddlewareHeaders(new Response(

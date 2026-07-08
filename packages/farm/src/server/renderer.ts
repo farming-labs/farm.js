@@ -14,6 +14,11 @@ import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "..
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { emitFarmEvent } from "../observability";
+import {
+  getFarmRedirectError,
+  isFarmNotFoundError,
+  isFarmRedirectError,
+} from "../navigation";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -682,6 +687,36 @@ export class ServerRenderer {
         });
       });
     } catch (error) {
+      if (isFarmRedirectError(error)) {
+        const redirect = getFarmRedirectError(error)!;
+        emitFarmEvent({
+          type: "route.redirect",
+          from: pathname,
+          to: redirect.url,
+          status: redirect.status,
+        });
+        if (!res.headersSent && !(res as any).writableEnded) {
+          res.statusCode = redirect.status;
+          res.setHeader("Location", redirect.url);
+          res.end();
+        } else if (!(res as any).writableEnded) {
+          res.end();
+        }
+        completeRender(redirect.status, pathname);
+        return;
+      }
+
+      if (isFarmNotFoundError(error)) {
+        emitFarmEvent({ type: "route.notFound", pathname });
+        if (!res.headersSent && !(res as any).writableEnded) {
+          await this.render404(req, res);
+        } else if (!(res as any).writableEnded) {
+          res.end();
+        }
+        completeRender(404, pathname);
+        return;
+      }
+
       emitFarmEvent({ type: "render.error", route: pathname, error });
       if (pprRefreshRoute) {
         emitFarmEvent({ type: "ppr.refresh.error", route: pprRefreshRoute, error });
@@ -1043,8 +1078,10 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
         },
         onShellError(error) {
           didError = true;
-          logger.error(`SSR shell error: ${error}`);
-          emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
+          if (!isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
+            logger.error(`SSR shell error: ${error}`);
+            emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
+          }
 
           if (clearMiddlewareData) {
             clearMiddlewareData();
@@ -1054,8 +1091,10 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
         },
         onError(error) {
           didError = true;
-          logger.error(`SSR streaming error: ${error}`);
-          emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
+          if (!isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
+            logger.error(`SSR streaming error: ${error}`);
+            emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
+          }
         },
       });
     });

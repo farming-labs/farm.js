@@ -18,6 +18,8 @@ export default defineConfig({
     plugin: "src/plugin.ts",
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",
+    navigation: "src/navigation.ts",
+    headers: "src/headers.ts",
     docs: "src/docs/index.ts",
     markdown: "src/markdown.ts",
     "app-markdown": "src/app-markdown.ts",
