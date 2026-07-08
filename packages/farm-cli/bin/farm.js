@@ -13,6 +13,10 @@ const banner = `
 program.name("farm").description("Farm.js CLI - A modern React meta-framework").version("0.1.0");
 program.addHelpText("beforeAll", `${banner}\n`);
 
+function collectOption(value, previous) {
+  return [...(previous || []), value];
+}
+
 program
   .command("dev")
   .description("Start development server")
@@ -74,6 +78,28 @@ program
       });
     } catch (error) {
       console.error("Failed to generate integration schema artifacts:", error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("migrate")
+  .description("Run one-shot migration commands from farm.config.ts")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("--command <command>", "Migration command to run; can be repeated", collectOption, [])
+  .option("--dry-run", "Print migration commands without running them")
+  .action(async (options) => {
+    try {
+      const { migrateFarm } = require("../dist/index.js");
+      await migrateFarm({
+        root: options.root,
+        configPath: options.config,
+        commands: options.command,
+        dryRun: options.dryRun,
+      });
+    } catch (error) {
+      console.error("Failed to run migrations:", error);
       process.exit(1);
     }
   });

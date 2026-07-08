@@ -1,4 +1,10 @@
-import type { FarmConfig as BaseFarmConfig } from "./types";
+import type {
+  FarmConfig as BaseFarmConfig,
+  FarmMigrationCommand,
+  FarmMigrationsConfig,
+  FarmMigrationsUserConfig,
+  ResolvedFarmMigrationsConfig,
+} from "./types";
 import type { DocsConfig } from "@farming-labs/docs";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
@@ -29,6 +35,12 @@ export type {
   FarmMarkdownUserConfig,
 } from "./markdown";
 export type { FarmMdxComponents, FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
+export type {
+  FarmMigrationCommand,
+  FarmMigrationsConfig,
+  FarmMigrationsUserConfig,
+  ResolvedFarmMigrationsConfig,
+} from "./types";
 
 export interface RedirectConfig {
   source: string;
@@ -133,6 +145,7 @@ export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output
 export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
+  migrations?: FarmMigrationsUserConfig;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
   docs?: FarmDocsUserConfig;
@@ -181,7 +194,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
 }
 
 export interface ResolvedFarmConfig extends Required<
-  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx">
+  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx" | "migrations">
 > {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
@@ -189,6 +202,7 @@ export interface ResolvedFarmConfig extends Required<
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
+  migrations: ResolvedFarmMigrationsConfig;
 }
 
 export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
@@ -281,6 +295,14 @@ export function resolveDeployConfig(
     preset,
     outputDir,
   };
+}
+
+export function resolveMigrationsConfig(
+  migrations: FarmMigrationsUserConfig | undefined,
+): ResolvedFarmMigrationsConfig {
+  if (!migrations) return { commands: [] };
+  if (Array.isArray(migrations)) return { commands: migrations };
+  return { commands: migrations.commands || [] };
 }
 
 export const DOCS_CONFIG_FILENAMES = [
@@ -559,6 +581,7 @@ export async function resolveConfig(
     docs,
     md,
     mdx,
+    migrations: resolveMigrationsConfig(userConfig.migrations),
     observability: userConfig.observability ?? false,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,

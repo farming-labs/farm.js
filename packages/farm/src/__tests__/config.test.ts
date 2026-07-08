@@ -4,7 +4,13 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadConfig, resolveConfig, resolveDeployConfig, resolveDocsConfig } from "../config";
+import {
+  loadConfig,
+  resolveConfig,
+  resolveDeployConfig,
+  resolveDocsConfig,
+  resolveMigrationsConfig,
+} from "../config";
 
 const originalEnv = { ...process.env };
 
@@ -168,6 +174,32 @@ describe("resolveConfig", () => {
       logs: true,
       onEvent,
       events: ["cache.hit", "ppr.shell.cached"],
+    });
+  });
+});
+
+describe("resolveMigrationsConfig", () => {
+  it("normalizes shorthand and object migration command config", () => {
+    expect(resolveMigrationsConfig(["pnpm prisma migrate deploy"])).toEqual({
+      commands: ["pnpm prisma migrate deploy"],
+    });
+
+    expect(
+      resolveMigrationsConfig({
+        commands: [
+          {
+            name: "drizzle",
+            command: "pnpm drizzle-kit migrate",
+          },
+        ],
+      }),
+    ).toEqual({
+      commands: [
+        {
+          name: "drizzle",
+          command: "pnpm drizzle-kit migrate",
+        },
+      ],
     });
   });
 });

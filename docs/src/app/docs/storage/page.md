@@ -64,6 +64,32 @@ export default defineFarmConfig({
 
 When an integration defines a schema, Farm exposes a typed ORM layer at `ctx.args.db`. The integration does not need to know whether the app passed SQLite, Postgres, or another supported runtime client.
 
+## Schema migrations
+
+Farm can generate integration schema artifacts with `farm generate`, then run your app-owned migration command with `farm migrate`.
+
+**farm.config.ts**
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  storage: {
+    client: db,
+  },
+  migrations: {
+    commands: [
+      {
+        name: "apply schema",
+        command: "pnpm drizzle-kit migrate",
+      },
+    ],
+  },
+});
+```
+
+`farm migrate` does not hide the database tool. It gives the project one consistent place to run Prisma, Drizzle, SQL files, Better Auth setup, or provider-specific schema commands before `farm build`.
+
 ## Storage client or runtime client
 
 | Config | Use it for |
@@ -79,5 +105,5 @@ When an integration defines a schema, Farm exposes a typed ORM layer at `ctx.arg
 - Use durable storage for production state.
 - Keep local/memory storage for development and tests.
 - Pass one runtime client through config so integrations do not each invent storage options.
-- Create physical tables/migrations that match integration schemas.
+- Create physical tables/migrations that match integration schemas, then run them with `farm migrate`.
 - Close database clients during app shutdown when the underlying driver requires it.
