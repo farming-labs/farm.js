@@ -45,6 +45,9 @@
       "headers": [
         "./dist/headers.d.ts"
       ],
+      "image": [
+        "./dist/image.d.ts"
+      ],
       "docs": [
         "./dist/docs.d.ts"
       ],
@@ -118,6 +121,11 @@
       "types": "./dist/headers.d.ts",
       "import": "./dist/headers.mjs",
       "require": "./dist/headers.cjs"
+    },
+    "./image": {
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.mjs",
+      "require": "./dist/image.cjs"
     },
     "./docs": {
       "types": "./dist/docs.d.ts",

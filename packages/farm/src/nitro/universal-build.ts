@@ -513,6 +513,7 @@ async function buildClient(
                 "// Farm.js Client Exports - Safe for browser bundling",
                 'export { Link } from "@farmjs/core/client";',
                 'export { useRouter } from "@farmjs/core/client";',
+                'export { Image } from "@farmjs/core/image";',
                 'export { usePathname, useSearchParams } from "@farmjs/core/navigation";',
                 'export { createAPIClient } from "@farmjs/core/client";',
               ].join("\n");
