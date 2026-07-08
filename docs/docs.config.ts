@@ -240,6 +240,7 @@ const sidebar = [
     label: "Reference",
     icon: "book",
     children: [
+      { label: "Migrations", slug: "migrations", icon: "route" },
       { label: "CLI", slug: "cli", icon: "terminal" },
       { label: "Examples", slug: "examples", icon: "box" },
       { label: "Reference", slug: "reference", icon: "book" },

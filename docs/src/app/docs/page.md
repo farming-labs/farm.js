@@ -75,8 +75,9 @@ Plugin system and lifecycle hooks.
 
 ### Reference
 
-CLI, examples, and package map.
+CLI, migrations, examples, and package map.
 
-- [CLI](/docs/cli): Use the Farm CLI to run, build, generate types, deploy output, and add integrations.
+- [Migrations](/docs/migrations): Move Next.js and TanStack Router apps with dry-run codemods, then run schema/provider commands.
+- [CLI](/docs/cli): Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and add integrations.
 - [Examples](/docs/examples): Use the examples folder as executable docs for routing, RSC, docs, markdown, auth, billing, email, jobs, and API keys.
 - [Reference](/docs/reference): A compact map of the main package exports and where to learn more.

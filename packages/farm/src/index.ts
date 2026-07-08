@@ -37,6 +37,19 @@ export * from "./build/index";
 export * from "./client";
 export * from "./ssg";
 export * from "./cache";
+export {
+  getFarmRedirectError,
+  isFarmNotFoundError,
+  isFarmRedirectError,
+  notFound,
+  permanentRedirect,
+  redirect,
+  usePathname,
+  useSearchParams,
+} from "./navigation";
+export type { FarmRedirectSignal, FarmRedirectStatus } from "./navigation";
+export { cookies, headers } from "./headers";
+export type { ReadonlyHeaders, ReadonlyRequestCookies, RequestCookie } from "./headers";
 export type {
   FarmPlugin,
   FarmPluginContext,

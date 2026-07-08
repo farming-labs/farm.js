@@ -1,12 +1,12 @@
 ---
 title: "CLI"
-description: "Use the Farm CLI to run, build, generate types, deploy output, and add integrations."
+description: "Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and add integrations."
 section: "Reference"
 ---
 
 # CLI
 
-Use the Farm CLI to run, build, generate types, deploy output, and add integrations.
+Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and add integrations.
 
 ## Common commands
 
@@ -16,6 +16,9 @@ Use the Farm CLI to run, build, generate types, deploy output, and add integrati
 | farm build | Build the app for the configured target. |
 | farm preview | Preview the production output. |
 | farm generate | Generate API and route types. |
+| farm migrate inspect | Detect supported framework migration sources. |
+| farm migrate next --write | Apply a deterministic Next.js App Router migration. |
+| farm migrate tanstack --write | Apply a deterministic TanStack Router file-route migration. |
 | farm migrate | Run one-shot schema or provider migration commands. |
 | farm add integration stripe --ui | Add integration wiring and optional UI. |
 
@@ -42,7 +45,24 @@ farm generate
 
 Use this after adding or changing API routes so `api.hello.post(...)`, route params, and `Link` types stay current.
 
-## Run migrations
+## Framework migrations
+
+```bash
+farm migrate inspect
+farm migrate next
+farm migrate next --write
+farm migrate tanstack --write
+```
+
+Framework migrations are deterministic codemods. They inspect the project, print a dry-run plan by default, and only write when `--write` is passed. Existing target files are skipped unless `--force` is passed.
+
+The Next.js migrator copies `app` or `src/app` into Farm's `src/app`, creates `farm.config.ts`, creates a minimal root layout when needed, rewrites supported imports from `next/link`, `next/navigation`, and `next/headers`, and updates package scripts to `farm dev`, `farm build`, and `node .output/server/index.mjs`.
+
+The TanStack migrator converts file routes from `src/routes` or `routes` into `src/app/**/page.tsx`, maps `$id` to `[id]`, maps `$` to `[...splat]`, and adds a default export for simple `component: ComponentName` route files.
+
+Both migrators leave source files in place and print manual review notes for framework-specific APIs.
+
+## Run command migrations
 
 ```bash
 farm migrate
