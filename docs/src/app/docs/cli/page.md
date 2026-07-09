@@ -14,7 +14,7 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 | --- | --- |
 | farm dev | Start the dev server. |
 | farm build | Build the app for the configured target. |
-| farm preview | Preview the production output. |
+| farm preview | Create a public URL for a running local app. |
 | farm generate | Generate API and route types. |
 | farm migrate inspect | Detect supported framework migration sources. |
 | farm migrate next --write | Apply a deterministic Next.js App Router migration. |
@@ -95,11 +95,22 @@ export default defineFarmConfig({
 
 Commands run sequentially and stop on the first failure. `--dry-run` prints the commands without executing them.
 
-## Build and preview
+## Instant preview
+
+```bash
+farm preview
+farm preview --port 3000
+farm preview --name stripe-webhook
+```
+
+`farm preview` exposes the app that is already running locally. It does not build or deploy the app. Use it when a teammate, webhook provider, OAuth provider, mobile device, or browser automation tool needs a public URL for the current `farm dev` session.
+
+Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. By default it connects to the hosted Farm Preview gateway and returns a URL such as `https://stripe-webhook.preview.farming-labs.dev`. App developers do not need to configure Vercel, DNS, Redis, or a local tunnel binary. The command keeps forwarding traffic until you press Ctrl+C.
+
+## Build
 
 ```bash
 farm build
-farm preview
 ```
 
 `farm build` respects `deploy.target`, `output`, and provider-specific output options from `farm.config.ts`.

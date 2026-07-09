@@ -83,6 +83,40 @@ program
   });
 
 program
+  .command("preview")
+  .description("Create a public URL for a running local Farm app")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-p, --port <port>", "Port of the running local app")
+  .option("--host <host>", "Host of the running local app", "localhost")
+  .option("--url <url>", "Full local URL to expose")
+  .option("--gateway <url>", "Advanced: override the hosted Farm Preview gateway URL", process.env.FARM_PREVIEW_GATEWAY_URL)
+  .option("--provider <provider>", "Advanced: preview provider to use (farm, local)", process.env.FARM_PREVIEW_PROVIDER)
+  .option("--name <name>", "Readable preview URL name")
+  .option("--dry-run", "Validate target detection and print the preview plan without opening it")
+  .option("--no-probe", "Skip local reachability check when --port is provided")
+  .action(async (options) => {
+    try {
+      const { previewFarm } = require("../dist/index.js");
+      await previewFarm({
+        root: options.root,
+        configPath: options.config,
+        port: options.port,
+        host: options.host,
+        url: options.url,
+        gatewayUrl: options.gateway,
+        name: options.name,
+        dryRun: options.dryRun,
+        noProbe: options.noProbe,
+        provider: options.provider,
+      });
+    } catch (error) {
+      console.error("Failed to create preview:", error);
+      process.exit(1);
+    }
+  });
+
+program
   .command("migrate [source]")
   .description("Run one-shot migration commands or migrate from another framework")
   .option("-r, --root <root>", "Root directory", process.cwd())

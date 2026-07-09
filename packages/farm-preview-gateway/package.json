@@ -1,0 +1,31 @@
+{
+  "name": "@farmjs/preview-gateway",
+  "version": "0.0.1",
+  "description": "Farm.js preview gateway for Vercel-hosted instant preview URLs",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown && node scripts/normalize-dts.mjs",
+    "test": "tsdown && node scripts/normalize-dts.mjs && node --test test/*.test.mjs",
+    "type-check": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "tsdown": "^0.15.7",
+    "typescript": "^5.3.3"
+  }
+}
