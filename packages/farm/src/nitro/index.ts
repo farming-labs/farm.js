@@ -6,6 +6,7 @@ import type { ServerRenderer } from "../server/renderer";
 import { createNitroAPIHandler } from "./api-handler";
 import { createNitroSSRHandler } from "./ssr-handler";
 import path from "path";
+import { prepareFarmWorkflowsForNitro } from "../workflows";
 
 // Export universal build functions
 export { buildUniversal } from "./universal-build";
@@ -48,6 +49,10 @@ export async function createNitroConfig(
   await mkdir(serverDir, { recursive: true });
   await mkdir(path.join(serverDir, "api"), { recursive: true });
   await mkdir(path.join(serverDir, "routes"), { recursive: true });
+  const farmWorkflows = await prepareFarmWorkflowsForNitro({
+    ...config,
+    distDir,
+  });
 
   // Create a runtime registry file to store route managers
   // This will be populated at runtime through Nitro hooks
@@ -488,6 +493,18 @@ export default defineEventHandler(async (event: H3Event) => {
     // Tell Nitro to scan the server directory we created
     // This ensures our handlers are discovered by Nitro
     scanDirs: [serverDir],
+    tasks: farmWorkflows.tasks,
+    scheduledTasks: farmWorkflows.scheduledTasks,
+    handlers: [
+      ...(farmWorkflows.handlerPath
+        ? [
+            {
+              route: `${config.workflows.route}/**`,
+              handler: farmWorkflows.handlerPath,
+            },
+          ]
+        : []),
+    ],
     // Route rules for Vercel
     routeRules: {
       "/api/**": {
@@ -612,6 +629,7 @@ export default defineEventHandler(async (event: H3Event) => {
     },
     // Experimental features
     experimental: {
+      tasks: farmWorkflows.workflows.length > 0,
       wasm: false, // Disable for now to avoid issues
     },
   };

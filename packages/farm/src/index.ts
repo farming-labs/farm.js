@@ -31,6 +31,7 @@ export * from "./docs";
 export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
+export * from "./workflows";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
@@ -86,6 +87,8 @@ export type {
   FarmMigrationsConfig,
   FarmMigrationsUserConfig,
   ResolvedFarmMigrationsConfig,
+  FarmWorkflowsUserConfig,
+  FarmWorkflowsResolvedConfig,
   FarmDocsResolvedConfig,
   FarmDocsUserConfig,
   FarmMarkdownResolvedConfig,

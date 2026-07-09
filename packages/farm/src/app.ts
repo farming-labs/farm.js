@@ -4,6 +4,7 @@ import type { FarmMarkdownResolvedConfig } from "./markdown";
 import type { FarmMdxResolvedConfig } from "./app-markdown";
 import { resolveMdxConfig } from "./app-markdown";
 import { resolveMarkdownConfig } from "./markdown";
+import { resolveWorkflowsConfig, type FarmWorkflowsResolvedConfig } from "./workflows";
 import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
@@ -16,6 +17,7 @@ type NormalizedFarmConfig = Required<FarmConfig> & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
+  workflows: FarmWorkflowsResolvedConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -92,6 +94,7 @@ export class FarmApp {
       storage: config.storage || {},
       integrations: config.integrations || {},
       migrations: config.migrations || { commands: [] },
+      workflows: resolveWorkflowsConfig(config.workflows),
       middleware: config.middleware || {},
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),

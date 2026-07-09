@@ -12,7 +12,7 @@ Use the examples folder as executable docs for routing, RSC, docs, markdown, aut
 
 | Example | Shows |
 | --- | --- |
-| examples/basic | Core routing, layouts, deployment config, markdown mirrors, PPR. |
+| examples/basic | Core routing, layouts, deployment config, markdown mirrors, PPR, cron workflows. |
 | examples/deployment-presets | Vercel, Cloudflare Pages, Netlify, self-hosted Node, and direct Nitro preset deployment output. |
 | examples/ssr-ssg-demo | SSR, SSG, ISR, API routes, middleware. |
 | examples/docs-integration | Docs runtime and /api/docs machine routes. |
@@ -42,6 +42,7 @@ pnpm --dir examples/basic dev
 | Stripe | Products, checkout redirect, portal redirect, session/status reads, and webhook handling. |
 | Better Auth | Sign-up, sign-in, session read, logout, and protected routes. |
 | Jobs | Trigger, batch trigger, schedule, status, and cancel calls. |
+| Cron workflows | Lightweight `defineCron` task discovered from `src/jobs`. |
 | Markdown | `.md` mirrors for public pages and cache headers. |
 
 ## Example-driven development
