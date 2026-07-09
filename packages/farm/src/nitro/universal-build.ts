@@ -16,6 +16,11 @@ import { getClientModuleMetadata } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import { virtualBundlePlugin } from "./virtual-bundle-plugin";
 import type { NitroConfig } from "nitro/config";
+import {
+  applyFarmWorkflowVercelCrons,
+  prepareFarmWorkflowsForNitro,
+  type PreparedFarmWorkflows,
+} from "../workflows";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -2337,6 +2342,11 @@ async function buildNitroUniversal(
   logger.info(`📦 SSR entry file: ${ssrEntryFile}`);
   logger.info(`📦 Preset: ${preset}`);
 
+  const farmWorkflows = await prepareFarmWorkflowsForNitro(config);
+  if (farmWorkflows.workflows.length > 0) {
+    logger.info(`⏱️  Found ${farmWorkflows.workflows.length} Farm workflow task(s)`);
+  }
+
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });
 
@@ -2385,9 +2395,21 @@ export default fromWebHandler(handler.fetch)
         baseURL: "/",
       },
     ],
-    // Use serverHandlers to define our catch-all handler
-    // This bundles the code properly
+    experimental: {
+      tasks: farmWorkflows.workflows.length > 0,
+    },
+    tasks: farmWorkflows.tasks,
+    scheduledTasks: farmWorkflows.scheduledTasks,
+    // Use serverHandlers to define our workflow handler first, then the catch-all handler.
     handlers: [
+      ...(farmWorkflows.handlerPath
+        ? [
+            {
+              route: `${config.workflows.route}/**`,
+              handler: farmWorkflows.handlerPath,
+            },
+          ]
+        : []),
       {
         route: "/**",
         handler: nitroEntryPath,
@@ -2448,7 +2470,7 @@ export default fromWebHandler(handler.fetch)
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json
   if (isVercel) {
-    await postProcessVercelOutput(root, outputDir, fs, config);
+    await postProcessVercelOutput(root, outputDir, fs, config, farmWorkflows);
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
@@ -2463,6 +2485,7 @@ async function postProcessVercelOutput(
   outputDir: string,
   fs: typeof import("fs/promises"),
   config: ResolvedFarmConfig,
+  farmWorkflows: PreparedFarmWorkflows,
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -2519,7 +2542,12 @@ async function postProcessVercelOutput(
     },
   ];
 
-  await fs.writeFile(configPath, JSON.stringify(vercelConfig, null, 2));
+  const vercelConfigWithCrons = applyFarmWorkflowVercelCrons(
+    vercelConfig,
+    farmWorkflows.workflows,
+  );
+
+  await fs.writeFile(configPath, JSON.stringify(vercelConfigWithCrons, null, 2));
   await copyFarmDocsContentForVercel(config, root, nitroFuncDir, fs);
   await copyPrismaClientForVercel(root, nitroFuncDir, fs);
 

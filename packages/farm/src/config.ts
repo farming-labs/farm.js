@@ -12,9 +12,11 @@ import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markd
 import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmPlugin } from "./plugin";
+import type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
+import { resolveWorkflowsConfig } from "./workflows";
 import {
   resolveMdxConfig,
   type FarmMdxResolvedConfig,
@@ -41,6 +43,7 @@ export type {
   FarmMigrationsUserConfig,
   ResolvedFarmMigrationsConfig,
 } from "./types";
+export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
 
 export interface RedirectConfig {
   source: string;
@@ -146,6 +149,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
   migrations?: FarmMigrationsUserConfig;
+  workflows?: FarmWorkflowsUserConfig | boolean;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
   docs?: FarmDocsUserConfig;
@@ -193,9 +197,13 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   [key: string]: any;
 }
 
-export interface ResolvedFarmConfig extends Required<
-  Omit<FarmUserConfig, "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx" | "migrations">
-> {
+export interface ResolvedFarmConfig
+  extends Required<
+    Omit<
+      FarmUserConfig,
+      "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx" | "migrations" | "workflows"
+    >
+  > {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
   deploy: ResolvedFarmDeployConfig;
@@ -203,6 +211,7 @@ export interface ResolvedFarmConfig extends Required<
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
   migrations: ResolvedFarmMigrationsConfig;
+  workflows: FarmWorkflowsResolvedConfig;
 }
 
 export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
@@ -582,6 +591,7 @@ export async function resolveConfig(
     md,
     mdx,
     migrations: resolveMigrationsConfig(userConfig.migrations),
+    workflows: resolveWorkflowsConfig(userConfig.workflows),
     observability: userConfig.observability ?? false,
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,

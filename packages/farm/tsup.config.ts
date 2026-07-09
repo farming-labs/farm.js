@@ -24,6 +24,7 @@ export default defineConfig({
     markdown: "src/markdown.ts",
     "app-markdown": "src/app-markdown.ts",
     observability: "src/observability.ts",
+    workflows: "src/workflows.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

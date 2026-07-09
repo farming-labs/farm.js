@@ -176,6 +176,27 @@ describe("resolveConfig", () => {
       events: ["cache.hit", "ppr.shell.cached"],
     });
   });
+
+  it("resolves workflow config defaults and overrides", async () => {
+    const config = await resolveConfig(
+      {
+        workflows: {
+          dir: "src/background",
+          route: "/api/internal/workflows",
+          secretEnv: "WORKFLOW_SECRET",
+        },
+      },
+      "production",
+    );
+
+    expect(config.workflows).toEqual({
+      enabled: true,
+      dirs: ["src/background"],
+      route: "/api/internal/workflows",
+      secretEnv: "WORKFLOW_SECRET",
+      secret: undefined,
+    });
+  });
 });
 
 describe("resolveMigrationsConfig", () => {

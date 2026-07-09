@@ -29,6 +29,12 @@ import {
   getIntegrationProviders,
   matchIntegrationRoute,
 } from "./integrations";
+import {
+  createFarmWorkflowRequestHandler,
+  discoverFarmWorkflows,
+  resolveWorkflowsConfig,
+  type FarmDiscoveredWorkflow,
+} from "./workflows";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -47,6 +53,9 @@ export function farmPlugin(
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
+  let workflowHandler:
+    | ((request: Request) => Promise<Response | null>)
+    | null = null;
   const pluginManager: PluginManager | undefined = initialPluginManager;
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE", message: string) => {
     try {
@@ -108,6 +117,7 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
       const getExtraRouteTypes = () => [
         ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
         ...getFarmDocsRouteTypeEntries(farmConfig.docs),
@@ -178,6 +188,22 @@ export function farmPlugin(
 
       apiRouteManager = new APIRouteManager(appDir, server);
       await apiRouteManager.discoverRoutes();
+      const discoveredWorkflows = await discoverFarmWorkflows(
+        { ...farmConfig, workflows: workflowConfig },
+        {
+          loadModule: async (filePath) =>
+            server.ssrLoadModule(filePath) as Promise<Record<string, any>>,
+        },
+      );
+      if (discoveredWorkflows.length > 0) {
+        workflowHandler = createFarmWorkflowRequestHandler({
+          workflows: discoveredWorkflows,
+          config: workflowConfig,
+          loadModule: async (workflow: FarmDiscoveredWorkflow) =>
+            server.ssrLoadModule(workflow.filePath) as Promise<Record<string, any>>,
+        });
+        logger.success(`✅ Discovered ${discoveredWorkflows.length} Farm workflow task(s)`);
+      }
       if (pm) {
         for (const [, apiRoute] of apiRouteManager.getRoutes()) {
           await pm.runHookParallel("apiRouteDiscovered", {
@@ -341,6 +367,36 @@ export function farmPlugin(
         if (markdownResponse) {
           await sendWebResponse(res, markdownResponse);
           return;
+        }
+
+        if (
+          workflowHandler &&
+          (requestPathname === workflowConfig.route ||
+            requestPathname.startsWith(`${workflowConfig.route}/`))
+        ) {
+          let workflowBody: string | undefined;
+          if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+            workflowBody = await new Promise<string>((resolve) => {
+              let data = "";
+              req.on("data", (chunk) => {
+                data += chunk;
+              });
+              req.on("end", () => {
+                resolve(data);
+              });
+            });
+          }
+          const workflowResponse = await workflowHandler(
+            new Request(fullUrl, {
+              method: requestMethod,
+              headers: docsHeaders,
+              body: workflowBody || undefined,
+            }),
+          );
+          if (workflowResponse) {
+            await sendWebResponse(res, workflowResponse);
+            return;
+          }
         }
 
         const configuredIntegrations = currentConfig.integrations;

@@ -57,6 +57,9 @@
       "observability": [
         "./dist/observability.d.ts"
       ],
+      "workflows": [
+        "./dist/workflows.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -138,6 +141,11 @@
       "types": "./dist/observability.d.ts",
       "import": "./dist/observability.mjs",
       "require": "./dist/observability.cjs"
+    },
+    "./workflows": {
+      "types": "./dist/workflows.d.ts",
+      "import": "./dist/workflows.mjs",
+      "require": "./dist/workflows.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
