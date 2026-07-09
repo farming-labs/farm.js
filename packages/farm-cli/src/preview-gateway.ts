@@ -1,3 +1,4 @@
+import { setTimeout as delay } from "node:timers/promises";
 import { logger } from "@farmjs/core";
 import type { PreviewFarmOptions, PreviewTarget } from "./preview";
 
@@ -37,12 +38,16 @@ export interface PreviewGatewayResponse {
 export interface RunPreviewGatewayOptions {
   timeoutMs?: number;
   pollTimeoutMs?: number;
+  localProbeIntervalMs?: number;
+  localProbeTimeoutMs?: number;
   maxRequests?: number;
 }
 
 const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
 const DEFAULT_PREVIEW_DOMAIN = "preview.farming-labs.dev";
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
+const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
+const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -84,6 +89,10 @@ export async function runPreviewGateway(
   const session = await createGatewaySession(plan, options.timeoutMs ?? 30000);
   const controller = new AbortController();
   let handledRequests = 0;
+  const localTargetWatch = watchLocalPreviewTarget(plan.target, controller, {
+    intervalMs: options.localProbeIntervalMs ?? DEFAULT_LOCAL_PROBE_INTERVAL_MS,
+    timeoutMs: options.localProbeTimeoutMs ?? DEFAULT_LOCAL_PROBE_TIMEOUT_MS,
+  });
 
   const cleanup = () => controller.abort();
   process.once("SIGINT", cleanup);
@@ -102,9 +111,17 @@ export async function runPreviewGateway(
 
       await Promise.all(
         requests.map(async (request) => {
-          const response = await forwardGatewayRequest(plan.target, request);
-          await sendGatewayResponse(plan, session, request.id, response, controller.signal);
-          handledRequests += 1;
+          try {
+            const response = await forwardGatewayRequest(plan.target, request);
+            await sendGatewayResponse(plan, session, request.id, response, controller.signal);
+            handledRequests += 1;
+          } catch (error) {
+            if (controller.signal.aborted) return;
+            logger.warn(
+              `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
+            );
+            controller.abort(error);
+          }
         }),
       );
 
@@ -115,10 +132,49 @@ export async function runPreviewGateway(
   } finally {
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
+    controller.abort();
+    await localTargetWatch.catch(() => undefined);
     await closeGatewaySession(plan, session).catch(() => undefined);
   }
 
   return session;
+}
+
+async function watchLocalPreviewTarget(
+  target: PreviewTarget,
+  controller: AbortController,
+  options: { intervalMs: number; timeoutMs: number },
+) {
+  while (!controller.signal.aborted) {
+    try {
+      await delay(options.intervalMs, undefined, { signal: controller.signal });
+    } catch {
+      return;
+    }
+
+    if (controller.signal.aborted) return;
+
+    const reachable = await isLocalPreviewTargetReachable(target.localUrl, options.timeoutMs);
+    if (!reachable && !controller.signal.aborted) {
+      logger.warn(`Local preview target ${target.localUrl} is no longer reachable. Closing preview session.`);
+      controller.abort(new Error("Local preview target is no longer reachable."));
+      return;
+    }
+  }
+}
+
+async function isLocalPreviewTargetReachable(url: string, timeoutMs: number) {
+  const signal = AbortSignal.timeout(timeoutMs);
+
+  try {
+    await fetch(url, {
+      method: "GET",
+      signal,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function createGatewaySession(

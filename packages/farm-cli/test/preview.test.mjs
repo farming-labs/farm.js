@@ -14,6 +14,7 @@ const {
   forwardGatewayRequest,
   parsePreviewPublicUrl,
   resolvePreviewTarget,
+  runPreviewGateway,
 } = require("../dist/index.js");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
@@ -150,6 +151,47 @@ test("forwards a gateway request to the local target", async () => {
   }
 });
 
+test("closes the gateway session when the local target stops", async () => {
+  const app = await createTestServer();
+  const gateway = await createPreviewGatewayTestServer();
+  const plan = createPreviewGatewayPlan(
+    {
+      localUrl: `http://localhost:${app.port}`,
+      host: "localhost",
+      port: app.port,
+      source: "port",
+    },
+    {
+      gatewayUrl: gateway.url,
+      name: "watch-check",
+    },
+  );
+
+  try {
+    const preview = runPreviewGateway(plan, {
+      pollTimeoutMs: 25,
+      localProbeIntervalMs: 20,
+      localProbeTimeoutMs: 50,
+    });
+
+    await gateway.waitForSession();
+    await app.close();
+
+    await Promise.race([
+      preview,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("preview did not stop after local target closed")), 1000),
+      ),
+    ]);
+
+    assert.equal(gateway.deletedSessions.length, 1);
+    assert.equal(gateway.deletedSessions[0], "sess_watch");
+  } finally {
+    await app.close().catch(() => undefined);
+    await gateway.close();
+  }
+});
+
 test("runs farm preview dry-run through the managed gateway by default", async () => {
   const server = await createTestServer();
 
@@ -241,6 +283,79 @@ async function createTestServer(handler) {
         server.close((error) => (error ? reject(error) : resolve()));
       }),
   };
+}
+
+async function createPreviewGatewayTestServer() {
+  let resolveSession;
+  const sessionReady = new Promise((resolve) => {
+    resolveSession = resolve;
+  });
+  const deletedSessions = [];
+
+  const server = createServer(async (req, res) => {
+    const url = new URL(req.url || "/", "http://localhost");
+
+    if (req.method === "POST" && url.pathname === "/api/sessions") {
+      await readRequestBody(req);
+      resolveSession();
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
+          id: "sess_watch",
+          name: "watch-check",
+          token: "token_watch",
+          publicUrl: "https://watch-check.preview.farming-labs.dev",
+        }),
+      );
+      return;
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/sessions/sess_watch/requests") {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+
+    if (req.method === "DELETE" && url.pathname === "/api/sessions/sess_watch") {
+      deletedSessions.push("sess_watch");
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+
+    res.statusCode = 404;
+    res.end("not found");
+  });
+
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, resolve);
+  });
+
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+
+  return {
+    url: `http://localhost:${address.port}`,
+    deletedSessions,
+    waitForSession: () => sessionReady,
+    close: () =>
+      new Promise((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      }),
+  };
+}
+
+function readRequestBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+    });
+    req.on("end", () => resolve(body));
+    req.on("error", reject);
+  });
 }
 
 function restoreEnv(key, previous) {
