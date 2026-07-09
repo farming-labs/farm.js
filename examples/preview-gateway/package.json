@@ -9,7 +9,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farmjs/preview-gateway": "workspace:*"
+    "@farmjs/preview-gateway": "workspace:*",
+    "@vercel/blob": "^2.6.1"
   },
   "devDependencies": {
     "@types/node": "^20.10.5",

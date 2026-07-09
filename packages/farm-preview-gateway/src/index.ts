@@ -78,6 +78,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024 * 5;
+const DEFAULT_POLL_REQUEST_LIMIT = 50;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-encoding",
@@ -432,7 +433,7 @@ async function pollSessionRequests(
   await markSessionOnline(store, config, session);
 
   while (Date.now() < deadline) {
-    const requests = await store.takeRequests(session.id, 10);
+    const requests = await store.takeRequests(session.id, DEFAULT_POLL_REQUEST_LIMIT);
     if (requests.length) {
       await markSessionOnline(store, config, session);
       return json({ requests });

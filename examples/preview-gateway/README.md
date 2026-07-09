@@ -24,9 +24,18 @@ Vercel will show the DNS records it expects. After DNS is verified, Vercel handl
 
 ## Required environment for production
 
-Use a shared Redis-compatible REST store so all Vercel function invocations see the same sessions and queued requests.
+Use a shared store so all Vercel function invocations see the same sessions and queued requests.
 
-The gateway reads either set of variables:
+The hosted Farming Labs gateway uses Vercel Blob. Create and link it once:
+
+```bash
+vercel blob create-store farm-preview-gateway --access private --region iad1 --yes
+```
+
+When the project is linked, Vercel connects the store and injects the Blob env automatically.
+
+If you prefer a Redis-compatible REST store, the reusable gateway package also reads either set of variables:
+
 
 ```txt
 UPSTASH_REDIS_REST_URL
@@ -47,7 +56,7 @@ FARM_PREVIEW_DOMAIN=preview.farming-labs.dev
 FARM_PREVIEW_GATEWAY_URL=https://preview.farming-labs.dev
 ```
 
-Without Redis REST env vars, the gateway falls back to in-memory storage. That is useful for local development, but not reliable for production Vercel traffic because requests can be handled by different function instances.
+Without Blob or Redis REST env vars, the gateway falls back to in-memory storage. That is useful for local development, but not reliable for production Vercel traffic because requests can be handled by different function instances.
 
 ## CLI usage
 
