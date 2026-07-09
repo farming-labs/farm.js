@@ -71,6 +71,10 @@ function createPPRRefreshScript(): string {
   return `<script>(function(){if(window.__FARM_PPR_REFRESHING__)return;window.__FARM_PPR_REFRESHING__=true;function replaceRoot(html){var doc=new DOMParser().parseFromString(html,"text/html");var next=doc.getElementById("root");var current=document.getElementById("root");if(!next||!current)return;current.innerHTML=next.innerHTML;}fetch(window.location.href,{credentials:"same-origin",headers:{"x-farm-ppr-refresh":"1"}}).then(function(response){return response.ok?response.text():null;}).then(function(html){if(html)replaceRoot(html);}).catch(function(){});})();</script>`;
 }
 
+function createPreHydrationClickQueueScript(): string {
+  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]"))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
+}
+
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
   refreshPPR?: boolean;
@@ -936,6 +940,10 @@ window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 </script>`;
+      const hydrationClickQueueScript =
+        isClientComponent || (req as any).__FARM_SHOULD_HYDRATE__ === true
+          ? createPreHydrationClickQueueScript()
+          : "";
 
       // Get metadata from request
       const metadata = (req as any).__FARM_METADATA__ || {};
@@ -994,6 +1002,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
   ${propsScript}
+  ${hydrationClickQueueScript}
 </head>
 <body class="">
   <div id="root">`;

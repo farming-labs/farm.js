@@ -1615,6 +1615,24 @@ function normalizeServerProps(rawProps) {
   return props;
 }
 
+function replayPreHydrationClicks() {
+  window.__FARM_HYDRATED__ = true;
+  document.documentElement.dataset.farmHydrated = 'true';
+
+  const queue = Array.isArray(window.__FARM_PREHYDRATION_CLICK_QUEUE__)
+    ? window.__FARM_PREHYDRATION_CLICK_QUEUE__
+    : [];
+  if (queue.length === 0) return;
+
+  const queuedClicks = queue.splice(0, queue.length);
+  for (const queuedClick of queuedClicks) {
+    const target = queuedClick?.target;
+    if (!target || typeof target.click !== 'function') continue;
+    if (target.isConnected === false) continue;
+    setTimeout(() => target.click(), 0);
+  }
+}
+
 async function buildClientHydrationElement(PageComponent, pageProps) {
   let element = React.createElement(PageComponent, pageProps);
   const loadingModulePath = window.__FARM_LOADING_MODULE__;
@@ -1964,6 +1982,7 @@ async function hydrate() {
     ).catch(() => false);
 
     if (hydrated) {
+      replayPreHydrationClicks();
       console.log('[Farm.js] ✅ Hydrated:', modulePath);
       return;
     }

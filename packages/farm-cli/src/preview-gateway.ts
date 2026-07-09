@@ -41,6 +41,7 @@ export interface RunPreviewGatewayOptions {
   localProbeIntervalMs?: number;
   localProbeTimeoutMs?: number;
   maxRequests?: number;
+  maxConcurrentRequests?: number;
 }
 
 const DEFAULT_GATEWAY_URL = "https://preview.farming-labs.dev";
@@ -48,6 +49,7 @@ const DEFAULT_PREVIEW_DOMAIN = "preview.farming-labs.dev";
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_LOCAL_PROBE_INTERVAL_MS = 2000;
 const DEFAULT_LOCAL_PROBE_TIMEOUT_MS = 1000;
+const DEFAULT_MAX_CONCURRENT_REQUESTS = 25;
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
   "content-length",
@@ -89,6 +91,11 @@ export async function runPreviewGateway(
   const session = await createGatewaySession(plan, options.timeoutMs ?? 30000);
   const controller = new AbortController();
   let handledRequests = 0;
+  const inFlightRequests = new Set<Promise<void>>();
+  const maxConcurrentRequests = Math.max(
+    1,
+    options.maxConcurrentRequests ?? DEFAULT_MAX_CONCURRENT_REQUESTS,
+  );
   const localTargetWatch = watchLocalPreviewTarget(plan.target, controller, {
     intervalMs: options.localProbeIntervalMs ?? DEFAULT_LOCAL_PROBE_INTERVAL_MS,
     timeoutMs: options.localProbeTimeoutMs ?? DEFAULT_LOCAL_PROBE_TIMEOUT_MS,
@@ -100,30 +107,51 @@ export async function runPreviewGateway(
 
   logger.success("Preview URL ready.");
   logger.info(`Public: ${session.publicUrl}`);
-  logger.info("Forwarding requests until Ctrl+C.");
+  logger.info("Forwarding requests until Ctrl+C. Remote traffic will be logged below.");
+
+  const waitForAvailableRequestSlot = async () => {
+    while (!controller.signal.aborted && inFlightRequests.size >= maxConcurrentRequests) {
+      await Promise.race(inFlightRequests);
+    }
+  };
+
+  const handleRequest = async (request: PreviewGatewayRequest) => {
+    const startedAt = Date.now();
+
+    try {
+      const response = await forwardGatewayRequest(plan.target, request);
+      await sendGatewayResponse(plan, session, request.id, response, controller.signal);
+      handledRequests += 1;
+      logger.info(
+        `${request.method.toUpperCase()} ${formatRequestPath(request.path)} -> ${response.status} ${Date.now() - startedAt}ms`,
+      );
+    } catch (error) {
+      if (controller.signal.aborted) return;
+      logger.warn(
+        `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
+      );
+      controller.abort(error);
+    }
+  };
 
   try {
     while (!controller.signal.aborted) {
+      await waitForAvailableRequestSlot();
+      if (controller.signal.aborted) break;
+
       const requests = await pollGatewayRequests(plan, session, {
         signal: controller.signal,
         pollTimeoutMs: options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
       });
 
-      await Promise.all(
-        requests.map(async (request) => {
-          try {
-            const response = await forwardGatewayRequest(plan.target, request);
-            await sendGatewayResponse(plan, session, request.id, response, controller.signal);
-            handledRequests += 1;
-          } catch (error) {
-            if (controller.signal.aborted) return;
-            logger.warn(
-              `Local preview target ${plan.target.localUrl} is no longer reachable. Closing preview session.`,
-            );
-            controller.abort(error);
-          }
-        }),
-      );
+      for (const request of requests) {
+        await waitForAvailableRequestSlot();
+        if (controller.signal.aborted) break;
+
+        const promise = handleRequest(request);
+        inFlightRequests.add(promise);
+        promise.finally(() => inFlightRequests.delete(promise));
+      }
 
       if (options.maxRequests && handledRequests >= options.maxRequests) {
         break;
@@ -133,6 +161,7 @@ export async function runPreviewGateway(
     process.removeListener("SIGINT", cleanup);
     process.removeListener("SIGTERM", cleanup);
     controller.abort();
+    await Promise.allSettled(inFlightRequests);
     await localTargetWatch.catch(() => undefined);
     await closeGatewaySession(plan, session).catch(() => undefined);
   }
@@ -319,6 +348,14 @@ export function formatGatewayPlan(plan: PreviewGatewayPlan) {
     `Local:   ${plan.target.localUrl}`,
     `Public:  ${plan.requestedPublicUrl}`,
   ].join("\n");
+}
+
+function formatRequestPath(path: string) {
+  if (path.length <= 96) {
+    return path;
+  }
+
+  return `${path.slice(0, 93)}...`;
 }
 
 function normalizeGatewayUrl(value: string) {
