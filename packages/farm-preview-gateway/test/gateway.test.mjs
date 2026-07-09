@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { setTimeout as delay } from "node:timers/promises";
 import test from "node:test";
 import { createNodePreviewGatewayHandler, MemoryPreviewGatewayStore } from "../dist/index.js";
 
@@ -58,13 +59,48 @@ test("proxies a public preview request through the gateway queue", async () => {
   }
 });
 
-async function createGatewayServer(store) {
+test("expires stale preview clients before queueing public requests", async () => {
+  const store = new MemoryPreviewGatewayStore();
+  const gateway = await createGatewayServer(store, {
+    clientHeartbeatTimeoutMs: 20,
+    requestTimeoutMs: 2000,
+  });
+
+  try {
+    const sessionResponse = await fetch(`${gateway.url}/api/sessions`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        name: "stale-check",
+        localUrl: "http://localhost:4321",
+      }),
+    });
+    assert.equal(sessionResponse.status, 200);
+
+    await delay(50);
+
+    const startedAt = Date.now();
+    const response = await fetch(`${gateway.url}/__preview/stale-check/docs`);
+    const elapsedMs = Date.now() - startedAt;
+
+    assert.equal(response.status, 404);
+    assert.match(await response.text(), /No active Farm preview/);
+    assert.ok(elapsedMs < 1000, `expected stale request to fail quickly, got ${elapsedMs}ms`);
+  } finally {
+    await gateway.close();
+  }
+});
+
+async function createGatewayServer(store, options = {}) {
   const handler = createNodePreviewGatewayHandler({
     store,
     domain: "preview.farming-labs.dev",
     requestTimeoutMs: 2000,
     pollTimeoutMs: 1000,
     pollIntervalMs: 10,
+    ...options,
   });
   const server = createServer(handler);
 

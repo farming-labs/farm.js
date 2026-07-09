@@ -6,6 +6,7 @@ export interface PreviewGatewayOptions {
   baseUrl?: string;
   store?: PreviewGatewayStore;
   sessionTtlMs?: number;
+  clientHeartbeatTimeoutMs?: number;
   requestTimeoutMs?: number;
   pollTimeoutMs?: number;
   pollIntervalMs?: number;
@@ -21,6 +22,7 @@ export interface PreviewGatewaySession {
   localUrl?: string;
   createdAt: number;
   expiresAt: number;
+  lastHeartbeatAt?: number;
 }
 
 export interface PreviewGatewayRequest {
@@ -62,6 +64,7 @@ interface PreviewGatewayRuntimeConfig {
   domain: string;
   baseUrl?: string;
   sessionTtlMs: number;
+  clientHeartbeatTimeoutMs: number;
   requestTimeoutMs: number;
   pollTimeoutMs: number;
   pollIntervalMs: number;
@@ -70,6 +73,7 @@ interface PreviewGatewayRuntimeConfig {
 
 const DEFAULT_DOMAIN = "preview.farming-labs.dev";
 const DEFAULT_SESSION_TTL_MS = 1000 * 60 * 30;
+const DEFAULT_CLIENT_HEARTBEAT_TIMEOUT_MS = 1000 * 20;
 const DEFAULT_REQUEST_TIMEOUT_MS = 25000;
 const DEFAULT_POLL_TIMEOUT_MS = 15000;
 const DEFAULT_POLL_INTERVAL_MS = 100;
@@ -93,6 +97,8 @@ export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {})
     domain: normalizeDomain(options.domain || process.env.FARM_PREVIEW_DOMAIN || DEFAULT_DOMAIN),
     baseUrl: options.baseUrl || process.env.FARM_PREVIEW_GATEWAY_URL,
     sessionTtlMs: options.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS,
+    clientHeartbeatTimeoutMs:
+      options.clientHeartbeatTimeoutMs ?? DEFAULT_CLIENT_HEARTBEAT_TIMEOUT_MS,
     requestTimeoutMs: options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     pollTimeoutMs: options.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
     pollIntervalMs: options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
@@ -367,6 +373,7 @@ async function createSession(
     localUrl: input.localUrl,
     createdAt: Date.now(),
     expiresAt: Date.now() + config.sessionTtlMs,
+    lastHeartbeatAt: Date.now(),
   };
 
   await store.createSession(session, config.sessionTtlMs);
@@ -396,12 +403,12 @@ async function handleSessionRoute(
   if (request.method === "POST" && route.action === "responses" && route.requestId) {
     const response = (await request.json()) as PreviewGatewayResponse;
     await store.saveResponse(session.id, route.requestId, response, config.sessionTtlMs);
-    await store.touchSession(session, config.sessionTtlMs);
+    await markSessionOnline(store, config, session);
     return json({ ok: true });
   }
 
   if (request.method === "POST" && route.action === "heartbeat") {
-    await store.touchSession(session, config.sessionTtlMs);
+    await markSessionOnline(store, config, session);
     return json({ ok: true, expiresAt: Date.now() + config.sessionTtlMs });
   }
 
@@ -422,16 +429,18 @@ async function pollSessionRequests(
   const waitMs = clamp(Number(url.searchParams.get("wait") || config.pollTimeoutMs), 1000, 25000);
   const deadline = Date.now() + waitMs;
 
+  await markSessionOnline(store, config, session);
+
   while (Date.now() < deadline) {
     const requests = await store.takeRequests(session.id, 10);
     if (requests.length) {
-      await store.touchSession(session, config.sessionTtlMs);
+      await markSessionOnline(store, config, session);
       return json({ requests });
     }
     await delay(config.pollIntervalMs);
   }
 
-  await store.touchSession(session, config.sessionTtlMs);
+  await markSessionOnline(store, config, session);
   return new Response(null, { status: 204 });
 }
 
@@ -446,12 +455,19 @@ async function proxyPublicRequest(
   if (!session) {
     return text(`No active Farm preview is running for "${route.name}".`, 404);
   }
+  if (!isPreviewClientOnline(session, config)) {
+    await store.deleteSession(session);
+    return text(`No active Farm preview is running for "${route.name}".`, 404);
+  }
 
   const previewRequest = await serializePreviewRequest(request, url, route.path, config.maxBodyBytes);
   await store.enqueueRequest(session.id, previewRequest, config.sessionTtlMs);
   await store.touchSession(session, config.sessionTtlMs);
 
   const response = await waitForPreviewResponse(store, config, session, previewRequest.id);
+  if (response === "stale") {
+    return text(`No active Farm preview is running for "${route.name}".`, 404);
+  }
   if (!response) {
     return text("The local Farm preview did not respond before the gateway timed out.", 504);
   }
@@ -482,8 +498,18 @@ async function waitForPreviewResponse(
   requestId: string,
 ) {
   const deadline = Date.now() + config.requestTimeoutMs;
+  let nextLivenessCheckAt = 0;
 
   while (Date.now() < deadline) {
+    if (Date.now() >= nextLivenessCheckAt) {
+      const latestSession = await store.getSessionById(session.id);
+      if (!latestSession || !isPreviewClientOnline(latestSession, config)) {
+        if (latestSession) await store.deleteSession(latestSession);
+        return "stale";
+      }
+      nextLivenessCheckAt = Date.now() + 1000;
+    }
+
     const response = await store.getResponse(session.id, requestId);
     if (response) {
       await store.deleteResponse(session.id, requestId);
@@ -493,6 +519,23 @@ async function waitForPreviewResponse(
   }
 
   return undefined;
+}
+
+async function markSessionOnline(
+  store: PreviewGatewayStore,
+  config: PreviewGatewayRuntimeConfig,
+  session: PreviewGatewaySession,
+) {
+  session.lastHeartbeatAt = Date.now();
+  await store.touchSession(session, config.sessionTtlMs);
+}
+
+function isPreviewClientOnline(
+  session: PreviewGatewaySession,
+  config: PreviewGatewayRuntimeConfig,
+) {
+  const lastHeartbeatAt = session.lastHeartbeatAt || session.createdAt;
+  return Date.now() - lastHeartbeatAt <= config.clientHeartbeatTimeoutMs;
 }
 
 async function serializePreviewRequest(
