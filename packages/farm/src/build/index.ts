@@ -10,7 +10,7 @@ import { APIRouteManager } from "../api/route-manager";
 import { resolveAppPath } from "../utils";
 import { buildUniversal } from "../nitro/universal-build";
 import { getFarmDocsRouteTypeEntries } from "../docs";
-import { generateRouteTypes } from "../routing/generate-route-types";
+import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 
 interface BuildOptions {
@@ -57,7 +57,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     const serverRenderer = farmApp.getServerRenderer();
 
     try {
-      await generateRouteTypes({
+      await generateFarmTypeArtifacts({
         root,
         srcDir,
         extraRoutes: [

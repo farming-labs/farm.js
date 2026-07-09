@@ -87,4 +87,18 @@ describe("generateRouteTypes", () => {
     expect(content).toContain('"/docs"');
     expect(content).toContain("`/docs/${string}`");
   });
+
+  it("writes a valid empty route union when no pages exist", async () => {
+    const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "farm-empty-route-types-"));
+    try {
+      await fs.promises.mkdir(path.join(root, "src", "app"), { recursive: true });
+
+      const outPath = await generateRouteTypes({ root, srcDir: "src" });
+      const content = fs.readFileSync(outPath, "utf8");
+
+      expect(content).toContain("export type RoutePath = never;");
+    } finally {
+      await fs.promises.rm(root, { recursive: true, force: true });
+    }
+  });
 });

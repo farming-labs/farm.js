@@ -15,7 +15,7 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 | farm dev | Start the dev server. |
 | farm build | Build the app for the configured target. |
 | farm preview | Create a public URL for a running local app. |
-| farm generate | Generate API and route types. |
+| farm generate | Generate route/API types and integration schema artifacts. |
 | farm migrate inspect | Detect supported framework migration sources. |
 | farm migrate next --write | Apply a deterministic Next.js App Router migration. |
 | farm migrate tanstack --write | Apply a deterministic TanStack Router file-route migration. |
@@ -43,7 +43,9 @@ Without `--ui`, the CLI installs integration wiring. With `--ui`, it also instal
 farm generate
 ```
 
-Use this after adding or changing API routes so `api.hello.post(...)`, route params, and `Link` types stay current.
+`farm dev` refreshes generated route/API types automatically when page and API route files change. Use `farm generate` when you want to refresh the same files outside the dev server, such as in CI, before publishing a package, or after moving files while the dev server was stopped.
+
+When integration storage schemas are configured, `farm generate` also writes schema artifacts if Farm can detect the data layer. Pass `--orm` and `--output` when you want explicit schema output for a migration step.
 
 ## Framework migrations
 

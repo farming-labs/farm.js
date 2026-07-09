@@ -40,7 +40,7 @@ export class APITypeGenerator {
       if (item.isDirectory()) {
         const newBasePath = basePath ? `${basePath}/${item.name}` : item.name;
         this.scanDirectory(fullPath, routes, newBasePath);
-      } else if (item.name === "route.ts" || item.name === "route.tsx") {
+      } else if (/^route\.(ts|tsx|js|jsx)$/.test(item.name)) {
         const routeInfo = this.extractRouteInfo(fullPath, basePath);
         if (routeInfo) {
           routes.push(routeInfo);
@@ -81,6 +81,7 @@ export class APITypeGenerator {
       // Look for export const METHOD = or export { METHOD }
       const patterns = [
         new RegExp(`export\\s+const\\s+${method}\\s*=`, "g"),
+        new RegExp(`export\\s+(?:async\\s+)?function\\s+${method}\\s*\\(`, "g"),
         new RegExp(`export\\s*{\\s*${method}\\s*}`, "g"),
         new RegExp(`export\\s*{\\s*${method}\\s*as\\s+\\w+\\s*}`, "g"),
       ];
@@ -118,9 +119,9 @@ export class APITypeGenerator {
 
     for (const [path, routeList] of routeGroups) {
       const route = routeList[0];
-      const importPath = route.relativePath.replace(/\\/g, "/").replace(/\.(ts|tsx)$/, "");
+      const importPath = route.relativePath.replace(/\\/g, "/").replace(/\.(ts|tsx|js|jsx)$/, "");
       const routeName = this.pathToRouteName(route.path);
-      const cleanPath = path.replace(/^\/api\//, "");
+      const cleanPath = path === "/api" ? "" : path.replace(/^\/api\//, "");
       const parts = cleanPath ? cleanPath.split("/") : [];
 
       // Collect all methods for this route
@@ -132,24 +133,32 @@ export class APITypeGenerator {
         imports.push(`import type { ${method} as ${importName} } from '../app/${importPath}';`);
       }
 
-      // Build nested object
-      let current = nestedStructure;
-      for (let i = 0; i < parts.length; i++) {
-        const part = parts[i];
-        if (i === parts.length - 1) {
-          // Last part - add methods
-          current[part] = {};
-          for (const method of allMethods) {
-            const importName = `${method}_${routeName}`;
-            const methodName = method.toLowerCase();
-            current[part][methodName] = `typeof ${importName}`;
-          }
-        } else {
-          // Intermediate part - create nested object
-          if (!current[part]) {
+      if (parts.length === 0) {
+        for (const method of allMethods) {
+          const importName = `${method}_${routeName}`;
+          const methodName = method.toLowerCase();
+          nestedStructure[methodName] = `typeof ${importName}`;
+        }
+      } else {
+        // Build nested object
+        let current = nestedStructure;
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
+          if (i === parts.length - 1) {
+            // Last part - add methods
             current[part] = {};
+            for (const method of allMethods) {
+              const importName = `${method}_${routeName}`;
+              const methodName = method.toLowerCase();
+              current[part][methodName] = `typeof ${importName}`;
+            }
+          } else {
+            // Intermediate part - create nested object
+            if (!current[part]) {
+              current[part] = {};
+            }
+            current = current[part];
           }
-          current = current[part];
         }
       }
     }
@@ -176,8 +185,7 @@ ${typeExports}
   }
 
   private pathToRouteName(path: string): string {
-    return path
-      .replace(/^\/api\//, "")
+    return (path === "/api" ? "root" : path.replace(/^\/api\//, ""))
       .replace(/\//g, "_")
       .replace(/[^a-zA-Z0-9_]/g, "");
   }

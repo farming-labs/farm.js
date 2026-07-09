@@ -1,7 +1,11 @@
 import {
+  APITypeGenerator,
+  getFarmDocsRouteTypeEntries,
   getIntegrationSchemas,
+  generateRouteTypes,
   loadConfig,
   logger,
+  resolveConfig,
   type FarmIntegrationSchema,
   type FarmIntegrationSchemaField,
   type FarmIntegrationSchemaModel,
@@ -60,22 +64,65 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
   const root = path.resolve(options.root || process.cwd());
   const userConfig = await loadConfig(root, options.configPath, "development");
 
-  if (!userConfig) {
+  if (!userConfig && hasSchemaOptions(options)) {
     throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
   }
 
-  const schemas = getIntegrationSchemas(userConfig.integrations);
+  const resolvedConfig = await resolveConfig({ root, ...(userConfig || {}) }, "development");
+  const extraRoutes = [
+    ...(resolvedConfig.openapi?.enabled && resolvedConfig.openapi.route
+      ? [resolvedConfig.openapi.route]
+      : []),
+    ...getFarmDocsRouteTypeEntries(resolvedConfig.docs),
+  ];
+  await generateRouteTypes({
+    root: resolvedConfig.root,
+    srcDir: resolvedConfig.srcDir,
+    extraRoutes,
+    suppressLintOnLink: resolvedConfig.suppressLintOnLink,
+  });
+  const appDir = path.join(resolvedConfig.root, resolvedConfig.srcDir, "app");
+  const apiGenerator = new APITypeGenerator(appDir);
+  const apiRoutes = apiGenerator.scanAPIRoutes();
+  const apiTypesPath = path.join(resolvedConfig.root, resolvedConfig.srcDir, "lib", "api.generated.ts");
+  await mkdir(path.dirname(apiTypesPath), { recursive: true });
+  await writeFile(apiTypesPath, apiGenerator.generateAPIRouter(apiRoutes), "utf8");
+  logger.success(
+    `Generated route and API types (${apiRoutes.length} API route${apiRoutes.length === 1 ? "" : "s"}).`,
+  );
+
+  const schemas = getIntegrationSchemas(resolvedConfig.integrations);
   const schemaEntries = Object.entries(schemas);
 
   if (!schemaEntries.length) {
-    logger.warn("No integration schemas were found in the current Farm config.");
+    if (hasSchemaOptions(options)) {
+      logger.warn("No integration schemas were found in the current Farm config.");
+    }
     return;
   }
 
   const packageManifest = await readPackageManifest(root);
-  const orm = options.orm ?? (await detectSchemaTarget(root, packageManifest));
+  const schemaOptionsExplicit = hasSchemaOptions(options);
+  let orm: GenerateFarmSchemaTarget | null = null;
+  try {
+    orm = options.orm ?? (await detectSchemaTarget(root, packageManifest));
+  } catch (error) {
+    if (schemaOptionsExplicit) {
+      throw error;
+    }
+    logger.warn(
+      `Integration schemas were found, but Farm could not choose a schema target automatically: ${(error as Error).message}`,
+    );
+    return;
+  }
 
   if (!orm) {
+    if (!schemaOptionsExplicit) {
+      logger.warn(
+        "Integration schemas were found, but no data layer was detected. Pass --orm prisma|drizzle|postgres|mysql|sqlite|mongodb to generate schema artifacts.",
+      );
+      return;
+    }
     throw new Error(
       "Could not auto-detect a schema target. Pass one explicitly with --orm prisma|drizzle|postgres|mysql|sqlite|mongodb.",
     );
@@ -140,6 +187,10 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
       return;
     }
   }
+}
+
+function hasSchemaOptions(options: GenerateFarmOptions) {
+  return Boolean(options.orm || options.output || options.dialect);
 }
 
 async function readPackageManifest(root: string): Promise<PackageManifest | null> {
