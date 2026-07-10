@@ -84,7 +84,7 @@ Keep framework configuration in `farm.config.ts`. Keep application helpers under
 
 ## Generated files
 
-Farm can generate route and API types from the app tree. Commit generated types when the project relies on them during CI or package publishing.
+Farm generates route and API types from the app tree. `farm dev` keeps them current as page and API route files change; run the command manually when the dev server is not running.
 
 **Terminal**
 

@@ -173,6 +173,8 @@ The group names are organizational. The URLs are still `/`, `/pricing`, and `/da
 ## Navigation workflow
 
 1. Add or rename route files.
-2. Run `farm generate` when you want type updates immediately.
+2. Keep `farm dev` running; Farm regenerates route and API types when route files change.
 3. Use `Link` for internal navigation and plain anchors for external URLs.
 4. Keep dynamic route values encoded in the href string, such as `/blog/${slug}`.
+
+Run `farm generate` when you want to refresh generated types outside the dev server, such as in CI or after a large file move.

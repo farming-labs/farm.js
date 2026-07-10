@@ -86,7 +86,7 @@ farm generate
 farm build
 ```
 
-`farm generate` keeps route types aware of the reference URL. `farm build` includes the reference route in the app output when OpenAPI is enabled.
+`farm dev` and `farm generate` keep route types aware of the reference URL. `farm build` includes the reference route in the app output when OpenAPI is enabled.
 
 ## Production notes
 

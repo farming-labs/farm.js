@@ -95,7 +95,7 @@ await api.users.get({
 });
 ```
 
-The exact generated shape comes from route generation. Body and query schemas become typed caller input, and path segments become the nested `api.users.get` style namespace. Run `farm generate` when you want updated route/API types without a full build.
+The exact generated shape comes from route generation. Body and query schemas become typed caller input, and path segments become the nested `api.users.get` style namespace. During `farm dev`, Farm regenerates route/API types when page or API route files are added, changed, or removed. Run `farm generate` when you want the same refresh outside the dev server.
 
 ## When to use integrations instead
 

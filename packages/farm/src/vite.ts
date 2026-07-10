@@ -8,7 +8,7 @@ import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
-import { generateRouteTypes } from "./routing/generate-route-types";
+import { generateFarmTypeArtifacts } from "./type-artifacts";
 import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
@@ -57,7 +57,7 @@ export function farmPlugin(
     | ((request: Request) => Promise<Response | null>)
     | null = null;
   const pluginManager: PluginManager | undefined = initialPluginManager;
-  const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE", message: string) => {
+  const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
     try {
       const pc = require("picocolors");
       const log = [
@@ -122,39 +122,59 @@ export function farmPlugin(
         ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
         ...getFarmDocsRouteTypeEntries(farmConfig.docs),
       ];
-      try {
-        await generateRouteTypes({
-          root: farmConfig.root,
-          srcDir: farmConfig.srcDir,
-          extraRoutes: getExtraRouteTypes(),
-          suppressLintOnLink: farmConfig.suppressLintOnLink,
-        });
-      } catch (e) {
-        if (process.env.FARM_VERBOSE)
-          logger.warn("Route type generation failed: " + (e as Error).message);
-      }
-
       const appDirSlug = path.join(farmConfig.root, farmConfig.srcDir, "app").replace(/\\/g, "/");
-      const isPageFile = (file: string) => {
-        const normalized = file.replace(/\\/g, "/");
-        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized);
-      };
-      let routeTypeGenScheduled: ReturnType<typeof setTimeout> | null = null;
-      const scheduleRouteTypeGen = () => {
-        if (routeTypeGenScheduled) return;
-        routeTypeGenScheduled = setTimeout(() => {
-          routeTypeGenScheduled = null;
-          generateRouteTypes({
+      const generateTypeArtifacts = async (reason: string, log = false) => {
+        try {
+          const result = await generateFarmTypeArtifacts({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
-          }).catch(() => {});
+          });
+          if (log) {
+            logUpdate(
+              "TYPE",
+              `${reason} - regenerated route and API types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
+            );
+          }
+          if (openAPIManager) {
+            await openAPIManager.invalidateCache();
+          }
+        } catch (e) {
+          if (process.env.FARM_VERBOSE) {
+            logger.warn("Type artifact generation failed: " + (e as Error).message);
+          }
+          if (pm) {
+            await emitPluginError("type-artifact-generation", e, { reason });
+          }
+        }
+      };
+      await generateTypeArtifacts("startup");
+
+      const isPageFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized);
+      };
+      const isApiRouteFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return (
+          normalized.includes(`${appDirSlug}/api/`) &&
+          /route\.(ts|tsx|js|jsx)$/.test(normalized)
+        );
+      };
+      const isTypeAffectingFile = (file: string) => isPageFile(file) || isApiRouteFile(file);
+      let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
+      const scheduleTypeArtifactGen = (file: string, event: string) => {
+        if (typeArtifactGenScheduled) return;
+        typeArtifactGenScheduled = setTimeout(() => {
+          typeArtifactGenScheduled = null;
+          const shortPath = file.split("/app/")[1] || file;
+          generateTypeArtifacts(`${event} ${shortPath}`, true).catch(() => {});
         }, 100);
       };
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
-          if (isPageFile(file)) scheduleRouteTypeGen();
+          if (isTypeAffectingFile(file)) scheduleTypeArtifactGen(file, ev);
         });
       });
 
@@ -162,7 +182,7 @@ export function farmPlugin(
       hmrManager = new HMRManager(server);
 
       // Initialize API route manager
-      const appDir = path.join(server.config.root, "src/app");
+      const appDir = path.join(farmConfig.root, farmConfig.srcDir, "app");
       const routeManager = farmApp.getRouteManager();
       const discoveredRoutes: Array<{
         kind: "page" | "layout";
@@ -1230,41 +1250,6 @@ if (import.meta.hot) {
           }
 
           return [];
-        }
-
-        // Auto-generate types when API routes change
-        if (file.includes("/api/") && file.includes("/route.")) {
-          const shortPath = file.split("/app/")[1] || file;
-          logUpdate("API", `updated ${shortPath} - regenerating types...`);
-
-          // Dynamically regenerate API types
-          try {
-            const { APITypeGenerator } = await import("./type-generator.js");
-            const { join } = await import("path");
-            const { fileURLToPath } = await import("url");
-
-            const appDir = file.substring(0, file.indexOf("/app/") + 4);
-            const outputPath = join(appDir, "../lib/api.generated.ts");
-
-            const generator = new APITypeGenerator(appDir);
-            generator.generateAPIIndex(outputPath);
-            logger.success("✅ API types regenerated!");
-
-            // Regenerate OpenAPI spec if enabled
-            if (openAPIManager) {
-              await openAPIManager.invalidateCache();
-              logger.success("✅ OpenAPI spec regenerated!");
-            }
-          } catch (error) {
-            if (initialPluginManager) {
-              await initialPluginManager.runHookParallel("onError", {
-                phase: "api-type-regeneration",
-                error,
-                meta: { file },
-              });
-            }
-            logger.warn(`Failed to regenerate API types: ${error}`);
-          }
         }
 
         if (file.includes("page.") || file.includes("layout.")) {

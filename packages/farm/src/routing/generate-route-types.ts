@@ -93,7 +93,11 @@ export type RoutePath = string;
 
   const typeLiterals = Array.from(patterns).sort().map(routePatternToTsTypeLiteral);
 
-  const routePathType = suppressLintOnLink ? "string" : typeLiterals.join(" | ");
+  const routePathType = suppressLintOnLink
+    ? "string"
+    : typeLiterals.length
+      ? typeLiterals.join(" | ")
+      : "never";
   const augmentationBlock = suppressLintOnLink
     ? ""
     : `

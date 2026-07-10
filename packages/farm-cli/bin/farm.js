@@ -57,7 +57,7 @@ program
 
 program
   .command("generate")
-  .description("Generate integration schema artifacts for the detected data layer")
+  .description("Generate route/API types and integration schema artifacts")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("-c, --config <config>", "Path to farm config file")
   .option(
@@ -77,7 +77,7 @@ program
         output: options.output,
       });
     } catch (error) {
-      console.error("Failed to generate integration schema artifacts:", error);
+      console.error("Failed to generate Farm artifacts:", error);
       process.exit(1);
     }
   });

@@ -9,8 +9,12 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
-const { createFrameworkMigrationPlan, inspectFrameworkMigrations, migrateFarm } =
-  require("../dist/index.js");
+const {
+  createFrameworkMigrationPlan,
+  generateFarmArtifacts,
+  inspectFrameworkMigrations,
+  migrateFarm,
+} = require("../dist/index.js");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const cliBin = path.resolve(testDir, "../bin/farm.js");
@@ -75,6 +79,41 @@ test("loads migration commands from farm.config", async () => {
     await migrateFarm({ root });
 
     assert.equal(await readFile(path.join(root, "configured.txt"), "utf8"), "configured");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("generates route and API types", async () => {
+  const root = await createTempProject();
+
+  try {
+    await mkdir(path.join(root, "src", "app", "about"), { recursive: true });
+    await mkdir(path.join(root, "src", "app", "api", "hello"), { recursive: true });
+    await writeFile(
+      path.join(root, "src", "app", "page.tsx"),
+      "export default function Home() { return null; }\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "app", "about", "page.tsx"),
+      "export default function About() { return null; }\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "app", "api", "hello", "route.ts"),
+      "export const POST = async () => Response.json({ ok: true });\n",
+      "utf8",
+    );
+
+    await generateFarmArtifacts({ root });
+
+    const routeTypes = await readFile(path.join(root, "src", "farm-routes.d.ts"), "utf8");
+    const apiTypes = await readFile(path.join(root, "src", "lib", "api.generated.ts"), "utf8");
+
+    assert.ok(routeTypes.includes('"/about"'));
+    assert.ok(apiTypes.includes("hello: {"));
+    assert.ok(apiTypes.includes("post: typeof POST_hello;"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

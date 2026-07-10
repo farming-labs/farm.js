@@ -38,4 +38,30 @@ describe("APITypeGenerator", () => {
     expect(existsSync(outputPath)).toBe(true);
     expect(readFileSync(outputPath, "utf8")).toContain("Auto-generated API router types");
   });
+
+  it("detects function-style handlers and JavaScript route files", () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-api-types-"));
+    const appDir = path.join(root, "src", "app");
+    const statusRouteDir = path.join(appDir, "api", "status");
+    const profileRouteDir = path.join(appDir, "api", "profile");
+    mkdirSync(statusRouteDir, { recursive: true });
+    mkdirSync(profileRouteDir, { recursive: true });
+
+    writeFileSync(
+      path.join(statusRouteDir, "route.ts"),
+      "export async function GET() { return Response.json({ ok: true }); }\n",
+    );
+    writeFileSync(
+      path.join(profileRouteDir, "route.js"),
+      "export function POST() { return Response.json({ ok: true }); }\n",
+    );
+
+    const generator = new APITypeGenerator(appDir);
+    const content = generator.generateAPIRouter(generator.scanAPIRoutes());
+
+    expect(content).toContain("import type { GET as GET_status }");
+    expect(content).toContain("import type { POST as POST_profile }");
+    expect(content).toContain("status: {");
+    expect(content).toContain("profile: {");
+  });
 });
