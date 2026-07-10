@@ -1,5 +1,5 @@
 // Form page - Server Actions Demo
-// Shows how to use "use server" functions from Client Components
+// Shows how to use createServerFn functions from Client Components
 
 import React from "react";
 import { MessageForm } from "../components/MessageForm";
@@ -16,8 +16,8 @@ export default function FormPage() {
       <div className="text-center">
         <h1 className="text-4xl font-bold text-white mb-4">Server Actions</h1>
         <p className="text-lg text-slate-400 max-w-2xl mx-auto">
-          Use <code className="text-orange-400">"use server"</code> to create
-          functions that run on the server but can be called from the client.
+          Use <code className="text-orange-400">createServerFn</code> to create
+          validated functions that run on the server but can be called from forms.
         </p>
       </div>
 
@@ -39,17 +39,16 @@ export default function FormPage() {
               Server Action (actions/user.ts)
             </h4>
             <pre className="bg-slate-900/50 rounded-lg p-4 overflow-x-auto text-sm">
-              <code className="text-slate-300">{`"use server";
-
-export async function submitMessage(formData) {
-  const name = formData.get("name");
-  const message = formData.get("message");
-
-  // Save to database
-  await db.messages.create({ name, message });
-
-  return { success: true };
-}`}</code>
+              <code className="text-slate-300">{`export const submitMessage = createServerFn({
+  input: z.object({
+    name: z.string().min(1),
+    message: z.string().min(1),
+  }),
+  async handler({ input }) {
+    await db.messages.create(input);
+    return { success: true };
+  },
+});`}</code>
             </pre>
           </div>
           <div>

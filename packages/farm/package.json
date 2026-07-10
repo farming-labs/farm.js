@@ -60,6 +60,9 @@
       "workflows": [
         "./dist/workflows.d.ts"
       ],
+      "server-fn": [
+        "./dist/server-fn.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -146,6 +149,11 @@
       "types": "./dist/workflows.d.ts",
       "import": "./dist/workflows.mjs",
       "require": "./dist/workflows.cjs"
+    },
+    "./server-fn": {
+      "types": "./dist/server-fn.d.ts",
+      "import": "./dist/server-fn.mjs",
+      "require": "./dist/server-fn.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",

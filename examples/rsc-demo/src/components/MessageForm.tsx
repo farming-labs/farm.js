@@ -43,8 +43,8 @@ export function MessageForm() {
         Server Action Form
       </h3>
       <p className="text-slate-400 mb-4">
-        This form calls a <code className="text-orange-400">"use server"</code>{" "}
-        function directly. No API route needed!
+        This form calls a <code className="text-orange-400">createServerFn</code>{" "}
+        action directly. No API route needed!
       </p>
 
       <form id="message-form" action={handleSubmit} className="space-y-4">
