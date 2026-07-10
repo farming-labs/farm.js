@@ -33,6 +33,9 @@
       "router": [
         "./dist/router.d.ts"
       ],
+      "routes": [
+        "./dist/routes.d.ts"
+      ],
       "storage": [
         "./dist/storage.d.ts"
       ],
@@ -201,6 +204,11 @@
       "types": "./dist/router.d.ts",
       "import": "./dist/router.mjs",
       "require": "./dist/router.cjs"
+    },
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "import": "./dist/routes.mjs",
+      "require": "./dist/routes.cjs"
     }
   },
   "scripts": {

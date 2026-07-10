@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { createEndpoint } from "../api/endpoint";
 import { APIRouteManager } from "../api/route-manager";
+import { defineRoutes } from "../routes";
 
 const tempDirs: string[] = [];
 
@@ -325,6 +326,53 @@ describe("APIRouteManager", () => {
 
     expect(echoResponse.status).toBe(200);
     await expect(echoResponse.json()).resolves.toEqual({ echo: "hello better-call" });
+  });
+
+  it("discovers programmatic API routes outside the /api prefix", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const srcDir = path.join(root, "src");
+    const routesFile = path.join(srcDir, "farm.routes.js");
+    fs.mkdirSync(path.join(srcDir, "app"), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    const manager = new APIRouteManager(path.join(srcDir, "app"), {
+      ssrLoadModule: async (filePath: string) => {
+        expect(filePath).toBe(routesFile);
+        return {
+          default: defineRoutes(({ api }) => [
+            api("/rss.xml", {
+              GET: async () =>
+                new Response("<rss>farm</rss>", {
+                  headers: { "Content-Type": "application/rss+xml" },
+                }),
+            }),
+            api("/api/posts/[id]", {
+              GET: async (_request: Request, context: { params: Promise<{ id: string }> }) => {
+                const params = await context.params;
+                return Response.json({ id: params.id });
+              },
+            }),
+          ]),
+        };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+    const handler = manager.getHandler();
+
+    expect(manager.isAPIRoute("/rss.xml")).toBe(true);
+    expect(Array.from(manager.getRoutes().keys()).sort()).toEqual(["/api/posts/[id]", "/rss.xml"]);
+
+    const rssResponse = await handler!(new Request("http://example.com/rss.xml"));
+    expect(rssResponse.status).toBe(200);
+    expect(rssResponse.headers.get("Content-Type")).toBe("application/rss+xml");
+    await expect(rssResponse.text()).resolves.toBe("<rss>farm</rss>");
+
+    const postResponse = await handler!(new Request("http://example.com/api/posts/hello"));
+    expect(postResponse.status).toBe(200);
+    await expect(postResponse.json()).resolves.toEqual({ id: "hello" });
   });
 
   it("parses DELETE request bodies", async () => {

@@ -88,6 +88,25 @@ describe("generateRouteTypes", () => {
     expect(content).toContain("`/docs/${string}`");
   });
 
+  it("includes literal page paths from programmatic route files", async () => {
+    await fs.promises.writeFile(
+      path.join(tmpDir, "src", "farm.routes.ts"),
+      `
+import { defineRoutes } from "@farmjs/core/routes";
+import { MarketingPage } from "./marketing-page";
+
+export default defineRoutes(({ page }) => [
+  page("/marketing/[slug]", { component: MarketingPage }),
+]);
+`,
+    );
+
+    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
+    const content = fs.readFileSync(outPath, "utf8");
+
+    expect(content).toContain("`/marketing/${string}`");
+  });
+
   it("writes a valid empty route union when no pages exist", async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "farm-empty-route-types-"));
     try {

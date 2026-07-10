@@ -27,6 +27,38 @@ export * from "./openapi";
 export * from "./query";
 export * from "./middleware";
 export * from "./router";
+export {
+  createLayoutModuleFromProgrammaticLayout,
+  createProgrammaticRouteModuleId,
+  createRouteModuleFromProgrammaticPage,
+  defineRoutes,
+  getProgrammaticRouteManifest,
+  isProgrammaticRouteManifest,
+  isProgrammaticRoutesFileName,
+  layout,
+  page,
+  parseProgrammaticRouteModuleId,
+  parseProgrammaticRoutePath,
+  routesBuilder,
+  scanProgrammaticPagePaths,
+} from "./routes";
+export type {
+  ProgrammaticApiRoute,
+  ProgrammaticApiRouteOptions,
+  ProgrammaticLayoutRoute,
+  ProgrammaticPageRoute,
+  ProgrammaticRedirectRoute,
+  ProgrammaticRouteBuilder,
+  ProgrammaticRouteDefinition,
+  ProgrammaticRouteFactory,
+  ProgrammaticRouteManifest,
+  ProgrammaticRouteMethod,
+  ProgrammaticRoutePrimitive,
+  ProgrammaticRouteRenderMode,
+  ProgrammaticStaticPath,
+  ProgrammaticStaticPathParams,
+  ProgrammaticStaticPaths,
+} from "./routes";
 export * from "./docs";
 export * from "./markdown";
 export * from "./app-markdown";

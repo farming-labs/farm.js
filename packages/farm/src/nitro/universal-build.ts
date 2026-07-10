@@ -15,6 +15,7 @@ import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
 import { virtualBundlePlugin } from "./virtual-bundle-plugin";
+import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/config";
 import {
   applyFarmWorkflowVercelCrons,
@@ -154,10 +155,10 @@ function hasFarmMiddlewareConfig(config: ResolvedFarmConfig["middleware"]): bool
   const configRecord = config as Record<string, unknown>;
   return Boolean(
     configRecord.matcher ||
-      configRecord.exclude ||
-      configRecord.runtime ||
-      configRecord.handler ||
-      (Array.isArray(configRecord.handlers) && configRecord.handlers.length > 0),
+    configRecord.exclude ||
+    configRecord.runtime ||
+    configRecord.handler ||
+    (Array.isArray(configRecord.handlers) && configRecord.handlers.length > 0),
   );
 }
 
@@ -1184,6 +1185,7 @@ async function buildSSRInMemory(
       methods: route.methods,
     });
   }
+  const redirectRoutes = routeManager.getRedirects();
 
   // Discover layout files by scanning the source directory
   const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
@@ -1214,6 +1216,18 @@ async function buildSSRInMemory(
   }
 
   await findLayouts(appDir);
+  const seenLayoutPatterns = new Set(layoutRoutes.map((layout) => layout.pattern));
+  for (const [pattern, entry] of routeManager.getLayouts()) {
+    if (seenLayoutPatterns.has(pattern)) {
+      continue;
+    }
+
+    seenLayoutPatterns.add(pattern);
+    layoutRoutes.push({
+      pattern,
+      modulePath: entry.modulePath,
+    });
+  }
 
   // Check for custom not-found page
   let notFoundPath: string | null = null;
@@ -1249,7 +1263,10 @@ async function buildSSRInMemory(
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
   const configModulePath =
-    hasConfiguredIntegrations || hasObservabilityHandler || hasMdxComponentConfig || hasMiddlewareConfig
+    hasConfiguredIntegrations ||
+    hasObservabilityHandler ||
+    hasMdxComponentConfig ||
+    hasMiddlewareConfig
       ? await findFarmConfigPath(root)
       : null;
 
@@ -1260,6 +1277,7 @@ async function buildSSRInMemory(
     pageRoutes,
     layoutRoutes,
     middlewareRoutes,
+    redirectRoutes,
     notFoundPath,
     config,
     configModulePath,
@@ -1406,6 +1424,7 @@ function generateVirtualEntryCode(
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   middlewareRoutes: UniversalMiddlewareRoute[],
+  redirectRoutes: ProgrammaticRedirectRoute[],
   notFoundPath: string | null,
   config: ResolvedFarmConfig,
   configModulePath: string | null,
@@ -1667,6 +1686,78 @@ const pageRoutes = [${pageRegistrations.join(",")}
 const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
 
+// Redirect routes bundled at build time
+const redirectRoutes = ${JSON.stringify(redirectRoutes, null, 2)};
+
+function normalizeRuntimePath(pathname) {
+  if (!pathname || pathname === "/") return "/";
+  return pathname.endsWith("/") ? pathname.replace(/\\/+$/, "") : pathname;
+}
+
+function splitRuntimePath(pathname) {
+  return normalizeRuntimePath(pathname).split("/").filter(Boolean);
+}
+
+function matchRuntimePathPattern(pattern, pathname) {
+  const patternSegments = splitRuntimePath(pattern);
+  const pathnameSegments = splitRuntimePath(pathname);
+  const params = {};
+  let pathIndex = 0;
+
+  for (const segment of patternSegments) {
+    const optionalCatchAll = segment.match(/^\\[\\[\\.\\.\\.(.+)\\]\\]$/);
+    const catchAll = segment.match(/^\\[\\.\\.\\.(.+)\\]$/);
+    const dynamic = segment.match(/^\\[(.+)\\]$/);
+
+    if (optionalCatchAll || catchAll) {
+      const name = (optionalCatchAll || catchAll)[1];
+      const remaining = pathnameSegments.slice(pathIndex).map(decodeURIComponent).join("/");
+      if (!remaining && catchAll) return null;
+      params[name] = remaining;
+      pathIndex = pathnameSegments.length;
+      continue;
+    }
+
+    const pathnameSegment = pathnameSegments[pathIndex];
+    if (pathnameSegment === undefined) return null;
+
+    if (dynamic) {
+      params[dynamic[1]] = decodeURIComponent(pathnameSegment);
+      pathIndex++;
+      continue;
+    }
+
+    if (segment !== pathnameSegment) return null;
+    pathIndex++;
+  }
+
+  return pathIndex === pathnameSegments.length ? params : null;
+}
+
+function interpolateRedirectDestination(destination, params) {
+  let result = destination;
+  for (const [key, value] of Object.entries(params)) {
+    result = result.split("[..." + key + "]").join(value);
+    result = result.split("[[..." + key + "]]").join(value);
+    result = result.split("[" + key + "]").join(value);
+    result = result.split(":" + key + "*").join(value);
+    result = result.split(":" + key).join(value);
+  }
+  return result;
+}
+
+function matchRedirectRoute(pathname) {
+  for (const redirect of redirectRoutes) {
+    const params = matchRuntimePathPattern(redirect.source, pathname);
+    if (!params) continue;
+    return {
+      destination: interpolateRedirectDestination(redirect.destination, params),
+      statusCode: redirect.statusCode || (redirect.permanent ? 308 : 307),
+    };
+  }
+  return null;
+}
+
 // App middleware files bundled at build time (sorted by depth, root first)
 const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
 ];
@@ -1866,13 +1957,24 @@ async function handleRequest(request) {
   url = new URL(request.url);
   pathname = url.pathname;
 
-  // Handle API routes
-  if (pathname.startsWith("/api/")) {
-    const apiResponse = await handleAPIRequest(request.clone());
-    if (apiResponse) {
-      return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
-    }
+  const redirectMatch = matchRedirectRoute(pathname);
+  if (redirectMatch) {
+    return applyProductionMiddlewareHeaders(new Response(
+      "Redirecting to " + redirectMatch.destination,
+      {
+        status: redirectMatch.statusCode,
+        headers: { Location: redirectMatch.destination },
+      }
+    ), middlewareHeaders);
+  }
 
+  const apiResponse = await handleAPIRequest(request.clone());
+  if (apiResponse) {
+    return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
+  }
+
+  // Preserve the explicit JSON 404 for /api/* misses.
+  if (pathname.startsWith("/api/")) {
     if (farmDocsAPIHandler) {
       const docsAPIResponse = await farmDocsAPIHandler(request.clone());
       if (docsAPIResponse) {
@@ -2542,10 +2644,7 @@ async function postProcessVercelOutput(
     },
   ];
 
-  const vercelConfigWithCrons = applyFarmWorkflowVercelCrons(
-    vercelConfig,
-    farmWorkflows.workflows,
-  );
+  const vercelConfigWithCrons = applyFarmWorkflowVercelCrons(vercelConfig, farmWorkflows.workflows);
 
   await fs.writeFile(configPath, JSON.stringify(vercelConfigWithCrons, null, 2));
   await copyFarmDocsContentForVercel(config, root, nitroFuncDir, fs);

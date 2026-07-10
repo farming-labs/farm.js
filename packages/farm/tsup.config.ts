@@ -15,6 +15,7 @@ export default defineConfig({
     middleware: "src/middleware/index.ts",
     api: "src/api/index.ts",
     router: "src/router.ts",
+    routes: "src/routes.ts",
     plugin: "src/plugin.ts",
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",

@@ -15,9 +15,11 @@ function readIfExists(filePath: string): string | null {
 
 export function resolveModuleSourcePath(modulePath: string, root?: string): string | null {
   const candidates = new Set<string>();
+  const withoutQuery = modulePath.split("?")[0];
 
   if (modulePath) {
     candidates.add(modulePath);
+    candidates.add(withoutQuery);
 
     if (modulePath.startsWith("file://")) {
       try {
@@ -33,13 +35,13 @@ export function resolveModuleSourcePath(modulePath: string, root?: string): stri
   }
 
   if (root && modulePath) {
-    const normalized = modulePath.replace(/^\/+/, "");
+    const normalized = withoutQuery.replace(/^\/+/, "");
     candidates.add(path.join(root, normalized));
     candidates.add(path.resolve(root, normalized));
   }
 
-  if (modulePath?.startsWith("/src/")) {
-    const normalized = modulePath.replace(/^\/+/, "");
+  if (withoutQuery?.startsWith("/src/")) {
+    const normalized = withoutQuery.replace(/^\/+/, "");
     candidates.add(path.join(process.cwd(), normalized));
     candidates.add(path.resolve(process.cwd(), normalized));
   }

@@ -84,6 +84,14 @@ async function defaultHandler({
     console.log("[Farm.js] [DEBUG] page-data request:", pathname, "rm:", !!rm);
   }
 
+  const redirectMatch = rm?.matchRedirect(pathname);
+  if (redirectMatch) {
+    return new Response(`Redirecting to ${redirectMatch.destination}`, {
+      status: redirectMatch.statusCode,
+      headers: { Location: redirectMatch.destination },
+    });
+  }
+
   // Handle SPA page-data requests for client-side navigation
   if (pathname === "/__farm/page-data") {
     const targetPath = url.searchParams.get("path") || "/";
@@ -179,7 +187,7 @@ async function defaultHandler({
   }
 
   // Handle API routes
-  if (pathname.startsWith("/api/") && arm) {
+  if (arm?.matchRoute(pathname)) {
     const handler = arm.getHandler();
     if (handler) {
       return await handler(request);
