@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
 import { logger } from "../utils";
+import { getProgrammaticRouteManifest, type ProgrammaticApiRoute } from "../routes";
+import { findProgrammaticRouteFilesInDir } from "../routes.server";
 
 export interface APIRoute {
   path: string;
@@ -43,6 +45,8 @@ export class APIRouteManager {
    * Discover route.ts files in /app/api and explicit endpoints in root routes.ts
    */
   async discoverRoutes(): Promise<void> {
+    this.routes.clear();
+
     const apiDir = path.join(this.appDir, "api");
     let routeFiles: string[] = [];
 
@@ -65,6 +69,7 @@ export class APIRouteManager {
     }
 
     await this.loadRootRoutes();
+    await this.loadProgrammaticApiRoutes();
 
     if (process.env.FARM_VERBOSE) {
       logger.success(`Discovered ${this.routes.size} API routes`);
@@ -165,6 +170,28 @@ export class APIRouteManager {
     }
   }
 
+  private async loadProgrammaticApiRoutes(): Promise<void> {
+    const candidateRoots = [path.dirname(this.appDir), this.appDir];
+    const routeFiles = Array.from(
+      new Set(candidateRoots.flatMap((srcRoot) => findProgrammaticRouteFilesInDir(srcRoot))),
+    );
+
+    for (const routeFile of routeFiles) {
+      try {
+        const routesModule = await this.loadModule(routeFile);
+        const manifest = getProgrammaticRouteManifest(routesModule);
+        if (!manifest) continue;
+
+        for (const definition of manifest.routes) {
+          if (definition.kind !== "api") continue;
+          this.addProgrammaticApiRoute(routeFile, definition);
+        }
+      } catch (error) {
+        logger.error(`Error loading programmatic API routes ${routeFile}: ${error}`);
+      }
+    }
+  }
+
   private findRootRoutesFile(): string | null {
     const routeNames = ["routes.ts", "routes.tsx", "routes.js"];
     const candidateDirs = [path.dirname(this.appDir), this.appDir];
@@ -216,6 +243,14 @@ export class APIRouteManager {
     });
   }
 
+  private addProgrammaticApiRoute(filePath: string, route: ProgrammaticApiRoute): void {
+    for (const [method, endpoint] of Object.entries(route.methods)) {
+      if (endpoint) {
+        this.addEndpoint(route.path, filePath, method, endpoint);
+      }
+    }
+  }
+
   /**
    * Get the handler that directly invokes endpoint handlers
    */
@@ -264,7 +299,7 @@ export class APIRouteManager {
    * Check if a path is an API route
    */
   isAPIRoute(pathname: string): boolean {
-    return pathname === "/api" || pathname.startsWith("/api/");
+    return Boolean(this.matchRoute(pathname));
   }
 
   matchRoute(pathname: string): APIRouteMatch<APIRoute> | null {

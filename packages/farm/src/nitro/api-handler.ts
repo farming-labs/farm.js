@@ -9,16 +9,17 @@ import type { H3Event } from "h3";
 export function createNitroAPIHandler(apiRouteManager: APIRouteManager) {
   return defineEventHandler(async (event: H3Event) => {
     const url = event.node.req.url || "/";
+    const host = event.node.req.headers.host || "localhost";
+    const pathname = new URL(url, `http://${host}`).pathname;
 
     // Only handle API routes
-    if (!url.startsWith("/api/")) {
+    if (!apiRouteManager.matchRoute(pathname)) {
       return; // Let other handlers process this
     }
 
     try {
       // Convert H3 event to Web Request
       const protocol = event.node.req.headers["x-forwarded-proto"] || "http";
-      const host = event.node.req.headers.host || "localhost";
       const fullUrl = `${protocol}://${host}${url}`;
 
       const headers = new Headers();

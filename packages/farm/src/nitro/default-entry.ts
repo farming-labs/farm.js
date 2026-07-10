@@ -37,8 +37,16 @@ async function defaultHandler({
   const arm = apiRouteManager || globalThis.__FARM_REGISTRY__?.apiRouteManager;
   const sr = serverRenderer || globalThis.__FARM_REGISTRY__?.serverRenderer;
 
+  const redirectMatch = rm?.matchRedirect(pathname);
+  if (redirectMatch) {
+    return new Response(`Redirecting to ${redirectMatch.destination}`, {
+      status: redirectMatch.statusCode,
+      headers: { Location: redirectMatch.destination },
+    });
+  }
+
   // Handle API routes
-  if (pathname.startsWith("/api/") && arm) {
+  if (arm?.matchRoute(pathname)) {
     const handler = arm.getHandler();
     if (handler) {
       return await handler(request);

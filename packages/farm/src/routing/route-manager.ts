@@ -7,6 +7,18 @@ import type {
 } from "../types";
 import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
 import { collectSSGPages, resolveRouteRenderingConfigFromFile } from "../ssg";
+import type {
+  ProgrammaticPageRoute,
+  ProgrammaticLayoutRoute,
+  ProgrammaticRedirectRoute,
+} from "../routes";
+import {
+  createLayoutModuleFromProgrammaticLayout,
+  createProgrammaticRouteModuleId,
+  createRouteModuleFromProgrammaticPage,
+  parseProgrammaticRoutePath,
+} from "../routes";
+import { loadProgrammaticRouteManifests } from "../routes.server";
 import {
   createFarmMarkdownRouteModuleFromFile,
   isFarmMarkdownPageFile,
@@ -21,6 +33,13 @@ interface RouteEntry {
   route: ParsedRoute;
   modulePath: string;
   pattern: string;
+  source?: "file" | "programmatic";
+}
+
+interface RedirectEntry {
+  route: ParsedRoute;
+  pattern: string;
+  definition: ProgrammaticRedirectRoute;
 }
 
 /**
@@ -32,6 +51,9 @@ export class RouteManager {
   private layouts: Map<string, RouteEntry> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
   private errors: Map<string, RouteEntry> = new Map();
+  private redirects: Map<string, RedirectEntry> = new Map();
+  private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
+  private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
   private viteServer?: ViteDevServer;
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
@@ -43,13 +65,21 @@ export class RouteManager {
    * Discover all routes in the app directory
    */
   async discoverRoutes(): Promise<void> {
+    this.routes.clear();
+    this.layouts.clear();
+    this.loadings.clear();
+    this.errors.clear();
+    this.redirects.clear();
+    this.programmaticPages.clear();
+    this.programmaticLayouts.clear();
+
     const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
 
     // Find all page and layout files
-    const pageFiles = await globFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
-    const layoutFiles = await globFiles("**/layout.{ts,tsx,js,jsx}", appDir);
-    const loadingFiles = await globFiles("**/loading.{ts,tsx,js,jsx}", appDir);
-    const errorFiles = await globFiles("**/error.{ts,tsx,js,jsx}", appDir);
+    const pageFiles = await safeGlobFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
+    const layoutFiles = await safeGlobFiles("**/layout.{ts,tsx,js,jsx}", appDir);
+    const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
+    const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
@@ -74,6 +104,7 @@ export class RouteManager {
         route,
         modulePath,
         pattern,
+        source: "file",
       });
     }
 
@@ -87,6 +118,7 @@ export class RouteManager {
         route,
         modulePath,
         pattern,
+        source: "file",
       });
     }
 
@@ -100,6 +132,7 @@ export class RouteManager {
         route,
         modulePath,
         pattern,
+        source: "file",
       });
     }
 
@@ -113,8 +146,11 @@ export class RouteManager {
         route,
         modulePath,
         pattern,
+        source: "file",
       });
     }
+
+    await this.discoverProgrammaticRoutes();
 
     if (process.env.FARM_VERBOSE) {
       this.logRoutes();
@@ -180,6 +216,39 @@ export class RouteManager {
    */
   getErrors(): Map<string, RouteEntry> {
     return new Map(this.errors);
+  }
+
+  getRedirects(): ProgrammaticRedirectRoute[] {
+    return Array.from(this.redirects.values()).map((entry) => entry.definition);
+  }
+
+  matchRedirect(pathname: string): {
+    redirect: ProgrammaticRedirectRoute;
+    destination: string;
+    statusCode: number;
+    params: Record<string, string>;
+  } | null {
+    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+
+    for (const redirectEntry of this.redirects.values()) {
+      const match = matchRoute(normalizedPath, redirectEntry.route.segments);
+      if (!match.matches) continue;
+
+      const statusCode =
+        redirectEntry.definition.statusCode || (redirectEntry.definition.permanent ? 308 : 307);
+
+      return {
+        redirect: redirectEntry.definition,
+        destination: interpolateRedirectDestination(
+          redirectEntry.definition.destination,
+          match.params,
+        ),
+        statusCode,
+        params: match.params,
+      };
+    }
+
+    return null;
   }
 
   /**
@@ -254,6 +323,11 @@ export class RouteManager {
    */
   async loadRouteModule(modulePath: string): Promise<RouteModule> {
     try {
+      const programmaticPage = this.programmaticPages.get(modulePath);
+      if (programmaticPage) {
+        return createRouteModuleFromProgrammaticPage(programmaticPage);
+      }
+
       if (isFarmMarkdownPageFile(modulePath)) {
         const mdxConfig = resolveMdxConfig(this.config.mdx);
         const components = await loadFarmMdxComponents(mdxConfig, {
@@ -286,6 +360,11 @@ export class RouteManager {
    */
   async loadLayoutModule(modulePath: string): Promise<LayoutModule> {
     try {
+      const programmaticLayout = this.programmaticLayouts.get(modulePath);
+      if (programmaticLayout) {
+        return createLayoutModuleFromProgrammaticLayout(programmaticLayout) as LayoutModule;
+      }
+
       if (this.viteServer) {
         const module = await this.viteServer.ssrLoadModule(modulePath);
         return module as LayoutModule;
@@ -319,6 +398,71 @@ export class RouteManager {
         })
         .join("/")
     );
+  }
+
+  private async discoverProgrammaticRoutes(): Promise<void> {
+    const manifests = await loadProgrammaticRouteManifests({
+      root: this.config.root,
+      srcDir: this.config.srcDir,
+      loadModule: (filePath) => this.loadProgrammaticRoutesModule(filePath),
+    });
+
+    for (const { filePath, manifest } of manifests) {
+      for (const definition of manifest.routes) {
+        if (definition.kind === "page") {
+          const route = parseProgrammaticRoutePath(definition.path, "page");
+          const pattern = this.createRoutePattern(route);
+          const existing = this.routes.get(pattern);
+
+          if (existing) {
+            throw new Error(
+              `Duplicate page route "${pattern}". Found both ${existing.modulePath} and programmatic route in ${filePath}.`,
+            );
+          }
+
+          const modulePath = createProgrammaticRouteModuleId(filePath, "page", definition.path);
+          this.programmaticPages.set(modulePath, definition);
+          this.routes.set(pattern, {
+            route,
+            modulePath,
+            pattern,
+            source: "programmatic",
+          });
+        }
+
+        if (definition.kind === "layout") {
+          const route = parseProgrammaticRoutePath(definition.path, "layout");
+          const pattern = this.createRoutePattern(route);
+          const modulePath = createProgrammaticRouteModuleId(filePath, "layout", definition.path);
+          this.programmaticLayouts.set(modulePath, definition);
+          this.layouts.set(pattern, {
+            route,
+            modulePath,
+            pattern,
+            source: "programmatic",
+          });
+        }
+
+        if (definition.kind === "redirect") {
+          const route = parseProgrammaticRoutePath(definition.source, "page");
+          const pattern = this.createRoutePattern(route);
+          this.redirects.set(pattern, {
+            route,
+            pattern,
+            definition,
+          });
+        }
+      }
+    }
+  }
+
+  private async loadProgrammaticRoutesModule(filePath: string): Promise<Record<string, any>> {
+    if (this.viteServer) {
+      return await this.viteServer.ssrLoadModule(filePath);
+    }
+
+    const fileUrl = `file://${filePath}`;
+    return await import(/* @vite-ignore */ fileUrl);
   }
 
   /**
@@ -468,5 +612,34 @@ export class RouteManager {
     } catch {
       return undefined;
     }
+  }
+}
+
+function interpolateRedirectDestination(
+  destination: string,
+  params: Record<string, string>,
+): string {
+  let result = destination;
+
+  for (const [key, value] of Object.entries(params)) {
+    result = replaceAll(result, `[...${key}]`, value);
+    result = replaceAll(result, `[[...${key}]]`, value);
+    result = replaceAll(result, `[${key}]`, value);
+    result = replaceAll(result, `:${key}*`, value);
+    result = replaceAll(result, `:${key}`, value);
+  }
+
+  return result;
+}
+
+function replaceAll(input: string, search: string, replacement: string): string {
+  return input.split(search).join(replacement);
+}
+
+async function safeGlobFiles(pattern: string, cwd: string): Promise<string[]> {
+  try {
+    return await globFiles(pattern, cwd);
+  } catch {
+    return [];
   }
 }

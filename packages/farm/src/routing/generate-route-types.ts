@@ -2,6 +2,7 @@ import * as path from "path";
 import * as fs from "fs";
 import { parseRoutePath } from "../utils";
 import type { ParsedRoute } from "../types";
+import { discoverProgrammaticRoutePaths } from "../routes.server";
 
 function routePatternToTsTypeLiteral(pattern: string): string {
   if (pattern === "/") return '"/"';
@@ -57,31 +58,21 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
 
   const outPath = path.join(root, srcDir, outFile);
 
-  if (!fs.existsSync(appDir)) {
-    if (suppressLintOnLink) {
-      const permissiveContent = `/**
- * Auto-generated (suppressLintOnLink: true). Link href accepts any string.
- */
-export type RoutePath = string;
-`;
-      fs.mkdirSync(path.dirname(outPath), { recursive: true });
-      fs.writeFileSync(outPath, permissiveContent, "utf8");
-    }
-    return outPath;
-  }
-
-  const glob = await import("fast-glob");
-  const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx,md,mdx}", {
-    cwd: appDir,
-    absolute: false,
-  });
-
   const patterns = new Set<string>();
-  for (const file of pageFiles) {
-    const route = parseRoutePath(file);
-    if (route.type === "page") {
-      const pattern = createRoutePattern(route);
-      patterns.add(pattern);
+
+  if (fs.existsSync(appDir)) {
+    const glob = await import("fast-glob");
+    const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx,md,mdx}", {
+      cwd: appDir,
+      absolute: false,
+    });
+
+    for (const file of pageFiles) {
+      const route = parseRoutePath(file);
+      if (route.type === "page") {
+        const pattern = createRoutePattern(route);
+        patterns.add(pattern);
+      }
     }
   }
 
@@ -89,6 +80,10 @@ export type RoutePath = string;
     if (route.startsWith("/")) {
       patterns.add(route);
     }
+  }
+
+  for (const route of discoverProgrammaticRoutePaths(root, srcDir)) {
+    patterns.add(route);
   }
 
   const typeLiterals = Array.from(patterns).sort().map(routePatternToTsTypeLiteral);

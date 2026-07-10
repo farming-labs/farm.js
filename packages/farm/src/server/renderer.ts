@@ -14,11 +14,7 @@ import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "..
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { emitFarmEvent } from "../observability";
-import {
-  getFarmRedirectError,
-  isFarmNotFoundError,
-  isFarmRedirectError,
-} from "../navigation";
+import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "../navigation";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -884,7 +880,9 @@ export class ServerRenderer {
       const pagePath = (req as any).__FARM_PAGE_PATH__;
       const isClientComponent = (req as any).__FARM_IS_CLIENT_COMPONENT__ === true;
       const relativePath = pagePath
-        ? pagePath.substring(pagePath.indexOf("/src/app/"))
+        ? pagePath.startsWith(this.config.root)
+          ? pagePath.slice(this.config.root.length)
+          : pagePath
         : "/src/app/page.tsx";
 
       // Generate manifest for client-side SPA navigation (TanStack Start pattern)

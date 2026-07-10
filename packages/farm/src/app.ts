@@ -10,6 +10,7 @@ import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
+import { findProgrammaticRouteFiles } from "./routes.server";
 import path from "path";
 import type { ViteDevServer } from "vite";
 
@@ -114,6 +115,11 @@ export class FarmApp {
     const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
 
     if (!(await fileExists(appDir))) {
+      const routeFiles = findProgrammaticRouteFiles(this.config.root, this.config.srcDir);
+      if (routeFiles.length > 0) {
+        return;
+      }
+
       throw new Error(
         `App directory not found at ${appDir}. ` +
           "Please create a src/app directory with your pages and layouts.",

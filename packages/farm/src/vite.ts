@@ -9,6 +9,7 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateFarmTypeArtifacts } from "./type-artifacts";
+import { isProgrammaticRoutesFileName, parseProgrammaticRouteModuleId } from "./routes";
 import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
@@ -53,9 +54,8 @@ export function farmPlugin(
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
-  let workflowHandler:
-    | ((request: Request) => Promise<Response | null>)
-    | null = null;
+  let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
+  let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   const pluginManager: PluginManager | undefined = initialPluginManager;
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
     try {
@@ -151,6 +151,7 @@ export function farmPlugin(
       };
       await generateTypeArtifacts("startup");
 
+      const srcDirSlug = path.join(farmConfig.root, farmConfig.srcDir).replace(/\\/g, "/");
       const isPageFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
         return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized);
@@ -158,11 +159,15 @@ export function farmPlugin(
       const isApiRouteFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
         return (
-          normalized.includes(`${appDirSlug}/api/`) &&
-          /route\.(ts|tsx|js|jsx)$/.test(normalized)
+          normalized.includes(`${appDirSlug}/api/`) && /route\.(ts|tsx|js|jsx)$/.test(normalized)
         );
       };
-      const isTypeAffectingFile = (file: string) => isPageFile(file) || isApiRouteFile(file);
+      const isProgrammaticRouteFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return normalized.startsWith(`${srcDirSlug}/`) && isProgrammaticRoutesFileName(normalized);
+      };
+      const isTypeAffectingFile = (file: string) =>
+        isPageFile(file) || isApiRouteFile(file) || isProgrammaticRouteFile(file);
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleTypeArtifactGen = (file: string, event: string) => {
         if (typeArtifactGenScheduled) return;
@@ -252,6 +257,21 @@ export function farmPlugin(
         await openAPIManager.generateSpec();
         logger.success("✅ OpenAPI documentation enabled");
       }
+
+      refreshRouteDiscovery = async (reason: string) => {
+        await routeManager.discoverRoutes();
+        await apiRouteManager.discoverRoutes();
+        const manifestModule = server.moduleGraph.getModuleById("/@farm/manifest");
+        if (manifestModule) {
+          server.moduleGraph.invalidateModule(manifestModule);
+        }
+        if (openAPIManager) {
+          await openAPIManager.invalidateCache();
+        }
+        if (process.env.FARM_VERBOSE) {
+          logger.info(`Refreshed routes: ${reason}`);
+        }
+      };
 
       const farmDocsHandler = createFarmDocsHandler(farmConfig.docs, {
         root: farmConfig.root,
@@ -512,8 +532,17 @@ export function farmPlugin(
           return;
         }
 
+        const redirectMatch = farmApp.getRouteManager().matchRedirect(requestPathname);
+        if (redirectMatch) {
+          res.statusCode = redirectMatch.statusCode;
+          res.setHeader("Location", redirectMatch.destination);
+          res.end(`Redirecting to ${redirectMatch.destination}`);
+          return;
+        }
+
         // Handle API routes first
-        if (req.url?.startsWith("/api/")) {
+        const hasMatchedApiRoute = Boolean(apiRouteManager.matchRoute(requestPathname));
+        if (hasMatchedApiRoute || req.url?.startsWith("/api/")) {
           const startTime = Date.now();
           const method = req.method || "GET";
           const urlPath = req.url || "/";
@@ -540,7 +569,8 @@ export function farmPlugin(
           }
 
           const apiHandler = apiRouteManager.getHandler();
-          const hasExplicitAPIRoute = Boolean(apiRouteManager.matchRoute(pathname));
+          const hasExplicitAPIRoute =
+            hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
           if (apiHandler && hasExplicitAPIRoute) {
             // Log API request
             // logRequest(method, urlPath, "API");
@@ -948,6 +978,10 @@ export function farmPlugin(
     },
 
     resolveId(id) {
+      if (parseProgrammaticRouteModuleId(id)) {
+        return id;
+      }
+
       if (id === "/@farm/client" || id === "/@farm/client.js") {
         return id;
       }
@@ -963,6 +997,10 @@ export function farmPlugin(
     },
 
     load(id) {
+      if (parseProgrammaticRouteModuleId(id)) {
+        return generateProgrammaticRouteModule(id, server?.config.root || options.root);
+      }
+
       if (id === "/@farm/client" || id === "/@farm/client.js") {
         return generateClientCode(
           getIntegrationProviders(farmApp?.getConfig().integrations || options.integrations),
@@ -1232,6 +1270,33 @@ if (import.meta.hot) {
           });
         }
       }
+
+      const currentFarmConfig = farmApp?.getConfig();
+      const normalizedFile = file.replace(/\\/g, "/");
+      const currentSrcRoot = currentFarmConfig
+        ? path.join(currentFarmConfig.root, currentFarmConfig.srcDir).replace(/\\/g, "/")
+        : null;
+      if (
+        currentSrcRoot &&
+        normalizedFile.startsWith(`${currentSrcRoot}/`) &&
+        isProgrammaticRoutesFileName(normalizedFile)
+      ) {
+        logUpdate("PAGE", `updated ${path.basename(file)}`);
+
+        for (const mod of modules) {
+          server.moduleGraph.invalidateModule(mod);
+        }
+
+        await refreshRouteDiscovery?.(`updated ${file}`);
+
+        server.ws.send({
+          type: "full-reload",
+          path: "*",
+        });
+
+        return [];
+      }
+
       if (file.includes("/app/")) {
         // Hot reload middleware changes
         if (file.includes("middleware.")) {
@@ -1272,6 +1337,54 @@ if (import.meta.hot) {
       return modules;
     },
   };
+}
+
+function generateProgrammaticRouteModule(moduleId: string, root?: string): string {
+  const parsed = parseProgrammaticRouteModuleId(moduleId);
+  if (!parsed) {
+    return "";
+  }
+
+  const routeFile = toProgrammaticRouteImportSpecifier(parsed.filePath, root);
+
+  return `
+import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
+
+const __farmManifest = __farmRoutesModule.default ?? __farmRoutesModule.routes;
+const __farmRoutes = Array.isArray(__farmManifest)
+  ? __farmManifest
+  : Array.isArray(__farmManifest?.routes)
+    ? __farmManifest.routes
+    : [];
+const __farmNormalizeRoutePath = (routePath) => {
+  const withSlash = routePath && routePath.startsWith("/") ? routePath : "/" + (routePath || "");
+  const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\\/+$/, "") : withSlash;
+  return withoutTrailing || "/";
+};
+const __farmRoute = __farmRoutes.find((route) => (
+  route &&
+  route.kind === ${JSON.stringify(parsed.kind)} &&
+  __farmNormalizeRoutePath(route.path) === ${JSON.stringify(parsed.routePath)}
+));
+
+if (!__farmRoute) {
+  throw new Error(${JSON.stringify(
+    `Programmatic ${parsed.kind} route "${parsed.routePath}" was not found in ${routeFile}.`,
+  )});
+}
+
+export const metadata = __farmRoute.metadata;
+export const generateMetadata = __farmRoute.generateMetadata;
+export default __farmRoute.component;
+`;
+}
+
+function toProgrammaticRouteImportSpecifier(filePath: string, root?: string): string {
+  if (root && filePath.startsWith(root)) {
+    return filePath.slice(root.length) || "/";
+  }
+
+  return filePath;
 }
 
 function generateClientCode(

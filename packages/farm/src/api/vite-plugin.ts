@@ -18,6 +18,8 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { API_ROUTE_METHODS, invokeAPIRouteEndpoint, matchAPIRoute } from "./route-manager";
 import { sendWebResponse } from "../server/response";
+import { getProgrammaticRouteManifest, isProgrammaticRoutesFileName } from "../routes";
+import { findProgrammaticRouteFilesInDir } from "../routes.server";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -70,12 +72,39 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
     }
   };
 
+  const addEndpoint = (
+    routePath: string,
+    filePath: string,
+    method: string,
+    endpoint: any,
+  ): void => {
+    const normalizedMethod = method.toUpperCase();
+    const existing = apiRoutesCache.get(routePath);
+
+    if (existing) {
+      if (!existing.methods.includes(normalizedMethod)) {
+        existing.methods.push(normalizedMethod);
+      }
+      existing.endpoints[normalizedMethod] = endpoint;
+      return;
+    }
+
+    apiRoutesCache.set(routePath, {
+      path: routePath,
+      filePath,
+      methods: [normalizedMethod],
+      endpoints: { [normalizedMethod]: endpoint },
+    });
+  };
+
   // Create API router handler
   const createRouter = async (): Promise<void> => {
     const totalEndpoints = Array.from(apiRoutesCache.values()).reduce(
       (sum, route) => sum + route.methods.length,
       0,
     );
+
+    apiRouterHandler = null;
 
     if (totalEndpoints > 0) {
       apiRouterHandler = async (request: Request): Promise<Response> => {
@@ -207,18 +236,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
                   const routePath = endpoint.__path;
                   const method = String(endpoint.__method || "GET").toUpperCase();
 
-                  const existing = apiRoutesCache.get(routePath);
-                  if (existing) {
-                    existing.methods.push(method);
-                    existing.endpoints[method] = endpoint;
-                  } else {
-                    apiRoutesCache.set(routePath, {
-                      path: routePath,
-                      filePath: routesFile,
-                      methods: [method],
-                      endpoints: { [method]: endpoint },
-                    });
-                  }
+                  addEndpoint(routePath, routesFile, method, endpoint);
                   log(`Root route discovered: ${method} ${routePath}`);
                 }
               }
@@ -226,6 +244,33 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               log(`Root routes.ts load failed: ${e.message}`);
             }
             break;
+          }
+        }
+      };
+
+      const discoverProgrammaticRoutes = async (): Promise<void> => {
+        const path = await import("path");
+        const srcRoot = path.join(server.config.root, srcDir);
+        const routeFiles = findProgrammaticRouteFilesInDir(srcRoot);
+
+        for (const routeFile of routeFiles) {
+          try {
+            const routesModule = await server.ssrLoadModule(routeFile);
+            const manifest = getProgrammaticRouteManifest(routesModule);
+            if (!manifest) continue;
+
+            for (const definition of manifest.routes) {
+              if (definition.kind !== "api") continue;
+
+              for (const [method, endpoint] of Object.entries(definition.methods)) {
+                if (endpoint) {
+                  addEndpoint(definition.path, routeFile, method, endpoint);
+                  log(`Programmatic route discovered: ${method} ${definition.path}`);
+                }
+              }
+            }
+          } catch (e: any) {
+            log(`Programmatic routes file load failed at ${routeFile}: ${e.message}`);
           }
         }
       };
@@ -238,6 +283,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
         await discoverFileRoutes(apiDir);
         await discoverRootRoutes();
+        await discoverProgrammaticRoutes();
         await createRouter();
 
         discoveryComplete = true;
@@ -263,12 +309,12 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
           const pathname = url.split("?")[0];
           const method = req.method || "GET";
 
-          if (!pathname.startsWith("/api/")) {
-            return next();
-          }
-
           if (discoveryPromise && !discoveryComplete) {
             await discoveryPromise;
+          }
+
+          if (!matchAPIRoute(apiRoutesCache, pathname)) {
+            return next();
           }
 
           if (!apiRouterHandler) {
@@ -341,7 +387,12 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
       const fileName = file.split("/").pop() || "";
 
       // Handle root routes.ts updates
-      if (fileName === "routes.ts" || fileName === "routes.tsx" || fileName === "routes.js") {
+      if (
+        fileName === "routes.ts" ||
+        fileName === "routes.tsx" ||
+        fileName === "routes.js" ||
+        isProgrammaticRoutesFileName(fileName)
+      ) {
         log(`Root routes file updated: ${fileName}`);
 
         for (const mod of modules) {
@@ -365,19 +416,22 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
               const routePath = endpoint.__path;
               const method = String(endpoint.__method || "GET").toUpperCase();
 
-              const existing = apiRoutesCache.get(routePath);
-              if (existing) {
-                existing.methods.push(method);
-                existing.endpoints[method] = endpoint;
-              } else {
-                apiRoutesCache.set(routePath, {
-                  path: routePath,
-                  filePath: file,
-                  methods: [method],
-                  endpoints: { [method]: endpoint },
-                });
-              }
+              addEndpoint(routePath, file, method, endpoint);
               log(`Root route reloaded: ${method} ${routePath}`);
+            }
+          }
+
+          const manifest = getProgrammaticRouteManifest(routesModule);
+          if (manifest) {
+            for (const definition of manifest.routes) {
+              if (definition.kind !== "api") continue;
+
+              for (const [method, endpoint] of Object.entries(definition.methods)) {
+                if (endpoint) {
+                  addEndpoint(definition.path, file, method, endpoint);
+                  log(`Programmatic route reloaded: ${method} ${definition.path}`);
+                }
+              }
             }
           }
 
