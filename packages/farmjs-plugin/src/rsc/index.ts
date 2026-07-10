@@ -27,6 +27,7 @@ import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
+import { transformFarmServerFns } from "./server-fn-transform.js";
 import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "node:url";
@@ -349,7 +350,6 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             ...(farmCorePath
               ? {
                   alias: [
-                    { find: "@farmjs/core", replacement: farmCorePath },
                     {
                       find: "@farmjs/core/middleware",
                       replacement: path.join(farmCorePath, "dist/middleware.mjs"),
@@ -358,6 +358,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                       find: "@farmjs/core/api",
                       replacement: path.join(farmCorePath, "dist/api.mjs"),
                     },
+                    {
+                      find: "@farmjs/core/server-fn",
+                      replacement: path.join(farmCorePath, "dist/server-fn.mjs"),
+                    },
+                    { find: "@farmjs/core", replacement: farmCorePath },
                   ],
                 }
               : {}),
@@ -391,6 +396,23 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               resolve: { conditions: ["browser", "import"] },
             },
           },
+        };
+      },
+    },
+
+    {
+      name: "@farmjs/plugin/rsc:server-fn-actions",
+      enforce: "pre",
+
+      transform(code, id) {
+        if (!rscEnabled || !actionsEnabled) return null;
+
+        const result = transformFarmServerFns(code, id);
+        if (!result) return null;
+
+        return {
+          code: result.code,
+          map: null,
         };
       },
     },
