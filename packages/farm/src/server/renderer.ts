@@ -130,26 +130,40 @@ class FarmRouteErrorBoundary extends React.Component<
   }
 }
 
-function parseRouteModuleProps(
+async function parseRouteModuleProps(
   routeModule: RouteModule,
   input: {
-    params: Record<string, string>;
+    props: PageProps;
     search: Record<string, string | string[] | undefined>;
     routePath: string;
   },
-): { params: unknown; search: unknown } {
+): Promise<PageProps & { search: unknown; data?: unknown; __farmRoutePropsResolved?: true }> {
+  const resolveRouteProps = (routeModule as any).__farmResolveRouteProps;
+  if (typeof resolveRouteProps === "function") {
+    return await resolveRouteProps(input.props);
+  }
+
   if ((routeModule as any).__farmRouteParsesProps) {
     return {
-      params: input.params,
+      ...input.props,
       search: input.search,
     };
   }
 
   const schemas = (routeModule as any).__farmRouteSchemas;
+  const params = parseRouteModuleSchema(
+    schemas?.params,
+    input.props.params,
+    "params",
+    input.routePath,
+  );
+  const search = parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath);
 
   return {
-    params: parseRouteModuleSchema(schemas?.params, input.params, "params", input.routePath),
-    search: parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath),
+    ...input.props,
+    params: params as Record<string, string>,
+    search,
+    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
   };
 }
 
@@ -518,21 +532,19 @@ export class ServerRenderer {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
       }
 
-      const routeProps = parseRouteModuleProps(routeModule, {
-        params,
-        search: searchParamsObject,
-        routePath: route.pattern,
-      });
-
       // Create page props with searchParams as plain object and middleware data
-      const pageProps: PageProps = {
-        params: routeProps.params as Record<string, string>,
-        searchParams: Promise.resolve(routeProps.search as Record<string, string | string[]>),
+      const rawPageProps: PageProps = {
+        params,
+        searchParams: Promise.resolve(searchParamsObject),
         path: pathname,
         middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
         context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
-        search: routeProps.search,
       } as PageProps & { search: unknown };
+      const pageProps = await parseRouteModuleProps(routeModule, {
+        props: rawPageProps,
+        search: searchParamsObject,
+        routePath: route.pattern,
+      });
 
       const renderingConfig = await resolveRouteRenderingConfigFromFile(
         routeModule,
@@ -607,9 +619,11 @@ export class ServerRenderer {
         : null;
       // Store pageProps for client-side hydration (serializable version - no Promises)
       (req as any).__FARM_PROPS__ = {
-        params: routeProps.params,
-        search: routeProps.search,
-        searchParams: routeProps.search,
+        params: pageProps.params,
+        search: (pageProps as any).search,
+        searchParams: (pageProps as any).search,
+        ...("data" in pageProps ? { data: (pageProps as any).data } : {}),
+        ...((pageProps as any).__farmRoutePropsResolved ? { __farmRoutePropsResolved: true } : {}),
         path: pathname,
         middleware:
           middlewareMap.size > 0

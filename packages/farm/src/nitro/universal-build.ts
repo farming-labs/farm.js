@@ -2039,31 +2039,37 @@ async function handleRequest(request) {
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
         const searchParamsObj = Object.fromEntries(url.searchParams.entries());
-        const routeSchemas = route.module.__farmRouteParsesProps
-          ? {}
-          : route.module.__farmRouteSchemas || {};
-        const parsedParams = routeSchemas.params?.parse
-          ? routeSchemas.params.parse(params)
-          : params;
-        const parsedSearch = routeSchemas.search?.parse
-          ? routeSchemas.search.parse(searchParamsObj)
-          : searchParamsObj;
         
         // Import React SSR utilities
         const ReactDOMServer = await import("react-dom/server");
         const React = await import("react");
         
-        // For async components, searchParams should be a resolved Promise
-        const searchParams = Promise.resolve(parsedSearch);
-        
         // Render the page component
-        const pageProps = {
-          params: parsedParams,
-          search: parsedSearch,
-          searchParams,
+        const rawPageProps = {
+          params,
+          searchParams: Promise.resolve(searchParamsObj),
           path: pathname,
           ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
         };
+        const pageProps = route.module.__farmResolveRouteProps
+          ? await route.module.__farmResolveRouteProps(rawPageProps)
+          : (() => {
+              const routeSchemas = route.module.__farmRouteParsesProps
+                ? {}
+                : route.module.__farmRouteSchemas || {};
+              const parsedParams = routeSchemas.params?.parse
+                ? routeSchemas.params.parse(params)
+                : params;
+              const parsedSearch = routeSchemas.search?.parse
+                ? routeSchemas.search.parse(searchParamsObj)
+                : searchParamsObj;
+              return {
+                ...rawPageProps,
+                params: parsedParams,
+                search: parsedSearch,
+                searchParams: Promise.resolve(parsedSearch),
+              };
+            })();
         
         // First, render the page content
         let pageElement;

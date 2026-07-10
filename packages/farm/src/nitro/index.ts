@@ -429,27 +429,40 @@ export default defineEventHandler(async (event: H3Event) => {
         })
       );
       
-      const routeSchemas = routeModule.__farmRouteParsesProps
-        ? {}
-        : routeModule.__farmRouteSchemas || {};
-      const parsedParams = routeSchemas.params?.parse
-        ? routeSchemas.params.parse(params)
-        : params;
-      const parsedSearch = routeSchemas.search?.parse
-        ? routeSchemas.search.parse(searchParamsObject)
-        : searchParamsObject;
-
       // Create page props
-      const pageProps = {
-        params: parsedParams,
-        search: parsedSearch,
-        searchParams: Promise.resolve(parsedSearch),
+      const rawPageProps = {
+        params,
+        searchParams: Promise.resolve(searchParamsObject),
         path: pathname,
       };
+      const pageProps = routeModule.__farmResolveRouteProps
+        ? await routeModule.__farmResolveRouteProps(rawPageProps)
+        : (() => {
+            const routeSchemas = routeModule.__farmRouteParsesProps
+              ? {}
+              : routeModule.__farmRouteSchemas || {};
+            const parsedParams = routeSchemas.params?.parse
+              ? routeSchemas.params.parse(params)
+              : params;
+            const parsedSearch = routeSchemas.search?.parse
+              ? routeSchemas.search.parse(searchParamsObject)
+              : searchParamsObject;
+            return {
+              ...rawPageProps,
+              params: parsedParams,
+              search: parsedSearch,
+              searchParams: Promise.resolve(parsedSearch),
+            };
+          })();
       
       // Create page element
       const PageComponent = routeModule.default;
-      let pageElement = React.createElement(PageComponent, pageProps);
+      let pageElement;
+      if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
+        pageElement = await PageComponent(pageProps);
+      } else {
+        pageElement = React.createElement(PageComponent, pageProps);
+      }
       
       // Wrap with layouts
       for (let i = layoutModules.length - 1; i >= 0; i--) {

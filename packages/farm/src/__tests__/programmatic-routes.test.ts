@@ -158,9 +158,28 @@ describe("programmatic routes", () => {
     const searchSchema = {
       parse: vi.fn((value: unknown) => ({ tab: (value as any).tab || "info" })),
     };
+    const afterData: unknown[] = [];
+    const before = vi.fn(async ({ params }: any) => ({
+      token: `before-${params.id}`,
+    }));
+    const main = vi.fn(async ({ params, search, before }: any) => ({
+      product: {
+        id: params.id,
+        tab: search.tab,
+        token: before.token,
+      },
+    }));
+    const after = vi.fn(async ({ data }: any) => {
+      afterData.push(data);
+    });
     const ProductRoute = createRoute("/products/[id]", {
       params: paramsSchema,
       search: searchSchema,
+      data: {
+        before,
+        main,
+        after,
+      },
       component: ProductPage as any,
       render: "dynamic",
     });
@@ -181,7 +200,9 @@ describe("programmatic routes", () => {
     const routeModule = await manager.loadRouteModule(match.route!.modulePath);
     expect((routeModule as any).__farmRouteSchemas.params).toBe(paramsSchema);
     expect((routeModule as any).__farmRouteSchemas.search).toBe(searchSchema);
+    expect((routeModule as any).__farmRouteData).toBe(ProductRoute.data);
     expect((routeModule as any).__farmRouteParsesProps).toBe(true);
+    expect(typeof (routeModule as any).__farmResolveRouteProps).toBe("function");
     expect(routeModule.dynamic).toBe("force-dynamic");
 
     const Page = routeModule.default as any;
@@ -194,6 +215,48 @@ describe("programmatic routes", () => {
     expect(element.type).toBe(ProductPage);
     expect(element.props.params).toEqual({ id: "product-123" });
     expect(element.props.search).toEqual({ tab: "info" });
+    expect(element.props.data).toEqual({
+      product: {
+        id: "product-123",
+        tab: "info",
+        token: "before-product-123",
+      },
+    });
     await expect(element.props.searchParams).resolves.toEqual({ tab: "info" });
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(afterData).toEqual([element.props.data]);
+
+    before.mockClear();
+    main.mockClear();
+    after.mockClear();
+    afterData.length = 0;
+
+    const resolvedProps = await (routeModule as any).__farmResolveRouteProps({
+      params: { id: "123" },
+      searchParams: Promise.resolve({ tab: "reviews" }),
+      path: "/products/123",
+    });
+    expect(resolvedProps.data).toEqual({
+      product: {
+        id: "product-123",
+        tab: "reviews",
+        token: "before-product-123",
+      },
+    });
+    expect(resolvedProps.__farmRoutePropsResolved).toBe(true);
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+
+    before.mockClear();
+    main.mockClear();
+    after.mockClear();
+    const resolvedElement = (await Page(resolvedProps)) as any;
+    expect(resolvedElement.props.data).toBe(resolvedProps.data);
+    expect(before).not.toHaveBeenCalled();
+    expect(main).not.toHaveBeenCalled();
+    expect(after).not.toHaveBeenCalled();
   });
 });

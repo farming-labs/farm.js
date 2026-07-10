@@ -33,25 +33,61 @@ export type InferProgrammaticRouteSchema<TSchema, TFallback> =
 
 export type ProgrammaticRouteParamsFallback = Record<string, string>;
 export type ProgrammaticRouteSearchFallback = Record<string, string | string[] | undefined>;
+export type ProgrammaticRouteMaybePromise<T> = T | Promise<T>;
 
 export type ProgrammaticRouteComponentProps<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
+  TData = undefined,
 > = Omit<PageProps, "params" | "searchParams"> & {
   params: TParams;
   search: TSearch;
   searchParams: Promise<TSearch>;
-};
+} & ([TData] extends [undefined] ? { data?: undefined } : { data: TData });
+
+export type ProgrammaticRouteDataContext<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> = ProgrammaticRouteComponentProps<TParams, TSearch>;
+
+export interface ProgrammaticRouteDataHooks<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+  TBefore = unknown,
+  TData = unknown,
+> {
+  before?: (
+    context: ProgrammaticRouteDataContext<TParams, TSearch>,
+  ) => ProgrammaticRouteMaybePromise<TBefore>;
+  main: (
+    context: ProgrammaticRouteDataContext<TParams, TSearch> & { before: TBefore },
+  ) => ProgrammaticRouteMaybePromise<TData>;
+  after?: (
+    context: ProgrammaticRouteDataContext<TParams, TSearch> & {
+      before: TBefore;
+      data: TData;
+    },
+  ) => ProgrammaticRouteMaybePromise<void>;
+}
+
+export type InferProgrammaticRouteData<TDataHooks> =
+  TDataHooks extends ProgrammaticRouteDataHooks<any, any, any, infer TData>
+    ? Awaited<TData>
+    : undefined;
 
 export interface ProgrammaticPageRoute<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
+  TDataHooks extends ProgrammaticRouteDataHooks<TParams, TSearch, any, any> | undefined =
+    | ProgrammaticRouteDataHooks<TParams, TSearch, any, any>
+    | undefined,
 > {
   kind: "page";
   path: string;
   component: ComponentType<any>;
   params?: ProgrammaticRouteSchema<TParams>;
   search?: ProgrammaticRouteSchema<TSearch>;
+  data?: TDataHooks;
   render?: ProgrammaticRouteRenderMode;
   staticPaths?: ProgrammaticStaticPaths;
   revalidate?: number | false;
@@ -122,19 +158,30 @@ export type ProgrammaticRouteFactory = (
 export type CreateRouteOptions<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
   TSearchSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TDataHooks extends
+    | ProgrammaticRouteDataHooks<
+        InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+        InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+        any,
+        any
+      >
+    | undefined = undefined,
 > = Omit<
   ProgrammaticPageRoute<
     InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+    TDataHooks
   >,
-  "kind" | "path" | "component" | "params" | "search"
+  "kind" | "path" | "component" | "params" | "search" | "data"
 > & {
   params?: TParamsSchema;
   search?: TSearchSchema;
+  data?: TDataHooks;
   component: ComponentType<
     ProgrammaticRouteComponentProps<
       InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-      InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+      InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+      InferProgrammaticRouteData<TDataHooks>
     >
   >;
 };
@@ -214,16 +261,26 @@ export const redirect = routesBuilder.redirect;
 export function createRoute<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
   TSearchSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TDataHooks extends
+    | ProgrammaticRouteDataHooks<
+        InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+        InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+        any,
+        any
+      >
+    | undefined = undefined,
 >(
   path: string,
-  options: CreateRouteOptions<TParamsSchema, TSearchSchema>,
+  options: CreateRouteOptions<TParamsSchema, TSearchSchema, TDataHooks>,
 ): ProgrammaticPageRoute<
   InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-  InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+  InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+  TDataHooks
 > {
   return routesBuilder.page(path, options) as ProgrammaticPageRoute<
     InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+    TDataHooks
   >;
 }
 
@@ -342,12 +399,15 @@ export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRou
     default: createProgrammaticPageComponent(route),
   };
 
-  if (route.params || route.search) {
+  if (route.params || route.search || route.data) {
     (mod as any).__farmRouteSchemas = {
       params: route.params,
       search: route.search,
     };
+    (mod as any).__farmRouteData = route.data;
     (mod as any).__farmRouteParsesProps = true;
+    (mod as any).__farmResolveRouteProps = (props: PageProps) =>
+      resolveProgrammaticRouteProps(route, props);
   }
 
   if (route.render === "static" || route.staticPaths) {
@@ -403,26 +463,81 @@ export function scanProgrammaticPagePaths(source: string): string[] {
 }
 
 function createProgrammaticPageComponent(route: ProgrammaticPageRoute): ComponentType<PageProps> {
-  if (!route.params && !route.search) {
+  if (!route.params && !route.search && !route.data) {
     return route.component as ComponentType<PageProps>;
   }
 
   const Component = route.component;
 
   const FarmProgrammaticPage = async function FarmProgrammaticPage(props: PageProps) {
-    const rawSearch = await props.searchParams;
-    const params = parseProgrammaticSchema(route.params, props.params, "params", route.path);
-    const search = parseProgrammaticSchema(route.search, rawSearch, "search", route.path);
+    const resolvedProps = isProgrammaticRoutePropsResolved(props)
+      ? props
+      : await resolveProgrammaticRouteProps(route, props);
 
-    return createElement(Component, {
-      ...props,
-      params,
-      search,
-      searchParams: Promise.resolve(search),
-    });
+    return createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps));
   };
 
   return FarmProgrammaticPage as unknown as ComponentType<PageProps>;
+}
+
+async function resolveProgrammaticRouteProps(
+  route: ProgrammaticPageRoute,
+  props: PageProps,
+): Promise<Record<string, any> & { __farmRoutePropsResolved: true }> {
+  const rawSearch = await props.searchParams;
+  const params = parseProgrammaticSchema(route.params, props.params, "params", route.path);
+  const search = parseProgrammaticSchema(route.search, rawSearch, "search", route.path);
+  const baseProps = {
+    ...props,
+    params,
+    search,
+    searchParams: Promise.resolve(search),
+  };
+
+  if (!route.data) {
+    return markProgrammaticRoutePropsResolved(baseProps);
+  }
+
+  const before = route.data.before ? await route.data.before(baseProps as any) : undefined;
+  const data = await route.data.main({
+    ...(baseProps as any),
+    before,
+  });
+
+  if (route.data.after) {
+    await route.data.after({
+      ...(baseProps as any),
+      before,
+      data,
+    });
+  }
+
+  return markProgrammaticRoutePropsResolved({
+    ...baseProps,
+    data,
+  });
+}
+
+function isProgrammaticRoutePropsResolved(value: unknown): boolean {
+  return !!value && typeof value === "object" && (value as any).__farmRoutePropsResolved === true;
+}
+
+function markProgrammaticRoutePropsResolved<T extends Record<string, any>>(
+  props: T,
+): T & { __farmRoutePropsResolved: true } {
+  return {
+    ...props,
+    __farmRoutePropsResolved: true,
+  };
+}
+
+function stripProgrammaticRoutePropsMarker<TProps>(props: TProps): TProps {
+  if (!isProgrammaticRoutePropsResolved(props)) {
+    return props;
+  }
+
+  const { __farmRoutePropsResolved, ...componentProps } = props as any;
+  return componentProps;
 }
 
 function parseProgrammaticSchema<TFallback>(

@@ -147,8 +147,12 @@ async function defaultHandler({
       targetUrl.searchParams.forEach((value, key) => {
         searchParams[key] = value;
       });
-      const routeProps = parseRouteModuleProps(routeModule, {
-        params,
+      const routeProps = await parseRouteModuleProps(routeModule, {
+        props: {
+          params,
+          searchParams: Promise.resolve(searchParams),
+          path: targetUrl.pathname,
+        },
         search: searchParams,
         routePath: route.pattern,
       });
@@ -157,8 +161,12 @@ async function defaultHandler({
       const pageData = {
         props: {
           params: routeProps.params,
-          search: routeProps.search,
-          searchParams: routeProps.search,
+          search: (routeProps as any).search,
+          searchParams: (routeProps as any).search,
+          ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+          ...((routeProps as any).__farmRoutePropsResolved
+            ? { __farmRoutePropsResolved: true }
+            : {}),
         },
         modulePath: route.modulePath,
         isClientComponent,
@@ -281,26 +289,45 @@ async function defaultHandler({
   );
 }
 
-function parseRouteModuleProps(
+async function parseRouteModuleProps(
   routeModule: unknown,
   input: {
-    params: Record<string, string>;
+    props: {
+      params: Record<string, string>;
+      searchParams: Promise<Record<string, string | string[] | undefined>>;
+      path: string;
+      [key: string]: unknown;
+    };
     search: Record<string, string | string[] | undefined>;
     routePath: string;
   },
-): { params: unknown; search: unknown } {
+): Promise<Record<string, unknown>> {
+  const resolveRouteProps = (routeModule as any).__farmResolveRouteProps;
+  if (typeof resolveRouteProps === "function") {
+    return await resolveRouteProps(input.props);
+  }
+
   if ((routeModule as any).__farmRouteParsesProps) {
     return {
-      params: input.params,
+      ...input.props,
       search: input.search,
     };
   }
 
   const schemas = (routeModule as any).__farmRouteSchemas;
+  const params = parseRouteModuleSchema(
+    schemas?.params,
+    input.props.params,
+    "params",
+    input.routePath,
+  );
+  const search = parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath);
 
   return {
-    params: parseRouteModuleSchema(schemas?.params, input.params, "params", input.routePath),
-    search: parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath),
+    ...input.props,
+    params,
+    search,
+    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
   };
 }
 
