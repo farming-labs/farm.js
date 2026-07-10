@@ -2044,16 +2044,32 @@ async function handleRequest(request) {
         const ReactDOMServer = await import("react-dom/server");
         const React = await import("react");
         
-        // For async components, searchParams should be a resolved Promise
-        const searchParams = Promise.resolve(searchParamsObj);
-        
         // Render the page component
-        const pageProps = {
+        const rawPageProps = {
           params,
-          searchParams,
+          searchParams: Promise.resolve(searchParamsObj),
           path: pathname,
           ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
         };
+        const pageProps = route.module.__farmResolveRouteProps
+          ? await route.module.__farmResolveRouteProps(rawPageProps)
+          : (() => {
+              const routeSchemas = route.module.__farmRouteParsesProps
+                ? {}
+                : route.module.__farmRouteSchemas || {};
+              const parsedParams = routeSchemas.params?.parse
+                ? routeSchemas.params.parse(params)
+                : params;
+              const parsedSearch = routeSchemas.search?.parse
+                ? routeSchemas.search.parse(searchParamsObj)
+                : searchParamsObj;
+              return {
+                ...rawPageProps,
+                params: parsedParams,
+                search: parsedSearch,
+                searchParams: Promise.resolve(parsedSearch),
+              };
+            })();
         
         // First, render the page content
         let pageElement;
@@ -2087,7 +2103,10 @@ async function handleRequest(request) {
           const layout = applicableLayouts[i];
           const LayoutComponent = layout.module.default;
           if (LayoutComponent) {
-            wrappedElement = React.createElement(LayoutComponent, { children: wrappedElement, params });
+            wrappedElement = React.createElement(LayoutComponent, {
+              children: wrappedElement,
+              params,
+            });
           }
         }
         

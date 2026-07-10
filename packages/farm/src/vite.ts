@@ -9,7 +9,11 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateFarmTypeArtifacts } from "./type-artifacts";
-import { isProgrammaticRoutesFileName, parseProgrammaticRouteModuleId } from "./routes";
+import {
+  isProgrammaticRoutesFileName,
+  parseProgrammaticRouteModuleId,
+  scanProgrammaticPagePaths,
+} from "./routes";
 import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
@@ -42,6 +46,31 @@ import type { FarmUserConfig } from "./config";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
+}
+
+function isPotentialProgrammaticRouteSourceFile(
+  normalizedFile: string,
+  srcDirSlug: string,
+): boolean {
+  return (
+    normalizedFile.startsWith(`${srcDirSlug}/`) &&
+    /\.(ts|tsx|js|jsx)$/.test(normalizedFile) &&
+    !/\.d\.ts$/.test(normalizedFile) &&
+    !normalizedFile.endsWith("/farm-routes.d.ts") &&
+    !normalizedFile.endsWith("/lib/api.generated.ts")
+  );
+}
+
+function fileContainsProgrammaticPageRoute(file: string): boolean {
+  if (!fs.existsSync(file)) {
+    return false;
+  }
+
+  try {
+    return scanProgrammaticPagePaths(fs.readFileSync(file, "utf8")).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function farmPlugin(
@@ -166,8 +195,16 @@ export function farmPlugin(
         const normalized = file.replace(/\\/g, "/");
         return normalized.startsWith(`${srcDirSlug}/`) && isProgrammaticRoutesFileName(normalized);
       };
-      const isTypeAffectingFile = (file: string) =>
-        isPageFile(file) || isApiRouteFile(file) || isProgrammaticRouteFile(file);
+      const isProgrammaticRouteSourceFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return isPotentialProgrammaticRouteSourceFile(normalized, srcDirSlug);
+      };
+      const isTypeAffectingFile = (file: string, event: string) =>
+        isPageFile(file) ||
+        isApiRouteFile(file) ||
+        isProgrammaticRouteFile(file) ||
+        (isProgrammaticRouteSourceFile(file) &&
+          (event === "unlink" || fileContainsProgrammaticPageRoute(file)));
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleTypeArtifactGen = (file: string, event: string) => {
         if (typeArtifactGenScheduled) return;
@@ -179,7 +216,7 @@ export function farmPlugin(
       };
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
-          if (isTypeAffectingFile(file)) scheduleTypeArtifactGen(file, ev);
+          if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
         });
       });
 
@@ -781,6 +818,15 @@ export function farmPlugin(
             targetUrl.searchParams.forEach((value, key) => {
               searchParams[key] = value;
             });
+            const routeProps = await parseRouteModuleProps(routeModule as RouteModuleLike, {
+              props: {
+                params,
+                searchParams: Promise.resolve(searchParams),
+                path: targetUrl.pathname,
+              },
+              search: searchParams,
+              routePath: route.pattern,
+            });
 
             // Convert absolute paths to URL paths (relative to project root)
             const projectRoot = server.config.root;
@@ -793,7 +839,15 @@ export function farmPlugin(
 
             // Return page data for SPA navigation
             const pageData = {
-              props: { params, searchParams },
+              props: {
+                params: routeProps.params,
+                search: (routeProps as any).search,
+                searchParams: (routeProps as any).search,
+                ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+                ...((routeProps as any).__farmRoutePropsResolved
+                  ? { __farmRoutePropsResolved: true }
+                  : {}),
+              },
               modulePath: toUrlPath(route.modulePath),
               isClientComponent,
               shouldHydrate,
@@ -1297,6 +1351,28 @@ if (import.meta.hot) {
         return [];
       }
 
+      if (
+        currentSrcRoot &&
+        isPotentialProgrammaticRouteSourceFile(normalizedFile, currentSrcRoot) &&
+        fileContainsProgrammaticPageRoute(file)
+      ) {
+        const shortPath = normalizedFile.slice(currentSrcRoot.length + 1);
+        logUpdate("PAGE", `updated ${shortPath}`);
+
+        for (const mod of modules) {
+          server.moduleGraph.invalidateModule(mod);
+        }
+
+        await refreshRouteDiscovery?.(`updated ${file}`);
+
+        server.ws.send({
+          type: "full-reload",
+          path: "*",
+        });
+
+        return [];
+      }
+
       if (file.includes("/app/")) {
         // Hot reload middleware changes
         if (file.includes("middleware.")) {
@@ -1348,14 +1424,38 @@ function generateProgrammaticRouteModule(moduleId: string, root?: string): strin
   const routeFile = toProgrammaticRouteImportSpecifier(parsed.filePath, root);
 
   return `
+import { createElement as __farmCreateElement } from "react";
 import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
 
-const __farmManifest = __farmRoutesModule.default ?? __farmRoutesModule.routes;
-const __farmRoutes = Array.isArray(__farmManifest)
-  ? __farmManifest
-  : Array.isArray(__farmManifest?.routes)
-    ? __farmManifest.routes
-    : [];
+const __farmIsRouteDefinition = (value) => (
+  value &&
+  typeof value === "object" &&
+  (
+    value.kind === "page" ||
+    value.kind === "layout" ||
+    value.kind === "api" ||
+    value.kind === "redirect"
+  )
+);
+const __farmRouteListFromCandidate = (candidate) => {
+  if (Array.isArray(candidate)) return candidate;
+  if (Array.isArray(candidate?.routes)) return candidate.routes;
+  if (__farmIsRouteDefinition(candidate)) return [candidate];
+  return [];
+};
+const __farmRouteCandidates = [
+  __farmRoutesModule.default,
+  __farmRoutesModule.routes,
+  __farmRoutesModule.Route,
+];
+let __farmRoutes = [];
+for (const __farmCandidate of __farmRouteCandidates) {
+  __farmRoutes = __farmRouteListFromCandidate(__farmCandidate);
+  if (__farmRoutes.length > 0) break;
+}
+if (__farmRoutes.length === 0) {
+  __farmRoutes = Object.values(__farmRoutesModule).filter(__farmIsRouteDefinition);
+}
 const __farmNormalizeRoutePath = (routePath) => {
   const withSlash = routePath && routePath.startsWith("/") ? routePath : "/" + (routePath || "");
   const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\\/+$/, "") : withSlash;
@@ -1375,7 +1475,100 @@ if (!__farmRoute) {
 
 export const metadata = __farmRoute.metadata;
 export const generateMetadata = __farmRoute.generateMetadata;
-export default __farmRoute.component;
+export const __farmRouteSchemas = {
+  params: __farmRoute.params,
+  search: __farmRoute.search,
+};
+export const __farmRouteData = __farmRoute.data;
+export const __farmRouteParsesProps = __farmRoute.kind === "page" && !!(
+  __farmRoute.params ||
+  __farmRoute.search ||
+  __farmRoute.data
+);
+
+const __farmParseSchema = (schema, value, label) => {
+  if (!schema || typeof schema.parse !== "function") {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    throw new Error("Invalid " + label + " for route " + JSON.stringify(__farmRoute.path) + ": " + (error?.message || String(error)));
+  }
+};
+
+const __farmMarkRoutePropsResolved = (props) => ({
+  ...props,
+  __farmRoutePropsResolved: true,
+});
+
+const __farmStripRoutePropsMarker = (props) => {
+  if (!props || props.__farmRoutePropsResolved !== true) {
+    return props;
+  }
+
+  const { __farmRoutePropsResolved, ...componentProps } = props;
+  return componentProps;
+};
+
+export async function __farmResolveRouteProps(props) {
+  const rawSearch = await props.searchParams;
+  const params = __farmParseSchema(__farmRoute.params, props.params, "params");
+  const search = __farmParseSchema(__farmRoute.search, rawSearch, "search");
+  const baseProps = {
+    ...props,
+    params,
+    search,
+    searchParams: Promise.resolve(search),
+  };
+
+  if (!__farmRoute.data) {
+    return __farmMarkRoutePropsResolved(baseProps);
+  }
+
+  const before = __farmRoute.data.before
+    ? await __farmRoute.data.before(baseProps)
+    : undefined;
+  const data = await __farmRoute.data.main({
+    ...baseProps,
+    before,
+  });
+
+  if (__farmRoute.data.after) {
+    await __farmRoute.data.after({
+      ...baseProps,
+      before,
+      data,
+    });
+  }
+
+  return __farmMarkRoutePropsResolved({
+    ...baseProps,
+    data,
+  });
+}
+
+const __farmNeedsPageWrapper = __farmRoute.kind === "page" && !!(
+  __farmRoute.params ||
+  __farmRoute.search ||
+  __farmRoute.data
+);
+
+async function __farmProgrammaticPage(props) {
+  const resolvedProps = props?.__farmRoutePropsResolved === true
+    ? props
+    : await __farmResolveRouteProps(props);
+
+  return __farmCreateElement(
+    __farmRoute.component,
+    __farmStripRoutePropsMarker(resolvedProps)
+  );
+}
+
+export default __farmNeedsPageWrapper
+  ? __farmProgrammaticPage
+  : __farmRoute.component;
 `;
 }
 
@@ -1385,6 +1578,79 @@ function toProgrammaticRouteImportSpecifier(filePath: string, root?: string): st
   }
 
   return filePath;
+}
+
+type RouteModuleLike = {
+  __farmRouteParsesProps?: boolean;
+  __farmResolveRouteProps?: (props: {
+    params: Record<string, string>;
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+    path: string;
+    [key: string]: unknown;
+  }) => Promise<Record<string, unknown>>;
+  __farmRouteSchemas?: {
+    params?: { parse?: (value: unknown) => unknown };
+    search?: { parse?: (value: unknown) => unknown };
+  };
+};
+
+async function parseRouteModuleProps(
+  routeModule: RouteModuleLike,
+  input: {
+    props: {
+      params: Record<string, string>;
+      searchParams: Promise<Record<string, string | string[] | undefined>>;
+      path: string;
+      [key: string]: unknown;
+    };
+    search: Record<string, string | string[] | undefined>;
+    routePath: string;
+  },
+): Promise<Record<string, unknown>> {
+  if (typeof routeModule.__farmResolveRouteProps === "function") {
+    return await routeModule.__farmResolveRouteProps(input.props);
+  }
+
+  if (routeModule.__farmRouteParsesProps) {
+    return {
+      ...input.props,
+      search: input.search,
+    };
+  }
+
+  const schemas = routeModule.__farmRouteSchemas;
+  const params = parseRouteModuleSchema(
+    schemas?.params,
+    input.props.params,
+    "params",
+    input.routePath,
+  );
+  const search = parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath);
+
+  return {
+    ...input.props,
+    params,
+    search,
+    searchParams: Promise.resolve(search as Record<string, string | string[] | undefined>),
+  };
+}
+
+function parseRouteModuleSchema(
+  schema: { parse?: (value: unknown) => unknown } | undefined,
+  value: unknown,
+  label: string,
+  routePath: string,
+): unknown {
+  if (!schema || typeof schema.parse !== "function") {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid ${label} for route "${routePath}": ${message}`);
+  }
 }
 
 function generateClientCode(
@@ -1837,6 +2103,48 @@ function getCurrentSearchParams() {
   return searchParams;
 }
 
+function parseClientRouteSchema(schema, value, label) {
+  if (!schema || typeof schema.parse !== 'function') {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    throw new Error('Invalid route ' + label + ': ' + (error?.message || String(error)));
+  }
+}
+
+async function buildRouteComponentProps(pageModule, params, searchParams, path, existingProps) {
+  if (existingProps?.__farmRoutePropsResolved === true) {
+    return {
+      ...existingProps,
+      searchParams: Promise.resolve(existingProps.search ?? existingProps.searchParams ?? {}),
+      path: existingProps.path || path,
+    };
+  }
+
+  if (typeof pageModule?.__farmResolveRouteProps === 'function') {
+    return await pageModule.__farmResolveRouteProps({
+      ...(existingProps || {}),
+      params,
+      searchParams: Promise.resolve(searchParams),
+      path,
+    });
+  }
+
+  const schemas = pageModule?.__farmRouteSchemas;
+  const parsedParams = parseClientRouteSchema(schemas?.params, params, 'params');
+  const parsedSearch = parseClientRouteSchema(schemas?.search, searchParams, 'search');
+
+  return {
+    params: parsedParams,
+    search: parsedSearch,
+    searchParams: schemas ? Promise.resolve(parsedSearch) : parsedSearch,
+    path,
+  };
+}
+
 const clientModuleHintCache = new Map();
 
 async function moduleLooksClient(modulePath) {
@@ -1871,7 +2179,14 @@ async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = 
   return wrapWithIntegrationProviders(wrappedTree);
 }
 
-async function tryHydrateImportedPage(container, route, params, layouts, useHydrate = false) {
+async function tryHydrateImportedPage(
+  container,
+  route,
+  params,
+  layouts,
+  useHydrate = false,
+  existingProps = null,
+) {
   const modulePath = route?.modulePath;
   if (!modulePath) {
     return false;
@@ -1889,11 +2204,13 @@ async function tryHydrateImportedPage(container, route, params, layouts, useHydr
   }
 
   currentPageComponent = PageComponent;
-  currentPageProps = {
+  currentPageProps = await buildRouteComponentProps(
+    pageModule,
     params,
-    searchParams: getCurrentSearchParams(),
-    path: window.location.pathname,
-  };
+    getCurrentSearchParams(),
+    window.location.pathname,
+    existingProps,
+  );
 
   const wrappedElement = useHydrate && container?.id === '__farm_page__'
     ? wrapWithIntegrationProviders(
@@ -2029,11 +2346,13 @@ async function renderPage(pageData) {
     
     // Update current page state
     currentPageComponent = PageComponent;
-    currentPageProps = {
+    currentPageProps = await buildRouteComponentProps(
+      pageModule,
       params,
-      searchParams: getCurrentSearchParams(),
+      getCurrentSearchParams(),
       path,
-    };
+      pageData.props,
+    );
 
     const element = await buildWrappedHydrationElement(
       PageComponent,
@@ -2111,6 +2430,7 @@ async function hydrate() {
       const foundRoute = findRoute(pathname);
       pageProps = normalizeServerProps({
         params: foundRoute?.params || {},
+        search: getCurrentSearchParams(),
         searchParams: getCurrentSearchParams(),
         path: pathname,
       });
@@ -2133,6 +2453,7 @@ async function hydrate() {
       currentPageProps.params || {},
       layouts,
       shouldHydrate,
+      currentPageProps,
     ).catch(() => false);
 
     if (hydrated) {
