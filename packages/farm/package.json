@@ -66,6 +66,12 @@
       "server-fn": [
         "./dist/server-fn.d.ts"
       ],
+      "env": [
+        "./dist/env.d.ts"
+      ],
+      "env-types": [
+        "./dist/env-types.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -157,6 +163,16 @@
       "types": "./dist/server-fn.d.ts",
       "import": "./dist/server-fn.mjs",
       "require": "./dist/server-fn.cjs"
+    },
+    "./env": {
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.mjs",
+      "require": "./dist/env.cjs"
+    },
+    "./env-types": {
+      "types": "./dist/env-types.d.ts",
+      "import": "./dist/env-types.mjs",
+      "require": "./dist/env-types.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",

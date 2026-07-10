@@ -10,7 +10,6 @@ import {
   createRedirectsPlugin,
   createHeadersPlugin,
   createRewritesPlugin,
-  createEnvPlugin,
   createCompressionPlugin,
   createLoggerPlugin,
 } from "../plugins";
@@ -153,10 +152,6 @@ export async function createServer(config: FarmConfig = {}) {
 
       if (rewrites.length > 0) {
         pluginManager.addPlugin(createRewritesPlugin(rewrites));
-      }
-
-      if (resolvedConfig.env) {
-        pluginManager.addPlugin(createEnvPlugin(resolvedConfig.env));
       }
 
       if (resolvedConfig.compress) {

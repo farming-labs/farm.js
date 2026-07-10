@@ -9,6 +9,7 @@ import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
 import { getClientModuleMetadata } from "../utils/client-component";
+import { setEnv } from "../env";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -20,9 +21,12 @@ declare global {
         routeManager?: RouteManager;
         apiRouteManager?: APIRouteManager;
         serverRenderer?: ServerRenderer;
+        env?: any;
       }
     | undefined;
 }
+
+let envHydrated = false;
 
 /**
  * Initialize managers from global registry if not already initialized
@@ -36,6 +40,7 @@ function getManagers() {
   // Check global registry (populated at build time or via Nitro hooks)
   if (typeof globalThis !== "undefined" && globalThis.__FARM_REGISTRY__) {
     const registry = globalThis.__FARM_REGISTRY__;
+    hydrateEnvFromRegistry(registry);
     return {
       routeManager: registry.routeManager,
       apiRouteManager: registry.apiRouteManager,
@@ -54,6 +59,15 @@ function getManagers() {
     apiRouteManager: undefined,
     serverRenderer: undefined,
   };
+}
+
+function hydrateEnvFromRegistry(registry: { env?: any }): void {
+  if (envHydrated || !registry.env) {
+    return;
+  }
+
+  setEnv(registry.env);
+  envHydrated = true;
 }
 
 /**

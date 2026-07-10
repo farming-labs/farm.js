@@ -22,16 +22,6 @@ export function createEnvPlugin(
   return {
     name: "farm:env",
 
-    config(config, context) {
-      // Inject environment variables into the config
-      return {
-        ...config,
-        env: {
-          ...(config as any).env,
-          ...env,
-        },
-      } as any;
-    },
     configResolved(config, context) {
       for (const [key, value] of Object.entries(env)) {
         process.env[key] = value;

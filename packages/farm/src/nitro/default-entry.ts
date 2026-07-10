@@ -3,6 +3,7 @@ import type { RequestHandler } from "./request-handler";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
+import { setEnv } from "../env";
 
 // Global registry for runtime access (populated at build time)
 declare global {
@@ -11,8 +12,20 @@ declare global {
         routeManager?: RouteManager;
         apiRouteManager?: APIRouteManager;
         serverRenderer?: ServerRenderer;
+        env?: any;
       }
     | undefined;
+}
+
+let envHydrated = false;
+
+function hydrateEnvFromRegistry(): void {
+  if (envHydrated || !globalThis.__FARM_REGISTRY__?.env) {
+    return;
+  }
+
+  setEnv(globalThis.__FARM_REGISTRY__.env);
+  envHydrated = true;
 }
 
 /**
@@ -33,6 +46,7 @@ async function defaultHandler({
   const pathname = url.pathname;
 
   // Get managers from context or global registry
+  hydrateEnvFromRegistry();
   const rm = routeManager || globalThis.__FARM_REGISTRY__?.routeManager;
   const arm = apiRouteManager || globalThis.__FARM_REGISTRY__?.apiRouteManager;
   const sr = serverRenderer || globalThis.__FARM_REGISTRY__?.serverRenderer;

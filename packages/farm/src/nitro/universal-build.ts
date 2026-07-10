@@ -1352,6 +1352,10 @@ async function buildSSRInMemory(
         // Keep this list minimal for faster builds
         noExternal: ["@farmjs/core", "better-call", "react", "react-dom", "react-dom/server"],
       },
+      define: {
+        __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
+        __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
+      },
       plugins: [
         farmPlugin(config, pluginManager),
         {

@@ -27,6 +27,8 @@ export default defineConfig({
     observability: "src/observability.ts",
     workflows: "src/workflows.ts",
     "server-fn": "src/server-fn.ts",
+    env: "src/env.ts",
+    "env-types": "src/env-types.ts",
   },
   format: ["cjs", "esm"],
   dts: true,
