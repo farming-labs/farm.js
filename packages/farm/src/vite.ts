@@ -9,7 +9,11 @@ import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateFarmTypeArtifacts } from "./type-artifacts";
-import { isProgrammaticRoutesFileName, parseProgrammaticRouteModuleId } from "./routes";
+import {
+  isProgrammaticRoutesFileName,
+  parseProgrammaticRouteModuleId,
+  scanProgrammaticPagePaths,
+} from "./routes";
 import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
@@ -42,6 +46,31 @@ import type { FarmUserConfig } from "./config";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
+}
+
+function isPotentialProgrammaticRouteSourceFile(
+  normalizedFile: string,
+  srcDirSlug: string,
+): boolean {
+  return (
+    normalizedFile.startsWith(`${srcDirSlug}/`) &&
+    /\.(ts|tsx|js|jsx)$/.test(normalizedFile) &&
+    !/\.d\.ts$/.test(normalizedFile) &&
+    !normalizedFile.endsWith("/farm-routes.d.ts") &&
+    !normalizedFile.endsWith("/lib/api.generated.ts")
+  );
+}
+
+function fileContainsProgrammaticPageRoute(file: string): boolean {
+  if (!fs.existsSync(file)) {
+    return false;
+  }
+
+  try {
+    return scanProgrammaticPagePaths(fs.readFileSync(file, "utf8")).length > 0;
+  } catch {
+    return false;
+  }
 }
 
 export function farmPlugin(
@@ -166,8 +195,16 @@ export function farmPlugin(
         const normalized = file.replace(/\\/g, "/");
         return normalized.startsWith(`${srcDirSlug}/`) && isProgrammaticRoutesFileName(normalized);
       };
-      const isTypeAffectingFile = (file: string) =>
-        isPageFile(file) || isApiRouteFile(file) || isProgrammaticRouteFile(file);
+      const isProgrammaticRouteSourceFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return isPotentialProgrammaticRouteSourceFile(normalized, srcDirSlug);
+      };
+      const isTypeAffectingFile = (file: string, event: string) =>
+        isPageFile(file) ||
+        isApiRouteFile(file) ||
+        isProgrammaticRouteFile(file) ||
+        (isProgrammaticRouteSourceFile(file) &&
+          (event === "unlink" || fileContainsProgrammaticPageRoute(file)));
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleTypeArtifactGen = (file: string, event: string) => {
         if (typeArtifactGenScheduled) return;
@@ -179,7 +216,7 @@ export function farmPlugin(
       };
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
-          if (isTypeAffectingFile(file)) scheduleTypeArtifactGen(file, ev);
+          if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
         });
       });
 
@@ -781,6 +818,11 @@ export function farmPlugin(
             targetUrl.searchParams.forEach((value, key) => {
               searchParams[key] = value;
             });
+            const routeProps = parseRouteModuleProps(routeModule as RouteModuleLike, {
+              params,
+              search: searchParams,
+              routePath: route.pattern,
+            });
 
             // Convert absolute paths to URL paths (relative to project root)
             const projectRoot = server.config.root;
@@ -793,7 +835,11 @@ export function farmPlugin(
 
             // Return page data for SPA navigation
             const pageData = {
-              props: { params, searchParams },
+              props: {
+                params: routeProps.params,
+                search: routeProps.search,
+                searchParams: routeProps.search,
+              },
               modulePath: toUrlPath(route.modulePath),
               isClientComponent,
               shouldHydrate,
@@ -1297,6 +1343,28 @@ if (import.meta.hot) {
         return [];
       }
 
+      if (
+        currentSrcRoot &&
+        isPotentialProgrammaticRouteSourceFile(normalizedFile, currentSrcRoot) &&
+        fileContainsProgrammaticPageRoute(file)
+      ) {
+        const shortPath = normalizedFile.slice(currentSrcRoot.length + 1);
+        logUpdate("PAGE", `updated ${shortPath}`);
+
+        for (const mod of modules) {
+          server.moduleGraph.invalidateModule(mod);
+        }
+
+        await refreshRouteDiscovery?.(`updated ${file}`);
+
+        server.ws.send({
+          type: "full-reload",
+          path: "*",
+        });
+
+        return [];
+      }
+
       if (file.includes("/app/")) {
         // Hot reload middleware changes
         if (file.includes("middleware.")) {
@@ -1350,12 +1418,35 @@ function generateProgrammaticRouteModule(moduleId: string, root?: string): strin
   return `
 import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
 
-const __farmManifest = __farmRoutesModule.default ?? __farmRoutesModule.routes;
-const __farmRoutes = Array.isArray(__farmManifest)
-  ? __farmManifest
-  : Array.isArray(__farmManifest?.routes)
-    ? __farmManifest.routes
-    : [];
+const __farmIsRouteDefinition = (value) => (
+  value &&
+  typeof value === "object" &&
+  (
+    value.kind === "page" ||
+    value.kind === "layout" ||
+    value.kind === "api" ||
+    value.kind === "redirect"
+  )
+);
+const __farmRouteListFromCandidate = (candidate) => {
+  if (Array.isArray(candidate)) return candidate;
+  if (Array.isArray(candidate?.routes)) return candidate.routes;
+  if (__farmIsRouteDefinition(candidate)) return [candidate];
+  return [];
+};
+const __farmRouteCandidates = [
+  __farmRoutesModule.default,
+  __farmRoutesModule.routes,
+  __farmRoutesModule.Route,
+];
+let __farmRoutes = [];
+for (const __farmCandidate of __farmRouteCandidates) {
+  __farmRoutes = __farmRouteListFromCandidate(__farmCandidate);
+  if (__farmRoutes.length > 0) break;
+}
+if (__farmRoutes.length === 0) {
+  __farmRoutes = Object.values(__farmRoutesModule).filter(__farmIsRouteDefinition);
+}
 const __farmNormalizeRoutePath = (routePath) => {
   const withSlash = routePath && routePath.startsWith("/") ? routePath : "/" + (routePath || "");
   const withoutTrailing = withSlash.length > 1 ? withSlash.replace(/\\/+$/, "") : withSlash;
@@ -1375,6 +1466,10 @@ if (!__farmRoute) {
 
 export const metadata = __farmRoute.metadata;
 export const generateMetadata = __farmRoute.generateMetadata;
+export const __farmRouteSchemas = {
+  params: __farmRoute.params,
+  search: __farmRoute.search,
+};
 export default __farmRoute.component;
 `;
 }
@@ -1385,6 +1480,55 @@ function toProgrammaticRouteImportSpecifier(filePath: string, root?: string): st
   }
 
   return filePath;
+}
+
+type RouteModuleLike = {
+  __farmRouteParsesProps?: boolean;
+  __farmRouteSchemas?: {
+    params?: { parse?: (value: unknown) => unknown };
+    search?: { parse?: (value: unknown) => unknown };
+  };
+};
+
+function parseRouteModuleProps(
+  routeModule: RouteModuleLike,
+  input: {
+    params: Record<string, string>;
+    search: Record<string, string | string[] | undefined>;
+    routePath: string;
+  },
+): { params: unknown; search: unknown } {
+  if (routeModule.__farmRouteParsesProps) {
+    return {
+      params: input.params,
+      search: input.search,
+    };
+  }
+
+  const schemas = routeModule.__farmRouteSchemas;
+
+  return {
+    params: parseRouteModuleSchema(schemas?.params, input.params, "params", input.routePath),
+    search: parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath),
+  };
+}
+
+function parseRouteModuleSchema(
+  schema: { parse?: (value: unknown) => unknown } | undefined,
+  value: unknown,
+  label: string,
+  routePath: string,
+): unknown {
+  if (!schema || typeof schema.parse !== "function") {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid ${label} for route "${routePath}": ${message}`);
+  }
 }
 
 function generateClientCode(
@@ -1837,6 +1981,31 @@ function getCurrentSearchParams() {
   return searchParams;
 }
 
+function parseClientRouteSchema(schema, value, label) {
+  if (!schema || typeof schema.parse !== 'function') {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    throw new Error('Invalid route ' + label + ': ' + (error?.message || String(error)));
+  }
+}
+
+function buildRouteComponentProps(pageModule, params, searchParams, path) {
+  const schemas = pageModule?.__farmRouteSchemas;
+  const parsedParams = parseClientRouteSchema(schemas?.params, params, 'params');
+  const parsedSearch = parseClientRouteSchema(schemas?.search, searchParams, 'search');
+
+  return {
+    params: parsedParams,
+    search: parsedSearch,
+    searchParams: schemas ? Promise.resolve(parsedSearch) : parsedSearch,
+    path,
+  };
+}
+
 const clientModuleHintCache = new Map();
 
 async function moduleLooksClient(modulePath) {
@@ -1889,11 +2058,12 @@ async function tryHydrateImportedPage(container, route, params, layouts, useHydr
   }
 
   currentPageComponent = PageComponent;
-  currentPageProps = {
+  currentPageProps = buildRouteComponentProps(
+    pageModule,
     params,
-    searchParams: getCurrentSearchParams(),
-    path: window.location.pathname,
-  };
+    getCurrentSearchParams(),
+    window.location.pathname,
+  );
 
   const wrappedElement = useHydrate && container?.id === '__farm_page__'
     ? wrapWithIntegrationProviders(
@@ -2029,11 +2199,12 @@ async function renderPage(pageData) {
     
     // Update current page state
     currentPageComponent = PageComponent;
-    currentPageProps = {
+    currentPageProps = buildRouteComponentProps(
+      pageModule,
       params,
-      searchParams: getCurrentSearchParams(),
+      getCurrentSearchParams(),
       path,
-    };
+    );
 
     const element = await buildWrappedHydrationElement(
       PageComponent,
@@ -2111,6 +2282,7 @@ async function hydrate() {
       const foundRoute = findRoute(pathname);
       pageProps = normalizeServerProps({
         params: foundRoute?.params || {},
+        search: getCurrentSearchParams(),
         searchParams: getCurrentSearchParams(),
         path: pathname,
       });

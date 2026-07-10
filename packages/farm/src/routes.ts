@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import { createElement, type ComponentType } from "react";
 import type { LayoutProps, Metadata, PageProps, ParsedRoute, RouteModule } from "./types";
 
 export type ProgrammaticRouteRenderMode = "static" | "dynamic";
@@ -24,10 +24,34 @@ export type ProgrammaticStaticPaths = () =>
   | readonly ProgrammaticStaticPath[]
   | Promise<readonly ProgrammaticStaticPath[]>;
 
-export interface ProgrammaticPageRoute {
+export interface ProgrammaticRouteSchema<TOutput = unknown> {
+  parse(value: unknown): TOutput;
+}
+
+export type InferProgrammaticRouteSchema<TSchema, TFallback> =
+  TSchema extends ProgrammaticRouteSchema<infer TOutput> ? TOutput : TFallback;
+
+export type ProgrammaticRouteParamsFallback = Record<string, string>;
+export type ProgrammaticRouteSearchFallback = Record<string, string | string[] | undefined>;
+
+export type ProgrammaticRouteComponentProps<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> = Omit<PageProps, "params" | "searchParams"> & {
+  params: TParams;
+  search: TSearch;
+  searchParams: Promise<TSearch>;
+};
+
+export interface ProgrammaticPageRoute<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> {
   kind: "page";
   path: string;
-  component: ComponentType<PageProps>;
+  component: ComponentType<any>;
+  params?: ProgrammaticRouteSchema<TParams>;
+  search?: ProgrammaticRouteSchema<TSearch>;
   render?: ProgrammaticRouteRenderMode;
   staticPaths?: ProgrammaticStaticPaths;
   revalidate?: number | false;
@@ -64,7 +88,7 @@ export interface ProgrammaticRedirectRoute {
 }
 
 export type ProgrammaticRouteDefinition =
-  | ProgrammaticPageRoute
+  | ProgrammaticPageRoute<any, any>
   | ProgrammaticLayoutRoute
   | ProgrammaticApiRoute
   | ProgrammaticRedirectRoute;
@@ -75,7 +99,10 @@ export interface ProgrammaticRouteManifest {
 }
 
 export interface ProgrammaticRouteBuilder {
-  page(path: string, options: Omit<ProgrammaticPageRoute, "kind" | "path">): ProgrammaticPageRoute;
+  page(
+    path: string,
+    options: Omit<ProgrammaticPageRoute<any, any>, "kind" | "path">,
+  ): ProgrammaticPageRoute;
   layout(
     path: string,
     options: Omit<ProgrammaticLayoutRoute, "kind" | "path">,
@@ -92,8 +119,32 @@ export type ProgrammaticRouteFactory = (
   builder: ProgrammaticRouteBuilder,
 ) => readonly ProgrammaticRouteDefinition[];
 
+export type CreateRouteOptions<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+> = Omit<
+  ProgrammaticPageRoute<
+    InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+  >,
+  "kind" | "path" | "component" | "params" | "search"
+> & {
+  params?: TParamsSchema;
+  search?: TSearchSchema;
+  component: ComponentType<
+    ProgrammaticRouteComponentProps<
+      InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+      InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+    >
+  >;
+};
+
 const FARM_ROUTES_BRAND = Symbol.for("farm.routes");
 export const PROGRAMMATIC_ROUTE_FILE_NAMES = [
+  "farm.route.ts",
+  "farm.route.tsx",
+  "farm.route.js",
+  "farm.route.jsx",
   "farm.routes.ts",
   "farm.routes.tsx",
   "farm.routes.js",
@@ -160,6 +211,22 @@ export const layout = routesBuilder.layout;
 export const api = routesBuilder.api;
 export const redirect = routesBuilder.redirect;
 
+export function createRoute<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+>(
+  path: string,
+  options: CreateRouteOptions<TParamsSchema, TSearchSchema>,
+): ProgrammaticPageRoute<
+  InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+  InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+> {
+  return routesBuilder.page(path, options) as ProgrammaticPageRoute<
+    InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+  >;
+}
+
 export function isProgrammaticRoutesFileName(fileName: string): boolean {
   const normalized = fileName.replace(/\\/g, "/");
   const baseName = normalized.split("/").pop() || normalized;
@@ -171,14 +238,22 @@ export function getProgrammaticRouteManifest(
 ): ProgrammaticRouteManifest | null {
   if (!mod) return null;
 
-  const candidates = [mod.default, mod.routes];
+  const candidates = [mod.default, mod.routes, mod.Route];
   for (const candidate of candidates) {
     if (isProgrammaticRouteManifest(candidate)) {
       return candidate;
     }
+    if (isProgrammaticRouteDefinition(candidate)) {
+      return defineRoutes([candidate]);
+    }
     if (Array.isArray(candidate)) {
       return defineRoutes(candidate as ProgrammaticRouteDefinition[]);
     }
+  }
+
+  const routeDefinitions = Object.values(mod).filter(isProgrammaticRouteDefinition);
+  if (routeDefinitions.length > 0) {
+    return defineRoutes(routeDefinitions);
   }
 
   return null;
@@ -191,6 +266,17 @@ export function isProgrammaticRouteManifest(value: unknown): value is Programmat
     (value as ProgrammaticRouteManifest).__farmRoutes === true &&
     Array.isArray((value as ProgrammaticRouteManifest).routes)
   );
+}
+
+export function isProgrammaticRouteDefinition(
+  value: unknown,
+): value is ProgrammaticRouteDefinition {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const kind = (value as { kind?: unknown }).kind;
+  return kind === "page" || kind === "layout" || kind === "api" || kind === "redirect";
 }
 
 export function createProgrammaticRouteModuleId(
@@ -253,8 +339,16 @@ export function parseProgrammaticRoutePath(
 
 export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRoute): RouteModule {
   const mod: RouteModule = {
-    default: route.component,
+    default: createProgrammaticPageComponent(route),
   };
+
+  if (route.params || route.search) {
+    (mod as any).__farmRouteSchemas = {
+      params: route.params,
+      search: route.search,
+    };
+    (mod as any).__farmRouteParsesProps = true;
+  }
 
   if (route.render === "static" || route.staticPaths) {
     mod.ssg = true;
@@ -297,7 +391,7 @@ export function createLayoutModuleFromProgrammaticLayout(route: ProgrammaticLayo
 
 export function scanProgrammaticPagePaths(source: string): string[] {
   const paths = new Set<string>();
-  const callRe = /\bpage\s*\(\s*(["'`])([^"'`]+)\1/g;
+  const callRe = /\b(?:page|createRoute)\s*\(\s*(["'`])([^"'`]+)\1/g;
 
   for (const match of source.matchAll(callRe)) {
     if (match[2]) {
@@ -306,6 +400,47 @@ export function scanProgrammaticPagePaths(source: string): string[] {
   }
 
   return Array.from(paths);
+}
+
+function createProgrammaticPageComponent(route: ProgrammaticPageRoute): ComponentType<PageProps> {
+  if (!route.params && !route.search) {
+    return route.component as ComponentType<PageProps>;
+  }
+
+  const Component = route.component;
+
+  const FarmProgrammaticPage = async function FarmProgrammaticPage(props: PageProps) {
+    const rawSearch = await props.searchParams;
+    const params = parseProgrammaticSchema(route.params, props.params, "params", route.path);
+    const search = parseProgrammaticSchema(route.search, rawSearch, "search", route.path);
+
+    return createElement(Component, {
+      ...props,
+      params,
+      search,
+      searchParams: Promise.resolve(search),
+    });
+  };
+
+  return FarmProgrammaticPage as unknown as ComponentType<PageProps>;
+}
+
+function parseProgrammaticSchema<TFallback>(
+  schema: ProgrammaticRouteSchema<any> | undefined,
+  value: TFallback,
+  label: string,
+  routePath: string,
+): unknown {
+  if (!schema) {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid ${label} for route "${routePath}": ${message}`);
+  }
 }
 
 function normalizeProgrammaticRoute(

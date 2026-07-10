@@ -107,6 +107,30 @@ export default defineRoutes(({ page }) => [
     expect(content).toContain("`/marketing/${string}`");
   });
 
+  it("includes literal createRoute paths from normal feature files", async () => {
+    const productRouteFile = path.join(tmpDir, "src", "features", "products", "page.tsx");
+    await fs.promises.mkdir(path.dirname(productRouteFile), { recursive: true });
+    await fs.promises.writeFile(
+      productRouteFile,
+      `
+import { createRoute } from "@farmjs/core/routes";
+
+function ProductPage() {
+  return null;
+}
+
+export const ProductRoute = createRoute("/products/[id]", {
+  component: ProductPage,
+});
+`,
+    );
+
+    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
+    const content = fs.readFileSync(outPath, "utf8");
+
+    expect(content).toContain("`/products/${string}`");
+  });
+
   it("writes a valid empty route union when no pages exist", async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "farm-empty-route-types-"));
     try {

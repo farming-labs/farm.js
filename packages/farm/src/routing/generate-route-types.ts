@@ -82,7 +82,7 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
     }
   }
 
-  for (const route of discoverProgrammaticRoutePaths(root, srcDir)) {
+  for (const route of await discoverProgrammaticRoutePaths(root, srcDir)) {
     patterns.add(route);
   }
 

@@ -429,10 +429,21 @@ export default defineEventHandler(async (event: H3Event) => {
         })
       );
       
+      const routeSchemas = routeModule.__farmRouteParsesProps
+        ? {}
+        : routeModule.__farmRouteSchemas || {};
+      const parsedParams = routeSchemas.params?.parse
+        ? routeSchemas.params.parse(params)
+        : params;
+      const parsedSearch = routeSchemas.search?.parse
+        ? routeSchemas.search.parse(searchParamsObject)
+        : searchParamsObject;
+
       // Create page props
       const pageProps = {
-        params,
-        searchParams: Promise.resolve(searchParamsObject),
+        params: parsedParams,
+        search: parsedSearch,
+        searchParams: Promise.resolve(parsedSearch),
         path: pathname,
       };
       

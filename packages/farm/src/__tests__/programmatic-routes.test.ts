@@ -1,8 +1,8 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { afterEach, describe, expect, it } from "vitest";
-import { defineRoutes } from "../routes";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRoute, defineRoutes } from "../routes";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
@@ -135,5 +135,65 @@ describe("programmatic routes", () => {
     } as any);
 
     await expect(manager.discoverRoutes()).rejects.toThrow('Duplicate page route "/about"');
+  });
+
+  it("accepts a typed createRoute export from a singular farm.route entry", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-create-route-"));
+    tempDirs.push(root);
+
+    const routesFile = path.join(root, "src", "farm.route.tsx");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(
+      routesFile,
+      'export { ProductRoute as Route } from "./features/products/page";\n',
+    );
+
+    function ProductPage() {
+      return null;
+    }
+
+    const paramsSchema = {
+      parse: vi.fn((value: unknown) => ({ id: `product-${(value as any).id}` })),
+    };
+    const searchSchema = {
+      parse: vi.fn((value: unknown) => ({ tab: (value as any).tab || "info" })),
+    };
+    const ProductRoute = createRoute("/products/[id]", {
+      params: paramsSchema,
+      search: searchSchema,
+      component: ProductPage as any,
+      render: "dynamic",
+    });
+
+    const manager = new RouteManager(createConfig(root), {
+      ssrLoadModule: async (filePath: string) => {
+        expect(filePath).toBe(routesFile);
+        return { Route: ProductRoute };
+      },
+    } as any);
+
+    await manager.discoverRoutes();
+
+    const match = manager.matchRoute("/products/123");
+    expect(match.route?.pattern).toBe("/products/[id]");
+    expect(match.params).toEqual({ id: "123" });
+
+    const routeModule = await manager.loadRouteModule(match.route!.modulePath);
+    expect((routeModule as any).__farmRouteSchemas.params).toBe(paramsSchema);
+    expect((routeModule as any).__farmRouteSchemas.search).toBe(searchSchema);
+    expect((routeModule as any).__farmRouteParsesProps).toBe(true);
+    expect(routeModule.dynamic).toBe("force-dynamic");
+
+    const Page = routeModule.default as any;
+    const element = (await Page({
+      params: { id: "123" },
+      searchParams: Promise.resolve({}),
+      path: "/products/123",
+    })) as any;
+
+    expect(element.type).toBe(ProductPage);
+    expect(element.props.params).toEqual({ id: "product-123" });
+    expect(element.props.search).toEqual({ tab: "info" });
+    await expect(element.props.searchParams).resolves.toEqual({ tab: "info" });
   });
 });

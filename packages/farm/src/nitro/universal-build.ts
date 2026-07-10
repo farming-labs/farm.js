@@ -2039,17 +2039,27 @@ async function handleRequest(request) {
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
         const searchParamsObj = Object.fromEntries(url.searchParams.entries());
+        const routeSchemas = route.module.__farmRouteParsesProps
+          ? {}
+          : route.module.__farmRouteSchemas || {};
+        const parsedParams = routeSchemas.params?.parse
+          ? routeSchemas.params.parse(params)
+          : params;
+        const parsedSearch = routeSchemas.search?.parse
+          ? routeSchemas.search.parse(searchParamsObj)
+          : searchParamsObj;
         
         // Import React SSR utilities
         const ReactDOMServer = await import("react-dom/server");
         const React = await import("react");
         
         // For async components, searchParams should be a resolved Promise
-        const searchParams = Promise.resolve(searchParamsObj);
+        const searchParams = Promise.resolve(parsedSearch);
         
         // Render the page component
         const pageProps = {
-          params,
+          params: parsedParams,
+          search: parsedSearch,
           searchParams,
           path: pathname,
           ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
@@ -2087,7 +2097,10 @@ async function handleRequest(request) {
           const layout = applicableLayouts[i];
           const LayoutComponent = layout.module.default;
           if (LayoutComponent) {
-            wrappedElement = React.createElement(LayoutComponent, { children: wrappedElement, params });
+            wrappedElement = React.createElement(LayoutComponent, {
+              children: wrappedElement,
+              params,
+            });
           }
         }
         

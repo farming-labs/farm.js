@@ -47,10 +47,17 @@ export function findProgrammaticRouteFilesInDir(srcRoot: string): string[] {
   return files;
 }
 
-export function discoverProgrammaticRoutePaths(root: string, srcDir = "src"): string[] {
+export async function discoverProgrammaticRoutePaths(
+  root: string,
+  srcDir = "src",
+): Promise<string[]> {
   const paths = new Set<string>();
+  const files = new Set([
+    ...findProgrammaticRouteFiles(root, srcDir),
+    ...(await findProgrammaticRouteSourceFiles(join(root, srcDir))),
+  ]);
 
-  for (const filePath of findProgrammaticRouteFiles(root, srcDir)) {
+  for (const filePath of files) {
     const source = readFileSync(filePath, "utf8");
     for (const routePath of scanProgrammaticPagePaths(source)) {
       paths.add(routePath);
@@ -58,4 +65,27 @@ export function discoverProgrammaticRoutePaths(root: string, srcDir = "src"): st
   }
 
   return Array.from(paths).sort();
+}
+
+async function findProgrammaticRouteSourceFiles(srcRoot: string): Promise<string[]> {
+  if (!existsSync(srcRoot)) {
+    return [];
+  }
+
+  try {
+    const glob = await import("fast-glob");
+    return await glob.default("**/*.{ts,tsx,js,jsx}", {
+      cwd: srcRoot,
+      absolute: true,
+      ignore: [
+        "**/*.d.ts",
+        "**/node_modules/**",
+        "**/.*/**",
+        "farm-routes.d.ts",
+        "lib/api.generated.ts",
+      ],
+    });
+  } catch {
+    return [];
+  }
 }

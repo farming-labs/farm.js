@@ -2,7 +2,14 @@ import React from "react";
 import { renderToPipeableStream } from "react-dom/server";
 import * as fs from "fs";
 import * as path from "path";
-import type { FarmConfig, FarmRequest, FarmResponse, PageProps, SSGPage } from "../types";
+import type {
+  FarmConfig,
+  FarmRequest,
+  FarmResponse,
+  PageProps,
+  RouteModule,
+  SSGPage,
+} from "../types";
 import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
@@ -120,6 +127,47 @@ class FarmRouteErrorBoundary extends React.Component<
       });
     }
     return this.props.children as React.ReactElement;
+  }
+}
+
+function parseRouteModuleProps(
+  routeModule: RouteModule,
+  input: {
+    params: Record<string, string>;
+    search: Record<string, string | string[] | undefined>;
+    routePath: string;
+  },
+): { params: unknown; search: unknown } {
+  if ((routeModule as any).__farmRouteParsesProps) {
+    return {
+      params: input.params,
+      search: input.search,
+    };
+  }
+
+  const schemas = (routeModule as any).__farmRouteSchemas;
+
+  return {
+    params: parseRouteModuleSchema(schemas?.params, input.params, "params", input.routePath),
+    search: parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath),
+  };
+}
+
+function parseRouteModuleSchema(
+  schema: { parse?: (value: unknown) => unknown } | undefined,
+  value: unknown,
+  label: string,
+  routePath: string,
+): unknown {
+  if (!schema || typeof schema.parse !== "function") {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid ${label} for route "${routePath}": ${message}`);
   }
 }
 
@@ -463,21 +511,28 @@ export class ServerRenderer {
         }
       });
 
-      // Create page props with searchParams as plain object and middleware data
-      const pageProps: PageProps = {
-        params,
-        searchParams: Promise.resolve(searchParamsObject),
-        path: pathname,
-        middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
-        context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
-      };
-
       // Load route module
       const routeModule = await this.routeManager.loadRouteModule(route.modulePath);
 
       if (!routeModule.default) {
         throw new Error(`Route module ${route.modulePath} does not export a default component`);
       }
+
+      const routeProps = parseRouteModuleProps(routeModule, {
+        params,
+        search: searchParamsObject,
+        routePath: route.pattern,
+      });
+
+      // Create page props with searchParams as plain object and middleware data
+      const pageProps: PageProps = {
+        params: routeProps.params as Record<string, string>,
+        searchParams: Promise.resolve(routeProps.search as Record<string, string | string[]>),
+        path: pathname,
+        middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+        context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+        search: routeProps.search,
+      } as PageProps & { search: unknown };
 
       const renderingConfig = await resolveRouteRenderingConfigFromFile(
         routeModule,
@@ -552,8 +607,9 @@ export class ServerRenderer {
         : null;
       // Store pageProps for client-side hydration (serializable version - no Promises)
       (req as any).__FARM_PROPS__ = {
-        params,
-        searchParams: searchParamsObject,
+        params: routeProps.params,
+        search: routeProps.search,
+        searchParams: routeProps.search,
         path: pathname,
         middleware:
           middlewareMap.size > 0

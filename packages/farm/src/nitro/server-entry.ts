@@ -147,12 +147,18 @@ async function defaultHandler({
       targetUrl.searchParams.forEach((value, key) => {
         searchParams[key] = value;
       });
+      const routeProps = parseRouteModuleProps(routeModule, {
+        params,
+        search: searchParams,
+        routePath: route.pattern,
+      });
 
       // Return page data for SPA navigation
       const pageData = {
         props: {
-          params,
-          searchParams,
+          params: routeProps.params,
+          search: routeProps.search,
+          searchParams: routeProps.search,
         },
         modulePath: route.modulePath,
         isClientComponent,
@@ -273,6 +279,47 @@ async function defaultHandler({
       headers: { "Content-Type": "application/json" },
     },
   );
+}
+
+function parseRouteModuleProps(
+  routeModule: unknown,
+  input: {
+    params: Record<string, string>;
+    search: Record<string, string | string[] | undefined>;
+    routePath: string;
+  },
+): { params: unknown; search: unknown } {
+  if ((routeModule as any).__farmRouteParsesProps) {
+    return {
+      params: input.params,
+      search: input.search,
+    };
+  }
+
+  const schemas = (routeModule as any).__farmRouteSchemas;
+
+  return {
+    params: parseRouteModuleSchema(schemas?.params, input.params, "params", input.routePath),
+    search: parseRouteModuleSchema(schemas?.search, input.search, "search", input.routePath),
+  };
+}
+
+function parseRouteModuleSchema(
+  schema: { parse?: (value: unknown) => unknown } | undefined,
+  value: unknown,
+  label: string,
+  routePath: string,
+): unknown {
+  if (!schema || typeof schema.parse !== "function") {
+    return value;
+  }
+
+  try {
+    return schema.parse(value);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid ${label} for route "${routePath}": ${message}`);
+  }
 }
 
 // Create the handler (context will be populated at build time via global registry)

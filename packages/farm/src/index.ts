@@ -29,6 +29,7 @@ export * from "./middleware";
 export * from "./router";
 export {
   createLayoutModuleFromProgrammaticLayout,
+  createRoute,
   createProgrammaticRouteModuleId,
   createRouteModuleFromProgrammaticPage,
   defineRoutes,
@@ -48,6 +49,7 @@ export type {
   ProgrammaticLayoutRoute,
   ProgrammaticPageRoute,
   ProgrammaticRedirectRoute,
+  ProgrammaticRouteComponentProps,
   ProgrammaticRouteBuilder,
   ProgrammaticRouteDefinition,
   ProgrammaticRouteFactory,
@@ -55,9 +57,14 @@ export type {
   ProgrammaticRouteMethod,
   ProgrammaticRoutePrimitive,
   ProgrammaticRouteRenderMode,
+  ProgrammaticRouteParamsFallback,
+  ProgrammaticRouteSchema,
+  ProgrammaticRouteSearchFallback,
   ProgrammaticStaticPath,
   ProgrammaticStaticPathParams,
   ProgrammaticStaticPaths,
+  InferProgrammaticRouteSchema,
+  CreateRouteOptions,
 } from "./routes";
 export * from "./docs";
 export * from "./markdown";
