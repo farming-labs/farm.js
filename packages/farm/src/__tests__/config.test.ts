@@ -142,6 +142,29 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it("resolves secure server action defaults and overrides", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.serverActions).toEqual({
+      allowedOrigins: [],
+      bodySizeLimit: 1_000_000,
+    });
+
+    const configured = await resolveConfig(
+      {
+        serverActions: {
+          allowedOrigins: ["HTTPS://APP.EXAMPLE.COM/", "*.proxy.example.com"],
+          bodySizeLimit: "2mb",
+        },
+      },
+      "production",
+    );
+
+    expect(configured.serverActions).toEqual({
+      allowedOrigins: ["https://app.example.com", "*.proxy.example.com"],
+      bodySizeLimit: 2_000_000,
+    });
+  });
+
   it("resolves MDX app page config", async () => {
     const config = await resolveConfig(
       {

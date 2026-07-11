@@ -10,6 +10,7 @@ import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmWorkflowsUserConfig } from "./workflows";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { FarmRouteRules } from "./route-rules";
+import type { FarmServerActionsConfig } from "./server-action-security";
 
 export type NitroPreset =
   | "node-server"
@@ -103,6 +104,7 @@ export interface FarmConfig {
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;
   context?: FarmContextFactory<any>;
+  serverActions?: FarmServerActionsConfig;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;

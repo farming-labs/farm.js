@@ -92,6 +92,7 @@ export * from "./env-types";
 export * from "./type-artifacts";
 export * from "./server-fn";
 export * from "./server-fn-client";
+export * from "./server-action-security";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
@@ -138,6 +139,8 @@ export type {
   RewriteConfig,
   ImageConfig,
   I18nConfig,
+  FarmServerActionsConfig,
+  ResolvedFarmServerActionsConfig,
   OpenAPIConfig,
   MiddlewareConfig,
   FarmDeployConfig,

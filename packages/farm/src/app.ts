@@ -9,6 +9,7 @@ import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
 import { normalizeRouteRules } from "./route-rules";
+import { resolveServerActionsConfig } from "./server-action-security";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
 import { findProgrammaticRouteFiles } from "./routes.server";
@@ -100,6 +101,7 @@ export class FarmApp {
       middleware: config.middleware || {},
       routeRules: normalizeRouteRules(config.routeRules),
       context: config.context || (() => undefined),
+      serverActions: resolveServerActionsConfig(config.serverActions),
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),

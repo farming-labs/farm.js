@@ -30,6 +30,11 @@ import {
   routeRulesToRedirects,
   type FarmRouteRules,
 } from "./route-rules";
+import {
+  resolveServerActionsConfig,
+  type FarmServerActionsConfig,
+  type ResolvedFarmServerActionsConfig,
+} from "./server-action-security";
 import path from "path";
 
 export type {
@@ -59,6 +64,10 @@ export type {
   FarmRouteRuleRenderMode,
   FarmRouteRules,
 } from "./route-rules";
+export type {
+  FarmServerActionsConfig,
+  ResolvedFarmServerActionsConfig,
+} from "./server-action-security";
 
 export interface RedirectConfig {
   source: string;
@@ -186,6 +195,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;
   context?: BaseFarmConfig["context"];
+  serverActions?: FarmServerActionsConfig;
 
   notFound?: NotFoundConfig;
 
@@ -217,7 +227,16 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
 export interface ResolvedFarmConfig extends Required<
   Omit<
     FarmUserConfig,
-    "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx" | "migrations" | "workflows" | "env"
+    | "plugins"
+    | "vite"
+    | "deploy"
+    | "docs"
+    | "md"
+    | "mdx"
+    | "migrations"
+    | "workflows"
+    | "env"
+    | "serverActions"
   >
 > {
   plugins: FarmPlugin[];
@@ -229,6 +248,7 @@ export interface ResolvedFarmConfig extends Required<
   migrations: ResolvedFarmMigrationsConfig;
   workflows: FarmWorkflowsResolvedConfig;
   env: ResolvedFarmEnv;
+  serverActions: ResolvedFarmServerActionsConfig;
 }
 
 export function defineFarmConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
@@ -651,6 +671,7 @@ export async function resolveConfig(
     middleware: userConfig.middleware || {},
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),
+    serverActions: resolveServerActionsConfig(userConfig.serverActions),
     output: userConfig.output || "standalone",
     distDir: userConfig.distDir || ".farm",
     generateBuildId: userConfig.generateBuildId || (() => `build-${Date.now()}`),

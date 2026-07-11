@@ -46,7 +46,7 @@
     "build": "tsc && node scripts/build.js",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
-    "test": "echo 'No tests in this package (boundary-matching tested via @farmjs/core)'"
+    "test": "vitest run"
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",
@@ -62,7 +62,8 @@
     "@vitejs/plugin-rsc": "^0.5.18",
     "tsdown": "^0.15.7",
     "typescript": "^5.5.3",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^1.1.0"
   },
   "peerDependencies": {
     "@farmjs/core": "workspace:*",

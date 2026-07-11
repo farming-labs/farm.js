@@ -69,6 +69,9 @@
       "server-fn/client": [
         "./dist/server-fn-client.d.ts"
       ],
+      "server-action-security": [
+        "./dist/server-action-security.d.ts"
+      ],
       "env": [
         "./dist/env.d.ts"
       ],
@@ -171,6 +174,11 @@
       "types": "./dist/server-fn-client.d.ts",
       "import": "./dist/server-fn-client.mjs",
       "require": "./dist/server-fn-client.cjs"
+    },
+    "./server-action-security": {
+      "types": "./dist/server-action-security.d.ts",
+      "import": "./dist/server-action-security.mjs",
+      "require": "./dist/server-action-security.cjs"
     },
     "./env": {
       "types": "./dist/env.d.ts",
