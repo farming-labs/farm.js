@@ -449,6 +449,29 @@ src/app/
 
 The group names are organizational. The URLs are still `/`, `/pricing`, and `/dashboard`.
 
+## Pending Navigation UI
+
+Use `useNavigation()` for global route-transition UI: top progress bars, disabled navigation buttons, optimistic shells, or app-wide busy indicators. It tracks SPA navigations started by `Link` and `navigateTo`.
+
+```tsx
+"use client";
+
+import { useNavigation } from "@farmjs/core/client";
+
+export function TopProgress() {
+  const navigation = useNavigation();
+
+  return (
+    <div
+      data-pending={navigation.pending}
+      aria-hidden={!navigation.pending}
+    />
+  );
+}
+```
+
+`navigation.state` is `"loading"` while route data is being fetched and returns to `"idle"` after the route is committed. `navigation.to` includes the target `pathname`, `search`, `hash`, and full `href`. Use route `loading.tsx` for segment-level Suspense fallbacks, and `useNavigation()` when the surrounding app shell should react to a navigation.
+
 ## Navigation workflow
 
 1. Add or rename route files.

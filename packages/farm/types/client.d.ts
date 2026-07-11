@@ -222,6 +222,24 @@ declare module "@farmjs/core/client" {
     state?: unknown;
   }
 
+  export interface FarmNavigationLocation {
+    href: string;
+    pathname: string;
+    search: string;
+    hash: string;
+  }
+
+  export interface FarmNavigationState {
+    state: "idle" | "loading";
+    pending: boolean;
+    from: string | null;
+    to: FarmNavigationLocation | null;
+    action: FarmNavigationBlockerContext["action"] | null;
+    startedAt: number | null;
+  }
+
+  export type FarmNavigationListener = (state: FarmNavigationState) => void;
+
   export interface UseRouterOptions {
     basePath?: string;
     routes?: Array<string | { path: string; name?: string; meta?: unknown }>;
@@ -253,6 +271,7 @@ declare module "@farmjs/core/client" {
   };
 
   export function usePageState<TState = unknown>(): TState | null;
+  export function useNavigation(): FarmNavigationState;
   export function useBlocker(options: UseBlockerOptions): UseBlockerReturn;
   export function useScrollRestoration<TElement extends HTMLElement = HTMLElement>(
     key: string,
