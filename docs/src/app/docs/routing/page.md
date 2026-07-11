@@ -306,6 +306,52 @@ This page renders at `/about` and exposes source at `/about.md`.
 
 Do not place `page.tsx` and `page.mdx` in the same folder. Farm treats that as a duplicate route and asks you to choose one page source.
 
+## File Route States
+
+Use `loading.tsx` and `error.tsx` next to a file route to define route-local loading and error states. Farm picks the nearest matching boundary, so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard pages unless a deeper segment defines its own boundary.
+
+```txt
+src/app/
+  dashboard/
+    page.tsx
+    loading.tsx
+    error.tsx
+```
+
+**src/app/dashboard/loading.tsx**
+
+```tsx
+import type { LoadingProps } from "@farmjs/core";
+
+export default function DashboardLoading(props: LoadingProps) {
+  return <p>Loading {props.path}</p>;
+}
+```
+
+`loading.tsx` is used as the Suspense fallback when the page or nested content suspends while rendering.
+
+**src/app/dashboard/error.tsx**
+
+```tsx
+"use client";
+
+import type { ErrorProps } from "@farmjs/core";
+
+export default function DashboardError({ error, reset }: ErrorProps) {
+  const message = error instanceof Error ? error.message : "Something went wrong";
+
+  return (
+    <section>
+      <h2>Could not load dashboard</h2>
+      <p>{message}</p>
+      <button onClick={reset}>Try again</button>
+    </section>
+  );
+}
+```
+
+`error.tsx` receives `error`, `reset`, `params`, `path`, `search`, `searchParams`, middleware data, and plugin context. The closest route error boundary handles normal render/data failures. Redirects and `notFound()` still escape to Farm's redirect and not-found handling.
+
 ## Catch-all routes
 
 Catch-all routes are useful for docs, CMS content, and nested marketing pages where the page is resolved from content instead of a fixed file for every URL.

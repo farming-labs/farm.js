@@ -6,6 +6,7 @@ import type {
   FarmConfig,
   FarmRequest,
   FarmResponse,
+  LoadingProps,
   PageProps,
   RouteModule,
   SSGPage,
@@ -183,6 +184,24 @@ function parseRouteModuleSchema(
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid ${label} for route "${routePath}": ${message}`);
   }
+}
+
+function createRouteStateProps(input: {
+  params: Record<string, string>;
+  searchParamsObject: Record<string, string | string[] | undefined>;
+  path: string;
+  middlewareMap: Map<string, any>;
+  pluginExposedContext: Map<string, any>;
+}): LoadingProps {
+  return {
+    params: input.params,
+    search: input.searchParamsObject,
+    searchParams: Promise.resolve(input.searchParamsObject),
+    path: input.path,
+    middleware: input.middlewareMap.size > 0 ? { data: input.middlewareMap } : undefined,
+    context:
+      input.pluginExposedContext.size > 0 ? { data: input.pluginExposedContext } : undefined,
+  };
 }
 
 export class ServerRenderer {
@@ -676,8 +695,13 @@ export class ServerRenderer {
 
           if (LoadingFallbackComponent) {
             const loadingFallback = React.createElement(LoadingFallbackComponent, {
-              params,
-              path: pathname,
+              ...createRouteStateProps({
+                params,
+                searchParamsObject,
+                path: pathname,
+                middlewareMap,
+                pluginExposedContext,
+              }),
             } as React.Attributes);
 
             pageElement = React.createElement(
@@ -716,12 +740,13 @@ export class ServerRenderer {
               {
                 Fallback: ErrorFallbackComponent,
                 fallbackProps: {
-                  params,
-                  path: pathname,
-                  searchParams: Promise.resolve(searchParamsObject),
-                  middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
-                  context:
-                    pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+                  ...createRouteStateProps({
+                    params,
+                    searchParamsObject,
+                    path: pathname,
+                    middlewareMap,
+                    pluginExposedContext,
+                  }),
                 },
               },
               wrappedElement,
@@ -874,15 +899,14 @@ export class ServerRenderer {
 
       const ErrorComponent = errorModule.default as React.ComponentType<unknown>;
       const errorElement = React.createElement(ErrorComponent, {
+        ...createRouteStateProps({
+          params: options.params,
+          searchParamsObject: options.searchParamsObject,
+          path: options.pathname,
+          middlewareMap: options.middlewareMap,
+          pluginExposedContext: options.pluginExposedContext,
+        }),
         error: options.error,
-        params: options.params,
-        path: options.pathname,
-        searchParams: Promise.resolve(options.searchParamsObject),
-        middleware: options.middlewareMap.size > 0 ? { data: options.middlewareMap } : undefined,
-        context:
-          options.pluginExposedContext.size > 0
-            ? { data: options.pluginExposedContext }
-            : undefined,
         reset: () => {},
       } as React.Attributes);
 
@@ -935,9 +959,6 @@ export class ServerRenderer {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
         res.setHeader(key, value);
-      }
-      if (typeof res.flushHeaders === "function") {
-        res.flushHeaders();
       }
 
       const htmlParts: string[] = [];
