@@ -79,6 +79,7 @@ export * from "./env";
 export * from "./env-types";
 export * from "./type-artifacts";
 export * from "./server-fn";
+export * from "./server-fn-client";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";

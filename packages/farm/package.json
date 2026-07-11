@@ -66,6 +66,9 @@
       "server-fn": [
         "./dist/server-fn.d.ts"
       ],
+      "server-fn/client": [
+        "./dist/server-fn-client.d.ts"
+      ],
       "env": [
         "./dist/env.d.ts"
       ],
@@ -163,6 +166,11 @@
       "types": "./dist/server-fn.d.ts",
       "import": "./dist/server-fn.mjs",
       "require": "./dist/server-fn.cjs"
+    },
+    "./server-fn/client": {
+      "types": "./dist/server-fn-client.d.ts",
+      "import": "./dist/server-fn-client.mjs",
+      "require": "./dist/server-fn-client.cjs"
     },
     "./env": {
       "types": "./dist/env.d.ts",
