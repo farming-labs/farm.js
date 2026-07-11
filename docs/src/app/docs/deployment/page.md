@@ -83,6 +83,12 @@ export default defineFarmConfig({
 
 The same shape lives in `examples/deployment-presets` so the preset behavior can be tested from a real app.
 
+## Chunk error recovery
+
+Farm installs client-side chunk recovery automatically in the generated browser runtime. When the browser fails to load a JavaScript or CSS chunk after a deployment, Farm reloads the current page once so the app can pick up the newest asset manifest.
+
+This is meant for stale deploy assets, where a user has an older HTML page open while the server now points at newer chunks. Farm stores a short session guard per page before reloading, so repeated chunk failures do not trap the user in a reload loop. Ordinary runtime errors are left alone and should still be handled with route `error.tsx`, programmatic `error` components, monitoring, and tests.
+
 ## Self-host a Farm app
 
 Use `target: "node"` when you want to run the app on your own server, VPS, container, or platform that expects a long-running Node process. Farm builds the app with Nitro's Node server preset.

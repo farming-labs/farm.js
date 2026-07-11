@@ -81,6 +81,7 @@ export {
   readPageState,
   replaceState,
 } from "./client/spa-router";
+export { installChunkErrorRecovery, isChunkLoadError } from "./client/chunk-recovery";
 export type {
   LinkProps,
   PrefetchBehavior,
@@ -94,6 +95,7 @@ export type {
   RouteOptionalParamValue,
   RouteParams,
 } from "./client/link";
+export type { FarmChunkRecoveryOptions } from "./client/chunk-recovery";
 export type {
   UseBlockerOptions,
   UseBlockerReturn,

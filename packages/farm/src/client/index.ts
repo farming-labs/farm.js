@@ -59,6 +59,8 @@ export {
   replaceState,
   SPARouter,
 } from "./spa-router";
+export { installChunkErrorRecovery, isChunkLoadError } from "./chunk-recovery";
+export type { FarmChunkRecoveryOptions } from "./chunk-recovery";
 export type {
   FarmNavigateOptions,
   FarmNavigationListener,

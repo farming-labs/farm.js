@@ -244,6 +244,16 @@ declare module "@farmjs/core/client" {
 
   export type FarmNavigationListener = (state: FarmNavigationState) => void;
 
+  export interface FarmChunkRecoveryOptions {
+    maxAgeMs?: number;
+    storageKey?: string;
+    onRecover?: (error: unknown) => void;
+    reload?: () => void;
+    storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+    location?: Pick<Location, "pathname" | "search" | "reload">;
+    now?: () => number;
+  }
+
   export interface UseRouterOptions {
     basePath?: string;
     routes?: Array<string | { path: string; name?: string; meta?: unknown }>;
@@ -285,6 +295,8 @@ declare module "@farmjs/core/client" {
   export function pushState<TState>(state: TState, href?: string): void;
   export function replaceState<TState>(state: TState, href?: string): void;
   export function readPageState<TState = unknown>(): TState | null;
+  export function isChunkLoadError(errorLike: unknown): boolean;
+  export function installChunkErrorRecovery(options?: FarmChunkRecoveryOptions): () => void;
 
   export interface APIClientOptions {
     baseURL?: string;
