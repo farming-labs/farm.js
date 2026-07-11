@@ -99,6 +99,60 @@ export function CurrentUserTab() {
 }
 ```
 
+## Route data cache
+
+Programmatic routes can cache the value returned from `data.main`. This is useful for product pages, docs pages, dashboards, and other route data that should be reused during server rendering or prefetching.
+
+```tsx
+import { createRoute, invalidate } from "@farmjs/core";
+import { z } from "zod";
+import { ProductPage } from "./page";
+
+export const ProductRoute = createRoute("/products/[id]", {
+  params: z.object({ id: z.string() }),
+
+  data: {
+    key: ({ params }) => ["product", params.id],
+    staleTime: "30s",
+
+    async main({ params }) {
+      return {
+        product: await db.product.findUnique({ where: { id: params.id } }),
+      };
+    },
+  },
+
+  component: ProductPage,
+});
+
+export async function saveProduct(id: string, name: string) {
+  await db.product.update({ where: { id }, data: { name } });
+  await invalidate(["product", id]);
+}
+```
+
+`key` enables caching. When a cached entry is still fresh, Farm reuses the previous `data.main` result. `before` still runs for each request, and `after` still runs with the returned data, so setup and logging hooks keep their normal behavior.
+
+`staleTime` accepts a number of milliseconds or a duration string such as `"500ms"`, `"30s"`, `"5m"`, or `"1h"`. Omit `staleTime` when data should stay cached until invalidated.
+
+Farm also tags route data by the rendered path, so `revalidatePath("/products/123")` invalidates the matching route data entry. Use `tags` or `paths` when one mutation should refresh more than one route:
+
+```tsx
+export const ProductRoute = createRoute("/products/[id]", {
+  data: {
+    key: ({ params }) => ["product", params.id],
+    tags: ({ params }) => [`product:${params.id}`, "products"],
+    paths: ({ params }) => [`/products/${params.id}`, "/products"],
+    async main({ params }) {
+      return { product: await getProduct(params.id) };
+    },
+  },
+  component: ProductPage,
+});
+```
+
+Cache keys are part of your data security model. If data depends on the current user, role, tenant, locale, or draft mode, include that value in `key` or avoid caching that route. Route cache invalidation improves freshness, but API routes and server functions still need their own authorization checks.
+
 ## Nested segments
 
 Folders become URL segments. Use normal folders for visible path segments and dynamic folders when the value comes from the URL.
