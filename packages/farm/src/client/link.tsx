@@ -2,6 +2,12 @@
 
 import type React from "react";
 import { forwardRef, useEffect, useRef, useCallback, type AnchorHTMLAttributes } from "react";
+import {
+  buildFarmRoutePath,
+  type FarmRouterBuildOptions,
+  type FarmRouterPathParam,
+  type FarmRouterPathParams,
+} from "../router";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -25,11 +31,25 @@ export type DefaultRoutePath = LinkDefaultRoute extends { _: infer TRoute extend
   ? TRoute
   : string;
 
-type RouteHref<TRoute extends string> =
+export type DefaultRoutePattern = LinkDefaultRoute extends {
+  pattern: infer TRoute extends string;
+}
+  ? TRoute
+  : DefaultRoutePath;
+
+export type DefaultRouteHref = DefaultRoutePath | DefaultRoutePattern;
+
+export type RouteHref<TRoute extends string> =
   | TRoute
   | `${TRoute}?${string}`
   | `${TRoute}#${string}`
   | `${TRoute}?${string}#${string}`;
+
+export type RouteParamValue = Exclude<FarmRouterPathParam, null | undefined>;
+export type RouteOptionalParamValue = FarmRouterPathParam;
+export type RouteParams<TRoute extends string> = string extends TRoute
+  ? FarmRouterPathParams
+  : ExtractRouteParams<StripRouteSuffix<TRoute>>;
 
 /** External URLs; these are never type-checked as routes. */
 export type ExternalHref =
@@ -38,24 +58,87 @@ export type ExternalHref =
   | `//${string}`
   | `mailto:${string}`;
 
-export interface LinkProps<TRoute extends string = DefaultRoutePath> extends Omit<
+type StripRouteSuffix<TRoute extends string> = TRoute extends `${infer Path}?${string}`
+  ? StripRouteSuffix<Path>
+  : TRoute extends `${infer Path}#${string}`
+    ? StripRouteSuffix<Path>
+    : TRoute;
+
+type ExtractRouteParams<TRoute extends string> = Simplify<
+  ExtractOptionalCatchAllParams<TRoute> &
+    ExtractCatchAllParams<TRoute> &
+    ExtractDynamicParams<TRoute>
+>;
+
+type ExtractOptionalCatchAllParams<TRoute extends string> =
+  TRoute extends `${string}[[...${infer Param}]]${infer Rest}`
+    ? { [Key in Param]?: RouteOptionalParamValue } & ExtractOptionalCatchAllParams<Rest>
+    : {};
+
+type ExtractCatchAllParams<TRoute extends string> =
+  TRoute extends `${string}[...${infer Param}]${infer Rest}`
+    ? Param extends `[...${string}`
+      ? ExtractCatchAllParams<Rest>
+      : { [Key in Param]: RouteParamValue } & ExtractCatchAllParams<Rest>
+    : {};
+
+type ExtractDynamicParams<TRoute extends string> =
+  TRoute extends `${string}[${infer Param}]${infer Rest}`
+    ? Param extends `...${string}` | `[...${string}`
+      ? ExtractDynamicParams<Rest>
+      : { [Key in Param]: RouteParamValue } & ExtractDynamicParams<Rest>
+    : {};
+
+type Simplify<T> = { [Key in keyof T]: T[Key] } & {};
+
+type HasRouteParams<TRoute extends string> = keyof RouteParams<TRoute> extends never ? false : true;
+
+type LinkRouteParamsProps<TRoute extends string> = string extends TRoute
+  ? { params?: FarmRouterPathParams }
+  : HasRouteParams<TRoute> extends true
+    ? { params: RouteParams<TRoute> }
+    : { params?: FarmRouterPathParams };
+
+type LinkRouteTargetProps<TRoute extends string> = TRoute extends string
+  ? {
+      /** Internal route path or route pattern. */
+      href: RouteHref<TRoute>;
+    } & LinkRouteParamsProps<TRoute>
+  : never;
+
+type LinkExternalTargetProps = {
+  /** External URL; these are never type-checked as app routes. */
+  href: ExternalHref;
+  params?: never;
+};
+
+type LinkTargetProps<TRoute extends string> =
+  | LinkExternalTargetProps
+  | LinkRouteTargetProps<TRoute>;
+
+export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
   AnchorHTMLAttributes<HTMLAnchorElement>,
   "href"
-> {
-  /** Internal route path (typed when route types are generated) or external URL. */
-  href: RouteHref<TRoute> | ExternalHref;
+> &
+  LinkTargetProps<TRoute> & {
   /**
    * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
    * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".
    */
   prefetch?: PrefetchBehavior | PrefetchLegacy;
+  /** Search params appended after route params are resolved. */
+  query?: FarmRouterBuildOptions["query"];
+  /** Hash appended after route params and search params are resolved. */
+  hash?: string;
+  /** Add a trailing slash to the generated internal href. */
+  trailingSlash?: boolean;
   /** Delay in ms before intent-based prefetch (hover/touch). Default 50. */
   prefetchDelay?: number;
   /** Replace current history entry instead of pushing */
   replace?: boolean;
   /** Scroll to top after navigation (default: true) */
   scroll?: boolean;
-}
+};
 
 function isModifierEvent(e: React.MouseEvent): boolean {
   return !!(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey);
@@ -103,9 +186,13 @@ function normalizePrefetch(prefetch: LinkProps["prefetch"]): {
   return { intent: false, viewport: false, render: false };
 }
 
-function LinkInner<TRoute extends string = DefaultRoutePath>(
+function LinkInner<TRoute extends string = DefaultRouteHref>(
   {
     href,
+    params,
+    query,
+    hash,
+    trailingSlash,
     prefetch = true,
     prefetchDelay = 50,
     replace = false,
@@ -126,15 +213,24 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
   const hasPrefetched = useRef(false);
 
   const { intent, viewport, render } = normalizePrefetch(prefetch);
-  const isExternal = isExternalUrl(href);
+  const resolvedHref = resolveLinkHref(href, params, {
+    query,
+    hash,
+    trailingSlash,
+  });
+  const isExternal = isExternalUrl(resolvedHref);
 
   const doPrefetch = useCallback(() => {
     if (isExternal || hasPrefetched.current) return;
     const router = getRouter();
     if (!router) return;
     hasPrefetched.current = true;
-    router.prefetch(href);
-  }, [href, isExternal]);
+    router.prefetch(resolvedHref);
+  }, [resolvedHref, isExternal]);
+
+  useEffect(() => {
+    hasPrefetched.current = false;
+  }, [resolvedHref]);
 
   useEffect(() => {
     const element = elementRef.current;
@@ -147,7 +243,7 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
       router.observeForPrefetch(element);
       return () => router.unobserveForPrefetch(element);
     }
-  }, [href, viewport, isExternal]);
+  }, [resolvedHref, viewport, isExternal]);
 
   useEffect(() => {
     if (!render || isExternal) return;
@@ -165,7 +261,7 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
       }
 
       hasPrefetched.current = true;
-      router.prefetch(href);
+      router.prefetch(resolvedHref);
     };
 
     tryRenderPrefetch();
@@ -176,7 +272,7 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
         clearTimeout(timeoutId);
       }
     };
-  }, [render, isExternal, href]);
+  }, [render, isExternal, resolvedHref]);
 
   useEffect(() => {
     return () => {
@@ -256,14 +352,14 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
         event.preventDefault();
         const router = getRouter();
         if (router) {
-          router.navigate(href, { replace, scroll });
+          router.navigate(resolvedHref, { replace, scroll });
         } else {
-          if (replace) window.location.replace(href);
-          else window.location.href = href;
+          if (replace) window.location.replace(resolvedHref);
+          else window.location.href = resolvedHref;
         }
       }
     },
-    [href, replace, scroll, target, isExternal, onClick],
+    [resolvedHref, replace, scroll, target, isExternal, onClick],
   );
 
   const setRefs = useCallback(
@@ -278,7 +374,7 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
   return (
     <a
       ref={setRefs}
-      href={href}
+      href={resolvedHref}
       target={target}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
@@ -294,8 +390,70 @@ function LinkInner<TRoute extends string = DefaultRoutePath>(
 const LinkWithRef = forwardRef(LinkInner);
 LinkWithRef.displayName = "Link";
 
-type LinkComponentType = <TRoute extends string = DefaultRoutePath>(
+type LinkComponentType = <TRoute extends string = DefaultRouteHref>(
   props: LinkProps<TRoute> & { ref?: React.ForwardedRef<HTMLAnchorElement> },
 ) => React.ReactElement;
 
 export const Link = LinkWithRef as unknown as LinkComponentType;
+
+function resolveLinkHref(
+  href: string,
+  params: FarmRouterPathParams | undefined,
+  options: FarmRouterBuildOptions,
+) {
+  if (isExternalUrl(href)) return href;
+
+  if (!params && !options.query && !options.hash && !options.trailingSlash) {
+    return href;
+  }
+
+  const { pathname, query, hash } = splitInternalHref(href);
+
+  return buildFarmRoutePath(pathname, params, {
+    query: mergeQueryParams(query, options.query),
+    hash: options.hash ?? hash,
+    trailingSlash: options.trailingSlash,
+  });
+}
+
+function splitInternalHref(href: string) {
+  try {
+    const url = new URL(href, "http://farm.local");
+    return {
+      pathname: url.pathname || "/",
+      query: url.searchParams,
+      hash: url.hash ? url.hash.slice(1) : undefined,
+    };
+  } catch {
+    const [withoutHash, rawHash] = href.split("#", 2);
+    const [pathname, rawQuery] = withoutHash.split("?", 2);
+    return {
+      pathname: pathname || "/",
+      query: new URLSearchParams(rawQuery || ""),
+      hash: rawHash,
+    };
+  }
+}
+
+function mergeQueryParams(
+  current: URLSearchParams,
+  next: FarmRouterBuildOptions["query"],
+): URLSearchParams | undefined {
+  const merged = new URLSearchParams(current);
+
+  if (next instanceof URLSearchParams) {
+    for (const [key, value] of next.entries()) {
+      merged.append(key, value);
+    }
+  } else if (next) {
+    for (const [key, value] of Object.entries(next)) {
+      const values = Array.isArray(value) ? value : [value];
+      for (const item of values) {
+        if (item == null) continue;
+        merged.append(key, String(item));
+      }
+    }
+  }
+
+  return merged.toString() ? merged : undefined;
+}

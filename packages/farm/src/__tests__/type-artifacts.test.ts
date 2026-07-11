@@ -54,6 +54,7 @@ describe("generateFarmTypeArtifacts", () => {
     expect(existsSync(apiTypesPath)).toBe(true);
     expect(existsSync(envTypesPath)).toBe(true);
     expect(readFileSync(routeTypesPath, "utf8")).toContain("`/users/${string}`");
+    expect(readFileSync(routeTypesPath, "utf8")).toContain('"/users/[id]"');
     expect(readFileSync(routeTypesPath, "utf8")).toContain('"/docs/reference"');
     expect(readFileSync(apiTypesPath, "utf8")).toContain("hello: {");
     expect(readFileSync(apiTypesPath, "utf8")).toContain("post: typeof POST_hello;");

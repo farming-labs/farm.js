@@ -17,6 +17,10 @@ function routePatternToTsTypeLiteral(pattern: string): string {
   return "`/" + parts.join("/") + "`";
 }
 
+function routePatternToRouteLiteral(pattern: string): string {
+  return JSON.stringify(pattern);
+}
+
 function createRoutePattern(route: ParsedRoute): string {
   if (route.segments.length === 0) return "/";
   return (
@@ -86,12 +90,19 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
     patterns.add(route);
   }
 
-  const typeLiterals = Array.from(patterns).sort().map(routePatternToTsTypeLiteral);
+  const sortedPatterns = Array.from(patterns).sort();
+  const typeLiterals = sortedPatterns.map(routePatternToTsTypeLiteral);
+  const patternLiterals = sortedPatterns.map(routePatternToRouteLiteral);
 
   const routePathType = suppressLintOnLink
     ? "string"
     : typeLiterals.length
       ? typeLiterals.join(" | ")
+      : "never";
+  const routePatternType = suppressLintOnLink
+    ? "string"
+    : patternLiterals.length
+      ? patternLiterals.join(" | ")
       : "never";
   const augmentationBlock = suppressLintOnLink
     ? ""
@@ -99,12 +110,14 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
 declare module "@farmjs/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
+    pattern: import("./farm-routes").RoutePattern;
   }
 }
 
 declare module "@farmjs/core" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
+    pattern: import("./farm-routes").RoutePattern;
   }
   // Ensure root import ("@farmjs/core") uses the same typed Link signature as client entry.
   const Link: typeof import("@farmjs/core/client").Link;
@@ -114,6 +127,7 @@ declare module "@farmjs/core" {
 declare module "@farmjs/core/dist/client.js" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
+    pattern: import("./farm-routes").RoutePattern;
   }
 }
 `;
@@ -123,7 +137,8 @@ declare module "@farmjs/core/dist/client.js" {
  * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
-export type RoutePath = ${routePathType};${augmentationBlock}
+export type RoutePath = ${routePathType};
+export type RoutePattern = ${routePatternType};${augmentationBlock}
 `;
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
