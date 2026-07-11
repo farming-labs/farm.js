@@ -24,6 +24,12 @@ import {
   type FarmMdxResolvedConfig,
   type FarmMdxUserConfig,
 } from "./app-markdown";
+import {
+  normalizeRouteRules,
+  routeRulesToHeaders,
+  routeRulesToRedirects,
+  type FarmRouteRules,
+} from "./route-rules";
 import path from "path";
 
 export type {
@@ -46,6 +52,13 @@ export type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+export type {
+  FarmRouteRule,
+  FarmRouteRuleCors,
+  FarmRouteRuleRedirect,
+  FarmRouteRuleRenderMode,
+  FarmRouteRules,
+} from "./route-rules";
 
 export interface RedirectConfig {
   source: string;
@@ -171,6 +184,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   openapi?: OpenAPIConfig;
 
   middleware?: FarmMiddlewareConfig;
+  routeRules?: FarmRouteRules;
 
   notFound?: NotFoundConfig;
 
@@ -574,6 +588,9 @@ export async function resolveConfig(
     typeof userConfig.headers === "function"
       ? await userConfig.headers()
       : userConfig.headers || [];
+  const routeRules = normalizeRouteRules(userConfig.routeRules);
+  const routeRuleRedirects = routeRulesToRedirects(routeRules);
+  const routeRuleHeaders = routeRulesToHeaders(routeRules);
 
   const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
@@ -607,9 +624,10 @@ export async function resolveConfig(
     plugins: [...resolveIntegrationPlugins(userConfig.integrations), ...(userConfig.plugins || [])],
     integrations: userConfig.integrations || {},
     trailingSlash: userConfig.trailingSlash ?? false,
-    redirects: () => redirects,
+    redirects: () => [...redirects, ...routeRuleRedirects],
     rewrites: () => rewrites,
-    headers: () => headers,
+    headers: () => [...headers, ...routeRuleHeaders],
+    routeRules,
     images: {
       domains: [],
       deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
