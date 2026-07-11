@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmCacheKey,
+  createRouteDataCacheTag,
   getFarmDataCache,
+  invalidate,
+  invalidateRouteData,
   normalizeRevalidatePath,
   revalidatePath,
   revalidateTag,
@@ -118,6 +121,56 @@ describe("server cache primitives", () => {
     await expect(getUser()).resolves.toEqual({ calls: 1 });
     updateTag("user:1");
     await expect(getUser()).resolves.toEqual({ calls: 2 });
+  });
+
+  it("invalidates route data cache entries by structured key", async () => {
+    let calls = 0;
+    const key = ["product", "123"] as const;
+    const cacheKey = createFarmCacheKey(["route-data", key]);
+
+    await expect(
+      getFarmDataCache().getOrSet(
+        cacheKey,
+        async () => {
+          calls++;
+          return { id: "123", calls };
+        },
+        { tags: [createRouteDataCacheTag(key)] },
+      ),
+    ).resolves.toEqual({ id: "123", calls: 1 });
+
+    await expect(
+      getFarmDataCache().getOrSet(cacheKey, async () => {
+        calls++;
+        return { id: "123", calls };
+      }),
+    ).resolves.toEqual({ id: "123", calls: 1 });
+
+    invalidate(key);
+
+    await expect(
+      getFarmDataCache().getOrSet(
+        cacheKey,
+        async () => {
+          calls++;
+          return { id: "123", calls };
+        },
+        { tags: [createRouteDataCacheTag(key)] },
+      ),
+    ).resolves.toEqual({ id: "123", calls: 2 });
+
+    invalidateRouteData(key);
+
+    await expect(
+      getFarmDataCache().getOrSet(
+        cacheKey,
+        async () => {
+          calls++;
+          return { id: "123", calls };
+        },
+        { tags: [createRouteDataCacheTag(key)] },
+      ),
+    ).resolves.toEqual({ id: "123", calls: 3 });
   });
 
   it("expires entries using revalidate seconds", async () => {

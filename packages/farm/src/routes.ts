@@ -1,4 +1,11 @@
 import { createElement, type ComponentType } from "react";
+import {
+  createFarmCacheKey,
+  createRouteDataCacheTag,
+  getFarmDataCache,
+  type FarmCacheOptions,
+  type RouteDataCacheKey,
+} from "./cache";
 import type { LayoutProps, Metadata, PageProps, ParsedRoute, RouteModule } from "./types";
 
 export type ProgrammaticRouteRenderMode = "static" | "dynamic";
@@ -34,6 +41,13 @@ export type InferProgrammaticRouteSchema<TSchema, TFallback> =
 export type ProgrammaticRouteParamsFallback = Record<string, string>;
 export type ProgrammaticRouteSearchFallback = Record<string, string | string[] | undefined>;
 export type ProgrammaticRouteMaybePromise<T> = T | Promise<T>;
+export type ProgrammaticRouteDataStaleTime =
+  | number
+  | false
+  | `${number}ms`
+  | `${number}s`
+  | `${number}m`
+  | `${number}h`;
 
 export type ProgrammaticRouteComponentProps<
   TParams = ProgrammaticRouteParamsFallback,
@@ -50,12 +64,34 @@ export type ProgrammaticRouteDataContext<
   TSearch = ProgrammaticRouteSearchFallback,
 > = ProgrammaticRouteComponentProps<TParams, TSearch>;
 
+export type ProgrammaticRouteDataCacheContext<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+  TBefore = unknown,
+> = ProgrammaticRouteDataContext<TParams, TSearch> & { before: TBefore };
+
+export type ProgrammaticRouteDataCacheKeys<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+  TBefore = unknown,
+> =
+  | readonly string[]
+  | ((
+      context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore>,
+    ) => ProgrammaticRouteMaybePromise<readonly string[]>);
+
 export interface ProgrammaticRouteDataHooks<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
   TBefore = unknown,
   TData = unknown,
 > {
+  key?: (
+    context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore>,
+  ) => ProgrammaticRouteMaybePromise<RouteDataCacheKey | null | undefined>;
+  staleTime?: ProgrammaticRouteDataStaleTime;
+  tags?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore>;
+  paths?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore>;
   before?: (
     context: ProgrammaticRouteDataContext<TParams, TSearch>,
   ) => ProgrammaticRouteMaybePromise<TBefore>;
@@ -499,10 +535,11 @@ async function resolveProgrammaticRouteProps(
   }
 
   const before = route.data.before ? await route.data.before(baseProps as any) : undefined;
-  const data = await route.data.main({
+  const dataContext = {
     ...(baseProps as any),
     before,
-  });
+  };
+  const data = await resolveProgrammaticRouteData(route, dataContext);
 
   if (route.data.after) {
     await route.data.after({
@@ -516,6 +553,75 @@ async function resolveProgrammaticRouteProps(
     ...baseProps,
     data,
   });
+}
+
+async function resolveProgrammaticRouteData(
+  route: ProgrammaticPageRoute<any, any, ProgrammaticRouteDataHooks<any, any, any, any>>,
+  context: ProgrammaticRouteDataCacheContext<any, any, any>,
+): Promise<unknown> {
+  const dataHooks = route.data;
+  if (!dataHooks?.key) {
+    return dataHooks!.main(context);
+  }
+
+  const routeDataKey = await dataHooks.key(context);
+  if (routeDataKey == null) {
+    return dataHooks.main(context);
+  }
+
+  const cacheKey = createFarmCacheKey(["route-data", routeDataKey]);
+  const cacheOptions: FarmCacheOptions = {
+    tags: [
+      createRouteDataCacheTag(routeDataKey),
+      ...(await resolveProgrammaticRouteDataKeys(dataHooks.tags, context)),
+    ],
+    paths: [
+      ...(typeof context.path === "string" ? [context.path] : []),
+      ...(await resolveProgrammaticRouteDataKeys(dataHooks.paths, context)),
+    ],
+    revalidate: normalizeProgrammaticRouteStaleTime(dataHooks.staleTime),
+  };
+
+  return getFarmDataCache().getOrSet(cacheKey, () => dataHooks.main(context), cacheOptions);
+}
+
+async function resolveProgrammaticRouteDataKeys(
+  input: ProgrammaticRouteDataCacheKeys<any, any, any> | undefined,
+  context: ProgrammaticRouteDataCacheContext<any, any, any>,
+): Promise<readonly string[]> {
+  if (!input) return [];
+  const value = typeof input === "function" ? await input(context) : input;
+  return value.filter((item) => typeof item === "string" && item.trim().length > 0);
+}
+
+function normalizeProgrammaticRouteStaleTime(
+  staleTime: ProgrammaticRouteDataStaleTime | undefined,
+): number | false | undefined {
+  if (staleTime === undefined) return undefined;
+  if (staleTime === false) return false;
+
+  if (typeof staleTime === "number") {
+    if (!Number.isFinite(staleTime) || staleTime <= 0) return undefined;
+    return Math.max(1, Math.ceil(staleTime / 1000));
+  }
+
+  const match = staleTime.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
+  if (!match) return undefined;
+
+  const value = Number(match[1]);
+  if (!Number.isFinite(value) || value <= 0) return undefined;
+
+  const unit = match[2];
+  const milliseconds =
+    unit === "ms"
+      ? value
+      : unit === "s"
+        ? value * 1000
+        : unit === "m"
+          ? value * 60000
+          : value * 3600000;
+
+  return Math.max(1, Math.ceil(milliseconds / 1000));
 }
 
 function isProgrammaticRoutePropsResolved(value: unknown): boolean {

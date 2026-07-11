@@ -2,6 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
 import { createRoute, defineRoutes } from "../routes";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
@@ -9,6 +10,7 @@ import type { FarmConfig } from "../types";
 const tempDirs: string[] = [];
 
 afterEach(() => {
+  getFarmDataCache().clear();
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop();
     if (dir) {
@@ -258,5 +260,78 @@ describe("programmatic routes", () => {
     expect(before).not.toHaveBeenCalled();
     expect(main).not.toHaveBeenCalled();
     expect(after).not.toHaveBeenCalled();
+  });
+
+  it("caches programmatic route data by key and supports invalidation", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-route-data-cache-"));
+    tempDirs.push(root);
+
+    const routesFile = path.join(root, "src", "farm.route.tsx");
+    fs.mkdirSync(path.dirname(routesFile), { recursive: true });
+    fs.writeFileSync(routesFile, "export {};\n");
+
+    function ProductPage() {
+      return null;
+    }
+
+    let calls = 0;
+    const before = vi.fn(async ({ params }: any) => ({ token: `token-${params.id}` }));
+    const main = vi.fn(async ({ params, before }: any) => ({
+      id: params.id,
+      token: before.token,
+      calls: ++calls,
+    }));
+    const after = vi.fn();
+
+    const ProductRoute = createRoute("/products/[id]", {
+      data: {
+        key: ({ params }) => ["product", params.id],
+        staleTime: "30s",
+        tags: ({ params }) => [`product:${params.id}`],
+        before,
+        main,
+        after,
+      },
+      component: ProductPage as any,
+    });
+
+    const manager = new RouteManager(createConfig(root), {
+      ssrLoadModule: async () => ({ Route: ProductRoute }),
+    } as any);
+
+    await manager.discoverRoutes();
+    const match = manager.matchRoute("/products/123");
+    const routeModule = await manager.loadRouteModule(match.route!.modulePath);
+    const resolveProps = (searchParams = {}) =>
+      (routeModule as any).__farmResolveRouteProps({
+        params: { id: "123" },
+        searchParams: Promise.resolve(searchParams),
+        path: "/products/123",
+      });
+
+    await expect(resolveProps()).resolves.toMatchObject({
+      data: { id: "123", token: "token-123", calls: 1 },
+    });
+    await expect(resolveProps()).resolves.toMatchObject({
+      data: { id: "123", token: "token-123", calls: 1 },
+    });
+
+    expect(before).toHaveBeenCalledTimes(2);
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(2);
+
+    invalidate(["product", "123"]);
+
+    await expect(resolveProps()).resolves.toMatchObject({
+      data: { id: "123", token: "token-123", calls: 2 },
+    });
+    expect(main).toHaveBeenCalledTimes(2);
+
+    revalidatePath("/products/123");
+
+    await expect(resolveProps()).resolves.toMatchObject({
+      data: { id: "123", token: "token-123", calls: 3 },
+    });
+    expect(main).toHaveBeenCalledTimes(3);
   });
 });

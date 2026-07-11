@@ -30,6 +30,8 @@ export interface FarmCacheSetOptions extends FarmCacheOptions {
   createdAt?: number;
 }
 
+export type RouteDataCacheKey = string | readonly unknown[];
+
 export interface FarmCacheEntry<T = unknown> {
   key: string;
   value: T;
@@ -319,8 +321,24 @@ export function revalidatePath(routePath: string): void {
   getFarmDataCache().revalidatePath(routePath);
 }
 
+export function invalidate(key: RouteDataCacheKey): void {
+  getFarmDataCache().revalidateTag(createRouteDataCacheTag(key), { source: "updateTag" });
+}
+
+export function invalidateRouteData(key: RouteDataCacheKey): void {
+  invalidate(key);
+}
+
 export function createPathCacheTag(routePath: string): string {
   return `path:${normalizeRevalidatePath(routePath)}`;
+}
+
+export function createRouteDataCacheTag(key: RouteDataCacheKey): string {
+  return `route-data:${createRouteDataCacheKey(key)}`;
+}
+
+export function createRouteDataCacheKey(key: RouteDataCacheKey): string {
+  return createFarmCacheKey(Array.isArray(key) ? key : [key]);
 }
 
 export function normalizeRevalidatePath(routePath: string): string {
