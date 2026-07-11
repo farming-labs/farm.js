@@ -7,6 +7,7 @@ import { createNitroAPIHandler } from "./api-handler";
 import { createNitroSSRHandler } from "./ssr-handler";
 import path from "path";
 import { prepareFarmWorkflowsForNitro } from "../workflows";
+import { routeRulesToNitroRouteRules } from "../route-rules";
 
 // Export universal build functions
 export { buildUniversal } from "./universal-build";
@@ -584,6 +585,7 @@ export default defineEventHandler(async (event: H3Event) => {
       "/**": {
         prerender: false,
       },
+      ...routeRulesToNitroRouteRules(config.routeRules),
     },
 
     // // Exclude certain directories from scanning

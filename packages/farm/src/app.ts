@@ -8,6 +8,7 @@ import { resolveWorkflowsConfig, type FarmWorkflowsResolvedConfig } from "./work
 import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
+import { normalizeRouteRules } from "./route-rules";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
 import { findProgrammaticRouteFiles } from "./routes.server";
@@ -97,6 +98,7 @@ export class FarmApp {
       migrations: config.migrations || { commands: [] },
       workflows: resolveWorkflowsConfig(config.workflows),
       middleware: config.middleware || {},
+      routeRules: normalizeRouteRules(config.routeRules),
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),

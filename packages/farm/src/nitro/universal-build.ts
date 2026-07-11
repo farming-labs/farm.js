@@ -22,6 +22,7 @@ import {
   prepareFarmWorkflowsForNitro,
   type PreparedFarmWorkflows,
 } from "../workflows";
+import { routeRulesToNitroRouteRules } from "../route-rules";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -2552,6 +2553,7 @@ export default fromWebHandler(handler.fetch)
       "/**": {
         prerender: false,
       },
+      ...routeRulesToNitroRouteRules(config.routeRules),
     },
     externals: {
       external: [

@@ -9,6 +9,7 @@ import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmWorkflowsUserConfig } from "./workflows";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
+import type { FarmRouteRules } from "./route-rules";
 
 export type NitroPreset =
   | "node-server"
@@ -86,6 +87,7 @@ export interface FarmConfig {
   workflows?: FarmWorkflowsUserConfig | boolean;
   env?: FarmEnvConfig<any, any> | ResolvedFarmEnv;
   middleware?: FarmMiddlewareConfig;
+  routeRules?: FarmRouteRules;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;

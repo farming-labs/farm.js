@@ -45,6 +45,7 @@ export default defineFarmConfig({
 | md | Exposing markdown mirrors like /pricing.md. |
 | mdx | Rendering `page.md` and `page.mdx` app routes, plus MDX components. |
 | deploy | Selecting a target, preset, and output directory. |
+| routeRules | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
 | openapi | Publishing API reference docs. |
 
 ## Next-style route exports
@@ -61,6 +62,33 @@ export default async function BlogPage() {
   return <main>...</main>;
 }
 ```
+
+## Route rules
+
+Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  routeRules: {
+    "/": { prerender: true },
+    "/blog/**": { swr: 3600 },
+    "/admin/**": { render: "dynamic" },
+    "/api/**": { cors: true },
+    "/assets/**": {
+      headers: {
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    },
+    "/old": { redirect: "/new" },
+  },
+});
+```
+
+`render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
+
+Prefer route-level exports when one page owns the behavior. Prefer `routeRules` for broad groups, deployment-facing cache policy, API CORS, static asset headers, and legacy redirects.
 
 ## Minimal project layout
 
@@ -156,4 +184,5 @@ export default defineFarmConfig({
 - Use `migrations.commands` for schema setup that should be explicit in CI.
 - Use `docs.entry` when the docs runtime should be mounted automatically.
 - Prefer route-level exports such as `dynamic`, `revalidate`, and `ppr` when behavior belongs to one page.
+- Prefer `routeRules` for broad URL patterns and platform-level cache/header behavior.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.

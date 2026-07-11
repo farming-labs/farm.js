@@ -27,6 +27,7 @@ export * from "./openapi";
 export * from "./query";
 export * from "./middleware";
 export * from "./router";
+export * from "./route-rules";
 export {
   createLayoutModuleFromProgrammaticLayout,
   createRoute,
