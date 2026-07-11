@@ -328,9 +328,11 @@ export interface LayoutModule {
 }
 
 export interface Metadata {
+  metadataBase?: string | URL;
   title?: string | { default?: string; template?: string };
   description?: string;
   keywords?: string | string[];
+  author?: string;
   authors?: Array<{ name: string; url?: string }>;
   creator?: string;
   publisher?: string;
@@ -340,13 +342,25 @@ export interface Metadata {
     description?: string;
     url?: string;
     siteName?: string;
-    images?: Array<{
-      url: string;
-      width?: number;
-      height?: number;
-      alt?: string;
-    }>;
+    images?:
+      | string
+      | {
+          url: string;
+          width?: number;
+          height?: number;
+          alt?: string;
+          type?: string;
+        }
+      | Array<{
+          url: string;
+          width?: number;
+          height?: number;
+          alt?: string;
+          type?: string;
+        }>;
+    image?: string;
     type?: string;
+    locale?: string;
   };
   twitter?: {
     card?: "summary" | "summary_large_image" | "app" | "player";
@@ -354,8 +368,44 @@ export interface Metadata {
     creator?: string;
     title?: string;
     description?: string;
-    images?: string | string[];
+    images?:
+      | string
+      | {
+          url: string;
+          width?: number;
+          height?: number;
+          alt?: string;
+          type?: string;
+        }
+      | Array<
+          | string
+          | {
+              url: string;
+              width?: number;
+              height?: number;
+              alt?: string;
+              type?: string;
+            }
+        >;
   };
+  alternates?: {
+    canonical?: string;
+    languages?: Record<string, string>;
+  };
+  icons?:
+    | string
+    | {
+        icon?:
+          | string
+          | Array<string | { url: string; sizes?: string; type?: string }>;
+        shortcut?:
+          | string
+          | Array<string | { url: string; sizes?: string; type?: string }>;
+        apple?:
+          | string
+          | Array<string | { url: string; sizes?: string; type?: string }>;
+      };
+  manifest?: string;
 }
 
 export interface FarmRequest extends IncomingMessage {

@@ -28,12 +28,18 @@ import {
 import path from "path";
 import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
+import type { MetadataImageKind } from "../metadata";
 
 interface RouteEntry {
   route: ParsedRoute;
   modulePath: string;
   pattern: string;
   source?: "file" | "programmatic";
+}
+
+interface MetadataImageEntry extends RouteEntry {
+  kind: MetadataImageKind;
+  fileName: "opengraph-image" | "twitter-image";
 }
 
 interface RedirectEntry {
@@ -51,6 +57,7 @@ export class RouteManager {
   private layouts: Map<string, RouteEntry> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
   private errors: Map<string, RouteEntry> = new Map();
+  private metadataImages: Map<string, MetadataImageEntry> = new Map();
   private redirects: Map<string, RedirectEntry> = new Map();
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
@@ -69,6 +76,7 @@ export class RouteManager {
     this.layouts.clear();
     this.loadings.clear();
     this.errors.clear();
+    this.metadataImages.clear();
     this.redirects.clear();
     this.programmaticPages.clear();
     this.programmaticLayouts.clear();
@@ -80,6 +88,10 @@ export class RouteManager {
     const layoutFiles = await safeGlobFiles("**/layout.{ts,tsx,js,jsx}", appDir);
     const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
     const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
+    const metadataImageFiles = await safeGlobFiles(
+      "**/{opengraph-image,twitter-image}.{ts,tsx,js,jsx}",
+      appDir,
+    );
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
@@ -146,6 +158,34 @@ export class RouteManager {
         route,
         modulePath,
         pattern,
+        source: "file",
+      });
+    }
+
+    // Process metadata image files
+    for (const file of metadataImageFiles) {
+      const fileBase = path.basename(file).replace(/\.(tsx?|jsx?)$/, "");
+      const kind: MetadataImageKind = fileBase === "twitter-image" ? "twitter" : "opengraph";
+      const fileName = kind === "twitter" ? "twitter-image" : "opengraph-image";
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+      const key = `${kind}:${pattern}`;
+      const existing = this.metadataImages.get(key);
+
+      if (existing) {
+        throw new Error(
+          `Duplicate ${fileName} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}. ` +
+            "Use only one metadata image file per route segment.",
+        );
+      }
+
+      this.metadataImages.set(key, {
+        route,
+        modulePath,
+        pattern,
+        kind,
+        fileName,
         source: "file",
       });
     }
@@ -218,6 +258,10 @@ export class RouteManager {
     return new Map(this.errors);
   }
 
+  getMetadataImages(): Map<string, MetadataImageEntry> {
+    return new Map(this.metadataImages);
+  }
+
   getRedirects(): ProgrammaticRedirectRoute[] {
     return Array.from(this.redirects.values()).map((entry) => entry.definition);
   }
@@ -263,6 +307,82 @@ export class RouteManager {
    */
   getMatchingError(pathname: string): RouteEntry | null {
     return this.findNearestBoundary(pathname, this.errors);
+  }
+
+  matchMetadataImage(pathname: string): {
+    image: MetadataImageEntry;
+    params: Record<string, string>;
+    pagePath: string;
+  } | null {
+    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const suffix = getMetadataImageSuffix(normalizedPath);
+    if (!suffix) return null;
+
+    const pagePath = normalizedPath.slice(0, -suffix.fileName.length - 1) || "/";
+
+    for (const imageEntry of this.metadataImages.values()) {
+      if (imageEntry.kind !== suffix.kind) continue;
+
+      const match = matchRoute(pagePath, imageEntry.route.segments);
+      if (!match.matches) continue;
+
+      return {
+        image: imageEntry,
+        params: match.params,
+        pagePath,
+      };
+    }
+
+    return null;
+  }
+
+  getMatchingMetadataImage(
+    pathname: string,
+    kind: MetadataImageKind,
+  ): {
+    image: MetadataImageEntry;
+    params: Record<string, string>;
+  } | null {
+    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const pathSegments = normalizedPath.split("/").filter(Boolean);
+    let bestMatch:
+      | {
+          image: MetadataImageEntry;
+          params: Record<string, string>;
+        }
+      | null = null;
+
+    for (const imageEntry of this.metadataImages.values()) {
+      if (imageEntry.kind !== kind) continue;
+      if (imageEntry.route.segments.length > pathSegments.length) continue;
+
+      const candidatePath =
+        imageEntry.route.segments.length === 0
+          ? "/"
+          : `/${pathSegments.slice(0, imageEntry.route.segments.length).join("/")}`;
+      const match = matchRoute(candidatePath, imageEntry.route.segments);
+      if (!match.matches) continue;
+
+      if (
+        !bestMatch ||
+        imageEntry.route.segments.length > bestMatch.image.route.segments.length
+      ) {
+        bestMatch = {
+          image: imageEntry,
+          params: match.params,
+        };
+      }
+    }
+
+    return bestMatch;
+  }
+
+  resolveMetadataImagePath(
+    image: MetadataImageEntry,
+    params: Record<string, string> = {},
+  ): string {
+    const pagePath = routeSegmentsToPath(image.route.segments, params);
+    return pagePath === "/" ? `/${image.fileName}` : `${pagePath}/${image.fileName}`;
   }
 
   /**
@@ -630,6 +750,49 @@ function interpolateRedirectDestination(
   }
 
   return result;
+}
+
+function getMetadataImageSuffix(pathname: string):
+  | {
+      kind: MetadataImageKind;
+      fileName: MetadataImageEntry["fileName"];
+    }
+  | null {
+  if (pathname === "/opengraph-image" || pathname.endsWith("/opengraph-image")) {
+    return { kind: "opengraph", fileName: "opengraph-image" };
+  }
+
+  if (pathname === "/twitter-image" || pathname.endsWith("/twitter-image")) {
+    return { kind: "twitter", fileName: "twitter-image" };
+  }
+
+  return null;
+}
+
+function routeSegmentsToPath(
+  segments: ParsedRoute["segments"],
+  params: Record<string, string>,
+): string {
+  if (segments.length === 0) return "/";
+
+  const parts: string[] = [];
+  for (const segment of segments) {
+    if (!segment.isDynamic) {
+      parts.push(segment.segment);
+      continue;
+    }
+
+    const value = params[segment.segment];
+    if (!value && segment.isOptional) continue;
+    if (!value) {
+      parts.push(`[${segment.segment}]`);
+      continue;
+    }
+
+    parts.push(...value.split("/").map((part) => encodeURIComponent(part)));
+  }
+
+  return `/${parts.join("/")}`;
 }
 
 function replaceAll(input: string, search: string, replacement: string): string {

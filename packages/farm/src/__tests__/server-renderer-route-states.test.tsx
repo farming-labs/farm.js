@@ -14,6 +14,7 @@ type MockResponse = FarmResponse & {
 const routeModulePath = "/test/src/app/dashboard/page.tsx";
 const loadingModulePath = "/test/src/app/dashboard/loading.tsx";
 const errorModulePath = "/test/src/app/dashboard/error.tsx";
+const ogImageModulePath = "/test/src/app/dashboard/opengraph-image.tsx";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -81,10 +82,128 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("Dashboard error dashboard exploded /dashboard stats");
     expect(response.body).not.toContain("Internal Server Error");
   });
+
+  it("renders generated metadata and route image file tags", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          metadata: {
+            description: "Dashboard overview",
+            openGraph: {
+              siteName: "Farm",
+            },
+          },
+          async generateMetadata(props: any) {
+            const search = await props.searchParams;
+            return {
+              title: `Dashboard ${search.tab}`,
+              openGraph: {
+                title: "Dashboard stats",
+              },
+            };
+          },
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Dashboard ready");
+          },
+        },
+        [ogImageModulePath]: {
+          size: { width: 1200, height: 630 },
+          alt: "Dashboard preview",
+          default: function DashboardImage() {
+            return React.createElement(
+              "svg",
+              { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 1200 630" },
+              React.createElement("text", null, "Dashboard OG"),
+            );
+          },
+        },
+      },
+      { opengraphImage: true },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard?tab=stats"), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("<title>Dashboard stats</title>");
+    expect(response.body).toContain(
+      '<meta name="description" content="Dashboard overview">',
+    );
+    expect(response.body).toContain('<meta property="og:title" content="Dashboard stats">');
+    expect(response.body).toContain('<meta property="og:site_name" content="Farm">');
+    expect(response.body).toContain(
+      '<meta property="og:image" content="/dashboard/opengraph-image">',
+    );
+    expect(response.body).toContain('<meta property="og:image:width" content="1200">');
+    expect(response.body).toContain(
+      '<meta property="og:image:alt" content="Dashboard preview">',
+    );
+  });
+
+  it("serves opengraph-image.tsx as a metadata image endpoint", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Dashboard ready");
+          },
+        },
+        [ogImageModulePath]: {
+          contentType: "image/svg+xml",
+          default: function DashboardImage(props: any) {
+            return React.createElement(
+              "svg",
+              { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 1200 630" },
+              React.createElement("text", null, `OG ${props.path}`),
+            );
+          },
+        },
+      },
+      { opengraphImage: true },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard/opengraph-image"), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.headers.get("content-type")).toBe("image/svg+xml");
+    expect(response.body).toContain("<svg");
+    expect(response.body).toContain("OG /dashboard");
+  });
 });
 
-function createRenderer(modules: Record<string, any>) {
+function createRenderer(
+  modules: Record<string, any>,
+  options: { opengraphImage?: boolean } = {},
+) {
+  const metadataImageEntry = {
+    pattern: "/dashboard",
+    modulePath: ogImageModulePath,
+    kind: "opengraph",
+    fileName: "opengraph-image",
+    route: {
+      segments: [
+        {
+          segment: "dashboard",
+          isDynamic: false,
+          isCatchAll: false,
+          isOptional: false,
+        },
+      ],
+    },
+  };
   const routeManager = {
+    matchMetadataImage(pathname: string) {
+      if (!options.opengraphImage || pathname !== "/dashboard/opengraph-image") {
+        return null;
+      }
+
+      return {
+        image: metadataImageEntry,
+        params: {},
+        pagePath: "/dashboard",
+      };
+    },
     matchRoute() {
       return {
         route: {
@@ -110,6 +229,19 @@ function createRenderer(modules: Record<string, any>) {
             modulePath: errorModulePath,
           }
         : null;
+    },
+    getMatchingMetadataImage(_pathname: string, kind: string) {
+      if (!options.opengraphImage || kind !== "opengraph") {
+        return null;
+      }
+
+      return {
+        image: metadataImageEntry,
+        params: {},
+      };
+    },
+    resolveMetadataImagePath() {
+      return "/dashboard/opengraph-image";
     },
     async loadRouteModule(modulePath: string) {
       const mod = modules[modulePath];
