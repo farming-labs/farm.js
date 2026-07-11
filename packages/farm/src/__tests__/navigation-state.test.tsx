@@ -44,6 +44,7 @@ describe("navigation state and blocking", () => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
+    delete (document as any).startViewTransition;
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
   });
 
@@ -148,6 +149,35 @@ describe("navigation state and blocking", () => {
 
     expect(container.textContent).toBe("idle::");
     expect(window.location.pathname).toBe("/reports");
+  });
+
+  it("wraps route commits in a view transition when requested", async () => {
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const updateCallbacks: Array<() => Promise<void>> = [];
+    const startViewTransition = vi.fn((callback: () => Promise<void>) => {
+      updateCallbacks.push(callback);
+      const updateCallbackDone = callback();
+      return {
+        updateCallbackDone,
+        finished: updateCallbackDone,
+      };
+    });
+    (document as any).startViewTransition = startViewTransition;
+
+    const router = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn(async () => undefined);
+    router.setNavigationHandler(onNavigate);
+
+    await router.navigate("/gallery", { viewTransition: true, scroll: false });
+
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(updateCallbacks.length).toBe(1);
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        modulePath: "/src/app/page.tsx",
+      }),
+    );
+    expect(window.location.pathname).toBe("/gallery");
   });
 
   it("restores registered nested scroll containers by key", () => {

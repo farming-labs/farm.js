@@ -43,10 +43,13 @@ export type FarmNavigationBlocker = (
   context: FarmNavigationBlockerContext,
 ) => boolean | void | Promise<boolean | void>;
 
+export type FarmViewTransitionMode = boolean | "auto";
+
 export interface FarmNavigateOptions {
   replace?: boolean;
   scroll?: boolean;
   state?: unknown;
+  viewTransition?: FarmViewTransitionMode;
 }
 
 export interface FarmNavigationLocation {
@@ -127,7 +130,7 @@ export class SPARouter {
     href: string,
     options: FarmNavigateOptions = {},
   ): Promise<void> {
-    const { replace = false, scroll = true, state } = options;
+    const { replace = false, scroll = true, state, viewTransition = false } = options;
 
     // Parse the URL
     const url = new URL(href, window.location.origin);
@@ -163,51 +166,17 @@ export class SPARouter {
       // Fetch page data (from cache or server)
       const pageData = await this.fetchPageData(fullPath);
 
-      // Update browser history
-      const historyState = createHistoryState(fullPath, state);
-      if (replace) {
-        window.history.replaceState(historyState, "", fullPath);
-      } else {
-        window.history.pushState(historyState, "", fullPath);
-      }
-
-      // Update document title
-      if (pageData.metadata?.title) {
-        document.title = pageData.metadata.title;
-      }
-
-      // Update meta description
-      if (pageData.metadata?.description) {
-        let metaDesc = document.querySelector('meta[name="description"]');
-        if (!metaDesc) {
-          metaDesc = document.createElement("meta");
-          metaDesc.setAttribute("name", "description");
-          document.head.appendChild(metaDesc);
-        }
-        metaDesc.setAttribute("content", pageData.metadata.description);
-      }
-
-      // Call the navigation handler to update React
-      if (this.onNavigate) {
-        await this.onNavigate(pageData);
-      }
-
-      // Handle scroll
-      if (scroll) {
-        if (url.hash) {
-          // Scroll to hash
-          const element = document.querySelector(url.hash);
-          if (element) {
-            element.scrollIntoView();
-          }
-        } else {
-          // Scroll to top
-          window.scrollTo(0, 0);
-        }
-      } else if (this.options.scrollRestoration) {
-        // Restore previous scroll position if available
-        this.restoreScrollPosition(pathname);
-      }
+      await this.runViewTransition(viewTransition, () =>
+        this.commitNavigation({
+          fullPath,
+          pageData,
+          pathname,
+          replace,
+          scroll,
+          state,
+          url,
+        }),
+      );
 
       this.finishNavigation();
     } catch (error) {
@@ -317,6 +286,77 @@ export class SPARouter {
 
   replaceState(state: unknown, href?: string): void {
     this.writePageState("replace", state, href);
+  }
+
+  private async commitNavigation(options: {
+    fullPath: string;
+    pageData: PageData;
+    pathname: string;
+    replace: boolean;
+    scroll: boolean;
+    state: unknown;
+    url: URL;
+  }): Promise<void> {
+    const historyState = createHistoryState(options.fullPath, options.state);
+    if (options.replace) {
+      window.history.replaceState(historyState, "", options.fullPath);
+    } else {
+      window.history.pushState(historyState, "", options.fullPath);
+    }
+
+    if (options.pageData.metadata?.title) {
+      document.title = options.pageData.metadata.title;
+    }
+
+    if (options.pageData.metadata?.description) {
+      let metaDesc = document.querySelector('meta[name="description"]');
+      if (!metaDesc) {
+        metaDesc = document.createElement("meta");
+        metaDesc.setAttribute("name", "description");
+        document.head.appendChild(metaDesc);
+      }
+      metaDesc.setAttribute("content", options.pageData.metadata.description);
+    }
+
+    if (this.onNavigate) {
+      await this.onNavigate(options.pageData);
+    }
+
+    if (options.scroll) {
+      if (options.url.hash) {
+        const element = document.querySelector(options.url.hash);
+        if (element) {
+          element.scrollIntoView();
+        }
+      } else {
+        window.scrollTo(0, 0);
+      }
+    } else if (this.options.scrollRestoration) {
+      this.restoreScrollPosition(options.pathname);
+    }
+  }
+
+  private async runViewTransition(
+    mode: FarmViewTransitionMode,
+    callback: () => Promise<void>,
+  ): Promise<void> {
+    if (!mode || typeof document === "undefined") {
+      await callback();
+      return;
+    }
+
+    const startViewTransition = (document as any).startViewTransition;
+    if (typeof startViewTransition !== "function") {
+      await callback();
+      return;
+    }
+
+    const transition = startViewTransition(() => callback());
+    const updateDone = transition?.updateCallbackDone || transition?.ready;
+    if (updateDone && typeof updateDone.then === "function") {
+      await updateDone;
+    }
+    transition?.finished?.catch?.(() => undefined);
   }
 
   /**

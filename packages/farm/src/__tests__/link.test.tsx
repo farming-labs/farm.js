@@ -180,7 +180,11 @@ describe("Link", () => {
         el.dispatchEvent(e);
       });
       expect(e.defaultPrevented).toBe(true);
-      expect(navigate).toHaveBeenCalledWith("/dashboard", { replace: false, scroll: true });
+      expect(navigate).toHaveBeenCalledWith("/dashboard", {
+        replace: false,
+        scroll: true,
+        viewTransition: false,
+      });
     });
 
     it("replace and scroll false passed to navigate", () => {
@@ -190,7 +194,25 @@ describe("Link", () => {
       act(() => {
         el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }));
       });
-      expect(navigate).toHaveBeenCalledWith("/settings", { replace: true, scroll: false });
+      expect(navigate).toHaveBeenCalledWith("/settings", {
+        replace: true,
+        scroll: false,
+        viewTransition: false,
+      });
+    });
+
+    it("passes viewTransition to navigate", () => {
+      const el = render(
+        createElement(Link, { href: "/gallery", viewTransition: true }),
+      ) as HTMLAnchorElement;
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }));
+      });
+      expect(navigate).toHaveBeenCalledWith("/gallery", {
+        replace: false,
+        scroll: true,
+        viewTransition: true,
+      });
     });
 
     it("renders and navigates with resolved route params, query, and hash", () => {
@@ -212,6 +234,7 @@ describe("Link", () => {
       expect(navigate).toHaveBeenCalledWith("/products/123?from=list&tab=info#reviews", {
         replace: false,
         scroll: true,
+        viewTransition: false,
       });
     });
 

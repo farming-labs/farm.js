@@ -8,6 +8,7 @@ import {
   type FarmRouterPathParam,
   type FarmRouterPathParams,
 } from "../router";
+import type { FarmViewTransitionMode } from "./spa-router";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -138,6 +139,8 @@ export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
   replace?: boolean;
   /** Scroll to top after navigation (default: true) */
   scroll?: boolean;
+  /** Wrap this SPA navigation in a browser View Transition when supported. */
+  viewTransition?: FarmViewTransitionMode;
 };
 
 function isModifierEvent(e: React.MouseEvent): boolean {
@@ -152,7 +155,10 @@ function getRouter(): {
   prefetch(href: string): Promise<void>;
   observeForPrefetch(el: HTMLAnchorElement): void;
   unobserveForPrefetch(el: HTMLAnchorElement): void;
-  navigate(href: string, opts: { replace?: boolean; scroll?: boolean }): void;
+  navigate(
+    href: string,
+    opts: { replace?: boolean; scroll?: boolean; viewTransition?: FarmViewTransitionMode },
+  ): void;
 } | null {
   if (typeof window !== "undefined" && (window as any).__FARM_SPA_ROUTER__) {
     return (window as any).__FARM_SPA_ROUTER__;
@@ -197,6 +203,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
     prefetchDelay = 50,
     replace = false,
     scroll = true,
+    viewTransition = false,
     onClick,
     target,
     onMouseEnter,
@@ -352,14 +359,14 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
         event.preventDefault();
         const router = getRouter();
         if (router) {
-          router.navigate(resolvedHref, { replace, scroll });
+          router.navigate(resolvedHref, { replace, scroll, viewTransition });
         } else {
           if (replace) window.location.replace(resolvedHref);
           else window.location.href = resolvedHref;
         }
       }
     },
-    [resolvedHref, replace, scroll, target, isExternal, onClick],
+    [resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
   );
 
   const setRefs = useCallback(

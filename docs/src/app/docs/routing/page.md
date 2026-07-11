@@ -472,6 +472,22 @@ export function TopProgress() {
 
 `navigation.state` is `"loading"` while route data is being fetched and returns to `"idle"` after the route is committed. `navigation.to` includes the target `pathname`, `search`, `hash`, and full `href`. Use route `loading.tsx` for segment-level Suspense fallbacks, and `useNavigation()` when the surrounding app shell should react to a navigation.
 
+## View Transitions
+
+Pass `viewTransition` to `Link` or `navigateTo` when a navigation should use the browser View Transitions API. Farm starts the transition after route data is ready and falls back to normal SPA navigation when the browser does not support it.
+
+```tsx
+import { Link, navigateTo } from "@farmjs/core/client";
+
+export function GalleryLink() {
+  return <Link href="/gallery" viewTransition>Gallery</Link>;
+}
+
+await navigateTo("/gallery", { viewTransition: true });
+```
+
+Use this for image galleries, dashboards that keep the same app shell, settings panes, and modal-to-page flows. Keep important loading states in `loading.tsx` or `useNavigation()`; view transitions are visual polish, not a loading boundary.
+
 ## Navigation workflow
 
 1. Add or rename route files.
