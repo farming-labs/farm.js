@@ -207,6 +207,10 @@ async function buildSSR(
         input: ssrEntry,
       },
     },
+    define: {
+      __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
+      __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
+    },
     plugins: [farmPlugin(config, pluginManager)],
     mode: "production",
   });
@@ -333,6 +337,7 @@ async function buildNitro(
     farmRegistry.apiRouteManager = apiRouteManager;
     farmRegistry.routeManager = routeManager;
     farmRegistry.serverRenderer = serverRenderer;
+    farmRegistry.env = config.env || { server: {}, public: {} };
 
     // Store route paths for SSR module loading
     const routePaths: Record<string, string> = {};

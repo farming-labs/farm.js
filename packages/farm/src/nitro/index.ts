@@ -79,9 +79,11 @@ export const farmRegistry: {
   apiRouteManager?: any;
   routeManager?: any;
   serverRenderer?: any;
+  env?: any;
   clientManifest?: any;
   routePaths?: Record<string, string>;
 } = {
+  env: ${JSON.stringify(config.env || { server: {}, public: {} }, null, 2)},
   routePaths: ${JSON.stringify(routePaths, null, 2)},
 };
 `,
@@ -643,6 +645,7 @@ export default defineEventHandler(async (event: H3Event) => {
           farmRegistry.apiRouteManager = apiRouteManager;
           farmRegistry.routeManager = routeManager;
           farmRegistry.serverRenderer = serverRenderer;
+          farmRegistry.env = config.env || { server: {}, public: {} };
         };
 
         // Also store in global for runtime access (works in serverless)
@@ -652,6 +655,7 @@ export default defineEventHandler(async (event: H3Event) => {
             apiRouteManager,
             routeManager,
             serverRenderer,
+            env: farmRegistry.env,
             clientManifest: farmRegistry.clientManifest,
             routePaths: farmRegistry.routePaths,
           };

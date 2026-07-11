@@ -1,10 +1,8 @@
 import { mkdirSync, writeFileSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
-import {
-  generateRouteTypes,
-  type GenerateRouteTypesOptions,
-} from "./routing/generate-route-types";
+import { generateRouteTypes, type GenerateRouteTypesOptions } from "./routing/generate-route-types";
+import { generateEnvTypes } from "./env-types";
 
 export interface GenerateFarmTypeArtifactsOptions {
   root: string;
@@ -13,13 +11,16 @@ export interface GenerateFarmTypeArtifactsOptions {
   suppressLintOnLink?: boolean;
   routeTypesOutFile?: string;
   apiTypesOutFile?: string;
+  envTypesOutFile?: string;
   routes?: boolean;
   api?: boolean;
+  env?: boolean;
 }
 
 export interface GenerateFarmTypeArtifactsResult {
   routeTypesPath?: string;
   apiTypesPath?: string;
+  envTypesPath?: string;
   apiRoutes: APIRouteInfo[];
 }
 
@@ -30,6 +31,7 @@ export async function generateFarmTypeArtifacts(
   const srcDir = options.srcDir || "src";
   const shouldGenerateRoutes = options.routes !== false;
   const shouldGenerateApi = options.api !== false;
+  const shouldGenerateEnv = options.env !== false;
   const appDir = join(root, srcDir, "app");
 
   const result: GenerateFarmTypeArtifactsResult = {
@@ -64,6 +66,14 @@ export async function generateFarmTypeArtifacts(
 
     result.apiTypesPath = apiTypesPath;
     result.apiRoutes = apiRoutes;
+  }
+
+  if (shouldGenerateEnv) {
+    result.envTypesPath = await generateEnvTypes({
+      root,
+      srcDir,
+      outFile: options.envTypesOutFile,
+    });
   }
 
   return result;

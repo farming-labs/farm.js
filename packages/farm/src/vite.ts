@@ -1,4 +1,4 @@
-import type { Plugin, ViteDevServer, HmrContext } from "vite";
+import type { ConfigEnv, Plugin, ViteDevServer, HmrContext } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
 import { logger } from "./utils";
@@ -48,6 +48,76 @@ interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
 }
 
+const FARM_CONFIG_FILENAMES = new Set([
+  "farm.config.ts",
+  "farm.config.tsx",
+  "farm.config.mts",
+  "farm.config.cts",
+  "farm.config.js",
+  "farm.config.jsx",
+  "farm.config.mjs",
+  "farm.config.cjs",
+  "config.ts",
+  "config.tsx",
+  "config.mts",
+  "config.cts",
+  "config.js",
+  "config.jsx",
+  "config.mjs",
+  "config.cjs",
+]);
+
+function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unknown> {
+  const publicEnv = (config as any).env?.public;
+  if (!isResolvedEnvScope(publicEnv)) {
+    return {};
+  }
+
+  return publicEnv;
+}
+
+function getFullEnvDefine(config: FarmVitePluginOptions): {
+  server: Record<string, unknown>;
+  public: Record<string, unknown>;
+} {
+  const env = (config as any).env;
+  if (!env || typeof env !== "object") {
+    return { server: {}, public: {} };
+  }
+
+  return {
+    server: isResolvedEnvScope(env.server) ? env.server : {},
+    public: isResolvedEnvScope(env.public) ? env.public : {},
+  };
+}
+
+function getEnvDefines(
+  config: FarmVitePluginOptions,
+  configEnv?: ConfigEnv,
+): Record<string, string> {
+  const defines: Record<string, string> = {
+    __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
+  };
+
+  if (configEnv?.isSsrBuild) {
+    defines.__FARM_ENV__ = JSON.stringify(getFullEnvDefine(config));
+  }
+
+  return defines;
+}
+
+function isResolvedEnvScope(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  return !Object.values(value).some(
+    (entry) =>
+      typeof entry === "function" ||
+      (!!entry && typeof entry === "object" && typeof (entry as any).parse === "function"),
+  );
+}
+
 function isPotentialProgrammaticRouteSourceFile(
   normalizedFile: string,
   srcDirSlug: string,
@@ -57,6 +127,7 @@ function isPotentialProgrammaticRouteSourceFile(
     /\.(ts|tsx|js|jsx)$/.test(normalizedFile) &&
     !/\.d\.ts$/.test(normalizedFile) &&
     !normalizedFile.endsWith("/farm-routes.d.ts") &&
+    !normalizedFile.endsWith("/farm-env.d.ts") &&
     !normalizedFile.endsWith("/lib/api.generated.ts")
   );
 }
@@ -71,6 +142,16 @@ function fileContainsProgrammaticPageRoute(file: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isFarmConfigFile(file: string, root: string): boolean {
+  const normalized = file.replace(/\\/g, "/");
+  const rootSlug = root.replace(/\\/g, "/").replace(/\/+$/, "");
+  const relative = normalized.startsWith(`${rootSlug}/`)
+    ? normalized.slice(rootSlug.length + 1)
+    : normalized;
+
+  return FARM_CONFIG_FILENAMES.has(relative);
 }
 
 export function farmPlugin(
@@ -103,6 +184,12 @@ export function farmPlugin(
 
   return {
     name: "farm",
+
+    config(_userConfig, configEnv) {
+      return {
+        define: getEnvDefines(options, configEnv),
+      };
+    },
 
     async configResolved(config) {
       // Defer initialization until Vite server is available
@@ -163,7 +250,7 @@ export function farmPlugin(
           if (log) {
             logUpdate(
               "TYPE",
-              `${reason} - regenerated route and API types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
+              `${reason} - regenerated route, API, and env types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
             );
           }
           if (openAPIManager) {
@@ -202,6 +289,7 @@ export function farmPlugin(
       const isTypeAffectingFile = (file: string, event: string) =>
         isPageFile(file) ||
         isApiRouteFile(file) ||
+        isFarmConfigFile(file, farmConfig.root) ||
         isProgrammaticRouteFile(file) ||
         (isProgrammaticRouteSourceFile(file) &&
           (event === "unlink" || fileContainsProgrammaticPageRoute(file)));
@@ -2797,6 +2885,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     },
     define: {
       __FARM_DEV__: JSON.stringify(process.env.NODE_ENV === "development"),
+      __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
     },
   };
 }

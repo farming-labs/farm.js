@@ -82,6 +82,7 @@ async function findProgrammaticRouteSourceFiles(srcRoot: string): Promise<string
         "**/node_modules/**",
         "**/.*/**",
         "farm-routes.d.ts",
+        "farm-env.d.ts",
         "lib/api.generated.ts",
       ],
     });

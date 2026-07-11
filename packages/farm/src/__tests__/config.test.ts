@@ -11,10 +11,13 @@ import {
   resolveDocsConfig,
   resolveMigrationsConfig,
 } from "../config";
+import { getResolvedEnv, setEnv } from "../env";
 
 const originalEnv = { ...process.env };
 
 afterEach(() => {
+  setEnv({ server: {}, public: {} });
+
   for (const key of Object.keys(process.env)) {
     if (!(key in originalEnv)) {
       delete process.env[key];
@@ -196,6 +199,66 @@ describe("resolveConfig", () => {
       secretEnv: "WORKFLOW_SECRET",
       secret: undefined,
     });
+  });
+
+  it("validates typed env from process env", async () => {
+    process.env.DATABASE_URL = "postgres://from-process/farm";
+    process.env.PUBLIC_APP_URL = "https://process.example";
+
+    const config = await resolveConfig(
+      {
+        env: {
+          server: {
+            DATABASE_URL: {
+              parse(value: unknown) {
+                if (typeof value !== "string") {
+                  throw new Error("required");
+                }
+
+                return value;
+              },
+            },
+          },
+          public: {
+            PUBLIC_APP_URL: {
+              parse(value: unknown) {
+                return String(value);
+              },
+            },
+          },
+        },
+      },
+      "development",
+    );
+
+    expect(config.env).toEqual({
+      server: { DATABASE_URL: "postgres://from-process/farm" },
+      public: { PUBLIC_APP_URL: "https://process.example" },
+    });
+    expect(getResolvedEnv()).toEqual(config.env);
+  });
+
+  it("throws when typed env validation fails", async () => {
+    await expect(
+      resolveConfig(
+        {
+          env: {
+            server: {
+              DATABASE_URL: {
+                parse(value: unknown) {
+                  if (!value) {
+                    throw new Error("missing database url");
+                  }
+
+                  return String(value);
+                },
+              },
+            },
+          },
+        },
+        "production",
+      ),
+    ).rejects.toThrow('Invalid server env "DATABASE_URL": missing database url');
   });
 });
 

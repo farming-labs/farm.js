@@ -13,10 +13,12 @@ import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmPlugin } from "./plugin";
 import type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
+import { resolveEnv, setEnv } from "./env";
 import {
   resolveMdxConfig,
   type FarmMdxResolvedConfig,
@@ -145,7 +147,7 @@ export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output
   outputDir: string;
 }
 
-export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
+export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "env"> {
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
   migrations?: FarmMigrationsUserConfig;
@@ -185,7 +187,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   serverRuntimeConfig?: Record<string, any>;
   publicRuntimeConfig?: Record<string, any>;
 
-  env?: Record<string, string>;
+  env?: FarmEnvConfig<any, any>;
 
   typescript?: {
     tsconfigPath?: string;
@@ -197,13 +199,12 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs"> {
   [key: string]: any;
 }
 
-export interface ResolvedFarmConfig
-  extends Required<
-    Omit<
-      FarmUserConfig,
-      "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx" | "migrations" | "workflows"
-    >
-  > {
+export interface ResolvedFarmConfig extends Required<
+  Omit<
+    FarmUserConfig,
+    "plugins" | "vite" | "deploy" | "docs" | "md" | "mdx" | "migrations" | "workflows" | "env"
+  >
+> {
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
   deploy: ResolvedFarmDeployConfig;
@@ -212,9 +213,10 @@ export interface ResolvedFarmConfig
   mdx: FarmMdxResolvedConfig;
   migrations: ResolvedFarmMigrationsConfig;
   workflows: FarmWorkflowsResolvedConfig;
+  env: ResolvedFarmEnv;
 }
 
-export function defineFarmConfig(config: FarmUserConfig): FarmUserConfig {
+export function defineFarmConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
   return config;
 }
 
@@ -579,6 +581,8 @@ export async function resolveConfig(
   const docs = await resolveDocsConfig(userConfig.docs, { root, srcDir });
   const md = resolveMarkdownConfig(userConfig.md);
   const mdx = resolveMdxConfig(userConfig.mdx);
+  const env = resolveEnv(userConfig.env, process.env);
+  setEnv(env);
 
   const resolved: ResolvedFarmConfig = {
     root,
@@ -638,7 +642,7 @@ export async function resolveConfig(
     },
     serverRuntimeConfig: userConfig.serverRuntimeConfig || {},
     publicRuntimeConfig: userConfig.publicRuntimeConfig || {},
-    env: { ...process.env, ...userConfig.env },
+    env,
     typescript: {
       tsconfigPath: "tsconfig.json",
       ignoreBuildErrors: false,

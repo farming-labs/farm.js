@@ -1,5 +1,6 @@
 import {
   APITypeGenerator,
+  generateEnvTypes,
   getFarmDocsRouteTypeEntries,
   getIntegrationSchemas,
   generateRouteTypes,
@@ -81,14 +82,24 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     extraRoutes,
     suppressLintOnLink: resolvedConfig.suppressLintOnLink,
   });
+  await generateEnvTypes({
+    root: resolvedConfig.root,
+    srcDir: resolvedConfig.srcDir,
+    configPath: options.configPath,
+  });
   const appDir = path.join(resolvedConfig.root, resolvedConfig.srcDir, "app");
   const apiGenerator = new APITypeGenerator(appDir);
   const apiRoutes = apiGenerator.scanAPIRoutes();
-  const apiTypesPath = path.join(resolvedConfig.root, resolvedConfig.srcDir, "lib", "api.generated.ts");
+  const apiTypesPath = path.join(
+    resolvedConfig.root,
+    resolvedConfig.srcDir,
+    "lib",
+    "api.generated.ts",
+  );
   await mkdir(path.dirname(apiTypesPath), { recursive: true });
   await writeFile(apiTypesPath, apiGenerator.generateAPIRouter(apiRoutes), "utf8");
   logger.success(
-    `Generated route and API types (${apiRoutes.length} API route${apiRoutes.length === 1 ? "" : "s"}).`,
+    `Generated route, API, and env types (${apiRoutes.length} API route${apiRoutes.length === 1 ? "" : "s"}).`,
   );
 
   const schemas = getIntegrationSchemas(resolvedConfig.integrations);

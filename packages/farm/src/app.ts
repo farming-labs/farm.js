@@ -101,6 +101,7 @@ export class FarmApp {
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),
       observability: config.observability ?? false,
+      env: config.env || { server: {}, public: {} },
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {
         serverComponents: config.experimental?.serverComponents ?? false,
