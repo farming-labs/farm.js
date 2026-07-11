@@ -67,7 +67,14 @@ export type {
 
 // SPA Navigation exports
 export { Link } from "./client/link";
-export { useRouter } from "./client/router";
+export { useBlocker, usePageState, useRouter, useScrollRestoration } from "./client/router";
+export {
+  navigateTo,
+  prefetch,
+  pushState,
+  readPageState,
+  replaceState,
+} from "./client/spa-router";
 export type {
   LinkProps,
   PrefetchBehavior,
@@ -81,3 +88,13 @@ export type {
   RouteOptionalParamValue,
   RouteParams,
 } from "./client/link";
+export type {
+  UseBlockerOptions,
+  UseBlockerReturn,
+  UseRouterOptions,
+} from "./client/router";
+export type {
+  FarmNavigateOptions,
+  FarmNavigationBlocker,
+  FarmNavigationBlockerContext,
+} from "./client/spa-router";
