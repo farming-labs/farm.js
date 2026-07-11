@@ -1,4 +1,4 @@
-import { createElement, type ComponentType } from "react";
+import { Suspense, createElement, type ComponentType } from "react";
 import {
   createFarmCacheKey,
   createRouteDataCacheTag,
@@ -70,6 +70,28 @@ export type ProgrammaticRouteDataCacheContext<
   TBefore = unknown,
 > = ProgrammaticRouteDataContext<TParams, TSearch> & { before: TBefore };
 
+export type ProgrammaticRouteGuardContext<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> = ProgrammaticRouteDataContext<TParams, TSearch>;
+
+export type ProgrammaticRouteGuard<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> = (context: ProgrammaticRouteGuardContext<TParams, TSearch>) => ProgrammaticRouteMaybePromise<void>;
+
+export type ProgrammaticRouteErrorComponentProps<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> = Partial<ProgrammaticRouteDataContext<TParams, TSearch>> & {
+  error: unknown;
+};
+
+export type ProgrammaticRoutePendingComponentProps<
+  TParams = ProgrammaticRouteParamsFallback,
+  TSearch = ProgrammaticRouteSearchFallback,
+> = Partial<ProgrammaticRouteDataContext<TParams, TSearch>>;
+
 export type ProgrammaticRouteDataCacheKeys<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
@@ -123,7 +145,11 @@ export interface ProgrammaticPageRoute<
   component: ComponentType<any>;
   params?: ProgrammaticRouteSchema<TParams>;
   search?: ProgrammaticRouteSchema<TSearch>;
+  guard?: ProgrammaticRouteGuard<TParams, TSearch>;
   data?: TDataHooks;
+  pending?: ComponentType<ProgrammaticRoutePendingComponentProps<TParams, TSearch>>;
+  error?: ComponentType<ProgrammaticRouteErrorComponentProps<TParams, TSearch>>;
+  notFound?: ComponentType<ProgrammaticRouteErrorComponentProps<TParams, TSearch>>;
   render?: ProgrammaticRouteRenderMode;
   staticPaths?: ProgrammaticStaticPaths;
   revalidate?: number | false;
@@ -208,10 +234,14 @@ export type CreateRouteOptions<
     InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
     TDataHooks
   >,
-  "kind" | "path" | "component" | "params" | "search" | "data"
+  "kind" | "path" | "component" | "params" | "search" | "data" | "guard"
 > & {
   params?: TParamsSchema;
   search?: TSearchSchema;
+  guard?: ProgrammaticRouteGuard<
+    InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
+    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+  >;
   data?: TDataHooks;
   component: ComponentType<
     ProgrammaticRouteComponentProps<
@@ -313,7 +343,7 @@ export function createRoute<
   InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
   TDataHooks
 > {
-  return routesBuilder.page(path, options) as ProgrammaticPageRoute<
+  return routesBuilder.page(path, options) as unknown as ProgrammaticPageRoute<
     InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
     InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
     TDataHooks
@@ -435,15 +465,24 @@ export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRou
     default: createProgrammaticPageComponent(route),
   };
 
-  if (route.params || route.search || route.data) {
+  if (route.params || route.search || route.guard || route.data) {
     (mod as any).__farmRouteSchemas = {
       params: route.params,
       search: route.search,
     };
+    (mod as any).__farmRouteGuard = route.guard;
     (mod as any).__farmRouteData = route.data;
     (mod as any).__farmRouteParsesProps = true;
     (mod as any).__farmResolveRouteProps = (props: PageProps) =>
       resolveProgrammaticRouteProps(route, props);
+  }
+
+  if (route.pending || route.error || route.notFound) {
+    (mod as any).__farmRouteComponents = {
+      pending: route.pending,
+      error: route.error,
+      notFound: route.notFound,
+    };
   }
 
   if (route.render === "static" || route.staticPaths) {
@@ -499,21 +538,95 @@ export function scanProgrammaticPagePaths(source: string): string[] {
 }
 
 function createProgrammaticPageComponent(route: ProgrammaticPageRoute): ComponentType<PageProps> {
-  if (!route.params && !route.search && !route.data) {
+  if (
+    !route.params &&
+    !route.search &&
+    !route.guard &&
+    !route.data &&
+    !route.pending &&
+    !route.error &&
+    !route.notFound
+  ) {
     return route.component as ComponentType<PageProps>;
   }
 
   const Component = route.component;
 
-  const FarmProgrammaticPage = async function FarmProgrammaticPage(props: PageProps) {
-    const resolvedProps = isProgrammaticRoutePropsResolved(props)
-      ? props
-      : await resolveProgrammaticRouteProps(route, props);
+  const FarmProgrammaticPageContent = async function FarmProgrammaticPageContent(props: PageProps) {
+    try {
+      const resolvedProps = isProgrammaticRoutePropsResolved(props)
+        ? props
+        : await resolveProgrammaticRouteProps(route, props);
 
-    return createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps));
+      return createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps));
+    } catch (error) {
+      if (isProgrammaticRedirectSignal(error)) {
+        throw error;
+      }
+
+      if (isProgrammaticNotFoundSignal(error) && route.notFound) {
+        return createElement(route.notFound, createProgrammaticRouteErrorProps(error, props));
+      }
+
+      if (route.error) {
+        return createElement(route.error, createProgrammaticRouteErrorProps(error, props));
+      }
+
+      throw error;
+    }
   };
 
-  return FarmProgrammaticPage as unknown as ComponentType<PageProps>;
+  if (route.pending) {
+    const PendingComponent = route.pending;
+    const PageContent = FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
+    const FarmProgrammaticPage = function FarmProgrammaticPage(props: PageProps) {
+      return createElement(
+        Suspense,
+        {
+          fallback: createElement(PendingComponent, createProgrammaticRoutePendingProps(props)),
+        },
+        createElement(PageContent, props),
+      );
+    };
+
+    return FarmProgrammaticPage as unknown as ComponentType<PageProps>;
+  }
+
+  return FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
+}
+
+function createProgrammaticRoutePendingProps(
+  props: PageProps,
+): ProgrammaticRoutePendingComponentProps {
+  return {
+    params: props.params,
+    searchParams: props.searchParams,
+    path: props.path,
+  };
+}
+
+function createProgrammaticRouteErrorProps(
+  error: unknown,
+  props: PageProps,
+): ProgrammaticRouteErrorComponentProps {
+  return {
+    error,
+    params: props.params,
+    searchParams: props.searchParams,
+    path: props.path,
+  };
+}
+
+function isProgrammaticRedirectSignal(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const digest = (error as { digest?: unknown }).digest;
+  return typeof digest === "string" && digest.startsWith("FARM_REDIRECT;");
+}
+
+function isProgrammaticNotFoundSignal(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const digest = (error as { digest?: unknown }).digest;
+  return digest === "FARM_NOT_FOUND";
 }
 
 async function resolveProgrammaticRouteProps(
@@ -530,6 +643,10 @@ async function resolveProgrammaticRouteProps(
     searchParams: Promise.resolve(search),
   };
 
+  if (route.guard) {
+    await route.guard(baseProps as any);
+  }
+
   if (!route.data) {
     return markProgrammaticRoutePropsResolved(baseProps);
   }
@@ -539,7 +656,7 @@ async function resolveProgrammaticRouteProps(
     ...(baseProps as any),
     before,
   };
-  const data = await resolveProgrammaticRouteData(route, dataContext);
+  const data = await resolveProgrammaticRouteData(route, route.data, dataContext);
 
   if (route.data.after) {
     await route.data.after({
@@ -556,12 +673,12 @@ async function resolveProgrammaticRouteProps(
 }
 
 async function resolveProgrammaticRouteData(
-  route: ProgrammaticPageRoute<any, any, ProgrammaticRouteDataHooks<any, any, any, any>>,
+  route: ProgrammaticPageRoute,
+  dataHooks: ProgrammaticRouteDataHooks<any, any, any, any>,
   context: ProgrammaticRouteDataCacheContext<any, any, any>,
 ): Promise<unknown> {
-  const dataHooks = route.data;
   if (!dataHooks?.key) {
-    return dataHooks!.main(context);
+    return dataHooks.main(context);
   }
 
   const routeDataKey = await dataHooks.key(context);

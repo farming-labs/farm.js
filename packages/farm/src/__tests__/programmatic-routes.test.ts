@@ -3,7 +3,8 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
-import { createRoute, defineRoutes } from "../routes";
+import { notFound, redirect } from "../navigation";
+import { createRoute, createRouteModuleFromProgrammaticPage, defineRoutes } from "../routes";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
@@ -334,4 +335,115 @@ describe("programmatic routes", () => {
     });
     expect(main).toHaveBeenCalledTimes(3);
   });
+
+  it("runs programmatic route guards before data hooks", async () => {
+    function DashboardPage() {
+      return null;
+    }
+
+    const guard = vi.fn(async ({ search }: any) => {
+      if (search.token !== "allowed") {
+        redirect("/login");
+      }
+    });
+    const main = vi.fn(async () => ({ ok: true }));
+    const DashboardRoute = createRoute("/dashboard", {
+      search: {
+        parse: (value: any) => ({ token: value.token }),
+      },
+      guard,
+      data: {
+        main,
+      },
+      component: DashboardPage as any,
+    });
+
+    const routeModule = createRouteModuleFromProgrammaticPageForTest(DashboardRoute);
+
+    await expect(
+      (routeModule as any).__farmResolveRouteProps({
+        params: {},
+        searchParams: Promise.resolve({ token: "nope" }),
+        path: "/dashboard",
+      }),
+    ).rejects.toMatchObject({ digest: "FARM_REDIRECT;307;/login" });
+
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(main).not.toHaveBeenCalled();
+
+    await expect(
+      (routeModule as any).__farmResolveRouteProps({
+        params: {},
+        searchParams: Promise.resolve({ token: "allowed" }),
+        path: "/dashboard",
+      }),
+    ).resolves.toMatchObject({ data: { ok: true } });
+    expect(main).toHaveBeenCalledTimes(1);
+  });
+
+  it("supports pending, error, and notFound components on programmatic routes", async () => {
+    function ProductPage() {
+      return null;
+    }
+    function Pending(props: any) {
+      return props;
+    }
+    function ErrorView(props: any) {
+      return props;
+    }
+    function MissingView(props: any) {
+      return props;
+    }
+
+    const ErrorRoute = createRoute("/error", {
+      data: {
+        main: async () => {
+          throw new Error("load failed");
+        },
+      },
+      pending: Pending,
+      error: ErrorView,
+      component: ProductPage as any,
+    });
+    const MissingRoute = createRoute("/missing", {
+      data: {
+        main: async () => {
+          notFound();
+        },
+      },
+      notFound: MissingView,
+      component: ProductPage as any,
+    });
+
+    const errorModule = createRouteModuleFromProgrammaticPageForTest(ErrorRoute);
+    expect((errorModule as any).__farmRouteComponents.pending).toBe(Pending);
+    expect((errorModule as any).__farmRouteComponents.error).toBe(ErrorView);
+
+    const ErrorPage = errorModule.default as any;
+    const suspenseElement = ErrorPage({
+      params: {},
+      searchParams: Promise.resolve({}),
+      path: "/error",
+    }) as any;
+
+    expect(suspenseElement.props.fallback.type).toBe(Pending);
+    const errorElement = await suspenseElement.props.children.type(suspenseElement.props.children.props);
+    expect(errorElement.type).toBe(ErrorView);
+    expect(errorElement.props.error).toBeInstanceOf(Error);
+
+    const missingModule = createRouteModuleFromProgrammaticPageForTest(MissingRoute);
+    const MissingPage = missingModule.default as any;
+    const missingElement = await MissingPage({
+      params: {},
+      searchParams: Promise.resolve({}),
+      path: "/missing",
+    });
+
+    expect(missingElement.type).toBe(MissingView);
+    expect(missingElement.props.error.digest).toBe("FARM_NOT_FOUND");
+  });
 });
+
+function createRouteModuleFromProgrammaticPageForTest(route: ReturnType<typeof createRoute>) {
+  return createRouteModuleFromProgrammaticPage(route);
+}

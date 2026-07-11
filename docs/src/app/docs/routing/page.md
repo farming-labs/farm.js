@@ -153,6 +153,59 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Cache keys are part of your data security model. If data depends on the current user, role, tenant, locale, or draft mode, include that value in `key` or avoid caching that route. Route cache invalidation improves freshness, but API routes and server functions still need their own authorization checks.
 
+## Route guards
+
+Use `guard` when a route should be allowed or blocked before route data loads. Guards run after params/search validation and before `data.before` or `data.main`.
+
+```tsx
+import { createRoute, redirect } from "@farmjs/core";
+
+export const DashboardRoute = createRoute("/dashboard", {
+  guard: async ({ context }) => {
+    const session = context?.data.get("session");
+
+    if (!session?.user) {
+      redirect("/login");
+    }
+  },
+
+  data: {
+    async main() {
+      return { stats: await getDashboardStats() };
+    },
+  },
+
+  component: DashboardPage,
+});
+```
+
+Use `guard` for route flow: auth redirects, role gates, tenant checks, and early `notFound()` decisions. Use `data.before` when you want to prepare values that `data.main` needs. A guard is not a complete authorization boundary; repeat sensitive authorization inside API routes and server functions because those can be requested directly.
+
+## Route UI states
+
+Programmatic routes can define local `pending`, `error`, and `notFound` components. `pending` is used as the Suspense fallback while route data resolves. `error` handles guard/data errors. `notFound` handles `notFound()` thrown from guard or data hooks.
+
+```tsx
+import { notFound } from "@farmjs/core";
+
+export const ProductRoute = createRoute("/products/[id]", {
+  data: {
+    async main({ params }) {
+      const product = await getProduct(params.id);
+      if (!product) notFound();
+      return { product };
+    },
+  },
+
+  pending: ProductSkeleton,
+  error: ProductError,
+  notFound: ProductNotFound,
+  component: ProductPage,
+});
+```
+
+Redirects are not rendered through `error`; they escape so Farm can return a real redirect response.
+
 ## Nested segments
 
 Folders become URL segments. Use normal folders for visible path segments and dynamic folders when the value comes from the URL.
