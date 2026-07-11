@@ -3,6 +3,7 @@ import * as fs from "fs";
 import { parseRoutePath } from "../utils";
 import type { ParsedRoute } from "../types";
 import { discoverProgrammaticRoutePaths } from "../routes.server";
+import type { FarmSourceRoot } from "../layers";
 
 function routePatternToTsTypeLiteral(pattern: string): string {
   if (pattern === "/") return '"/"';
@@ -40,6 +41,8 @@ export interface GenerateRouteTypesOptions {
   srcDir?: string;
   outFile?: string;
   extraRoutes?: string[];
+  /** Ordered layer roots followed by the project root. */
+  sourceRoots?: readonly FarmSourceRoot[];
   /** When true, do not augment LinkDefaultRoute so Link href accepts any string (no route-type errors). */
   suppressLintOnLink?: boolean;
 }
@@ -58,25 +61,32 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
     extraRoutes = [],
     suppressLintOnLink = false,
   } = options;
-  const appDir = path.join(root, srcDir, "app");
+  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
 
   const outPath = path.join(root, srcDir, outFile);
 
   const patterns = new Set<string>();
 
-  if (fs.existsSync(appDir)) {
-    const glob = await import("fast-glob");
-    const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx,md,mdx}", {
-      cwd: appDir,
-      absolute: false,
-    });
+  const glob = await import("fast-glob");
+  for (const source of sourceRoots) {
+    const appDir = path.join(source.root, source.srcDir, "app");
+    if (fs.existsSync(appDir)) {
+      const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx,md,mdx}", {
+        cwd: appDir,
+        absolute: false,
+      });
 
-    for (const file of pageFiles) {
-      const route = parseRoutePath(file);
-      if (route.type === "page") {
-        const pattern = createRoutePattern(route);
-        patterns.add(pattern);
+      for (const file of pageFiles) {
+        const route = parseRoutePath(file);
+        if (route.type === "page") {
+          const pattern = createRoutePattern(route);
+          patterns.add(pattern);
+        }
       }
+    }
+
+    for (const route of await discoverProgrammaticRoutePaths(source.root, source.srcDir)) {
+      patterns.add(route);
     }
   }
 
@@ -84,10 +94,6 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
     if (route.startsWith("/")) {
       patterns.add(route);
     }
-  }
-
-  for (const route of await discoverProgrammaticRoutePaths(root, srcDir)) {
-    patterns.add(route);
   }
 
   const sortedPatterns = Array.from(patterns).sort();

@@ -44,6 +44,7 @@ import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
+import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -206,8 +207,22 @@ export function farmPlugin(
     name: "farm",
 
     config(_userConfig, configEnv) {
+      const layerAliases = getFarmLayerAliases(options.layers);
+      const layerRoots = (options.layers ?? []).map((layer) => layer.root);
       return {
         define: getEnvDefines(options, configEnv),
+        resolve: {
+          alias: layerAliases,
+        },
+        ...(layerRoots.length
+          ? {
+              server: {
+                fs: {
+                  allow: [path.resolve(options.root || process.cwd()), ...layerRoots],
+                },
+              },
+            }
+          : {}),
       };
     },
 
@@ -253,17 +268,22 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      const sourceRoots = getFarmSourceRoots(farmConfig);
+      server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
       const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
       const getExtraRouteTypes = () => [
         ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
         ...getFarmDocsRouteTypeEntries(farmConfig.docs),
       ];
-      const appDirSlug = path.join(farmConfig.root, farmConfig.srcDir, "app").replace(/\\/g, "/");
+      const appDirSlugs = sourceRoots.map((source) =>
+        path.join(source.root, source.srcDir, "app").replace(/\\/g, "/"),
+      );
       const generateTypeArtifacts = async (reason: string, log = false) => {
         try {
           const result = await generateFarmTypeArtifacts({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
+            layers: farmConfig.layers,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
           });
@@ -287,33 +307,60 @@ export function farmPlugin(
       };
       await generateTypeArtifacts("startup");
 
-      const srcDirSlug = path.join(farmConfig.root, farmConfig.srcDir).replace(/\\/g, "/");
+      const srcDirSlugs = sourceRoots.map((source) =>
+        path.join(source.root, source.srcDir).replace(/\\/g, "/"),
+      );
+      const layerConfigFiles = new Set(
+        farmConfig.layers
+          .map((layer) => layer.configFile?.replace(/\\/g, "/"))
+          .filter((file): file is string => Boolean(file)),
+      );
       const isPageFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized);
+        return (
+          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
+          /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized)
+        );
       };
       const isApiRouteFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
         return (
-          normalized.includes(`${appDirSlug}/api/`) && /route\.(ts|tsx|js|jsx)$/.test(normalized)
+          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/api/`)) &&
+          /route\.(ts|tsx|js|jsx)$/.test(normalized)
         );
       };
       const isProgrammaticRouteFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return normalized.startsWith(`${srcDirSlug}/`) && isProgrammaticRoutesFileName(normalized);
+        return (
+          srcDirSlugs.some((srcDir) => normalized.startsWith(`${srcDir}/`)) &&
+          isProgrammaticRoutesFileName(normalized)
+        );
       };
       const isProgrammaticRouteSourceFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return isPotentialProgrammaticRouteSourceFile(normalized, srcDirSlug);
+        return srcDirSlugs.some((srcDir) =>
+          isPotentialProgrammaticRouteSourceFile(normalized, srcDir),
+        );
+      };
+      const isAppRuntimeFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return (
+          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
+          /\/(?:page|layout|loading|error|opengraph-image|twitter-image|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$/.test(
+            normalized,
+          )
+        );
       };
       const isTypeAffectingFile = (file: string, event: string) =>
         isPageFile(file) ||
         isApiRouteFile(file) ||
         isFarmConfigFile(file, farmConfig.root) ||
+        layerConfigFiles.has(file.replace(/\\/g, "/")) ||
         isProgrammaticRouteFile(file) ||
         (isProgrammaticRouteSourceFile(file) &&
           (event === "unlink" || fileContainsProgrammaticPageRoute(file)));
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
+      let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleTypeArtifactGen = (file: string, event: string) => {
         if (typeArtifactGenScheduled) return;
         typeArtifactGenScheduled = setTimeout(() => {
@@ -325,6 +372,24 @@ export function farmPlugin(
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
           if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
+          if (
+            ev !== "change" &&
+            (isAppRuntimeFile(file) ||
+              isProgrammaticRouteFile(file) ||
+              (isProgrammaticRouteSourceFile(file) &&
+                (ev === "unlink" || fileContainsProgrammaticPageRoute(file)))) &&
+            !routeRefreshScheduled
+          ) {
+            routeRefreshScheduled = setTimeout(() => {
+              routeRefreshScheduled = null;
+              Promise.all([
+                refreshRouteDiscovery?.(`${ev} ${file}`),
+                file.includes("middleware.") ? middlewareManager?.reload() : undefined,
+              ])
+                .then(() => server.ws.send({ type: "full-reload", path: "*" }))
+                .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+            }, 50);
+          }
         });
       });
 
@@ -332,7 +397,7 @@ export function farmPlugin(
       hmrManager = new HMRManager(server);
 
       // Initialize API route manager
-      const appDir = path.join(farmConfig.root, farmConfig.srcDir, "app");
+      const appDirs = getFarmAppDirectories(farmConfig);
       const routeManager = farmApp.getRouteManager();
       const discoveredRoutes: Array<{
         kind: "page" | "layout";
@@ -356,7 +421,7 @@ export function farmPlugin(
         });
       }
 
-      apiRouteManager = new APIRouteManager(appDir, server);
+      apiRouteManager = new APIRouteManager(appDirs, server);
       await apiRouteManager.discoverRoutes();
       const discoveredWorkflows = await discoverFarmWorkflows(
         { ...farmConfig, workflows: workflowConfig },
@@ -384,7 +449,7 @@ export function farmPlugin(
         }
       }
 
-      middlewareManager = new MiddlewareManager(appDir, server, options.middleware);
+      middlewareManager = new MiddlewareManager(appDirs, server, farmConfig.middleware);
       await middlewareManager.discover();
       if (pm) {
         for (const middleware of middlewareManager.getMiddlewares()) {
@@ -398,7 +463,7 @@ export function farmPlugin(
 
       // Initialize OpenAPI manager if enabled
       if (options.openapi?.enabled) {
-        openAPIManager = new OpenAPIManager(appDir, options.openapi);
+        openAPIManager = new OpenAPIManager(appDirs, options.openapi);
         await openAPIManager.generateSpec();
         logger.success("✅ OpenAPI documentation enabled");
       }
@@ -1450,7 +1515,9 @@ if (import.meta.hot) {
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
       const currentSrcRoot = currentFarmConfig
-        ? path.join(currentFarmConfig.root, currentFarmConfig.srcDir).replace(/\\/g, "/")
+        ? getFarmSourceRoots(currentFarmConfig)
+            .map((source) => path.join(source.root, source.srcDir).replace(/\\/g, "/"))
+            .find((sourceRoot) => normalizedFile.startsWith(`${sourceRoot}/`)) || null
         : null;
       if (
         currentSrcRoot &&
@@ -2791,6 +2858,15 @@ function generateClientManifest(bundle: any): Record<string, any> {
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
   const appRoot = path.resolve(config.root || process.cwd());
+  if (config.extends?.length) {
+    const { config: layeredConfig } = await import("./layers").then(({ resolveFarmLayers }) =>
+      resolveFarmLayers(config, {
+        root: appRoot,
+        mode: process.env.NODE_ENV === "production" ? "production" : "development",
+      }),
+    );
+    config = layeredConfig;
+  }
 
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
@@ -3006,6 +3082,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
       // Stub out problematic server-only modules during dev mode
       alias: {
+        ...getFarmLayerAliases(config.layers),
         "@": path.resolve(appRoot, "src"),
         // Nitro internals that should not be resolved in browser
         "supports-color":

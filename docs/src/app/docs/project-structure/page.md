@@ -32,6 +32,7 @@ my-app/
 | src/app | Pages, nested layouts, API routes, route boundaries, middleware. |
 | src/lib | Shared server and client utilities. |
 | src/components | Reusable UI and client components. |
+| layers | Optional local Farm layers consumed through `extends`. |
 | src/farm-routes.d.ts | Generated typed route union for Link. |
 | farm.config.ts | Framework config, integrations, docs, storage, deployment. |
 
@@ -81,6 +82,8 @@ my-app/
 ```
 
 Keep framework configuration in `farm.config.ts`. Keep application helpers under `src/lib`, and keep UI that is reused across pages under `src/components`.
+
+Reusable product areas can live under `layers/<name>` with their own optional `farm.config.ts` and `src` directory. The application enables them explicitly through `extends`; see [Layers](/docs/layers).
 
 ## Generated files
 

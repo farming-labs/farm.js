@@ -7,7 +7,7 @@ import { logger } from "../utils";
 import { createNitroConfig } from "../nitro";
 import { createFarmApp } from "../app";
 import { APIRouteManager } from "../api/route-manager";
-import { resolveAppPath } from "../utils";
+import { getFarmAppDirectories } from "../layers";
 import { buildUniversal } from "../nitro/universal-build";
 import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
@@ -60,6 +60,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
       await generateFarmTypeArtifacts({
         root,
         srcDir,
+        layers: config.layers,
         extraRoutes: [
           ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),
           ...getFarmDocsRouteTypeEntries(config.docs),
@@ -71,8 +72,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     }
 
     // Discover API routes
-    const appDir = resolveAppPath(root, srcDir, "app");
-    const apiRouteManager = new APIRouteManager(appDir);
+    const apiRouteManager = new APIRouteManager(getFarmAppDirectories(config));
     await apiRouteManager.discoverRoutes();
 
     // Use universal build pattern if enabled

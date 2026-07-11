@@ -68,6 +68,13 @@ export interface EntryContext {
   /** Route files subdirectory within srcDir */
   routesDir?: string;
 
+  /** Ordered route roots. Modules from later roots override matching earlier modules. */
+  routeRoots?: Array<{
+    name: string;
+    base: string;
+    glob: string;
+  }>;
+
   /** Whether server actions are enabled */
   actionsEnabled: boolean;
 

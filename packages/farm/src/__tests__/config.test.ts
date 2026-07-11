@@ -56,6 +56,7 @@ describe("loadConfig", () => {
     const config = await loadConfig(root, undefined, "development");
 
     expect(config).toMatchObject({
+      root,
       clerkSecretKey: "from-local",
       clerkPublishableKey: "from-local-pk",
     });

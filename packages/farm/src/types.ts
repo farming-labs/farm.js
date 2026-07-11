@@ -11,6 +11,7 @@ import type { FarmWorkflowsUserConfig } from "./workflows";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { FarmRouteRules } from "./route-rules";
 import type { FarmServerActionsConfig } from "./server-action-security";
+import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 
 export type NitroPreset =
   | "node-server"
@@ -72,6 +73,9 @@ export interface FarmAppContext {}
 export interface FarmConfig {
   root?: string;
   srcDir?: string;
+  extends?: readonly FarmLayerEntry[];
+  /** Resolved layer graph. Populated by config resolution. */
+  layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
   preset?: NitroPreset;
@@ -410,8 +414,8 @@ export interface Metadata {
     languages?: Record<string, string>;
   };
   icons?:
-    | string
-    | {
+      | string
+      | {
         icon?:
           | string
           | Array<string | { url: string; sizes?: string; type?: string }>;

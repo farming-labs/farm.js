@@ -107,6 +107,7 @@ const sidebar = [
       { label: "Getting Started", slug: "getting-started", icon: "rocket" },
       { label: "Project Structure", slug: "project-structure", icon: "folder" },
       { label: "Configuration", slug: "configuration", icon: "settings" },
+      { label: "Layers", slug: "layers", icon: "box" },
     ],
   },
   {

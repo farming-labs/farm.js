@@ -42,12 +42,14 @@ export class MiddlewareManager {
   private configMiddleware: DiscoveredMiddleware[] = [];
   private globalConfig?: MiddlewareConfig;
   private viteServer?: ViteDevServer;
+  private appDirs: string[];
 
   constructor(
-    private appDir: string,
+    appDir: string | readonly string[],
     viteServer?: ViteDevServer,
     config?: FarmMiddlewareConfig,
   ) {
+    this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.configure(config);
   }
@@ -83,8 +85,15 @@ export class MiddlewareManager {
    * Discover all middleware.ts files
    */
   async discover(): Promise<void> {
-    this.middleware = [];
-    await this.discoverInDirectory(this.appDir, "/");
+    const middlewareByPath = new Map<string, DiscoveredMiddleware>();
+    for (const appDir of this.appDirs) {
+      const discovered: DiscoveredMiddleware[] = [];
+      await this.discoverInDirectory(appDir, "/", discovered);
+      for (const middleware of discovered) {
+        middlewareByPath.set(middleware.path, middleware);
+      }
+    }
+    this.middleware = Array.from(middlewareByPath.values());
 
     // Sort by path depth (root first, then nested)
     this.middleware.sort((a, b) => {
@@ -104,7 +113,11 @@ export class MiddlewareManager {
   /**
    * Recursively discover middleware files
    */
-  private async discoverInDirectory(dir: string, routePath: string): Promise<void> {
+  private async discoverInDirectory(
+    dir: string,
+    routePath: string,
+    discovered: DiscoveredMiddleware[],
+  ): Promise<void> {
     if (!fs.existsSync(dir)) {
       return;
     }
@@ -114,7 +127,7 @@ export class MiddlewareManager {
     if (middlewareFile) {
       const middleware = await this.loadMiddleware(middlewareFile, routePath);
       if (middleware) {
-        this.middleware.push(middleware);
+        discovered.push(middleware);
       }
     }
 
@@ -124,7 +137,7 @@ export class MiddlewareManager {
       if (entry.isDirectory() && !entry.name.startsWith(".") && !entry.name.startsWith("_")) {
         const subPath = path.join(dir, entry.name);
         const subRoutePath = path.posix.join(routePath, entry.name);
-        await this.discoverInDirectory(subPath, subRoutePath);
+        await this.discoverInDirectory(subPath, subRoutePath, discovered);
       }
     }
   }

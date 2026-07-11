@@ -19,6 +19,14 @@ export {
   getDeployTargetForPreset,
   getPresetForDeployTarget,
 } from "./config";
+export type { FarmLayerConfig } from "./config";
+export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
+export {
+  getFarmAppDirectories,
+  getFarmLayerAliases,
+  getFarmSourceRoots,
+  resolveFarmLayers,
+} from "./layers";
 export { HMRManager } from "./hmr";
 export * from "./plugins";
 export * from "./api";

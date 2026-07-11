@@ -31,12 +31,14 @@ import path from "path";
 import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
+import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
 
 interface RouteEntry {
   route: ParsedRoute;
   modulePath: string;
   pattern: string;
   source?: "file" | "programmatic";
+  sourceRoot: string;
 }
 
 interface MetadataImageEntry extends RouteEntry {
@@ -83,116 +85,15 @@ export class RouteManager {
     this.programmaticPages.clear();
     this.programmaticLayouts.clear();
 
-    const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
-
-    // Find all page and layout files
-    const pageFiles = await safeGlobFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
-    const layoutFiles = await safeGlobFiles("**/layout.{ts,tsx,js,jsx}", appDir);
-    const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
-    const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
-    const metadataImageFiles = await safeGlobFiles(
-      "**/{opengraph-image,twitter-image}.{ts,tsx,js,jsx}",
-      appDir,
-    );
+    for (const source of getFarmSourceRoots(this.config)) {
+      await this.discoverFileRoutes(source);
+      await this.discoverProgrammaticRoutes(source);
+    }
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
-      logger.info(`Discovered ${pageFiles.length} pages and ${layoutFiles.length} layouts`);
+      logger.info(`Discovered ${this.routes.size} pages and ${this.layouts.size} layouts`);
     }
-
-    // Process page files
-    for (const file of pageFiles) {
-      const route = parseRoutePath(file);
-      const modulePath = path.join(appDir, file);
-      const pattern = this.createRoutePattern(route);
-
-      const existing = this.routes.get(pattern);
-      if (existing) {
-        throw new Error(
-          `Duplicate page route "${pattern}". Found both ${existing.modulePath} and ${modulePath}. ` +
-            "Use only one page file per route segment.",
-        );
-      }
-
-      this.routes.set(pattern, {
-        route,
-        modulePath,
-        pattern,
-        source: "file",
-      });
-    }
-
-    // Process layout files
-    for (const file of layoutFiles) {
-      const route = parseRoutePath(file);
-      const modulePath = path.join(appDir, file);
-      const pattern = this.createRoutePattern(route);
-
-      this.layouts.set(pattern, {
-        route,
-        modulePath,
-        pattern,
-        source: "file",
-      });
-    }
-
-    // Process loading files
-    for (const file of loadingFiles) {
-      const route = parseRoutePath(file);
-      const modulePath = path.join(appDir, file);
-      const pattern = this.createRoutePattern(route);
-
-      this.loadings.set(pattern, {
-        route,
-        modulePath,
-        pattern,
-        source: "file",
-      });
-    }
-
-    // Process error files
-    for (const file of errorFiles) {
-      const route = parseRoutePath(file);
-      const modulePath = path.join(appDir, file);
-      const pattern = this.createRoutePattern(route);
-
-      this.errors.set(pattern, {
-        route,
-        modulePath,
-        pattern,
-        source: "file",
-      });
-    }
-
-    // Process metadata image files
-    for (const file of metadataImageFiles) {
-      const fileBase = path.basename(file).replace(/\.(tsx?|jsx?)$/, "");
-      const kind: MetadataImageKind = fileBase === "twitter-image" ? "twitter" : "opengraph";
-      const fileName = kind === "twitter" ? "twitter-image" : "opengraph-image";
-      const route = parseRoutePath(file);
-      const modulePath = path.join(appDir, file);
-      const pattern = this.createRoutePattern(route);
-      const key = `${kind}:${pattern}`;
-      const existing = this.metadataImages.get(key);
-
-      if (existing) {
-        throw new Error(
-          `Duplicate ${fileName} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}. ` +
-            "Use only one metadata image file per route segment.",
-        );
-      }
-
-      this.metadataImages.set(key, {
-        route,
-        modulePath,
-        pattern,
-        kind,
-        fileName,
-        source: "file",
-      });
-    }
-
-    await this.discoverProgrammaticRoutes();
 
     if (process.env.FARM_VERBOSE) {
       this.logRoutes();
@@ -347,12 +248,10 @@ export class RouteManager {
   } | null {
     const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
     const pathSegments = normalizedPath.split("/").filter(Boolean);
-    let bestMatch:
-      | {
-          image: MetadataImageEntry;
-          params: Record<string, string>;
-        }
-      | null = null;
+    let bestMatch: {
+      image: MetadataImageEntry;
+      params: Record<string, string>;
+    } | null = null;
 
     for (const imageEntry of this.metadataImages.values()) {
       if (imageEntry.kind !== kind) continue;
@@ -365,10 +264,7 @@ export class RouteManager {
       const match = matchRoute(candidatePath, imageEntry.route.segments);
       if (!match.matches) continue;
 
-      if (
-        !bestMatch ||
-        imageEntry.route.segments.length > bestMatch.image.route.segments.length
-      ) {
+      if (!bestMatch || imageEntry.route.segments.length > bestMatch.image.route.segments.length) {
         bestMatch = {
           image: imageEntry,
           params: match.params,
@@ -379,10 +275,7 @@ export class RouteManager {
     return bestMatch;
   }
 
-  resolveMetadataImagePath(
-    image: MetadataImageEntry,
-    params: Record<string, string> = {},
-  ): string {
+  resolveMetadataImagePath(image: MetadataImageEntry, params: Record<string, string> = {}): string {
     const pagePath = routeSegmentsToPath(image.route.segments, params);
     return pagePath === "/" ? `/${image.fileName}` : `${pagePath}/${image.fileName}`;
   }
@@ -411,8 +304,12 @@ export class RouteManager {
     }>;
   } {
     const toUrlPath = (absolutePath: string) => {
-      if (absolutePath.startsWith(projectRoot)) {
+      if (absolutePath === projectRoot || absolutePath.startsWith(`${projectRoot}${path.sep}`)) {
         return absolutePath.slice(projectRoot.length);
+      }
+      if (path.isAbsolute(absolutePath)) {
+        const normalized = absolutePath.replace(/\\/g, "/");
+        return normalized.startsWith("/") ? `/@fs${normalized}` : `/@fs/${normalized}`;
       }
       return absolutePath;
     };
@@ -525,10 +422,75 @@ export class RouteManager {
     );
   }
 
-  private async discoverProgrammaticRoutes(): Promise<void> {
+  private async discoverFileRoutes(source: FarmSourceRoot): Promise<void> {
+    const appDir = resolveAppPath(source.root, source.srcDir, "app");
+    const pageFiles = await safeGlobFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
+    const layoutFiles = await safeGlobFiles("**/layout.{ts,tsx,js,jsx}", appDir);
+    const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
+    const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
+    const metadataImageFiles = await safeGlobFiles(
+      "**/{opengraph-image,twitter-image}.{ts,tsx,js,jsx}",
+      appDir,
+    );
+
+    for (const [kind, files, target] of [
+      ["page", pageFiles, this.routes],
+      ["layout", layoutFiles, this.layouts],
+      ["loading", loadingFiles, this.loadings],
+      ["error", errorFiles, this.errors],
+    ] as const) {
+      for (const file of files) {
+        const route = parseRoutePath(file);
+        const modulePath = path.join(appDir, file);
+        const pattern = this.createRoutePattern(route);
+        const existing = target.get(pattern);
+        if (existing?.sourceRoot === source.root) {
+          throw new Error(
+            `Duplicate ${kind} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
+          );
+        }
+        target.set(pattern, {
+          route,
+          modulePath,
+          pattern,
+          source: "file",
+          sourceRoot: source.root,
+        });
+      }
+    }
+
+    for (const file of metadataImageFiles) {
+      const fileBase = path.basename(file).replace(/\.(tsx?|jsx?)$/, "");
+      const kind: MetadataImageKind = fileBase === "twitter-image" ? "twitter" : "opengraph";
+      const fileName = kind === "twitter" ? "twitter-image" : "opengraph-image";
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+      const key = `${kind}:${pattern}`;
+      const existing = this.metadataImages.get(key);
+
+      if (existing?.sourceRoot === source.root) {
+        throw new Error(
+          `Duplicate ${fileName} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
+        );
+      }
+
+      this.metadataImages.set(key, {
+        route,
+        modulePath,
+        pattern,
+        kind,
+        fileName,
+        source: "file",
+        sourceRoot: source.root,
+      });
+    }
+  }
+
+  private async discoverProgrammaticRoutes(source: FarmSourceRoot): Promise<void> {
     const manifests = await loadProgrammaticRouteManifests({
-      root: this.config.root,
-      srcDir: this.config.srcDir,
+      root: source.root,
+      srcDir: source.srcDir,
       loadModule: (filePath) => this.loadProgrammaticRoutesModule(filePath),
     });
 
@@ -539,7 +501,7 @@ export class RouteManager {
           const pattern = this.createRoutePattern(route);
           const existing = this.routes.get(pattern);
 
-          if (existing) {
+          if (existing?.sourceRoot === source.root) {
             throw new Error(
               `Duplicate page route "${pattern}". Found both ${existing.modulePath} and programmatic route in ${filePath}.`,
             );
@@ -552,12 +514,19 @@ export class RouteManager {
             modulePath,
             pattern,
             source: "programmatic",
+            sourceRoot: source.root,
           });
         }
 
         if (definition.kind === "layout") {
           const route = parseProgrammaticRoutePath(definition.path, "layout");
           const pattern = this.createRoutePattern(route);
+          const existing = this.layouts.get(pattern);
+          if (existing?.sourceRoot === source.root) {
+            throw new Error(
+              `Duplicate layout route "${pattern}". Found both ${existing.modulePath} and programmatic route in ${filePath}.`,
+            );
+          }
           const modulePath = createProgrammaticRouteModuleId(filePath, "layout", definition.path);
           this.programmaticLayouts.set(modulePath, definition);
           this.layouts.set(pattern, {
@@ -565,6 +534,7 @@ export class RouteManager {
             modulePath,
             pattern,
             source: "programmatic",
+            sourceRoot: source.root,
           });
         }
 
@@ -757,12 +727,10 @@ function interpolateRedirectDestination(
   return result;
 }
 
-function getMetadataImageSuffix(pathname: string):
-  | {
-      kind: MetadataImageKind;
-      fileName: MetadataImageEntry["fileName"];
-    }
-  | null {
+function getMetadataImageSuffix(pathname: string): {
+  kind: MetadataImageKind;
+  fileName: MetadataImageEntry["fileName"];
+} | null {
   if (pathname === "/opengraph-image" || pathname.endsWith("/opengraph-image")) {
     return { kind: "opengraph", fileName: "opengraph-image" };
   }

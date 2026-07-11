@@ -58,6 +58,34 @@ describe("generated server action security", () => {
     expect(entry).not.toContain("throw p.returnValue?.data");
   });
 
+  it("merges layer route roots before project routes", async () => {
+    const entry = generateRscEntry({
+      ...context,
+      routeRoots: [
+        {
+          name: "admin-layer",
+          base: "../../layers/admin/src/app",
+          glob: "../../layers/admin/src/app",
+        },
+        {
+          name: "project",
+          base: "../../src/app",
+          glob: "../../src/app",
+        },
+      ],
+    });
+
+    expect(entry).toContain(
+      'import.meta.glob("../../layers/admin/src/app/**/page.{tsx,jsx,ts,js}"',
+    );
+    expect(entry).toContain('import.meta.glob("../../src/app/**/page.{tsx,jsx,ts,js}"');
+    expect(entry.indexOf("modules: pages0")).toBeLessThan(entry.indexOf("modules: pages1"));
+    expect(entry).toContain("merged[relative] = module");
+    await expect(
+      transformWithEsbuild(entry, "layered-entry.rsc.tsx", { loader: "tsx" }),
+    ).resolves.toMatchObject({ code: expect.any(String) });
+  });
+
   it("emits syntactically valid RSC and browser entries", async () => {
     await expect(
       transformWithEsbuild(generateRscEntry(context), "entry.rsc.tsx", { loader: "tsx" }),

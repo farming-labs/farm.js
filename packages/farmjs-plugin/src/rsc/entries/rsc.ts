@@ -14,6 +14,9 @@ export function generateRscEntry(ctx: EntryContext): string {
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
+  const routeRoots = ctx.routeRoots?.length
+    ? ctx.routeRoots
+    : [{ name: "project", base: glob, glob }];
 
   const debugLog = `// Debug disabled`;
   let code = `
@@ -59,13 +62,53 @@ function applyActionResponseHeaders(headers, request) {
   }
 }
 
-// Auto-discover all page, layout, and middleware files
-// eager: true means they're imported at startup, not lazily
-const pages = import.meta.glob('${glob}/**/page.{tsx,jsx,ts,js}', { eager: true });
-const layouts = import.meta.glob('${glob}/**/layout.{tsx,jsx,ts,js}', { eager: true });
-const loadings = import.meta.glob('${glob}/**/loading.{tsx,jsx,ts,js}', { eager: true });
-const errors = import.meta.glob('${glob}/**/error.{tsx,jsx,ts,js}', { eager: true });
-const middlewares = import.meta.glob('${glob}/**/middleware.{tsx,jsx,ts,js}', { eager: true });
+// Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
+${routeRoots
+  .map(
+    (
+      root,
+      index,
+    ) => `const pages${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/page.{tsx,jsx,ts,js}`)}, { eager: true });
+const layouts${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/layout.{tsx,jsx,ts,js}`)}, { eager: true });
+const loadings${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/loading.{tsx,jsx,ts,js}`)}, { eager: true });
+const errors${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/error.{tsx,jsx,ts,js}`)}, { eager: true });
+const middlewares${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/middleware.{tsx,jsx,ts,js}`)}, { eager: true });`,
+  )
+  .join("\n")}
+
+function mergeRouteModules(sources) {
+  const merged = {};
+  for (const source of sources) {
+    const baseValue = source.base.replace(/\\\\/g, '/').replace(/^\\.\\//, '');
+    const normalizedBase = baseValue.endsWith('/') ? baseValue.slice(0, -1) : baseValue;
+    for (const [filePath, module] of Object.entries(source.modules)) {
+      const normalizedFile = filePath.replace(/\\\\/g, '/').replace(/^\\.\\//, '');
+      const baseIndex = normalizedFile.indexOf(normalizedBase);
+      let relative = baseIndex === -1
+        ? normalizedFile
+        : normalizedFile.slice(baseIndex + normalizedBase.length);
+      if (!relative.startsWith('/')) relative = '/' + relative;
+      merged[relative] = module;
+    }
+  }
+  return merged;
+}
+
+const pages = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: pages${index} }`)
+    .join(", ")}]);
+const layouts = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: layouts${index} }`)
+    .join(", ")}]);
+const loadings = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: loadings${index} }`)
+    .join(", ")}]);
+const errors = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: errors${index} }`)
+    .join(", ")}]);
+const middlewares = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: middlewares${index} }`)
+    .join(", ")}]);
 
 debug('Discovered pages:', Object.keys(pages));
 debug('Discovered layouts:', Object.keys(layouts));
@@ -131,7 +174,7 @@ function getMatchingError(pathname, globVal) {
  */
 function middlewarePathToRoute(filePath) {
   let route = filePath
-    .replace('${glob}', '')
+    .replace('', '')
     .replace(/\\/middleware\\.[tj]sx?$/, '') || '/';
   return route;
 }
@@ -303,7 +346,7 @@ async function executeMiddleware(request, url) {
  */
 function filePathToRoute(filePath) {
   let route = filePath
-    .replace('${glob}', '')
+    .replace('', '')
     .replace(/\\/page\\.[tj]sx?$/, '')
     .replace(/\\/page$/, '') || '/';
   
@@ -414,7 +457,7 @@ function matchRoute(pathname) {
 
 /**
  * Find the layout for a given page file path (pattern from matchRoute = pages key).
- * Layout keys from glob are like '/src/layout.tsx' or 'src/about/layout.tsx'.
+ * Layer roots are normalized to virtual keys such as '/layout.tsx' and '/about/layout.tsx'.
  */
 function getLayout(pageFilePath) {
   const tryKeys = (...keys) => {
@@ -446,9 +489,9 @@ function getLayout(pageFilePath) {
     }
   }
 
-  // Root layout (glob is e.g. '/src')
+  // Root layout
   for (const ext of extensions) {
-    const layout = tryKeys('${glob}/layout.' + ext, '${glob}'.replace(/^\\//, '') + '/layout.' + ext);
+    const layout = tryKeys('/layout.' + ext, 'layout.' + ext);
     if (layout) return layout;
   }
   return null;
@@ -499,7 +542,7 @@ async function handler(request) {
     middlewareHeaders.set(key, value);
   }
   
-  const glob = ${JSON.stringify(glob)};
+  const glob = '';
 `;
 
   // If actions enabled, add action handling before rendering

@@ -9,29 +9,33 @@ export interface APIRouteInfo {
 }
 
 export class APITypeGenerator {
-  private appDir: string;
-  private apiDir: string;
+  private appDirs: string[];
 
-  constructor(appDir: string) {
-    this.appDir = appDir;
-    this.apiDir = join(appDir, "api");
+  constructor(appDir: string | readonly string[]) {
+    this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
   }
 
   /**
    * Scan all API route files and extract route information
    */
   scanAPIRoutes(): APIRouteInfo[] {
-    const routes: APIRouteInfo[] = [];
+    const routes = new Map<string, APIRouteInfo>();
 
-    if (!existsSync(this.apiDir)) {
-      return routes;
+    for (const appDir of this.appDirs) {
+      const apiDir = join(appDir, "api");
+      if (!existsSync(apiDir)) continue;
+
+      const discovered: APIRouteInfo[] = [];
+      this.scanDirectory(apiDir, appDir, discovered);
+      for (const route of discovered) {
+        routes.set(route.path, route);
+      }
     }
 
-    this.scanDirectory(this.apiDir, routes);
-    return routes;
+    return Array.from(routes.values()).sort((left, right) => left.path.localeCompare(right.path));
   }
 
-  private scanDirectory(dir: string, routes: APIRouteInfo[], basePath = "") {
+  private scanDirectory(dir: string, appDir: string, routes: APIRouteInfo[], basePath = "") {
     const items = readdirSync(dir, { withFileTypes: true });
 
     for (const item of items) {
@@ -39,9 +43,9 @@ export class APITypeGenerator {
 
       if (item.isDirectory()) {
         const newBasePath = basePath ? `${basePath}/${item.name}` : item.name;
-        this.scanDirectory(fullPath, routes, newBasePath);
+        this.scanDirectory(fullPath, appDir, routes, newBasePath);
       } else if (/^route\.(ts|tsx|js|jsx)$/.test(item.name)) {
-        const routeInfo = this.extractRouteInfo(fullPath, basePath);
+        const routeInfo = this.extractRouteInfo(fullPath, appDir, basePath);
         if (routeInfo) {
           routes.push(routeInfo);
         }
@@ -49,7 +53,11 @@ export class APITypeGenerator {
     }
   }
 
-  private extractRouteInfo(filePath: string, basePath: string): APIRouteInfo | null {
+  private extractRouteInfo(
+    filePath: string,
+    appDir: string,
+    basePath: string,
+  ): APIRouteInfo | null {
     try {
       const content = readFileSync(filePath, "utf-8");
       const methods = this.extractExportedMethods(content);
@@ -58,7 +66,7 @@ export class APITypeGenerator {
         return null;
       }
 
-      const relativePath = relative(this.appDir, filePath);
+      const relativePath = relative(appDir, filePath);
       const apiPath = basePath ? `/api/${basePath}` : "/api";
 
       return {
@@ -100,7 +108,7 @@ export class APITypeGenerator {
   /**
    * Generate TypeScript code for the API router
    */
-  generateAPIRouter(routes: APIRouteInfo[]): string {
+  generateAPIRouter(routes: APIRouteInfo[], options: { outFile?: string } = {}): string {
     const imports: string[] = [];
 
     // Group routes by path to handle multiple methods
@@ -119,7 +127,7 @@ export class APITypeGenerator {
 
     for (const [path, routeList] of routeGroups) {
       const route = routeList[0];
-      const importPath = route.relativePath.replace(/\\/g, "/").replace(/\.(ts|tsx|js|jsx)$/, "");
+      const importPath = this.getRouteImportPath(route, options.outFile);
       const routeName = this.pathToRouteName(route.path);
       const cleanPath = path === "/api" ? "" : path.replace(/^\/api\//, "");
       const parts = cleanPath ? cleanPath.split("/") : [];
@@ -130,7 +138,9 @@ export class APITypeGenerator {
       // Generate imports
       for (const method of allMethods) {
         const importName = `${method}_${routeName}`;
-        imports.push(`import type { ${method} as ${importName} } from '../app/${importPath}';`);
+        imports.push(
+          `import type { ${method} as ${importName} } from ${JSON.stringify(importPath)};`,
+        );
       }
 
       if (parts.length === 0) {
@@ -182,6 +192,17 @@ export type APIRouter = {
 ${typeExports}
 };
 `;
+  }
+
+  private getRouteImportPath(route: APIRouteInfo, outFile?: string): string {
+    if (!outFile) {
+      return `../app/${route.relativePath.replace(/\\/g, "/").replace(/\.(ts|tsx|js|jsx)$/, "")}`;
+    }
+
+    const relativeImport = relative(dirname(outFile), route.filePath)
+      .replace(/\\/g, "/")
+      .replace(/\.(ts|tsx|js|jsx)$/, "");
+    return relativeImport.startsWith(".") ? relativeImport : `./${relativeImport}`;
   }
 
   private pathToRouteName(path: string): string {

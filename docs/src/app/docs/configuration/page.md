@@ -37,6 +37,7 @@ export default defineFarmConfig({
 
 | Option        | Use it for                                                                        |
 | ------------- | --------------------------------------------------------------------------------- |
+| extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
 | integrations  | Registering built-in or custom integrations.                                      |
 | storage       | Providing storage clients and mounts for framework and integration code.          |
@@ -48,6 +49,18 @@ export default defineFarmConfig({
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
 | serverActions | Restricting trusted action origins and request body size.                         |
 | openapi       | Publishing API reference docs.                                                    |
+
+## Layers
+
+Use `extends` to compose ordinary Farm-shaped directories and packages. Entries apply from left to right, and project files and configuration have final priority.
+
+```ts
+export default defineFarmConfig({
+  extends: ["@company/farm-base", "./layers/commerce"],
+});
+```
+
+A layer may contain an optional plain `farm.config.ts` plus its own `src/app`, components, middleware, APIs, and programmatic routes. It does not use a separate layer registration function. See [Layers](/docs/layers) for package structure, merge rules, aliases, generated types, and override behavior.
 
 ## Server action security
 

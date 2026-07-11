@@ -23,6 +23,7 @@ import {
   type PreparedFarmWorkflows,
 } from "../workflows";
 import { routeRulesToNitroRouteRules } from "../route-rules";
+import { getFarmAppDirectories } from "../layers";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -163,11 +164,18 @@ function hasFarmMiddlewareConfig(config: ResolvedFarmConfig["middleware"]): bool
   );
 }
 
-async function discoverMiddlewareRoutes(appDir: string): Promise<UniversalMiddlewareRoute[]> {
+export async function discoverMiddlewareRoutes(
+  appDir: string | readonly string[],
+): Promise<UniversalMiddlewareRoute[]> {
   const fs = await import("fs/promises");
-  const routes: UniversalMiddlewareRoute[] = [];
+  const appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
+  const routes = new Map<string, UniversalMiddlewareRoute>();
 
-  async function walk(dir: string, routePath: string): Promise<void> {
+  async function walk(
+    dir: string,
+    routePath: string,
+    discovered: UniversalMiddlewareRoute[],
+  ): Promise<void> {
     let entries: import("fs").Dirent[];
     try {
       entries = await fs.readdir(dir, { withFileTypes: true });
@@ -180,7 +188,7 @@ async function discoverMiddlewareRoutes(appDir: string): Promise<UniversalMiddle
     );
 
     if (middlewareFile) {
-      routes.push({
+      discovered.push({
         path: routePath,
         filePath: path.join(dir, middlewareFile.name),
       });
@@ -192,13 +200,19 @@ async function discoverMiddlewareRoutes(appDir: string): Promise<UniversalMiddle
       }
 
       const childRoutePath = routePath === "/" ? `/${entry.name}` : `${routePath}/${entry.name}`;
-      await walk(path.join(dir, entry.name), childRoutePath);
+      await walk(path.join(dir, entry.name), childRoutePath, discovered);
     }
   }
 
-  await walk(appDir, "/");
+  for (const sourceAppDir of appDirs) {
+    const discovered: UniversalMiddlewareRoute[] = [];
+    await walk(sourceAppDir, "/", discovered);
+    for (const route of discovered) {
+      routes.set(route.path, route);
+    }
+  }
 
-  return routes.sort((a, b) => {
+  return Array.from(routes.values()).sort((a, b) => {
     const depthA = a.path.split("/").filter(Boolean).length;
     const depthB = b.path.split("/").filter(Boolean).length;
     return depthA - depthB || a.path.localeCompare(b.path);
@@ -274,6 +288,12 @@ export async function buildUniversal(
       }
     }
     await findLayoutsForClient(appDir);
+    const seenLayoutPatterns = new Set(layoutRoutes.map((layout) => layout.pattern));
+    for (const [pattern, entry] of routeManager.getLayouts()) {
+      if (seenLayoutPatterns.has(pattern)) continue;
+      seenLayoutPatterns.add(pattern);
+      layoutRoutes.push({ pattern, modulePath: entry.modulePath });
+    }
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
     const clientOutputDir = path.join(root, distDir, "client");
@@ -1196,8 +1216,9 @@ async function buildSSRInMemory(
 
   // Discover layout files by scanning the source directory
   const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
+  const appDirs = getFarmAppDirectories(config);
   const appDir = path.join(root, srcDir, "app");
-  const middlewareRoutes = await discoverMiddlewareRoutes(appDir);
+  const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
 
   async function findLayouts(dir: string, routePrefix: string = "/"): Promise<void> {
     try {
@@ -1239,17 +1260,19 @@ async function buildSSRInMemory(
   // Check for custom not-found page
   let notFoundPath: string | null = null;
   const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
-  for (const ext of notFoundExtensions) {
-    const checkPath = path.join(appDir, `not-found${ext}`);
-    try {
-      await fs.access(checkPath);
-      notFoundPath = checkPath;
-      logger.info(`📋 Found custom 404 page: ${checkPath}`);
-      break;
-    } catch {
-      // File doesn't exist, continue checking
+  for (const sourceAppDir of appDirs) {
+    for (const ext of notFoundExtensions) {
+      const checkPath = path.join(sourceAppDir, `not-found${ext}`);
+      try {
+        await fs.access(checkPath);
+        notFoundPath = checkPath;
+        break;
+      } catch {
+        // File doesn't exist, continue checking
+      }
     }
   }
+  if (notFoundPath) logger.info(`📋 Found custom 404 page: ${notFoundPath}`);
 
   // Sort layouts by depth (root first)
   layoutRoutes.sort((a, b) => {

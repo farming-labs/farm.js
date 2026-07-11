@@ -10,6 +10,7 @@ import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
 import { normalizeRouteRules } from "./route-rules";
 import { resolveServerActionsConfig } from "./server-action-security";
+import { getFarmAppDirectories, getFarmSourceRoots } from "./layers";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
 import { findProgrammaticRouteFiles } from "./routes.server";
@@ -90,6 +91,8 @@ export class FarmApp {
     return {
       root,
       srcDir: config.srcDir || "src",
+      extends: config.extends || [],
+      layers: [...(config.layers || [])],
       outDir: config.outDir || "dist",
       basePath: config.basePath || "/",
       preset: config.preset ?? "node-server",
@@ -118,26 +121,33 @@ export class FarmApp {
   }
 
   private async verifyAppStructure(): Promise<void> {
-    const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
+    const appDirs = getFarmAppDirectories(this.config);
 
-    if (!(await fileExists(appDir))) {
-      const routeFiles = findProgrammaticRouteFiles(this.config.root, this.config.srcDir);
+    const hasAppDirectory = (await Promise.all(appDirs.map((appDir) => fileExists(appDir)))).some(
+      Boolean,
+    );
+
+    if (!hasAppDirectory) {
+      const routeFiles = getFarmSourceRoots(this.config).flatMap((source) =>
+        findProgrammaticRouteFiles(source.root, source.srcDir),
+      );
       if (routeFiles.length > 0) {
         return;
       }
 
+      const appDir = resolveAppPath(this.config.root, this.config.srcDir, "app");
       throw new Error(
         `App directory not found at ${appDir}. ` +
-          "Please create a src/app directory with your pages and layouts.",
+          "Please create a src/app directory or extend a Farm layer containing routes.",
       );
     }
 
-    const rootLayoutPaths = [
+    const rootLayoutPaths = appDirs.flatMap((appDir) => [
       path.join(appDir, "layout.tsx"),
       path.join(appDir, "layout.ts"),
       path.join(appDir, "layout.jsx"),
       path.join(appDir, "layout.js"),
-    ];
+    ]);
 
     const hasRootLayout = await Promise.all(rootLayoutPaths.map((p) => fileExists(p))).then(
       (results) => results.some(Boolean),

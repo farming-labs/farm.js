@@ -35,6 +35,12 @@ import {
   type FarmServerActionsConfig,
   type ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
+import {
+  loadFarmConfigFile,
+  resolveFarmLayers,
+  type FarmLayerEntry,
+  type ResolvedFarmLayer,
+} from "./layers";
 import path from "path";
 
 export type {
@@ -68,6 +74,7 @@ export type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
+export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 
 export interface RedirectConfig {
   source: string;
@@ -169,7 +176,9 @@ export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output
   outputDir: string;
 }
 
-export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "env"> {
+export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "env" | "layers"> {
+  /** Reusable Farm directories or installed packages, applied from left to right. */
+  extends?: readonly FarmLayerEntry[];
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
   migrations?: FarmMigrationsUserConfig;
@@ -227,6 +236,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
 export interface ResolvedFarmConfig extends Required<
   Omit<
     FarmUserConfig,
+    | "extends"
     | "plugins"
     | "vite"
     | "deploy"
@@ -239,6 +249,8 @@ export interface ResolvedFarmConfig extends Required<
     | "serverActions"
   >
 > {
+  extends: readonly FarmLayerEntry[];
+  layers: ResolvedFarmLayer[];
   plugins: FarmPlugin[];
   vite: ViteUserConfig;
   deploy: ResolvedFarmDeployConfig;
@@ -250,6 +262,11 @@ export interface ResolvedFarmConfig extends Required<
   env: ResolvedFarmEnv;
   serverActions: ResolvedFarmServerActionsConfig;
 }
+
+export type FarmLayerConfig = Omit<
+  FarmUserConfig,
+  "root" | "outDir" | "distDir" | "deploy" | "output" | "preset" | "publicDir" | "generateBuildId"
+>;
 
 export function defineFarmConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
   return config;
@@ -431,7 +448,7 @@ export async function findDocsConfigPath(
   configPath?: string,
 ): Promise<string | undefined> {
   const { existsSync } = await import("fs");
-  const root = rootDir || process.cwd();
+  const root = path.resolve(rootDir || process.cwd());
 
   if (configPath) {
     const resolvedPath = path.isAbsolute(configPath) ? configPath : path.join(root, configPath);
@@ -457,7 +474,7 @@ export async function loadDocsConfig(
 ): Promise<{ config: Partial<DocsConfig>; configPath: string } | undefined> {
   const fs = await import("fs/promises");
   const { pathToFileURL } = await import("url");
-  const root = rootDir || process.cwd();
+  const root = path.resolve(rootDir || process.cwd());
   const resolvedPath = await findDocsConfigPath(root, configPath);
 
   if (!resolvedPath) return undefined;
@@ -593,7 +610,12 @@ export async function resolveConfig(
   userConfig: FarmUserConfig,
   mode: "development" | "production",
 ): Promise<ResolvedFarmConfig> {
-  const isDev = mode === "development";
+  const projectRoot = userConfig.root || process.cwd();
+  const layerResolution = await resolveFarmLayers(userConfig, {
+    root: projectRoot,
+    mode,
+  });
+  userConfig = layerResolution.config;
 
   const redirects =
     typeof userConfig.redirects === "function"
@@ -625,6 +647,8 @@ export async function resolveConfig(
   const resolved: ResolvedFarmConfig = {
     root,
     srcDir,
+    extends: userConfig.extends || [],
+    layers: layerResolution.layers,
     outDir: userConfig.outDir || "dist",
     basePath: userConfig.basePath || "/",
     preset: deploy.preset || "node-server",
@@ -700,11 +724,7 @@ export async function loadConfig(
   configPath?: string,
   mode = process.env.NODE_ENV === "production" ? "production" : "development",
 ): Promise<FarmUserConfig | undefined> {
-  const path = await import("path");
-  const fs = await import("fs/promises");
-  const { pathToFileURL } = await import("url");
   const { existsSync } = await import("fs");
-  const { build } = await import("esbuild");
   const { loadEnv } = await import("vite");
 
   const root = rootDir || process.cwd();
@@ -741,36 +761,8 @@ export async function loadConfig(
         continue;
       }
 
-      const configCacheDir = path.join(root, ".farm", ".config-loader");
-      await fs.mkdir(configCacheDir, { recursive: true });
-      const modulePath = path.join(
-        configCacheDir,
-        `farm-config-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`,
-      );
-      await build({
-        absWorkingDir: root,
-        entryPoints: [normalizedPath],
-        outfile: modulePath,
-        bundle: true,
-        format: "esm",
-        platform: "node",
-        target: `node${process.versions.node.split(".")[0]}`,
-        packages: "external",
-        jsx: "automatic",
-        logLevel: "silent",
-        sourcemap: "inline",
-      });
-
-      const moduleUrl = pathToFileURL(modulePath).href + `?t=${Date.now()}`;
-      let config: any;
-
-      try {
-        config = await import(/* @vite-ignore */ moduleUrl);
-      } finally {
-        await fs.unlink(modulePath).catch(() => undefined);
-      }
-
-      return config.default || config;
+      const loadedConfig = await loadFarmConfigFile<FarmUserConfig>(normalizedPath, { root });
+      return loadedConfig.root === undefined ? { ...loadedConfig, root } : loadedConfig;
     } catch (error: any) {
       const message = error instanceof Error ? error.message : String(error);
       throw new Error(`Failed to load config from ${relativePath}: ${message}`);

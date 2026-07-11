@@ -33,11 +33,10 @@ export const API_ROUTE_METHODS = [
 export class APIRouteManager {
   private routes: Map<string, APIRoute> = new Map();
   private viteServer?: ViteDevServer;
+  private appDirs: string[];
 
-  constructor(
-    private appDir: string,
-    viteServer?: ViteDevServer,
-  ) {
+  constructor(appDir: string | readonly string[], viteServer?: ViteDevServer) {
+    this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
   }
 
@@ -47,29 +46,21 @@ export class APIRouteManager {
   async discoverRoutes(): Promise<void> {
     this.routes.clear();
 
-    const apiDir = path.join(this.appDir, "api");
-    let routeFiles: string[] = [];
+    for (const appDir of this.appDirs) {
+      const apiDir = path.join(appDir, "api");
+      let routeFiles: string[] = [];
 
-    if (fs.existsSync(apiDir)) {
-      routeFiles = this.findRouteFiles(apiDir);
-    } else {
-      if (process.env.FARM_VERBOSE) {
-        logger.info("No /app/api directory found, skipping file-based API route discovery");
+      if (fs.existsSync(apiDir)) {
+        routeFiles = this.findRouteFiles(apiDir);
       }
-    }
 
-    if (routeFiles.length === 0) {
-      if (process.env.FARM_VERBOSE) {
-        logger.info("No route files found in /app/api");
+      for (const filePath of routeFiles) {
+        await this.loadRoute(filePath, appDir);
       }
-    }
 
-    for (const filePath of routeFiles) {
-      await this.loadRoute(filePath);
+      await this.loadRootRoutes(appDir);
+      await this.loadProgrammaticApiRoutes(appDir);
     }
-
-    await this.loadRootRoutes();
-    await this.loadProgrammaticApiRoutes();
 
     if (process.env.FARM_VERBOSE) {
       logger.success(`Discovered ${this.routes.size} API routes`);
@@ -111,11 +102,11 @@ export class APIRouteManager {
   /**
    * Load a route.ts file and extract HTTP method exports
    */
-  private async loadRoute(filePath: string): Promise<void> {
+  private async loadRoute(filePath: string, appDir: string): Promise<void> {
     try {
       // Convert file path to API route path
       // /app/api/auth/login/route.ts -> /api/auth/login
-      const apiDir = path.join(this.appDir, "api");
+      const apiDir = path.join(appDir, "api");
       const relativePath = path.relative(apiDir, path.dirname(filePath));
       const routePath = "/api/" + (relativePath === "." ? "" : relativePath.replace(/\\/g, "/"));
 
@@ -147,8 +138,8 @@ export class APIRouteManager {
   /**
    * Load explicit-path endpoints from src/routes.ts-style files.
    */
-  private async loadRootRoutes(): Promise<void> {
-    const routesFile = this.findRootRoutesFile();
+  private async loadRootRoutes(appDir: string): Promise<void> {
+    const routesFile = this.findRootRoutesFile(appDir);
     if (!routesFile) {
       return;
     }
@@ -170,8 +161,8 @@ export class APIRouteManager {
     }
   }
 
-  private async loadProgrammaticApiRoutes(): Promise<void> {
-    const candidateRoots = [path.dirname(this.appDir), this.appDir];
+  private async loadProgrammaticApiRoutes(appDir: string): Promise<void> {
+    const candidateRoots = [path.dirname(appDir), appDir];
     const routeFiles = Array.from(
       new Set(candidateRoots.flatMap((srcRoot) => findProgrammaticRouteFilesInDir(srcRoot))),
     );
@@ -192,9 +183,9 @@ export class APIRouteManager {
     }
   }
 
-  private findRootRoutesFile(): string | null {
+  private findRootRoutesFile(appDir: string): string | null {
     const routeNames = ["routes.ts", "routes.tsx", "routes.js"];
-    const candidateDirs = [path.dirname(this.appDir), this.appDir];
+    const candidateDirs = [path.dirname(appDir), appDir];
     const seen = new Set<string>();
 
     for (const dir of candidateDirs) {
