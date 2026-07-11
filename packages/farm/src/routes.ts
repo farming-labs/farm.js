@@ -44,8 +44,26 @@ export interface ProgrammaticRouteSchema<TOutput = unknown> {
   parse(value: unknown): TOutput;
 }
 
+export interface ProgrammaticRouteSearchOptions<TOutput = ProgrammaticRouteSearchFallback> {
+  schema?: ProgrammaticRouteSchema<TOutput>;
+  stripDefaults?: boolean | readonly string[];
+  preserve?: readonly string[];
+  temporary?: readonly string[];
+}
+
+export type ProgrammaticRouteSearchConfig<TOutput = ProgrammaticRouteSearchFallback> =
+  | ProgrammaticRouteSchema<TOutput>
+  | ProgrammaticRouteSearchOptions<TOutput>;
+
 export type InferProgrammaticRouteSchema<TSchema, TFallback> =
   TSchema extends ProgrammaticRouteSchema<infer TOutput> ? TOutput : TFallback;
+
+export type InferProgrammaticRouteSearch<TSearch, TFallback> =
+  TSearch extends ProgrammaticRouteSearchOptions<infer TOutput>
+    ? TOutput
+    : TSearch extends ProgrammaticRouteSchema<infer TOutput>
+      ? TOutput
+      : TFallback;
 
 export type ProgrammaticRouteParamsFallback = Record<string, string>;
 export type ProgrammaticRouteSearchFallback = Record<string, string | string[] | undefined>;
@@ -168,7 +186,7 @@ export interface ProgrammaticPageRoute<
   path: string;
   component: ComponentType<any>;
   params?: ProgrammaticRouteSchema<TParams>;
-  search?: ProgrammaticRouteSchema<TSearch>;
+  search?: ProgrammaticRouteSearchConfig<TSearch>;
   guard?: ProgrammaticRouteGuard<TParams, TSearch, TContext>;
   data?: TDataHooks;
   pending?: ComponentType<ProgrammaticRoutePendingComponentProps<TParams, TSearch>>;
@@ -243,11 +261,11 @@ export type ProgrammaticRouteFactory = (
 
 export type CreateRouteOptions<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
-  TSearchSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
   TDataHooks extends
     | ProgrammaticRouteDataHooks<
         InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-        InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+        InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
         any,
         any,
         any
@@ -256,22 +274,22 @@ export type CreateRouteOptions<
 > = Omit<
   ProgrammaticPageRoute<
     InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+    InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
     TDataHooks
   >,
   "kind" | "path" | "component" | "params" | "search" | "data" | "guard"
 > & {
   params?: TParamsSchema;
-  search?: TSearchSchema;
+  search?: TSearchConfig;
   guard?: ProgrammaticRouteGuard<
     InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>
+    InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>
   >;
   data?: TDataHooks;
   component: ComponentType<
     ProgrammaticRouteComponentProps<
       InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-      InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+      InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
       InferProgrammaticRouteData<TDataHooks>
     >
   >;
@@ -349,13 +367,174 @@ export const layout = routesBuilder.layout;
 export const api = routesBuilder.api;
 export const redirect = routesBuilder.redirect;
 
+export interface ProgrammaticRouteSearchClientOptions {
+  stripDefaults?: boolean | readonly string[];
+  preserve?: readonly string[];
+  temporary?: readonly string[];
+}
+
+export interface ProgrammaticRouteSearchResolution<TSearch = unknown> {
+  search: TSearch;
+  canonicalPath?: string;
+}
+
+export function getProgrammaticRouteSearchSchema<TSearch = unknown>(
+  search: ProgrammaticRouteSearchConfig<TSearch> | undefined,
+): ProgrammaticRouteSchema<TSearch> | undefined {
+  if (!search) return undefined;
+  if (isProgrammaticRouteSchema(search)) return search;
+  return search.schema;
+}
+
+export function getProgrammaticRouteSearchClientOptions(
+  search: ProgrammaticRouteSearchConfig<any> | undefined,
+): ProgrammaticRouteSearchClientOptions | undefined {
+  if (!search || isProgrammaticRouteSchema(search)) return undefined;
+
+  const options: ProgrammaticRouteSearchClientOptions = {};
+  if (typeof search.stripDefaults !== "undefined") options.stripDefaults = search.stripDefaults;
+  if (search.preserve?.length) options.preserve = [...search.preserve];
+  if (search.temporary?.length) options.temporary = [...search.temporary];
+
+  return Object.keys(options).length > 0 ? options : undefined;
+}
+
+function resolveProgrammaticRouteSearch<TSearch>(
+  searchConfig: ProgrammaticRouteSearchConfig<TSearch> | undefined,
+  rawSearch: ProgrammaticRouteSearchFallback,
+  path: string,
+  routePath: string,
+): ProgrammaticRouteSearchResolution<TSearch | ProgrammaticRouteSearchFallback> {
+  const schema = getProgrammaticRouteSearchSchema(searchConfig);
+  const search = parseProgrammaticSchema(schema, rawSearch, "search", routePath) as
+    | TSearch
+    | ProgrammaticRouteSearchFallback;
+  const options = getProgrammaticRouteSearchOptions(searchConfig);
+  const canonicalPath = resolveProgrammaticRouteCanonicalPath({
+    options,
+    schema,
+    rawSearch,
+    parsedSearch: search,
+    path,
+  });
+
+  return { search, canonicalPath };
+}
+
+function getProgrammaticRouteSearchOptions(
+  search: ProgrammaticRouteSearchConfig<any> | undefined,
+): ProgrammaticRouteSearchOptions<any> | undefined {
+  if (!search || isProgrammaticRouteSchema(search)) return undefined;
+  return search;
+}
+
+function isProgrammaticRouteSchema(value: unknown): value is ProgrammaticRouteSchema<any> {
+  return !!value && typeof value === "object" && typeof (value as any).parse === "function";
+}
+
+function resolveProgrammaticRouteCanonicalPath(input: {
+  options: ProgrammaticRouteSearchOptions<any> | undefined;
+  schema: ProgrammaticRouteSchema<any> | undefined;
+  rawSearch: ProgrammaticRouteSearchFallback;
+  parsedSearch: unknown;
+  path: string;
+}): string | undefined {
+  const options = input.options;
+  if (!options?.temporary?.length && !options?.stripDefaults) {
+    return undefined;
+  }
+
+  const params = createSearchParams(input.rawSearch);
+  const original = params.toString();
+
+  for (const key of options.temporary || []) {
+    params.delete(key);
+  }
+
+  if (options.stripDefaults) {
+    const defaultSearch = parseDefaultSearch(input.schema);
+    if (defaultSearch !== undefined) {
+      const keys =
+        options.stripDefaults === true
+          ? Array.from(new Set(Array.from(params.keys())))
+          : [...options.stripDefaults];
+
+      for (const key of keys) {
+        if (
+          params.has(key) &&
+          searchValuesEqual(readSearchValue(input.parsedSearch, key), readSearchValue(defaultSearch, key))
+        ) {
+          params.delete(key);
+        }
+      }
+    }
+  }
+
+  const next = params.toString();
+  if (next === original) {
+    return undefined;
+  }
+
+  return next ? `${input.path}?${next}` : input.path;
+}
+
+function createSearchParams(value: ProgrammaticRouteSearchFallback): URLSearchParams {
+  const params = new URLSearchParams();
+
+  for (const [key, item] of Object.entries(value)) {
+    if (item == null) continue;
+    const values = Array.isArray(item) ? item : [item];
+    for (const entry of values) {
+      if (entry != null) params.append(key, String(entry));
+    }
+  }
+
+  return params;
+}
+
+function parseDefaultSearch(
+  schema: ProgrammaticRouteSchema<any> | undefined,
+): Record<string, unknown> | undefined {
+  if (!schema) return undefined;
+
+  try {
+    const value = schema.parse({});
+    return value && typeof value === "object" ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readSearchValue(value: unknown, key: string): unknown {
+  return value && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined;
+}
+
+function searchValuesEqual(left: unknown, right: unknown): boolean {
+  return JSON.stringify(normalizeComparableValue(left)) === JSON.stringify(normalizeComparableValue(right));
+}
+
+function normalizeComparableValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(normalizeComparableValue);
+  }
+  if (value && typeof value === "object") {
+    return Object.keys(value as Record<string, unknown>)
+      .sort()
+      .reduce<Record<string, unknown>>((output, key) => {
+        output[key] = normalizeComparableValue((value as Record<string, unknown>)[key]);
+        return output;
+      }, {});
+  }
+  return value;
+}
+
 export function createRoute<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
-  TSearchSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
   TDataHooks extends
     | ProgrammaticRouteDataHooks<
         InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-        InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+        InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
         any,
         any,
         any
@@ -363,15 +542,15 @@ export function createRoute<
     | undefined = undefined,
 >(
   path: string,
-  options: CreateRouteOptions<TParamsSchema, TSearchSchema, TDataHooks>,
+  options: CreateRouteOptions<TParamsSchema, TSearchConfig, TDataHooks>,
 ): ProgrammaticPageRoute<
   InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-  InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+  InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
   TDataHooks
 > {
   return routesBuilder.page(path, options) as unknown as ProgrammaticPageRoute<
     InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+    InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
     TDataHooks
   >;
 }
@@ -494,8 +673,9 @@ export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRou
   if (route.params || route.search || route.guard || route.data) {
     (mod as any).__farmRouteSchemas = {
       params: route.params,
-      search: route.search,
+      search: getProgrammaticRouteSearchSchema(route.search),
     };
+    (mod as any).__farmRouteSearch = getProgrammaticRouteSearchClientOptions(route.search);
     (mod as any).__farmRouteGuard = route.guard;
     (mod as any).__farmRouteData = route.data;
     (mod as any).__farmRouteParsesProps = true;
@@ -661,7 +841,12 @@ async function resolveProgrammaticRouteProps(
 ): Promise<Record<string, any> & { __farmRoutePropsResolved: true }> {
   const rawSearch = await props.searchParams;
   const params = parseProgrammaticSchema(route.params, props.params, "params", route.path);
-  const search = parseProgrammaticSchema(route.search, rawSearch, "search", route.path);
+  const { search, canonicalPath } = resolveProgrammaticRouteSearch(
+    route.search,
+    rawSearch,
+    props.path,
+    route.path,
+  );
   const routeContextValue = getFarmRouteContext(props);
   const pluginContext = props.context;
   const baseProps = {
@@ -681,7 +866,7 @@ async function resolveProgrammaticRouteProps(
   }
 
   if (!route.data) {
-    return markProgrammaticRoutePropsResolved(baseProps);
+    return markProgrammaticRoutePropsResolved(addCanonicalPath(baseProps, canonicalPath));
   }
 
   const before = route.data.before ? await route.data.before(routeContextProps as any) : undefined;
@@ -702,6 +887,7 @@ async function resolveProgrammaticRouteProps(
   return markProgrammaticRoutePropsResolved({
     ...baseProps,
     data,
+    ...(canonicalPath ? { __farmCanonicalPath: canonicalPath } : {}),
   });
 }
 
@@ -787,12 +973,19 @@ function markProgrammaticRoutePropsResolved<T extends Record<string, any>>(
   };
 }
 
+function addCanonicalPath<T extends Record<string, any>>(
+  props: T,
+  canonicalPath: string | undefined,
+): T {
+  return canonicalPath ? ({ ...props, __farmCanonicalPath: canonicalPath } as T) : props;
+}
+
 function stripProgrammaticRoutePropsMarker<TProps>(props: TProps): TProps {
   if (!isProgrammaticRoutePropsResolved(props)) {
     return props;
   }
 
-  const { __farmRoutePropsResolved, ...componentProps } = props as any;
+  const { __farmRoutePropsResolved, __farmCanonicalPath, ...componentProps } = props as any;
   return componentProps;
 }
 

@@ -961,10 +961,14 @@ export function farmPlugin(
                 search: (routeProps as any).search,
                 searchParams: (routeProps as any).search,
                 ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+                ...((routeProps as any).__farmCanonicalPath
+                  ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
+                  : {}),
                 ...((routeProps as any).__farmRoutePropsResolved
                   ? { __farmRoutePropsResolved: true }
                   : {}),
               },
+              canonicalPath: (routeProps as any).__farmCanonicalPath,
               modulePath: toUrlPath(route.modulePath),
               isClientComponent,
               shouldHydrate,
@@ -1220,6 +1224,7 @@ export const getManifest = () => ({
             modulePath: route.modulePath,
             pattern: route.pattern,
             segments: route.segments,
+            search: route.search,
             isClientComponent: moduleMetadata.isClientComponent,
             shouldHydrate: moduleMetadata.shouldHydrate,
             preloads: [route.modulePath], // In dev, preload is just the module
@@ -1592,10 +1597,20 @@ if (!__farmRoute) {
 
 export const metadata = __farmRoute.metadata;
 export const generateMetadata = __farmRoute.generateMetadata;
+const __farmIsSearchSchema = (value) => value && typeof value.parse === "function";
+const __farmGetSearchSchema = (search) => __farmIsSearchSchema(search) ? search : search?.schema;
+const __farmGetSearchOptions = (search) => __farmIsSearchSchema(search) ? undefined : search;
+const __farmSearchSchema = __farmGetSearchSchema(__farmRoute.search);
+const __farmSearchOptions = __farmGetSearchOptions(__farmRoute.search);
 export const __farmRouteSchemas = {
   params: __farmRoute.params,
-  search: __farmRoute.search,
+  search: __farmSearchSchema,
 };
+export const __farmRouteSearch = __farmSearchOptions ? {
+  stripDefaults: __farmSearchOptions.stripDefaults,
+  preserve: __farmSearchOptions.preserve,
+  temporary: __farmSearchOptions.temporary,
+} : undefined;
 export const __farmRouteData = __farmRoute.data;
 export const __farmRouteParsesProps = __farmRoute.kind === "page" && !!(
   __farmRoute.params ||
@@ -1620,19 +1635,96 @@ const __farmMarkRoutePropsResolved = (props) => ({
   __farmRoutePropsResolved: true,
 });
 
+const __farmAddCanonicalPath = (props, canonicalPath) => (
+  canonicalPath ? { ...props, __farmCanonicalPath: canonicalPath } : props
+);
+
 const __farmStripRoutePropsMarker = (props) => {
   if (!props || props.__farmRoutePropsResolved !== true) {
     return props;
   }
 
-  const { __farmRoutePropsResolved, ...componentProps } = props;
+  const { __farmRoutePropsResolved, __farmCanonicalPath, ...componentProps } = props;
   return componentProps;
+};
+
+const __farmCreateSearchParams = (value) => {
+  const params = new URLSearchParams();
+  for (const [key, item] of Object.entries(value || {})) {
+    if (item == null) continue;
+    const values = Array.isArray(item) ? item : [item];
+    for (const entry of values) {
+      if (entry != null) params.append(key, String(entry));
+    }
+  }
+  return params;
+};
+
+const __farmComparable = (value) => {
+  if (Array.isArray(value)) return value.map(__farmComparable);
+  if (value && typeof value === "object") {
+    return Object.keys(value).sort().reduce((output, key) => {
+      output[key] = __farmComparable(value[key]);
+      return output;
+    }, {});
+  }
+  return value;
+};
+
+const __farmEqual = (left, right) => (
+  JSON.stringify(__farmComparable(left)) === JSON.stringify(__farmComparable(right))
+);
+
+const __farmReadSearchValue = (value, key) => (
+  value && typeof value === "object" ? value[key] : undefined
+);
+
+const __farmParseDefaultSearch = () => {
+  if (!__farmSearchSchema) return undefined;
+  try {
+    const value = __farmSearchSchema.parse({});
+    return value && typeof value === "object" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const __farmResolveCanonicalPath = (rawSearch, parsedSearch, path) => {
+  if (!__farmSearchOptions?.temporary?.length && !__farmSearchOptions?.stripDefaults) {
+    return undefined;
+  }
+
+  const params = __farmCreateSearchParams(rawSearch);
+  const original = params.toString();
+
+  for (const key of __farmSearchOptions.temporary || []) {
+    params.delete(key);
+  }
+
+  if (__farmSearchOptions.stripDefaults) {
+    const defaults = __farmParseDefaultSearch();
+    if (defaults) {
+      const keys = __farmSearchOptions.stripDefaults === true
+        ? Array.from(new Set(Array.from(params.keys())))
+        : [...__farmSearchOptions.stripDefaults];
+      for (const key of keys) {
+        if (params.has(key) && __farmEqual(__farmReadSearchValue(parsedSearch, key), __farmReadSearchValue(defaults, key))) {
+          params.delete(key);
+        }
+      }
+    }
+  }
+
+  const next = params.toString();
+  if (next === original) return undefined;
+  return next ? path + "?" + next : path;
 };
 
 export async function __farmResolveRouteProps(props) {
   const rawSearch = await props.searchParams;
   const params = __farmParseSchema(__farmRoute.params, props.params, "params");
-  const search = __farmParseSchema(__farmRoute.search, rawSearch, "search");
+  const search = __farmParseSchema(__farmSearchSchema, rawSearch, "search");
+  const canonicalPath = __farmResolveCanonicalPath(rawSearch, search, props.path);
   const baseProps = {
     ...props,
     params,
@@ -1641,7 +1733,7 @@ export async function __farmResolveRouteProps(props) {
   };
 
   if (!__farmRoute.data) {
-    return __farmMarkRoutePropsResolved(baseProps);
+    return __farmMarkRoutePropsResolved(__farmAddCanonicalPath(baseProps, canonicalPath));
   }
 
   const before = __farmRoute.data.before
@@ -1663,6 +1755,7 @@ export async function __farmResolveRouteProps(props) {
   return __farmMarkRoutePropsResolved({
     ...baseProps,
     data,
+    ...(canonicalPath ? { __farmCanonicalPath: canonicalPath } : {}),
   });
 }
 
@@ -1993,6 +2086,7 @@ class SPARouter {
       if (this.onNavigate) {
         await this.onNavigate(pageData);
       }
+      applyCanonicalPathFromProps(currentPageProps);
 
       // Handle scroll
       if (scroll) {
@@ -2153,6 +2247,16 @@ function normalizeServerProps(rawProps) {
     props.context = { ...props.context, data: new Map(Object.entries(props.context.data)) };
   }
   return props;
+}
+
+function applyCanonicalPathFromProps(props) {
+  const canonicalPath = props && typeof props.__farmCanonicalPath === 'string'
+    ? props.__farmCanonicalPath
+    : null;
+  if (!canonicalPath) return;
+  const currentPath = window.location.pathname + window.location.search;
+  if (canonicalPath === currentPath) return;
+  window.history.replaceState({ ...(window.history.state || {}), path: canonicalPath }, '', canonicalPath);
 }
 
 function replayPreHydrationClicks() {
@@ -2473,6 +2577,7 @@ async function renderPage(pageData) {
       path,
       pageData.props,
     );
+    applyCanonicalPathFromProps(currentPageProps);
 
     const element = await buildWrappedHydrationElement(
       PageComponent,
@@ -2544,6 +2649,7 @@ async function hydrate() {
 
     // Get props - either from server-injected props or by matching the current URL
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
+    applyCanonicalPathFromProps(pageProps);
     if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
       // Extract params from URL using manifest route matching (fallback)
       const pathname = window.location.pathname;

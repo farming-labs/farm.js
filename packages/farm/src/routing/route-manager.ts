@@ -11,11 +11,13 @@ import type {
   ProgrammaticPageRoute,
   ProgrammaticLayoutRoute,
   ProgrammaticRedirectRoute,
+  ProgrammaticRouteSearchClientOptions,
 } from "../routes";
 import {
   createLayoutModuleFromProgrammaticLayout,
   createProgrammaticRouteModuleId,
   createRouteModuleFromProgrammaticPage,
+  getProgrammaticRouteSearchClientOptions,
   parseProgrammaticRoutePath,
 } from "../routes";
 import { loadProgrammaticRouteManifests } from "../routes.server";
@@ -395,6 +397,7 @@ export class RouteManager {
       modulePath: string;
       shouldHydrate: boolean;
       isClientComponent: boolean;
+      search?: ProgrammaticRouteSearchClientOptions;
       segments: Array<{
         segment: string;
         isDynamic: boolean;
@@ -416,11 +419,13 @@ export class RouteManager {
 
     const routes = Array.from(this.routes.values()).map((entry) => {
       const metadata = getClientModuleMetadata(entry.modulePath, projectRoot);
+      const programmaticPage = this.programmaticPages.get(entry.modulePath);
       return {
         pattern: entry.pattern,
         modulePath: toUrlPath(entry.modulePath),
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
+        search: getProgrammaticRouteSearchClientOptions(programmaticPage?.search),
         segments: entry.route.segments.map((seg) => ({
           segment: seg.segment,
           isDynamic: seg.isDynamic,
