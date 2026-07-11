@@ -598,6 +598,9 @@ ${cssImport}
 ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
+import { installChunkErrorRecovery } from "@farmjs/core/client";
+
+installChunkErrorRecovery();
 
 // SPA Router for server-rendered pages (HTML swap)
 const spaRouter = {
@@ -774,8 +777,11 @@ ${cssImport}
 ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
+import { installChunkErrorRecovery } from "@farmjs/core/client";
 
 ${imports.join("\n")}
+
+installChunkErrorRecovery();
 
 // Client component routes
 const clientRoutes = [

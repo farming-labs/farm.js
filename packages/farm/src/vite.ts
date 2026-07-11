@@ -1753,6 +1753,7 @@ function generateClientCode(
   return `
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
+import { installChunkErrorRecovery } from '@farmjs/core/client'
 ${providerImportBlock}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
@@ -1763,6 +1764,8 @@ ${providerImportBlock}
 window.__FARM_REACT__ = React;
 const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
+
+installChunkErrorRecovery();
 
 let reactRoot = null;
 
