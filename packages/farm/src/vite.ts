@@ -40,6 +40,7 @@ import {
   resolveWorkflowsConfig,
   type FarmDiscoveredWorkflow,
 } from "./workflows";
+import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -74,6 +75,25 @@ function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unkno
   }
 
   return publicEnv;
+}
+
+function createRequestFromNodeRequest(
+  req: { method?: string; headers: Record<string, string | string[] | undefined> },
+  url: URL,
+): Request {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item);
+    } else if (value !== undefined) {
+      headers.set(key, value);
+    }
+  }
+
+  return new Request(url.toString(), {
+    method: req.method || "GET",
+    headers,
+  });
 }
 
 function getFullEnvDefine(config: FarmVitePluginOptions): {
@@ -906,12 +926,21 @@ export function farmPlugin(
             targetUrl.searchParams.forEach((value, key) => {
               searchParams[key] = value;
             });
+            const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
+              request: createRequestFromNodeRequest(req, urlObj),
+              params,
+              search: searchParams,
+              path: targetUrl.pathname,
+            });
             const routeProps = await parseRouteModuleProps(routeModule as RouteModuleLike, {
-              props: {
-                params,
-                searchParams: Promise.resolve(searchParams),
-                path: targetUrl.pathname,
-              },
+              props: withFarmRouteContext(
+                {
+                  params,
+                  searchParams: Promise.resolve(searchParams),
+                  path: targetUrl.pathname,
+                },
+                routeContext,
+              ),
               search: searchParams,
               routePath: route.pattern,
             });

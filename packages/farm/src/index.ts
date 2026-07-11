@@ -61,6 +61,7 @@ export type {
   ProgrammaticRouteGuardContext,
   ProgrammaticRoutePendingComponentProps,
   ProgrammaticRouteBuilder,
+  ProgrammaticRouteContext,
   ProgrammaticRouteDefinition,
   ProgrammaticRouteFactory,
   ProgrammaticRouteManifest,

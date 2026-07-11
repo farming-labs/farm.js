@@ -185,6 +185,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
 
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;
+  context?: BaseFarmConfig["context"];
 
   notFound?: NotFoundConfig;
 
@@ -649,6 +650,7 @@ export async function resolveConfig(
     },
     middleware: userConfig.middleware || {},
     notFound: userConfig.notFound || {},
+    context: userConfig.context || (() => undefined),
     output: userConfig.output || "standalone",
     distDir: userConfig.distDir || ".farm",
     generateBuildId: userConfig.generateBuildId || (() => `build-${Date.now()}`),

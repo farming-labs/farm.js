@@ -30,6 +30,7 @@ import {
   type FarmMetadataImageReference,
   type MetadataImageKind,
 } from "../metadata";
+import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -250,6 +251,16 @@ export class ServerRenderer {
     this.config = config;
     this.routeManager = routeManager;
     this.loadSSGManifest();
+  }
+
+  async resolveRouteContext(input: {
+    request: Request;
+    rawRequest?: FarmRequest;
+    params: Record<string, string>;
+    search: Record<string, string | string[] | undefined>;
+    path: string;
+  }): Promise<unknown> {
+    return resolveFarmRouteContext(this.config, input);
   }
 
   /**
@@ -576,6 +587,14 @@ export class ServerRenderer {
 
       middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
       pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
+      const currentRequest = createWebRequestFromFarmRequest(req);
+      const routeContext = await this.resolveRouteContext({
+        request: currentRequest,
+        rawRequest: req,
+        params,
+        search: searchParamsObject,
+        path: pathname,
+      });
 
       // Load route module
       const routeModule = await this.routeManager.loadRouteModule(route.modulePath);
@@ -585,13 +604,16 @@ export class ServerRenderer {
       }
 
       // Create page props with searchParams as plain object and middleware data
-      const rawPageProps: PageProps = {
-        params,
-        searchParams: Promise.resolve(searchParamsObject),
-        path: pathname,
-        middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
-        context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
-      } as PageProps & { search: unknown };
+      const rawPageProps: PageProps = withFarmRouteContext(
+        {
+          params,
+          searchParams: Promise.resolve(searchParamsObject),
+          path: pathname,
+          middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+          context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+        } as PageProps & { search: unknown },
+        routeContext,
+      );
       const pageProps = await parseRouteModuleProps(routeModule, {
         props: rawPageProps,
         search: searchParamsObject,
@@ -708,7 +730,6 @@ export class ServerRenderer {
 
       // Get middleware data for AsyncLocalStorage
       const middlewareDataForContext = middlewareMap;
-      const currentRequest = createWebRequestFromFarmRequest(req);
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithCurrentRequest(currentRequest, async () => {

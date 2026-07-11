@@ -216,6 +216,39 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Cache keys are part of your data security model. If data depends on the current user, role, tenant, locale, or draft mode, include that value in `key` or avoid caching that route. Route cache invalidation improves freshness, but API routes and server functions still need their own authorization checks.
 
+## Route context
+
+Use `context` in `farm.config.ts` for request-scoped dependencies that guards and route data need: sessions, tenants, feature flags, or database clients. The value is available to programmatic route `guard`, `data.before`, `data.main`, cache key functions, and `data.after`.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+import { db } from "./src/db";
+import { getSession } from "./src/session";
+
+export default defineFarmConfig({
+  context: async ({ request }) => ({
+    session: await getSession(request),
+    db,
+  }),
+});
+```
+
+Add a module augmentation when you want autocomplete in route files:
+
+```ts
+import type { db } from "./src/db";
+import type { getSession } from "./src/session";
+
+declare module "@farmjs/core" {
+  interface FarmAppContext {
+    session: Awaited<ReturnType<typeof getSession>>;
+    db: typeof db;
+  }
+}
+```
+
+Route context is server-only. Farm passes it to guards and data hooks without serializing it into browser props, so keep raw database clients and secrets in `context` and return only safe page data from `data.main`.
+
 ## Route guards
 
 Use `guard` when a route should be allowed or blocked before route data loads. Guards run after params/search validation and before `data.before` or `data.main`.
@@ -225,16 +258,14 @@ import { createRoute, redirect } from "@farmjs/core";
 
 export const DashboardRoute = createRoute("/dashboard", {
   guard: async ({ context }) => {
-    const session = context?.data.get("session");
-
-    if (!session?.user) {
+    if (!context.session.user) {
       redirect("/login");
     }
   },
 
   data: {
-    async main() {
-      return { stats: await getDashboardStats() };
+    async main({ context }) {
+      return { stats: await getDashboardStats(context.db) };
     },
   },
 

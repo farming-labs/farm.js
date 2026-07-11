@@ -99,6 +99,7 @@ export class FarmApp {
       workflows: resolveWorkflowsConfig(config.workflows),
       middleware: config.middleware || {},
       routeRules: normalizeRouteRules(config.routeRules),
+      context: config.context || (() => undefined),
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),
