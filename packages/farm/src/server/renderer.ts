@@ -697,6 +697,9 @@ export class ServerRenderer {
         search: (pageProps as any).search,
         searchParams: (pageProps as any).search,
         ...("data" in pageProps ? { data: (pageProps as any).data } : {}),
+        ...((pageProps as any).__farmCanonicalPath
+          ? { __farmCanonicalPath: (pageProps as any).__farmCanonicalPath }
+          : {}),
         ...((pageProps as any).__farmRoutePropsResolved ? { __farmRoutePropsResolved: true } : {}),
         path: pathname,
         middleware:
@@ -1196,6 +1199,7 @@ export class ServerRenderer {
           modulePath: routeEntry.modulePath,
           pattern: routeEntry.pattern,
           segments: routeEntry.segments,
+          search: routeEntry.search,
           isClientComponent: isClient,
           shouldHydrate: shouldHydrateRoute,
           preloads: [routeEntry.modulePath],

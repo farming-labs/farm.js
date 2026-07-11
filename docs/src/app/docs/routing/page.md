@@ -216,6 +216,55 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Cache keys are part of your data security model. If data depends on the current user, role, tenant, locale, or draft mode, include that value in `key` or avoid caching that route. Route cache invalidation improves freshness, but API routes and server functions still need their own authorization checks.
 
+## Typed Search Params
+
+Programmatic routes can validate URL search params and define cleanup rules in one place. Use `search.schema` for typed route input, `stripDefaults` for clean URLs, `preserve` for params that should carry across links, and `temporary` for one-time UI params.
+
+```tsx
+import { createRoute } from "@farmjs/core";
+import { z } from "zod";
+
+export const ProductRoute = createRoute("/products/[id]", {
+  search: {
+    schema: z.object({
+      tab: z.enum(["info", "reviews"]).default("info"),
+      locale: z.string().default("en"),
+      toast: z.string().optional(),
+    }),
+    stripDefaults: true,
+    preserve: ["locale"],
+    temporary: ["toast"],
+  },
+
+  data: {
+    async main({ params, search }) {
+      return {
+        product: await getProduct(params.id),
+        tab: search.tab,
+      };
+    },
+  },
+
+  component: ProductPage,
+});
+```
+
+With that route, `/products/123?tab=info&locale=am&toast=saved` gives the component typed search data:
+
+```ts
+{
+  tab: "info",
+  locale: "am",
+  toast: "saved",
+}
+```
+
+After the route has consumed it, Farm can clean the URL to `/products/123?locale=am`. `tab=info` is removed because it matches the schema default, and `toast=saved` is removed because it is temporary.
+
+`preserve` is used by Farm links. If the current page is `/products?locale=am`, then a link to `/products/[id]` carries `locale=am` unless the link already provides its own `locale`.
+
+Use this for tab state, pagination defaults, locale/tenant preservation, preview mode, and one-time params such as `toast=saved`. Keep security-sensitive values out of search params; they are user-editable URL state, not trusted server state.
+
 ## Route context
 
 Use `context` in `farm.config.ts` for request-scoped dependencies that guards and route data need: sessions, tenants, feature flags, or database clients. The value is available to programmatic route `guard`, `data.before`, `data.main`, cache key functions, and `data.after`.

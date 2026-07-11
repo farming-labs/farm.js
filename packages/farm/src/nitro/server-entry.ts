@@ -190,10 +190,14 @@ async function defaultHandler({
           search: (routeProps as any).search,
           searchParams: (routeProps as any).search,
           ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+          ...((routeProps as any).__farmCanonicalPath
+            ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
+            : {}),
           ...((routeProps as any).__farmRoutePropsResolved
             ? { __farmRoutePropsResolved: true }
             : {}),
         },
+        canonicalPath: (routeProps as any).__farmCanonicalPath,
         modulePath: route.modulePath,
         isClientComponent,
         shouldHydrate,

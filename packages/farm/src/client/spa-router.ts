@@ -15,6 +15,7 @@
 interface PageData {
   props: Record<string, any>;
   modulePath: string;
+  canonicalPath?: string;
   metadata?: {
     title?: string;
     description?: string;
@@ -297,11 +298,12 @@ export class SPARouter {
     state: unknown;
     url: URL;
   }): Promise<void> {
-    const historyState = createHistoryState(options.fullPath, options.state);
+    const historyPath = options.pageData.canonicalPath || options.fullPath;
+    const historyState = createHistoryState(historyPath, options.state);
     if (options.replace) {
-      window.history.replaceState(historyState, "", options.fullPath);
+      window.history.replaceState(historyState, "", historyPath);
     } else {
-      window.history.pushState(historyState, "", options.fullPath);
+      window.history.pushState(historyState, "", historyPath);
     }
 
     if (options.pageData.metadata?.title) {

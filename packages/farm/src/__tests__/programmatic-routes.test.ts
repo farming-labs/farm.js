@@ -337,6 +337,59 @@ describe("programmatic routes", () => {
     expect(main).toHaveBeenCalledTimes(3);
   });
 
+  it("normalizes typed search params with defaults and temporary keys", async () => {
+    function ProductPage() {
+      return null;
+    }
+
+    const searchSchema = {
+      parse: vi.fn((value: any) => ({
+        tab: value.tab === "reviews" ? "reviews" : "info",
+        locale: value.locale || "en",
+        toast: value.toast,
+      })),
+    };
+    const ProductRoute = createRoute("/products/[id]", {
+      search: {
+        schema: searchSchema,
+        stripDefaults: true,
+        preserve: ["locale"],
+        temporary: ["toast"],
+      },
+      data: {
+        main: async ({ search }) => ({ search }),
+      },
+      component: ProductPage as any,
+    });
+    const routeModule = createRouteModuleFromProgrammaticPageForTest(ProductRoute);
+
+    expect((routeModule as any).__farmRouteSchemas.search).toBe(searchSchema);
+    expect((routeModule as any).__farmRouteSearch).toEqual({
+      stripDefaults: true,
+      preserve: ["locale"],
+      temporary: ["toast"],
+    });
+
+    const resolvedProps = await (routeModule as any).__farmResolveRouteProps({
+      params: { id: "123" },
+      searchParams: Promise.resolve({ tab: "info", locale: "am", toast: "saved" }),
+      path: "/products/123",
+    });
+
+    expect(resolvedProps.search).toEqual({
+      tab: "info",
+      locale: "am",
+      toast: "saved",
+    });
+    expect(resolvedProps.data.search).toEqual(resolvedProps.search);
+    expect(resolvedProps.__farmCanonicalPath).toBe("/products/123?locale=am");
+
+    const Page = routeModule.default as any;
+    const element = (await Page(resolvedProps)) as any;
+    expect(element.props.search).toEqual(resolvedProps.search);
+    expect(element.props.__farmCanonicalPath).toBeUndefined();
+  });
+
   it("runs programmatic route guards before data hooks", async () => {
     function DashboardPage() {
       return null;
