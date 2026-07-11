@@ -100,6 +100,53 @@ const checkout = await apiClient.billing.checkout.post({
 
 If an integration operation is marked server-only, call it from `api`, not `apiClient`.
 
+## Server Function Form Actions
+
+`createServerFn` pairs with `useServerFn` when a mutation is naturally a form action. Use `optimistic` to show the next UI state immediately, then let the server result replace it when the action completes.
+
+```tsx
+"use client";
+
+import { useServerFn } from "@farmjs/core/server-fn/client";
+import { createServerFn } from "@farmjs/core/server-fn";
+import { z } from "zod";
+
+export const addTodo = createServerFn({
+  input: z.object({
+    title: z.string().min(1),
+  }),
+  async handler({ input }) {
+    return {
+      todos: await db.todo.create({ data: input }),
+    };
+  },
+});
+
+export function TodoForm() {
+  const action = useServerFn(addTodo, {
+    initialResult: { todos: [] },
+    rollbackOnError: true,
+    optimistic({ current, formData }) {
+      return {
+        todos: [
+          ...(current?.todos ?? []),
+          { id: "draft", title: String(formData?.get("title") ?? "") },
+        ],
+      };
+    },
+  });
+
+  return (
+    <form action={action.formAction}>
+      <input name="title" />
+      <button disabled={action.pending}>Add</button>
+    </form>
+  );
+}
+```
+
+The optimistic callback receives the raw input, `formData` for form submissions, and the current result. Return `undefined` when a submission should not change the optimistic result. Use `rollbackOnError` for reversible UI state; keep authorization and validation on the server function itself.
+
 ## Production notes
 
 - Keep generated API types committed or generated during CI.
