@@ -168,6 +168,127 @@ describe("useServerFn", () => {
     expect(onError).toHaveBeenCalledWith(action.error);
   });
 
+  it("applies optimistic results for form actions before the server settles", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const saveMessage = createServerFn({
+      input: z.object({
+        message: z.string().min(1),
+      }),
+      async handler({ input }) {
+        await gate;
+        return {
+          messages: [`Saved:${input.message}`],
+        };
+      },
+    });
+
+    let action!: UseServerFnReturn<{ message: string }, { messages: string[] }>;
+
+    function App() {
+      action = useServerFn(saveMessage, {
+        initialResult: { messages: ["Existing"] },
+        optimistic({ current, formData }) {
+          return {
+            messages: [
+              ...(current?.messages ?? []),
+              `Draft:${String(formData?.get("message") ?? "")}`,
+            ],
+          };
+        },
+      });
+
+      return createElement("output", null, action.result?.messages.join("|") ?? action.status);
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    const formData = new FormData();
+    formData.set("message", "Hello");
+
+    let promise!: Promise<void>;
+    await act(async () => {
+      promise = action.formAction(formData);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toBe("Existing|Draft:Hello");
+
+    await act(async () => {
+      release();
+      await promise;
+    });
+
+    expect(container.textContent).toBe("Saved:Hello");
+  });
+
+  it("rolls optimistic form results back when the server action fails", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const saveMessage = createServerFn({
+      input: z.object({
+        message: z.string().min(1),
+      }),
+      async handler() {
+        await gate;
+        throw new Error("save failed");
+      },
+    });
+
+    let action!: UseServerFnReturn<{ message: string }, { messages: string[] }>;
+
+    function App() {
+      action = useServerFn(saveMessage, {
+        initialResult: { messages: ["Existing"] },
+        rollbackOnError: true,
+        optimistic({ current, formData }) {
+          return {
+            messages: [
+              ...(current?.messages ?? []),
+              `Draft:${String(formData?.get("message") ?? "")}`,
+            ],
+          };
+        },
+      });
+
+      return createElement(
+        "output",
+        null,
+        `${action.status}:${action.result?.messages.join("|") ?? ""}:${action.error?.message ?? ""}`,
+      );
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    const formData = new FormData();
+    formData.set("message", "Hello");
+
+    let promise!: Promise<void>;
+    await act(async () => {
+      promise = action.formAction(formData);
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toBe("pending:Existing|Draft:Hello:");
+
+    await act(async () => {
+      release();
+      await promise;
+    });
+
+    expect(container.textContent).toBe("error:Existing:save failed");
+  });
+
   it("resets action state and ignores stale submissions", async () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => {
