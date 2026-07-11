@@ -6,7 +6,16 @@ import {
   type FarmCacheOptions,
   type RouteDataCacheKey,
 } from "./cache";
-import type { LayoutProps, Metadata, PageProps, ParsedRoute, RouteModule } from "./types";
+import { getFarmRouteContext } from "./route-context";
+import type {
+  FarmAppContext,
+  LayoutProps,
+  Metadata,
+  PageProps,
+  ParsedRoute,
+  PluginContextProps,
+  RouteModule,
+} from "./types";
 
 export type ProgrammaticRouteRenderMode = "static" | "dynamic";
 export type ProgrammaticRouteMethod =
@@ -48,6 +57,9 @@ export type ProgrammaticRouteDataStaleTime =
   | `${number}s`
   | `${number}m`
   | `${number}h`;
+export type ProgrammaticRouteContext = keyof FarmAppContext extends never
+  ? unknown
+  : FarmAppContext;
 
 export type ProgrammaticRouteComponentProps<
   TParams = ProgrammaticRouteParamsFallback,
@@ -62,44 +74,54 @@ export type ProgrammaticRouteComponentProps<
 export type ProgrammaticRouteDataContext<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
-> = ProgrammaticRouteComponentProps<TParams, TSearch>;
+  TContext = ProgrammaticRouteContext,
+> = Omit<ProgrammaticRouteComponentProps<TParams, TSearch>, "context"> & {
+  context: TContext;
+  pluginContext?: PluginContextProps;
+};
 
 export type ProgrammaticRouteDataCacheContext<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
   TBefore = unknown,
-> = ProgrammaticRouteDataContext<TParams, TSearch> & { before: TBefore };
+  TContext = ProgrammaticRouteContext,
+> = ProgrammaticRouteDataContext<TParams, TSearch, TContext> & { before: TBefore };
 
 export type ProgrammaticRouteGuardContext<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
-> = ProgrammaticRouteDataContext<TParams, TSearch>;
+  TContext = ProgrammaticRouteContext,
+> = ProgrammaticRouteDataContext<TParams, TSearch, TContext>;
 
 export type ProgrammaticRouteGuard<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
-> = (context: ProgrammaticRouteGuardContext<TParams, TSearch>) => ProgrammaticRouteMaybePromise<void>;
+  TContext = ProgrammaticRouteContext,
+> = (
+  context: ProgrammaticRouteGuardContext<TParams, TSearch, TContext>,
+) => ProgrammaticRouteMaybePromise<void>;
 
 export type ProgrammaticRouteErrorComponentProps<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
-> = Partial<ProgrammaticRouteDataContext<TParams, TSearch>> & {
+> = Partial<ProgrammaticRouteComponentProps<TParams, TSearch>> & {
   error: unknown;
 };
 
 export type ProgrammaticRoutePendingComponentProps<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
-> = Partial<ProgrammaticRouteDataContext<TParams, TSearch>>;
+> = Partial<ProgrammaticRouteComponentProps<TParams, TSearch>>;
 
 export type ProgrammaticRouteDataCacheKeys<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
   TBefore = unknown,
+  TContext = ProgrammaticRouteContext,
 > =
   | readonly string[]
   | ((
-      context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore>,
+      context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore, TContext>,
     ) => ProgrammaticRouteMaybePromise<readonly string[]>);
 
 export interface ProgrammaticRouteDataHooks<
@@ -107,21 +129,22 @@ export interface ProgrammaticRouteDataHooks<
   TSearch = ProgrammaticRouteSearchFallback,
   TBefore = unknown,
   TData = unknown,
+  TContext = ProgrammaticRouteContext,
 > {
   key?: (
-    context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore>,
+    context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore, TContext>,
   ) => ProgrammaticRouteMaybePromise<RouteDataCacheKey | null | undefined>;
   staleTime?: ProgrammaticRouteDataStaleTime;
-  tags?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore>;
-  paths?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore>;
+  tags?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore, TContext>;
+  paths?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore, TContext>;
   before?: (
-    context: ProgrammaticRouteDataContext<TParams, TSearch>,
+    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext>,
   ) => ProgrammaticRouteMaybePromise<TBefore>;
   main: (
-    context: ProgrammaticRouteDataContext<TParams, TSearch> & { before: TBefore },
+    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & { before: TBefore },
   ) => ProgrammaticRouteMaybePromise<TData>;
   after?: (
-    context: ProgrammaticRouteDataContext<TParams, TSearch> & {
+    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & {
       before: TBefore;
       data: TData;
     },
@@ -136,16 +159,17 @@ export type InferProgrammaticRouteData<TDataHooks> =
 export interface ProgrammaticPageRoute<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
-  TDataHooks extends ProgrammaticRouteDataHooks<TParams, TSearch, any, any> | undefined =
-    | ProgrammaticRouteDataHooks<TParams, TSearch, any, any>
+  TDataHooks extends ProgrammaticRouteDataHooks<TParams, TSearch, any, any, any> | undefined =
+    | ProgrammaticRouteDataHooks<TParams, TSearch, any, any, any>
     | undefined,
+  TContext = ProgrammaticRouteContext,
 > {
   kind: "page";
   path: string;
   component: ComponentType<any>;
   params?: ProgrammaticRouteSchema<TParams>;
   search?: ProgrammaticRouteSchema<TSearch>;
-  guard?: ProgrammaticRouteGuard<TParams, TSearch>;
+  guard?: ProgrammaticRouteGuard<TParams, TSearch, TContext>;
   data?: TDataHooks;
   pending?: ComponentType<ProgrammaticRoutePendingComponentProps<TParams, TSearch>>;
   error?: ComponentType<ProgrammaticRouteErrorComponentProps<TParams, TSearch>>;
@@ -224,6 +248,7 @@ export type CreateRouteOptions<
     | ProgrammaticRouteDataHooks<
         InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
         InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+        any,
         any,
         any
       >
@@ -331,6 +356,7 @@ export function createRoute<
     | ProgrammaticRouteDataHooks<
         InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
         InferProgrammaticRouteSchema<TSearchSchema, ProgrammaticRouteSearchFallback>,
+        any,
         any,
         any
       >
@@ -636,31 +662,38 @@ async function resolveProgrammaticRouteProps(
   const rawSearch = await props.searchParams;
   const params = parseProgrammaticSchema(route.params, props.params, "params", route.path);
   const search = parseProgrammaticSchema(route.search, rawSearch, "search", route.path);
+  const routeContextValue = getFarmRouteContext(props);
+  const pluginContext = props.context;
   const baseProps = {
     ...props,
     params,
     search,
     searchParams: Promise.resolve(search),
   };
+  const routeContextProps = {
+    ...baseProps,
+    context: routeContextValue,
+    pluginContext,
+  };
 
   if (route.guard) {
-    await route.guard(baseProps as any);
+    await route.guard(routeContextProps as any);
   }
 
   if (!route.data) {
     return markProgrammaticRoutePropsResolved(baseProps);
   }
 
-  const before = route.data.before ? await route.data.before(baseProps as any) : undefined;
+  const before = route.data.before ? await route.data.before(routeContextProps as any) : undefined;
   const dataContext = {
-    ...(baseProps as any),
+    ...(routeContextProps as any),
     before,
   };
   const data = await resolveProgrammaticRouteData(route, route.data, dataContext);
 
   if (route.data.after) {
     await route.data.after({
-      ...(baseProps as any),
+      ...(routeContextProps as any),
       before,
       data,
     });

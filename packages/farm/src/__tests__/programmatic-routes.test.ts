@@ -4,6 +4,7 @@ import path from "path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
 import { notFound, redirect } from "../navigation";
+import { FARM_ROUTE_CONTEXT_SYMBOL, resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 import { createRoute, createRouteModuleFromProgrammaticPage, defineRoutes } from "../routes";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
@@ -379,6 +380,101 @@ describe("programmatic routes", () => {
       }),
     ).resolves.toMatchObject({ data: { ok: true } });
     expect(main).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes app route context to guards and data without leaking it to components", async () => {
+    function DashboardPage() {
+      return null;
+    }
+
+    const appContext = {
+      session: { user: { id: "user-1" } },
+      db: { label: "database" },
+    };
+    const pluginContext = { data: new Map([["traceId", "trace-1"]]) };
+    const guard = vi.fn(({ context, pluginContext: exposedPlugins }: any) => {
+      expect(context).toBe(appContext);
+      expect(exposedPlugins).toBe(pluginContext);
+      if (!context.session.user) redirect("/login");
+    });
+    const before = vi.fn(({ context }: any) => ({
+      userId: context.session.user.id,
+    }));
+    const key = vi.fn(({ context, before }: any) => ["dashboard", context.session.user.id, before.userId]);
+    const main = vi.fn(({ context, before }: any) => ({
+      userId: before.userId,
+      db: context.db.label,
+    }));
+    const after = vi.fn(({ context, data }: any) => {
+      expect(context).toBe(appContext);
+      expect(data.userId).toBe("user-1");
+    });
+
+    const DashboardRoute = createRoute("/dashboard", {
+      guard,
+      data: {
+        key,
+        before,
+        main,
+        after,
+      },
+      component: DashboardPage as any,
+    });
+    const routeModule = createRouteModuleFromProgrammaticPageForTest(DashboardRoute);
+    const props = withFarmRouteContext(
+      {
+        params: {},
+        searchParams: Promise.resolve({}),
+        path: "/dashboard",
+        context: pluginContext,
+      },
+      appContext,
+    );
+
+    const resolvedProps = await (routeModule as any).__farmResolveRouteProps(props);
+
+    expect(resolvedProps.data).toEqual({ userId: "user-1", db: "database" });
+    expect(resolvedProps.context).toBe(pluginContext);
+    expect(Object.getOwnPropertySymbols(resolvedProps)).not.toContain(FARM_ROUTE_CONTEXT_SYMBOL);
+    expect(guard).toHaveBeenCalledTimes(1);
+    expect(before).toHaveBeenCalledTimes(1);
+    expect(key).toHaveBeenCalledTimes(1);
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+
+    const Page = routeModule.default as any;
+    const element = (await Page(props)) as any;
+
+    expect(element.props.context).toBe(pluginContext);
+    expect(element.props.context).not.toBe(appContext);
+    expect(Object.getOwnPropertySymbols(element.props)).not.toContain(FARM_ROUTE_CONTEXT_SYMBOL);
+  });
+
+  it("resolves app route context from config", async () => {
+    const request = new Request("https://example.com/products/123?tab=info");
+    const context = await resolveFarmRouteContext(
+      {
+        context: ({ request, params, search, path }) => ({
+          host: new URL(request.url).host,
+          id: params.id,
+          tab: search.tab,
+          path,
+        }),
+      },
+      {
+        request,
+        params: { id: "123" },
+        search: { tab: "info" },
+        path: "/products/123",
+      },
+    );
+
+    expect(context).toEqual({
+      host: "example.com",
+      id: "123",
+      tab: "info",
+      path: "/products/123",
+    });
   });
 
   it("supports pending, error, and notFound components on programmatic routes", async () => {

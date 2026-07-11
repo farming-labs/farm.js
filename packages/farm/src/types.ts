@@ -54,6 +54,20 @@ export interface ResolvedFarmMigrationsConfig {
   commands: FarmMigrationCommand[];
 }
 
+export interface FarmContextFactoryInput {
+  request: Request;
+  rawRequest?: FarmRequest;
+  params: Record<string, string>;
+  search: Record<string, string | string[] | undefined>;
+  path: string;
+}
+
+export type FarmContextFactory<TContext = unknown> = (
+  input: FarmContextFactoryInput,
+) => TContext | Promise<TContext>;
+
+export interface FarmAppContext {}
+
 export interface FarmConfig {
   root?: string;
   srcDir?: string;
@@ -88,6 +102,7 @@ export interface FarmConfig {
   env?: FarmEnvConfig<any, any> | ResolvedFarmEnv;
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;
+  context?: FarmContextFactory<any>;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
