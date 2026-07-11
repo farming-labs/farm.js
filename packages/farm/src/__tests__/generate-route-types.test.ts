@@ -38,6 +38,7 @@ describe("generateRouteTypes", () => {
 
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain("export type RoutePath =");
+    expect(content).toContain("export type RoutePattern =");
     expect(content).toContain('"/"');
     expect(content).toContain('"/about"');
     expect(content).toContain('"/content"');
@@ -46,9 +47,10 @@ describe("generateRouteTypes", () => {
     expect(content).toContain('declare module "@farmjs/core"');
     expect(content).toContain('declare module "@farmjs/core/dist/client.js"');
     expect(content).toContain('_: import("./farm-routes").RoutePath');
+    expect(content).toContain('pattern: import("./farm-routes").RoutePattern');
   });
 
-  it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and RoutePath is string", async () => {
+  it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and route types are string", async () => {
     const outPath = await generateRouteTypes({
       root: tmpDir,
       srcDir: "src",
@@ -56,6 +58,7 @@ describe("generateRouteTypes", () => {
     });
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain("export type RoutePath = string");
+    expect(content).toContain("export type RoutePattern = string");
     expect(content).not.toContain("declare module");
     expect(content).not.toContain("LinkDefaultRoute");
   });
@@ -85,6 +88,7 @@ describe("generateRouteTypes", () => {
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain('"/docs/reference"');
     expect(content).toContain('"/docs"');
+    expect(content).toContain('"/docs/[...docs]"');
     expect(content).toContain("`/docs/${string}`");
   });
 
@@ -105,6 +109,7 @@ export default defineRoutes(({ page }) => [
     const content = fs.readFileSync(outPath, "utf8");
 
     expect(content).toContain("`/marketing/${string}`");
+    expect(content).toContain('"/marketing/[slug]"');
   });
 
   it("includes literal createRoute paths from normal feature files", async () => {
@@ -129,6 +134,7 @@ export const ProductRoute = createRoute("/products/[id]", {
     const content = fs.readFileSync(outPath, "utf8");
 
     expect(content).toContain("`/products/${string}`");
+    expect(content).toContain('"/products/[id]"');
   });
 
   it("writes a valid empty route union when no pages exist", async () => {
@@ -140,6 +146,7 @@ export const ProductRoute = createRoute("/products/[id]", {
       const content = fs.readFileSync(outPath, "utf8");
 
       expect(content).toContain("export type RoutePath = never;");
+      expect(content).toContain("export type RoutePattern = never;");
     } finally {
       await fs.promises.rm(root, { recursive: true, force: true });
     }

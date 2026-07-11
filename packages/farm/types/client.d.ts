@@ -8,7 +8,7 @@
 
 import type {
   AnchorHTMLAttributes,
-  ForwardRefExoticComponent,
+  ReactElement,
   ReactNode,
   RefAttributes,
 } from "react";
@@ -111,25 +111,99 @@ declare module "@farmjs/core/client" {
     ? TRoute
     : string;
 
+  export type DefaultRoutePattern = LinkDefaultRoute extends {
+    pattern: infer TRoute extends string;
+  }
+    ? TRoute
+    : DefaultRoutePath;
+
+  export type DefaultRouteHref = DefaultRoutePath | DefaultRoutePattern;
+
   export type RouteHref<TRoute extends string> =
     | TRoute
     | `${TRoute}?${string}`
     | `${TRoute}#${string}`
     | `${TRoute}?${string}#${string}`;
 
-  export interface LinkProps<TRoute extends string = DefaultRoutePath> extends Omit<
+  export type RouteParamPrimitive = string | number | boolean;
+  export type RouteParamValue = RouteParamPrimitive | readonly RouteParamPrimitive[];
+  export type RouteOptionalParamValue = RouteParamValue | null | undefined;
+  export type RouteQueryValue = RouteParamPrimitive | readonly RouteParamPrimitive[] | null | undefined;
+
+  export type RouteParams<TRoute extends string> = string extends TRoute
+    ? Record<string, RouteOptionalParamValue>
+    : ExtractRouteParams<StripRouteSuffix<TRoute>>;
+
+  export type StripRouteSuffix<TRoute extends string> = TRoute extends `${infer Path}?${string}`
+    ? StripRouteSuffix<Path>
+    : TRoute extends `${infer Path}#${string}`
+      ? StripRouteSuffix<Path>
+      : TRoute;
+
+  export type ExtractRouteParams<TRoute extends string> = Simplify<
+    ExtractOptionalCatchAllParams<TRoute> &
+      ExtractCatchAllParams<TRoute> &
+      ExtractDynamicParams<TRoute>
+  >;
+
+  export type ExtractOptionalCatchAllParams<TRoute extends string> =
+    TRoute extends `${string}[[...${infer Param}]]${infer Rest}`
+      ? { [Key in Param]?: RouteOptionalParamValue } & ExtractOptionalCatchAllParams<Rest>
+      : {};
+
+  export type ExtractCatchAllParams<TRoute extends string> =
+    TRoute extends `${string}[...${infer Param}]${infer Rest}`
+      ? Param extends `[...${string}`
+        ? ExtractCatchAllParams<Rest>
+        : { [Key in Param]: RouteParamValue } & ExtractCatchAllParams<Rest>
+      : {};
+
+  export type ExtractDynamicParams<TRoute extends string> =
+    TRoute extends `${string}[${infer Param}]${infer Rest}`
+      ? Param extends `...${string}` | `[...${string}`
+        ? ExtractDynamicParams<Rest>
+        : { [Key in Param]: RouteParamValue } & ExtractDynamicParams<Rest>
+      : {};
+
+  export type Simplify<T> = { [Key in keyof T]: T[Key] } & {};
+
+  export type LinkRouteParamsProps<TRoute extends string> = string extends TRoute
+    ? { params?: Record<string, RouteOptionalParamValue> }
+    : keyof RouteParams<TRoute> extends never
+      ? { params?: Record<string, RouteOptionalParamValue> }
+      : { params: RouteParams<TRoute> };
+
+  export type LinkRouteTargetProps<TRoute extends string> = TRoute extends string
+    ? {
+        href: RouteHref<TRoute>;
+      } & LinkRouteParamsProps<TRoute>
+    : never;
+
+  export type LinkExternalTargetProps = {
+    href: ExternalHref;
+    params?: never;
+  };
+
+  export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
     AnchorHTMLAttributes<HTMLAnchorElement>,
     "href"
-  > {
+  > &
+    (LinkExternalTargetProps | LinkRouteTargetProps<TRoute>) & {
     /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
-    href: RouteHref<TRoute> | ExternalHref;
     prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
+    query?: URLSearchParams | Record<string, RouteQueryValue>;
+    hash?: string;
+    trailingSlash?: boolean;
     prefetchDelay?: number;
     replace?: boolean;
     scroll?: boolean;
-  }
+  };
 
-  export const Link: ForwardRefExoticComponent<LinkProps & RefAttributes<HTMLAnchorElement>>;
+  export type LinkComponent = <TRoute extends string = DefaultRouteHref>(
+    props: LinkProps<TRoute> & RefAttributes<HTMLAnchorElement>,
+  ) => ReactElement;
+
+  export const Link: LinkComponent;
 
   export function useRouter(): {
     pathname: string;

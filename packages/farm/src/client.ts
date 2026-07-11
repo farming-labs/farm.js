@@ -73,5 +73,11 @@ export type {
   PrefetchBehavior,
   LinkDefaultRoute,
   DefaultRoutePath,
+  DefaultRoutePattern,
+  DefaultRouteHref,
   ExternalHref,
+  RouteHref,
+  RouteParamValue,
+  RouteOptionalParamValue,
+  RouteParams,
 } from "./client/link";

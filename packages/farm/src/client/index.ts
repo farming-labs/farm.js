@@ -11,7 +11,13 @@ export type {
   PrefetchBehavior,
   LinkDefaultRoute,
   DefaultRoutePath,
+  DefaultRoutePattern,
+  DefaultRouteHref,
   ExternalHref,
+  RouteHref,
+  RouteParamValue,
+  RouteOptionalParamValue,
+  RouteParams,
 } from "./link";
 export { useRouter } from "./router";
 export type { UseRouterOptions } from "./router";

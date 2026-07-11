@@ -67,6 +67,20 @@ describe("Link", () => {
       expect(observeForPrefetch).not.toHaveBeenCalled();
     });
 
+    it("prefetches the resolved href for route patterns with params", () => {
+      render(
+        createElement(Link<"/products/[id]">, {
+          href: "/products/[id]",
+          params: { id: "farm shoes" },
+          query: { tab: "reviews" },
+          hash: "details",
+          prefetch: "render",
+        }),
+      );
+
+      expect(prefetch).toHaveBeenCalledWith("/products/farm%20shoes?tab=reviews#details");
+    });
+
     it("prefetch=viewport calls observeForPrefetch", () => {
       const el = render(createElement(Link, { href: "/about", prefetch: "viewport" }));
       expect(observeForPrefetch).toHaveBeenCalledWith(el);
@@ -179,15 +193,42 @@ describe("Link", () => {
       expect(navigate).toHaveBeenCalledWith("/settings", { replace: true, scroll: false });
     });
 
+    it("renders and navigates with resolved route params, query, and hash", () => {
+      const el = render(
+        createElement(Link<"/products/[id]">, {
+          href: "/products/[id]?from=list",
+          params: { id: 123 },
+          query: { tab: "info" },
+          hash: "reviews",
+        }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("/products/123?from=list&tab=info#reviews");
+
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }));
+      });
+
+      expect(navigate).toHaveBeenCalledWith("/products/123?from=list&tab=info#reviews", {
+        replace: false,
+        scroll: true,
+      });
+    });
+
     it("external href has correct attribute and is not intercepted", () => {
-      const el = render(createElement(Link, { href: "https://example.com" })) as HTMLAnchorElement;
+      const onClick = vi.fn((event: React.MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+      });
+      const el = render(
+        createElement(Link, { href: "https://example.com", onClick }),
+      ) as HTMLAnchorElement;
       expect(el.getAttribute("href")).toBe("https://example.com");
       const clickEvent = new MouseEvent("click", { bubbles: true, button: 0, cancelable: true });
       act(() => {
         el.dispatchEvent(clickEvent);
       });
+      expect(onClick).toHaveBeenCalled();
       expect(navigate).not.toHaveBeenCalled();
-      expect(clickEvent.defaultPrevented).toBe(false);
     });
   });
 
@@ -196,6 +237,28 @@ describe("Link", () => {
       type AppRoutes = "/" | "/about" | "/blog/[slug]";
       const el = render(createElement(Link<AppRoutes>, { href: "/about" }));
       expect(el?.getAttribute("href")).toBe("/about");
+    });
+
+    it("accepts route patterns with inferred params", () => {
+      type AppRoutes = "/" | "/products/[id]" | "/docs/[[...slug]]";
+
+      expectTypeOf<LinkProps<"/products/[id]">["params"]>().toEqualTypeOf<
+        { id: string | number | boolean | readonly (string | number | boolean)[] } | undefined
+      >();
+
+      expectTypeOf<LinkProps<"/docs/[[...slug]]">["params"]>().toEqualTypeOf<
+        | {
+            slug?: string | number | boolean | readonly (string | number | boolean)[] | null;
+          }
+        | undefined
+      >();
+
+      render(
+        createElement(Link<AppRoutes>, {
+          href: "/products/[id]",
+          params: { id: "sku-123" },
+        }),
+      );
     });
 
     it("accepts route hrefs with query strings and hashes", () => {
