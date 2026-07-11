@@ -3,6 +3,7 @@
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
 import { createServerFn, FARM_SERVER_FN_SYMBOL } from "../server-fn";
+import { runWithServerActionRequest } from "../server-action-security";
 
 describe("createServerFn", () => {
   it("validates object input before calling the handler", async () => {
@@ -134,5 +135,27 @@ describe("createServerFn", () => {
 
     expectTypeOf(signup).parameter(0).toEqualTypeOf<{ email: string } | FormData>();
     expectTypeOf(await signup({ email: "ada@example.com" })).toEqualTypeOf<{ ok: true }>();
+  });
+
+  it("provides the action request and cancellation signal to handlers", async () => {
+    const controller = new AbortController();
+    const request = new Request("https://app.example.com/action", {
+      signal: controller.signal,
+    });
+    const inspect = createServerFn({
+      handler({ request: currentRequest, signal }) {
+        return {
+          request: currentRequest,
+          signal,
+        };
+      },
+    });
+
+    const result = await runWithServerActionRequest(request, () => inspect());
+
+    expect(result.request).toBe(request);
+    expect(result.signal).toBe(request.signal);
+    controller.abort();
+    expect(result.signal.aborted).toBe(true);
   });
 });

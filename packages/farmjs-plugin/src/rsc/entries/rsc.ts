@@ -32,12 +32,31 @@ import {
   }
   code += `} from '@vitejs/plugin-rsc/rsc';
 `;
+  if (ctx.actionsEnabled) {
+    code += `import {
+  createServerActionRequestErrorResponse,
+  prepareServerActionRequest,
+  runWithServerActionRequest,
+  sanitizeServerActionError,
+  validateServerActionRequest,
+} from '@farmjs/core/server-action-security';
+
+const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
+`;
+  }
 
   // Auto-discover pages, layouts, and middleware using Vite's glob import
   code += `
 // Debug logging helper
 function debug(...args) {
   ${debugLog}
+}
+
+function applyActionResponseHeaders(headers, request) {
+  if (${ctx.actionsEnabled ? "true" : "false"} && request.method === 'POST') {
+    headers.set('cache-control', 'no-store');
+    headers.set('x-content-type-options', 'nosniff');
+  }
 }
 
 // Auto-discover all page, layout, and middleware files
@@ -440,9 +459,30 @@ function getLayout(pageFilePath) {
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
  */
 async function handler(request) {
-  try {
   const url = new URL(request.url);
+  try {
   debug('Handling request:', request.method, url.pathname);
+
+  ${
+    ctx.actionsEnabled
+      ? `if (request.method === 'POST') {
+    try {
+      validateServerActionRequest(request, serverActionSecurity);
+    } catch (error) {
+      const rejection = createServerActionRequestErrorResponse(error);
+      if (rejection) return rejection;
+      return new Response('Bad Request', {
+        status: 400,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+  }`
+      : ""
+  }
 
   // Execute middleware first
   const middlewareResult = await executeMiddleware(request, url);
@@ -471,38 +511,103 @@ async function handler(request) {
   // Handle POST requests (server actions)
   if (request.method === 'POST') {
     const actionId = request.headers.get('x-farm-action-id');
+    let preparedActionRequest;
+
+    try {
+      preparedActionRequest = await prepareServerActionRequest(
+        request,
+        serverActionSecurity,
+        actionId ? 'javascript' : 'form',
+        actionId,
+      );
+    } catch (error) {
+      if (request.signal.aborted) {
+        return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+      }
+      const rejection = createServerActionRequestErrorResponse(error);
+      if (rejection) return rejection;
+      console.error('[Farm.js] Failed to read server action request:', error);
+      return new Response('Bad Request', {
+        status: 400,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     
     if (actionId) {
       // Action called via JavaScript (after hydration)
       debug('Executing server action:', actionId);
       temporaryReferences = createTemporaryReferenceSet();
+      let args, action;
+
       try {
-        const contentType = request.headers.get('content-type') || '';
-        const body = contentType.includes('multipart/form-data')
-          ? await request.formData()
-          : await request.text();
-        const args = await decodeReply(body, { temporaryReferences });
-        const action = await loadServerAction(actionId);
-        const data = await action.apply(null, args);
+        args = await decodeReply(preparedActionRequest.body, { temporaryReferences });
+        action = await loadServerAction(actionId);
+      } catch (error) {
+        console.error('[Farm.js] Invalid server action request:', error);
+        return new Response('Bad Request', {
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
+
+      try {
+        const data = await runWithServerActionRequest(request, () => action.apply(null, args));
         returnValue = { ok: true, data };
         debug('Server action succeeded:', actionId);
       } catch (e) {
-        returnValue = { ok: false, data: e };
+        if (request.signal.aborted) {
+          return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+        }
+        console.error('[Farm.js] Server action failed:', e);
+        returnValue = { ok: false, data: sanitizeServerActionError(e) };
         debug('Server action failed:', actionId, e);
       }
     } else {
       // Progressive enhancement (form submitted before JS loaded)
       debug('Handling progressive enhancement form submission');
-      
-      const formData = await request.formData();
-      const decoded = await decodeAction(formData);
+      const formData = preparedActionRequest.body;
+      let decoded;
+
+      try {
+        decoded = await decodeAction(formData);
+        if (typeof decoded !== 'function') throw new Error('Missing form action');
+      } catch (error) {
+        console.error('[Farm.js] Invalid form action request:', error);
+        return new Response('Bad Request', {
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
       
       try {
-        const result = await decoded();
+        const result = await runWithServerActionRequest(request, () => decoded());
         formState = await decodeFormState(result, formData);
       } catch (e) {
+        if (request.signal.aborted) {
+          return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+        }
+        console.error('[Farm.js] Form action failed:', e);
         debug('Form action failed:', e);
-        return new Response('Action Failed', { status: 500 });
+        return new Response('Server function failed', {
+          status: 500,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
       }
     }
   }
@@ -613,6 +718,7 @@ async function handler(request) {
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/x-component');
+      applyActionResponseHeaders(responseHeaders, request);
       return new Response(rscStream, { headers: responseHeaders });
     }
 
@@ -632,6 +738,7 @@ async function handler(request) {
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/html');
+      applyActionResponseHeaders(responseHeaders, request);
       return new Response(html, { headers: responseHeaders });
     }
   }
@@ -657,9 +764,23 @@ async function handler(request) {
   // Merge middleware headers with response headers
   const responseHeaders = new Headers(middlewareHeaders);
   responseHeaders.set('content-type', 'text/html');
+  applyActionResponseHeaders(responseHeaders, request);
   return new Response(html, { headers: responseHeaders });
   } catch (err) {
     console.error('[RSC] Handler error:', err);
+    if (request.method === 'POST') {
+      if (request.signal.aborted) {
+        return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+      }
+      return new Response('Server function failed', {
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     // If route has error.tsx, render it (Next.js-style: SSR error goes to route error boundary)
     const pathname = url.pathname.replace(/\\/$/, '') || '/';
     const ErrorComponent = getMatchingError(pathname, glob);

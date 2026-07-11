@@ -24,6 +24,7 @@
 
 import type { Plugin, UserConfig, ViteDevServer } from "vite";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
+import type { FarmServerActionsConfig } from "@farmjs/core/server-action-security";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
@@ -37,6 +38,9 @@ const require_ = createRequire(import.meta.url);
 const { farmApiPlugin, farmMiddlewarePlugin } = require_(
   "@farmjs/core",
 ) as typeof import("@farmjs/core");
+const { resolveServerActionsConfig } = require_(
+  "@farmjs/core/server-action-security",
+) as typeof import("@farmjs/core/server-action-security");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -56,6 +60,7 @@ export interface FarmRscConfig {
   };
   debug?: boolean;
   encryptActions?: boolean;
+  serverActions?: FarmServerActionsConfig;
   routesDir?: string;
   entries?: {
     rsc?: string;
@@ -83,6 +88,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     srcDir: config.srcDir ?? "src",
     outDir: config.outDir ?? "dist",
     basePath: config.basePath ?? "/",
+    serverActions: config.serverActions,
 
     // Vite server configuration
     server: {
@@ -105,6 +111,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       farmRsc({
         debug,
         encryptActions: config.encryptActions,
+        serverActions: config.serverActions,
         routesDir: config.routesDir,
         entries: config.entries,
       }),
@@ -273,6 +280,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           outDir?: string;
           basePath?: string;
           root?: string;
+          serverActions?: FarmServerActionsConfig;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
@@ -298,6 +306,12 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           basePath: c.basePath ?? "/",
           routesDir: options.routesDir,
           actionsEnabled,
+          serverActions: resolveServerActionsConfig({
+            ...c.serverActions,
+            ...options.serverActions,
+            allowedOrigins:
+              options.serverActions?.allowedOrigins ?? c.serverActions?.allowedOrigins,
+          }),
           debug,
         };
 
@@ -361,6 +375,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                     {
                       find: "@farmjs/core/server-fn",
                       replacement: path.join(farmCorePath, "dist/server-fn.mjs"),
+                    },
+                    {
+                      find: "@farmjs/core/server-action-security",
+                      replacement: path.join(farmCorePath, "dist/server-action-security.mjs"),
                     },
                     { find: "@farmjs/core", replacement: farmCorePath },
                   ],
@@ -533,11 +551,20 @@ setServerCallback(async (id, args) => {
   const headers = { 'x-farm-action-id': id, 'Accept': 'text/x-component' };
   if (typeof body === 'string') headers['Content-Type'] = 'text/plain; charset=utf-8';
   else if (!(body instanceof FormData)) headers['Content-Type'] = 'application/octet-stream';
-  const res = await fetch(location.href, { method: 'POST', headers, body });
+  const res = await fetch(location.href, {
+    method: 'POST',
+    headers,
+    body,
+    cache: 'no-store',
+    credentials: 'same-origin',
+    redirect: 'error',
+  });
   if (!res.ok) throw new Error('Server action failed: ' + res.status);
   const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
   if (p?.returnValue?.ok) return p.returnValue.data;
-  throw p?.returnValue?.data;
+  const error = new Error(p?.returnValue?.data?.message || 'Server function failed');
+  error.name = 'ServerActionError';
+  throw error;
 });
 `
             : "";
