@@ -106,4 +106,5 @@ export type {
   FarmNavigationListener,
   FarmNavigationLocation,
   FarmNavigationState,
+  FarmViewTransitionMode,
 } from "./client/spa-router";

@@ -198,6 +198,7 @@ declare module "@farmjs/core/client" {
     prefetchDelay?: number;
     replace?: boolean;
     scroll?: boolean;
+    viewTransition?: FarmViewTransitionMode;
   };
 
   export type LinkComponent = <TRoute extends string = DefaultRouteHref>(
@@ -216,10 +217,13 @@ declare module "@farmjs/core/client" {
     context: FarmNavigationBlockerContext,
   ) => boolean | void | Promise<boolean | void>;
 
+  export type FarmViewTransitionMode = boolean | "auto";
+
   export interface FarmNavigateOptions {
     replace?: boolean;
     scroll?: boolean;
     state?: unknown;
+    viewTransition?: FarmViewTransitionMode;
   }
 
   export interface FarmNavigationLocation {

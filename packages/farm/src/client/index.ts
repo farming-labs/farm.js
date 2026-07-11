@@ -66,5 +66,6 @@ export type {
   FarmNavigationBlocker,
   FarmNavigationBlockerContext,
   FarmNavigationState,
+  FarmViewTransitionMode,
 } from "./spa-router";
 export type { PageProps, LayoutProps, Metadata } from "../types";
