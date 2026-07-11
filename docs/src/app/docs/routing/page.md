@@ -306,6 +306,69 @@ This page renders at `/about` and exposes source at `/about.md`.
 
 Do not place `page.tsx` and `page.mdx` in the same folder. Farm treats that as a duplicate route and asks you to choose one page source.
 
+## Metadata And OG Images
+
+Export `metadata` for static head tags or `generateMetadata` when the values depend on route params, search params, middleware data, or route data. Farm merges layout metadata from root to leaf, then applies the page metadata last.
+
+**src/app/products/[id]/page.tsx**
+
+```tsx
+import type { PageProps } from "@farmjs/core";
+
+export const metadata = {
+  description: "Product details",
+  openGraph: {
+    siteName: "Acme",
+    type: "website",
+  },
+};
+
+export async function generateMetadata({ params }: PageProps) {
+  const product = await getProduct(params.id);
+
+  return {
+    title: product.name,
+    openGraph: {
+      title: product.name,
+      description: product.summary,
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: product.name,
+    },
+  };
+}
+
+export default function ProductPage() {
+  return <main>Product</main>;
+}
+```
+
+Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment to create a metadata image endpoint. Farm automatically adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
+
+**src/app/products/[id]/opengraph-image.tsx**
+
+```tsx
+import type { PageProps } from "@farmjs/core";
+
+export const size = { width: 1200, height: 630 };
+export const alt = "Product preview";
+export const contentType = "image/svg+xml";
+
+export default function ProductOpenGraphImage({ params }: PageProps) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
+      <rect width="1200" height="630" fill="#111827" />
+      <text x="80" y="340" fill="white" fontSize="72">
+        Product {params.id}
+      </text>
+    </svg>
+  );
+}
+```
+
+For `/products/42`, this file is served at `/products/42/opengraph-image` and Farm emits `og:image`, `og:image:width`, `og:image:height`, and `og:image:alt` tags. The default return value can be a React SVG element, a string, bytes, or a `Response`.
+
 ## File Route States
 
 Use `loading.tsx` and `error.tsx` next to a file route to define route-local loading and error states. Farm picks the nearest matching boundary, so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard pages unless a deeper segment defines its own boundary.

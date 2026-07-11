@@ -203,4 +203,44 @@ describe("RouteManager", () => {
       expect(root?.route.filePath).toBe("error.tsx");
     });
   });
+
+  describe("metadata image routes", () => {
+    it("discovers and matches opengraph-image and twitter-image files", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["page.tsx", "blog/[slug]/page.tsx"];
+        }
+        if (pattern.includes("opengraph-image")) {
+          return [
+            "opengraph-image.tsx",
+            "blog/[slug]/opengraph-image.tsx",
+            "blog/[slug]/twitter-image.tsx",
+          ];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.getMetadataImages().size).toBe(3);
+
+      const exact = routeManager.matchMetadataImage("/blog/farm/opengraph-image");
+      expect(exact?.image.pattern).toBe("/blog/[slug]");
+      expect(exact?.params).toEqual({ slug: "farm" });
+      expect(exact?.pagePath).toBe("/blog/farm");
+
+      const nearest = routeManager.getMatchingMetadataImage("/blog/farm/comments", "opengraph");
+      expect(nearest?.image.pattern).toBe("/blog/[slug]");
+      expect(routeManager.resolveMetadataImagePath(nearest!.image, nearest!.params)).toBe(
+        "/blog/farm/opengraph-image",
+      );
+
+      const twitter = routeManager.getMatchingMetadataImage("/blog/farm", "twitter");
+      expect(twitter?.image.pattern).toBe("/blog/[slug]");
+      expect(routeManager.resolveMetadataImagePath(twitter!.image, twitter!.params)).toBe(
+        "/blog/farm/twitter-image",
+      );
+    });
+  });
 });
