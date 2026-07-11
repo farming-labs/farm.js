@@ -10,6 +10,7 @@ import type {
   AnchorHTMLAttributes,
   ReactElement,
   ReactNode,
+  RefObject,
   RefAttributes,
 } from "react";
 
@@ -205,13 +206,62 @@ declare module "@farmjs/core/client" {
 
   export const Link: LinkComponent;
 
-  export function useRouter(): {
+  export interface FarmNavigationBlockerContext {
+    from: string;
+    to: string;
+    action: "push" | "replace" | "pop";
+  }
+
+  export type FarmNavigationBlocker = (
+    context: FarmNavigationBlockerContext,
+  ) => boolean | void | Promise<boolean | void>;
+
+  export interface FarmNavigateOptions {
+    replace?: boolean;
+    scroll?: boolean;
+    state?: unknown;
+  }
+
+  export interface UseRouterOptions {
+    basePath?: string;
+    routes?: Array<string | { path: string; name?: string; meta?: unknown }>;
+  }
+
+  export interface UseBlockerOptions {
+    when: boolean | ((context: FarmNavigationBlockerContext) => boolean);
+    message?: string;
+    shouldBlock?: (
+      context: FarmNavigationBlockerContext,
+    ) => boolean | Promise<boolean>;
+  }
+
+  export interface UseBlockerReturn {
+    active: boolean;
+  }
+
+  export function useRouter(options?: UseRouterOptions): {
     pathname: string;
     searchParams: URLSearchParams;
     params: Record<string, string>;
-    push: (path: string, opts?: { replace?: boolean; scroll?: boolean }) => void;
+    pageState: unknown;
+    push: (path: string) => void;
     replace: (path: string) => void;
+    pushState: <TState>(state: TState, href?: string) => void;
+    replaceState: <TState>(state: TState, href?: string) => void;
+    back: () => void;
+    forward: () => void;
   };
+
+  export function usePageState<TState = unknown>(): TState | null;
+  export function useBlocker(options: UseBlockerOptions): UseBlockerReturn;
+  export function useScrollRestoration<TElement extends HTMLElement = HTMLElement>(
+    key: string,
+  ): RefObject<TElement>;
+  export function navigateTo(href: string, options?: FarmNavigateOptions): Promise<void>;
+  export function prefetch(href: string): Promise<void>;
+  export function pushState<TState>(state: TState, href?: string): void;
+  export function replaceState<TState>(state: TState, href?: string): void;
+  export function readPageState<TState = unknown>(): TState | null;
 
   export interface APIClientOptions {
     baseURL?: string;

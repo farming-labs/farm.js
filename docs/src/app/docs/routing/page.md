@@ -99,6 +99,69 @@ export function CurrentUserTab() {
 }
 ```
 
+## Navigation blocking
+
+Use `useBlocker` when a client component needs to protect unsaved work before SPA navigation continues.
+
+```tsx
+"use client";
+
+import { useBlocker } from "@farmjs/core/client";
+
+export function ProductForm({ isDirty }: { isDirty: boolean }) {
+  useBlocker({
+    when: isDirty,
+    message: "You have unsaved changes.",
+  });
+
+  return <form>{/* ... */}</form>;
+}
+```
+
+Blockers apply to Farm SPA navigation and browser unload prompts. They improve UX, but they do not replace server-side validation or persistence checks.
+
+## Page state
+
+Use page state for shallow UI state that belongs in browser history but should not reload route data: modals, drawers, selected panels, or temporary filters.
+
+```tsx
+"use client";
+
+import { usePageState, useRouter } from "@farmjs/core/client";
+
+export function ProductToolbar() {
+  const router = useRouter();
+  const page = usePageState<{ modal?: "cart"; drawer?: "filters" }>();
+
+  return (
+    <>
+      <button onClick={() => router.pushState({ modal: "cart" })}>Cart</button>
+      <button onClick={() => router.replaceState({ drawer: "filters" })}>Filters</button>
+      {page?.modal === "cart" ? <CartModal /> : null}
+    </>
+  );
+}
+```
+
+Page state is stored in `history.state`, so back/forward navigation restores the previous state without changing the URL unless you pass an href.
+
+## Scroll restoration
+
+Farm restores window scroll during SPA navigation. Register nested scroll areas when a layout owns its own scroll container.
+
+```tsx
+"use client";
+
+import { useScrollRestoration } from "@farmjs/core/client";
+
+export function DocsSidebar() {
+  const ref = useScrollRestoration<HTMLDivElement>("docs-sidebar");
+  return <div ref={ref}>{/* links */}</div>;
+}
+```
+
+Use stable keys per scroll container. If two elements share a key, the latest mounted element owns that stored position.
+
 ## Route data cache
 
 Programmatic routes can cache the value returned from `data.main`. This is useful for product pages, docs pages, dashboards, and other route data that should be reused during server rendering or prefetching.
