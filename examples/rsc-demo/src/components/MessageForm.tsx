@@ -3,39 +3,22 @@
 // Client Component that calls a Server Action
 // Forms can call server actions directly without needing an API route!
 
-import React, { useState, useTransition } from "react";
+import React from "react";
+import { useServerFn } from "@farmjs/core/server-fn/client";
 import { submitMessage } from "../actions/user";
 
 export function MessageForm() {
-  const [isPending, startTransition] = useTransition();
-  const [result, setResult] = useState<{
-    success: boolean;
-    message?: { name: string };
-    error?: string;
-  } | null>(null);
-
-  async function handleSubmit(formData: FormData) {
-    startTransition(async () => {
-      try {
-        const result = await submitMessage(formData);
-        setResult(result);
-
-        // Clear form and notify messages list to refresh
-        if (result?.success) {
-          const form = document.getElementById("message-form") as HTMLFormElement;
-          form?.reset();
-          
-          // Dispatch custom event to refresh messages list
-          window.dispatchEvent(new CustomEvent("messages-updated"));
-        }
-      } catch (err) {
-        setResult({
-          success: false,
-          error: err instanceof Error ? err.message : String(err),
-        });
+  const submitMessageAction = useServerFn(submitMessage, {
+    onSuccess(result) {
+      if (result?.success) {
+        const form = document.getElementById("message-form") as HTMLFormElement;
+        form?.reset();
+        window.dispatchEvent(new CustomEvent("messages-updated"));
       }
-    });
-  }
+    },
+  });
+
+  const result = submitMessageAction.result;
 
   return (
     <div className="bg-slate-800/50 rounded-xl p-6 border border-orange-700/50">
@@ -47,7 +30,7 @@ export function MessageForm() {
         action directly. No API route needed!
       </p>
 
-      <form id="message-form" action={handleSubmit} className="space-y-4">
+      <form id="message-form" action={submitMessageAction.formAction} className="space-y-4">
         <div>
           <label htmlFor="name" className="block text-sm text-slate-400 mb-1">
             Name
@@ -81,17 +64,17 @@ export function MessageForm() {
 
         <button
           type="submit"
-          disabled={isPending}
+          disabled={submitMessageAction.pending}
           className="w-full px-4 py-2 bg-orange-600 hover:bg-orange-500 disabled:bg-orange-800 disabled:cursor-not-allowed rounded-lg font-semibold transition-colors"
         >
-          {isPending ? "Submitting..." : "Submit Message"}
+          {submitMessageAction.pending ? "Submitting..." : "Submit Message"}
         </button>
       </form>
 
-      {result && (
+      {(result || submitMessageAction.error) && (
         <div
           className={`mt-4 p-4 rounded-lg ${
-            result.success
+            result?.success
               ? "bg-green-900/30 border border-green-700/50"
               : "bg-red-900/30 border border-red-700/50"
           }`}
@@ -101,7 +84,9 @@ export function MessageForm() {
               ✓ Message from "{result.message?.name}" saved on the server!
             </p>
           ) : (
-            <p className="text-red-400">✗ {result.error}</p>
+            <p className="text-red-400">
+              ✗ {result?.error ?? submitMessageAction.error?.message}
+            </p>
           )}
         </div>
       )}
