@@ -19,7 +19,13 @@ export type {
   RouteOptionalParamValue,
   RouteParams,
 } from "./link";
-export { useBlocker, usePageState, useRouter, useScrollRestoration } from "./router";
+export {
+  useBlocker,
+  useNavigation,
+  usePageState,
+  useRouter,
+  useScrollRestoration,
+} from "./router";
 export type { UseBlockerOptions, UseBlockerReturn, UseRouterOptions } from "./router";
 export { buildFarmRoutePath, createFarmRouter, isFarmRouteActive, matchFarmRoute } from "../router";
 export type {
@@ -55,7 +61,10 @@ export {
 } from "./spa-router";
 export type {
   FarmNavigateOptions,
+  FarmNavigationListener,
+  FarmNavigationLocation,
   FarmNavigationBlocker,
   FarmNavigationBlockerContext,
+  FarmNavigationState,
 } from "./spa-router";
 export type { PageProps, LayoutProps, Metadata } from "../types";

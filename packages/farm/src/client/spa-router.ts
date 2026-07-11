@@ -49,7 +49,33 @@ export interface FarmNavigateOptions {
   state?: unknown;
 }
 
+export interface FarmNavigationLocation {
+  href: string;
+  pathname: string;
+  search: string;
+  hash: string;
+}
+
+export interface FarmNavigationState {
+  state: "idle" | "loading";
+  pending: boolean;
+  from: string | null;
+  to: FarmNavigationLocation | null;
+  action: FarmNavigationBlockerContext["action"] | null;
+  startedAt: number | null;
+}
+
+export type FarmNavigationListener = (state: FarmNavigationState) => void;
+
 const FARM_PAGE_STATE_KEY = "__farmPageState";
+const IDLE_NAVIGATION_STATE: FarmNavigationState = {
+  state: "idle",
+  pending: false,
+  from: null,
+  to: null,
+  action: null,
+  startedAt: null,
+};
 
 // Global router instance
 let routerInstance: SPARouter | null = null;
@@ -59,6 +85,8 @@ export class SPARouter {
   private prefetchingUrls: Set<string> = new Set();
   private observers: Map<Element, IntersectionObserver> = new Map();
   private blockers: Set<FarmNavigationBlocker> = new Set();
+  private navigationListeners: Set<FarmNavigationListener> = new Set();
+  private navigationState: FarmNavigationState = IDLE_NAVIGATION_STATE;
   private scrollElements: Map<string, HTMLElement> = new Map();
   private options: Required<RouterOptions>;
   private onNavigate?: (data: PageData) => Promise<void>;
@@ -125,6 +153,12 @@ export class SPARouter {
       this.saveScrollPosition(window.location.pathname);
     }
 
+    this.startNavigation({
+      from,
+      to: createNavigationLocation(url),
+      action: replace ? "replace" : "push",
+    });
+
     try {
       // Fetch page data (from cache or server)
       const pageData = await this.fetchPageData(fullPath);
@@ -174,7 +208,10 @@ export class SPARouter {
         // Restore previous scroll position if available
         this.restoreScrollPosition(pathname);
       }
+
+      this.finishNavigation();
     } catch (error) {
+      this.finishNavigation();
       console.error("[Farm.js] Navigation error:", error);
       // Fall back to full page navigation
       window.location.href = href;
@@ -252,6 +289,18 @@ export class SPARouter {
     };
   }
 
+  getNavigationState(): FarmNavigationState {
+    return this.navigationState;
+  }
+
+  subscribeNavigation(listener: FarmNavigationListener): () => void {
+    this.navigationListeners.add(listener);
+    listener(this.navigationState);
+    return () => {
+      this.navigationListeners.delete(listener);
+    };
+  }
+
   registerScrollElement(key: string, element: HTMLElement): () => void {
     this.scrollElements.set(key, element);
     this.restoreScrollElement(window.location.pathname, key, element);
@@ -319,6 +368,12 @@ export class SPARouter {
       return;
     }
 
+    this.startNavigation({
+      from: event.state?.path || path,
+      to: createNavigationLocation(new URL(window.location.href)),
+      action: "pop",
+    });
+
     try {
       const pageData = await this.fetchPageData(path);
 
@@ -336,7 +391,10 @@ export class SPARouter {
       if (this.options.scrollRestoration) {
         this.restoreScrollPosition(window.location.pathname);
       }
+
+      this.finishNavigation();
     } catch (error) {
+      this.finishNavigation();
       console.error("[Farm.js] Popstate navigation error:", error);
       // Reload the page as fallback
       window.location.reload();
@@ -365,6 +423,32 @@ export class SPARouter {
       }
     }
     return false;
+  }
+
+  private startNavigation(options: {
+    from: string;
+    to: FarmNavigationLocation;
+    action: FarmNavigationBlockerContext["action"];
+  }): void {
+    this.setNavigationState({
+      state: "loading",
+      pending: true,
+      from: options.from,
+      to: options.to,
+      action: options.action,
+      startedAt: Date.now(),
+    });
+  }
+
+  private finishNavigation(): void {
+    this.setNavigationState(IDLE_NAVIGATION_STATE);
+  }
+
+  private setNavigationState(state: FarmNavigationState): void {
+    this.navigationState = state;
+    for (const listener of this.navigationListeners) {
+      listener(state);
+    }
   }
 
   private writePageState(action: "push" | "replace", state: unknown, href?: string): void {
@@ -500,6 +584,15 @@ function createHistoryState(path: string, pageState: unknown, currentState?: unk
     ...base,
     path,
     [FARM_PAGE_STATE_KEY]: pageState,
+  };
+}
+
+function createNavigationLocation(url: URL): FarmNavigationLocation {
+  return {
+    href: url.href,
+    pathname: url.pathname,
+    search: url.search,
+    hash: url.hash,
   };
 }
 

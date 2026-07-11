@@ -4,7 +4,7 @@
 import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useBlocker, useScrollRestoration } from "../client/router";
+import { useBlocker, useNavigation, useScrollRestoration } from "../client/router";
 import { navigateTo, pushState, readPageState, replaceState, SPARouter } from "../client/spa-router";
 
 describe("navigation state and blocking", () => {
@@ -41,6 +41,7 @@ describe("navigation state and blocking", () => {
     container.remove();
     root = undefined;
     sessionStorage.clear();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.useRealTimers();
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
@@ -95,6 +96,58 @@ describe("navigation state and blocking", () => {
     expect(window.confirm).toHaveBeenCalledWith("Leave this form?");
     expect(fetch).not.toHaveBeenCalled();
     expect(window.location.pathname).toBe("/");
+  });
+
+  it("exposes pending navigation state while a route transition loads", async () => {
+    let releaseFetch!: () => void;
+    vi.mocked(fetch).mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          releaseFetch = () => {
+            resolve(
+              new Response(
+                JSON.stringify({
+                  props: {},
+                  modulePath: "/src/app/reports/page.tsx",
+                  metadata: { title: "Reports" },
+                }),
+                { status: 200, headers: { "Content-Type": "application/json" } },
+              ),
+            );
+          };
+        }),
+    );
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+
+    function App() {
+      const navigation = useNavigation();
+      return createElement(
+        "output",
+        null,
+        `${navigation.state}:${navigation.to?.pathname ?? ""}:${navigation.action ?? ""}`,
+      );
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    let navigationPromise!: Promise<void>;
+    await act(async () => {
+      navigationPromise = navigateTo("/reports");
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toBe("loading:/reports:push");
+
+    await act(async () => {
+      releaseFetch();
+      await navigationPromise;
+    });
+
+    expect(container.textContent).toBe("idle::");
+    expect(window.location.pathname).toBe("/reports");
   });
 
   it("restores registered nested scroll containers by key", () => {

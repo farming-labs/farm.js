@@ -4,6 +4,7 @@ import {
   getRouter as getSPARouter,
   readPageState,
   type FarmNavigationBlockerContext,
+  type FarmNavigationState,
 } from "./spa-router";
 
 interface RouterState {
@@ -120,6 +121,19 @@ export function usePageState<TState = unknown>(): TState | null {
     handlePopState();
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  return state;
+}
+
+export function useNavigation(): FarmNavigationState {
+  const [state, setState] = useState<FarmNavigationState>(() =>
+    getSPARouter().getNavigationState(),
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    return getSPARouter().subscribeNavigation(setState);
   }, []);
 
   return state;
