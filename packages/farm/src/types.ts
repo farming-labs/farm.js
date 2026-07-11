@@ -165,6 +165,21 @@ export interface PageProps {
    */
   context?: PluginContextProps;
 }
+
+export interface LoadingProps {
+  params: Record<string, string>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  search?: Record<string, string | string[] | undefined>;
+  path: string;
+  middleware?: MiddlewareProps;
+  context?: PluginContextProps;
+}
+
+export interface ErrorProps extends LoadingProps {
+  error: unknown;
+  reset: () => void;
+}
+
 /**
  * Helper type to create typed page props with specific middleware data shape
  *
@@ -198,6 +213,8 @@ export interface LayoutProps {
 
 export type Page = ComponentType<PageProps>;
 export type Layout = ComponentType<LayoutProps>;
+export type Loading = ComponentType<LoadingProps>;
+export type ErrorBoundary = ComponentType<ErrorProps>;
 /**
  * Route module exports for pages
  *
