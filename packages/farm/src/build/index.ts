@@ -12,6 +12,7 @@ import { buildUniversal } from "../nitro/universal-build";
 import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
+import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 
 interface BuildOptions {
   preset?: string;
@@ -169,7 +170,7 @@ async function buildClient(
         input: path.join(root, srcDir, "app", "page.tsx"),
       },
     },
-    plugins: [farmPlugin(config, pluginManager)],
+    plugins: [farmPlugin(config, pluginManager), farmEnvironmentFunctionsPlugin()],
     mode: "production",
   });
 }
@@ -211,7 +212,7 @@ async function buildSSR(
       __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
       __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
     },
-    plugins: [farmPlugin(config, pluginManager)],
+    plugins: [farmPlugin(config, pluginManager), farmEnvironmentFunctionsPlugin()],
     mode: "production",
   });
 }

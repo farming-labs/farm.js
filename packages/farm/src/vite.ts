@@ -45,6 +45,7 @@ import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
+import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -3038,7 +3039,13 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
   };
 
   return {
-    plugins: [tailwindcss(), viteBrowserExternalPlugin, farmPlugin(config), farmBrandingPlugin],
+    plugins: [
+      tailwindcss(),
+      viteBrowserExternalPlugin,
+      farmPlugin(config),
+      farmEnvironmentFunctionsPlugin(),
+      farmBrandingPlugin,
+    ],
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {

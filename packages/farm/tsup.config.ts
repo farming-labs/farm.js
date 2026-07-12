@@ -31,6 +31,8 @@ export default defineConfig({
     "server-action-security": "src/server-action-security.ts",
     env: "src/env.ts",
     "env-types": "src/env-types.ts",
+    environment: "src/environment.ts",
+    "environment/vite": "src/environment-vite.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

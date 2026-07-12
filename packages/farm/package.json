@@ -78,6 +78,12 @@
       "env-types": [
         "./dist/env-types.d.ts"
       ],
+      "environment": [
+        "./dist/environment.d.ts"
+      ],
+      "environment/vite": [
+        "./dist/environment/vite.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -189,6 +195,16 @@
       "types": "./dist/env-types.d.ts",
       "import": "./dist/env-types.mjs",
       "require": "./dist/env-types.cjs"
+    },
+    "./environment": {
+      "types": "./dist/environment.d.ts",
+      "import": "./dist/environment.mjs",
+      "require": "./dist/environment.cjs"
+    },
+    "./environment/vite": {
+      "types": "./dist/environment/vite.d.ts",
+      "import": "./dist/environment/vite.mjs",
+      "require": "./dist/environment/vite.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",

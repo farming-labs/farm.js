@@ -24,6 +24,7 @@ import {
 } from "../workflows";
 import { routeRulesToNitroRouteRules } from "../route-rules";
 import { getFarmAppDirectories } from "../layers";
+import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -548,6 +549,7 @@ async function buildClient(
           },
         },
         farmPlugin(config, pluginManager),
+        farmEnvironmentFunctionsPlugin(),
       ],
       mode: "production",
       css: postcssSearchPath
@@ -1388,6 +1390,7 @@ async function buildSSRInMemory(
       },
       plugins: [
         farmPlugin(config, pluginManager),
+        farmEnvironmentFunctionsPlugin(),
         {
           name: "farm-virtual-ssr-entry",
           resolveId(id) {

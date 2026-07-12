@@ -97,6 +97,7 @@ export * from "./observability";
 export * from "./workflows";
 export * from "./env";
 export * from "./env-types";
+export * from "./environment";
 export * from "./type-artifacts";
 export * from "./server-fn";
 export * from "./server-fn-client";
