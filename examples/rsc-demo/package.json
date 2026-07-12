@@ -9,6 +9,7 @@
     "build": "vite build && node scripts/nitro-post.mjs && node scripts/vercel-output.mjs",
     "build:vercel": "vite build && node scripts/nitro-post.mjs && node scripts/vercel-output.mjs",
     "build:cloudflare": "NITRO_PRESET=cloudflare_pages vite build",
+    "type-check": "tsc --noEmit",
     "preview": "node .output/server/index.mjs",
     "preview:cloudflare": "pnpm run build:cloudflare && npx wrangler pages dev .output/public --compatibility-date=2024-12-01",
     "deploy:vercel": "pnpm run build:vercel && vercel deploy --yes --prebuilt",

@@ -390,15 +390,13 @@ async function buildClient(
   );
 
   // Generate client hydration entry code
-  const clientEntryDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-client-entry-"));
+  // Keep generated entries under the project so bare imports resolve through the
+  // application's node_modules, including isolated production-build fixtures.
+  const clientEntryRoot = path.join(root, ".farm", "tmp");
+  await fs.mkdir(clientEntryRoot, { recursive: true });
+  const clientEntryDir = await fs.mkdtemp(path.join(clientEntryRoot, "client-entry-"));
   const clientEntryPath = path.join(clientEntryDir, "farm-client-entry.tsx");
-  const clientHydrationCode = generateClientHydrationEntry(
-    clientPages,
-    layoutRoutes,
-    root,
-    srcDir,
-    clientEntryDir,
-  );
+  const clientHydrationCode = generateClientHydrationEntry(clientPages, layoutRoutes, root, srcDir);
 
   // Write the client entry to a temporary file
   await fs.writeFile(clientEntryPath, clientHydrationCode);
@@ -429,6 +427,9 @@ async function buildClient(
   try {
     await viteBuild({
       root,
+      esbuild: {
+        jsxDev: false,
+      },
       build: {
         outDir: outputDir,
         emptyOutDir: true,
@@ -589,7 +590,6 @@ function generateClientHydrationEntry(
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   root: string,
   srcDir: string,
-  clientEntryDir: string,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
 
@@ -1352,6 +1352,7 @@ async function buildSSRInMemory(
       esbuild: {
         target: "node18",
         keepNames: true,
+        jsxDev: false,
       },
       // SSR configuration to externalize problematic modules
       ssr: {

@@ -14,6 +14,7 @@ import {
   createCompressionPlugin,
   createLoggerPlugin,
 } from "../plugins";
+import { mergeFarmViteConfig } from "./vite-config";
 
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
@@ -194,67 +195,71 @@ export async function createServer(config: FarmConfig = {}) {
       }
     }
 
-    const server = await createViteServer({
-      root: projectRoot,
-      css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
-      plugins: [
-        ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
-        createDevDependencyStubsPlugin(),
-        farmPlugin(finalConfig, pluginManager),
-        farmEnvironmentFunctionsPlugin(),
-        createBrandingPlugin(),
-      ],
-      server: {
-        middlewareMode: false,
-      },
-      optimizeDeps: {
-        // Avoid Vite scanning server/native-only deps from framework internals.
-        noDiscovery: true,
-        include: [
-          "react",
-          "react-dom",
-          "react-dom/client",
-          "react/jsx-runtime",
-          "react/jsx-dev-runtime",
-        ],
-        exclude: [
-          "@farmjs/core/server",
-          "@farmjs/core/api",
-          "@farmjs/core/middleware",
-          "@farmjs/core/config",
-          "nitro",
-          "h3",
-          "vite",
-          "esbuild",
-          "rollup",
-          "fsevents",
-          "nf3",
-          "better-call",
-          "zod",
-          "supports-color",
-          "node-fetch",
-          "consola",
-          "mock-aws-s3",
-          "aws-sdk",
-          "nock",
-          "lightningcss",
-          "@tailwindcss/oxide",
-        ],
-      },
-      ssr: {
-        noExternal: ["farm"],
-      },
-      customLogger: {
-        info: () => {},
-        warn: () => {},
-        warnOnce: () => {},
-        error: (msg) => logger.error(String(msg)),
-        clearScreen: () => {},
-        hasErrorLogged: () => false,
-        hasWarned: false,
-      },
-      ...resolvedConfig?.vite,
-    });
+    const server = await createViteServer(
+      mergeFarmViteConfig(
+        {
+          root: projectRoot,
+          css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
+          plugins: [
+            ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+            createDevDependencyStubsPlugin(),
+            farmPlugin(finalConfig, pluginManager),
+            farmEnvironmentFunctionsPlugin(),
+            createBrandingPlugin(),
+          ],
+          server: {
+            middlewareMode: false,
+          },
+          optimizeDeps: {
+            // Avoid Vite scanning server/native-only deps from framework internals.
+            noDiscovery: true,
+            include: [
+              "react",
+              "react-dom",
+              "react-dom/client",
+              "react/jsx-runtime",
+              "react/jsx-dev-runtime",
+            ],
+            exclude: [
+              "@farmjs/core/server",
+              "@farmjs/core/api",
+              "@farmjs/core/middleware",
+              "@farmjs/core/config",
+              "nitro",
+              "h3",
+              "vite",
+              "esbuild",
+              "rollup",
+              "fsevents",
+              "nf3",
+              "better-call",
+              "zod",
+              "supports-color",
+              "node-fetch",
+              "consola",
+              "mock-aws-s3",
+              "aws-sdk",
+              "nock",
+              "lightningcss",
+              "@tailwindcss/oxide",
+            ],
+          },
+          ssr: {
+            noExternal: ["farm"],
+          },
+          customLogger: {
+            info: () => {},
+            warn: () => {},
+            warnOnce: () => {},
+            error: (msg) => logger.error(String(msg)),
+            clearScreen: () => {},
+            hasErrorLogged: () => false,
+            hasWarned: false,
+          },
+        },
+        resolvedConfig?.vite,
+      ),
+    );
 
     (server as any).__farmPluginManager = pluginManager;
 

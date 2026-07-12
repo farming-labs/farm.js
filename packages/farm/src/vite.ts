@@ -1,7 +1,7 @@
 import type { ConfigEnv, Plugin, ViteDevServer, HmrContext } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
-import { logger } from "./utils";
+import { logger, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
 import type { PluginManager } from "./plugin";
 import { HMRManager } from "./hmr";
@@ -164,6 +164,94 @@ function fileContainsProgrammaticPageRoute(file: string): boolean {
   } catch {
     return false;
   }
+}
+
+interface FarmModuleAstNode {
+  type: string;
+  start: number;
+  end: number;
+  [key: string]: unknown;
+}
+
+export function rewriteEarlySsrRelativeImports(options: {
+  code: string;
+  id: string;
+  root: string;
+  parse: (code: string) => FarmModuleAstNode;
+}): string | null {
+  const cleanId = options.id.split("?", 1)[0];
+  if (!path.isAbsolute(cleanId) || cleanId.replace(/\\/g, "/").includes("/node_modules/")) {
+    return null;
+  }
+
+  const replacements: Array<{ start: number; end: number; code: string }> = [];
+  let ast: FarmModuleAstNode;
+  try {
+    ast = options.parse(options.code);
+  } catch {
+    return null;
+  }
+
+  walkModuleAst(ast, (node) => {
+    if (
+      node.type !== "ImportDeclaration" &&
+      node.type !== "ExportNamedDeclaration" &&
+      node.type !== "ExportAllDeclaration" &&
+      node.type !== "ImportExpression"
+    ) {
+      return;
+    }
+
+    const source = node.source;
+    if (!isFarmModuleAstNode(source) || typeof source.value !== "string") return;
+    if (!source.value.startsWith(".")) return;
+
+    const suffixIndex = source.value.search(/[?#]/);
+    const sourcePath = suffixIndex === -1 ? source.value : source.value.slice(0, suffixIndex);
+    const suffix = suffixIndex === -1 ? "" : source.value.slice(suffixIndex);
+    const resolvedPath = path.resolve(path.dirname(cleanId), sourcePath);
+
+    replacements.push({
+      start: source.start,
+      end: source.end,
+      code: JSON.stringify(`${toViteModuleId(resolvedPath, options.root)}${suffix}`),
+    });
+  });
+
+  if (replacements.length === 0) return null;
+
+  let output = options.code;
+  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
+    output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
+  }
+  return output;
+}
+
+function walkModuleAst(node: FarmModuleAstNode, visit: (node: FarmModuleAstNode) => void): void {
+  visit(node);
+
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "start" || key === "end" || key === "loc" || key === "range") continue;
+    if (isFarmModuleAstNode(value)) {
+      walkModuleAst(value, visit);
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (isFarmModuleAstNode(item)) walkModuleAst(item, visit);
+      }
+    }
+  }
+}
+
+function isFarmModuleAstNode(value: unknown): value is FarmModuleAstNode {
+  return (
+    !!value &&
+    typeof value === "object" &&
+    typeof (value as FarmModuleAstNode).type === "string" &&
+    typeof (value as FarmModuleAstNode).start === "number" &&
+    typeof (value as FarmModuleAstNode).end === "number"
+  );
 }
 
 function isFarmConfigFile(file: string, root: string): boolean {
@@ -1318,14 +1406,31 @@ export const manifest = getManifest();
       }
     },
 
-    transform(code, id) {
-      if (hasUseClientDirective(code)) {
+    transform(code, id, transformOptions) {
+      let transformedCode = code;
+      let transformed = false;
+
+      if (transformOptions?.ssr && server) {
+        const rewrittenImports = rewriteEarlySsrRelativeImports({
+          code: transformedCode,
+          id,
+          root: server.config.root,
+          parse: (source) => this.parse(source) as unknown as FarmModuleAstNode,
+        });
+        if (rewrittenImports) {
+          transformedCode = rewrittenImports;
+          transformed = true;
+        }
+      }
+
+      if (hasUseClientDirective(transformedCode)) {
         const moduleInfo = this.getModuleInfo(id);
         if (moduleInfo) {
           (moduleInfo as any).isClientComponent = true;
         }
 
-        const transformedCode = stripUseClientDirective(code);
+        transformedCode = stripUseClientDirective(transformedCode);
+        transformed = true;
 
         // Store client component for later injection
         if (!farmApp) {
@@ -1366,7 +1471,7 @@ if (import.meta.hot) {
         };
       }
 
-      return null;
+      return transformed ? { code: transformedCode, map: null } : null;
     },
 
     generateBundle(options, bundle) {
@@ -1613,6 +1718,10 @@ function generateProgrammaticRouteModule(moduleId: string, root?: string): strin
 
   const routeFile = toProgrammaticRouteImportSpecifier(parsed.filePath, root);
 
+  if (parsed.kind === "api") {
+    return generateProgrammaticApiRouteModule(parsed.routePath, routeFile);
+  }
+
   return `
 import { createElement as __farmCreateElement } from "react";
 import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
@@ -1633,16 +1742,18 @@ const __farmRouteListFromCandidate = (candidate) => {
   if (__farmIsRouteDefinition(candidate)) return [candidate];
   return [];
 };
+const __farmGetRouteExport = (name) => Reflect.get(__farmRoutesModule, name);
 const __farmRouteCandidates = [
-  __farmRoutesModule.default,
-  __farmRoutesModule.routes,
-  __farmRoutesModule.Route,
+  __farmGetRouteExport("default"),
+  __farmGetRouteExport("routes"),
+  __farmGetRouteExport("Route"),
 ];
 let __farmRoutes = [];
 for (const __farmCandidate of __farmRouteCandidates) {
   __farmRoutes = __farmRouteListFromCandidate(__farmCandidate);
   if (__farmRoutes.length > 0) break;
 }
+
 if (__farmRoutes.length === 0) {
   __farmRoutes = Object.values(__farmRoutesModule).filter(__farmIsRouteDefinition);
 }
@@ -1850,6 +1961,63 @@ export default __farmNeedsPageWrapper
 `;
 }
 
+function generateProgrammaticApiRouteModule(routePath: string, routeFile: string): string {
+  return `
+import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
+
+const __farmIsRouteDefinition = (value) => (
+  value && typeof value === "object" && (
+    value.kind === "page" ||
+    value.kind === "layout" ||
+    value.kind === "api" ||
+    value.kind === "redirect"
+  )
+);
+const __farmRouteListFromCandidate = (candidate) => {
+  if (Array.isArray(candidate)) return candidate;
+  if (Array.isArray(candidate?.routes)) return candidate.routes;
+  if (__farmIsRouteDefinition(candidate)) return [candidate];
+  return [];
+};
+const __farmGetRouteExport = (name) => Reflect.get(__farmRoutesModule, name);
+const __farmRouteCandidates = [
+  __farmGetRouteExport("default"),
+  __farmGetRouteExport("routes"),
+  __farmGetRouteExport("Route"),
+];
+let __farmRoutes = [];
+for (const __farmCandidate of __farmRouteCandidates) {
+  __farmRoutes = __farmRouteListFromCandidate(__farmCandidate);
+  if (__farmRoutes.length > 0) break;
+}
+if (__farmRoutes.length === 0) {
+  __farmRoutes = Object.values(__farmRoutesModule).filter(__farmIsRouteDefinition);
+}
+const __farmNormalizeRoutePath = (value) => {
+  const withSlash = value && value.startsWith("/") ? value : "/" + (value || "");
+  return withSlash.length > 1 ? withSlash.replace(/\\/+$/, "") : withSlash;
+};
+const __farmRoute = __farmRoutes.find((route) => (
+  route?.kind === "api" &&
+  __farmNormalizeRoutePath(route.path) === ${JSON.stringify(routePath)}
+));
+
+if (!__farmRoute) {
+  throw new Error(${JSON.stringify(
+    `Programmatic api route "${routePath}" was not found in ${routeFile}.`,
+  )});
+}
+
+export const GET = __farmRoute.methods.GET;
+export const HEAD = __farmRoute.methods.HEAD;
+export const POST = __farmRoute.methods.POST;
+export const PUT = __farmRoute.methods.PUT;
+export const DELETE = __farmRoute.methods.DELETE;
+export const PATCH = __farmRoute.methods.PATCH;
+export const OPTIONS = __farmRoute.methods.OPTIONS;
+`.trim();
+}
+
 function toProgrammaticRouteImportSpecifier(filePath: string, root?: string): string {
   if (root && filePath.startsWith(root)) {
     return filePath.slice(root.length) || "/";
@@ -1943,7 +2111,7 @@ function generateClientCode(
   return `
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
-import { installChunkErrorRecovery } from '@farmjs/core/client'
+import { installChunkErrorRecovery, SPARouter } from '@farmjs/core/client'
 ${providerImportBlock}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
@@ -2078,7 +2246,7 @@ function findLayouts(pathname) {
 // ====== SPA ROUTER ======
 // Client-side router - no server requests needed!
 
-class SPARouter {
+class LegacyManifestSPARouter {
   constructor() {
     this.moduleCache = new Map();
     this.prefetchingUrls = new Set();
@@ -2289,7 +2457,9 @@ class SPARouter {
 }
 
 // Initialize the SPA router
-const spaRouter = new SPARouter();
+const spaRouter = new SPARouter({
+  shouldUseDocumentNavigation: matchesDocumentNavigation,
+});
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 // Cache for loaded page modules
@@ -2544,7 +2714,16 @@ async function renderPage(pageData) {
   const container = document.getElementById('root');
   if (!container) return;
 
-  const { route, params, layouts } = pageData;
+  const route = {
+    modulePath: pageData.modulePath,
+    isClientComponent: pageData.isClientComponent === true,
+    shouldHydrate: pageData.shouldHydrate === true,
+  };
+  const params = pageData.props?.params || {};
+  const layouts = (pageData.layoutModules || []).map((modulePath, index) => ({
+    modulePath,
+    pattern: index === 0 ? '/' : modulePath,
+  }));
   const path = window.location.pathname + window.location.search;
 
   // Helper to fetch HTML and swap content, then re-hydrate if client component
@@ -2706,6 +2885,9 @@ async function hydrate() {
       return
     }
 
+    let pageProps = normalizeServerProps(window.__FARM_PROPS__);
+    applyCanonicalPathFromProps(pageProps);
+
     const shouldHydrate =
       window.__FARM_SHOULD_HYDRATE__ === true ||
       isClientComponent ||
@@ -2716,8 +2898,6 @@ async function hydrate() {
     }
 
     // Get props - either from server-injected props or by matching the current URL
-    let pageProps = normalizeServerProps(window.__FARM_PROPS__);
-    applyCanonicalPathFromProps(pageProps);
     if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
       // Extract params from URL using manifest route matching (fallback)
       const pathname = window.location.pathname;
@@ -2815,8 +2995,12 @@ document.addEventListener('click', function(event) {
   event.preventDefault();
   const replace = target.hasAttribute('data-replace');
   const scroll = !target.hasAttribute('data-no-scroll');
+  const viewTransitionValue = target.getAttribute('data-view-transition');
+  const viewTransition = viewTransitionValue === 'auto'
+    ? 'auto'
+    : viewTransitionValue === 'true';
   
-  spaRouter.navigate(href, { replace, scroll });
+  spaRouter.navigate(href, { replace, scroll, viewTransition });
 }, true);  // Use capture phase to handle before React
 
 if (import.meta.hot) {

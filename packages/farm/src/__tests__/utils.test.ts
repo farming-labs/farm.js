@@ -1,5 +1,20 @@
+import path from "path";
 import { describe, it, expect } from "vitest";
-import { parseRoutePath, matchRoute, segmentsToPattern } from "../utils";
+import { parseRoutePath, matchRoute, segmentsToPattern, toViteModuleId } from "../utils";
+
+describe("toViteModuleId", () => {
+  it("uses root URLs for project files and /@fs URLs for external files", () => {
+    const root = path.resolve("/workspace/app");
+
+    expect(toViteModuleId(path.join(root, "src", "farm.routes.tsx"), root)).toBe(
+      "/src/farm.routes.tsx",
+    );
+    expect(toViteModuleId(path.resolve("/workspace/layer/routes.ts"), root)).toBe(
+      "/@fs/workspace/layer/routes.ts",
+    );
+    expect(toViteModuleId("virtual:farm-routes", root)).toBe("virtual:farm-routes");
+  });
+});
 
 describe("parseRoutePath", () => {
   it("should parse static routes", () => {

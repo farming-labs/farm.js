@@ -24,6 +24,10 @@ describe("server cache primitives", () => {
     vi.useRealTimers();
   });
 
+  it("shares the cache across server module instances", () => {
+    expect((globalThis as any)[Symbol.for("farm.dataCache")]).toBe(getFarmDataCache());
+  });
+
   it("caches unstable_cache results by key parts and arguments", async () => {
     let calls = 0;
     const getProduct = unstable_cache(

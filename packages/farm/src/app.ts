@@ -161,6 +161,6 @@ export class FarmApp {
   }
 }
 
-export function createFarmApp(config?: FarmConfig): FarmApp {
-  return new FarmApp(config);
+export function createFarmApp(config?: FarmConfig, viteServer?: ViteDevServer): FarmApp {
+  return new FarmApp(config, viteServer);
 }

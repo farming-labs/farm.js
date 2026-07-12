@@ -364,6 +364,7 @@ describe("APIRouteManager", () => {
 
     expect(manager.isAPIRoute("/rss.xml")).toBe(true);
     expect(Array.from(manager.getRoutes().keys()).sort()).toEqual(["/api/posts/[id]", "/rss.xml"]);
+    expect(manager.getRoutes().get("/api/posts/[id]")?.filePath).toContain("?farm-route=api:");
 
     const rssResponse = await handler!(new Request("http://example.com/rss.xml"));
     expect(rssResponse.status).toBe(200);

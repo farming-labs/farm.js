@@ -14,10 +14,7 @@ export async function createMiddlewareProductionFixture(): Promise<string> {
   await fs.mkdir(path.join(root, "src", "app", "users", "[id]", "settings"), {
     recursive: true,
   });
-  await fs.writeFile(
-    path.join(root, "package.json"),
-    JSON.stringify({ type: "module" }, null, 2),
-  );
+  await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ type: "module" }, null, 2));
   await fs.writeFile(
     path.join(root, "farm.config.ts"),
     `
@@ -60,6 +57,28 @@ export default {
 `.trim(),
   );
   await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+  await fs.writeFile(
+    path.join(root, "src", "farm.routes.tsx"),
+    `
+import { createRoute, defineRoutes } from "@farmjs/core/routes";
+
+export const ProgrammaticRoute = createRoute("/programmatic/[id]", {
+  component({ params }: { params: { id: string } }) {
+    return <main>{\`production programmatic route: \${params.id}\`}</main>;
+  },
+});
+
+export default defineRoutes(({ api }) => [
+  ProgrammaticRoute,
+  api("/api/programmatic/[id]", {
+    async GET(_request: Request, context: { params: Promise<{ id: string }> }) {
+      const params = await context.params;
+      return Response.json({ id: params.id });
+    },
+  }),
+]);
+`.trim(),
+  );
   await fs.writeFile(
     path.join(root, "src", "app", "dashboard", "settings", "page.tsx"),
     `

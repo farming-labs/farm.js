@@ -62,6 +62,10 @@ export type FarmTypedEnv = ResolvedFarmEnv<FarmServerEnv, FarmPublicEnv>;
 declare const __FARM_PUBLIC_ENV__: Record<string, unknown> | undefined;
 declare const __FARM_ENV__: ResolvedFarmEnv | undefined;
 
+const FARM_ENV_SYMBOL = Symbol.for("farm.env");
+const farmEnvGlobal = globalThis as typeof globalThis & {
+  [FARM_ENV_SYMBOL]?: ResolvedFarmEnv;
+};
 let currentEnv: ResolvedFarmEnv = getInitialEnv();
 
 export function resolveEnv<TConfig extends FarmEnvConfig<any, any> | undefined>(
@@ -78,10 +82,13 @@ export function resolveEnv<TConfig extends FarmEnvConfig<any, any> | undefined>(
 
 export function setEnv(env: ResolvedFarmEnv): void {
   currentEnv = normalizeResolvedEnv(env);
+  if (typeof window === "undefined") {
+    farmEnvGlobal[FARM_ENV_SYMBOL] = currentEnv;
+  }
 }
 
 export function getResolvedEnv<TEnv extends ResolvedFarmEnv = FarmTypedEnv>(): TEnv {
-  return currentEnv as TEnv;
+  return getCurrentEnv() as TEnv;
 }
 
 export function getEnv<TServer extends Record<string, any> = FarmServerEnv>(): TServer;
@@ -91,10 +98,10 @@ export function getEnv<TKey extends Extract<keyof FarmServerEnv, string>>(
 export function getEnv(key?: string): unknown {
   assertServerEnvAccess();
   if (key === undefined) {
-    return currentEnv.server;
+    return getCurrentEnv().server;
   }
 
-  return currentEnv.server[key];
+  return getCurrentEnv().server[key];
 }
 
 export function getPublicEnv<TPublic extends Record<string, any> = FarmPublicEnv>(): TPublic;
@@ -103,10 +110,10 @@ export function getPublicEnv<TKey extends Extract<keyof FarmPublicEnv, string>>(
 ): FarmPublicEnv[TKey];
 export function getPublicEnv(key?: string): unknown {
   if (key === undefined) {
-    return currentEnv.public;
+    return getCurrentEnv().public;
   }
 
-  return currentEnv.public[key];
+  return getCurrentEnv().public[key];
 }
 
 export const env = createEnvProxy("server") as FarmServerEnv;
@@ -192,7 +199,7 @@ function getEnvScope(scope: "server" | "public"): Record<string, unknown> {
     assertServerEnvAccess();
   }
 
-  return currentEnv[scope] || {};
+  return getCurrentEnv()[scope] || {};
 }
 
 function assertServerEnvAccess(): void {
@@ -207,10 +214,22 @@ function getInitialEnv(): ResolvedFarmEnv {
     return injectedEnv;
   }
 
+  if (typeof window === "undefined" && farmEnvGlobal[FARM_ENV_SYMBOL]) {
+    return normalizeResolvedEnv(farmEnvGlobal[FARM_ENV_SYMBOL]);
+  }
+
   return {
     server: {},
     public: getInjectedPublicEnv(),
   };
+}
+
+function getCurrentEnv(): ResolvedFarmEnv {
+  if (typeof window === "undefined" && farmEnvGlobal[FARM_ENV_SYMBOL]) {
+    return farmEnvGlobal[FARM_ENV_SYMBOL];
+  }
+
+  return currentEnv;
 }
 
 function getInjectedEnv(): ResolvedFarmEnv | null {

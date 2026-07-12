@@ -282,7 +282,11 @@ export class FarmDataCache {
   }
 }
 
-const sharedFarmDataCache = new FarmDataCache();
+const FARM_DATA_CACHE_SYMBOL = Symbol.for("farm.dataCache");
+const farmDataCacheGlobal = globalThis as typeof globalThis & {
+  [FARM_DATA_CACHE_SYMBOL]?: FarmDataCache;
+};
+const sharedFarmDataCache = (farmDataCacheGlobal[FARM_DATA_CACHE_SYMBOL] ??= new FarmDataCache());
 const functionIds = new WeakMap<Function, number>();
 let nextFunctionId = 0;
 

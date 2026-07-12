@@ -126,10 +126,17 @@ declare module "@farmjs/core/client" {
     | `${TRoute}#${string}`
     | `${TRoute}?${string}#${string}`;
 
+  /** A generated route with params already filled into its pathname. */
+  export type ResolvedRouteHref = RouteHref<DefaultRoutePath>;
+
   export type RouteParamPrimitive = string | number | boolean;
   export type RouteParamValue = RouteParamPrimitive | readonly RouteParamPrimitive[];
   export type RouteOptionalParamValue = RouteParamValue | null | undefined;
-  export type RouteQueryValue = RouteParamPrimitive | readonly RouteParamPrimitive[] | null | undefined;
+  export type RouteQueryValue =
+    | RouteParamPrimitive
+    | readonly RouteParamPrimitive[]
+    | null
+    | undefined;
 
   export type RouteParams<TRoute extends string> = string extends TRoute
     ? Record<string, RouteOptionalParamValue>
@@ -174,11 +181,24 @@ declare module "@farmjs/core/client" {
       ? { params?: Record<string, RouteOptionalParamValue> }
       : { params: RouteParams<TRoute> };
 
-  export type LinkRouteTargetProps<TRoute extends string> = TRoute extends string
+  export type RoutesWithRequiredParams<TRoute extends string> = TRoute extends string
+    ? keyof RouteParams<TRoute> extends never
+      ? never
+      : TRoute
+    : never;
+
+  export type LinkRouteTargetProps<TRoute extends string> = [
+    RoutesWithRequiredParams<TRoute>,
+  ] extends [never]
     ? {
         href: RouteHref<TRoute>;
-      } & LinkRouteParamsProps<TRoute>
-    : never;
+        params?: Record<string, RouteOptionalParamValue>;
+      }
+    : TRoute extends string
+      ? {
+          href: RouteHref<TRoute>;
+        } & LinkRouteParamsProps<TRoute>
+      : never;
 
   export type LinkExternalTargetProps = {
     href: ExternalHref;
@@ -190,16 +210,16 @@ declare module "@farmjs/core/client" {
     "href"
   > &
     (LinkExternalTargetProps | LinkRouteTargetProps<TRoute>) & {
-    /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
-    prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
-    query?: URLSearchParams | Record<string, RouteQueryValue>;
-    hash?: string;
-    trailingSlash?: boolean;
-    prefetchDelay?: number;
-    replace?: boolean;
-    scroll?: boolean;
-    viewTransition?: FarmViewTransitionMode;
-  };
+      /** Internal route path (typed when route types are generated) or external URL (never raises route-type errors). */
+      prefetch?: PrefetchBehavior | boolean | "hover" | "viewport" | "none";
+      query?: URLSearchParams | Record<string, RouteQueryValue>;
+      hash?: string;
+      trailingSlash?: boolean;
+      prefetchDelay?: number;
+      replace?: boolean;
+      scroll?: boolean;
+      viewTransition?: FarmViewTransitionMode;
+    };
 
   export type LinkComponent = <TRoute extends string = DefaultRouteHref>(
     props: LinkProps<TRoute> & RefAttributes<HTMLAnchorElement>,
@@ -244,6 +264,29 @@ declare module "@farmjs/core/client" {
 
   export type FarmNavigationListener = (state: FarmNavigationState) => void;
 
+  export class SPARouter {
+    constructor(options?: {
+      prefetchTimeout?: number;
+      cacheMaxAge?: number;
+      scrollRestoration?: boolean;
+      shouldUseDocumentNavigation?: (pathname: string) => boolean;
+    });
+    setNavigationHandler(handler: (data: Record<string, any>) => Promise<void>): void;
+    navigate(href: string, options?: FarmNavigateOptions): Promise<void>;
+    prefetch(href: string): Promise<void>;
+    observeForPrefetch(element: HTMLAnchorElement): void;
+    unobserveForPrefetch(element: HTMLAnchorElement): void;
+    addBlocker(blocker: FarmNavigationBlocker): () => void;
+    getNavigationState(): FarmNavigationState;
+    subscribeNavigation(listener: FarmNavigationListener): () => void;
+    registerScrollElement(key: string, element: HTMLElement): () => void;
+    pushState(state: unknown, href?: string): void;
+    replaceState(state: unknown, href?: string): void;
+    clearCache(): void;
+  }
+
+  export function getRouter(): SPARouter;
+
   export interface FarmChunkRecoveryOptions {
     maxAgeMs?: number;
     storageKey?: string;
@@ -262,9 +305,7 @@ declare module "@farmjs/core/client" {
   export interface UseBlockerOptions {
     when: boolean | ((context: FarmNavigationBlockerContext) => boolean);
     message?: string;
-    shouldBlock?: (
-      context: FarmNavigationBlockerContext,
-    ) => boolean | Promise<boolean>;
+    shouldBlock?: (context: FarmNavigationBlockerContext) => boolean | Promise<boolean>;
   }
 
   export interface UseBlockerReturn {
@@ -475,7 +516,7 @@ declare module "@farmjs/core/client" {
     };
   };
 
-  type Simplify<T> = {
+  type SimplifyEndpointInput<T> = {
     [K in keyof T]: T[K];
   } & {};
 
@@ -516,7 +557,7 @@ declare module "@farmjs/core/client" {
       query: infer TQuery;
     };
   }
-    ? Simplify<BodyInputProp<TBody> & QueryInputProp<TQuery>>
+    ? SimplifyEndpointInput<BodyInputProp<TBody> & QueryInputProp<TQuery>>
     : {};
 
   type InferEndpointOutput<T> = T extends {
@@ -865,14 +906,14 @@ declare module "@farmjs/core/client" {
   export type InferIntegrationOperationQuery<T> = ExtractIntegrationOperationQuery<T>;
   export type InferIntegrationOperationResponse<T> = ExtractIntegrationOperationResponse<T>;
 
-  type IsNever<T> = [T] extends [never] ? true : false;
+  type IsIntegrationNever<T> = [T] extends [never] ? true : false;
 
   type IntegrationOperationInput<T> =
-    IsNever<ExtractIntegrationOperationBody<T>> extends true
-      ? IsNever<ExtractIntegrationOperationQuery<T>> extends true
+    IsIntegrationNever<ExtractIntegrationOperationBody<T>> extends true
+      ? IsIntegrationNever<ExtractIntegrationOperationQuery<T>> extends true
         ? {}
         : { query?: ExtractIntegrationOperationQuery<T> }
-      : IsNever<ExtractIntegrationOperationQuery<T>> extends true
+      : IsIntegrationNever<ExtractIntegrationOperationQuery<T>> extends true
         ? { body: ExtractIntegrationOperationBody<T> }
         : {
             body: ExtractIntegrationOperationBody<T>;

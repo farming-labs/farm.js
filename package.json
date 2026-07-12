@@ -16,6 +16,7 @@
     "test:farm": "pnpm --filter @farmjs/core test",
     "test:ci": "node scripts/run-tests.js",
     "test:e2e": "playwright test",
+    "test:e2e:recent": "corepack pnpm --filter @farmjs/core build && playwright test tests/e2e/recent-features.spec.ts",
     "test:e2e:list": "playwright test --list",
     "docs:dev": "pnpm --filter @farmjs/core build && pnpm --filter farmjs-docs dev",
     "docs:build": "pnpm --filter @farmjs/core build && pnpm --filter farmjs-docs build",

@@ -236,8 +236,7 @@ function createRouteStateProps(input: {
     searchParams: Promise.resolve(input.searchParamsObject),
     path: input.path,
     middleware: input.middlewareMap.size > 0 ? { data: input.middlewareMap } : undefined,
-    context:
-      input.pluginExposedContext.size > 0 ? { data: input.pluginExposedContext } : undefined,
+    context: input.pluginExposedContext.size > 0 ? { data: input.pluginExposedContext } : undefined,
   };
 }
 
@@ -614,11 +613,48 @@ export class ServerRenderer {
         } as PageProps & { search: unknown },
         routeContext,
       );
-      const pageProps = await parseRouteModuleProps(routeModule, {
-        props: rawPageProps,
-        search: searchParamsObject,
-        routePath: route.pattern,
-      });
+      const programmaticRouteComponents = (routeModule as any).__farmRouteComponents as
+        | {
+            error?: React.ComponentType<any>;
+            notFound?: React.ComponentType<any>;
+          }
+        | undefined;
+      let PageComponent = routeModule.default;
+      let pageProps: PageProps & {
+        search: unknown;
+        data?: unknown;
+        error?: unknown;
+        __farmRoutePropsResolved?: true;
+      };
+
+      try {
+        pageProps = await parseRouteModuleProps(routeModule, {
+          props: rawPageProps,
+          search: searchParamsObject,
+          routePath: route.pattern,
+        });
+      } catch (error) {
+        if (isFarmRedirectError(error)) throw error;
+
+        const routeStateProps = {
+          ...rawPageProps,
+          search: searchParamsObject,
+          searchParams: Promise.resolve(searchParamsObject),
+          error,
+        };
+
+        if (isFarmNotFoundError(error) && programmaticRouteComponents?.notFound) {
+          res.statusCode = 404;
+          PageComponent = programmaticRouteComponents.notFound;
+          pageProps = routeStateProps;
+        } else if (programmaticRouteComponents?.error) {
+          res.statusCode = 500;
+          PageComponent = programmaticRouteComponents.error;
+          pageProps = routeStateProps;
+        } else {
+          throw error;
+        }
+      }
 
       const renderingConfig = await resolveRouteRenderingConfigFromFile(
         routeModule,
@@ -736,7 +772,6 @@ export class ServerRenderer {
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithCurrentRequest(currentRequest, async () => {
-          const PageComponent = routeModule.default!;
           let pageElement = React.createElement(
             PageComponent as React.ComponentType<unknown>,
             pageProps as React.Attributes,
@@ -946,10 +981,7 @@ export class ServerRenderer {
     }
 
     for (const kind of ["opengraph", "twitter"] as const) {
-      const reference = await this.resolveMetadataImageReference(
-        kind,
-        options.pathname,
-      );
+      const reference = await this.resolveMetadataImageReference(kind, options.pathname);
       if (reference) {
         metadata = addMetadataImageReference(metadata, reference);
       }

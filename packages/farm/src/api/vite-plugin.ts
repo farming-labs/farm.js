@@ -20,6 +20,7 @@ import { API_ROUTE_METHODS, invokeAPIRouteEndpoint, matchAPIRoute } from "./rout
 import { sendWebResponse } from "../server/response";
 import { getProgrammaticRouteManifest, isProgrammaticRoutesFileName } from "../routes";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
+import { toViteModuleId } from "../utils";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -255,7 +256,9 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
         for (const routeFile of routeFiles) {
           try {
-            const routesModule = await server.ssrLoadModule(routeFile);
+            const routesModule = await server.ssrLoadModule(
+              toViteModuleId(routeFile, server.config.root),
+            );
             const manifest = getProgrammaticRouteManifest(routesModule);
             if (!manifest) continue;
 

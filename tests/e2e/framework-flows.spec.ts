@@ -1,15 +1,13 @@
 import { expect, test } from "@playwright/test";
 
 test.describe("Framework flows", () => {
-  test("query parsing works in server-rendered query demo", async ({ page }) => {
+  test("query parsing hydrates the client query-state demo", async ({ page }) => {
     await page.goto("/query-demo?search=e2e&page=7&category=test&enabled=true&tags=a,b");
-    const serverSection = page.locator(".bg-blue-50").first();
-    await expect(serverSection).toContainText("Search:");
-    await expect(serverSection).toContainText("e2e");
-    await expect(serverSection).toContainText("Page:");
-    await expect(serverSection).toContainText("7");
-    await expect(serverSection).toContainText("Category:");
-    await expect(serverSection).toContainText("test");
+    await expect(page.getByPlaceholder("Enter search term...")).toHaveValue("e2e");
+    await expect(page.getByLabel("Enabled")).toBeChecked();
+    await expect(page.getByText("Page 7 of 10")).toBeVisible();
+    await expect(page.locator("span.bg-purple-100").filter({ hasText: "a" })).toBeVisible();
+    await expect(page.locator("span.bg-purple-100").filter({ hasText: "b" })).toBeVisible();
   });
 
   test("dynamic route params and query render correctly", async ({ page }) => {
