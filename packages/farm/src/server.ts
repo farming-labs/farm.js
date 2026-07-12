@@ -10,3 +10,4 @@ export { createServer, startDevServer } from "./server/create-server";
 export { getCurrentRequest } from "./server/request";
 export * from "./server-action-security";
 export * from "./layers";
+export * from "./environment";

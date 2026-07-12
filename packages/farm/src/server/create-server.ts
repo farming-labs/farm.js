@@ -4,6 +4,7 @@ import { farmPlugin } from "../vite";
 import { logger } from "../utils";
 import { loadConfig, resolveConfig } from "../config";
 import { PluginManager } from "../plugin";
+import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import fs from "fs";
 import path from "path";
 import {
@@ -200,6 +201,7 @@ export async function createServer(config: FarmConfig = {}) {
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         createDevDependencyStubsPlugin(),
         farmPlugin(finalConfig, pluginManager),
+        farmEnvironmentFunctionsPlugin(),
         createBrandingPlugin(),
       ],
       server: {

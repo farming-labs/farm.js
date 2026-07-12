@@ -26,6 +26,7 @@ import type { Plugin, UserConfig } from "vite";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farmjs/core/server-action-security";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farmjs/core/server";
+import { farmEnvironmentFunctionsPlugin } from "@farmjs/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
@@ -277,6 +278,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   };
 
   return [
+    farmEnvironmentFunctionsPlugin() as unknown as Plugin,
     {
       name: "@farmjs/plugin/rsc:config",
       enforce: "pre",
@@ -420,6 +422,10 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                     {
                       find: "@farmjs/core/server-action-security",
                       replacement: path.join(farmCorePath, "dist/server-action-security.mjs"),
+                    },
+                    {
+                      find: /^@farmjs\/core\/environment$/,
+                      replacement: path.join(farmCorePath, "dist/environment.mjs"),
                     },
                     { find: "@farmjs/core", replacement: farmCorePath },
                   ]

@@ -117,6 +117,7 @@ const sidebar = [
       { label: "Routing", slug: "routing", icon: "route" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
+      { label: "Environment Functions", slug: "environment-functions", icon: "code" },
       { label: "Middleware", slug: "middleware", icon: "shield" },
     ],
   },

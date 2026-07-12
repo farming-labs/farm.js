@@ -25,6 +25,7 @@ Routes, rendering, layouts, and request flow.
 - [Layouts and Route Boundaries](/docs/layouts): Wrap routes with root and nested layouts, then use loading, error, and not-found files for route-level UX.
 - [Rendering Model](/docs/server-rendering): Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports and config.
 - [Middleware](/docs/middleware): Run request behavior before routes, pass request-scoped data to pages, and short-circuit with redirects or responses.
+- [Environment Functions](/docs/environment-functions): Remove server-only or client-only implementations from the opposite bundle while preserving one typed interface.
 
 ### Data and APIs
 
