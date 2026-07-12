@@ -5,7 +5,14 @@ import type {
   LayoutModule,
   SSGCollectionResult,
 } from "../types";
-import { parseRoutePath, matchRoute, resolveAppPath, globFiles, logger } from "../utils";
+import {
+  parseRoutePath,
+  matchRoute,
+  resolveAppPath,
+  globFiles,
+  logger,
+  toViteModuleId,
+} from "../utils";
 import { collectSSGPages, resolveRouteRenderingConfigFromFile } from "../ssg";
 import type {
   ProgrammaticPageRoute,
@@ -553,7 +560,8 @@ export class RouteManager {
 
   private async loadProgrammaticRoutesModule(filePath: string): Promise<Record<string, any>> {
     if (this.viteServer) {
-      return await this.viteServer.ssrLoadModule(filePath);
+      const viteRoot = this.viteServer.config?.root || this.config.root || process.cwd();
+      return await this.viteServer.ssrLoadModule(toViteModuleId(filePath, viteRoot));
     }
 
     const fileUrl = `file://${filePath}`;

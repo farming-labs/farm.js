@@ -1,7 +1,7 @@
 import React from 'react'
 import type { PageProps, Metadata } from '@farmjs/core'
 import { Link } from '@farmjs/core/client'
-import type { LinkProps } from '@farmjs/core/client'
+import type { ResolvedRouteHref } from '@farmjs/core/client'
 
 // Note: This page uses Link components which require hydration
 // SSG is better suited for pages without client-side interactivity
@@ -136,7 +136,7 @@ function FeatureCard({ icon, title, description, href }: {
   icon: string
   title: string
   description: string
-  href?: LinkProps["href"]
+  href?: ResolvedRouteHref
 }) {
   const content = (
     <>

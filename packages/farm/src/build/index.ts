@@ -1,6 +1,6 @@
 import type { ResolvedFarmConfig } from "../config";
 import { resolveDeployOutputPath } from "../config";
-import { build as viteBuild } from "vite";
+import { build as viteBuild, createServer as createViteServer, type ViteDevServer } from "vite";
 import { createNitro, build as nitroBuild } from "nitro";
 import path from "path";
 import { logger } from "../utils";
@@ -13,6 +13,7 @@ import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
+import { mergeFarmViteConfig } from "../server/vite-config";
 
 interface BuildOptions {
   preset?: string;
@@ -38,6 +39,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     isProd: true,
   });
   pluginManager.addPlugins(config.plugins || []);
+  let projectModuleServer: ViteDevServer | undefined;
 
   try {
     await pluginManager.runHookParallel("init");
@@ -51,7 +53,8 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
 
     // Step 1: Initialize Farm app to get route managers
     logger.info("🔍 Discovering routes and API endpoints...");
-    const farmApp = createFarmApp(config);
+    projectModuleServer = await createProjectModuleServer(config, root);
+    const farmApp = createFarmApp(config, projectModuleServer);
     await farmApp.initialize();
 
     const routeManager = farmApp.getRouteManager();
@@ -73,7 +76,13 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     }
 
     // Discover API routes
-    const apiRouteManager = new APIRouteManager(getFarmAppDirectories(config));
+    const apiRouteManager = new APIRouteManager(
+      getFarmAppDirectories(config),
+      projectModuleServer,
+      {
+        throwOnLoadError: true,
+      },
+    );
     await apiRouteManager.discoverRoutes();
 
     // Use universal build pattern if enabled
@@ -139,7 +148,58 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     });
     logger.error(`❌ Build failed: ${error}`);
     throw error;
+  } finally {
+    await projectModuleServer?.close();
   }
+}
+
+async function createProjectModuleServer(
+  config: ResolvedFarmConfig,
+  root: string,
+): Promise<ViteDevServer> {
+  const viteConfig = mergeFarmViteConfig(
+    {
+      root,
+      appType: "custom",
+      mode: "production",
+      css: {
+        postcss: {
+          plugins: [],
+        },
+      },
+      plugins: [farmEnvironmentFunctionsPlugin()],
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
+      optimizeDeps: {
+        noDiscovery: true,
+      },
+      logLevel: "silent",
+    },
+    config.vite,
+  );
+
+  return createViteServer({
+    ...viteConfig,
+    root,
+    configFile: false,
+    appType: "custom",
+    mode: "production",
+    esbuild: {
+      ...(typeof viteConfig.esbuild === "object" ? viteConfig.esbuild : {}),
+      jsxDev: false,
+    },
+    server: {
+      ...viteConfig.server,
+      middlewareMode: true,
+      hmr: false,
+    },
+    optimizeDeps: {
+      ...viteConfig.optimizeDeps,
+      noDiscovery: true,
+    },
+  });
 }
 
 /**

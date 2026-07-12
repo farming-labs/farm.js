@@ -136,6 +136,18 @@ export function resolveAppPath(root: string, ...paths: string[]): string {
   return path.resolve(root, ...paths);
 }
 
+export function toViteModuleId(filePath: string, root: string): string {
+  if (!path.isAbsolute(filePath)) return filePath;
+
+  const relativePath = path.relative(root, filePath);
+  if (relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath)) {
+    return `/${relativePath.split(path.sep).join("/")}`;
+  }
+
+  const normalizedPath = filePath.replace(/\\/g, "/");
+  return normalizedPath.startsWith("/") ? `/@fs${normalizedPath}` : `/@fs/${normalizedPath}`;
+}
+
 export async function fileExists(filePath: string): Promise<boolean> {
   try {
     const fs = await import("fs/promises");

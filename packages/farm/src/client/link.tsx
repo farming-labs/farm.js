@@ -46,6 +46,9 @@ export type RouteHref<TRoute extends string> =
   | `${TRoute}#${string}`
   | `${TRoute}?${string}#${string}`;
 
+/** A generated route with params already filled into its pathname. */
+export type ResolvedRouteHref = RouteHref<DefaultRoutePath>;
+
 export type RouteParamValue = Exclude<FarmRouterPathParam, null | undefined>;
 export type RouteOptionalParamValue = FarmRouterPathParam;
 export type RouteParams<TRoute extends string> = string extends TRoute
@@ -94,18 +97,32 @@ type Simplify<T> = { [Key in keyof T]: T[Key] } & {};
 
 type HasRouteParams<TRoute extends string> = keyof RouteParams<TRoute> extends never ? false : true;
 
+type RoutesWithRequiredParams<TRoute extends string> = TRoute extends string
+  ? HasRouteParams<TRoute> extends true
+    ? TRoute
+    : never
+  : never;
+
 type LinkRouteParamsProps<TRoute extends string> = string extends TRoute
   ? { params?: FarmRouterPathParams }
   : HasRouteParams<TRoute> extends true
     ? { params: RouteParams<TRoute> }
     : { params?: FarmRouterPathParams };
 
-type LinkRouteTargetProps<TRoute extends string> = TRoute extends string
+type LinkRouteTargetProps<TRoute extends string> = [RoutesWithRequiredParams<TRoute>] extends [
+  never,
+]
   ? {
-      /** Internal route path or route pattern. */
+      /** Internal route path with all params already resolved. */
       href: RouteHref<TRoute>;
-    } & LinkRouteParamsProps<TRoute>
-  : never;
+      params?: FarmRouterPathParams;
+    }
+  : TRoute extends string
+    ? {
+        /** Internal route path or route pattern. */
+        href: RouteHref<TRoute>;
+      } & LinkRouteParamsProps<TRoute>
+    : never;
 
 type LinkExternalTargetProps = {
   /** External URL; these are never type-checked as app routes. */
@@ -122,26 +139,26 @@ export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
   "href"
 > &
   LinkTargetProps<TRoute> & {
-  /**
-   * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
-   * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".
-   */
-  prefetch?: PrefetchBehavior | PrefetchLegacy;
-  /** Search params appended after route params are resolved. */
-  query?: FarmRouterBuildOptions["query"];
-  /** Hash appended after route params and search params are resolved. */
-  hash?: string;
-  /** Add a trailing slash to the generated internal href. */
-  trailingSlash?: boolean;
-  /** Delay in ms before intent-based prefetch (hover/touch). Default 50. */
-  prefetchDelay?: number;
-  /** Replace current history entry instead of pushing */
-  replace?: boolean;
-  /** Scroll to top after navigation (default: true) */
-  scroll?: boolean;
-  /** Wrap this SPA navigation in a browser View Transition when supported. */
-  viewTransition?: FarmViewTransitionMode;
-};
+    /**
+     * When to prefetch. TanStack-style: "intent" (hover+touch), "viewport", "render", or "none".
+     * Legacy: true (intent+viewport), "hover" (intent), "viewport", false/"none".
+     */
+    prefetch?: PrefetchBehavior | PrefetchLegacy;
+    /** Search params appended after route params are resolved. */
+    query?: FarmRouterBuildOptions["query"];
+    /** Hash appended after route params and search params are resolved. */
+    hash?: string;
+    /** Add a trailing slash to the generated internal href. */
+    trailingSlash?: boolean;
+    /** Delay in ms before intent-based prefetch (hover/touch). Default 50. */
+    prefetchDelay?: number;
+    /** Replace current history entry instead of pushing */
+    replace?: boolean;
+    /** Scroll to top after navigation (default: true) */
+    scroll?: boolean;
+    /** Wrap this SPA navigation in a browser View Transition when supported. */
+    viewTransition?: FarmViewTransitionMode;
+  };
 
 function isModifierEvent(e: React.MouseEvent): boolean {
   return !!(e.metaKey || e.altKey || e.ctrlKey || e.shiftKey);
@@ -390,6 +407,12 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
       onBlur={handleBlur}
       onTouchStart={handleTouchStart}
       {...props}
+      data-farm-link=""
+      data-replace={replace ? "" : undefined}
+      data-no-scroll={!scroll ? "" : undefined}
+      data-view-transition={
+        viewTransition === "auto" ? "auto" : viewTransition ? "true" : undefined
+      }
     />
   );
 }
@@ -467,9 +490,8 @@ function applyPreservedSearchParams(href: string): string {
   if (typeof window === "undefined") return href;
 
   const manifest = (window as any).__FARM_MANIFEST__;
-  const routes = manifest?.routes && typeof manifest.routes === "object"
-    ? Object.values(manifest.routes)
-    : [];
+  const routes =
+    manifest?.routes && typeof manifest.routes === "object" ? Object.values(manifest.routes) : [];
   if (routes.length === 0) return href;
 
   const url = new URL(href, window.location.origin);

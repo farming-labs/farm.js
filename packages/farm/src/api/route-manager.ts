@@ -2,7 +2,11 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
 import { logger } from "../utils";
-import { getProgrammaticRouteManifest, type ProgrammaticApiRoute } from "../routes";
+import {
+  createProgrammaticRouteModuleId,
+  getProgrammaticRouteManifest,
+  type ProgrammaticApiRoute,
+} from "../routes";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
 
 export interface APIRoute {
@@ -20,6 +24,10 @@ export interface APIRouteMatch<T extends { path: string }> {
   params: APIRouteParams;
 }
 
+export interface APIRouteManagerOptions {
+  throwOnLoadError?: boolean;
+}
+
 export const API_ROUTE_METHODS = [
   "GET",
   "HEAD",
@@ -34,10 +42,16 @@ export class APIRouteManager {
   private routes: Map<string, APIRoute> = new Map();
   private viteServer?: ViteDevServer;
   private appDirs: string[];
+  private throwOnLoadError: boolean;
 
-  constructor(appDir: string | readonly string[], viteServer?: ViteDevServer) {
+  constructor(
+    appDir: string | readonly string[],
+    viteServer?: ViteDevServer,
+    options: APIRouteManagerOptions = {},
+  ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
+    this.throwOnLoadError = options.throwOnLoadError === true;
   }
 
   /**
@@ -131,7 +145,7 @@ export class APIRouteManager {
         });
       }
     } catch (error) {
-      logger.error(`Error loading route ${filePath}: ${error}`);
+      this.handleLoadError(`Error loading route ${filePath}`, error);
     }
   }
 
@@ -157,7 +171,7 @@ export class APIRouteManager {
         this.addEndpoint(endpoint.__path, routesFile, method, endpoint);
       }
     } catch (error) {
-      logger.error(`Error loading root API routes ${routesFile}: ${error}`);
+      this.handleLoadError(`Error loading root API routes ${routesFile}`, error);
     }
   }
 
@@ -178,8 +192,15 @@ export class APIRouteManager {
           this.addProgrammaticApiRoute(routeFile, definition);
         }
       } catch (error) {
-        logger.error(`Error loading programmatic API routes ${routeFile}: ${error}`);
+        this.handleLoadError(`Error loading programmatic API routes ${routeFile}`, error);
       }
+    }
+  }
+
+  private handleLoadError(message: string, error: unknown): void {
+    logger.error(`${message}: ${error}`);
+    if (this.throwOnLoadError) {
+      throw error;
     }
   }
 
@@ -235,9 +256,10 @@ export class APIRouteManager {
   }
 
   private addProgrammaticApiRoute(filePath: string, route: ProgrammaticApiRoute): void {
+    const modulePath = createProgrammaticRouteModuleId(filePath, "api", route.path);
     for (const [method, endpoint] of Object.entries(route.methods)) {
       if (endpoint) {
-        this.addEndpoint(route.path, filePath, method, endpoint);
+        this.addEndpoint(route.path, modulePath, method, endpoint);
       }
     }
   }

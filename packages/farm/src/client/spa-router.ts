@@ -16,6 +16,8 @@ interface PageData {
   props: Record<string, any>;
   modulePath: string;
   canonicalPath?: string;
+  isClientComponent?: boolean;
+  shouldHydrate?: boolean;
   metadata?: {
     title?: string;
     description?: string;
@@ -27,6 +29,7 @@ interface RouterOptions {
   prefetchTimeout?: number;
   cacheMaxAge?: number;
   scrollRestoration?: boolean;
+  shouldUseDocumentNavigation?: (pathname: string) => boolean;
 }
 
 interface CacheEntry {
@@ -100,6 +103,7 @@ export class SPARouter {
       prefetchTimeout: options.prefetchTimeout ?? 100,
       cacheMaxAge: options.cacheMaxAge ?? 30000, // 30 seconds
       scrollRestoration: options.scrollRestoration ?? true,
+      shouldUseDocumentNavigation: options.shouldUseDocumentNavigation ?? (() => false),
     };
 
     if (typeof window !== "undefined") {
@@ -127,10 +131,7 @@ export class SPARouter {
   /**
    * Navigate to a new URL
    */
-  async navigate(
-    href: string,
-    options: FarmNavigateOptions = {},
-  ): Promise<void> {
+  async navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
     const { replace = false, scroll = true, state, viewTransition = false } = options;
 
     // Parse the URL
@@ -138,6 +139,12 @@ export class SPARouter {
     const pathname = url.pathname;
     const search = url.search;
     const fullPath = pathname + search;
+
+    if (this.options.shouldUseDocumentNavigation(pathname)) {
+      if (replace) window.location.replace(url.toString());
+      else window.location.assign(url.toString());
+      return;
+    }
 
     // Same page navigation - just update hash/scroll
     if (pathname === window.location.pathname && search === window.location.search) {
@@ -148,7 +155,9 @@ export class SPARouter {
     }
 
     const from = window.location.pathname + window.location.search;
-    if (await this.shouldBlockNavigation({ from, to: fullPath, action: replace ? "replace" : "push" })) {
+    if (
+      await this.shouldBlockNavigation({ from, to: fullPath, action: replace ? "replace" : "push" })
+    ) {
       return;
     }
 
@@ -166,6 +175,12 @@ export class SPARouter {
     try {
       // Fetch page data (from cache or server)
       const pageData = await this.fetchPageData(fullPath);
+
+      if (pageData.isClientComponent === false) {
+        this.finishNavigation();
+        window.location.assign(pageData.canonicalPath || fullPath);
+        return;
+      }
 
       await this.runViewTransition(viewTransition, () =>
         this.commitNavigation({
@@ -581,6 +596,12 @@ export function getRouter(): SPARouter {
     return new SPARouter();
   }
 
+  const installedRouter = (window as any).__FARM_SPA_ROUTER__ as SPARouter | undefined;
+  if (installedRouter) {
+    routerInstance = installedRouter;
+    return installedRouter;
+  }
+
   if (!routerInstance) {
     routerInstance = new SPARouter();
   }
@@ -591,10 +612,7 @@ export function getRouter(): SPARouter {
 /**
  * Navigate to a URL using the SPA router
  */
-export function navigateTo(
-  href: string,
-  options?: FarmNavigateOptions,
-): Promise<void> {
+export function navigateTo(href: string, options?: FarmNavigateOptions): Promise<void> {
   return getRouter().navigate(href, options);
 }
 
@@ -621,7 +639,8 @@ export function readPageState<TState = unknown>(): TState | null {
 }
 
 function createHistoryState(path: string, pageState: unknown, currentState?: unknown) {
-  const base = currentState && typeof currentState === "object" ? { ...(currentState as object) } : {};
+  const base =
+    currentState && typeof currentState === "object" ? { ...(currentState as object) } : {};
   return {
     ...base,
     path,

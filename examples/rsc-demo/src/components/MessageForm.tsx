@@ -9,6 +9,22 @@ import { submitMessage } from "../actions/user";
 
 export function MessageForm() {
   const submitMessageAction = useServerFn(submitMessage, {
+    optimistic({ formData }) {
+      const name = String(formData?.get("name") ?? "").trim();
+      const message = String(formData?.get("message") ?? "").trim();
+      if (!name || !message) return undefined;
+
+      return {
+        success: true,
+        message: {
+          id: -1,
+          name,
+          message,
+          timestamp: "pending",
+        },
+      };
+    },
+    rollbackOnError: true,
     onSuccess(result) {
       if (result?.success) {
         const form = document.getElementById("message-form") as HTMLFormElement;
@@ -31,6 +47,9 @@ export function MessageForm() {
       </p>
 
       <form id="message-form" action={submitMessageAction.formAction} className="space-y-4">
+        <output className="sr-only" data-testid="server-action-status">
+          {submitMessageAction.status}
+        </output>
         <div>
           <label htmlFor="name" className="block text-sm text-slate-400 mb-1">
             Name
@@ -73,19 +92,21 @@ export function MessageForm() {
 
       {(result || submitMessageAction.error) && (
         <div
+          data-testid="server-action-result"
           className={`mt-4 p-4 rounded-lg ${
-            result?.success
+            result?.success && !submitMessageAction.error
               ? "bg-green-900/30 border border-green-700/50"
               : "bg-red-900/30 border border-red-700/50"
           }`}
         >
-          {result.success ? (
+          {result?.success ? (
             <p className="text-green-400">
-              ✓ Message from "{result.message?.name}" saved on the server!
+              {submitMessageAction.pending ? "Saving" : "Saved"} message from "
+              {result.message.name}".
             </p>
           ) : (
             <p className="text-red-400">
-              ✗ {result?.error ?? submitMessageAction.error?.message}
+              {submitMessageAction.error?.message ?? "Unable to save this message."}
             </p>
           )}
         </div>

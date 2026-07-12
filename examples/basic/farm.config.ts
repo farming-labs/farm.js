@@ -1,5 +1,6 @@
 import { defineFarmConfig, type FarmPlugin } from '@farmjs/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farmjs/core/plugin/server';
+import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 
 const myCustomPlugin: FarmPlugin = {
@@ -18,6 +19,7 @@ const myCustomPlugin: FarmPlugin = {
 };
 
 export default defineFarmConfig({
+  extends: ['./layers/recent-features'],
   srcDir: 'src',
   outDir: 'dist',
   basePath: '/',
@@ -37,6 +39,35 @@ export default defineFarmConfig({
     // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
     serverComponents: true,
     serverActions: true,
+  },
+
+  context: async ({ request, path }) => ({
+    tenant: {
+      id: request.headers.get('x-farm-tenant') || 'public',
+    },
+    requestId: request.headers.get('x-request-id') || `request:${path}`,
+  }),
+
+  routeRules: {
+    '/feature-lab': {
+      render: 'dynamic',
+      headers: {
+        'x-farm-feature-lab': 'active',
+      },
+    },
+    '/feature-lab/**': {
+      render: 'dynamic',
+      headers: {
+        'x-farm-feature-lab': 'active',
+      },
+    },
+    '/feature-lab/route-rule-redirect': {
+      redirect: '/feature-lab',
+    },
+  },
+
+  serverActions: {
+    bodySizeLimit: '512kb',
   },
 
   trailingSlash: false,
@@ -110,8 +141,12 @@ export default defineFarmConfig({
 
   // Environment variables
   env: {
-    FARM_API_URL: 'https://api.example.com',
-    PUBLIC_APP_NAME: 'My Farm.js App',
+    server: {
+      FARM_API_URL: z.string().url().default('https://api.example.com'),
+    },
+    public: {
+      PUBLIC_APP_NAME: z.string().default('My Farm.js App'),
+    },
   },
 
   // Build configuration

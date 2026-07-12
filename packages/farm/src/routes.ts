@@ -93,7 +93,7 @@ export type ProgrammaticRouteDataContext<
   TParams = ProgrammaticRouteParamsFallback,
   TSearch = ProgrammaticRouteSearchFallback,
   TContext = ProgrammaticRouteContext,
-> = Omit<ProgrammaticRouteComponentProps<TParams, TSearch>, "context"> & {
+> = Omit<ProgrammaticRouteComponentProps<TParams, TSearch>, "context" | "data"> & {
   context: TContext;
   pluginContext?: PluginContextProps;
 };
@@ -150,29 +150,32 @@ export interface ProgrammaticRouteDataHooks<
   TContext = ProgrammaticRouteContext,
 > {
   key?: (
-    context: ProgrammaticRouteDataCacheContext<TParams, TSearch, TBefore, TContext>,
+    context: ProgrammaticRouteDataCacheContext<TParams, TSearch, NoInfer<TBefore>, TContext>,
   ) => ProgrammaticRouteMaybePromise<RouteDataCacheKey | null | undefined>;
   staleTime?: ProgrammaticRouteDataStaleTime;
-  tags?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore, TContext>;
-  paths?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, TBefore, TContext>;
+  tags?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, NoInfer<TBefore>, TContext>;
+  paths?: ProgrammaticRouteDataCacheKeys<TParams, TSearch, NoInfer<TBefore>, TContext>;
   before?: (
     context: ProgrammaticRouteDataContext<TParams, TSearch, TContext>,
   ) => ProgrammaticRouteMaybePromise<TBefore>;
   main: (
-    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & { before: TBefore },
+    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & {
+      before: NoInfer<TBefore>;
+    },
   ) => ProgrammaticRouteMaybePromise<TData>;
   after?: (
     context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & {
-      before: TBefore;
-      data: TData;
+      before: NoInfer<TBefore>;
+      data: NoInfer<TData>;
     },
   ) => ProgrammaticRouteMaybePromise<void>;
 }
 
-export type InferProgrammaticRouteData<TDataHooks> =
-  TDataHooks extends ProgrammaticRouteDataHooks<any, any, any, infer TData>
-    ? Awaited<TData>
-    : undefined;
+export type InferProgrammaticRouteData<TDataHooks> = TDataHooks extends {
+  main: (...args: any[]) => infer TResult;
+}
+  ? Awaited<TResult>
+  : undefined;
 
 export interface ProgrammaticPageRoute<
   TParams = ProgrammaticRouteParamsFallback,
@@ -259,41 +262,139 @@ export type ProgrammaticRouteFactory = (
   builder: ProgrammaticRouteBuilder,
 ) => readonly ProgrammaticRouteDefinition[];
 
-export type CreateRouteOptions<
-  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
-  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
-  TDataHooks extends
-    | ProgrammaticRouteDataHooks<
-        InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-        InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
-        any,
-        any,
-        any
-      >
-    | undefined = undefined,
+type CreateRouteParams<TParamsSchema> = InferProgrammaticRouteSchema<
+  TParamsSchema,
+  ProgrammaticRouteParamsFallback
+>;
+
+type CreateRouteSearch<TSearchConfig> = InferProgrammaticRouteSearch<
+  TSearchConfig,
+  ProgrammaticRouteSearchFallback
+>;
+
+type CreateRouteSharedOptions<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined,
 > = Omit<
-  ProgrammaticPageRoute<
-    InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
-    TDataHooks
-  >,
+  ProgrammaticPageRoute<CreateRouteParams<TParamsSchema>, CreateRouteSearch<TSearchConfig>>,
   "kind" | "path" | "component" | "params" | "search" | "data" | "guard"
 > & {
   params?: TParamsSchema;
   search?: TSearchConfig;
   guard?: ProgrammaticRouteGuard<
-    InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>
   >;
-  data?: TDataHooks;
+};
+
+type CreateRouteDataHooksWithBefore<
+  TParams,
+  TSearch,
+  TBeforeResult,
+  TMainResult,
+  TContext = ProgrammaticRouteContext,
+> = Omit<
+  ProgrammaticRouteDataHooks<
+    TParams,
+    TSearch,
+    NoInfer<Awaited<TBeforeResult>>,
+    NoInfer<Awaited<TMainResult>>,
+    TContext
+  >,
+  "before" | "main"
+> & {
+  before: (context: ProgrammaticRouteDataContext<TParams, TSearch, TContext>) => TBeforeResult;
+  main: (
+    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & {
+      before: NoInfer<Awaited<TBeforeResult>>;
+    },
+  ) => TMainResult;
+};
+
+type CreateRouteDataHooksWithoutBefore<
+  TParams,
+  TSearch,
+  TMainResult,
+  TContext = ProgrammaticRouteContext,
+> = Omit<
+  ProgrammaticRouteDataHooks<TParams, TSearch, undefined, NoInfer<Awaited<TMainResult>>, TContext>,
+  "before" | "main"
+> & {
+  before?: undefined;
+  main: (
+    context: ProgrammaticRouteDataContext<TParams, TSearch, TContext> & {
+      before: undefined;
+    },
+  ) => TMainResult;
+};
+
+type CreateRouteOptionsWithBefore<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined,
+  TBefore,
+  TData,
+> = CreateRouteSharedOptions<TParamsSchema, TSearchConfig> & {
+  data: CreateRouteDataHooksWithBefore<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    TBefore,
+    TData
+  >;
   component: ComponentType<
     ProgrammaticRouteComponentProps<
-      InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-      InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
-      InferProgrammaticRouteData<TDataHooks>
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      NoInfer<Awaited<TData>>
     >
   >;
 };
+
+type CreateRouteOptionsWithoutBefore<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined,
+  TData,
+> = CreateRouteSharedOptions<TParamsSchema, TSearchConfig> & {
+  data: CreateRouteDataHooksWithoutBefore<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    TData
+  >;
+  component: ComponentType<
+    ProgrammaticRouteComponentProps<
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      NoInfer<Awaited<TData>>
+    >
+  >;
+};
+
+type CreateRouteOptionsWithoutData<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined,
+> = CreateRouteSharedOptions<TParamsSchema, TSearchConfig> & {
+  data?: undefined;
+  component: ComponentType<
+    ProgrammaticRouteComponentProps<
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      undefined
+    >
+  >;
+};
+
+type CreateRouteComponentOption<TComponent extends ComponentType<any>, TProps> = {
+  component: TComponent;
+} & (TComponent extends ComponentType<TProps> ? unknown : { component: ComponentType<TProps> });
+
+export type CreateRouteOptions<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
+  TBefore = unknown,
+  TData = unknown,
+> =
+  | CreateRouteOptionsWithBefore<TParamsSchema, TSearchConfig, TBefore, TData>
+  | CreateRouteOptionsWithoutBefore<TParamsSchema, TSearchConfig, TData>
+  | CreateRouteOptionsWithoutData<TParamsSchema, TSearchConfig>;
 
 const FARM_ROUTES_BRAND = Symbol.for("farm.routes");
 export const PROGRAMMATIC_ROUTE_FILE_NAMES = [
@@ -462,7 +563,10 @@ function resolveProgrammaticRouteCanonicalPath(input: {
       for (const key of keys) {
         if (
           params.has(key) &&
-          searchValuesEqual(readSearchValue(input.parsedSearch, key), readSearchValue(defaultSearch, key))
+          searchValuesEqual(
+            readSearchValue(input.parsedSearch, key),
+            readSearchValue(defaultSearch, key),
+          )
         ) {
           params.delete(key);
         }
@@ -510,7 +614,10 @@ function readSearchValue(value: unknown, key: string): unknown {
 }
 
 function searchValuesEqual(left: unknown, right: unknown): boolean {
-  return JSON.stringify(normalizeComparableValue(left)) === JSON.stringify(normalizeComparableValue(right));
+  return (
+    JSON.stringify(normalizeComparableValue(left)) ===
+    JSON.stringify(normalizeComparableValue(right))
+  );
 }
 
 function normalizeComparableValue(value: unknown): unknown {
@@ -531,28 +638,74 @@ function normalizeComparableValue(value: unknown): unknown {
 export function createRoute<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
   TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
-  TDataHooks extends
-    | ProgrammaticRouteDataHooks<
-        InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-        InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
-        any,
-        any,
-        any
-      >
-    | undefined = undefined,
+  TBeforeResult = unknown,
+  TMainResult = unknown,
+  TComponent extends ComponentType<any> = ComponentType<any>,
 >(
   path: string,
-  options: CreateRouteOptions<TParamsSchema, TSearchConfig, TDataHooks>,
+  options: Omit<
+    CreateRouteOptionsWithBefore<TParamsSchema, TSearchConfig, TBeforeResult, TMainResult>,
+    "component"
+  > &
+    CreateRouteComponentOption<
+      TComponent,
+      ProgrammaticRouteComponentProps<
+        CreateRouteParams<TParamsSchema>,
+        CreateRouteSearch<TSearchConfig>,
+        Awaited<TMainResult>
+      >
+    >,
 ): ProgrammaticPageRoute<
-  InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-  InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
-  TDataHooks
-> {
-  return routesBuilder.page(path, options) as unknown as ProgrammaticPageRoute<
-    InferProgrammaticRouteSchema<TParamsSchema, ProgrammaticRouteParamsFallback>,
-    InferProgrammaticRouteSearch<TSearchConfig, ProgrammaticRouteSearchFallback>,
-    TDataHooks
-  >;
+  CreateRouteParams<TParamsSchema>,
+  CreateRouteSearch<TSearchConfig>,
+  CreateRouteDataHooksWithBefore<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    TBeforeResult,
+    TMainResult
+  >
+>;
+export function createRoute<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
+  TMainResult = unknown,
+  TComponent extends ComponentType<any> = ComponentType<any>,
+>(
+  path: string,
+  options: Omit<
+    CreateRouteOptionsWithoutBefore<TParamsSchema, TSearchConfig, TMainResult>,
+    "component"
+  > &
+    CreateRouteComponentOption<
+      TComponent,
+      ProgrammaticRouteComponentProps<
+        CreateRouteParams<TParamsSchema>,
+        CreateRouteSearch<TSearchConfig>,
+        Awaited<TMainResult>
+      >
+    >,
+): ProgrammaticPageRoute<
+  CreateRouteParams<TParamsSchema>,
+  CreateRouteSearch<TSearchConfig>,
+  CreateRouteDataHooksWithoutBefore<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    TMainResult
+  >
+>;
+export function createRoute<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
+>(
+  path: string,
+  options: CreateRouteOptionsWithoutData<TParamsSchema, TSearchConfig>,
+): ProgrammaticPageRoute<
+  CreateRouteParams<TParamsSchema>,
+  CreateRouteSearch<TSearchConfig>,
+  undefined
+>;
+export function createRoute(path: string, options: any): any {
+  return routesBuilder.page(path, options);
 }
 
 export function isProgrammaticRoutesFileName(fileName: string): boolean {
@@ -609,7 +762,7 @@ export function isProgrammaticRouteDefinition(
 
 export function createProgrammaticRouteModuleId(
   filePath: string,
-  kind: "page" | "layout",
+  kind: "page" | "layout" | "api",
   routePath: string,
 ): string {
   return `${filePath}?farm-route=${kind}:${encodeURIComponent(normalizeRoutePath(routePath))}`;
@@ -617,7 +770,7 @@ export function createProgrammaticRouteModuleId(
 
 export function parseProgrammaticRouteModuleId(moduleId: string): {
   filePath: string;
-  kind: "page" | "layout";
+  kind: "page" | "layout" | "api";
   routePath: string;
 } | null {
   const queryIndex = moduleId.indexOf("?");
@@ -638,7 +791,7 @@ export function parseProgrammaticRouteModuleId(moduleId: string): {
   }
 
   const kind = value.slice(0, separator);
-  if (kind !== "page" && kind !== "layout") {
+  if (kind !== "page" && kind !== "layout" && kind !== "api") {
     return null;
   }
 

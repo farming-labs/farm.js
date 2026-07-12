@@ -1,11 +1,20 @@
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
 import { notFound, redirect } from "../navigation";
-import { FARM_ROUTE_CONTEXT_SYMBOL, resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
-import { createRoute, createRouteModuleFromProgrammaticPage, defineRoutes } from "../routes";
+import {
+  FARM_ROUTE_CONTEXT_SYMBOL,
+  resolveFarmRouteContext,
+  withFarmRouteContext,
+} from "../route-context";
+import {
+  createRoute,
+  createRouteModuleFromProgrammaticPage,
+  defineRoutes,
+  type InferProgrammaticRouteData,
+} from "../routes";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
@@ -41,6 +50,44 @@ function createConfig(root: string): Required<FarmConfig> {
 }
 
 describe("programmatic routes", () => {
+  it("infers params, search, before data, main data, and component props", () => {
+    const paramsSchema = {
+      parse: (_value: unknown) => ({ id: "product-1" }),
+    };
+    const searchSchema = {
+      parse: (_value: unknown) => ({ tab: "info" as "info" | "reviews" }),
+    };
+
+    const route = createRoute("/typed-products/[id]", {
+      params: paramsSchema,
+      search: searchSchema,
+      data: {
+        before({ params, search }) {
+          expectTypeOf(params).toEqualTypeOf<{ id: string }>();
+          expectTypeOf(search).toEqualTypeOf<{ tab: "info" | "reviews" }>();
+          return { token: `${params.id}:${search.tab}` };
+        },
+        async main({ params, before }) {
+          expectTypeOf(before).toEqualTypeOf<{ token: string }>();
+          return { label: `${params.id}:${before.token}` };
+        },
+        after({ data }) {
+          expectTypeOf(data).toEqualTypeOf<{ label: string }>();
+        },
+      },
+      component(props) {
+        expectTypeOf(props.params).toEqualTypeOf<{ id: string }>();
+        expectTypeOf(props.search).toEqualTypeOf<{ tab: "info" | "reviews" }>();
+        expectTypeOf(props.data).toEqualTypeOf<{ label: string }>();
+        return null;
+      },
+    });
+
+    expectTypeOf<InferProgrammaticRouteData<NonNullable<typeof route.data>>>().toEqualTypeOf<{
+      label: string;
+    }>();
+  });
+
   it("discovers page, layout, redirect, staticPaths, and render metadata", async () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-programmatic-routes-"));
     tempDirs.push(root);
@@ -73,8 +120,9 @@ describe("programmatic routes", () => {
     ]);
 
     const manager = new RouteManager(createConfig(root), {
+      config: { root },
       ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routesFile);
+        expect(filePath).toBe("/src/farm.routes.js");
         return { default: manifest };
       },
     } as any);
@@ -189,8 +237,9 @@ describe("programmatic routes", () => {
     });
 
     const manager = new RouteManager(createConfig(root), {
+      config: { root },
       ssrLoadModule: async (filePath: string) => {
-        expect(filePath).toBe(routesFile);
+        expect(filePath).toBe("/src/farm.route.tsx");
         return { Route: ProductRoute };
       },
     } as any);
@@ -453,7 +502,11 @@ describe("programmatic routes", () => {
     const before = vi.fn(({ context }: any) => ({
       userId: context.session.user.id,
     }));
-    const key = vi.fn(({ context, before }: any) => ["dashboard", context.session.user.id, before.userId]);
+    const key = vi.fn(({ context, before }: any) => [
+      "dashboard",
+      context.session.user.id,
+      before.userId,
+    ]);
     const main = vi.fn(({ context, before }: any) => ({
       userId: before.userId,
       db: context.db.label,
@@ -576,7 +629,9 @@ describe("programmatic routes", () => {
     }) as any;
 
     expect(suspenseElement.props.fallback.type).toBe(Pending);
-    const errorElement = await suspenseElement.props.children.type(suspenseElement.props.children.props);
+    const errorElement = await suspenseElement.props.children.type(
+      suspenseElement.props.children.props,
+    );
     expect(errorElement.type).toBe(ErrorView);
     expect(errorElement.props.error).toBeInstanceOf(Error);
 

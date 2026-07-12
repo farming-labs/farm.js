@@ -75,6 +75,8 @@ export {
   useScrollRestoration,
 } from "./client/router";
 export {
+  SPARouter,
+  getRouter,
   navigateTo,
   prefetch,
   pushState,
@@ -96,11 +98,7 @@ export type {
   RouteParams,
 } from "./client/link";
 export type { FarmChunkRecoveryOptions } from "./client/chunk-recovery";
-export type {
-  UseBlockerOptions,
-  UseBlockerReturn,
-  UseRouterOptions,
-} from "./client/router";
+export type { UseBlockerOptions, UseBlockerReturn, UseRouterOptions } from "./client/router";
 export type {
   FarmNavigateOptions,
   FarmNavigationBlocker,

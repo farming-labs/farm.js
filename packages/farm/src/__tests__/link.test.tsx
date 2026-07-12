@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, createElement } from "react";
 import { expectTypeOf } from "vitest";
 import { createRoot } from "react-dom/client";
-import { Link, type LinkProps } from "../client/link";
+import { Link, type LinkProps, type RouteHref } from "../client/link";
 
 const prefetch = vi.fn().mockResolvedValue(undefined);
 const navigate = vi.fn();
@@ -214,6 +214,8 @@ describe("Link", () => {
         scroll: true,
         viewTransition: true,
       });
+      expect(el.getAttribute("data-view-transition")).toBe("true");
+      expect(el.hasAttribute("data-farm-link")).toBe(true);
     });
 
     it("renders and navigates with resolved route params, query, and hash", () => {
@@ -357,6 +359,14 @@ describe("Link", () => {
         | `//${string}`
         | `mailto:${string}`
       >();
+    });
+
+    it("accepts a union variable of routes whose params are already resolved", () => {
+      type AppRoutes = "/" | "/about" | `/users/${string}`;
+      const href: RouteHref<AppRoutes> = Math.random() > 0.5 ? "/about" : "/users/42";
+
+      const el = render(createElement(Link<AppRoutes>, { href }));
+      expect(el?.getAttribute("href")).toBe(href);
     });
   });
 });
