@@ -9,11 +9,12 @@ export class OpenAPIManager {
   private appDir: string;
   private specCache: any = null;
 
-  constructor(appDir: string, config: OpenAPIConfig) {
-    this.appDir = appDir;
+  constructor(appDir: string | readonly string[], config: OpenAPIConfig) {
+    const appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
+    this.appDir = appDirs[appDirs.length - 1];
     this.config = config;
-    this.generator = new OpenAPIGenerator(appDir, config);
-    this.apiTypeGenerator = new APITypeGenerator(appDir);
+    this.generator = new OpenAPIGenerator(this.appDir, config);
+    this.apiTypeGenerator = new APITypeGenerator(appDirs);
   }
 
   /**

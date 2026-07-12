@@ -3,11 +3,13 @@ import { dirname, join, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
 import { generateRouteTypes, type GenerateRouteTypesOptions } from "./routing/generate-route-types";
 import { generateEnvTypes } from "./env-types";
+import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 
 export interface GenerateFarmTypeArtifactsOptions {
   root: string;
   srcDir?: string;
   extraRoutes?: string[];
+  layers?: readonly ResolvedFarmLayer[];
   suppressLintOnLink?: boolean;
   routeTypesOutFile?: string;
   apiTypesOutFile?: string;
@@ -32,7 +34,8 @@ export async function generateFarmTypeArtifacts(
   const shouldGenerateRoutes = options.routes !== false;
   const shouldGenerateApi = options.api !== false;
   const shouldGenerateEnv = options.env !== false;
-  const appDir = join(root, srcDir, "app");
+  const sourceRoots = getFarmSourceRoots({ root, srcDir, layers: options.layers });
+  const appDirs = getFarmAppDirectories({ root, srcDir, layers: options.layers });
 
   const result: GenerateFarmTypeArtifactsResult = {
     apiRoutes: [],
@@ -44,6 +47,7 @@ export async function generateFarmTypeArtifacts(
       srcDir,
       extraRoutes: options.extraRoutes || [],
       suppressLintOnLink: options.suppressLintOnLink,
+      sourceRoots,
     };
 
     if (options.routeTypesOutFile) {
@@ -54,12 +58,12 @@ export async function generateFarmTypeArtifacts(
   }
 
   if (shouldGenerateApi) {
-    const generator = new APITypeGenerator(appDir);
+    const generator = new APITypeGenerator(appDirs);
     const apiRoutes = generator.scanAPIRoutes();
     const apiTypesPath = options.apiTypesOutFile
       ? resolve(root, options.apiTypesOutFile)
       : join(root, srcDir, "lib", "api.generated.ts");
-    const content = generator.generateAPIRouter(apiRoutes);
+    const content = generator.generateAPIRouter(apiRoutes, { outFile: apiTypesPath });
 
     mkdirSync(dirname(apiTypesPath), { recursive: true });
     writeFileSync(apiTypesPath, content, "utf-8");
@@ -73,6 +77,9 @@ export async function generateFarmTypeArtifacts(
       root,
       srcDir,
       outFile: options.envTypesOutFile,
+      layerConfigPaths: (options.layers ?? [])
+        .map((layer) => layer.configFile)
+        .filter((configFile): configFile is string => Boolean(configFile)),
     });
   }
 

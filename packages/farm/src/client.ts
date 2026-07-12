@@ -67,7 +67,21 @@ export type {
 
 // SPA Navigation exports
 export { Link } from "./client/link";
-export { useRouter } from "./client/router";
+export {
+  useBlocker,
+  useNavigation,
+  usePageState,
+  useRouter,
+  useScrollRestoration,
+} from "./client/router";
+export {
+  navigateTo,
+  prefetch,
+  pushState,
+  readPageState,
+  replaceState,
+} from "./client/spa-router";
+export { installChunkErrorRecovery, isChunkLoadError } from "./client/chunk-recovery";
 export type {
   LinkProps,
   PrefetchBehavior,
@@ -81,3 +95,18 @@ export type {
   RouteOptionalParamValue,
   RouteParams,
 } from "./client/link";
+export type { FarmChunkRecoveryOptions } from "./client/chunk-recovery";
+export type {
+  UseBlockerOptions,
+  UseBlockerReturn,
+  UseRouterOptions,
+} from "./client/router";
+export type {
+  FarmNavigateOptions,
+  FarmNavigationBlocker,
+  FarmNavigationBlockerContext,
+  FarmNavigationListener,
+  FarmNavigationLocation,
+  FarmNavigationState,
+  FarmViewTransitionMode,
+} from "./client/spa-router";

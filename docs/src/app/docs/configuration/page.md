@@ -35,17 +35,70 @@ export default defineFarmConfig({
 
 ## Important options
 
-| Option | Use it for |
-| --- | --- |
-| srcDir | Changing the app source folder from the default src. |
-| integrations | Registering built-in or custom integrations. |
-| storage | Providing storage clients and mounts for framework and integration code. |
-| migrations | Running one-shot schema/provider commands with `farm migrate`. |
-| docs | Serving the built-in docs runtime and docs API. |
-| md | Exposing markdown mirrors like /pricing.md. |
-| mdx | Rendering `page.md` and `page.mdx` app routes, plus MDX components. |
-| deploy | Selecting a target, preset, and output directory. |
-| openapi | Publishing API reference docs. |
+| Option        | Use it for                                                                        |
+| ------------- | --------------------------------------------------------------------------------- |
+| extends       | Composing local or package Farm layers with project-first overrides.              |
+| srcDir        | Changing the app source folder from the default src.                              |
+| integrations  | Registering built-in or custom integrations.                                      |
+| storage       | Providing storage clients and mounts for framework and integration code.          |
+| migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
+| docs          | Serving the built-in docs runtime and docs API.                                   |
+| md            | Exposing markdown mirrors like /pricing.md.                                       |
+| mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
+| deploy        | Selecting a target, preset, and output directory.                                 |
+| routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
+| serverActions | Restricting trusted action origins and request body size.                         |
+| openapi       | Publishing API reference docs.                                                    |
+
+## Layers
+
+Use `extends` to compose ordinary Farm-shaped directories and packages. Entries apply from left to right, and project files and configuration have final priority.
+
+```ts
+export default defineFarmConfig({
+  extends: ["@company/farm-base", "./layers/commerce"],
+});
+```
+
+A layer may contain an optional plain `farm.config.ts` plus its own `src/app`, components, middleware, APIs, and programmatic routes. It does not use a separate layer registration function. See [Layers](/docs/layers) for package structure, merge rules, aliases, generated types, and override behavior.
+
+## Server action security
+
+Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  experimental: {
+    serverComponents: true,
+    serverActions: true,
+  },
+
+  serverActions: {
+    allowedOrigins: [],
+    bodySizeLimit: "1mb",
+  },
+});
+```
+
+`allowedOrigins` adds trusted origins when a reverse proxy or multi-origin deployment makes the browser origin differ from the server request origin. Entries can be exact origins, hosts, or leftmost-subdomain wildcards:
+
+```ts
+serverActions: {
+  allowedOrigins: [
+    "https://app.example.com",
+    "proxy.internal:8443",
+    "https://*.preview.example.com",
+  ],
+}
+```
+
+Do not use `allowedOrigins` as a replacement for CORS or as a public API allowlist. Browser action requests must provide a matching `Origin` or `Referer`; Farm accepts `Sec-Fetch-Site: same-origin` when both are unavailable. Explicitly configured origins can cross a trusted proxy boundary.
+
+`bodySizeLimit` accepts bytes or strings such as `"500kb"`, `"2mb"`, and `"2MiB"`. Farm checks `Content-Length` when present and also counts streamed bytes, so chunked requests cannot bypass the limit.
+
+Rejected requests use generic, non-cacheable responses: `403` for origin failures, `413` for oversized bodies, and `415` for unsupported content types. Detailed parsing or execution errors stay in server logs.
 
 ## Next-style route exports
 
@@ -61,6 +114,33 @@ export default async function BlogPage() {
   return <main>...</main>;
 }
 ```
+
+## Route rules
+
+Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  routeRules: {
+    "/": { prerender: true },
+    "/blog/**": { swr: 3600 },
+    "/admin/**": { render: "dynamic" },
+    "/api/**": { cors: true },
+    "/assets/**": {
+      headers: {
+        "Cache-Control": "public, max-age=31536000, immutable",
+      },
+    },
+    "/old": { redirect: "/new" },
+  },
+});
+```
+
+`render: "static"` maps to prerendering. `render: "dynamic"` forces a dynamic response. `swr` and `isr` accept `true` or a TTL in seconds. `cors: true` applies permissive API CORS headers; pass an object when you need a specific origin, methods, or headers.
+
+Prefer route-level exports when one page owns the behavior. Prefer `routeRules` for broad groups, deployment-facing cache policy, API CORS, static asset headers, and legacy redirects.
 
 ## Minimal project layout
 
@@ -156,4 +236,7 @@ export default defineFarmConfig({
 - Use `migrations.commands` for schema setup that should be explicit in CI.
 - Use `docs.entry` when the docs runtime should be mounted automatically.
 - Prefer route-level exports such as `dynamic`, `revalidate`, and `ppr` when behavior belongs to one page.
+- Prefer `routeRules` for broad URL patterns and platform-level cache/header behavior.
+- Keep `serverActions.allowedOrigins` empty unless the deployment has a known proxy-origin mismatch.
+- Treat every server action as a public endpoint and authorize the current user inside the action or middleware.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.

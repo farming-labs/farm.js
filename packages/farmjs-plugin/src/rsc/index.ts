@@ -22,8 +22,10 @@
  * ```
  */
 
-import type { Plugin, UserConfig, ViteDevServer } from "vite";
+import type { Plugin, UserConfig } from "vite";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
+import type { FarmServerActionsConfig } from "@farmjs/core/server-action-security";
+import type { FarmLayerEntry, ResolvedFarmLayer } from "@farmjs/core/server";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
@@ -37,6 +39,12 @@ const require_ = createRequire(import.meta.url);
 const { farmApiPlugin, farmMiddlewarePlugin } = require_(
   "@farmjs/core",
 ) as typeof import("@farmjs/core");
+const { resolveServerActionsConfig } = require_(
+  "@farmjs/core/server-action-security",
+) as typeof import("@farmjs/core/server-action-security");
+const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
+  "@farmjs/core/server",
+) as typeof import("@farmjs/core/server");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -47,6 +55,8 @@ export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
 // Extended config type for Farm.js RSC
 export interface FarmRscConfig {
   srcDir?: string;
+  extends?: readonly FarmLayerEntry[];
+  layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
   port?: number;
@@ -56,6 +66,7 @@ export interface FarmRscConfig {
   };
   debug?: boolean;
   encryptActions?: boolean;
+  serverActions?: FarmServerActionsConfig;
   routesDir?: string;
   entries?: {
     rsc?: string;
@@ -81,8 +92,11 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       serverActions: config.experimental?.serverActions ?? true,
     },
     srcDir: config.srcDir ?? "src",
+    extends: config.extends,
+    layers: config.layers,
     outDir: config.outDir ?? "dist",
     basePath: config.basePath ?? "/",
+    serverActions: config.serverActions,
 
     // Vite server configuration
     server: {
@@ -105,6 +119,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
       farmRsc({
         debug,
         encryptActions: config.encryptActions,
+        serverActions: config.serverActions,
         routesDir: config.routesDir,
         entries: config.entries,
       }),
@@ -273,6 +288,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           outDir?: string;
           basePath?: string;
           root?: string;
+          extends?: readonly FarmLayerEntry[];
+          layers?: readonly ResolvedFarmLayer[];
+          serverActions?: FarmServerActionsConfig;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
@@ -286,18 +304,45 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           return;
         }
 
+        const root = c.root ?? process.cwd();
+        if (c.extends?.length) {
+          const layerResolution = await resolveFarmLayers(c, {
+            root,
+            mode: process.env.NODE_ENV === "production" ? "production" : "development",
+          });
+          Object.assign(c, layerResolution.config);
+        }
+
         // Read user's directory configuration
         const srcDir = c.srcDir ?? "src";
         const outDir = c.outDir ?? "dist";
-        const root = c.root ?? process.cwd();
         rscBuildRoot = root;
+        const entriesDir = path.join(root, ".farm", "rsc-entries");
+        await fs.mkdir(entriesDir, { recursive: true });
+        const configuredRoutesDir =
+          options.routesDir === undefined ? "app" : options.routesDir.trim();
+        const routeRoots = getFarmSourceRoots(c).map((source) => {
+          const routeDirectory = configuredRoutesDir
+            ? path.join(source.root, source.srcDir, configuredRoutesDir)
+            : path.join(source.root, source.srcDir);
+          const relative = path.relative(entriesDir, routeDirectory).replace(/\\/g, "/");
+          const base = relative.startsWith(".") ? relative : `./${relative}`;
+          return { name: source.name, base, glob: base };
+        });
         // Build context for entry generators
         entryContext = {
           srcDir,
           outDir,
           basePath: c.basePath ?? "/",
           routesDir: options.routesDir,
+          routeRoots,
           actionsEnabled,
+          serverActions: resolveServerActionsConfig({
+            ...c.serverActions,
+            ...options.serverActions,
+            allowedOrigins:
+              options.serverActions?.allowedOrigins ?? c.serverActions?.allowedOrigins,
+          }),
           debug,
         };
 
@@ -305,8 +350,6 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
         // Write real entry files so @vitejs/plugin-rsc can use file-based entries.
         // This ensures the RSC plugin runs for every environment (rsc, ssr, client) and client build/deploy works.
-        const entriesDir = path.join(root, ".farm", "rsc-entries");
-        await fs.mkdir(entriesDir, { recursive: true });
         const entryRscPath = path.join(entriesDir, "entry.rsc.tsx");
         const entrySsrPath = path.join(entriesDir, "entry.ssr.tsx");
         const entryClientPath = path.join(entriesDir, "entry.browser.tsx");
@@ -328,8 +371,16 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         try {
           farmCorePath = path.dirname(require_.resolve("@farmjs/core/package.json"));
         } catch {
-          // @farmjs/core not installed or not built; alias not added
+          try {
+            farmCorePath = path.resolve(
+              path.dirname(require_.resolve("@farmjs/core/server")),
+              "..",
+            );
+          } catch {
+            // @farmjs/core not installed or not built; core aliases are not added
+          }
         }
+        const layerAliases = getFarmLayerAliases(c.layers);
 
         // Return shared config and environments. RSC plugin (in plugins) needs to run in same
         // pipeline for client build to resolve virtual:vite-rsc/client-references.
@@ -347,9 +398,13 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           },
           resolve: {
             dedupe: ["react", "react-dom"],
-            ...(farmCorePath
-              ? {
-                  alias: [
+            alias: [
+              ...Object.entries(layerAliases).map(([find, replacement]) => ({
+                find,
+                replacement,
+              })),
+              ...(farmCorePath
+                ? [
                     {
                       find: "@farmjs/core/middleware",
                       replacement: path.join(farmCorePath, "dist/middleware.mjs"),
@@ -362,15 +417,28 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                       find: "@farmjs/core/server-fn",
                       replacement: path.join(farmCorePath, "dist/server-fn.mjs"),
                     },
+                    {
+                      find: "@farmjs/core/server-action-security",
+                      replacement: path.join(farmCorePath, "dist/server-action-security.mjs"),
+                    },
                     { find: "@farmjs/core", replacement: farmCorePath },
-                  ],
-                }
-              : {}),
+                  ]
+                : []),
+            ],
           },
           esbuild: {
             jsx: "automatic",
             jsxImportSource: "react",
           },
+          ...(c.layers?.length
+            ? {
+                server: {
+                  fs: {
+                    allow: [root, ...c.layers.map((layer) => layer.root)],
+                  },
+                },
+              }
+            : {}),
           environments: {
             rsc: {
               build: {
@@ -533,11 +601,20 @@ setServerCallback(async (id, args) => {
   const headers = { 'x-farm-action-id': id, 'Accept': 'text/x-component' };
   if (typeof body === 'string') headers['Content-Type'] = 'text/plain; charset=utf-8';
   else if (!(body instanceof FormData)) headers['Content-Type'] = 'application/octet-stream';
-  const res = await fetch(location.href, { method: 'POST', headers, body });
+  const res = await fetch(location.href, {
+    method: 'POST',
+    headers,
+    body,
+    cache: 'no-store',
+    credentials: 'same-origin',
+    redirect: 'error',
+  });
   if (!res.ok) throw new Error('Server action failed: ' + res.status);
   const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
   if (p?.returnValue?.ok) return p.returnValue.data;
-  throw p?.returnValue?.data;
+  const error = new Error(p?.returnValue?.data?.message || 'Server function failed');
+  error.name = 'ServerActionError';
+  throw error;
 });
 `
             : "";

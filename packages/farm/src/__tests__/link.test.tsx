@@ -43,6 +43,7 @@ describe("Link", () => {
     container?.remove();
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
     delete (window as any).__FARM_SPA_ROUTER__;
+    delete (window as any).__FARM_MANIFEST__;
   });
 
   function render(ui: React.ReactElement) {
@@ -180,7 +181,11 @@ describe("Link", () => {
         el.dispatchEvent(e);
       });
       expect(e.defaultPrevented).toBe(true);
-      expect(navigate).toHaveBeenCalledWith("/dashboard", { replace: false, scroll: true });
+      expect(navigate).toHaveBeenCalledWith("/dashboard", {
+        replace: false,
+        scroll: true,
+        viewTransition: false,
+      });
     });
 
     it("replace and scroll false passed to navigate", () => {
@@ -190,7 +195,25 @@ describe("Link", () => {
       act(() => {
         el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }));
       });
-      expect(navigate).toHaveBeenCalledWith("/settings", { replace: true, scroll: false });
+      expect(navigate).toHaveBeenCalledWith("/settings", {
+        replace: true,
+        scroll: false,
+        viewTransition: false,
+      });
+    });
+
+    it("passes viewTransition to navigate", () => {
+      const el = render(
+        createElement(Link, { href: "/gallery", viewTransition: true }),
+      ) as HTMLAnchorElement;
+      act(() => {
+        el.dispatchEvent(new MouseEvent("click", { bubbles: true, button: 0, cancelable: true }));
+      });
+      expect(navigate).toHaveBeenCalledWith("/gallery", {
+        replace: false,
+        scroll: true,
+        viewTransition: true,
+      });
     });
 
     it("renders and navigates with resolved route params, query, and hash", () => {
@@ -212,7 +235,59 @@ describe("Link", () => {
       expect(navigate).toHaveBeenCalledWith("/products/123?from=list&tab=info#reviews", {
         replace: false,
         scroll: true,
+        viewTransition: false,
       });
+    });
+
+    it("preserves target route search params from the current URL", () => {
+      window.history.replaceState(null, "", "/products?locale=am&tab=info");
+      (window as any).__FARM_MANIFEST__ = {
+        routes: {
+          "/products/[id]": {
+            pattern: "/products/[id]",
+            search: { preserve: ["locale"] },
+            segments: [
+              { segment: "products", isDynamic: false },
+              { segment: "id", isDynamic: true },
+            ],
+          },
+        },
+      };
+
+      const el = render(
+        createElement(Link<"/products/[id]">, {
+          href: "/products/[id]",
+          params: { id: 123 },
+          query: { tab: "reviews" },
+        }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("/products/123?tab=reviews&locale=am");
+    });
+
+    it("does not overwrite search params already provided by the link", () => {
+      window.history.replaceState(null, "", "/products?locale=am");
+      (window as any).__FARM_MANIFEST__ = {
+        routes: {
+          "/products/[id]": {
+            pattern: "/products/[id]",
+            search: { preserve: ["locale"] },
+            segments: [
+              { segment: "products", isDynamic: false },
+              { segment: "id", isDynamic: true },
+            ],
+          },
+        },
+      };
+
+      const el = render(
+        createElement(Link<"/products/[id]">, {
+          href: "/products/[id]?locale=en",
+          params: { id: 123 },
+        }),
+      ) as HTMLAnchorElement;
+
+      expect(el.getAttribute("href")).toBe("/products/123?locale=en");
     });
 
     it("external href has correct attribute and is not intercepted", () => {

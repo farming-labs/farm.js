@@ -40,9 +40,11 @@ import {
   resolveWorkflowsConfig,
   type FarmDiscoveredWorkflow,
 } from "./workflows";
+import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
+import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -74,6 +76,25 @@ function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unkno
   }
 
   return publicEnv;
+}
+
+function createRequestFromNodeRequest(
+  req: { method?: string; headers: Record<string, string | string[] | undefined> },
+  url: URL,
+): Request {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(req.headers)) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item);
+    } else if (value !== undefined) {
+      headers.set(key, value);
+    }
+  }
+
+  return new Request(url.toString(), {
+    method: req.method || "GET",
+    headers,
+  });
 }
 
 function getFullEnvDefine(config: FarmVitePluginOptions): {
@@ -186,8 +207,22 @@ export function farmPlugin(
     name: "farm",
 
     config(_userConfig, configEnv) {
+      const layerAliases = getFarmLayerAliases(options.layers);
+      const layerRoots = (options.layers ?? []).map((layer) => layer.root);
       return {
         define: getEnvDefines(options, configEnv),
+        resolve: {
+          alias: layerAliases,
+        },
+        ...(layerRoots.length
+          ? {
+              server: {
+                fs: {
+                  allow: [path.resolve(options.root || process.cwd()), ...layerRoots],
+                },
+              },
+            }
+          : {}),
       };
     },
 
@@ -233,17 +268,22 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      const sourceRoots = getFarmSourceRoots(farmConfig);
+      server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
       const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
       const getExtraRouteTypes = () => [
         ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
         ...getFarmDocsRouteTypeEntries(farmConfig.docs),
       ];
-      const appDirSlug = path.join(farmConfig.root, farmConfig.srcDir, "app").replace(/\\/g, "/");
+      const appDirSlugs = sourceRoots.map((source) =>
+        path.join(source.root, source.srcDir, "app").replace(/\\/g, "/"),
+      );
       const generateTypeArtifacts = async (reason: string, log = false) => {
         try {
           const result = await generateFarmTypeArtifacts({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
+            layers: farmConfig.layers,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
           });
@@ -267,33 +307,60 @@ export function farmPlugin(
       };
       await generateTypeArtifacts("startup");
 
-      const srcDirSlug = path.join(farmConfig.root, farmConfig.srcDir).replace(/\\/g, "/");
+      const srcDirSlugs = sourceRoots.map((source) =>
+        path.join(source.root, source.srcDir).replace(/\\/g, "/"),
+      );
+      const layerConfigFiles = new Set(
+        farmConfig.layers
+          .map((layer) => layer.configFile?.replace(/\\/g, "/"))
+          .filter((file): file is string => Boolean(file)),
+      );
       const isPageFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return normalized.includes(appDirSlug) && /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized);
+        return (
+          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
+          /page\.(ts|tsx|js|jsx|md|mdx)$/.test(normalized)
+        );
       };
       const isApiRouteFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
         return (
-          normalized.includes(`${appDirSlug}/api/`) && /route\.(ts|tsx|js|jsx)$/.test(normalized)
+          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/api/`)) &&
+          /route\.(ts|tsx|js|jsx)$/.test(normalized)
         );
       };
       const isProgrammaticRouteFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return normalized.startsWith(`${srcDirSlug}/`) && isProgrammaticRoutesFileName(normalized);
+        return (
+          srcDirSlugs.some((srcDir) => normalized.startsWith(`${srcDir}/`)) &&
+          isProgrammaticRoutesFileName(normalized)
+        );
       };
       const isProgrammaticRouteSourceFile = (file: string) => {
         const normalized = file.replace(/\\/g, "/");
-        return isPotentialProgrammaticRouteSourceFile(normalized, srcDirSlug);
+        return srcDirSlugs.some((srcDir) =>
+          isPotentialProgrammaticRouteSourceFile(normalized, srcDir),
+        );
+      };
+      const isAppRuntimeFile = (file: string) => {
+        const normalized = file.replace(/\\/g, "/");
+        return (
+          appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
+          /\/(?:page|layout|loading|error|opengraph-image|twitter-image|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$/.test(
+            normalized,
+          )
+        );
       };
       const isTypeAffectingFile = (file: string, event: string) =>
         isPageFile(file) ||
         isApiRouteFile(file) ||
         isFarmConfigFile(file, farmConfig.root) ||
+        layerConfigFiles.has(file.replace(/\\/g, "/")) ||
         isProgrammaticRouteFile(file) ||
         (isProgrammaticRouteSourceFile(file) &&
           (event === "unlink" || fileContainsProgrammaticPageRoute(file)));
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
+      let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleTypeArtifactGen = (file: string, event: string) => {
         if (typeArtifactGenScheduled) return;
         typeArtifactGenScheduled = setTimeout(() => {
@@ -305,6 +372,24 @@ export function farmPlugin(
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
           if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
+          if (
+            ev !== "change" &&
+            (isAppRuntimeFile(file) ||
+              isProgrammaticRouteFile(file) ||
+              (isProgrammaticRouteSourceFile(file) &&
+                (ev === "unlink" || fileContainsProgrammaticPageRoute(file)))) &&
+            !routeRefreshScheduled
+          ) {
+            routeRefreshScheduled = setTimeout(() => {
+              routeRefreshScheduled = null;
+              Promise.all([
+                refreshRouteDiscovery?.(`${ev} ${file}`),
+                file.includes("middleware.") ? middlewareManager?.reload() : undefined,
+              ])
+                .then(() => server.ws.send({ type: "full-reload", path: "*" }))
+                .catch((error) => logger.warn(`Route refresh failed: ${error.message}`));
+            }, 50);
+          }
         });
       });
 
@@ -312,7 +397,7 @@ export function farmPlugin(
       hmrManager = new HMRManager(server);
 
       // Initialize API route manager
-      const appDir = path.join(farmConfig.root, farmConfig.srcDir, "app");
+      const appDirs = getFarmAppDirectories(farmConfig);
       const routeManager = farmApp.getRouteManager();
       const discoveredRoutes: Array<{
         kind: "page" | "layout";
@@ -336,7 +421,7 @@ export function farmPlugin(
         });
       }
 
-      apiRouteManager = new APIRouteManager(appDir, server);
+      apiRouteManager = new APIRouteManager(appDirs, server);
       await apiRouteManager.discoverRoutes();
       const discoveredWorkflows = await discoverFarmWorkflows(
         { ...farmConfig, workflows: workflowConfig },
@@ -364,7 +449,7 @@ export function farmPlugin(
         }
       }
 
-      middlewareManager = new MiddlewareManager(appDir, server, options.middleware);
+      middlewareManager = new MiddlewareManager(appDirs, server, farmConfig.middleware);
       await middlewareManager.discover();
       if (pm) {
         for (const middleware of middlewareManager.getMiddlewares()) {
@@ -378,7 +463,7 @@ export function farmPlugin(
 
       // Initialize OpenAPI manager if enabled
       if (options.openapi?.enabled) {
-        openAPIManager = new OpenAPIManager(appDir, options.openapi);
+        openAPIManager = new OpenAPIManager(appDirs, options.openapi);
         await openAPIManager.generateSpec();
         logger.success("✅ OpenAPI documentation enabled");
       }
@@ -906,12 +991,21 @@ export function farmPlugin(
             targetUrl.searchParams.forEach((value, key) => {
               searchParams[key] = value;
             });
+            const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
+              request: createRequestFromNodeRequest(req, urlObj),
+              params,
+              search: searchParams,
+              path: targetUrl.pathname,
+            });
             const routeProps = await parseRouteModuleProps(routeModule as RouteModuleLike, {
-              props: {
-                params,
-                searchParams: Promise.resolve(searchParams),
-                path: targetUrl.pathname,
-              },
+              props: withFarmRouteContext(
+                {
+                  params,
+                  searchParams: Promise.resolve(searchParams),
+                  path: targetUrl.pathname,
+                },
+                routeContext,
+              ),
               search: searchParams,
               routePath: route.pattern,
             });
@@ -932,10 +1026,14 @@ export function farmPlugin(
                 search: (routeProps as any).search,
                 searchParams: (routeProps as any).search,
                 ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+                ...((routeProps as any).__farmCanonicalPath
+                  ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
+                  : {}),
                 ...((routeProps as any).__farmRoutePropsResolved
                   ? { __farmRoutePropsResolved: true }
                   : {}),
               },
+              canonicalPath: (routeProps as any).__farmCanonicalPath,
               modulePath: toUrlPath(route.modulePath),
               isClientComponent,
               shouldHydrate,
@@ -1191,6 +1289,7 @@ export const getManifest = () => ({
             modulePath: route.modulePath,
             pattern: route.pattern,
             segments: route.segments,
+            search: route.search,
             isClientComponent: moduleMetadata.isClientComponent,
             shouldHydrate: moduleMetadata.shouldHydrate,
             preloads: [route.modulePath], // In dev, preload is just the module
@@ -1416,7 +1515,9 @@ if (import.meta.hot) {
       const currentFarmConfig = farmApp?.getConfig();
       const normalizedFile = file.replace(/\\/g, "/");
       const currentSrcRoot = currentFarmConfig
-        ? path.join(currentFarmConfig.root, currentFarmConfig.srcDir).replace(/\\/g, "/")
+        ? getFarmSourceRoots(currentFarmConfig)
+            .map((source) => path.join(source.root, source.srcDir).replace(/\\/g, "/"))
+            .find((sourceRoot) => normalizedFile.startsWith(`${sourceRoot}/`)) || null
         : null;
       if (
         currentSrcRoot &&
@@ -1563,10 +1664,20 @@ if (!__farmRoute) {
 
 export const metadata = __farmRoute.metadata;
 export const generateMetadata = __farmRoute.generateMetadata;
+const __farmIsSearchSchema = (value) => value && typeof value.parse === "function";
+const __farmGetSearchSchema = (search) => __farmIsSearchSchema(search) ? search : search?.schema;
+const __farmGetSearchOptions = (search) => __farmIsSearchSchema(search) ? undefined : search;
+const __farmSearchSchema = __farmGetSearchSchema(__farmRoute.search);
+const __farmSearchOptions = __farmGetSearchOptions(__farmRoute.search);
 export const __farmRouteSchemas = {
   params: __farmRoute.params,
-  search: __farmRoute.search,
+  search: __farmSearchSchema,
 };
+export const __farmRouteSearch = __farmSearchOptions ? {
+  stripDefaults: __farmSearchOptions.stripDefaults,
+  preserve: __farmSearchOptions.preserve,
+  temporary: __farmSearchOptions.temporary,
+} : undefined;
 export const __farmRouteData = __farmRoute.data;
 export const __farmRouteParsesProps = __farmRoute.kind === "page" && !!(
   __farmRoute.params ||
@@ -1591,19 +1702,96 @@ const __farmMarkRoutePropsResolved = (props) => ({
   __farmRoutePropsResolved: true,
 });
 
+const __farmAddCanonicalPath = (props, canonicalPath) => (
+  canonicalPath ? { ...props, __farmCanonicalPath: canonicalPath } : props
+);
+
 const __farmStripRoutePropsMarker = (props) => {
   if (!props || props.__farmRoutePropsResolved !== true) {
     return props;
   }
 
-  const { __farmRoutePropsResolved, ...componentProps } = props;
+  const { __farmRoutePropsResolved, __farmCanonicalPath, ...componentProps } = props;
   return componentProps;
+};
+
+const __farmCreateSearchParams = (value) => {
+  const params = new URLSearchParams();
+  for (const [key, item] of Object.entries(value || {})) {
+    if (item == null) continue;
+    const values = Array.isArray(item) ? item : [item];
+    for (const entry of values) {
+      if (entry != null) params.append(key, String(entry));
+    }
+  }
+  return params;
+};
+
+const __farmComparable = (value) => {
+  if (Array.isArray(value)) return value.map(__farmComparable);
+  if (value && typeof value === "object") {
+    return Object.keys(value).sort().reduce((output, key) => {
+      output[key] = __farmComparable(value[key]);
+      return output;
+    }, {});
+  }
+  return value;
+};
+
+const __farmEqual = (left, right) => (
+  JSON.stringify(__farmComparable(left)) === JSON.stringify(__farmComparable(right))
+);
+
+const __farmReadSearchValue = (value, key) => (
+  value && typeof value === "object" ? value[key] : undefined
+);
+
+const __farmParseDefaultSearch = () => {
+  if (!__farmSearchSchema) return undefined;
+  try {
+    const value = __farmSearchSchema.parse({});
+    return value && typeof value === "object" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+};
+
+const __farmResolveCanonicalPath = (rawSearch, parsedSearch, path) => {
+  if (!__farmSearchOptions?.temporary?.length && !__farmSearchOptions?.stripDefaults) {
+    return undefined;
+  }
+
+  const params = __farmCreateSearchParams(rawSearch);
+  const original = params.toString();
+
+  for (const key of __farmSearchOptions.temporary || []) {
+    params.delete(key);
+  }
+
+  if (__farmSearchOptions.stripDefaults) {
+    const defaults = __farmParseDefaultSearch();
+    if (defaults) {
+      const keys = __farmSearchOptions.stripDefaults === true
+        ? Array.from(new Set(Array.from(params.keys())))
+        : [...__farmSearchOptions.stripDefaults];
+      for (const key of keys) {
+        if (params.has(key) && __farmEqual(__farmReadSearchValue(parsedSearch, key), __farmReadSearchValue(defaults, key))) {
+          params.delete(key);
+        }
+      }
+    }
+  }
+
+  const next = params.toString();
+  if (next === original) return undefined;
+  return next ? path + "?" + next : path;
 };
 
 export async function __farmResolveRouteProps(props) {
   const rawSearch = await props.searchParams;
   const params = __farmParseSchema(__farmRoute.params, props.params, "params");
-  const search = __farmParseSchema(__farmRoute.search, rawSearch, "search");
+  const search = __farmParseSchema(__farmSearchSchema, rawSearch, "search");
+  const canonicalPath = __farmResolveCanonicalPath(rawSearch, search, props.path);
   const baseProps = {
     ...props,
     params,
@@ -1612,7 +1800,7 @@ export async function __farmResolveRouteProps(props) {
   };
 
   if (!__farmRoute.data) {
-    return __farmMarkRoutePropsResolved(baseProps);
+    return __farmMarkRoutePropsResolved(__farmAddCanonicalPath(baseProps, canonicalPath));
   }
 
   const before = __farmRoute.data.before
@@ -1634,6 +1822,7 @@ export async function __farmResolveRouteProps(props) {
   return __farmMarkRoutePropsResolved({
     ...baseProps,
     data,
+    ...(canonicalPath ? { __farmCanonicalPath: canonicalPath } : {}),
   });
 }
 
@@ -1753,6 +1942,7 @@ function generateClientCode(
   return `
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
+import { installChunkErrorRecovery } from '@farmjs/core/client'
 ${providerImportBlock}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
@@ -1763,6 +1953,8 @@ ${providerImportBlock}
 window.__FARM_REACT__ = React;
 const integrationProviders = ${JSON.stringify(integrationProviders)};
 const integrationDocumentNavigationMatchers = ${JSON.stringify(documentNavigationMatchers)};
+
+installChunkErrorRecovery();
 
 let reactRoot = null;
 
@@ -1961,6 +2153,7 @@ class SPARouter {
       if (this.onNavigate) {
         await this.onNavigate(pageData);
       }
+      applyCanonicalPathFromProps(currentPageProps);
 
       // Handle scroll
       if (scroll) {
@@ -2121,6 +2314,16 @@ function normalizeServerProps(rawProps) {
     props.context = { ...props.context, data: new Map(Object.entries(props.context.data)) };
   }
   return props;
+}
+
+function applyCanonicalPathFromProps(props) {
+  const canonicalPath = props && typeof props.__farmCanonicalPath === 'string'
+    ? props.__farmCanonicalPath
+    : null;
+  if (!canonicalPath) return;
+  const currentPath = window.location.pathname + window.location.search;
+  if (canonicalPath === currentPath) return;
+  window.history.replaceState({ ...(window.history.state || {}), path: canonicalPath }, '', canonicalPath);
 }
 
 function replayPreHydrationClicks() {
@@ -2441,6 +2644,7 @@ async function renderPage(pageData) {
       path,
       pageData.props,
     );
+    applyCanonicalPathFromProps(currentPageProps);
 
     const element = await buildWrappedHydrationElement(
       PageComponent,
@@ -2512,6 +2716,7 @@ async function hydrate() {
 
     // Get props - either from server-injected props or by matching the current URL
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
+    applyCanonicalPathFromProps(pageProps);
     if (!pageProps || !pageProps.params || Object.keys(pageProps.params).length === 0) {
       // Extract params from URL using manifest route matching (fallback)
       const pathname = window.location.pathname;
@@ -2653,6 +2858,15 @@ function generateClientManifest(bundle: any): Record<string, any> {
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
   const appRoot = path.resolve(config.root || process.cwd());
+  if (config.extends?.length) {
+    const { config: layeredConfig } = await import("./layers").then(({ resolveFarmLayers }) =>
+      resolveFarmLayers(config, {
+        root: appRoot,
+        mode: process.env.NODE_ENV === "production" ? "production" : "development",
+      }),
+    );
+    config = layeredConfig;
+  }
 
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
@@ -2868,6 +3082,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
       // Stub out problematic server-only modules during dev mode
       alias: {
+        ...getFarmLayerAliases(config.layers),
         "@": path.resolve(appRoot, "src"),
         // Nitro internals that should not be resolved in browser
         "supports-color":

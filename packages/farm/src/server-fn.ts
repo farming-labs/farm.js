@@ -1,3 +1,5 @@
+import { getServerActionExecutionContext, getServerActionSignal } from "./server-action-security";
+
 type MaybePromise<T> = T | Promise<T>;
 
 // Generic schema type that works with Zod v3/v4 and similar validator APIs.
@@ -24,6 +26,10 @@ export type ServerFnContext<TInput> = {
   input: TInput;
   rawInput: unknown;
   formData?: FormData;
+  /** The action request when invoked across the network. Undefined for direct server calls. */
+  request?: Request;
+  /** Aborts when the underlying action request is cancelled. */
+  signal: AbortSignal;
 };
 
 export type ServerFnHandler<TInput, TResult> = (
@@ -61,11 +67,14 @@ export function createServerFn(options: ServerFnOptions<AnySchema | undefined, u
     const formData = isFormData(value) ? value : undefined;
     const rawInput = formData ? formDataToObject(formData) : value;
     const input = await parseInput(options.input, rawInput);
+    const executionContext = getServerActionExecutionContext();
 
     return options.handler({
       input,
       rawInput,
       formData,
+      request: executionContext?.request,
+      signal: getServerActionSignal(),
     });
   };
 

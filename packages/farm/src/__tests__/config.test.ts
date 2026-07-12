@@ -12,6 +12,7 @@ import {
   resolveMigrationsConfig,
 } from "../config";
 import { getResolvedEnv, setEnv } from "../env";
+import { routeRulesToNitroRouteRules } from "../route-rules";
 
 const originalEnv = { ...process.env };
 
@@ -55,6 +56,7 @@ describe("loadConfig", () => {
     const config = await loadConfig(root, undefined, "development");
 
     expect(config).toMatchObject({
+      root,
       clerkSecretKey: "from-local",
       clerkPublishableKey: "from-local-pk",
     });
@@ -141,6 +143,29 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it("resolves secure server action defaults and overrides", async () => {
+    const defaults = await resolveConfig({}, "production");
+    expect(defaults.serverActions).toEqual({
+      allowedOrigins: [],
+      bodySizeLimit: 1_000_000,
+    });
+
+    const configured = await resolveConfig(
+      {
+        serverActions: {
+          allowedOrigins: ["HTTPS://APP.EXAMPLE.COM/", "*.proxy.example.com"],
+          bodySizeLimit: "2mb",
+        },
+      },
+      "production",
+    );
+
+    expect(configured.serverActions).toEqual({
+      allowedOrigins: ["https://app.example.com", "*.proxy.example.com"],
+      bodySizeLimit: 2_000_000,
+    });
+  });
+
   it("resolves MDX app page config", async () => {
     const config = await resolveConfig(
       {
@@ -259,6 +284,73 @@ describe("resolveConfig", () => {
         "production",
       ),
     ).rejects.toThrow('Invalid server env "DATABASE_URL": missing database url');
+  });
+
+  it("normalizes routeRules and derives redirects and headers", async () => {
+    const config = await resolveConfig(
+      {
+        routeRules: {
+          "/": { prerender: true },
+          "blog/**": { swr: 3600 },
+          "/admin/**": { render: "dynamic" },
+          "/api/**": {
+            cors: { origin: "https://app.example", methods: ["GET", "POST"] },
+          },
+          "/old": { redirect: { to: "/new", permanent: true } },
+          "/assets/**": { headers: { "Cache-Control": "public, max-age=31536000" } },
+        },
+      },
+      "production",
+    );
+
+    expect(config.routeRules).toMatchObject({
+      "/": { prerender: true },
+      "/blog/**": { swr: 3600 },
+      "/admin/**": { render: "dynamic" },
+      "/api/**": {
+        cors: { origin: "https://app.example", methods: ["GET", "POST"] },
+      },
+    });
+
+    expect(config.redirects()).toEqual([
+      {
+        source: "/old",
+        destination: "/new",
+        permanent: true,
+        statusCode: 308,
+      },
+    ]);
+    expect(config.headers()).toEqual(
+      expect.arrayContaining([
+        {
+          source: "/api/**",
+          headers: expect.arrayContaining([
+            { key: "Access-Control-Allow-Origin", value: "https://app.example" },
+            { key: "Access-Control-Allow-Methods", value: "GET, POST" },
+            { key: "Access-Control-Allow-Headers", value: "*" },
+          ]),
+        },
+        {
+          source: "/assets/**",
+          headers: [{ key: "Cache-Control", value: "public, max-age=31536000" }],
+        },
+      ]),
+    );
+
+    expect(routeRulesToNitroRouteRules(config.routeRules)).toMatchObject({
+      "/": { prerender: true },
+      "/blog/**": { swr: 3600 },
+      "/admin/**": { prerender: false },
+      "/old": { redirect: "/new" },
+      "/api/**": {
+        cors: true,
+        headers: {
+          "Access-Control-Allow-Origin": "https://app.example",
+          "Access-Control-Allow-Methods": "GET, POST",
+          "Access-Control-Allow-Headers": "*",
+        },
+      },
+    });
   });
 });
 

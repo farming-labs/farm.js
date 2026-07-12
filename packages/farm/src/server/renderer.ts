@@ -1,11 +1,12 @@
 import React from "react";
-import { renderToPipeableStream } from "react-dom/server";
+import { renderToPipeableStream, renderToStaticMarkup } from "react-dom/server";
 import * as fs from "fs";
 import * as path from "path";
 import type {
   FarmConfig,
   FarmRequest,
   FarmResponse,
+  LoadingProps,
   PageProps,
   RouteModule,
   SSGPage,
@@ -22,6 +23,14 @@ import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./reque
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { emitFarmEvent } from "../observability";
 import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "../navigation";
+import {
+  addMetadataImageReference,
+  mergeMetadata,
+  renderMetadataHead,
+  type FarmMetadataImageReference,
+  type MetadataImageKind,
+} from "../metadata";
+import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -78,6 +87,27 @@ function createPreHydrationClickQueueScript(): string {
   return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]"))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
 }
 
+function searchParamsToObject(
+  searchParams: URLSearchParams,
+): Record<string, string | string[] | undefined> {
+  const output: Record<string, string | string[] | undefined> = {};
+
+  searchParams.forEach((value, key) => {
+    const existing = output[key];
+    if (existing) {
+      if (Array.isArray(existing)) {
+        existing.push(value);
+      } else {
+        output[key] = [existing, value];
+      }
+    } else {
+      output[key] = value;
+    }
+  });
+
+  return output;
+}
+
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
   refreshPPR?: boolean;
@@ -98,6 +128,14 @@ function toMiddlewareMap(input: unknown): Map<string, any> {
     return new Map(Object.entries(input as Record<string, any>));
   }
   return new Map<string, any>();
+}
+
+function isWebResponse(value: unknown): value is Response {
+  return (
+    typeof Response !== "undefined" &&
+    value instanceof Response &&
+    typeof value.arrayBuffer === "function"
+  );
 }
 
 class FarmRouteErrorBoundary extends React.Component<
@@ -185,6 +223,24 @@ function parseRouteModuleSchema(
   }
 }
 
+function createRouteStateProps(input: {
+  params: Record<string, string>;
+  searchParamsObject: Record<string, string | string[] | undefined>;
+  path: string;
+  middlewareMap: Map<string, any>;
+  pluginExposedContext: Map<string, any>;
+}): LoadingProps {
+  return {
+    params: input.params,
+    search: input.searchParamsObject,
+    searchParams: Promise.resolve(input.searchParamsObject),
+    path: input.path,
+    middleware: input.middlewareMap.size > 0 ? { data: input.middlewareMap } : undefined,
+    context:
+      input.pluginExposedContext.size > 0 ? { data: input.pluginExposedContext } : undefined,
+  };
+}
+
 export class ServerRenderer {
   private config: Required<FarmConfig>;
   private routeManager: RouteManager;
@@ -195,6 +251,16 @@ export class ServerRenderer {
     this.config = config;
     this.routeManager = routeManager;
     this.loadSSGManifest();
+  }
+
+  async resolveRouteContext(input: {
+    request: Request;
+    rawRequest?: FarmRequest;
+    params: Record<string, string>;
+    search: Record<string, string | string[] | undefined>;
+    path: string;
+  }): Promise<unknown> {
+    return resolveFarmRouteContext(this.config, input);
   }
 
   /**
@@ -471,6 +537,18 @@ export class ServerRenderer {
       const url = new URL(req.url || "/", `http://${req.headers.host}`);
       pathname = url.pathname;
       emitFarmEvent({ type: "render.start", route: pathname, pathname });
+      searchParamsObject = searchParamsToObject(url.searchParams);
+
+      const metadataImageMatch = this.routeManager.matchMetadataImage(pathname);
+      if (metadataImageMatch) {
+        await this.renderMetadataImage(req, res, {
+          pathname,
+          searchParamsObject,
+          ...metadataImageMatch,
+        });
+        completeRender(res.statusCode || 200, pathname);
+        return;
+      }
 
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
@@ -509,20 +587,13 @@ export class ServerRenderer {
 
       middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
       pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
-
-      searchParamsObject = {};
-      url.searchParams.forEach((value, key) => {
-        const existing = searchParamsObject[key];
-        if (existing) {
-          // If key already exists, convert to array
-          if (Array.isArray(existing)) {
-            existing.push(value);
-          } else {
-            searchParamsObject[key] = [existing, value];
-          }
-        } else {
-          searchParamsObject[key] = value;
-        }
+      const currentRequest = createWebRequestFromFarmRequest(req);
+      const routeContext = await this.resolveRouteContext({
+        request: currentRequest,
+        rawRequest: req,
+        params,
+        search: searchParamsObject,
+        path: pathname,
       });
 
       // Load route module
@@ -533,13 +604,16 @@ export class ServerRenderer {
       }
 
       // Create page props with searchParams as plain object and middleware data
-      const rawPageProps: PageProps = {
-        params,
-        searchParams: Promise.resolve(searchParamsObject),
-        path: pathname,
-        middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
-        context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
-      } as PageProps & { search: unknown };
+      const rawPageProps: PageProps = withFarmRouteContext(
+        {
+          params,
+          searchParams: Promise.resolve(searchParamsObject),
+          path: pathname,
+          middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+          context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+        } as PageProps & { search: unknown },
+        routeContext,
+      );
       const pageProps = await parseRouteModuleProps(routeModule, {
         props: rawPageProps,
         search: searchParamsObject,
@@ -623,6 +697,9 @@ export class ServerRenderer {
         search: (pageProps as any).search,
         searchParams: (pageProps as any).search,
         ...("data" in pageProps ? { data: (pageProps as any).data } : {}),
+        ...((pageProps as any).__farmCanonicalPath
+          ? { __farmCanonicalPath: (pageProps as any).__farmCanonicalPath }
+          : {}),
         ...((pageProps as any).__farmRoutePropsResolved ? { __farmRoutePropsResolved: true } : {}),
         path: pathname,
         middleware:
@@ -644,27 +721,18 @@ export class ServerRenderer {
         layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
       );
 
-      // Collect metadata from layouts and page (page metadata overrides layout metadata)
-      let mergedMetadata: Record<string, any> = {};
-
-      // First, collect metadata from layouts (in order, so nested layouts can override)
-      for (const layoutModule of layoutModules) {
-        if ((layoutModule as any).metadata) {
-          mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
-        }
-      }
-
-      // Then, page metadata overrides everything
-      if ((routeModule as any).metadata) {
-        mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
-      }
+      const mergedMetadata = await this.resolveRouteMetadata({
+        layoutModules,
+        routeModule,
+        pageProps,
+        pathname,
+      });
 
       // Store metadata on request for renderWithSSR
       (req as any).__FARM_METADATA__ = mergedMetadata;
 
       // Get middleware data for AsyncLocalStorage
       const middlewareDataForContext = middlewareMap;
-      const currentRequest = createWebRequestFromFarmRequest(req);
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithCurrentRequest(currentRequest, async () => {
@@ -676,8 +744,13 @@ export class ServerRenderer {
 
           if (LoadingFallbackComponent) {
             const loadingFallback = React.createElement(LoadingFallbackComponent, {
-              params,
-              path: pathname,
+              ...createRouteStateProps({
+                params,
+                searchParamsObject,
+                path: pathname,
+                middlewareMap,
+                pluginExposedContext,
+              }),
             } as React.Attributes);
 
             pageElement = React.createElement(
@@ -716,12 +789,13 @@ export class ServerRenderer {
               {
                 Fallback: ErrorFallbackComponent,
                 fallbackProps: {
-                  params,
-                  path: pathname,
-                  searchParams: Promise.resolve(searchParamsObject),
-                  middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
-                  context:
-                    pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+                  ...createRouteStateProps({
+                    params,
+                    searchParamsObject,
+                    path: pathname,
+                    middlewareMap,
+                    pluginExposedContext,
+                  }),
                 },
               },
               wrappedElement,
@@ -845,6 +919,158 @@ export class ServerRenderer {
     return wrapped;
   }
 
+  private async resolveRouteMetadata(options: {
+    layoutModules: Array<Record<string, any>>;
+    routeModule: RouteModule;
+    pageProps: PageProps;
+    pathname: string;
+  }): Promise<Record<string, any>> {
+    let metadata: Record<string, any> = {};
+
+    for (const layoutModule of options.layoutModules) {
+      metadata = mergeMetadata(metadata, layoutModule.metadata);
+      if (typeof layoutModule.generateMetadata === "function") {
+        metadata = mergeMetadata(
+          metadata,
+          await layoutModule.generateMetadata({ params: options.pageProps.params }),
+        );
+      }
+    }
+
+    metadata = mergeMetadata(metadata, (options.routeModule as any).metadata);
+    if (typeof (options.routeModule as any).generateMetadata === "function") {
+      metadata = mergeMetadata(
+        metadata,
+        await (options.routeModule as any).generateMetadata(options.pageProps),
+      );
+    }
+
+    for (const kind of ["opengraph", "twitter"] as const) {
+      const reference = await this.resolveMetadataImageReference(
+        kind,
+        options.pathname,
+      );
+      if (reference) {
+        metadata = addMetadataImageReference(metadata, reference);
+      }
+    }
+
+    return metadata;
+  }
+
+  private async resolveMetadataImageReference(
+    kind: MetadataImageKind,
+    pathname: string,
+  ): Promise<FarmMetadataImageReference | null> {
+    const match = this.routeManager.getMatchingMetadataImage(pathname, kind);
+    if (!match) return null;
+
+    const href = this.routeManager.resolveMetadataImagePath(match.image, match.params);
+    const reference: FarmMetadataImageReference = {
+      kind,
+      href,
+    };
+
+    try {
+      const imageModule = await this.routeManager.loadRouteModule(match.image.modulePath);
+      const size = (imageModule as any).size;
+      if (size && typeof size === "object") {
+        reference.width = typeof size.width === "number" ? size.width : undefined;
+        reference.height = typeof size.height === "number" ? size.height : undefined;
+      }
+      if (typeof (imageModule as any).alt === "string") {
+        reference.alt = (imageModule as any).alt;
+      }
+      if (typeof (imageModule as any).contentType === "string") {
+        reference.contentType = (imageModule as any).contentType;
+      }
+    } catch (error) {
+      logger.warn(`Failed to read ${kind} image metadata for ${pathname}: ${error}`);
+    }
+
+    return reference;
+  }
+
+  private async renderMetadataImage(
+    req: FarmRequest,
+    res: FarmResponse,
+    options: {
+      pathname: string;
+      pagePath: string;
+      params: Record<string, string>;
+      searchParamsObject: Record<string, string | string[] | undefined>;
+      image: { modulePath: string; kind: MetadataImageKind };
+    },
+  ): Promise<void> {
+    const imageModule = await this.routeManager.loadRouteModule(options.image.modulePath);
+    if (!imageModule.default) {
+      throw new Error(
+        `Metadata image module ${options.image.modulePath} does not export a default component or handler`,
+      );
+    }
+
+    const imageProps: PageProps = {
+      params: options.params,
+      searchParams: Promise.resolve(options.searchParamsObject),
+      path: options.pagePath,
+    };
+    const handlerResult =
+      typeof imageModule.default === "function"
+        ? await (imageModule.default as any)(imageProps)
+        : imageModule.default;
+
+    await this.writeMetadataImageResponse(req, res, handlerResult, imageModule);
+  }
+
+  private async writeMetadataImageResponse(
+    req: FarmRequest,
+    res: FarmResponse,
+    value: unknown,
+    imageModule: RouteModule,
+  ): Promise<void> {
+    if (isWebResponse(value)) {
+      res.statusCode = value.status;
+      value.headers.forEach((headerValue, key) => {
+        res.setHeader(key, headerValue);
+      });
+
+      if (req.method === "HEAD") {
+        res.end();
+        return;
+      }
+
+      const body = Buffer.from(await value.arrayBuffer());
+      res.write(body);
+      res.end();
+      return;
+    }
+
+    const contentType = (imageModule as any).contentType || "image/svg+xml; charset=utf-8";
+    let body: string | Buffer;
+
+    if (typeof value === "string") {
+      body = value;
+    } else if (value instanceof ArrayBuffer) {
+      body = Buffer.from(value);
+    } else if (ArrayBuffer.isView(value)) {
+      body = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
+    } else if (React.isValidElement(value)) {
+      body = renderToStaticMarkup(value);
+    } else {
+      throw new Error("Metadata image must return a Response, string, bytes, or React element");
+    }
+
+    res.statusCode = res.statusCode || 200;
+    res.setHeader("Content-Type", contentType);
+    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
+    if (req.method === "HEAD") {
+      res.end();
+      return;
+    }
+    res.write(body);
+    res.end();
+  }
+
   private async renderRouteErrorBoundary(
     req: FarmRequest,
     res: FarmResponse,
@@ -874,15 +1100,14 @@ export class ServerRenderer {
 
       const ErrorComponent = errorModule.default as React.ComponentType<unknown>;
       const errorElement = React.createElement(ErrorComponent, {
+        ...createRouteStateProps({
+          params: options.params,
+          searchParamsObject: options.searchParamsObject,
+          path: options.pathname,
+          middlewareMap: options.middlewareMap,
+          pluginExposedContext: options.pluginExposedContext,
+        }),
         error: options.error,
-        params: options.params,
-        path: options.pathname,
-        searchParams: Promise.resolve(options.searchParamsObject),
-        middleware: options.middlewareMap.size > 0 ? { data: options.middlewareMap } : undefined,
-        context:
-          options.pluginExposedContext.size > 0
-            ? { data: options.pluginExposedContext }
-            : undefined,
         reset: () => {},
       } as React.Attributes);
 
@@ -936,9 +1161,6 @@ export class ServerRenderer {
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
         res.setHeader(key, value);
       }
-      if (typeof res.flushHeaders === "function") {
-        res.flushHeaders();
-      }
 
       const htmlParts: string[] = [];
       const staticShellParts: string[] | undefined = options.captureStaticShell ? [] : undefined;
@@ -977,6 +1199,7 @@ export class ServerRenderer {
           modulePath: routeEntry.modulePath,
           pattern: routeEntry.pattern,
           segments: routeEntry.segments,
+          search: routeEntry.search,
           isClientComponent: isClient,
           shouldHydrate: shouldHydrateRoute,
           preloads: [routeEntry.modulePath],
@@ -1013,39 +1236,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
           ? createPreHydrationClickQueueScript()
           : "";
 
-      // Get metadata from request
-      const metadata = (req as any).__FARM_METADATA__ || {};
-      const title = metadata.title || "Farm.js App";
-      const description = metadata.description || "";
-
-      // Build meta tags
-      let metaTags = "";
-      if (description) {
-        metaTags += `\n  <meta name="description" content="${description.replace(/"/g, "&quot;")}">`;
-      }
-      if (metadata.keywords) {
-        const keywords = Array.isArray(metadata.keywords)
-          ? metadata.keywords.join(", ")
-          : metadata.keywords;
-        metaTags += `\n  <meta name="keywords" content="${keywords.replace(/"/g, "&quot;")}">`;
-      }
-      if (metadata.author) {
-        metaTags += `\n  <meta name="author" content="${metadata.author.replace(/"/g, "&quot;")}">`;
-      }
-      // Open Graph tags
-      if (metadata.openGraph) {
-        const og = metadata.openGraph;
-        if (og.title)
-          metaTags += `\n  <meta property="og:title" content="${og.title.replace(/"/g, "&quot;")}">`;
-        if (og.description)
-          metaTags += `\n  <meta property="og:description" content="${og.description.replace(/"/g, "&quot;")}">`;
-        if (og.image)
-          metaTags += `\n  <meta property="og:image" content="${og.image.replace(/"/g, "&quot;")}">`;
-        if (og.url)
-          metaTags += `\n  <meta property="og:url" content="${og.url.replace(/"/g, "&quot;")}">`;
-        if (og.type)
-          metaTags += `\n  <meta property="og:type" content="${og.type.replace(/"/g, "&quot;")}">`;
-      }
+      const { title, tags: metaTags } = renderMetadataHead((req as any).__FARM_METADATA__);
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);

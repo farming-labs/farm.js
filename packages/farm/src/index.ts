@@ -19,6 +19,14 @@ export {
   getDeployTargetForPreset,
   getPresetForDeployTarget,
 } from "./config";
+export type { FarmLayerConfig } from "./config";
+export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
+export {
+  getFarmAppDirectories,
+  getFarmLayerAliases,
+  getFarmSourceRoots,
+  resolveFarmLayers,
+} from "./layers";
 export { HMRManager } from "./hmr";
 export * from "./plugins";
 export * from "./api";
@@ -27,6 +35,7 @@ export * from "./openapi";
 export * from "./query";
 export * from "./middleware";
 export * from "./router";
+export * from "./route-rules";
 export {
   createLayoutModuleFromProgrammaticLayout,
   createRoute,
@@ -50,9 +59,17 @@ export type {
   ProgrammaticPageRoute,
   ProgrammaticRedirectRoute,
   ProgrammaticRouteComponentProps,
+  ProgrammaticRouteDataCacheContext,
+  ProgrammaticRouteDataCacheKeys,
   ProgrammaticRouteDataContext,
   ProgrammaticRouteDataHooks,
+  ProgrammaticRouteDataStaleTime,
+  ProgrammaticRouteErrorComponentProps,
+  ProgrammaticRouteGuard,
+  ProgrammaticRouteGuardContext,
+  ProgrammaticRoutePendingComponentProps,
   ProgrammaticRouteBuilder,
+  ProgrammaticRouteContext,
   ProgrammaticRouteDefinition,
   ProgrammaticRouteFactory,
   ProgrammaticRouteManifest,
@@ -62,6 +79,9 @@ export type {
   ProgrammaticRouteRenderMode,
   ProgrammaticRouteParamsFallback,
   ProgrammaticRouteSchema,
+  ProgrammaticRouteSearchClientOptions,
+  ProgrammaticRouteSearchConfig,
+  ProgrammaticRouteSearchOptions,
   ProgrammaticRouteSearchFallback,
   ProgrammaticStaticPath,
   ProgrammaticStaticPathParams,
@@ -80,6 +100,7 @@ export * from "./env-types";
 export * from "./type-artifacts";
 export * from "./server-fn";
 export * from "./server-fn-client";
+export * from "./server-action-security";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
@@ -126,6 +147,8 @@ export type {
   RewriteConfig,
   ImageConfig,
   I18nConfig,
+  FarmServerActionsConfig,
+  ResolvedFarmServerActionsConfig,
   OpenAPIConfig,
   MiddlewareConfig,
   FarmDeployConfig,

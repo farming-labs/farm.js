@@ -28,6 +28,7 @@ export default defineConfig({
     workflows: "src/workflows.ts",
     "server-fn": "src/server-fn.ts",
     "server-fn-client": "src/server-fn-client.ts",
+    "server-action-security": "src/server-action-security.ts",
     env: "src/env.ts",
     "env-types": "src/env-types.ts",
   },

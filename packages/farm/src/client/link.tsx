@@ -8,6 +8,7 @@ import {
   type FarmRouterPathParam,
   type FarmRouterPathParams,
 } from "../router";
+import type { FarmViewTransitionMode } from "./spa-router";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -138,6 +139,8 @@ export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
   replace?: boolean;
   /** Scroll to top after navigation (default: true) */
   scroll?: boolean;
+  /** Wrap this SPA navigation in a browser View Transition when supported. */
+  viewTransition?: FarmViewTransitionMode;
 };
 
 function isModifierEvent(e: React.MouseEvent): boolean {
@@ -152,7 +155,10 @@ function getRouter(): {
   prefetch(href: string): Promise<void>;
   observeForPrefetch(el: HTMLAnchorElement): void;
   unobserveForPrefetch(el: HTMLAnchorElement): void;
-  navigate(href: string, opts: { replace?: boolean; scroll?: boolean }): void;
+  navigate(
+    href: string,
+    opts: { replace?: boolean; scroll?: boolean; viewTransition?: FarmViewTransitionMode },
+  ): void;
 } | null {
   if (typeof window !== "undefined" && (window as any).__FARM_SPA_ROUTER__) {
     return (window as any).__FARM_SPA_ROUTER__;
@@ -197,6 +203,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
     prefetchDelay = 50,
     replace = false,
     scroll = true,
+    viewTransition = false,
     onClick,
     target,
     onMouseEnter,
@@ -352,14 +359,14 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
         event.preventDefault();
         const router = getRouter();
         if (router) {
-          router.navigate(resolvedHref, { replace, scroll });
+          router.navigate(resolvedHref, { replace, scroll, viewTransition });
         } else {
           if (replace) window.location.replace(resolvedHref);
           else window.location.href = resolvedHref;
         }
       }
     },
-    [resolvedHref, replace, scroll, target, isExternal, onClick],
+    [resolvedHref, replace, scroll, viewTransition, target, isExternal, onClick],
   );
 
   const setRefs = useCallback(
@@ -403,17 +410,15 @@ function resolveLinkHref(
 ) {
   if (isExternalUrl(href)) return href;
 
-  if (!params && !options.query && !options.hash && !options.trailingSlash) {
-    return href;
-  }
-
   const { pathname, query, hash } = splitInternalHref(href);
 
-  return buildFarmRoutePath(pathname, params, {
+  const resolvedHref = buildFarmRoutePath(pathname, params, {
     query: mergeQueryParams(query, options.query),
     hash: options.hash ?? hash,
     trailingSlash: options.trailingSlash,
   });
+
+  return applyPreservedSearchParams(resolvedHref);
 }
 
 function splitInternalHref(href: string) {
@@ -456,4 +461,67 @@ function mergeQueryParams(
   }
 
   return merged.toString() ? merged : undefined;
+}
+
+function applyPreservedSearchParams(href: string): string {
+  if (typeof window === "undefined") return href;
+
+  const manifest = (window as any).__FARM_MANIFEST__;
+  const routes = manifest?.routes && typeof manifest.routes === "object"
+    ? Object.values(manifest.routes)
+    : [];
+  if (routes.length === 0) return href;
+
+  const url = new URL(href, window.location.origin);
+  const route = routes.find((candidate: any) => matchManifestRoute(url.pathname, candidate));
+  const preserve = Array.isArray((route as any)?.search?.preserve)
+    ? ((route as any).search.preserve as string[])
+    : [];
+  if (preserve.length === 0) return href;
+
+  const current = new URLSearchParams(window.location.search);
+  let changed = false;
+
+  for (const key of preserve) {
+    if (url.searchParams.has(key) || !current.has(key)) continue;
+    for (const value of current.getAll(key)) {
+      url.searchParams.append(key, value);
+      changed = true;
+    }
+  }
+
+  if (!changed) return href;
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function matchManifestRoute(pathname: string, route: any): boolean {
+  if (!route || !Array.isArray(route.segments)) return false;
+  const routeSegments = route.segments;
+  const normalized = pathname === "/" ? "" : pathname.replace(/^\/+/, "").replace(/\/+$/, "");
+  const pathSegments = normalized ? normalized.split("/") : [];
+  const hasCatchAll = routeSegments.some((segment: any) => segment.isCatchAll);
+
+  if (!hasCatchAll && pathSegments.length !== routeSegments.length) {
+    return false;
+  }
+
+  for (let index = 0; index < routeSegments.length; index++) {
+    const routeSegment = routeSegments[index];
+    const pathSegment = pathSegments[index];
+
+    if (routeSegment.isCatchAll) {
+      return true;
+    }
+
+    if (pathSegment === undefined) {
+      if (routeSegment.isOptional) continue;
+      return false;
+    }
+
+    if (!routeSegment.isDynamic && routeSegment.segment !== pathSegment) {
+      return false;
+    }
+  }
+
+  return pathSegments.length === routeSegments.length || hasCatchAll;
 }

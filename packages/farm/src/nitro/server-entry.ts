@@ -10,6 +10,7 @@ import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { setEnv } from "../env";
+import { withFarmRouteContext } from "../route-context";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -161,12 +162,23 @@ async function defaultHandler({
       targetUrl.searchParams.forEach((value, key) => {
         searchParams[key] = value;
       });
+      const routeContext = sr
+        ? await sr.resolveRouteContext({
+            request,
+            params,
+            search: searchParams,
+            path: targetUrl.pathname,
+          })
+        : undefined;
       const routeProps = await parseRouteModuleProps(routeModule, {
-        props: {
-          params,
-          searchParams: Promise.resolve(searchParams),
-          path: targetUrl.pathname,
-        },
+        props: withFarmRouteContext(
+          {
+            params,
+            searchParams: Promise.resolve(searchParams),
+            path: targetUrl.pathname,
+          },
+          routeContext,
+        ),
         search: searchParams,
         routePath: route.pattern,
       });
@@ -178,10 +190,14 @@ async function defaultHandler({
           search: (routeProps as any).search,
           searchParams: (routeProps as any).search,
           ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+          ...((routeProps as any).__farmCanonicalPath
+            ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
+            : {}),
           ...((routeProps as any).__farmRoutePropsResolved
             ? { __farmRoutePropsResolved: true }
             : {}),
         },
+        canonicalPath: (routeProps as any).__farmCanonicalPath,
         modulePath: route.modulePath,
         isClientComponent,
         shouldHydrate,

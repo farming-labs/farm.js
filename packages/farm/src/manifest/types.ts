@@ -28,6 +28,12 @@ export interface RouteManifestEntry {
   shouldHydrate?: boolean;
   /** Route pattern (for client-side matching) */
   pattern: string;
+  /** Serializable route search behavior for browser navigation. */
+  search?: {
+    preserve?: readonly string[];
+    temporary?: readonly string[];
+    stripDefaults?: boolean | readonly string[];
+  };
   /** Route segments for dynamic matching */
   segments: Array<{
     segment: string;
@@ -78,7 +84,7 @@ export interface DehydratedManifest {
     string,
     Pick<
       RouteManifestEntry,
-      "modulePath" | "pattern" | "segments" | "isClientComponent" | "shouldHydrate"
+      "modulePath" | "pattern" | "segments" | "isClientComponent" | "shouldHydrate" | "search"
     >
   >;
   /** All layouts (for navigation) */

@@ -9,6 +9,9 @@ import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmWorkflowsUserConfig } from "./workflows";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
+import type { FarmRouteRules } from "./route-rules";
+import type { FarmServerActionsConfig } from "./server-action-security";
+import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 
 export type NitroPreset =
   | "node-server"
@@ -53,9 +56,26 @@ export interface ResolvedFarmMigrationsConfig {
   commands: FarmMigrationCommand[];
 }
 
+export interface FarmContextFactoryInput {
+  request: Request;
+  rawRequest?: FarmRequest;
+  params: Record<string, string>;
+  search: Record<string, string | string[] | undefined>;
+  path: string;
+}
+
+export type FarmContextFactory<TContext = unknown> = (
+  input: FarmContextFactoryInput,
+) => TContext | Promise<TContext>;
+
+export interface FarmAppContext {}
+
 export interface FarmConfig {
   root?: string;
   srcDir?: string;
+  extends?: readonly FarmLayerEntry[];
+  /** Resolved layer graph. Populated by config resolution. */
+  layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
   preset?: NitroPreset;
@@ -86,6 +106,9 @@ export interface FarmConfig {
   workflows?: FarmWorkflowsUserConfig | boolean;
   env?: FarmEnvConfig<any, any> | ResolvedFarmEnv;
   middleware?: FarmMiddlewareConfig;
+  routeRules?: FarmRouteRules;
+  context?: FarmContextFactory<any>;
+  serverActions?: FarmServerActionsConfig;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
@@ -163,6 +186,21 @@ export interface PageProps {
    */
   context?: PluginContextProps;
 }
+
+export interface LoadingProps {
+  params: Record<string, string>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+  search?: Record<string, string | string[] | undefined>;
+  path: string;
+  middleware?: MiddlewareProps;
+  context?: PluginContextProps;
+}
+
+export interface ErrorProps extends LoadingProps {
+  error: unknown;
+  reset: () => void;
+}
+
 /**
  * Helper type to create typed page props with specific middleware data shape
  *
@@ -196,6 +234,8 @@ export interface LayoutProps {
 
 export type Page = ComponentType<PageProps>;
 export type Layout = ComponentType<LayoutProps>;
+export type Loading = ComponentType<LoadingProps>;
+export type ErrorBoundary = ComponentType<ErrorProps>;
 /**
  * Route module exports for pages
  *
@@ -309,9 +349,11 @@ export interface LayoutModule {
 }
 
 export interface Metadata {
+  metadataBase?: string | URL;
   title?: string | { default?: string; template?: string };
   description?: string;
   keywords?: string | string[];
+  author?: string;
   authors?: Array<{ name: string; url?: string }>;
   creator?: string;
   publisher?: string;
@@ -321,13 +363,25 @@ export interface Metadata {
     description?: string;
     url?: string;
     siteName?: string;
-    images?: Array<{
-      url: string;
-      width?: number;
-      height?: number;
-      alt?: string;
-    }>;
+    images?:
+      | string
+      | {
+          url: string;
+          width?: number;
+          height?: number;
+          alt?: string;
+          type?: string;
+        }
+      | Array<{
+          url: string;
+          width?: number;
+          height?: number;
+          alt?: string;
+          type?: string;
+        }>;
+    image?: string;
     type?: string;
+    locale?: string;
   };
   twitter?: {
     card?: "summary" | "summary_large_image" | "app" | "player";
@@ -335,8 +389,44 @@ export interface Metadata {
     creator?: string;
     title?: string;
     description?: string;
-    images?: string | string[];
+    images?:
+      | string
+      | {
+          url: string;
+          width?: number;
+          height?: number;
+          alt?: string;
+          type?: string;
+        }
+      | Array<
+          | string
+          | {
+              url: string;
+              width?: number;
+              height?: number;
+              alt?: string;
+              type?: string;
+            }
+        >;
   };
+  alternates?: {
+    canonical?: string;
+    languages?: Record<string, string>;
+  };
+  icons?:
+      | string
+      | {
+        icon?:
+          | string
+          | Array<string | { url: string; sizes?: string; type?: string }>;
+        shortcut?:
+          | string
+          | Array<string | { url: string; sizes?: string; type?: string }>;
+        apple?:
+          | string
+          | Array<string | { url: string; sizes?: string; type?: string }>;
+      };
+  manifest?: string;
 }
 
 export interface FarmRequest extends IncomingMessage {

@@ -9,10 +9,22 @@ export type ServerFnSubmit<TInput, TResult> = [unknown] extends [TInput]
   ? (input?: TInput | FormData) => Promise<TResult>
   : (input: TInput | FormData) => Promise<TResult>;
 
-export type UseServerFnOptions<TResult, TError extends Error = Error> = {
+export type ServerFnOptimisticContext<TInput, TResult> = {
+  input: TInput | FormData | undefined;
+  formData?: FormData;
+  current: TResult | null;
+};
+
+export type UseServerFnOptions<
+  TResult,
+  TError extends Error = Error,
+  TInput = unknown,
+> = {
   initialResult?: TResult | null;
   resetOnSubmit?: boolean;
   throwOnFormError?: boolean;
+  optimistic?: (context: ServerFnOptimisticContext<TInput, TResult>) => TResult | null | undefined;
+  rollbackOnError?: boolean;
   onSuccess?: (result: TResult) => void;
   onError?: (error: TError) => void;
   onSettled?: (result: TResult | null, error: TError | null) => void;
@@ -36,23 +48,41 @@ type ServerFnActionState<TResult, TError extends Error> = {
 };
 
 type ServerFnActionCallbacks<TResult, TError extends Error> = Pick<
-  UseServerFnOptions<TResult, TError>,
+  UseServerFnOptions<TResult, TError, unknown>,
   "onError" | "onSettled" | "onSuccess" | "throwOnFormError"
 >;
 
 export function useServerFn<TInput, TResult, TError extends Error = Error>(
   serverFn: ServerFn<TInput, TResult>,
-  options: UseServerFnOptions<TResult, TError> = {},
+  options: UseServerFnOptions<TResult, TError, TInput> = {},
 ): UseServerFnReturn<TInput, TResult, TError> {
   const { initialResult = null, resetOnSubmit = true } = options;
   const callbacksRef = useRef<ServerFnActionCallbacks<TResult, TError>>({});
   const requestIdRef = useRef(0);
-  const [state, setState] = useState<ServerFnActionState<TResult, TError>>({
+  const initialState: ServerFnActionState<TResult, TError> = {
     pendingCount: 0,
     status: "idle",
     result: initialResult,
     error: null,
-  });
+  };
+  const stateRef = useRef<ServerFnActionState<TResult, TError>>(initialState);
+  const [state, setState] = useState<ServerFnActionState<TResult, TError>>(initialState);
+  const setActionState = useCallback(
+    (
+      value:
+        | ServerFnActionState<TResult, TError>
+        | ((
+            current: ServerFnActionState<TResult, TError>,
+          ) => ServerFnActionState<TResult, TError>),
+    ) => {
+      setState((current) => {
+        const next = typeof value === "function" ? value(current) : value;
+        stateRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
   callbacksRef.current = {
     onError: options.onError,
@@ -64,11 +94,23 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
   const submit = useCallback(
     async (input?: TInput | FormData) => {
       const requestId = ++requestIdRef.current;
+      const formData = isFormData(input) ? input : undefined;
+      const previousResult = stateRef.current.result;
+      const optimisticResult = options.optimistic?.({
+        input,
+        formData,
+        current: previousResult,
+      });
+      const hasOptimisticResult = optimisticResult !== undefined;
 
-      setState((current) => ({
+      setActionState((current) => ({
         pendingCount: current.pendingCount + 1,
         status: "pending",
-        result: resetOnSubmit ? null : current.result,
+        result: hasOptimisticResult
+          ? optimisticResult
+          : resetOnSubmit
+            ? null
+            : current.result,
         error: null,
       }));
 
@@ -76,7 +118,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         const result = await serverFn(input as TInput | FormData);
         const isLatestRequest = requestId === requestIdRef.current;
 
-        setState((current) => {
+        setActionState((current) => {
           const pendingCount = Math.max(0, current.pendingCount - 1);
 
           if (!isLatestRequest) {
@@ -105,7 +147,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         const error = normalizeServerFnError(cause) as TError;
         const isLatestRequest = requestId === requestIdRef.current;
 
-        setState((current) => {
+        setActionState((current) => {
           const pendingCount = Math.max(0, current.pendingCount - 1);
 
           if (!isLatestRequest) {
@@ -119,7 +161,12 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
           return {
             pendingCount,
             status: pendingCount > 0 ? "pending" : "error",
-            result: resetOnSubmit ? null : current.result,
+            result:
+              hasOptimisticResult && options.rollbackOnError
+                ? previousResult
+                : resetOnSubmit
+                  ? null
+                  : current.result,
             error,
           };
         });
@@ -132,7 +179,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
         throw error;
       }
     },
-    [resetOnSubmit, serverFn],
+    [options.optimistic, options.rollbackOnError, resetOnSubmit, serverFn, setActionState],
   ) as ServerFnSubmit<TInput, TResult>;
 
   const formAction = useCallback(
@@ -150,13 +197,13 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
 
   const reset = useCallback(() => {
     requestIdRef.current += 1;
-    setState({
+    setActionState({
       pendingCount: 0,
       status: "idle",
       result: initialResult,
       error: null,
     });
-  }, [initialResult]);
+  }, [initialResult, setActionState]);
 
   return useMemo(
     () => ({
@@ -178,4 +225,17 @@ function normalizeServerFnError(error: unknown) {
   const normalized = new Error(typeof error === "string" ? error : "Server function failed");
   (normalized as Error & { cause?: unknown }).cause = error;
   return normalized;
+}
+
+function isFormData(value: unknown): value is FormData {
+  if (!value || typeof value !== "object") return false;
+
+  if (typeof FormData !== "undefined" && value instanceof FormData) {
+    return true;
+  }
+
+  return (
+    Object.prototype.toString.call(value) === "[object FormData]" &&
+    typeof (value as { entries?: unknown }).entries === "function"
+  );
 }

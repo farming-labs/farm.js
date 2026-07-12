@@ -100,6 +100,85 @@ const checkout = await apiClient.billing.checkout.post({
 
 If an integration operation is marked server-only, call it from `api`, not `apiClient`.
 
+## Server Function Form Actions
+
+`createServerFn` pairs with `useServerFn` when a mutation is naturally a form action. Use `optimistic` to show the next UI state immediately, then let the server result replace it when the action completes.
+
+**src/actions/todos.ts**
+
+```ts
+import { createServerFn } from "@farmjs/core/server-fn";
+import { z } from "zod";
+
+export const addTodo = createServerFn({
+  input: z.object({
+    title: z.string().min(1),
+  }),
+  async handler({ input, signal }) {
+    signal.throwIfAborted();
+    return {
+      todos: await db.todo.create({ data: input }),
+    };
+  },
+});
+```
+
+**src/components/todo-form.tsx**
+
+```tsx
+"use client";
+
+import { useServerFn } from "@farmjs/core/server-fn/client";
+import { addTodo } from "../actions/todos";
+
+export function TodoForm() {
+  const action = useServerFn(addTodo, {
+    initialResult: { todos: [] },
+    rollbackOnError: true,
+    optimistic({ current, formData }) {
+      return {
+        todos: [
+          ...(current?.todos ?? []),
+          { id: "draft", title: String(formData?.get("title") ?? "") },
+        ],
+      };
+    },
+  });
+
+  return (
+    <form action={action.formAction}>
+      <input name="title" />
+      <button disabled={action.pending}>Add</button>
+    </form>
+  );
+}
+```
+
+The optimistic callback receives the raw input, `formData` for form submissions, and the current result. Return `undefined` when a submission should not change the optimistic result. Use `rollbackOnError` for reversible UI state; keep authorization and validation on the server function itself.
+
+When the function is called from the browser, `request` is the underlying Web `Request` and `signal` aborts with that request. A direct server-side call has no `request` and receives a stable, non-aborted signal. Pass `signal` to database or network clients that support cancellation.
+
+Farm validates action origin metadata, accepted form/RSC content types, action ID shape, and request size before decoding an action. Browser calls use same-origin credentials and refuse redirects. Unexpected thrown values are logged on the server but become a generic `ServerActionError` in the browser, so secrets and stack traces are not serialized.
+
+Return typed expected failures instead of throwing messages that the UI needs to display:
+
+```ts
+export const renameProject = createServerFn({
+  input: renameProjectSchema,
+  async handler({ input }) {
+    const session = await requireSession();
+    if (!session.canEdit(input.projectId)) {
+      return { ok: false as const, reason: "forbidden" as const };
+    }
+
+    await updateProject(input);
+    return { ok: true as const };
+  },
+});
+```
+
+Action references identify which function to execute; they are not authorization tokens. Check authentication, roles, tenant ownership, and resource access inside every action that reads or changes private data.
+
 ## Production notes
 
 - Keep generated API types committed or generated during CI.
@@ -107,3 +186,5 @@ If an integration operation is marked server-only, call it from `api`, not `apiC
 - Use server callers for secrets, auth cookies, and internal-only provider actions.
 - Use invalidation after mutations that change cached route data.
 - Keep optimistic updates scoped to UI state you can confidently roll back.
+- Keep `serverActions.allowedOrigins` narrow and use API routes for intentionally cross-origin callers.
+- Return typed expected failures; reserve thrown errors for unexpected failures.

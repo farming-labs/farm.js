@@ -6,6 +6,8 @@ export interface GenerateEnvTypesOptions {
   srcDir?: string;
   outFile?: string;
   configPath?: string;
+  /** Lower-priority layer config files, ordered before the project config. */
+  layerConfigPaths?: readonly string[];
 }
 
 const DEFAULT_OUT_FILE = "farm-env.d.ts";
@@ -33,14 +35,84 @@ export async function generateEnvTypes(options: GenerateEnvTypesOptions): Promis
   const srcDir = options.srcDir || "src";
   const outPath = path.join(root, srcDir, options.outFile || DEFAULT_OUT_FILE);
   const configPath = findConfigPath(root, options.configPath);
-  const content = configPath
-    ? createConfigBackedEnvTypes(outPath, configPath)
-    : createEmptyEnvTypes();
+  const configPaths = [
+    ...(options.layerConfigPaths ?? []).filter((value) => fs.existsSync(value)),
+    ...(configPath ? [configPath] : []),
+  ];
+  const content =
+    configPaths.length > 1
+      ? createLayeredConfigBackedEnvTypes(outPath, configPaths)
+      : configPaths.length === 1
+        ? createConfigBackedEnvTypes(outPath, configPaths[0])
+        : createEmptyEnvTypes();
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, content, "utf8");
 
   return outPath;
+}
+
+function createLayeredConfigBackedEnvTypes(outPath: string, configPaths: string[]): string {
+  const imports = configPaths
+    .map(
+      (configPath, index) =>
+        `import type FarmConfig${index} from ${JSON.stringify(toTypeImportPath(outPath, configPath))};`,
+    )
+    .join("\n");
+  const resolvedTypes = configPaths
+    .map(
+      (_configPath, index) => `
+type FarmConfigEnv${index} = typeof FarmConfig${index} extends { env?: infer TEnv }
+  ? NonNullable<TEnv>
+  : never;
+type FarmResolvedEnv${index} = [FarmConfigEnv${index}] extends [never]
+  ? { server: {}; public: {} }
+  : InferEnv<FarmConfigEnv${index}>;`,
+    )
+    .join("\n");
+  const mergedTypes = configPaths
+    .slice(1)
+    .map(
+      (_configPath, index) =>
+        `type FarmMergedEnv${index + 1} = MergeFarmEnv<${index === 0 ? "FarmResolvedEnv0" : `FarmMergedEnv${index}`}, FarmResolvedEnv${index + 1}>;`,
+    )
+    .join("\n");
+  const finalType = `FarmMergedEnv${configPaths.length - 1}`;
+
+  return `/**
+ * Auto-generated env types from Farm layers and farm.config.
+ * Regenerated on dev start, build, and farm generate.
+ */
+${imports}
+import type { InferEnv } from "@farmjs/core/env";
+
+type MergeFarmEnv<TBase, TOverride> = {
+  server: Omit<TBase extends { server: infer T } ? T : {}, keyof (TOverride extends { server: infer T } ? T : {})> &
+    (TOverride extends { server: infer T } ? T : {});
+  public: Omit<TBase extends { public: infer T } ? T : {}, keyof (TOverride extends { public: infer T } ? T : {})> &
+    (TOverride extends { public: infer T } ? T : {});
+};
+${resolvedTypes}
+${mergedTypes}
+
+type FarmResolvedEnv = ${finalType};
+
+declare module "@farmjs/core/env" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+declare module "@farmjs/core" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+export {};
+`;
 }
 
 function findConfigPath(root: string, configPath?: string): string | null {

@@ -1,7 +1,15 @@
+import type {
+  FarmServerActionsConfig,
+  ResolvedFarmServerActionsConfig,
+} from "@farmjs/core/server-action-security";
+
 /**
  * Configuration options for the Farm.js RSC plugin.
  */
 export interface FarmRscPluginOptions {
+  /** Security policy applied to server action requests. */
+  serverActions?: FarmServerActionsConfig;
+
   /**
    * Override the auto-generated virtual entries with custom files.
    * If not provided, virtual entries are generated automatically based on
@@ -60,8 +68,18 @@ export interface EntryContext {
   /** Route files subdirectory within srcDir */
   routesDir?: string;
 
+  /** Ordered route roots. Modules from later roots override matching earlier modules. */
+  routeRoots?: Array<{
+    name: string;
+    base: string;
+    glob: string;
+  }>;
+
   /** Whether server actions are enabled */
   actionsEnabled: boolean;
+
+  /** Normalized server action request security policy. */
+  serverActions: ResolvedFarmServerActionsConfig;
 
   /** Whether debug mode is enabled */
   debug: boolean;

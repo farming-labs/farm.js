@@ -10,6 +10,7 @@ import type {
   AnchorHTMLAttributes,
   ReactElement,
   ReactNode,
+  RefObject,
   RefAttributes,
 } from "react";
 
@@ -197,6 +198,7 @@ declare module "@farmjs/core/client" {
     prefetchDelay?: number;
     replace?: boolean;
     scroll?: boolean;
+    viewTransition?: FarmViewTransitionMode;
   };
 
   export type LinkComponent = <TRoute extends string = DefaultRouteHref>(
@@ -205,13 +207,96 @@ declare module "@farmjs/core/client" {
 
   export const Link: LinkComponent;
 
-  export function useRouter(): {
+  export interface FarmNavigationBlockerContext {
+    from: string;
+    to: string;
+    action: "push" | "replace" | "pop";
+  }
+
+  export type FarmNavigationBlocker = (
+    context: FarmNavigationBlockerContext,
+  ) => boolean | void | Promise<boolean | void>;
+
+  export type FarmViewTransitionMode = boolean | "auto";
+
+  export interface FarmNavigateOptions {
+    replace?: boolean;
+    scroll?: boolean;
+    state?: unknown;
+    viewTransition?: FarmViewTransitionMode;
+  }
+
+  export interface FarmNavigationLocation {
+    href: string;
+    pathname: string;
+    search: string;
+    hash: string;
+  }
+
+  export interface FarmNavigationState {
+    state: "idle" | "loading";
+    pending: boolean;
+    from: string | null;
+    to: FarmNavigationLocation | null;
+    action: FarmNavigationBlockerContext["action"] | null;
+    startedAt: number | null;
+  }
+
+  export type FarmNavigationListener = (state: FarmNavigationState) => void;
+
+  export interface FarmChunkRecoveryOptions {
+    maxAgeMs?: number;
+    storageKey?: string;
+    onRecover?: (error: unknown) => void;
+    reload?: () => void;
+    storage?: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+    location?: Pick<Location, "pathname" | "search" | "reload">;
+    now?: () => number;
+  }
+
+  export interface UseRouterOptions {
+    basePath?: string;
+    routes?: Array<string | { path: string; name?: string; meta?: unknown }>;
+  }
+
+  export interface UseBlockerOptions {
+    when: boolean | ((context: FarmNavigationBlockerContext) => boolean);
+    message?: string;
+    shouldBlock?: (
+      context: FarmNavigationBlockerContext,
+    ) => boolean | Promise<boolean>;
+  }
+
+  export interface UseBlockerReturn {
+    active: boolean;
+  }
+
+  export function useRouter(options?: UseRouterOptions): {
     pathname: string;
     searchParams: URLSearchParams;
     params: Record<string, string>;
-    push: (path: string, opts?: { replace?: boolean; scroll?: boolean }) => void;
+    pageState: unknown;
+    push: (path: string) => void;
     replace: (path: string) => void;
+    pushState: <TState>(state: TState, href?: string) => void;
+    replaceState: <TState>(state: TState, href?: string) => void;
+    back: () => void;
+    forward: () => void;
   };
+
+  export function usePageState<TState = unknown>(): TState | null;
+  export function useNavigation(): FarmNavigationState;
+  export function useBlocker(options: UseBlockerOptions): UseBlockerReturn;
+  export function useScrollRestoration<TElement extends HTMLElement = HTMLElement>(
+    key: string,
+  ): RefObject<TElement>;
+  export function navigateTo(href: string, options?: FarmNavigateOptions): Promise<void>;
+  export function prefetch(href: string): Promise<void>;
+  export function pushState<TState>(state: TState, href?: string): void;
+  export function replaceState<TState>(state: TState, href?: string): void;
+  export function readPageState<TState = unknown>(): TState | null;
+  export function isChunkLoadError(errorLike: unknown): boolean;
+  export function installChunkErrorRecovery(options?: FarmChunkRecoveryOptions): () => void;
 
   export interface APIClientOptions {
     baseURL?: string;

@@ -63,4 +63,78 @@ describe("generateFarmTypeArtifacts", () => {
     );
     expect(readFileSync(envTypesPath, "utf8")).toContain('declare module "@farmjs/core/env"');
   });
+
+  it("generates one typed application from layer and project sources", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-layer-type-artifacts-"));
+    const layerRoot = path.join(root, "layers", "commerce");
+    const layerApp = path.join(layerRoot, "src", "app");
+    const projectApp = path.join(root, "src", "app");
+    mkdirSync(path.join(layerApp, "products", "[id]"), { recursive: true });
+    mkdirSync(path.join(layerApp, "api", "inventory"), { recursive: true });
+    mkdirSync(path.join(layerApp, "api", "catalog"), { recursive: true });
+    mkdirSync(path.join(projectApp, "api", "catalog"), { recursive: true });
+
+    writeFileSync(
+      path.join(layerRoot, "farm.config.ts"),
+      `export default {
+        env: { server: { LAYER_TOKEN: { parse: (value: unknown) => String(value) } } }
+      };\n`,
+    );
+    writeFileSync(
+      path.join(root, "farm.config.ts"),
+      `export default {
+        extends: ["./layers/commerce"],
+        env: { public: { PUBLIC_APP: { parse: (value: unknown) => String(value) } } }
+      };\n`,
+    );
+    writeFileSync(
+      path.join(layerApp, "products", "[id]", "page.tsx"),
+      "export default function Product() { return null; }\n",
+    );
+    writeFileSync(
+      path.join(layerRoot, "src", "routes.ts"),
+      'export const ReportsRoute = createRoute("/reports", { component: () => null });\n',
+    );
+    writeFileSync(
+      path.join(layerApp, "api", "inventory", "route.ts"),
+      "export const GET = async () => Response.json({ ok: true });\n",
+    );
+    writeFileSync(
+      path.join(layerApp, "api", "catalog", "route.ts"),
+      "export const GET = async () => Response.json({ source: 'layer' });\n",
+    );
+    writeFileSync(
+      path.join(projectApp, "api", "catalog", "route.ts"),
+      "export const POST = async () => Response.json({ source: 'project' });\n",
+    );
+
+    const result = await generateFarmTypeArtifacts({
+      root,
+      layers: [
+        {
+          source: "./layers/commerce",
+          name: "commerce",
+          root: layerRoot,
+          srcDir: "src",
+          configFile: path.join(layerRoot, "farm.config.ts"),
+        },
+      ],
+    });
+
+    const routeTypes = readFileSync(result.routeTypesPath!, "utf8");
+    const apiTypes = readFileSync(result.apiTypesPath!, "utf8");
+    const envTypes = readFileSync(result.envTypesPath!, "utf8");
+
+    expect(routeTypes).toContain("`/products/${string}`");
+    expect(routeTypes).toContain('"/reports"');
+    expect(result.apiRoutes.map((route) => [route.path, route.methods])).toEqual([
+      ["/api/catalog", ["POST"]],
+      ["/api/inventory", ["GET"]],
+    ]);
+    expect(apiTypes).toContain('from "../../layers/commerce/src/app/api/inventory/route"');
+    expect(apiTypes).toContain('from "../app/api/catalog/route"');
+    expect(envTypes).toContain('FarmConfig0 from "../layers/commerce/farm.config"');
+    expect(envTypes).toContain('FarmConfig1 from "../farm.config"');
+    expect(envTypes).toContain("type FarmMergedEnv1");
+  });
 });

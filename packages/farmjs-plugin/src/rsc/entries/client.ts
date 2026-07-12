@@ -48,7 +48,14 @@ setServerCallback(async (id, args) => {
   };
   if (typeof body === 'string') headers['Content-Type'] = 'text/plain; charset=utf-8';
   else if (!(body instanceof FormData)) headers['Content-Type'] = 'application/octet-stream';
-  const res = await fetch(location.href, { method: 'POST', headers, body });
+  const res = await fetch(location.href, {
+    method: 'POST',
+    headers,
+    body,
+    cache: 'no-store',
+    credentials: 'same-origin',
+    redirect: 'error',
+  });
   if (!res.ok) {
     const text = await res.text();
     console.error('[Farm.js] Server action request failed:', res.status, text);
@@ -69,7 +76,9 @@ setServerCallback(async (id, args) => {
   setPayloadRef.current?.(p);
   if (!p.returnValue || !p.returnValue.ok) {
     debug('Server action failed:', id);
-    throw p.returnValue?.data;
+    const error = new Error(p.returnValue?.data?.message || 'Server function failed');
+    error.name = 'ServerActionError';
+    throw error;
   }
   return p.returnValue.data;
 });

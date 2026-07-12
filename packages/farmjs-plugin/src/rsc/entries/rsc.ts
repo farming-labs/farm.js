@@ -14,6 +14,9 @@ export function generateRscEntry(ctx: EntryContext): string {
   // Build the glob pattern for discovering routes (Farm convention: src/app when routesDir unset)
   const appSegment = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const glob = appSegment ? `/${ctx.srcDir}/${appSegment}` : `/${ctx.srcDir}`;
+  const routeRoots = ctx.routeRoots?.length
+    ? ctx.routeRoots
+    : [{ name: "project", base: glob, glob }];
 
   const debugLog = `// Debug disabled`;
   let code = `
@@ -32,6 +35,18 @@ import {
   }
   code += `} from '@vitejs/plugin-rsc/rsc';
 `;
+  if (ctx.actionsEnabled) {
+    code += `import {
+  createServerActionRequestErrorResponse,
+  prepareServerActionRequest,
+  runWithServerActionRequest,
+  sanitizeServerActionError,
+  validateServerActionRequest,
+} from '@farmjs/core/server-action-security';
+
+const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
+`;
+  }
 
   // Auto-discover pages, layouts, and middleware using Vite's glob import
   code += `
@@ -40,13 +55,60 @@ function debug(...args) {
   ${debugLog}
 }
 
-// Auto-discover all page, layout, and middleware files
-// eager: true means they're imported at startup, not lazily
-const pages = import.meta.glob('${glob}/**/page.{tsx,jsx,ts,js}', { eager: true });
-const layouts = import.meta.glob('${glob}/**/layout.{tsx,jsx,ts,js}', { eager: true });
-const loadings = import.meta.glob('${glob}/**/loading.{tsx,jsx,ts,js}', { eager: true });
-const errors = import.meta.glob('${glob}/**/error.{tsx,jsx,ts,js}', { eager: true });
-const middlewares = import.meta.glob('${glob}/**/middleware.{tsx,jsx,ts,js}', { eager: true });
+function applyActionResponseHeaders(headers, request) {
+  if (${ctx.actionsEnabled ? "true" : "false"} && request.method === 'POST') {
+    headers.set('cache-control', 'no-store');
+    headers.set('x-content-type-options', 'nosniff');
+  }
+}
+
+// Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
+${routeRoots
+  .map(
+    (
+      root,
+      index,
+    ) => `const pages${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/page.{tsx,jsx,ts,js}`)}, { eager: true });
+const layouts${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/layout.{tsx,jsx,ts,js}`)}, { eager: true });
+const loadings${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/loading.{tsx,jsx,ts,js}`)}, { eager: true });
+const errors${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/error.{tsx,jsx,ts,js}`)}, { eager: true });
+const middlewares${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/middleware.{tsx,jsx,ts,js}`)}, { eager: true });`,
+  )
+  .join("\n")}
+
+function mergeRouteModules(sources) {
+  const merged = {};
+  for (const source of sources) {
+    const baseValue = source.base.replace(/\\\\/g, '/').replace(/^\\.\\//, '');
+    const normalizedBase = baseValue.endsWith('/') ? baseValue.slice(0, -1) : baseValue;
+    for (const [filePath, module] of Object.entries(source.modules)) {
+      const normalizedFile = filePath.replace(/\\\\/g, '/').replace(/^\\.\\//, '');
+      const baseIndex = normalizedFile.indexOf(normalizedBase);
+      let relative = baseIndex === -1
+        ? normalizedFile
+        : normalizedFile.slice(baseIndex + normalizedBase.length);
+      if (!relative.startsWith('/')) relative = '/' + relative;
+      merged[relative] = module;
+    }
+  }
+  return merged;
+}
+
+const pages = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: pages${index} }`)
+    .join(", ")}]);
+const layouts = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: layouts${index} }`)
+    .join(", ")}]);
+const loadings = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: loadings${index} }`)
+    .join(", ")}]);
+const errors = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: errors${index} }`)
+    .join(", ")}]);
+const middlewares = mergeRouteModules([${routeRoots
+    .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: middlewares${index} }`)
+    .join(", ")}]);
 
 debug('Discovered pages:', Object.keys(pages));
 debug('Discovered layouts:', Object.keys(layouts));
@@ -112,7 +174,7 @@ function getMatchingError(pathname, globVal) {
  */
 function middlewarePathToRoute(filePath) {
   let route = filePath
-    .replace('${glob}', '')
+    .replace('', '')
     .replace(/\\/middleware\\.[tj]sx?$/, '') || '/';
   return route;
 }
@@ -284,7 +346,7 @@ async function executeMiddleware(request, url) {
  */
 function filePathToRoute(filePath) {
   let route = filePath
-    .replace('${glob}', '')
+    .replace('', '')
     .replace(/\\/page\\.[tj]sx?$/, '')
     .replace(/\\/page$/, '') || '/';
   
@@ -395,7 +457,7 @@ function matchRoute(pathname) {
 
 /**
  * Find the layout for a given page file path (pattern from matchRoute = pages key).
- * Layout keys from glob are like '/src/layout.tsx' or 'src/about/layout.tsx'.
+ * Layer roots are normalized to virtual keys such as '/layout.tsx' and '/about/layout.tsx'.
  */
 function getLayout(pageFilePath) {
   const tryKeys = (...keys) => {
@@ -427,9 +489,9 @@ function getLayout(pageFilePath) {
     }
   }
 
-  // Root layout (glob is e.g. '/src')
+  // Root layout
   for (const ext of extensions) {
-    const layout = tryKeys('${glob}/layout.' + ext, '${glob}'.replace(/^\\//, '') + '/layout.' + ext);
+    const layout = tryKeys('/layout.' + ext, 'layout.' + ext);
     if (layout) return layout;
   }
   return null;
@@ -440,9 +502,30 @@ function getLayout(pageFilePath) {
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
  */
 async function handler(request) {
-  try {
   const url = new URL(request.url);
+  try {
   debug('Handling request:', request.method, url.pathname);
+
+  ${
+    ctx.actionsEnabled
+      ? `if (request.method === 'POST') {
+    try {
+      validateServerActionRequest(request, serverActionSecurity);
+    } catch (error) {
+      const rejection = createServerActionRequestErrorResponse(error);
+      if (rejection) return rejection;
+      return new Response('Bad Request', {
+        status: 400,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
+  }`
+      : ""
+  }
 
   // Execute middleware first
   const middlewareResult = await executeMiddleware(request, url);
@@ -459,7 +542,7 @@ async function handler(request) {
     middlewareHeaders.set(key, value);
   }
   
-  const glob = ${JSON.stringify(glob)};
+  const glob = '';
 `;
 
   // If actions enabled, add action handling before rendering
@@ -471,38 +554,103 @@ async function handler(request) {
   // Handle POST requests (server actions)
   if (request.method === 'POST') {
     const actionId = request.headers.get('x-farm-action-id');
+    let preparedActionRequest;
+
+    try {
+      preparedActionRequest = await prepareServerActionRequest(
+        request,
+        serverActionSecurity,
+        actionId ? 'javascript' : 'form',
+        actionId,
+      );
+    } catch (error) {
+      if (request.signal.aborted) {
+        return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+      }
+      const rejection = createServerActionRequestErrorResponse(error);
+      if (rejection) return rejection;
+      console.error('[Farm.js] Failed to read server action request:', error);
+      return new Response('Bad Request', {
+        status: 400,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     
     if (actionId) {
       // Action called via JavaScript (after hydration)
       debug('Executing server action:', actionId);
       temporaryReferences = createTemporaryReferenceSet();
+      let args, action;
+
       try {
-        const contentType = request.headers.get('content-type') || '';
-        const body = contentType.includes('multipart/form-data')
-          ? await request.formData()
-          : await request.text();
-        const args = await decodeReply(body, { temporaryReferences });
-        const action = await loadServerAction(actionId);
-        const data = await action.apply(null, args);
+        args = await decodeReply(preparedActionRequest.body, { temporaryReferences });
+        action = await loadServerAction(actionId);
+      } catch (error) {
+        console.error('[Farm.js] Invalid server action request:', error);
+        return new Response('Bad Request', {
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
+
+      try {
+        const data = await runWithServerActionRequest(request, () => action.apply(null, args));
         returnValue = { ok: true, data };
         debug('Server action succeeded:', actionId);
       } catch (e) {
-        returnValue = { ok: false, data: e };
+        if (request.signal.aborted) {
+          return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+        }
+        console.error('[Farm.js] Server action failed:', e);
+        returnValue = { ok: false, data: sanitizeServerActionError(e) };
         debug('Server action failed:', actionId, e);
       }
     } else {
       // Progressive enhancement (form submitted before JS loaded)
       debug('Handling progressive enhancement form submission');
-      
-      const formData = await request.formData();
-      const decoded = await decodeAction(formData);
+      const formData = preparedActionRequest.body;
+      let decoded;
+
+      try {
+        decoded = await decodeAction(formData);
+        if (typeof decoded !== 'function') throw new Error('Missing form action');
+      } catch (error) {
+        console.error('[Farm.js] Invalid form action request:', error);
+        return new Response('Bad Request', {
+          status: 400,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
+      }
       
       try {
-        const result = await decoded();
+        const result = await runWithServerActionRequest(request, () => decoded());
         formState = await decodeFormState(result, formData);
       } catch (e) {
+        if (request.signal.aborted) {
+          return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+        }
+        console.error('[Farm.js] Form action failed:', e);
         debug('Form action failed:', e);
-        return new Response('Action Failed', { status: 500 });
+        return new Response('Server function failed', {
+          status: 500,
+          headers: {
+            'Cache-Control': 'no-store',
+            'Content-Type': 'text/plain; charset=utf-8',
+            'X-Content-Type-Options': 'nosniff',
+          },
+        });
       }
     }
   }
@@ -613,6 +761,7 @@ async function handler(request) {
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/x-component');
+      applyActionResponseHeaders(responseHeaders, request);
       return new Response(rscStream, { headers: responseHeaders });
     }
 
@@ -632,6 +781,7 @@ async function handler(request) {
       // Merge middleware headers with response headers
       const responseHeaders = new Headers(middlewareHeaders);
       responseHeaders.set('content-type', 'text/html');
+      applyActionResponseHeaders(responseHeaders, request);
       return new Response(html, { headers: responseHeaders });
     }
   }
@@ -657,9 +807,23 @@ async function handler(request) {
   // Merge middleware headers with response headers
   const responseHeaders = new Headers(middlewareHeaders);
   responseHeaders.set('content-type', 'text/html');
+  applyActionResponseHeaders(responseHeaders, request);
   return new Response(html, { headers: responseHeaders });
   } catch (err) {
     console.error('[RSC] Handler error:', err);
+    if (request.method === 'POST') {
+      if (request.signal.aborted) {
+        return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
+      }
+      return new Response('Server function failed', {
+        status: 500,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Content-Type': 'text/plain; charset=utf-8',
+          'X-Content-Type-Options': 'nosniff',
+        },
+      });
+    }
     // If route has error.tsx, render it (Next.js-style: SSR error goes to route error boundary)
     const pathname = url.pathname.replace(/\\/$/, '') || '/';
     const ErrorComponent = getMatchingError(pathname, glob);

@@ -19,8 +19,14 @@ export type {
   RouteOptionalParamValue,
   RouteParams,
 } from "./link";
-export { useRouter } from "./router";
-export type { UseRouterOptions } from "./router";
+export {
+  useBlocker,
+  useNavigation,
+  usePageState,
+  useRouter,
+  useScrollRestoration,
+} from "./router";
+export type { UseBlockerOptions, UseBlockerReturn, UseRouterOptions } from "./router";
 export { buildFarmRoutePath, createFarmRouter, isFarmRouteActive, matchFarmRoute } from "../router";
 export type {
   FarmRouter,
@@ -44,5 +50,24 @@ export type {
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "../api/client";
-export { getRouter, navigateTo, prefetch, SPARouter } from "./spa-router";
+export {
+  getRouter,
+  navigateTo,
+  prefetch,
+  pushState,
+  readPageState,
+  replaceState,
+  SPARouter,
+} from "./spa-router";
+export { installChunkErrorRecovery, isChunkLoadError } from "./chunk-recovery";
+export type { FarmChunkRecoveryOptions } from "./chunk-recovery";
+export type {
+  FarmNavigateOptions,
+  FarmNavigationListener,
+  FarmNavigationLocation,
+  FarmNavigationBlocker,
+  FarmNavigationBlockerContext,
+  FarmNavigationState,
+  FarmViewTransitionMode,
+} from "./spa-router";
 export type { PageProps, LayoutProps, Metadata } from "../types";
