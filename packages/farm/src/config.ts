@@ -42,6 +42,7 @@ import {
   type ResolvedFarmLayer,
 } from "./layers";
 import path from "path";
+import { normalizeFarmDeploymentId } from "./deployment";
 
 export type {
   FarmDocsConfigInput,
@@ -205,6 +206,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   routeRules?: FarmRouteRules;
   context?: BaseFarmConfig["context"];
   serverActions?: FarmServerActionsConfig;
+  /** Build identifier used to detect and recover from deployment version skew. */
+  deploymentId?: string;
 
   notFound?: NotFoundConfig;
 
@@ -265,7 +268,15 @@ export interface ResolvedFarmConfig extends Required<
 
 export type FarmLayerConfig = Omit<
   FarmUserConfig,
-  "root" | "outDir" | "distDir" | "deploy" | "output" | "preset" | "publicDir" | "generateBuildId"
+  | "root"
+  | "outDir"
+  | "distDir"
+  | "deploy"
+  | "output"
+  | "preset"
+  | "publicDir"
+  | "generateBuildId"
+  | "deploymentId"
 >;
 
 export function defineFarmConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
@@ -643,6 +654,14 @@ export async function resolveConfig(
   const mdx = resolveMdxConfig(userConfig.mdx);
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
+  const generateBuildId = userConfig.generateBuildId || (() => `build-${Date.now()}`);
+  const deploymentId = normalizeFarmDeploymentId(
+    userConfig.deploymentId ||
+      process.env.FARM_DEPLOYMENT_ID ||
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      process.env.CF_PAGES_COMMIT_SHA ||
+      (mode === "production" ? await generateBuildId() : "development"),
+  );
 
   const resolved: ResolvedFarmConfig = {
     root,
@@ -696,9 +715,10 @@ export async function resolveConfig(
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),
     serverActions: resolveServerActionsConfig(userConfig.serverActions),
+    deploymentId,
     output: userConfig.output || "standalone",
     distDir: userConfig.distDir || ".farm",
-    generateBuildId: userConfig.generateBuildId || (() => `build-${Date.now()}`),
+    generateBuildId,
     compress: userConfig.compress ?? true,
     devIndicators: {
       buildActivity: true,

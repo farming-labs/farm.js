@@ -72,6 +72,9 @@
       "server-action-security": [
         "./dist/server-action-security.d.ts"
       ],
+      "deployment": [
+        "./dist/deployment.d.ts"
+      ],
       "env": [
         "./dist/env.d.ts"
       ],
@@ -185,6 +188,11 @@
       "types": "./dist/server-action-security.d.ts",
       "import": "./dist/server-action-security.mjs",
       "require": "./dist/server-action-security.cjs"
+    },
+    "./deployment": {
+      "types": "./dist/deployment.d.ts",
+      "import": "./dist/deployment.mjs",
+      "require": "./dist/deployment.cjs"
     },
     "./env": {
       "types": "./dist/env.d.ts",
