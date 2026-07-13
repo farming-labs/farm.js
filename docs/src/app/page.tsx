@@ -11,16 +11,13 @@ import {
   ExternalLink,
   FileCode2,
   FileText,
-  FolderTree,
   Gauge,
-  GitCompareArrows,
   GitFork,
   KeyRound,
   Layers3,
   Mail,
   Menu,
   Network,
-  PanelsTopLeft,
   Plug,
   Rocket,
   Route,
@@ -790,217 +787,6 @@ function DeveloperExperienceGrid() {
   );
 }
 
-function FileTreeVisual() {
-  const files = [
-    ["src/app", "directory"],
-    ["  dashboard/page.tsx", "route"],
-    ["  api/users/route.ts", "api"],
-    ["  docs/page.md", "content"],
-    ["farm.config.ts", "config"],
-  ] as const;
-
-  return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <div className="flex h-10 shrink-0 items-center border-b border-white/8 px-4 font-mono text-[10px] text-white/32">
-          project
-        </div>
-        <div className="min-h-0 flex-1 py-3">
-          {files.map(([name, kind]) => (
-            <div key={name} className="grid grid-cols-[1fr_auto] px-4 py-2 font-mono text-[11px]">
-              <span
-                className={
-                  kind === "directory" || kind === "config" ? "text-white" : "text-white/58"
-                }
-              >
-                {name}
-              </span>
-              <span className="text-white/34">{kind}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MiddlewareVisual() {
-  const events = [
-    ["request", "/dashboard/settings", "12:04:41.021"],
-    ["matcher", "/dashboard/:path*", "+0.2ms"],
-    ["session", "authenticated", "+1.6ms"],
-    ["render", "dashboard/settings", "+8.4ms"],
-  ] as const;
-
-  return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-rows-4 overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        {events.map(([event, detail, time], index) => (
-          <div
-            key={event}
-            className={cx(
-              "grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 font-mono text-[10px]",
-              index !== 0 && "border-t border-white/8",
-            )}
-          >
-            <span className="text-white/72">{event}</span>
-            <span className="truncate text-white/54">{detail}</span>
-            <span className="text-white/25">{time}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DocsVisual() {
-  const resources = [
-    {
-      label: "src/app/docs",
-      kind: "route",
-      icon: FolderTree,
-      offset: "translate-x-[28%]",
-    },
-    {
-      label: "getting-started.mdx",
-      kind: "MDX",
-      icon: FileText,
-      offset: "translate-x-[20%]",
-    },
-    {
-      label: "openapi.json",
-      kind: "API",
-      icon: Braces,
-      offset: "translate-x-[12%]",
-    },
-    {
-      label: "llms.txt",
-      kind: "AI",
-      icon: FileCode2,
-      offset: "translate-x-[4%]",
-      featured: true,
-    },
-  ] as const;
-
-  return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px h-[290px] w-full max-w-full overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <div className="flex h-full flex-col justify-center -space-y-2 p-5 transition-[margin] duration-500 ease-out group-hover:space-y-2">
-          {resources.map((resource) => {
-            const Icon = resource.icon;
-            const isFeatured = "featured" in resource && resource.featured;
-
-            return (
-              <div
-                key={resource.label}
-                className={cx(
-                  "flex h-16 shrink-0 items-center justify-between border px-4 pt-3 transition-[height,margin,padding,transform,background-color,border-color] duration-500 ease-out group-hover:h-12 group-hover:translate-x-0 group-hover:pt-0",
-                  resource.offset,
-                  isFeatured
-                    ? "border-white bg-white text-black"
-                    : "border-white/10 bg-black text-white",
-                )}
-              >
-                <span className="flex min-w-0 items-center gap-2.5">
-                  <Icon
-                    aria-hidden
-                    className={cx(
-                      "size-3.5 shrink-0",
-                      isFeatured ? "text-black/72" : "text-white/52",
-                    )}
-                    strokeWidth={1.5}
-                  />
-                  <span className="truncate font-mono text-[10px] font-normal tracking-normal">
-                    {resource.label}
-                  </span>
-                </span>
-                <span
-                  className={cx(
-                    "ml-4 shrink-0 font-mono text-[9px] uppercase tracking-normal",
-                    isFeatured ? "text-black/52" : "text-white/28",
-                  )}
-                >
-                  {resource.kind}
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function MigrationVisual() {
-  const rows = [
-    ["Next.js", "src/app preserved", "ready"],
-    ["Remix", "routes mapped", "ready"],
-    ["Express", "handlers inventoried", "ready"],
-  ] as const;
-
-  return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
-        <div className="mt-4 grid min-h-0 flex-1 grid-rows-3 gap-2">
-          {rows.map(([source, detail, status]) => (
-            <div
-              key={source}
-              className="grid grid-cols-[4rem_1fr_auto] items-center gap-3 border border-white/8 px-3 py-2 font-mono text-[9px] sm:text-[10px]"
-            >
-              <span className="text-white">{source}</span>
-              <span className="truncate text-white/42">{detail}</span>
-              <span className="text-white/68">{status}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FoundationGrid() {
-  return (
-    <section className="farm-full-rule grid w-full lg:grid-cols-2">
-      <FeatureCell
-        body="Pages, layouts, route handlers, loading states, markdown, and typed links live in the app directory."
-        icon={FolderTree}
-        index="02.1"
-        title="A Familiar App Router"
-      >
-        <FileTreeVisual />
-      </FeatureCell>
-      <FeatureCell
-        body="Config and file middleware are discovered, traced, tested, and compiled into deployment matchers."
-        className="border-t border-white/12 lg:border-l lg:border-t-0"
-        icon={Network}
-        index="02.2"
-        title="Middleware You Can See"
-      >
-        <MiddlewareVisual />
-      </FeatureCell>
-      <FeatureCell
-        body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
-        className="border-t border-white/12"
-        icon={BookOpenText}
-        index="02.3"
-        title="Docs Are Part of the App"
-      >
-        <DocsVisual />
-      </FeatureCell>
-      <FeatureCell
-        body="Inventory routes from Next.js, Remix, Express, and custom servers before changing application source."
-        className="border-t border-white/12 lg:border-l"
-        icon={GitCompareArrows}
-        index="02.4"
-        title="Migrate With Evidence"
-      >
-        <MigrationVisual />
-      </FeatureCell>
-    </section>
-  );
-}
-
 function StackMap() {
   const integrationRows = [
     [
@@ -1364,16 +1150,8 @@ export default function HomePage(_props: PageProps) {
           <main>
             <Hero />
             <EcosystemStrip />
-            <IntegrationsSection />
             <DeveloperExperienceGrid />
-            <HeadingSection
-              body="The familiar app directory stays simple. Farm composes the product systems around it."
-              eyebrow="Application foundation"
-              icon={PanelsTopLeft}
-              index="02"
-              title="A shared foundation for the whole application"
-            />
-            <FoundationGrid />
+            <IntegrationsSection />
             <HeadingSection
               body="Framework integrations can register routes, server APIs, docs, generated clients, and lifecycle hooks together."
               eyebrow="Product systems"
