@@ -33,6 +33,7 @@ export default defineConfig({
     "env-types": "src/env-types.ts",
     environment: "src/environment.ts",
     "environment/vite": "src/environment-vite.ts",
+    testing: "src/testing.ts",
   },
   format: ["cjs", "esm"],
   dts: true,
