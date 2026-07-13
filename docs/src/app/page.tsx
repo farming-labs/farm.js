@@ -41,6 +41,7 @@ import reactIconUrl from "simple-icons/icons/react.svg?url";
 import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import typescriptIconUrl from "simple-icons/icons/typescript.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
+import { HighlightedCode } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 
 export const metadata = {
@@ -133,6 +134,23 @@ const footerGroups = [
     ],
   },
 ] as const;
+
+const typedApiCode = `const user = await api.users.get({
+  params: { id: "user_123" },
+});
+
+user.name;
+//   ^? string`;
+
+const integrationConfigCode = `import { defineFarmConfig } from "@farmjs/core";
+
+export default defineFarmConfig({
+  integrations: [
+    auth(),
+    billing(),
+    jobs(),
+  ],
+});`;
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -247,7 +265,7 @@ function AnnouncementBar() {
 
 function Header() {
   return (
-    <header className="farm-full-rule sticky top-0 z-50 border-b border-white/12 bg-black/94 backdrop-blur-xl">
+    <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
       <div className="flex h-16 w-full items-stretch">
         <div className="flex shrink-0 items-center px-4 sm:px-7">
           <Wordmark />
@@ -316,170 +334,61 @@ function Header() {
 
 function FarmRuntimeVisual() {
   return (
-    <div className="farm-runtime-visual farm-line-field relative flex min-h-[430px] items-center justify-center overflow-hidden bg-black sm:min-h-[520px] lg:min-h-[620px]">
-      <div className="farm-dot-grid absolute inset-0 opacity-30" />
-      <span className="absolute right-5 top-5 border border-white/10 bg-black px-2 py-1 font-mono text-[9px] uppercase text-white/32 sm:right-8 sm:top-8">
-        Runtime graph / 01
+    <div
+      aria-label="A layered monochrome Farm build pipeline connecting source files to routes, server APIs, and deployment output."
+      className="farm-runtime-visual farm-line-field relative flex min-h-[430px] items-center justify-center overflow-hidden bg-black sm:min-h-[520px] lg:min-h-[620px]"
+      role="img"
+    >
+      <div aria-hidden className="farm-dot-grid absolute inset-0 opacity-20" />
+      <div aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-white/[0.045]" />
+      <div aria-hidden className="absolute inset-y-0 left-1/2 w-px bg-white/[0.045]" />
+
+      <span className="absolute right-5 top-5 z-20 border border-white/10 bg-black px-2 py-1 font-mono text-[9px] uppercase tracking-normal text-white/32 sm:right-8 sm:top-8">
+        Build pipeline / 01
       </span>
 
-      <svg
-        aria-labelledby="farm-runtime-title"
-        className="relative z-10 h-auto w-[112%] max-w-[650px]"
-        role="img"
-        viewBox="0 0 620 620"
-      >
-        <title id="farm-runtime-title">
-          Farm connects application routes, APIs, docs, integrations, and deployment output.
-        </title>
-        <g fill="none" stroke="white" strokeOpacity="0.2" strokeWidth="1.5">
-          <path className="farm-runtime-line" d="M206 276 134 194" />
-          <path className="farm-runtime-line" d="M414 276 486 194" />
-          <path className="farm-runtime-line" d="M206 364 128 452" />
-          <path className="farm-runtime-line" d="M414 364 492 452" />
-        </g>
+      <div aria-hidden className="farm-prism-scene z-10">
+        <span className="farm-prism-node farm-prism-node-tsx">
+          TSX
+          <small>routes</small>
+        </span>
+        <span className="farm-prism-node farm-prism-node-api">
+          API
+          <small>typed</small>
+        </span>
+        <span className="farm-prism-node farm-prism-node-mdx">
+          MDX
+          <small>docs</small>
+        </span>
+        <span className="farm-prism-node farm-prism-node-edge">
+          Edge
+          <small>deploy</small>
+        </span>
 
-        <g className="farm-signal" fill="white">
-          <circle cx="166" cy="230" r="3" />
-          <circle cx="452" cy="232" r="3" />
-          <circle cx="164" cy="410" r="3" />
-          <circle cx="454" cy="410" r="3" />
-        </g>
+        <div className="farm-prism-stack">
+          <div className="farm-prism-plane farm-prism-plane-source" />
+          <div className="farm-prism-plane farm-prism-plane-router" />
+          <div className="farm-prism-plane farm-prism-plane-runtime" />
+          <div className="farm-prism-plane farm-prism-plane-output" />
 
-        <g transform="translate(69 142)">
-          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="11"
-            textAnchor="middle"
-            x="66"
-            y="29"
-          >
-            ROUTES
-          </text>
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="9"
-            opacity="0.38"
-            textAnchor="middle"
-            x="66"
-            y="46"
-          >
-            pages + layouts
-          </text>
-        </g>
-        <g transform="translate(419 142)">
-          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="11"
-            textAnchor="middle"
-            x="66"
-            y="29"
-          >
-            APIs
-          </text>
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="9"
-            opacity="0.38"
-            textAnchor="middle"
-            x="66"
-            y="46"
-          >
-            typed callers
-          </text>
-        </g>
-        <g transform="translate(63 420)">
-          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="11"
-            textAnchor="middle"
-            x="66"
-            y="29"
-          >
-            INTEGRATIONS
-          </text>
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="9"
-            opacity="0.38"
-            textAnchor="middle"
-            x="66"
-            y="46"
-          >
-            auth + billing
-          </text>
-        </g>
-        <g transform="translate(425 420)">
-          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="11"
-            textAnchor="middle"
-            x="66"
-            y="29"
-          >
-            DEPLOY
-          </text>
-          <text
-            fill="white"
-            fontFamily="Geist Mono, monospace"
-            fontSize="9"
-            opacity="0.38"
-            textAnchor="middle"
-            x="66"
-            y="46"
-          >
-            manifests + output
-          </text>
-        </g>
+          <span className="absolute left-1/2 top-[13%] -translate-x-1/2 font-mono text-[8px] uppercase tracking-normal text-white/24">
+            Source modules
+          </span>
+          <span className="absolute left-1/2 top-[33%] -translate-x-1/2 font-mono text-[8px] uppercase tracking-normal text-white/34">
+            Route graph
+          </span>
+          <span className="absolute left-1/2 top-[75%] -translate-x-1/2 font-mono text-[8px] uppercase tracking-normal text-white/32">
+            Production output
+          </span>
 
-        <polygon
-          fill="black"
-          points="184,332 310,258 436,332 310,406"
-          stroke="white"
-          strokeOpacity="0.12"
-          strokeWidth="2"
-        />
-        <polygon
-          fill="black"
-          points="184,310 310,236 436,310 310,384"
-          stroke="white"
-          strokeOpacity="0.26"
-          strokeWidth="2"
-        />
-        <polygon
-          className="farm-core-face"
-          fill="black"
-          points="184,286 310,212 436,286 310,360"
-          stroke="white"
-          strokeWidth="2"
-        />
-        <path d="M279 257h62v12h-46v12h33v12h-33v20h-16v-56Z" fill="white" />
-        <path d="M325 257h16l-13 12h-16l13-12Z" fill="black" />
-        <text
-          fill="white"
-          fontFamily="Geist Mono, monospace"
-          fontSize="9"
-          opacity="0.42"
-          textAnchor="middle"
-          x="310"
-          y="334"
-        >
-          APP RUNTIME
-        </text>
-      </svg>
+          <div className="farm-prism-mark">
+            <FarmMark className="size-16" />
+          </div>
+        </div>
+      </div>
 
-      <div className="absolute bottom-5 left-5 flex items-center gap-2 font-mono text-[10px] text-white/34 sm:bottom-8 sm:left-8">
-        <span className="size-1.5 bg-white" /> ready in 126ms
+      <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 font-mono text-[10px] tracking-normal text-white/34 sm:bottom-8 sm:left-8">
+        <span className="size-1.5 bg-white" /> 24 routes / 12 APIs / ready
       </div>
     </div>
   );
@@ -487,7 +396,7 @@ function FarmRuntimeVisual() {
 
 function Hero() {
   return (
-    <section className="farm-full-rule grid w-full border-b border-white/12 lg:grid-cols-[1.08fr_0.92fr]">
+    <section className="farm-full-rule grid w-full lg:grid-cols-[1.08fr_0.92fr]">
       <span
         aria-hidden
         className="pointer-events-none absolute -left-px -top-px z-30 size-[9px] border-l border-t border-white/28"
@@ -536,7 +445,7 @@ function Hero() {
 
 function EcosystemStrip() {
   return (
-    <section className="farm-full-rule w-full border-b border-white/12">
+    <section className="farm-full-rule w-full">
       <div className="grid border-b border-white/12 md:grid-cols-[14rem_1fr]">
         <div className="flex items-center border-b border-white/12 px-6 py-5 text-white/36 md:border-b-0 md:border-r sm:px-8">
           <IndexedLabel icon={Layers3} index="01" label="Product stack" />
@@ -591,7 +500,7 @@ function HeadingSection({
   body?: string;
 }) {
   return (
-    <section className="farm-wide-rule grid min-h-[320px] w-full border-b border-white/12 lg:grid-cols-[14rem_1fr]">
+    <section className="farm-wide-rule grid min-h-[320px] w-full lg:grid-cols-[14rem_1fr]">
       <div className="flex items-start border-b border-white/12 p-6 text-white/36 lg:border-b-0 lg:border-r sm:p-8">
         <IndexedLabel icon={icon} index={index} label={eyebrow} />
       </div>
@@ -609,129 +518,97 @@ function HeadingSection({
 
 function TerminalVisual() {
   return (
-    <div
-      aria-label="Farm development server terminal output"
-      className="farm-line-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10"
-      role="img"
-    >
+    <div className="farm-line-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
       <div className="farm-scan-lines absolute inset-0 opacity-30" />
-      <div className="relative w-full max-w-[470px] border border-white/18 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.6)]">
-        <div className="flex h-10 items-center justify-between border-b border-white/10 px-4">
+      <figure className="relative w-full max-w-[470px] overflow-hidden border border-white/18 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.6)]">
+        <figcaption className="flex h-10 items-center justify-between border-b border-white/10 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
             <span className="size-2 rounded-full bg-white/14" />
             <span className="size-2 rounded-full bg-white/10" />
           </div>
-          <span className="font-mono text-[9px] text-white/28">terminal</span>
-        </div>
-        <div className="space-y-2 p-5 font-mono text-[11px] leading-5 sm:text-xs">
-          <p className="text-white/48">$ pnpm dev</p>
-          <p className="text-white">
-            <span className="font-semibold text-white">FARM</span> v0.0.3 ready in 126ms
-          </p>
-          <p className="text-white/54">
-            <span className="text-white/82">Local</span> http://localhost:3000
-          </p>
-          <p className="text-white/54">
-            <span className="text-white/82">Graph</span> 32 routes / 8 integrations
-          </p>
-          <p className="text-white/32">press h + enter to show help</p>
-        </div>
-      </div>
+          <span className="flex items-center gap-1.5 font-mono text-[9px] tracking-normal text-white/28">
+            <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> pnpm dev
+          </span>
+        </figcaption>
+        <pre className="overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
+          <code className="block min-w-max">
+            <span className="block text-white/48">$ pnpm dev</span>
+            <span className="mt-2 block text-white">
+              <span className="font-semibold text-white">FARM</span> v0.0.3 ready in 126ms
+            </span>
+            <span className="block text-white/54">
+              <span className="text-white/82">Local</span> http://localhost:3000
+            </span>
+            <span className="block text-white/54">
+              <span className="text-white/82">Graph</span> 32 routes / 8 integrations
+            </span>
+            <span className="mt-2 block text-white/32">press h + enter to show help</span>
+          </code>
+        </pre>
+      </figure>
     </div>
   );
 }
 
 function TypedApiVisual() {
-  const lines = [
-    "const user = await api.users.get({",
-    '  params: { id: "user_123" },',
-    "});",
-    "",
-    "user.name;",
-    "//   ^? string",
-  ];
-
   return (
-    <div
-      aria-label="Typed Farm API client example"
-      className="farm-line-field relative flex min-h-[320px] items-end justify-end overflow-hidden bg-black pt-14"
-      role="img"
-    >
-      <div className="absolute left-8 top-9 border border-white/22 bg-black px-3 py-2 font-mono text-[10px] text-white/66">
+    <div className="farm-line-field relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden bg-black p-6 pt-16 sm:p-10 sm:pt-16">
+      <div className="absolute left-6 top-7 border border-white/22 bg-black px-3 py-2 font-mono text-[10px] text-white/66 sm:left-8">
         GET /api/users/:id
       </div>
-      <div className="w-[88%] border-l border-t border-white/12 bg-black py-5 shadow-[-20px_-20px_60px_rgba(0,0,0,0.42)]">
-        <div className="mb-4 flex items-center justify-between border-b border-white/8 px-5 pb-4">
-          <span className="font-mono text-[10px] text-white/35">src/app/dashboard/page.tsx</span>
-          <span className="font-mono text-[9px] text-white/50">typed</span>
-        </div>
-        <code className="block font-mono text-[11px] leading-6 text-white/68 sm:text-xs">
-          {lines.map((line, index) => (
-            <span key={`${line}-${index}`} className="grid grid-cols-[2rem_1fr] px-5">
-              <span className="select-none text-right text-white/18">{index + 1}</span>
-              <span className={index === 0 || index === 4 ? "text-white" : ""}>{line || " "}</span>
-            </span>
-          ))}
-        </code>
-      </div>
+      <HighlightedCode
+        className="w-full max-w-[470px]"
+        code={typedApiCode}
+        label="src/app/dashboard/page.tsx"
+        language="tsx"
+      />
     </div>
   );
 }
 
 function IntegrationVisual() {
-  const items = ["auth", "billing", "email", "jobs", "storage", "docs"];
-
   return (
-    <div
-      aria-label="Farm integration modules connected to framework configuration"
-      className="farm-dot-grid relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10"
-      role="img"
-    >
-      <div className="grid w-full max-w-[470px] grid-cols-2 gap-2 sm:grid-cols-3">
-        {items.map((item, index) => (
-          <div
-            key={item}
-            className={cx(
-              "flex h-20 flex-col justify-between border border-white/10 bg-black p-3 transition-colors hover:border-white/28 hover:bg-white/[0.025]",
-              index < 3 && "border-white/18",
-            )}
-          >
-            <span className="font-mono text-[9px] text-white/28">0{index + 1}</span>
-            <span className="font-mono text-xs text-white/70">{item}</span>
-          </div>
-        ))}
-      </div>
-      <span className="absolute bottom-5 border border-white/18 bg-black px-3 py-2 font-mono text-[10px] text-white/70 shadow-xl shadow-black/40">
-        defineFarmConfig()
-      </span>
+    <div className="farm-dot-grid relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 sm:p-10">
+      <HighlightedCode
+        className="w-full max-w-[470px]"
+        code={integrationConfigCode}
+        label="farm.config.ts"
+        language="ts"
+      />
     </div>
   );
 }
 
 function BuildVisual() {
   return (
-    <div
-      aria-label="Farm production build output"
-      className="farm-diagonal-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10"
-      role="img"
-    >
-      <div className="relative w-full max-w-[450px] border border-white/18 bg-black p-5 font-mono text-[10px] leading-5 text-white/58 shadow-[0_28px_70px_rgba(0,0,0,0.6)] sm:text-[11px]">
-        <p className="text-white">$ farm build --target vercel</p>
-        <p className="mt-3">
-          <span className="text-white">ok</span> route manifest ........ 44 routes
-        </p>
-        <p>
-          <span className="text-white">ok</span> middleware .............. 6 matchers
-        </p>
-        <p>
-          <span className="text-white">ok</span> generated client ........ 12 APIs
-        </p>
-        <p>
-          <span className="text-white">ok</span> deployment output ....... .vercel/output
-        </p>
-        <p className="mt-3 text-white/78">built in 842ms</p>
-      </div>
+    <div className="farm-diagonal-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
+      <figure className="relative w-full max-w-[450px] overflow-hidden border border-white/18 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.6)]">
+        <figcaption className="flex h-10 items-center justify-between border-b border-white/10 px-4 font-mono text-[9px] tracking-normal text-white/34">
+          <span className="flex items-center gap-1.5">
+            <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
+          </span>
+          <span>bash</span>
+        </figcaption>
+        <pre className="overflow-x-auto p-5 font-mono text-[10px] leading-6 tracking-normal text-white/58 sm:text-[11px]">
+          <code className="block min-w-max">
+            <span className="block text-white">$ farm build --target vercel</span>
+            <span className="mt-2 block">
+              <span className="text-white">ok</span> route manifest ........ 44 routes
+            </span>
+            <span className="block">
+              <span className="text-white">ok</span> middleware .............. 6 matchers
+            </span>
+            <span className="block">
+              <span className="text-white">ok</span> generated client ........ 12 APIs
+            </span>
+            <span className="block">
+              <span className="text-white">ok</span> deployment output ....... .vercel/output
+            </span>
+            <span className="mt-2 block text-white/78">built in 842ms</span>
+          </code>
+        </pre>
+      </figure>
     </div>
   );
 }
@@ -752,7 +629,7 @@ function FeatureCell({
   children: ReactNode;
 }) {
   return (
-    <article className={cx("flex min-h-[500px] flex-col justify-between", className)}>
+    <article className={cx("flex min-h-[500px] min-w-0 flex-col justify-between", className)}>
       <div className="p-6 sm:p-10">
         <div className="-mx-6 mb-8 flex items-center justify-between border-b border-white/10 px-6 pb-5 sm:-mx-10 sm:px-10">
           <span className="grid size-9 place-items-center border border-white/14 text-white/72">
@@ -774,7 +651,7 @@ function FeatureCell({
 
 function DeveloperExperienceGrid() {
   return (
-    <section className="farm-full-rule grid w-full border-b border-white/12 lg:grid-cols-2">
+    <section className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
         body="Start the app, route graph, generated clients, docs, and integration runtime together with one command."
         icon={Terminal}
@@ -932,7 +809,7 @@ function MigrationVisual() {
 
 function FoundationGrid() {
   return (
-    <section className="farm-full-rule grid w-full border-b border-white/12 lg:grid-cols-2">
+    <section className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
         body="Pages, layouts, route handlers, loading states, markdown, and typed links live in the app directory."
         icon={FolderTree}
@@ -974,7 +851,7 @@ function FoundationGrid() {
 
 function StackMap() {
   return (
-    <section className="farm-full-rule farm-stack-map w-full border-b border-white/12">
+    <section className="farm-full-rule farm-stack-map w-full">
       <div className="grid gap-2 p-5 sm:hidden">
         <div className="mb-3 border border-white/24 bg-black p-4 text-center">
           <Settings2 aria-hidden className="mx-auto size-4 text-white/68" strokeWidth={1.5} />
@@ -1078,7 +955,7 @@ function OpenSourceSection() {
   ] as const;
 
   return (
-    <section id="open-source" className="farm-full-rule w-full border-b border-white/12">
+    <section id="open-source" className="farm-full-rule w-full">
       <div className="grid gap-12 px-6 py-20 sm:px-10 lg:grid-cols-[1fr_auto] lg:items-end lg:px-14 lg:py-28">
         <div className="max-w-2xl">
           <div className="text-white/45">
@@ -1154,7 +1031,7 @@ function OpenSourceSection() {
 
 function FinalCta() {
   return (
-    <section className="farm-full-rule farm-footer-field flex min-h-[520px] w-full items-center justify-center border-b border-white/12 px-6 py-20 text-center sm:px-10">
+    <section className="farm-full-rule farm-footer-field flex min-h-[520px] w-full items-center justify-center px-6 py-20 text-center sm:px-10">
       <div className="max-w-3xl">
         <span className="mx-auto grid size-14 place-items-center border border-white/18 bg-white text-black">
           <FarmMark className="size-8" />
@@ -1223,7 +1100,7 @@ function Footer() {
           ))}
         </div>
       </div>
-      <div className="farm-top-rule flex flex-col gap-2 border-t border-white/12 px-6 py-5 font-mono text-[10px] tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between sm:px-10 lg:px-14">
+      <div className="farm-top-rule flex flex-col gap-2 px-6 py-5 font-mono text-[10px] tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between sm:px-10 lg:px-14">
         <span>MIT License / Farm.js Team</span>
         <a className="inline-flex items-center gap-1.5 hover:text-white" href="https://kinfish.dev">
           kinfish.dev <ExternalLink aria-hidden className="size-3" strokeWidth={1.5} />

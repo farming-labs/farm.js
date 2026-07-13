@@ -36,6 +36,7 @@
     --farm-bg: #000;
     --farm-line: rgb(255 255 255 / 0.12);
     --farm-line-soft: rgb(255 255 255 / 0.055);
+    --farm-rule: rgb(255 255 255 / 0.06);
   }
 
   html {
@@ -96,7 +97,6 @@
   }
 
   .farm-full-rule::after,
-  .farm-wide-rule::before,
   .farm-wide-rule::after,
   .farm-top-rule::before {
     position: absolute;
@@ -104,13 +104,12 @@
     left: calc(50% - 50vw);
     z-index: 20;
     height: 1px;
-    background: var(--farm-line);
+    background: var(--farm-rule);
     content: "";
     pointer-events: none;
   }
 
-  .farm-top-rule::before,
-  .farm-wide-rule::before {
+  .farm-top-rule::before {
     top: -1px;
   }
 
@@ -174,6 +173,196 @@
     background-size: 48px 48px;
   }
 
+  .farm-highlighted-code {
+    --sh-class: rgb(255 255 255 / 0.86);
+    --sh-identifier: rgb(255 255 255 / 0.64);
+    --sh-string: rgb(255 255 255 / 0.94);
+    --sh-keyword: #fff;
+    --sh-comment: rgb(255 255 255 / 0.3);
+    --sh-property: rgb(255 255 255 / 0.78);
+    --sh-sign: rgb(255 255 255 / 0.42);
+    --sh-space: inherit;
+    counter-reset: farm-code-line;
+  }
+
+  .farm-highlighted-code .sh__line {
+    display: block;
+    min-width: max-content;
+    min-height: 1.5rem;
+    padding-right: 1.25rem;
+    white-space: pre;
+    counter-increment: farm-code-line;
+  }
+
+  .farm-highlighted-code .sh__line::before {
+    display: inline-block;
+    width: 2rem;
+    margin-right: 1rem;
+    color: rgb(255 255 255 / 0.18);
+    text-align: right;
+    content: counter(farm-code-line);
+    user-select: none;
+  }
+
+  .farm-highlighted-code .sh__token--keyword {
+    font-weight: 650;
+  }
+
+  .farm-highlighted-code .sh__token--comment {
+    font-style: italic;
+  }
+
+  .farm-prism-scene {
+    position: relative;
+    width: min(100%, 560px);
+    height: 430px;
+    isolation: isolate;
+  }
+
+  .farm-prism-stack {
+    position: absolute;
+    inset: 0;
+    animation: farm-prism-float 6.5s ease-in-out infinite;
+  }
+
+  .farm-prism-plane {
+    position: absolute;
+    left: 50%;
+    width: var(--farm-prism-size);
+    aspect-ratio: 1;
+    border: 1px solid rgb(255 255 255 / var(--farm-prism-opacity));
+    background: #020202;
+    box-shadow:
+      inset 0 0 0 1px rgb(255 255 255 / 0.025),
+      0 var(--farm-prism-edge) 0 rgb(255 255 255 / var(--farm-prism-edge-opacity));
+    transform: translate(-50%, -50%) rotateX(62deg) rotateZ(45deg);
+    transform-style: preserve-3d;
+  }
+
+  .farm-prism-plane-source {
+    --farm-prism-size: 168px;
+    --farm-prism-opacity: 0.2;
+    --farm-prism-edge: 5px;
+    --farm-prism-edge-opacity: 0.035;
+    top: 25%;
+  }
+
+  .farm-prism-plane-router {
+    --farm-prism-size: 218px;
+    --farm-prism-opacity: 0.28;
+    --farm-prism-edge: 7px;
+    --farm-prism-edge-opacity: 0.055;
+    top: 43%;
+  }
+
+  .farm-prism-plane-runtime {
+    --farm-prism-size: 270px;
+    --farm-prism-opacity: 0.52;
+    --farm-prism-edge: 11px;
+    --farm-prism-edge-opacity: 0.1;
+    top: 63%;
+    filter: drop-shadow(0 0 24px rgb(255 255 255 / 0.08));
+  }
+
+  .farm-prism-plane-output {
+    --farm-prism-size: 228px;
+    --farm-prism-opacity: 0.16;
+    --farm-prism-edge: 6px;
+    --farm-prism-edge-opacity: 0.035;
+    top: 80%;
+  }
+
+  .farm-prism-mark {
+    position: absolute;
+    top: 52%;
+    left: 50%;
+    display: grid;
+    width: 108px;
+    aspect-ratio: 1;
+    place-items: center;
+    color: #000;
+    background: #fff;
+    clip-path: polygon(50% 0, 100% 22%, 86% 82%, 50% 100%, 14% 82%, 0 22%);
+    filter: drop-shadow(0 0 30px rgb(255 255 255 / 0.2));
+    transform: translate(-50%, -50%);
+  }
+
+  .farm-prism-node {
+    position: absolute;
+    z-index: 10;
+    display: grid;
+    width: 64px;
+    height: 44px;
+    place-content: center;
+    border: 1px solid rgb(255 255 255 / 0.18);
+    background: #000;
+    font-family: var(--font-geist-mono), monospace;
+    font-size: 9px;
+    line-height: 1;
+    color: rgb(255 255 255 / 0.68);
+    text-align: center;
+    text-transform: uppercase;
+  }
+
+  .farm-prism-node::after {
+    position: absolute;
+    top: 50%;
+    width: 74px;
+    height: 1px;
+    background: rgb(255 255 255 / 0.15);
+    content: "";
+  }
+
+  .farm-prism-node small {
+    margin-top: 5px;
+    font-size: 7px;
+    color: rgb(255 255 255 / 0.3);
+  }
+
+  .farm-prism-node-tsx {
+    top: 24%;
+    left: 7%;
+  }
+
+  .farm-prism-node-tsx::after {
+    left: 100%;
+    transform: rotate(22deg);
+    transform-origin: left;
+  }
+
+  .farm-prism-node-api {
+    top: 19%;
+    right: 7%;
+  }
+
+  .farm-prism-node-api::after {
+    right: 100%;
+    transform: rotate(-22deg);
+    transform-origin: right;
+  }
+
+  .farm-prism-node-mdx {
+    bottom: 16%;
+    left: 4%;
+  }
+
+  .farm-prism-node-mdx::after {
+    left: 100%;
+    transform: rotate(-20deg);
+    transform-origin: left;
+  }
+
+  .farm-prism-node-edge {
+    right: 4%;
+    bottom: 13%;
+  }
+
+  .farm-prism-node-edge::after {
+    right: 100%;
+    transform: rotate(20deg);
+    transform-origin: right;
+  }
+
   @media (min-width: 768px) {
     .farm-page-grid {
       grid-template-columns: 40px minmax(0, 1240px) 40px;
@@ -186,46 +375,41 @@
     .farm-page-content {
       border-inline: 0;
     }
+
+    .farm-prism-scene {
+      height: 520px;
+    }
+
+    .farm-prism-plane-source {
+      --farm-prism-size: 188px;
+    }
+
+    .farm-prism-plane-router {
+      --farm-prism-size: 242px;
+    }
+
+    .farm-prism-plane-runtime {
+      --farm-prism-size: 304px;
+    }
+
+    .farm-prism-plane-output {
+      --farm-prism-size: 258px;
+    }
+
+    .farm-prism-mark {
+      width: 124px;
+    }
   }
 }
 
-@keyframes farm-flow {
-  to {
-    stroke-dashoffset: -68;
-  }
-}
-
-@keyframes farm-signal-pulse {
+@keyframes farm-prism-float {
   0%,
   100% {
-    opacity: 0.35;
+    transform: translateY(0);
   }
   50% {
-    opacity: 1;
+    transform: translateY(-9px);
   }
-}
-
-@keyframes farm-core-breathe {
-  0%,
-  100% {
-    opacity: 0.84;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-.farm-runtime-line {
-  stroke-dasharray: 5 11;
-  animation: farm-flow 7s linear infinite;
-}
-
-.farm-signal {
-  animation: farm-signal-pulse 2.8s ease-in-out infinite;
-}
-
-.farm-core-face {
-  animation: farm-core-breathe 4.5s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -233,9 +417,7 @@
     scroll-behavior: auto;
   }
 
-  .farm-runtime-line,
-  .farm-signal,
-  .farm-core-face {
+  .farm-prism-stack {
     animation: none;
   }
 }

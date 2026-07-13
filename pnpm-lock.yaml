@@ -78,6 +78,9 @@ importers:
       simple-icons:
         specifier: 16.25.0
         version: 16.25.0
+      sugar-high:
+        specifier: 0.9.5
+        version: 0.9.5
       zod:
         specifier: ^4.3.6
         version: 4.3.6
