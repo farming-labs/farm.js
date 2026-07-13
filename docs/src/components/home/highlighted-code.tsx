@@ -17,7 +17,7 @@ export function HighlightedCode({ className, code, label, language }: Highlighte
   return (
     <figure
       className={[
-        "min-w-0 max-w-full overflow-hidden border border-white/16 bg-black shadow-[0_24px_70px_rgba(0,0,0,0.55)]",
+        "min-w-0 max-w-full overflow-hidden border border-white/16 bg-black/72 shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-sm",
         className,
       ]
         .filter(Boolean)

@@ -63,6 +63,12 @@
     letter-spacing: 0;
   }
 
+  .farm-home .font-geist-pixel {
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: optimizeSpeed;
+  }
+
   .farm-page-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
@@ -125,16 +131,6 @@
     background-size: 34px 34px;
   }
 
-  .farm-scan-lines {
-    background-image: repeating-linear-gradient(
-      120deg,
-      transparent 0,
-      transparent 18px,
-      rgb(255 255 255 / 0.1) 19px,
-      transparent 20px
-    );
-  }
-
   .farm-line-field {
     background-color: #000;
     background-image: repeating-linear-gradient(
@@ -146,15 +142,51 @@
     );
   }
 
-  .farm-diagonal-field {
+  .farm-feature-spotlight {
+    position: relative;
+    isolation: isolate;
     background-color: #000;
-    background-image: repeating-linear-gradient(
-      135deg,
-      rgb(255 255 255 / 0.045) 0,
-      rgb(255 255 255 / 0.045) 1px,
-      transparent 1px,
-      transparent 12px
+    background-image: radial-gradient(
+      ellipse 125% 115% at 50% 0%,
+      transparent 34%,
+      rgb(255 255 255 / 0.028) 66%,
+      rgb(0 0 0 / 0.94) 100%
     );
+  }
+
+  .farm-feature-spotlight::before,
+  .farm-feature-spotlight::after {
+    position: absolute;
+    z-index: 0;
+    border-radius: 50%;
+    content: "";
+    pointer-events: none;
+  }
+
+  .farm-feature-spotlight::before {
+    inset: 6% 8% 14%;
+    background: radial-gradient(
+      ellipse at center,
+      rgb(255 255 255 / 0.18) 0%,
+      rgb(255 255 255 / 0.08) 34%,
+      rgb(255 255 255 / 0.03) 55%,
+      transparent 82%
+    );
+    filter: blur(46px);
+    opacity: 0.5;
+    transform: translate3d(0, -6%, 0);
+  }
+
+  .farm-feature-spotlight::after {
+    inset: 18% 18% 28%;
+    background: radial-gradient(
+      ellipse at center,
+      rgb(255 255 255 / 0.12) 0%,
+      rgb(255 255 255 / 0.04) 40%,
+      transparent 74%
+    );
+    filter: blur(32px);
+    opacity: 0.5;
   }
 
   .farm-stack-map {

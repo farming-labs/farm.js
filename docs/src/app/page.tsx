@@ -518,9 +518,8 @@ function HeadingSection({
 
 function TerminalVisual() {
   return (
-    <div className="farm-line-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
-      <div className="farm-scan-lines absolute inset-0 opacity-30" />
-      <figure className="relative w-full max-w-[470px] overflow-hidden border border-white/18 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.6)]">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
+      <figure className="relative z-10 w-full max-w-[470px] overflow-hidden border border-white/18 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/10 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
@@ -553,12 +552,12 @@ function TerminalVisual() {
 
 function TypedApiVisual() {
   return (
-    <div className="farm-line-field relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden bg-black p-6 pt-16 sm:p-10 sm:pt-16">
-      <div className="absolute left-6 top-7 border border-white/22 bg-black px-3 py-2 font-mono text-[10px] text-white/66 sm:left-8">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 pt-16 sm:p-10 sm:pt-16">
+      <div className="absolute left-6 top-7 z-20 border border-white/22 bg-black/72 px-3 py-2 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
         GET /api/users/:id
       </div>
       <HighlightedCode
-        className="w-full max-w-[470px]"
+        className="relative z-10 w-full max-w-[470px]"
         code={typedApiCode}
         label="src/app/dashboard/page.tsx"
         language="tsx"
@@ -569,9 +568,9 @@ function TypedApiVisual() {
 
 function IntegrationVisual() {
   return (
-    <div className="farm-dot-grid relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 sm:p-10">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 sm:p-10">
       <HighlightedCode
-        className="w-full max-w-[470px]"
+        className="relative z-10 w-full max-w-[470px]"
         code={integrationConfigCode}
         label="farm.config.ts"
         language="ts"
@@ -582,8 +581,8 @@ function IntegrationVisual() {
 
 function BuildVisual() {
   return (
-    <div className="farm-diagonal-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
-      <figure className="relative w-full max-w-[450px] overflow-hidden border border-white/18 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.6)]">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
+      <figure className="relative z-10 w-full max-w-[450px] overflow-hidden border border-white/18 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/10 px-4 font-mono text-[9px] tracking-normal text-white/34">
           <span className="flex items-center gap-1.5">
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
@@ -637,10 +636,10 @@ function FeatureCell({
           </span>
           <span className="font-mono text-[10px] text-white/28">{index}</span>
         </div>
-        <h3 className="font-mono text-sm font-semibold uppercase text-white sm:text-base">
+        <h3 className="font-mono text-[11px] font-medium uppercase text-white/52 sm:text-xs">
           {title}
         </h3>
-        <p className="mt-3 max-w-[31rem] text-sm leading-6 text-white/47 sm:text-base sm:leading-7">
+        <p className="mt-4 max-w-[31rem] font-geist-pixel text-xl font-medium leading-[1.28] tracking-normal text-white/88 sm:text-2xl">
           {body}
         </p>
       </div>
@@ -701,8 +700,8 @@ function FileTreeVisual() {
   ] as const;
 
   return (
-    <div className="farm-line-field min-h-[280px] overflow-hidden bg-black px-6 pt-8 sm:px-10">
-      <div className="mx-auto max-w-[460px] border-x border-t border-white/12 bg-black">
+    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden px-6 pt-8 sm:px-10">
+      <div className="relative z-10 mx-auto max-w-[460px] border-x border-t border-white/12 bg-black/72 backdrop-blur-sm">
         <div className="border-b border-white/10 px-4 py-3 font-mono text-[10px] text-white/32">
           project
         </div>
@@ -734,8 +733,8 @@ function MiddlewareVisual() {
   ] as const;
 
   return (
-    <div className="farm-dot-grid min-h-[280px] p-6 sm:p-10">
-      <div className="mx-auto max-w-[470px] overflow-hidden border border-white/12 bg-black">
+    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden p-6 sm:p-10">
+      <div className="relative z-10 mx-auto max-w-[470px] overflow-hidden border border-white/12 bg-black/72 backdrop-blur-sm">
         {events.map(([event, detail, time], index) => (
           <div
             key={event}
@@ -756,8 +755,8 @@ function MiddlewareVisual() {
 
 function DocsVisual() {
   return (
-    <div className="farm-line-field min-h-[280px] overflow-hidden bg-black px-5 pt-8 sm:px-10">
-      <div className="mx-auto grid max-w-[490px] grid-cols-[7rem_1fr] overflow-hidden border-x border-t border-white/12 bg-black sm:grid-cols-[9rem_1fr]">
+    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden px-5 pt-8 sm:px-10">
+      <div className="relative z-10 mx-auto grid max-w-[490px] grid-cols-[7rem_1fr] overflow-hidden border-x border-t border-white/12 bg-black/72 backdrop-blur-sm sm:grid-cols-[9rem_1fr]">
         <div className="border-r border-white/10 p-3 font-mono text-[9px] text-white/34">
           <p className="text-white/70">Introduction</p>
           <p className="mt-3">Routing</p>
@@ -787,8 +786,8 @@ function MigrationVisual() {
   ] as const;
 
   return (
-    <div className="farm-diagonal-field min-h-[280px] p-6 sm:p-10">
-      <div className="mx-auto max-w-[470px] border border-white/15 bg-black p-4">
+    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden p-6 sm:p-10">
+      <div className="relative z-10 mx-auto max-w-[470px] border border-white/15 bg-black/72 p-4 backdrop-blur-sm">
         <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
         <div className="mt-4 space-y-2">
           {rows.map(([source, detail, status]) => (
