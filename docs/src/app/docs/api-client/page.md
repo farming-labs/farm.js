@@ -114,6 +114,14 @@ export const addTodo = createServerFn({
   input: z.object({
     title: z.string().min(1),
   }),
+  output: z.object({
+    todos: z.array(
+      z.object({
+        id: z.string(),
+        title: z.string(),
+      }),
+    ),
+  }),
   async handler({ input, signal }) {
     signal.throwIfAborted();
     return {
@@ -122,6 +130,30 @@ export const addTodo = createServerFn({
   },
 });
 ```
+
+`input` validates values before the handler runs. An optional `output` schema validates the
+resolved handler result before it crosses the server-function boundary. Its parsed type becomes
+the function's return type, and schema transforms are supported:
+
+```ts
+const PublicUser = z.object({
+  id: z.string(),
+  email: z.string().email(),
+});
+
+export const getUser = createServerFn({
+  input: z.object({ id: z.string() }),
+  output: PublicUser,
+  async handler({ input }) {
+    // PublicUser strips passwordHash before this result can reach the browser.
+    return db.user.findUniqueOrThrow({ where: { id: input.id } });
+  },
+});
+```
+
+Output parsing also runs for direct server calls, form actions, and browser calls. Invalid results
+reject the function just like invalid input. Keep the output contract narrow for private data;
+do not rely on TypeScript alone to prevent an extra database field from being returned at runtime.
 
 **src/components/todo-form.tsx**
 
@@ -188,3 +220,4 @@ Action references identify which function to execute; they are not authorization
 - Keep optimistic updates scoped to UI state you can confidently roll back.
 - Keep `serverActions.allowedOrigins` narrow and use API routes for intentionally cross-origin callers.
 - Return typed expected failures; reserve thrown errors for unexpected failures.
+- Add narrow output schemas to functions that return private database records.
