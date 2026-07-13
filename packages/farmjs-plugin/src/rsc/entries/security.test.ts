@@ -14,6 +14,7 @@ const context: EntryContext = {
     allowedOrigins: ["https://proxy.example.com"],
     bodySizeLimit: 500_000,
   },
+  deploymentId: "release-2",
   debug: false,
 };
 
