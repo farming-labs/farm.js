@@ -19,6 +19,7 @@ export default defineConfig({
     plugin: "src/plugin.ts",
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",
+    deferred: "src/deferred.ts",
     navigation: "src/navigation.ts",
     headers: "src/headers.ts",
     docs: "src/docs/index.ts",

@@ -42,6 +42,9 @@
       "cache": [
         "./dist/cache.d.ts"
       ],
+      "deferred": [
+        "./dist/deferred.d.ts"
+      ],
       "navigation": [
         "./dist/navigation.d.ts"
       ],
@@ -135,6 +138,11 @@
       "types": "./dist/cache.d.ts",
       "import": "./dist/cache.mjs",
       "require": "./dist/cache.cjs"
+    },
+    "./deferred": {
+      "types": "./dist/deferred.d.ts",
+      "import": "./dist/deferred.mjs",
+      "require": "./dist/deferred.cjs"
     },
     "./navigation": {
       "types": "./dist/navigation.d.ts",
