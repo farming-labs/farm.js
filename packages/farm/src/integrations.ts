@@ -47,6 +47,12 @@ export type FarmIntegrationRouteInputSource = "body" | "query";
 
 type MaybePromise<T> = T | Promise<T>;
 
+export type FarmIntegrationValidationPathSegment =
+  | PropertyKey
+  | {
+      readonly key: PropertyKey;
+    };
+
 export interface FarmIntegrationRouteInput<TBody = unknown, TQuery = unknown> {
   body?: TBody;
   query?: TQuery;
@@ -61,7 +67,7 @@ export interface FarmIntegrationValidationIssue {
 
 export interface FarmIntegrationValidationErrorLike {
   issues?: readonly {
-    path?: readonly (string | number)[];
+    path?: readonly FarmIntegrationValidationPathSegment[];
     code?: string;
     message?: string;
   }[];
@@ -84,7 +90,7 @@ export type FarmIntegrationStandardValidationResult<TValue> =
     }
   | {
       issues: readonly {
-        path?: readonly (string | number)[];
+        path?: readonly FarmIntegrationValidationPathSegment[];
         code?: string;
         message: string;
       }[];
@@ -464,7 +470,7 @@ export interface FarmIntegration<
   plugins?: readonly FarmPlugin[];
 }
 
-export type FarmIntegrationsUserConfig = Record<string, FarmIntegration | undefined>;
+export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any> | undefined>;
 
 type IntegrationRouteBuilderOptions<
   TBody,
@@ -967,12 +973,16 @@ export function defineIntegration<
   const TSchema extends FarmIntegrationSchema | undefined,
   const TConfig,
   TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
->(integration: TIntegration): DefinedIntegration<TIntegration, TSchema>;
+>(
+  integration: TIntegration & FarmIntegrationInput<TSchema, TConfig>,
+): DefinedIntegration<TIntegration, TSchema>;
 export function defineIntegration<
   const TSchema extends FarmIntegrationSchema | undefined,
   const TConfig,
   TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
->(integration: TIntegration): DefinedIntegration<TIntegration, TSchema> {
+>(
+  integration: TIntegration & FarmIntegrationInput<TSchema, TConfig>,
+): DefinedIntegration<TIntegration, TSchema> {
   const category = integration.category ?? integration.slot;
 
   if (!category) {
@@ -1379,7 +1389,8 @@ function createIntegrationConfigValidationError(
     Array.isArray(error.issues) && error.issues.length > 0
       ? error.issues
           .map((issue) => {
-            const path = issue.path?.length ? `${issue.path.join(".")}: ` : "";
+            const normalizedPath = normalizeIntegrationValidationPath(issue.path);
+            const path = normalizedPath.length ? `${normalizedPath.join(".")}: ` : "";
             return `${path}${issue.message || "Invalid config"}`;
           })
           .join("; ")
@@ -2198,7 +2209,7 @@ function normalizeIntegrationValidationIssues(
   if (Array.isArray(error.issues) && error.issues.length > 0) {
     return error.issues.map((issue) => ({
       source,
-      path: issue.path || [],
+      path: normalizeIntegrationValidationPath(issue.path),
       code: issue.code,
       message: issue.message || "Invalid input",
     }));
@@ -2211,6 +2222,16 @@ function normalizeIntegrationValidationIssues(
       message: error.message || "Invalid input",
     },
   ];
+}
+
+function normalizeIntegrationValidationPath(
+  path: readonly FarmIntegrationValidationPathSegment[] | undefined,
+): (string | number)[] {
+  return (path || []).map((segment) => {
+    const key =
+      typeof segment === "object" && segment !== null && "key" in segment ? segment.key : segment;
+    return typeof key === "symbol" ? key.description || key.toString() : key;
+  });
 }
 
 function normalizeIntegrationValidationError(error: unknown): FarmIntegrationValidationErrorLike {

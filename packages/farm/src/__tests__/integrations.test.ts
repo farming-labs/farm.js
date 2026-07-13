@@ -623,6 +623,63 @@ describe("integrations runtime", () => {
     expect(beforeHook).toHaveBeenCalledWith("hello", 3);
   });
 
+  it("normalizes Standard Schema property-key issue paths for JSON responses", async () => {
+    const manager = createManager();
+    const secretKey = Symbol("secret");
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        localDemo: defineIntegration({
+          category: "custom",
+          type: "property-key-paths",
+          instance: {},
+          routes: [
+            integrationRoute.post("/api/local-demo/property-key-paths", {
+              body: {
+                safeParse() {
+                  return {
+                    success: false as const,
+                    error: {
+                      issues: [
+                        {
+                          path: [secretKey, { key: "value" }],
+                          message: "Invalid property-key path",
+                        },
+                      ],
+                    },
+                  };
+                },
+              },
+              handler() {
+                return Response.json({ ok: true });
+              },
+            }),
+          ],
+        }),
+      }),
+    );
+
+    const req = createRequest("/api/local-demo/property-key-paths", "POST");
+    const res = createResponse();
+    const result = manager.runHookParallel("beforeRequest", req as any, res as any);
+    setImmediate(() => {
+      req.emit("data", Buffer.from(JSON.stringify({ value: "invalid" })));
+      req.emit("end");
+    });
+
+    await expect(result).resolves.toBe(true);
+    expect(res.statusCode).toBe(400);
+    expect(JSON.parse(res.body.toString())).toEqual({
+      error: "Integration route input validation failed",
+      issues: [
+        {
+          source: "body",
+          path: ["secret", "value"],
+          message: "Invalid property-key path",
+        },
+      ],
+    });
+  });
+
   it("validates route input schemas during server integration dispatch", async () => {
     const manager = createManager();
     manager.addPlugins(
