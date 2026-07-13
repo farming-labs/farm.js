@@ -1184,7 +1184,7 @@ function IntegrationsSection() {
         <IndexedLabel icon={Blocks} index="01" label="Connected systems" />
       </div>
 
-      <div className="relative grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_20rem] lg:min-h-[440px] lg:gap-10 lg:px-12">
+      <div className="relative grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_20rem] lg:min-h-[440px] lg:gap-10 lg:px-12 xl:h-[440px] xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="relative z-10 flex items-center">
           <div className="max-w-lg">
             <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
@@ -1212,8 +1212,8 @@ function IntegrationsSection() {
           </div>
         </div>
 
-        <div className="farm-integration-visual relative z-10 flex items-center justify-center md:justify-end">
-          <div className="farm-integration-directory relative aspect-[5/6] w-full max-w-72">
+        <div className="farm-integration-visual relative z-10 flex items-center justify-center md:h-full md:min-h-0 md:justify-end">
+          <div className="farm-integration-directory relative aspect-[5/6] w-full max-w-72 md:w-[21rem] md:max-w-none md:shrink-0 md:translate-x-12 xl:w-96 xl:translate-x-16">
             <div
               aria-hidden
               className="absolute inset-0"
