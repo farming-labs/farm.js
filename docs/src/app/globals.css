@@ -124,7 +124,7 @@
     bottom: -1px;
   }
 
-  .farm-cta-frame-border {
+  .farm-hero-title-frame-border {
     position: absolute;
     top: 0;
     right: 100%;
@@ -136,11 +136,11 @@
     transform: translate3d(10px, 10px, 0);
   }
 
-  .farm-cta-frame[data-visible="true"] .farm-cta-frame-border {
-    animation: farm-cta-frame-reveal 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  .farm-hero-title-frame[data-visible="true"] .farm-hero-title-frame-border {
+    animation: farm-hero-title-frame-reveal 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
-  .farm-cta-frame-corner {
+  .farm-hero-title-frame-corner {
     position: absolute;
     width: 10px;
     height: 10px;
@@ -148,22 +148,22 @@
     background: #000;
   }
 
-  .farm-cta-frame-corner-tl {
+  .farm-hero-title-frame-corner-tl {
     top: -5px;
     left: -5px;
   }
 
-  .farm-cta-frame-corner-tr {
+  .farm-hero-title-frame-corner-tr {
     top: -5px;
     right: -5px;
   }
 
-  .farm-cta-frame-corner-bl {
+  .farm-hero-title-frame-corner-bl {
     bottom: -5px;
     left: -5px;
   }
 
-  .farm-cta-frame-corner-br {
+  .farm-hero-title-frame-corner-br {
     right: -5px;
     bottom: -5px;
   }
@@ -490,7 +490,7 @@
   }
 }
 
-@keyframes farm-cta-frame-reveal {
+@keyframes farm-hero-title-frame-reveal {
   0% {
     right: 100%;
     bottom: 100%;
@@ -558,8 +558,8 @@
     display: none;
   }
 
-  .farm-cta-frame-border,
-  .farm-cta-frame[data-visible="true"] .farm-cta-frame-border {
+  .farm-hero-title-frame-border,
+  .farm-hero-title-frame[data-visible="true"] .farm-hero-title-frame-border {
     right: 0;
     bottom: 0;
     opacity: 1;

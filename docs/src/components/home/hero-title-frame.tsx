@@ -2,11 +2,11 @@
 
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
-type CtaFrameProps = {
+type HeroTitleFrameProps = {
   children: ReactNode;
 };
 
-export function CtaFrame({ children }: CtaFrameProps) {
+export function HeroTitleFrame({ children }: HeroTitleFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [isVisible, setIsVisible] = useState(false);
 
@@ -29,7 +29,7 @@ export function CtaFrame({ children }: CtaFrameProps) {
         setIsVisible(true);
         observer.disconnect();
       },
-      { rootMargin: "0px 0px -12%", threshold: 0.3 },
+      { threshold: 0.3 },
     );
 
     observer.observe(frame);
@@ -39,14 +39,14 @@ export function CtaFrame({ children }: CtaFrameProps) {
   return (
     <div
       ref={frameRef}
-      className="farm-cta-frame relative mx-auto w-full max-w-3xl px-5 py-7 text-center sm:px-9 sm:py-8"
+      className="farm-hero-title-frame relative mt-7 w-fit max-w-full px-4 py-4 sm:px-5 sm:py-5"
       data-visible={isVisible}
     >
-      <div aria-hidden="true" className="farm-cta-frame-border">
-        <span className="farm-cta-frame-corner farm-cta-frame-corner-tl" />
-        <span className="farm-cta-frame-corner farm-cta-frame-corner-tr" />
-        <span className="farm-cta-frame-corner farm-cta-frame-corner-bl" />
-        <span className="farm-cta-frame-corner farm-cta-frame-corner-br" />
+      <div aria-hidden="true" className="farm-hero-title-frame-border">
+        <span className="farm-hero-title-frame-corner farm-hero-title-frame-corner-tl" />
+        <span className="farm-hero-title-frame-corner farm-hero-title-frame-corner-tr" />
+        <span className="farm-hero-title-frame-corner farm-hero-title-frame-corner-bl" />
+        <span className="farm-hero-title-frame-corner farm-hero-title-frame-corner-br" />
       </div>
       <div className="relative z-10">{children}</div>
     </div>

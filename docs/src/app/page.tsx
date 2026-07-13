@@ -41,7 +41,7 @@ import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import typescriptIconUrl from "simple-icons/icons/typescript.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
-import { CtaFrame } from "../components/home/cta-frame";
+import { HeroTitleFrame } from "../components/home/hero-title-frame";
 import { HighlightedCode } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 
@@ -411,10 +411,12 @@ function Hero() {
           <div className="text-white/42">
             <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
           </div>
-          <h1 className="mt-7 max-w-[16ch] text-[2.375rem] font-medium leading-[1.02] tracking-normal text-white sm:text-[3.5rem] lg:text-[2.75rem] min-[1120px]:text-[3.25rem] xl:text-[4rem]">
-            <span className="block">React Framework</span>
-            <span className="block text-white/82">for Product Apps</span>
-          </h1>
+          <HeroTitleFrame>
+            <h1 className="max-w-[16ch] text-[2.375rem] font-medium leading-[1.02] tracking-normal text-white sm:text-[3.5rem] lg:text-[2.75rem] min-[1120px]:text-[3.25rem] xl:text-[4rem]">
+              <span className="block">React Framework</span>
+              <span className="block text-white/82">for Product Apps</span>
+            </h1>
+          </HeroTitleFrame>
           <p className="mt-6 max-w-[32rem] text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
             Farm.js keeps the app router you already know, then brings typed APIs, middleware,
             integrations, docs, and deployment into the same framework.
@@ -1023,15 +1025,13 @@ function OpenSourceSection() {
 function FinalCta() {
   return (
     <section className="farm-full-rule w-full">
-      <div className="px-6 py-10 sm:px-10 sm:py-12">
-        <CtaFrame>
-          <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl">
-            One framework. The whole product.
-          </h2>
-          <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
-            Build routing, APIs, integrations, docs, and deployment together in one React framework.
-          </p>
-        </CtaFrame>
+      <div className="px-6 py-10 text-center sm:px-10 sm:py-12">
+        <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl">
+          One framework. The whole product.
+        </h2>
+        <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
+          Build routing, APIs, integrations, docs, and deployment together in one React framework.
+        </p>
       </div>
       <div className="farm-top-rule flex flex-col items-center justify-center gap-2 bg-white/[0.035] p-4 sm:flex-row">
         <ButtonLink
