@@ -3,6 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
+import { defer, isDeferred, type Deferred } from "../deferred";
 import { notFound, redirect } from "../navigation";
 import {
   FARM_ROUTE_CONTEXT_SYMBOL,
@@ -86,6 +87,43 @@ describe("programmatic routes", () => {
     expectTypeOf<InferProgrammaticRouteData<NonNullable<typeof route.data>>>().toEqualTypeOf<{
       label: string;
     }>();
+  });
+
+  it("passes deferred main data to after and the component without awaiting it", async () => {
+    const reviews = createControlledPromise<string[]>();
+    const after = vi.fn();
+    const route = createRoute("/streamed-products/[id]", {
+      data: {
+        main({ params }) {
+          return {
+            product: { id: params.id },
+            reviews: defer(reviews.promise),
+          };
+        },
+        after({ data }) {
+          expectTypeOf(data.reviews).toEqualTypeOf<Deferred<string[]>>();
+          after(data);
+        },
+      },
+      component(props) {
+        expectTypeOf(props.data.reviews).toEqualTypeOf<Deferred<string[]>>();
+        return null;
+      },
+    });
+    const routeModule = createRouteModuleFromProgrammaticPageForTest(route);
+
+    const resolved = await (routeModule as any).__farmResolveRouteProps({
+      params: { id: "p1" },
+      searchParams: Promise.resolve({}),
+      path: "/streamed-products/p1",
+    });
+
+    expect(resolved.data.product).toEqual({ id: "p1" });
+    expect(isDeferred(resolved.data.reviews)).toBe(true);
+    expect(after).toHaveBeenCalledWith(resolved.data);
+
+    reviews.resolve(["Excellent"]);
+    await expect(resolved.data.reviews).resolves.toEqual(["Excellent"]);
   });
 
   it("discovers page, layout, redirect, staticPaths, and render metadata", async () => {
@@ -650,4 +688,14 @@ describe("programmatic routes", () => {
 
 function createRouteModuleFromProgrammaticPageForTest(route: ReturnType<typeof createRoute>) {
   return createRouteModuleFromProgrammaticPage(route);
+}
+
+function createControlledPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
 }

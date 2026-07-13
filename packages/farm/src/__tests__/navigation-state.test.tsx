@@ -5,7 +5,14 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBlocker, useNavigation, useScrollRestoration } from "../client/router";
-import { navigateTo, pushState, readPageState, replaceState, SPARouter } from "../client/spa-router";
+import {
+  navigateTo,
+  pushState,
+  readPageState,
+  replaceState,
+  SPARouter,
+} from "../client/spa-router";
+import { createDeferredDataResponse, defer } from "../deferred";
 
 describe("navigation state and blocking", () => {
   let container: HTMLDivElement;
@@ -18,15 +25,16 @@ describe("navigation state and blocking", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            props: {},
-            modulePath: "/src/app/page.tsx",
-            metadata: { title: "Next" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              props: {},
+              modulePath: "/src/app/page.tsx",
+              metadata: { title: "Next" },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
       ),
     );
   });
@@ -180,6 +188,43 @@ describe("navigation state and blocking", () => {
     expect(window.location.pathname).toBe("/gallery");
   });
 
+  it("commits immediate route data while deferred fields keep streaming", async () => {
+    const reviews = createControlledPromise<string[]>();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      createDeferredDataResponse({
+        props: {
+          data: {
+            product: { id: "p1" },
+            reviews: defer(reviews.promise),
+          },
+        },
+        modulePath: "/src/app/products/page.tsx",
+        isClientComponent: true,
+      }),
+    );
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const router = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn(async () => undefined);
+    router.setNavigationHandler(onNavigate);
+
+    await router.navigate("/products", { scroll: false });
+
+    const pageData = onNavigate.mock.calls[0]?.[0] as any;
+    expect(pageData.props.data.product).toEqual({ id: "p1" });
+    expect(pageData.props.data.reviews.status).toBe("pending");
+    expect(fetch).toHaveBeenCalledWith(
+      "/__farm/page-data?path=%2Fproducts",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Accept: "application/x-farm-deferred+json, application/json",
+        }),
+      }),
+    );
+
+    reviews.resolve(["Excellent"]);
+    await expect(pageData.props.data.reviews).resolves.toEqual(["Excellent"]);
+  });
+
   it("restores registered nested scroll containers by key", () => {
     vi.useFakeTimers();
     sessionStorage.setItem("farm-scroll-/:sidebar", JSON.stringify({ x: 4, y: 120 }));
@@ -203,3 +248,13 @@ describe("navigation state and blocking", () => {
     expect(panel.scrollTop).toBe(120);
   });
 });
+
+function createControlledPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
