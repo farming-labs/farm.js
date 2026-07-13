@@ -445,6 +445,47 @@
   }
 }
 
+@keyframes farm-logo-rail {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+.farm-logo-viewport {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent
+  );
+}
+
+.farm-logo-rail {
+  animation: farm-logo-rail 24s linear infinite;
+  will-change: transform;
+}
+
+.farm-logo-viewport:focus .farm-logo-rail {
+  animation-play-state: paused;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .farm-logo-viewport:hover .farm-logo-rail {
+    animation-play-state: paused;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
@@ -452,5 +493,14 @@
 
   .farm-prism-stack {
     animation: none;
+  }
+
+  .farm-logo-rail {
+    animation: none;
+    transform: none;
+  }
+
+  .farm-logo-rail-copy[aria-hidden="true"] {
+    display: none;
   }
 }

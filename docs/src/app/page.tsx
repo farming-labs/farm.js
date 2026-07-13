@@ -30,7 +30,6 @@ import {
   Terminal,
   Workflow,
   X,
-  Zap,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
@@ -41,6 +40,7 @@ import reactIconUrl from "simple-icons/icons/react.svg?url";
 import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import typescriptIconUrl from "simple-icons/icons/typescript.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
+import nitroIconUrl from "../assets/nitro.svg?url";
 import { HighlightedCode } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 
@@ -60,7 +60,7 @@ const navItems = [
 const ecosystemItems = [
   { label: "React 19", brand: reactIconUrl },
   { label: "Vite", brand: viteIconUrl },
-  { label: "Nitro", icon: Zap },
+  { label: "Nitro", brand: nitroIconUrl },
   { label: "Prisma", brand: prismaIconUrl },
   { label: "Better Auth", brand: betterAuthIconUrl },
   { label: "Stripe", brand: stripeIconUrl },
@@ -446,41 +446,39 @@ function Hero() {
 function EcosystemStrip() {
   return (
     <section className="farm-full-rule w-full">
-      <div className="grid border-b border-white/12 md:grid-cols-[14rem_1fr]">
-        <div className="flex items-center border-b border-white/12 px-6 py-5 text-white/36 md:border-b-0 md:border-r sm:px-8">
+      <div className="grid h-24 grid-cols-[11rem_minmax(0,1fr)] sm:grid-cols-[14rem_minmax(0,1fr)]">
+        <div className="flex min-w-0 items-center border-r border-white/12 px-4 text-white/36 sm:px-8">
           <IndexedLabel icon={Layers3} index="01" label="Product stack" />
         </div>
-        <p className="px-6 py-5 text-sm font-medium text-white/72 sm:px-8">
-          Built around the tools product teams already use
-        </p>
-      </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
-        {ecosystemItems.map((item, index) => {
-          const Icon = "icon" in item ? item.icon : null;
-
-          return (
-            <div
-              key={item.label}
-              className={cx(
-                "flex h-20 items-center justify-center gap-2 border-white/12 px-3 text-center font-mono text-[11px] font-medium uppercase tracking-normal text-white/48 transition-colors hover:bg-white/[0.035] hover:text-white/80",
-                index % 2 !== 0 && "border-l",
-                index >= 2 && "border-t sm:border-t-0",
-                index % 3 !== 0 && "sm:border-l",
-                index >= 3 && "sm:border-t lg:border-t-0",
-                index !== 0 && "lg:border-l",
-              )}
-            >
-              <span className="grid size-8 shrink-0 place-items-center border border-white/14 text-white/68">
-                {"brand" in item ? (
-                  <BrandIcon className="size-3.5" src={item.brand} />
-                ) : Icon ? (
-                  <Icon aria-hidden className="size-4" strokeWidth={1.5} />
-                ) : null}
-              </span>
-              {item.label}
-            </div>
-          );
-        })}
+        <div
+          aria-label="Product stack logos. Focus to pause animation."
+          className="farm-logo-viewport min-w-0 overflow-hidden focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/28"
+          role="region"
+          tabIndex={0}
+        >
+          <div className="farm-logo-rail flex h-full w-max">
+            {([0, 1] as const).map((copyIndex) => (
+              <div
+                key={copyIndex}
+                aria-hidden={copyIndex === 1 ? true : undefined}
+                className="farm-logo-rail-copy flex h-full shrink-0"
+              >
+                {ecosystemItems.map((item, itemIndex) => (
+                  <div
+                    key={`${copyIndex}-${item.label}`}
+                    className={cx(
+                      "flex h-24 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 px-5 font-mono text-[10px] font-medium uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.04] hover:text-white/82 sm:w-44 sm:text-[11px]",
+                      itemIndex % 2 === 0 && "bg-white/[0.018]",
+                    )}
+                  >
+                    <BrandIcon className="size-5 shrink-0 opacity-72" src={item.brand} />
+                    <span className="whitespace-nowrap">{item.label}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </section>
   );
