@@ -69,9 +69,57 @@ A plain object in `routes` or `endpoints` still mounts its handler. Only the typ
 `integrationRoute.*` and `endpoint.*` builders attach the operation metadata Farm needs to infer
 `api` and `apiClient` request and response types.
 
-For most integrations, define `routes` and stop there:
+The three formats below are alternatives. Each example exports an integration named `billing` and
+uses the same registration and caller setup.
+
+### Shared registration
+
+Register the integration once. The `billing` key becomes the first segment after `api` or
+`apiClient`.
+
+**farm.config.ts**
 
 ```ts
+import { defineFarmConfig } from "@farmjs/core";
+import { billing } from "./src/integrations/billing";
+
+export default defineFarmConfig({
+  integrations: {
+    billing,
+  },
+});
+```
+
+Create the browser and server callers once as well:
+
+**src/lib/integrations.ts**
+
+```ts
+import { createIntegrations } from "@farmjs/core/client";
+import type { billing } from "../integrations/billing";
+
+type AppIntegrations = {
+  billing: typeof billing;
+};
+
+export const { api, apiClient } = createIntegrations<AppIntegrations>();
+```
+
+`apiClient` is the browser caller. `api` is the server caller; it dispatches directly to a
+registered integration handler when possible and falls back to `fetch` when no runtime is
+available.
+
+### 1. `routes`: flat owned handlers
+
+Use `routes` when the integration owns the HTTP handlers and a flat list is easy to read. This is
+the recommended default.
+
+**src/integrations/billing.ts**
+
+```ts
+import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { z } from "zod";
+
 export const billing = defineIntegration({
   category: "payment",
   type: "acme-billing",
@@ -80,8 +128,11 @@ export const billing = defineIntegration({
     integrationRoute.post<"/api/billing/checkout", { priceId: string }, { url: string }>(
       "/api/billing/checkout",
       {
-        handler() {
-          return Response.json({ url: "https://checkout.example/session" });
+        body: z.object({ priceId: z.string() }),
+        handler(_request, ctx) {
+          return Response.json({
+            url: `https://checkout.example/${ctx.input.body!.priceId}`,
+          });
         },
       },
     ),
@@ -89,16 +140,54 @@ export const billing = defineIntegration({
 });
 ```
 
-That one declaration does both jobs:
+Farm mounts `POST /api/billing/checkout` and derives the caller from that URL.
 
-- It mounts `POST /api/billing/checkout`.
-- It derives `api.billing.checkout.post(...)` and `apiClient.billing.checkout.post(...)` when the
-  integration is registered as `billing`.
+**client code**
 
-Use `endpoints` instead when grouping the same handler definitions makes the integration easier to
-scan:
+```tsx
+"use client";
+
+import { apiClient } from "../lib/integrations";
+
+export async function startCheckout() {
+  const result = await apiClient.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+**server code**
 
 ```ts
+import { api } from "../lib/integrations";
+
+export async function startCheckoutOnServer() {
+  const result = await api.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+Both calls have typed input, typed `data`, and typed `error`. The Zod body schema also validates the
+incoming request at runtime.
+
+### 2. `endpoints`: grouped owned handlers
+
+Use `endpoints` when the integration still owns the handlers, but an object is easier to organize
+than a flat list.
+
+**src/integrations/billing.ts**
+
+```ts
+import { defineIntegration } from "@farmjs/core";
+import { z } from "zod";
+
 export const billing = defineIntegration({
   category: "payment",
   type: "acme-billing",
@@ -107,8 +196,11 @@ export const billing = defineIntegration({
     checkout: endpoint.post<"/api/billing/checkout", { priceId: string }, { url: string }>(
       "/api/billing/checkout",
       {
-        handler() {
-          return Response.json({ url: "https://checkout.example/session" });
+        body: z.object({ priceId: z.string() }),
+        handler(_request, ctx) {
+          return Response.json({
+            url: `https://checkout.example/${ctx.input.body!.priceId}`,
+          });
         },
       },
     ),
@@ -116,10 +208,51 @@ export const billing = defineIntegration({
 });
 ```
 
-This mounts and derives the same route as the `routes` example. The key `checkout` is only an
-authoring label. The URL `/api/billing/checkout` determines the derived caller path.
+Farm flattens this object into `routes`, mounts the same HTTP handler, and generates the same typed
+callers:
 
-Use `api` by itself when this integration does not own the handler:
+**client code**
+
+```tsx
+"use client";
+
+import { apiClient } from "../lib/integrations";
+
+export async function startCheckout() {
+  const result = await apiClient.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+**server code**
+
+```ts
+import { api } from "../lib/integrations";
+
+export async function startCheckoutOnServer() {
+  const result = await api.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+The `checkout` object key is only an authoring label. The URL `/api/billing/checkout` determines the
+derived caller path. If the key were `start` but the URL stayed the same, the caller would still be
+`api.billing.checkout.post(...)`.
+
+### 3. `api`: callers for existing handlers
+
+Use `api` when this integration does not own the handler, or when you intentionally want caller
+names that do not follow route URLs.
+
+**src/integrations/billing.ts**
 
 ```ts
 import { defineIntegration, endpoint } from "@farmjs/core";
@@ -136,8 +269,42 @@ export const billing = defineIntegration({
 });
 ```
 
-This creates `api.billing.startCheckout(...)`, but it does **not** create
-`POST /api/billing/checkout`. The app or another service must implement that URL.
+This creates typed callers named `startCheckout`:
+
+**client code**
+
+```tsx
+"use client";
+
+import { apiClient } from "../lib/integrations";
+
+export async function startCheckout() {
+  const result = await apiClient.billing.startCheckout({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+**server code**
+
+```ts
+import { api } from "../lib/integrations";
+
+export async function startCheckoutOnServer() {
+  const result = await api.billing.startCheckout({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+Unlike `routes` and `endpoints`, `api` does **not** create `POST /api/billing/checkout`. The app or
+another service must implement that URL.
 
 If you provide `api` together with `routes` or `endpoints`, Farm still mounts the handlers, but the
 explicit `api` object replaces all automatic caller derivation for that integration. Use that
@@ -146,15 +313,8 @@ paths, and keep the declared methods and paths synchronized. Built-in integratio
 advanced combination to keep a stable public caller contract; most application integrations do not
 need it.
 
-There are also two similarly named values on the consuming side:
-
-```ts
-const { api: integrationsServer, apiClient: integrationsClient } =
-  createIntegrations<AppIntegrations>();
-```
-
-The integration's `api:` field is a contract. The returned `api` value is the server caller for that
-contract, while `apiClient` is the browser caller.
+The integration's `api:` field is a contract. It is different from the returned `api` value, which
+is the server caller for that contract. `apiClient` is the browser caller.
 
 ## Full shape
 
