@@ -17,13 +17,13 @@ export function HighlightedCode({ className, code, label, language }: Highlighte
   return (
     <figure
       className={[
-        "min-w-0 max-w-full overflow-hidden border border-white/16 bg-black/72 shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-sm",
+        "min-w-0 max-w-full overflow-hidden border border-white/10 bg-black/72 shadow-[0_24px_70px_rgba(0,0,0,0.55)] backdrop-blur-sm",
         className,
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <figcaption className="flex h-10 min-w-0 items-center justify-between gap-4 border-b border-white/10 px-4 font-mono text-[9px] tracking-normal text-white/38">
+      <figcaption className="flex h-10 min-w-0 items-center justify-between gap-4 border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/38">
         <span className="flex min-w-0 items-center gap-2">
           <Code2 aria-hidden className="size-3 shrink-0" strokeWidth={1.5} />
           <span className="truncate">{label}</span>

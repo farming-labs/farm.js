@@ -519,8 +519,8 @@ function HeadingSection({
 function TerminalVisual() {
   return (
     <div className="farm-feature-spotlight relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
-      <figure className="relative z-10 w-full max-w-[470px] overflow-hidden border border-white/18 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
-        <figcaption className="flex h-10 items-center justify-between border-b border-white/10 px-4">
+      <figure className="relative z-10 w-full max-w-[470px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+        <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
             <span className="size-2 rounded-full bg-white/14" />
@@ -553,7 +553,7 @@ function TerminalVisual() {
 function TypedApiVisual() {
   return (
     <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 pt-16 sm:p-10 sm:pt-16">
-      <div className="absolute left-6 top-7 z-20 border border-white/22 bg-black/72 px-3 py-2 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
+      <div className="absolute left-6 top-7 z-20 border border-white/12 bg-black/72 px-3 py-2 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
         GET /api/users/:id
       </div>
       <HighlightedCode
@@ -582,8 +582,8 @@ function IntegrationVisual() {
 function BuildVisual() {
   return (
     <div className="farm-feature-spotlight relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
-      <figure className="relative z-10 w-full max-w-[450px] overflow-hidden border border-white/18 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
-        <figcaption className="flex h-10 items-center justify-between border-b border-white/10 px-4 font-mono text-[9px] tracking-normal text-white/34">
+      <figure className="relative z-10 w-full max-w-[450px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+        <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/34">
           <span className="flex items-center gap-1.5">
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
           </span>

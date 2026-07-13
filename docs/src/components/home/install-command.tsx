@@ -73,10 +73,10 @@ export function InstallCommand() {
   }
 
   return (
-    <div className="overflow-hidden border border-white/12 bg-black shadow-[0_18px_60px_rgba(0,0,0,0.4)]">
+    <div className="overflow-hidden border border-white/10 bg-black shadow-[0_18px_60px_rgba(0,0,0,0.4)]">
       <div
         aria-label="Package manager"
-        className="flex min-w-0 items-center overflow-x-auto border-b border-white/10"
+        className="flex min-w-0 items-center overflow-x-auto border-b border-white/8"
         role="group"
       >
         {commands.map((item, index) => (
