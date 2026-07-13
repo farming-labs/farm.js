@@ -406,18 +406,19 @@ function Hero() {
         className="pointer-events-none absolute -bottom-px -right-px z-30 size-[9px] border-b border-r border-white/28"
       />
       <div className="flex min-h-[600px] flex-col justify-between gap-14 p-6 sm:p-10 lg:min-h-[620px] lg:p-12">
-        <div className="max-w-[34rem]">
+        <div className="max-w-[38rem]">
           <div className="text-white/42">
             <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
           </div>
-          <h1 className="mt-8 max-w-[11ch] text-balance text-5xl font-medium leading-[0.98] tracking-normal text-white sm:text-6xl xl:text-[4.75rem]">
-            The React Framework for Product Apps
+          <h1 className="mt-7 max-w-[16ch] text-[2.375rem] font-medium leading-[1.02] tracking-normal text-white sm:text-[3.5rem] lg:text-[2.75rem] min-[1120px]:text-[3.25rem] xl:text-[4rem]">
+            <span className="block">React Framework</span>
+            <span className="block text-white/82">for Product Apps</span>
           </h1>
-          <p className="mt-7 max-w-[31rem] text-base leading-7 text-white/58 sm:text-lg sm:leading-8">
+          <p className="mt-6 max-w-[32rem] font-mono text-[13px] leading-6 tracking-normal text-white/56 sm:text-sm sm:leading-6">
             Farm.js keeps the app router you already know, then brings typed APIs, middleware,
             integrations, docs, and deployment into the same framework.
           </p>
-          <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
             <ButtonLink
               href="/docs/getting-started"
               icon={<BookOpen aria-hidden className="size-4" strokeWidth={1.5} />}
