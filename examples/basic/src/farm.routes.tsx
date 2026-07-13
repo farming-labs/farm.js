@@ -1,11 +1,13 @@
 import {
   createRoute,
+  defer,
   defineRoutes,
   getFarmDataCache,
   notFound,
   redirect,
   revalidatePath,
   type InferProgrammaticRouteData,
+  type Deferred,
   type ProgrammaticPageRoute,
 } from '@farmjs/core';
 import { z } from 'zod';
@@ -46,6 +48,7 @@ export interface FeatureProductData {
   mainCall: number;
   serverBoundary: string;
   runtimeBoundary: string;
+  reviews: Deferred<string[]>;
 }
 
 interface FeatureLabRuntimeState {
@@ -89,6 +92,11 @@ export const FeatureProductRoute = createRoute('/feature-lab/products/[id]', {
     staleTime: '30s',
     tags: ({ params }) => [`feature-product:${params.id}`],
     async main({ params, context, before }): Promise<FeatureProductData> {
+      const reviews = defer(
+        new Promise<string[]>((resolve) => {
+          setTimeout(() => resolve([`Review for ${params.id}`, 'Deferred route data']), 300);
+        }),
+      );
       await new Promise((resolve) => setTimeout(resolve, 120));
 
       if (params.id === 'missing') notFound();
@@ -101,6 +109,7 @@ export const FeatureProductRoute = createRoute('/feature-lab/products/[id]', {
         mainCall: ++featureLabState.mainCalls,
         serverBoundary: readServerBoundary(),
         runtimeBoundary: readRuntimeBoundary(),
+        reviews,
       };
     },
     after() {

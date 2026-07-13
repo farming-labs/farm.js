@@ -46,6 +46,7 @@ import * as path from "path";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
+import { createDeferredDataResponse } from "./deferred";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -1145,11 +1146,24 @@ export function farmPlugin(
               layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
             };
 
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "application/json");
-            res.setHeader("Cache-Control", "private, max-age=0");
-            res.setHeader(FARM_DEPLOYMENT_ID_HEADER, farmConfig.deploymentId);
-            res.end(JSON.stringify(pageData));
+            await sendWebResponse(
+              res,
+              createDeferredDataResponse(
+                pageData,
+                {
+                  status: 200,
+                  headers: {
+                    "Cache-Control": "private, max-age=0",
+                    [FARM_DEPLOYMENT_ID_HEADER]: farmConfig.deploymentId,
+                  },
+                },
+                {
+                  onError(error, id) {
+                    logger.error(`Deferred route data ${id} failed: ${error}`);
+                  },
+                },
+              ),
+            );
             return;
           } catch (error) {
             await emitPluginError("page-data", error, {
@@ -2125,6 +2139,7 @@ function generateClientCode(
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
 import { installChunkErrorRecovery, SPARouter } from '@farmjs/core/client'
+import { reviveDeferredData } from '@farmjs/core/deferred'
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
@@ -2597,10 +2612,15 @@ function parseClientRouteSchema(schema, value, label) {
 
 async function buildRouteComponentProps(pageModule, params, searchParams, path, existingProps) {
   if (existingProps?.__farmRoutePropsResolved === true) {
+    const revivedProps = reviveDeferredData(
+      existingProps,
+      window.__FARM_DEFERRED_DATA__ || {},
+    );
+    window.__FARM_PROPS__ = revivedProps;
     return {
-      ...existingProps,
-      searchParams: Promise.resolve(existingProps.search ?? existingProps.searchParams ?? {}),
-      path: existingProps.path || path,
+      ...revivedProps,
+      searchParams: Promise.resolve(revivedProps.search ?? revivedProps.searchParams ?? {}),
+      path: revivedProps.path || path,
     };
   }
 

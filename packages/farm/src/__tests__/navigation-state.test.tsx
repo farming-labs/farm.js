@@ -12,6 +12,7 @@ import {
   replaceState,
   SPARouter,
 } from "../client/spa-router";
+import { createDeferredDataResponse, defer } from "../deferred";
 
 describe("navigation state and blocking", () => {
   let container: HTMLDivElement;
@@ -187,6 +188,41 @@ describe("navigation state and blocking", () => {
     expect(window.location.pathname).toBe("/gallery");
   });
 
+  it("commits immediate route data while deferred fields keep streaming", async () => {
+    const reviews = createControlledPromise<string[]>();
+    vi.mocked(fetch).mockResolvedValueOnce(
+      createDeferredDataResponse({
+        props: {
+          data: {
+            product: { id: "p1" },
+            reviews: defer(reviews.promise),
+          },
+        },
+        modulePath: "/src/app/products/page.tsx",
+        isClientComponent: true,
+      }),
+    );
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const router = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn(async () => undefined);
+    router.setNavigationHandler(onNavigate);
+
+    await router.navigate("/products", { scroll: false });
+
+    const pageData = onNavigate.mock.calls[0]?.[0] as any;
+    expect(pageData.props.data.product).toEqual({ id: "p1" });
+    expect(pageData.props.data.reviews.status).toBe("pending");
+    expect(fetch).toHaveBeenCalledWith(
+      "/__farm/page-data?path=%2Fproducts",
+      expect.objectContaining({ headers: expect.any(Headers) }),
+    );
+    const requestHeaders = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(requestHeaders.get("accept")).toBe("application/x-farm-deferred+json, application/json");
+
+    reviews.resolve(["Excellent"]);
+    await expect(pageData.props.data.reviews).resolves.toEqual(["Excellent"]);
+  });
+
   it("reports stale prefetches without retrying or navigating", async () => {
     const mismatchListener = vi.fn();
     window.addEventListener("farm:deployment-mismatch", mismatchListener, { once: true });
@@ -208,7 +244,9 @@ describe("navigation state and blocking", () => {
     const requestHeaders = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
     expect(requestHeaders.get("x-farm-deployment-id")).toBe("release-1");
     expect(mismatchListener).toHaveBeenCalledTimes(1);
-    expect((mismatchListener.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+    const mismatchEvent = mismatchListener.mock.calls[0]?.[0];
+    expect(mismatchEvent).toBeInstanceOf(CustomEvent);
+    expect((mismatchEvent as CustomEvent).detail).toMatchObject({
       code: "FARM_DEPLOYMENT_MISMATCH",
       retryable: false,
       clientDeploymentId: "release-1",
@@ -240,3 +278,13 @@ describe("navigation state and blocking", () => {
     expect(panel.scrollTop).toBe(120);
   });
 });
+
+function createControlledPromise<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}

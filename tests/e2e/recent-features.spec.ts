@@ -55,6 +55,8 @@ test.describe("Recent feature integration", () => {
     expect(firstHtml).toContain("server:https://api.example.com:FARM_SERVER_BOUNDARY_SENTINEL");
     expect(firstHtml).toContain("runtime:server");
     expect(firstHtml).toContain("product-pending");
+    expect(firstHtml).toContain("product-reviews-pending");
+    expect(firstHtml).toContain("Deferred route data");
     await expect(readFeatureState(request)).resolves.toEqual({ mainCalls: 1, afterCalls: 1 });
 
     const cached = await request.get(routeUrl, {
@@ -110,6 +112,7 @@ test.describe("Recent feature integration", () => {
     await expect(page.getByTestId("product-locale")).toHaveText("am");
     await expect(page.getByTestId("product-tenant")).toHaveText("acme");
     await expect(page.getByTestId("product-before")).toHaveText("acme:44:browser");
+    await expect(page.getByTestId("product-reviews")).toContainText("Deferred route data");
     await expect(page).toHaveURL(/\/feature-lab\/products\/44\?locale=am$/);
   });
 

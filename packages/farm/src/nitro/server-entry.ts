@@ -11,6 +11,7 @@ import type { ServerRenderer } from "../server/renderer";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
+import { createDeferredDataResponse } from "../deferred";
 import {
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
@@ -224,13 +225,18 @@ async function defaultHandler({
       };
 
       return withFarmDeploymentResponse(
-        new Response(JSON.stringify(pageData), {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-            "Cache-Control": "private, max-age=0",
+        createDeferredDataResponse(
+          pageData,
+          {
+            status: 200,
+            headers: { "Cache-Control": "private, max-age=0" },
           },
-        }),
+          {
+            onError(error, id) {
+              console.error(`[Farm.js] Deferred route data ${id} failed:`, error);
+            },
+          },
+        ),
         activeDeploymentId,
       );
     } catch (error) {

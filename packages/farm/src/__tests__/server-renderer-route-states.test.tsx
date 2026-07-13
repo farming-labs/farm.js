@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ServerRenderer } from "../server/renderer";
 import type { FarmConfig, FarmRequest, FarmResponse, LoadingProps, ErrorProps } from "../types";
 import { logger } from "../utils";
+import { defer } from "../deferred";
 
 type MockResponse = FarmResponse & {
   body: string;
@@ -167,6 +168,45 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("OG /dashboard");
   });
 
+  it("streams deferred route data and serializes it for hydration", async () => {
+    const reviews = createDeferred<string[]>();
+    const response = createMockResponse();
+    const renderer = createRenderer({
+      [routeModulePath]: {
+        async __farmResolveRouteProps(props: any) {
+          return {
+            ...props,
+            data: {
+              product: { id: "p1" },
+              reviews: defer(reviews.promise),
+            },
+            __farmRoutePropsResolved: true,
+          };
+        },
+        default: function DashboardPage({ data }: any) {
+          return React.createElement(
+            React.Suspense,
+            { fallback: React.createElement("p", null, "Loading reviews") },
+            React.createElement(DeferredReviews, { reviews: data.reviews }),
+          );
+        },
+      },
+    });
+
+    const renderPromise = renderer.renderPage(createMockRequest("/dashboard"), response);
+    await waitFor(() => response.body.includes("Loading reviews"));
+    expect(response.body).toContain('"$farmDeferred":"d0"');
+
+    reviews.resolve(["Excellent"]);
+    await renderPromise;
+
+    expect(response.body).toContain("Excellent");
+    expect(response.body).toContain('window.__FARM_DEFERRED_DATA__={"d0"');
+    expect(response.body).toContain('"status":"fulfilled"');
+    expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
+    expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
+  });
+
   it("embeds the deployment identity in document responses", async () => {
     const response = createMockResponse();
     const renderer = createRenderer({
@@ -185,6 +225,15 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain('<meta name="farm-deployment-id" content="release-2">');
   });
 });
+
+function DeferredReviews({ reviews }: { reviews: Promise<string[]> }) {
+  const resolvedReviews = (React as any).use(reviews) as string[];
+  return React.createElement(
+    "ul",
+    null,
+    resolvedReviews.map((review) => React.createElement("li", { key: review }, review)),
+  );
+}
 
 function createRenderer(modules: Record<string, any>, options: { opengraphImage?: boolean } = {}) {
   const metadataImageEntry = {

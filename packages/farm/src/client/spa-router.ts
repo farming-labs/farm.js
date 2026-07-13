@@ -1,5 +1,6 @@
 "use client";
 
+import { readDeferredDataResponse } from "../deferred";
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
@@ -398,7 +399,7 @@ export class SPARouter {
     // Fetch from server
     const response = await fetch(`/__farm/page-data?path=${encodeURIComponent(path)}`, {
       headers: createFarmDeploymentRequestHeaders(this.options.deploymentId, {
-        Accept: "application/json",
+        Accept: "application/x-farm-deferred+json, application/json",
         "X-Farm-SPA": "1",
       }),
     });
@@ -419,7 +420,7 @@ export class SPARouter {
       throw new Error(`Failed to fetch page data: ${response.status}`);
     }
 
-    const data: PageData = await response.json();
+    const data = await readDeferredDataResponse<PageData>(response);
 
     // Cache the result
     this.cache.set(path, {

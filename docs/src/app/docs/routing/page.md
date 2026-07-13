@@ -10,13 +10,13 @@ Farm uses an app directory routing model with static routes, dynamic segments, c
 
 ## File routes
 
-| File | URL |
-| --- | --- |
-| src/app/page.tsx | / |
-| src/app/about/page.tsx | /about |
-| src/app/about/page.mdx | /about |
-| src/app/blog/[slug]/page.tsx | /blog/:slug |
-| src/app/docs/[...slug]/page.tsx | /docs/:slug* |
+| File                            | URL           |
+| ------------------------------- | ------------- |
+| src/app/page.tsx                | /             |
+| src/app/about/page.tsx          | /about        |
+| src/app/about/page.mdx          | /about        |
+| src/app/blog/[slug]/page.tsx    | /blog/:slug   |
+| src/app/docs/[...slug]/page.tsx | /docs/:slug\* |
 
 ## Dynamic params
 
@@ -58,12 +58,7 @@ Use the lightweight router when client components, layouts, breadcrumbs, tabs, o
 ```ts
 import { createFarmRouter } from "@farmjs/core/router";
 
-export const router = createFarmRouter([
-  "/",
-  "/dashboard",
-  "/users/[id]",
-  "/docs/[[...slug]]",
-]);
+export const router = createFarmRouter(["/", "/dashboard", "/users/[id]", "/docs/[[...slug]]"]);
 ```
 
 ```ts
@@ -215,6 +210,63 @@ export const ProductRoute = createRoute("/products/[id]", {
 ```
 
 Cache keys are part of your data security model. If data depends on the current user, role, tenant, locale, or draft mode, include that value in `key` or avoid caching that route. Route cache invalidation improves freshness, but API routes and server functions still need their own authorization checks.
+
+## Deferred route data
+
+Use `defer()` for secondary data that should not delay the route shell. Farm returns the value from `data.main` as soon as its directly awaited work finishes, then streams explicitly deferred fields into nested React Suspense boundaries.
+
+**src/features/products/page.tsx**
+
+```tsx
+import { Suspense, use } from "react";
+import type { Deferred } from "@farmjs/core";
+
+export function ProductPage({ data }: ProductPageProps) {
+  return (
+    <main>
+      <h1>{data.product.name}</h1>
+      <Suspense fallback={<ReviewsSkeleton />}>
+        <Reviews reviews={data.reviews} />
+      </Suspense>
+    </main>
+  );
+}
+
+function Reviews({ reviews }: { reviews: Deferred<Review[]> }) {
+  const resolvedReviews = use(reviews);
+  return resolvedReviews.map((review) => <ReviewRow key={review.id} review={review} />);
+}
+```
+
+**src/farm.routes.tsx**
+
+```tsx
+import { createRoute, defer } from "@farmjs/core";
+import { ProductPage } from "./features/products/page";
+
+export const ProductRoute = createRoute("/products/[id]", {
+  data: {
+    async main({ params }) {
+      const reviews = defer(getProductReviews(params.id));
+      const product = await getProduct(params.id);
+
+      return {
+        product,
+        reviews,
+      };
+    },
+  },
+  component: ProductPage,
+});
+```
+
+In this example, both requests start together, but only `getProduct` controls when the route shell is ready. `getProductReviews` does not block the shell. The component receives `reviews` as `Deferred<Review[]>`, so React `use()` resolves it with full type inference.
+
+`data.after` runs after `main` returns and receives the deferred promise without waiting for it. This keeps logging and request cleanup hooks from extending the stream; await a deferred field inside `after` only when that delay is intentional.
+
+Farm uses a streaming page-data response for SPA navigation and serializes settled deferred values for hydration. Rejections expose a generic `DeferredDataError` to the browser while the original error remains in server logs. Deferred values and their resolved results must be JSON-serializable when they cross into a hydrated component.
+
+Use `defer()` for independent secondary sections such as reviews, recommendations, activity, or analytics. Keep data required for the title, authorization decision, redirect, or primary above-the-fold content directly awaited in `main`. `defer()` is explicit: ordinary nested promises are not automatically treated as streamed route data.
 
 ## Typed Search Params
 
@@ -541,12 +593,7 @@ import { useNavigation } from "@farmjs/core/client";
 export function TopProgress() {
   const navigation = useNavigation();
 
-  return (
-    <div
-      data-pending={navigation.pending}
-      aria-hidden={!navigation.pending}
-    />
-  );
+  return <div data-pending={navigation.pending} aria-hidden={!navigation.pending} />;
 }
 ```
 
@@ -560,7 +607,11 @@ Pass `viewTransition` to `Link` or `navigateTo` when a navigation should use the
 import { Link, navigateTo } from "@farmjs/core/client";
 
 export function GalleryLink() {
-  return <Link href="/gallery" viewTransition>Gallery</Link>;
+  return (
+    <Link href="/gallery" viewTransition>
+      Gallery
+    </Link>
+  );
 }
 
 await navigateTo("/gallery", { viewTransition: true });
