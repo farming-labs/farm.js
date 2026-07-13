@@ -11,6 +11,7 @@ import type { ServerRenderer } from "../server/renderer";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
+import { createDeferredDataResponse } from "../deferred";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -208,13 +209,18 @@ async function defaultHandler({
         layoutModules: layouts.map((l) => l.modulePath),
       };
 
-      return new Response(JSON.stringify(pageData), {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
-          "Cache-Control": "private, max-age=0",
+      return createDeferredDataResponse(
+        pageData,
+        {
+          status: 200,
+          headers: { "Cache-Control": "private, max-age=0" },
         },
-      });
+        {
+          onError(error, id) {
+            console.error(`[Farm.js] Deferred route data ${id} failed:`, error);
+          },
+        },
+      );
     } catch (error) {
       console.error("[Farm.js] Page data error:", error);
       return new Response(

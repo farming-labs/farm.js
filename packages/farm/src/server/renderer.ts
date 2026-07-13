@@ -31,6 +31,7 @@ import {
   type MetadataImageKind,
 } from "../metadata";
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
+import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -111,13 +112,29 @@ function searchParamsToObject(
 function createDocumentFooter(options: {
   suspenseRevealFallback: string;
   refreshPPR?: boolean;
+  deferredHydrationScript?: string;
 }): string {
   return `</div>
   ${options.suspenseRevealFallback}
   ${options.refreshPPR ? createPPRRefreshScript() : ""}
+  ${options.deferredHydrationScript || ""}
   <script type="module" src="/@farm/client.js"></script>
 </body>
 </html>`;
+}
+
+function serializeInlineValue(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function createDeferredHydrationScript(records: readonly DeferredRecord[]): string {
+  if (records.length === 0) return "";
+  return `<script>window.__FARM_DEFERRED_DATA__=${serializeInlineValue(
+    snapshotDeferredData(records),
+  )};</script>`;
 }
 
 function toMiddlewareMap(input: unknown): Map<string, any> {
@@ -1251,8 +1268,9 @@ export class ServerRenderer {
 
       // Inject page props, component info, and MANIFEST for client-side SPA
       // __FARM_MANIFEST__ contains the full route manifest (TanStack Start pattern)
+      const deferredProps = prepareDeferredData((req as any).__FARM_PROPS__ || {});
       const propsScript = `<script>
-window.__FARM_PROPS__ = ${JSON.stringify((req as any).__FARM_PROPS__ || {})};
+window.__FARM_PROPS__ = ${serializeInlineValue(deferredProps.data)};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
@@ -1333,7 +1351,10 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
             },
             final(callback) {
               const suspenseRevealFallback = `<script>(function(){function moveFragment(srcId,placeholderId){var src=document.getElementById(srcId),ph=document.getElementById(placeholderId);if(!src||!ph||!ph.parentNode)return false;while(src.firstChild)ph.parentNode.insertBefore(src.firstChild,ph);ph.parentNode.removeChild(ph);if(src.parentNode)src.parentNode.removeChild(src);return true}function revealBoundary(boundaryId,sectionId){var boundary=document.getElementById(boundaryId),section=document.getElementById(sectionId);if(!boundary||!section||!boundary.parentNode)return false;var start=boundary.previousSibling;if(!start||start.nodeType!==8)return false;var parent=boundary.parentNode;var node=boundary;var depth=0;while(node){if(node.nodeType===8){var data=node.data;if(data==="/$"||data==="/&"){if(depth===0)break;depth--;}else if(data==="$"||data==="$?"||data==="$~"||data==="$!"||data==="&"){depth++;}}var next=node.nextSibling;parent.removeChild(node);node=next;}while(section.firstChild)parent.insertBefore(section.firstChild,node);if(section.parentNode)section.parentNode.removeChild(section);start.data="$";return true}var tries=0;var timer=setInterval(function(){var changed=false;document.querySelectorAll('div[id^="S:"]').forEach(function(section){var suffix=section.id.slice(2);changed=moveFragment('S:'+suffix,'P:'+suffix)||changed;});document.querySelectorAll('template[id^="B:"]').forEach(function(boundary){var suffix=boundary.id.slice(2);changed=revealBoundary('B:'+suffix,'S:'+suffix)||changed;});tries++;if(tries>80||(!document.querySelector('template[id^="B:"]')&&!document.querySelector('template[id^="P:"]'))){clearInterval(timer);}},50);})();</script>`;
-              const footer = createDocumentFooter({ suspenseRevealFallback });
+              const footer = createDocumentFooter({
+                suspenseRevealFallback,
+                deferredHydrationScript: createDeferredHydrationScript(deferredProps.records),
+              });
               htmlParts.push(footer);
               res.write(footer);
               res.end();
