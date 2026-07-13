@@ -2,7 +2,6 @@ import type { PageProps } from "@farmjs/core";
 import {
   ArrowRight,
   ArrowUpRight,
-  BadgeCheck,
   Blocks,
   BookOpen,
   BookOpenText,
@@ -16,6 +15,7 @@ import {
   Gauge,
   GitCompareArrows,
   GitFork,
+  KeyRound,
   Layers3,
   Mail,
   Menu,
@@ -33,12 +33,16 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
 import betterAuthIconUrl from "simple-icons/icons/betterauth.svg?url";
+import clerkIconUrl from "simple-icons/icons/clerk.svg?url";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import prismaIconUrl from "simple-icons/icons/prisma.svg?url";
 import reactIconUrl from "simple-icons/icons/react.svg?url";
+import resendIconUrl from "simple-icons/icons/resend.svg?url";
+import shadcnIconUrl from "simple-icons/icons/shadcnui.svg?url";
 import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
-import typescriptIconUrl from "simple-icons/icons/typescript.svg?url";
+import supabaseIconUrl from "simple-icons/icons/supabase.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
@@ -55,7 +59,7 @@ const navItems = [
   { index: "01", label: "Guide", href: "/docs/getting-started", icon: BookOpen },
   { index: "02", label: "Config", href: "/docs/configuration", icon: Settings2 },
   { index: "03", label: "Integrations", href: "/docs/integrations", icon: Blocks },
-  { index: "04", label: "Resources", href: "#open-source", icon: FileText },
+  { index: "04", label: "Resources", href: "/docs", icon: FileText },
 ] as const;
 
 const ecosystemItems = [
@@ -97,6 +101,114 @@ const stackItems = [
     label: "OpenAPI",
     detail: "schema + clients",
     icon: FileCode2,
+  },
+] as const;
+
+const integrationDirectoryItems = [
+  {
+    row: 0,
+    col: 1,
+    label: "Better Auth",
+    href: "/docs/integrations/auth/better-auth",
+    brand: betterAuthIconUrl,
+  },
+  {
+    row: 0,
+    col: 3,
+    label: "Auth.js",
+    href: "/docs/integrations/auth/authjs",
+    icon: ShieldCheck,
+  },
+  {
+    row: 1,
+    col: 0,
+    label: "Clerk",
+    href: "/docs/integrations/auth/clerk",
+    brand: clerkIconUrl,
+  },
+  {
+    row: 1,
+    col: 2,
+    label: "Auth0",
+    href: "/docs/integrations/auth/auth0",
+    brand: auth0IconUrl,
+  },
+  {
+    row: 1,
+    col: 4,
+    label: "WorkOS",
+    href: "/docs/integrations/auth/workos",
+    icon: Blocks,
+  },
+  {
+    row: 2,
+    col: 1,
+    label: "Supabase",
+    href: "/docs/integrations/auth/supabase",
+    brand: supabaseIconUrl,
+  },
+  {
+    row: 2,
+    col: 3,
+    label: "Autumn",
+    href: "/docs/integrations/autumn",
+    icon: Gauge,
+  },
+  {
+    row: 3,
+    col: 0,
+    label: "Polar",
+    href: "/docs/integrations/polar",
+    icon: CreditCard,
+  },
+  {
+    row: 3,
+    col: 2,
+    label: "Stripe",
+    href: "/docs/integrations/stripe",
+    brand: stripeIconUrl,
+  },
+  {
+    row: 3,
+    col: 4,
+    label: "Resend",
+    href: "/docs/integrations/email",
+    brand: resendIconUrl,
+  },
+  {
+    row: 4,
+    col: 1,
+    label: "Prisma",
+    href: "/docs/integrations/orm-storage",
+    brand: prismaIconUrl,
+  },
+  {
+    row: 4,
+    col: 3,
+    label: "Inngest",
+    href: "/docs/integrations/inngest",
+    icon: Network,
+  },
+  {
+    row: 5,
+    col: 0,
+    label: "Trigger.dev",
+    href: "/docs/integrations/trigger",
+    icon: Workflow,
+  },
+  {
+    row: 5,
+    col: 2,
+    label: "shadcn/ui",
+    href: "/docs/integrations/ui-registry",
+    brand: shadcnIconUrl,
+  },
+  {
+    row: 5,
+    col: 4,
+    label: "Unkey",
+    href: "/docs/integrations/unkey",
+    icon: KeyRound,
   },
 ] as const;
 
@@ -1062,105 +1174,89 @@ function StackMap() {
   );
 }
 
-function OpenSourceSection() {
-  const links = [
-    {
-      label: "Framework source",
-      body: "Read the router, runtime, build, and deployment implementation in the public repository.",
-      href: "https://github.com/Kinfe123/farm.js",
-      icon: <GithubIcon className="size-3.5" />,
-    },
-    {
-      label: "Integration SDK",
-      body: "Build auth, billing, jobs, storage, and product-system contracts as first-class integrations.",
-      href: "/docs/plugins/create-plugin",
-      icon: <Plug aria-hidden className="size-3.5" strokeWidth={1.5} />,
-    },
-    {
-      label: "Migration tooling",
-      body: "Inspect a current application and produce a reviewable migration inventory before rewriting it.",
-      href: "/docs/migrations",
-      icon: <GitCompareArrows aria-hidden className="size-3.5" strokeWidth={1.5} />,
-    },
-  ] as const;
-
-  const stats = [
-    { value: "MIT", label: "licensed", icon: BadgeCheck },
-    { value: "19", label: "React", brand: reactIconUrl },
-    { value: "TS", label: "first", brand: typescriptIconUrl },
-  ] as const;
-
+function IntegrationsSection() {
   return (
-    <section id="open-source" className="farm-full-rule w-full">
-      <div className="grid gap-12 px-6 py-20 sm:px-10 lg:grid-cols-[1fr_auto] lg:items-end lg:px-14 lg:py-28">
-        <div className="max-w-2xl">
+    <section id="integrations" className="farm-full-rule grid w-full lg:grid-cols-2">
+      <div className="flex min-h-[460px] flex-col justify-between border-b border-white/12 px-6 py-12 sm:px-10 sm:py-16 lg:min-h-[520px] lg:border-b-0 lg:border-r lg:px-14">
+        <div className="max-w-xl">
           <div className="text-white/45">
-            <IndexedLabel icon={GitFork} index="04" label="Open source / MIT" />
+            <IndexedLabel icon={Blocks} index="04" label="Developer experience" />
           </div>
-          <h2 className="mt-5 text-balance text-4xl font-medium leading-[1.04] tracking-normal text-white sm:text-5xl">
-            Built in public for the React ecosystem
+          <h2 className="mt-6 text-balance text-4xl font-medium leading-[1.04] tracking-normal text-white sm:text-5xl">
+            Connect the systems your product already uses
           </h2>
-          <p className="mt-5 max-w-xl text-base leading-7 text-white/48">
-            The framework, integration contracts, migration tooling, and documentation are all
-            reviewable source.
+          <p className="mt-5 max-w-lg text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+            Auth, billing, email, jobs, storage, API keys, and UI scaffolds register through one
+            framework-level integration contract.
           </p>
         </div>
-        <div className="grid grid-cols-3 gap-6 sm:gap-10">
-          {stats.map((stat) => {
-            const Icon = "icon" in stat ? stat.icon : null;
-
-            return (
-              <div key={stat.label}>
-                <span className="mb-4 grid size-8 place-items-center border border-white/12 text-white/54">
-                  {"brand" in stat ? (
-                    <BrandIcon className="size-3.5" src={stat.brand} />
-                  ) : Icon ? (
-                    <Icon aria-hidden className="size-4" strokeWidth={1.5} />
-                  ) : null}
-                </span>
-                <p className="font-mono text-2xl font-medium text-white sm:text-3xl">
-                  {stat.value}
-                </p>
-                <p className="mt-2 font-mono text-[10px] uppercase text-white/35">{stat.label}</p>
-              </div>
-            );
-          })}
+        <div className="mt-10 flex flex-col gap-2 sm:flex-row">
+          <ButtonLink
+            href="/docs/integrations"
+            icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
+          >
+            Explore Integrations
+          </ButtonLink>
+          <ButtonLink
+            href="/docs/integrations/custom"
+            icon={<Plug aria-hidden className="size-4" strokeWidth={1.5} />}
+            variant="secondary"
+          >
+            Custom Integration
+          </ButtonLink>
         </div>
       </div>
 
-      <div className="grid border-t border-white/12 md:grid-cols-3">
-        {links.map((item, index) => (
-          <a
-            key={item.label}
-            className={cx(
-              "group flex min-h-[250px] flex-col justify-between p-6 transition-colors duration-150 hover:bg-white/[0.035] focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:p-8",
-              index !== 0 && "border-t border-white/12 md:border-l md:border-t-0",
-            )}
-            href={item.href}
-          >
-            <div>
-              <h3 className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-white/58">
-                <span className="text-white/26">04.{index + 1}</span>
-                <span aria-hidden className="text-white/18">
-                  /
+      <div className="relative flex min-h-[460px] items-end justify-end overflow-hidden px-5 pt-10 sm:px-10 lg:min-h-[520px] lg:px-12">
+        <div className="relative aspect-[5/6] w-full max-w-80">
+          <div
+            aria-hidden
+            className="absolute inset-0"
+            style={{
+              backgroundImage:
+                "linear-gradient(to right, rgb(255 255 255 / 0.11) 1px, transparent 1px), linear-gradient(to bottom, rgb(255 255 255 / 0.11) 1px, transparent 1px)",
+              backgroundSize: "20% 16.6666667%",
+              maskImage: "radial-gradient(ellipse at center, black 68%, transparent 100%)",
+              WebkitMaskImage: "radial-gradient(ellipse at center, black 68%, transparent 100%)",
+            }}
+          />
+
+          {integrationDirectoryItems.map((item) => {
+            const Icon = "icon" in item ? item.icon : null;
+
+            return (
+              <a
+                key={item.label}
+                aria-label={`${item.label} integration documentation`}
+                className="group absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+                href={item.href}
+                style={{
+                  height: "16.6666667%",
+                  left: `${item.col * 20}%`,
+                  top: `${item.row * (100 / 6)}%`,
+                  width: "20%",
+                }}
+                title={`${item.label} integration`}
+              >
+                {"brand" in item ? (
+                  <BrandIcon
+                    className="size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100"
+                    src={item.brand}
+                  />
+                ) : Icon ? (
+                  <Icon
+                    aria-hidden
+                    className="size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black"
+                    strokeWidth={1.35}
+                  />
+                ) : null}
+                <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+                  {item.label}
                 </span>
-                <span aria-hidden className="grid size-3.5 shrink-0 place-items-center">
-                  {item.icon}
-                </span>
-                <span className="truncate">{item.label}</span>
-              </h3>
-              <p className="mt-6 text-sm leading-6 text-white/45">{item.body}</p>
-            </div>
-            <span className="mt-8 flex items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-white/60 transition-colors duration-150 group-hover:text-white">
-              Explore
-              {item.href.startsWith("http") ? (
-                <ArrowUpRight aria-hidden className="size-3.5" strokeWidth={1.5} />
-              ) : (
-                <ArrowRight aria-hidden className="size-3.5" strokeWidth={1.5} />
-              )}
-            </span>
-          </a>
-        ))}
+              </a>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -1286,7 +1382,7 @@ export default function HomePage(_props: PageProps) {
               title="Bring your product stack with you"
             />
             <StackMap />
-            <OpenSourceSection />
+            <IntegrationsSection />
             <FinalCta />
           </main>
           <Footer />
