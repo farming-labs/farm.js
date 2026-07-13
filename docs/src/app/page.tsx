@@ -71,37 +71,31 @@ const stackItems = [
   {
     label: "Better Auth",
     detail: "session + routes",
-    position: "left-[5%] top-[12%]",
     icon: ShieldCheck,
   },
   {
     label: "Stripe",
     detail: "billing + webhooks",
-    position: "right-[5%] top-[12%]",
     icon: CreditCard,
   },
   {
     label: "Trigger.dev",
     detail: "jobs + events",
-    position: "left-[3%] bottom-[15%]",
     icon: Workflow,
   },
   {
     label: "Resend",
     detail: "email + templates",
-    position: "right-[3%] bottom-[15%]",
     icon: Mail,
   },
   {
     label: "Prisma",
     detail: "schema + storage",
-    position: "left-[22%] top-[41%]",
     icon: Database,
   },
   {
     label: "OpenAPI",
     detail: "schema + clients",
-    position: "right-[22%] top-[41%]",
     icon: FileCode2,
   },
 ] as const;
@@ -628,7 +622,7 @@ function FeatureCell({
   children: ReactNode;
 }) {
   return (
-    <article className={cx("flex min-h-[500px] min-w-0 flex-col justify-between", className)}>
+    <article className={cx("group flex min-h-[500px] min-w-0 flex-col justify-between", className)}>
       <div className="p-6 sm:p-10">
         <h3 className="text-white/52">
           <IndexedLabel icon={Icon} index={index} label={title} />
@@ -748,24 +742,77 @@ function MiddlewareVisual() {
 }
 
 function DocsVisual() {
+  const resources = [
+    {
+      label: "src/app/docs",
+      kind: "route",
+      icon: FolderTree,
+      offset: "translate-x-[28%]",
+    },
+    {
+      label: "getting-started.mdx",
+      kind: "MDX",
+      icon: FileText,
+      offset: "translate-x-[20%]",
+    },
+    {
+      label: "openapi.json",
+      kind: "API",
+      icon: Braces,
+      offset: "translate-x-[12%]",
+    },
+    {
+      label: "llms.txt",
+      kind: "AI",
+      icon: FileCode2,
+      offset: "translate-x-[4%]",
+      featured: true,
+    },
+  ] as const;
+
   return (
     <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-cols-[7rem_1fr] overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)] sm:grid-cols-[9rem_1fr]">
-        <div className="border-r border-white/10 p-3 font-mono text-[9px] text-white/34">
-          <p className="text-white/70">Introduction</p>
-          <p className="mt-3">Routing</p>
-          <p className="mt-3">API client</p>
-          <p className="mt-3">Middleware</p>
-          <p className="mt-3">Deployment</p>
-        </div>
-        <div className="p-5">
-          <span className="font-mono text-[9px] text-white/52">GETTING STARTED</span>
-          <div className="mt-4 h-4 w-3/4 bg-white/80" />
-          <div className="mt-4 h-2 w-full bg-white/12" />
-          <div className="mt-2 h-2 w-5/6 bg-white/12" />
-          <div className="mt-5 border border-white/10 bg-black p-3 font-mono text-[9px] text-white/55">
-            pnpm create farm@latest
-          </div>
+      <div className="relative z-10 -mb-px -mr-px h-[290px] w-full max-w-full overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <div className="flex h-full flex-col justify-center -space-y-2 p-5 transition-[margin] duration-500 ease-out group-hover:space-y-2">
+          {resources.map((resource) => {
+            const Icon = resource.icon;
+            const isFeatured = "featured" in resource && resource.featured;
+
+            return (
+              <div
+                key={resource.label}
+                className={cx(
+                  "flex h-16 shrink-0 items-center justify-between border px-4 pt-3 transition-[height,margin,padding,transform,background-color,border-color] duration-500 ease-out group-hover:h-12 group-hover:translate-x-0 group-hover:pt-0",
+                  resource.offset,
+                  isFeatured
+                    ? "border-white bg-white text-black"
+                    : "border-white/10 bg-black text-white",
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <Icon
+                    aria-hidden
+                    className={cx(
+                      "size-3.5 shrink-0",
+                      isFeatured ? "text-black/72" : "text-white/52",
+                    )}
+                    strokeWidth={1.5}
+                  />
+                  <span className="truncate font-mono text-[10px] font-normal tracking-normal">
+                    {resource.label}
+                  </span>
+                </span>
+                <span
+                  className={cx(
+                    "ml-4 shrink-0 font-mono text-[9px] uppercase tracking-normal",
+                    isFeatured ? "text-black/52" : "text-white/28",
+                  )}
+                >
+                  {resource.kind}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
     </div>
@@ -843,9 +890,90 @@ function FoundationGrid() {
 }
 
 function StackMap() {
+  const integrationRows = [
+    [
+      {
+        key: "auth",
+        label: "Better Auth",
+        detail: "session + routes",
+        icon: ShieldCheck,
+        className: "flex-[1.1]",
+      },
+      { key: "blank-1", className: "flex-[0.45]" },
+      {
+        key: "billing",
+        label: "Stripe",
+        detail: "billing + webhooks",
+        icon: CreditCard,
+        className: "flex-[0.9]",
+      },
+    ],
+    [
+      { key: "blank-2", className: "flex-[0.35]" },
+      {
+        key: "database",
+        label: "Prisma",
+        detail: "schema + storage",
+        icon: Database,
+        className: "flex-1",
+      },
+      {
+        key: "config",
+        label: "farm.config.ts",
+        detail: "integration registry",
+        icon: Settings2,
+        className: "flex-[1.15]",
+        featured: true,
+      },
+      { key: "blank-3", className: "flex-[0.4]" },
+    ],
+    [
+      {
+        key: "jobs",
+        label: "Trigger.dev",
+        detail: "jobs + events",
+        icon: Workflow,
+        className: "flex-1",
+      },
+      {
+        key: "email",
+        label: "Resend",
+        detail: "email + templates",
+        icon: Mail,
+        className: "flex-[0.9]",
+      },
+      { key: "blank-4", className: "flex-[0.5]" },
+      {
+        key: "openapi",
+        label: "OpenAPI",
+        detail: "schema + clients",
+        icon: FileCode2,
+        className: "flex-1",
+      },
+    ],
+    [
+      { key: "blank-5", className: "flex-[0.55]" },
+      {
+        key: "docs",
+        label: "Docs registry",
+        detail: "MDX + references",
+        icon: BookOpenText,
+        className: "flex-1",
+      },
+      {
+        key: "routes",
+        label: "Route manifest",
+        detail: "pages + APIs",
+        icon: Route,
+        className: "flex-1",
+      },
+      { key: "blank-6", className: "flex-[0.35]" },
+    ],
+  ] as const;
+
   return (
-    <section className="farm-full-rule farm-stack-map w-full">
-      <div className="grid gap-2 p-5 sm:hidden">
+    <section className="farm-full-rule farm-feature-spotlight group w-full">
+      <div className="relative z-10 grid gap-2 p-5 sm:hidden">
         <div className="mb-3 border border-white/24 bg-black p-4 text-center">
           <Settings2 aria-hidden className="mx-auto size-4 text-white/68" strokeWidth={1.5} />
           <p className="mt-3 font-mono text-xs text-white">farm.config.ts</p>
@@ -870,47 +998,65 @@ function StackMap() {
         </div>
       </div>
 
-      <div className="relative hidden h-[520px] overflow-hidden sm:block">
-        <svg aria-hidden className="absolute inset-0 size-full" viewBox="0 0 1240 520">
-          <g fill="none" stroke="white" strokeDasharray="4 9" strokeOpacity="0.2" strokeWidth="1.3">
-            <path d="M620 260 170 86" />
-            <path d="M620 260 1070 86" />
-            <path d="M620 260 160 430" />
-            <path d="M620 260 1080 430" />
-            <path d="M620 260 360 250" />
-            <path d="M620 260 880 250" />
-          </g>
-        </svg>
+      <div className="relative z-10 hidden h-[520px] items-center overflow-hidden sm:flex">
+        <div className="mx-auto grid w-full max-w-6xl gap-2 px-6 transition-transform duration-500 ease-out lg:translate-x-[7%] lg:px-0 lg:group-hover:translate-x-0 lg:group-hover:scale-[0.98]">
+          {integrationRows.map((row, rowIndex) => (
+            <div key={rowIndex} className="flex w-full gap-2">
+              {row.map((cell) => {
+                if (!("label" in cell)) {
+                  return (
+                    <div
+                      key={cell.key}
+                      aria-hidden
+                      className={cx(
+                        "h-16 min-w-14 border border-white/[0.055] bg-black/70",
+                        cell.className,
+                      )}
+                    />
+                  );
+                }
 
-        <div className="absolute left-1/2 top-1/2 w-56 -translate-x-1/2 -translate-y-1/2 border border-white/28 bg-black p-5 text-center shadow-[0_0_50px_rgba(255,255,255,0.04)]">
-          <FarmMark className="mx-auto size-8 text-white" />
-          <div className="mt-3 flex items-center justify-center gap-2">
-            <Settings2 aria-hidden className="size-3.5 text-white/58" strokeWidth={1.5} />
-            <p className="font-mono text-sm text-white">farm.config.ts</p>
-          </div>
-          <p className="mt-2 text-xs leading-5 text-white/38">
-            one contract for routes, server APIs, docs, and lifecycle hooks
-          </p>
-        </div>
+                const Icon = cell.icon;
+                const isFeatured = "featured" in cell && cell.featured;
 
-        {stackItems.map((item) => {
-          const Icon = item.icon;
-
-          return (
-            <div
-              key={item.label}
-              className={cx("absolute w-40 border border-white/12 bg-black p-4", item.position)}
-            >
-              <div className="flex items-center gap-2">
-                <Icon aria-hidden className="size-3.5 text-white/52" strokeWidth={1.5} />
-                <p className="font-mono text-[11px] font-normal uppercase text-white/78">
-                  {item.label}
-                </p>
-              </div>
-              <p className="mt-2 font-mono text-[9px] text-white/32">{item.detail}</p>
+                return (
+                  <div
+                    key={cell.key}
+                    className={cx(
+                      "flex h-16 min-w-0 items-center border px-4",
+                      cell.className,
+                      isFeatured
+                        ? "border-white bg-white text-black"
+                        : "border-white/10 bg-black text-white",
+                    )}
+                  >
+                    <Icon
+                      aria-hidden
+                      className={cx(
+                        "size-4 shrink-0",
+                        isFeatured ? "text-black/68" : "text-white/48",
+                      )}
+                      strokeWidth={1.5}
+                    />
+                    <div className="ml-3 min-w-0">
+                      <p className="truncate font-mono text-[10px] font-normal uppercase tracking-normal">
+                        {cell.label}
+                      </p>
+                      <p
+                        className={cx(
+                          "mt-1 truncate font-mono text-[9px] tracking-normal",
+                          isFeatured ? "text-black/48" : "text-white/28",
+                        )}
+                      >
+                        {cell.detail}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          );
-        })}
+          ))}
+        </div>
       </div>
     </section>
   );

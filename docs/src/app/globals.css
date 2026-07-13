@@ -235,14 +235,6 @@
     transform: translate3d(6px, -2px, 0);
   }
 
-  .farm-stack-map {
-    background-color: #000;
-    background-image:
-      linear-gradient(to right, var(--farm-line-soft) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--farm-line-soft) 1px, transparent 1px);
-    background-size: 48px 48px;
-  }
-
   .farm-highlighted-code {
     --sh-class: rgb(255 255 255 / 0.86);
     --sh-identifier: rgb(255 255 255 / 0.64);
