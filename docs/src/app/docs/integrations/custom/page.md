@@ -48,6 +48,274 @@ export default defineFarmConfig({
 
 The route is now mounted at `/api/acme/status`. Because it was created with `integrationRoute.get`, Farm can also derive the callable API shape.
 
+## Choose the HTTP surface
+
+`routes`, `endpoints`, and `api` are not three steps that every integration must configure. They
+describe two different responsibilities:
+
+```text
+typed routes or endpoints -> mount HTTP handlers -> derive api and apiClient callers
+plain route objects       -> mount HTTP handlers only
+api                       -> describe callers only; no HTTP handler is mounted
+```
+
+| Field       | Runtime responsibility                                                       | Caller names come from                                       | Best use                                                                  |
+| ----------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| `routes`    | Mounts a flat list of handlers.                                              | The route URL when you use `integrationRoute.*`.             | Most integrations. Start here.                                            |
+| `endpoints` | Recursively flattens an object of handlers into `routes` and mounts them.    | The route URL when you use `endpoint.*`, not the object key. | Large integrations that are clearer when handlers are grouped by feature. |
+| `api`       | Defines typed operations that call existing URLs. It never mounts a handler. | The keys in the `api` object.                                | Routes implemented elsewhere, or a deliberately customized caller tree.   |
+
+A plain object in `routes` or `endpoints` still mounts its handler. Only the typed
+`integrationRoute.*` and `endpoint.*` builders attach the operation metadata Farm needs to infer
+`api` and `apiClient` request and response types.
+
+The three formats below are alternatives. Each example exports an integration named `billing` and
+uses the same registration and caller setup.
+
+### Shared registration
+
+Register the integration once. The `billing` key becomes the first segment after `api` or
+`apiClient`.
+
+**farm.config.ts**
+
+```ts
+import { defineFarmConfig } from "@farmjs/core";
+import { billing } from "./src/integrations/billing";
+
+export default defineFarmConfig({
+  integrations: {
+    billing,
+  },
+});
+```
+
+Create the browser and server callers once as well:
+
+**src/lib/integrations.ts**
+
+```ts
+import { createIntegrations } from "@farmjs/core/client";
+import type { billing } from "../integrations/billing";
+
+type AppIntegrations = {
+  billing: typeof billing;
+};
+
+export const { api, apiClient } = createIntegrations<AppIntegrations>();
+```
+
+`apiClient` is the browser caller. `api` is the server caller; it dispatches directly to a
+registered integration handler when possible and falls back to `fetch` when no runtime is
+available.
+
+### 1. `routes`: flat owned handlers
+
+Use `routes` when the integration owns the HTTP handlers and a flat list is easy to read. This is
+the recommended default.
+
+**src/integrations/billing.ts**
+
+```ts
+import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { z } from "zod";
+
+export const billing = defineIntegration({
+  category: "payment",
+  type: "acme-billing",
+  instance: {},
+  routes: [
+    integrationRoute.post<"/api/billing/checkout", { priceId: string }, { url: string }>(
+      "/api/billing/checkout",
+      {
+        body: z.object({ priceId: z.string() }),
+        handler(_request, ctx) {
+          return Response.json({
+            url: `https://checkout.example/${ctx.input.body!.priceId}`,
+          });
+        },
+      },
+    ),
+  ],
+});
+```
+
+Farm mounts `POST /api/billing/checkout` and derives the caller from that URL.
+
+**client code**
+
+```tsx
+"use client";
+
+import { apiClient } from "../lib/integrations";
+
+export async function startCheckout() {
+  const result = await apiClient.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+**server code**
+
+```ts
+import { api } from "../lib/integrations";
+
+export async function startCheckoutOnServer() {
+  const result = await api.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+Both calls have typed input, typed `data`, and typed `error`. The Zod body schema also validates the
+incoming request at runtime.
+
+### 2. `endpoints`: grouped owned handlers
+
+Use `endpoints` when the integration still owns the handlers, but an object is easier to organize
+than a flat list.
+
+**src/integrations/billing.ts**
+
+```ts
+import { defineIntegration } from "@farmjs/core";
+import { z } from "zod";
+
+export const billing = defineIntegration({
+  category: "payment",
+  type: "acme-billing",
+  instance: {},
+  endpoints: ({ endpoint }) => ({
+    checkout: endpoint.post<"/api/billing/checkout", { priceId: string }, { url: string }>(
+      "/api/billing/checkout",
+      {
+        body: z.object({ priceId: z.string() }),
+        handler(_request, ctx) {
+          return Response.json({
+            url: `https://checkout.example/${ctx.input.body!.priceId}`,
+          });
+        },
+      },
+    ),
+  }),
+});
+```
+
+Farm flattens this object into `routes`, mounts the same HTTP handler, and generates the same typed
+callers:
+
+**client code**
+
+```tsx
+"use client";
+
+import { apiClient } from "../lib/integrations";
+
+export async function startCheckout() {
+  const result = await apiClient.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+**server code**
+
+```ts
+import { api } from "../lib/integrations";
+
+export async function startCheckoutOnServer() {
+  const result = await api.billing.checkout.post({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+The `checkout` object key is only an authoring label. The URL `/api/billing/checkout` determines the
+derived caller path. If the key were `start` but the URL stayed the same, the caller would still be
+`api.billing.checkout.post(...)`.
+
+### 3. `api`: callers for existing handlers
+
+Use `api` when this integration does not own the handler, or when you intentionally want caller
+names that do not follow route URLs.
+
+**src/integrations/billing.ts**
+
+```ts
+import { defineIntegration, endpoint } from "@farmjs/core";
+
+export const billing = defineIntegration({
+  category: "payment",
+  type: "acme-billing",
+  instance: {},
+  api: {
+    startCheckout: endpoint.post<{ priceId: string }, { url: string }>("/api/billing/checkout", {
+      responseFormat: "json",
+    }),
+  },
+});
+```
+
+This creates typed callers named `startCheckout`:
+
+**client code**
+
+```tsx
+"use client";
+
+import { apiClient } from "../lib/integrations";
+
+export async function startCheckout() {
+  const result = await apiClient.billing.startCheckout({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+**server code**
+
+```ts
+import { api } from "../lib/integrations";
+
+export async function startCheckoutOnServer() {
+  const result = await api.billing.startCheckout({
+    body: { priceId: "price_123" },
+  });
+
+  if (result.error) throw result.error;
+  return result.data;
+}
+```
+
+Unlike `routes` and `endpoints`, `api` does **not** create `POST /api/billing/checkout`. The app or
+another service must implement that URL.
+
+If you provide `api` together with `routes` or `endpoints`, Farm still mounts the handlers, but the
+explicit `api` object replaces all automatic caller derivation for that integration. Use that
+combination only when you intentionally want caller names or operations that differ from the route
+paths, and keep the declared methods and paths synchronized. Built-in integrations may use this
+advanced combination to keep a stable public caller contract; most application integrations do not
+need it.
+
+The integration's `api:` field is a contract. It is different from the returned `api` value, which
+is the server caller for that contract. `apiClient` is the browser caller.
+
 ## Full shape
 
 The full interface is intentionally flat. Lifecycle hooks are top-level fields instead of being wrapped in a `lifecycle` object.
@@ -57,9 +325,9 @@ type IntegrationAuthoringShape = {
   category: string;
   type: string;
   instance: unknown;
-  api?: object;
-  routes?: readonly unknown[];
-  endpoints?: object;
+  routes?: readonly unknown[]; // Flat HTTP handler definitions.
+  endpoints?: object; // Grouped HTTP handler definitions.
+  api?: object; // Caller definitions only; does not mount handlers.
   middleware?: readonly unknown[];
   providers?: readonly unknown[];
   documentNavigations?: readonly unknown[];
@@ -214,7 +482,9 @@ For body and query validation you can use Zod, any parser with `parse`, any pars
 
 ## Endpoints object
 
-Use `endpoints` when you want the integration definition to look like the callable API tree. Farm flattens the endpoints into routes and derives the same client namespace.
+Use `endpoints` when you want to organize handler definitions in an object instead of a flat array.
+Farm recursively flattens the object into `routes` and derives callers from each route URL. The
+object keys are organizational; they do not control the caller namespace.
 
 ```ts
 import { z } from "zod";
@@ -254,11 +524,15 @@ export const billing = defineIntegration({
 });
 ```
 
-That produces `api.billing.checkout.post(...)` and `api.billing.status()`.
+The URLs in this example produce `api.billing.checkout.post(...)` and
+`api.billing.status()`. Those names match the object keys because the final URL segments are also
+`checkout` and `status`.
 
 ## Explicit API trees
 
-Use `api` when routes are implemented elsewhere, or when the integration only needs typed callers.
+Use `api` when routes are implemented elsewhere, when the integration only needs typed callers, or
+when you intentionally want caller names that do not follow the URLs. An `api` operation never
+registers an HTTP handler.
 
 ```ts
 import { defineIntegration, endpoint } from "@farmjs/core";
@@ -285,6 +559,9 @@ export const acme = defineIntegration({
 ```
 
 `endpoint.route(path, ...)` is useful when multiple methods share one path. A namespace with one method can be called directly and still keeps the method accessor.
+
+If the integration also declares `routes` or `endpoints`, this explicit tree replaces the caller
+tree Farm would derive from them. It does not replace or remove their HTTP handlers.
 
 ## Hooks around a route
 
