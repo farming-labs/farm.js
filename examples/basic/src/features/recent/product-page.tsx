@@ -1,4 +1,6 @@
+import { Suspense, use } from 'react';
 import type {
+  Deferred,
   ProgrammaticRouteComponentProps,
   ProgrammaticRouteErrorComponentProps,
   ProgrammaticRoutePendingComponentProps,
@@ -55,7 +57,21 @@ export function FeatureProductPage({ params, search, data }: ProductPageProps) {
       <p data-testid="product-runtime-boundary" className="text-slate-700">
         {data.runtimeBoundary}
       </p>
+      <Suspense fallback={<p data-testid="product-reviews-pending">Loading reviews...</p>}>
+        <FeatureProductReviews reviews={data.reviews} />
+      </Suspense>
     </main>
+  );
+}
+
+function FeatureProductReviews({ reviews }: { reviews: Deferred<string[]> }) {
+  const resolvedReviews = use(reviews);
+  return (
+    <ul data-testid="product-reviews" className="space-y-1 text-slate-700">
+      {resolvedReviews.map((review) => (
+        <li key={review}>{review}</li>
+      ))}
+    </ul>
   );
 }
 
