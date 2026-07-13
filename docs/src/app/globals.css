@@ -304,6 +304,54 @@
     );
   }
 
+  .farm-tree-route,
+  .farm-trace-step {
+    animation: farm-foundation-sequence-four 8s steps(1, end) infinite;
+  }
+
+  .farm-doc-source,
+  .farm-migration-row {
+    animation: farm-foundation-sequence-three 6s steps(1, end) infinite;
+  }
+
+  .farm-trace-pulse {
+    animation: farm-trace-pulse 8s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+    will-change: opacity, transform;
+  }
+
+  .farm-doc-pulse {
+    animation: farm-doc-pulse 2s ease-in-out infinite;
+    will-change: opacity, transform;
+  }
+
+  .farm-doc-preview-line {
+    animation: farm-doc-preview-line 6s ease-in-out infinite;
+    will-change: opacity, transform;
+  }
+
+  .farm-migration-table::after {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    background: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgb(255 255 255 / 0.08) 50%,
+      transparent 100%
+    );
+    background-repeat: no-repeat;
+    background-position: -50% 0;
+    background-size: 24% 100%;
+    content: "";
+    pointer-events: none;
+    animation: farm-migration-scan 6s ease-in-out infinite;
+  }
+
+  .farm-migration-progress {
+    animation: farm-migration-progress 6s ease-in-out infinite;
+    will-change: transform;
+  }
+
   .farm-highlighted-code {
     --sh-class: rgb(255 255 255 / 0.86);
     --sh-identifier: rgb(255 255 255 / 0.64);
@@ -611,6 +659,127 @@
   }
 }
 
+@keyframes farm-foundation-sequence-four {
+  0%,
+  22% {
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.075);
+    border-color: rgb(255 255 255 / 0.2);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
+  }
+
+  25%,
+  100% {
+    color: rgb(255 255 255 / 0.42);
+    background: transparent;
+    border-color: rgb(255 255 255 / 0.08);
+    box-shadow: inset 2px 0 0 transparent;
+  }
+}
+
+@keyframes farm-foundation-sequence-three {
+  0%,
+  30% {
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.075);
+    border-color: rgb(255 255 255 / 0.2);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
+  }
+
+  33.333%,
+  100% {
+    color: rgb(255 255 255 / 0.42);
+    background: transparent;
+    border-color: rgb(255 255 255 / 0.08);
+    box-shadow: inset 2px 0 0 transparent;
+  }
+}
+
+@keyframes farm-trace-pulse {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+
+  6%,
+  70% {
+    opacity: 1;
+  }
+
+  75% {
+    opacity: 1;
+    transform: translate3d(0, 10.5rem, 0);
+  }
+
+  88%,
+  100% {
+    opacity: 0;
+    transform: translate3d(0, 10.5rem, 0);
+  }
+}
+
+@keyframes farm-doc-pulse {
+  0% {
+    opacity: 0;
+    transform: translate3d(-0.25rem, 0, 0);
+  }
+
+  18%,
+  70% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(1.7rem, 0, 0);
+  }
+}
+
+@keyframes farm-doc-preview-line {
+  0%,
+  100% {
+    opacity: 0.24;
+    transform: scaleX(0.28);
+  }
+
+  18%,
+  72% {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+
+@keyframes farm-migration-scan {
+  0%,
+  8% {
+    background-position: -50% 0;
+    opacity: 0;
+  }
+
+  18%,
+  76% {
+    opacity: 1;
+  }
+
+  82%,
+  100% {
+    background-position: 150% 0;
+    opacity: 0;
+  }
+}
+
+@keyframes farm-migration-progress {
+  0%,
+  8% {
+    transform: scaleX(0.08);
+  }
+
+  76%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
 .farm-logo-viewport {
   -webkit-mask-image: linear-gradient(
     to right,
@@ -639,6 +808,18 @@
 
 @media (hover: hover) and (pointer: fine) {
   .farm-logo-viewport:hover .farm-logo-rail {
+    animation-play-state: paused;
+  }
+
+  .group:hover .farm-tree-route,
+  .group:hover .farm-trace-step,
+  .group:hover .farm-trace-pulse,
+  .group:hover .farm-doc-source,
+  .group:hover .farm-doc-pulse,
+  .group:hover .farm-doc-preview-line,
+  .group:hover .farm-migration-row,
+  .group:hover .farm-migration-table::after,
+  .group:hover .farm-migration-progress {
     animation-play-state: paused;
   }
 }
@@ -670,5 +851,36 @@
     opacity: 1;
     animation: none;
     transform: none;
+  }
+
+  .farm-tree-route,
+  .farm-trace-step,
+  .farm-doc-source,
+  .farm-doc-preview-line,
+  .farm-migration-row,
+  .farm-migration-progress {
+    animation: none;
+  }
+
+  .farm-tree-route[data-initial="true"],
+  .farm-trace-step[data-initial="true"],
+  .farm-doc-source[data-initial="true"],
+  .farm-migration-row[data-initial="true"] {
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.075);
+    border-color: rgb(255 255 255 / 0.2);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
+  }
+
+  .farm-doc-preview-line,
+  .farm-migration-progress {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  .farm-trace-pulse,
+  .farm-doc-pulse,
+  .farm-migration-table::after {
+    display: none;
   }
 }

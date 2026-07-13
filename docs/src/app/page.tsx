@@ -4,12 +4,15 @@ import {
   ArrowUpRight,
   Blocks,
   BookOpen,
+  BookOpenCheck,
   BookOpenText,
   Braces,
+  CircleCheck,
   CreditCard,
   ExternalLink,
   FileCode2,
   FileText,
+  FolderOpen,
   FolderTree,
   Gauge,
   GitCompareArrows,
@@ -21,6 +24,7 @@ import {
   Plug,
   Rocket,
   Route,
+  ScanLine,
   Settings2,
   ShieldCheck,
   Terminal,
@@ -723,172 +727,292 @@ function DeveloperExperienceGrid() {
   );
 }
 
+function FoundationIllustrationFrame({
+  icon: Icon,
+  title,
+  status,
+  children,
+}: {
+  icon: LucideIcon;
+  title: string;
+  status: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      aria-hidden
+      className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10"
+    >
+      <div className="relative z-10 -mb-px -mr-px flex h-[300px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] uppercase tracking-normal">
+          <span className="flex min-w-0 items-center gap-2 text-white/46">
+            <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+            <span className="truncate">{title}</span>
+          </span>
+          <span className="ml-3 flex shrink-0 items-center gap-2 text-white/32">
+            <span className="size-1.5 bg-white/52" />
+            {status}
+          </span>
+        </div>
+        <div className="relative min-h-0 flex-1 overflow-hidden">{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function FileTreeVisual() {
-  const files = [
-    ["src/app", "directory"],
-    ["  dashboard/page.tsx", "route"],
-    ["  api/users/route.ts", "api"],
-    ["  docs/page.md", "content"],
-    ["farm.config.ts", "config"],
+  const nodes = [
+    { label: "app", meta: "root", icon: FolderOpen, depth: 0 },
+    { label: "page.tsx", meta: "/", icon: FileCode2, depth: 1, sequence: 0 },
+    {
+      label: "dashboard/page.tsx",
+      meta: "/dashboard",
+      icon: FileCode2,
+      depth: 1,
+      sequence: 1,
+    },
+    {
+      label: "api/users/route.ts",
+      meta: "GET",
+      icon: Braces,
+      depth: 1,
+      sequence: 2,
+    },
+    {
+      label: "docs/[...slug]/page.tsx",
+      meta: "/docs/*",
+      icon: FileText,
+      depth: 1,
+      sequence: 3,
+    },
   ] as const;
 
   return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <div className="flex h-10 shrink-0 items-center border-b border-white/8 px-4 font-mono text-[10px] text-white/32">
-          project
-        </div>
-        <div className="min-h-0 flex-1 py-3">
-          {files.map(([name, kind]) => (
-            <div key={name} className="grid grid-cols-[1fr_auto] px-4 py-2 font-mono text-[11px]">
-              <span
-                className={
-                  kind === "directory" || kind === "config" ? "text-white" : "text-white/58"
-                }
+    <FoundationIllustrationFrame icon={FolderOpen} status="4 routes" title="app directory">
+      <div className="grid h-full grid-rows-[1fr_auto] gap-2 p-4">
+        <div className="relative grid content-start gap-1">
+          <span className="absolute bottom-4 left-[1.9rem] top-8 w-px bg-white/10" />
+          {nodes.map((node) => {
+            const Icon = node.icon;
+            const sequence = "sequence" in node ? node.sequence : null;
+
+            return (
+              <div
+                key={node.label}
+                className={cx(
+                  "relative flex h-8 min-w-0 items-center px-2 font-mono text-[9px] tracking-normal",
+                  node.depth > 0 && "ml-4",
+                  sequence === null
+                    ? "bg-white/[0.035] text-white/72"
+                    : "farm-tree-route text-white/46",
+                )}
+                data-initial={sequence === 0 ? "true" : undefined}
+                style={sequence === null ? undefined : { animationDelay: sequence * 2 + "s" }}
               >
-                {name}
-              </span>
-              <span className="text-white/34">{kind}</span>
-            </div>
-          ))}
+                {node.depth > 0 ? <span className="mr-2 h-px w-2 shrink-0 bg-white/14" /> : null}
+                <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.4} />
+                <span className="ml-2 min-w-0 flex-1 truncate">{node.label}</span>
+                <span className="ml-3 shrink-0 text-[8px] uppercase opacity-52">{node.meta}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="flex h-7 items-center justify-between border-t border-white/8 px-2 font-mono text-[8px] uppercase tracking-normal text-white/30">
+          <span>route manifest</span>
+          <span className="flex items-center gap-1.5 text-white/58">
+            <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
+            synced
+          </span>
         </div>
       </div>
-    </div>
+    </FoundationIllustrationFrame>
   );
 }
 
 function MiddlewareVisual() {
-  const events = [
-    ["request", "/dashboard/settings", "12:04:41.021"],
-    ["matcher", "/dashboard/:path*", "+0.2ms"],
-    ["session", "authenticated", "+1.6ms"],
-    ["render", "dashboard/settings", "+8.4ms"],
-  ] as const;
-
-  return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-rows-4 overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        {events.map(([event, detail, time], index) => (
-          <div
-            key={event}
-            className={cx(
-              "grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 font-mono text-[10px]",
-              index !== 0 && "border-t border-white/8",
-            )}
-          >
-            <span className="text-white/72">{event}</span>
-            <span className="truncate text-white/54">{detail}</span>
-            <span className="text-white/25">{time}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DocsVisual() {
-  const resources = [
+  const steps = [
     {
-      label: "src/app/docs",
-      kind: "route",
-      icon: FolderTree,
-      offset: "translate-x-[28%]",
+      label: "request",
+      detail: "GET /dashboard/settings",
+      time: "0.0ms",
+      icon: Route,
     },
     {
-      label: "getting-started.mdx",
-      kind: "MDX",
-      icon: FileText,
-      offset: "translate-x-[20%]",
+      label: "matcher",
+      detail: "/dashboard/:path*",
+      time: "+0.2",
+      icon: ScanLine,
     },
     {
-      label: "openapi.json",
-      kind: "API",
-      icon: Braces,
-      offset: "translate-x-[12%]",
+      label: "session",
+      detail: "authenticated",
+      time: "+1.6",
+      icon: ShieldCheck,
     },
     {
-      label: "llms.txt",
-      kind: "AI",
-      icon: FileCode2,
-      offset: "translate-x-[4%]",
-      featured: true,
+      label: "render",
+      detail: "dashboard/settings",
+      time: "+8.4",
+      icon: CircleCheck,
     },
   ] as const;
 
   return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px h-[290px] w-full max-w-full overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <div className="flex h-full flex-col justify-center -space-y-2 p-5 transition-[margin] duration-500 ease-out group-hover:space-y-2">
-          {resources.map((resource) => {
-            const Icon = resource.icon;
-            const isFeatured = "featured" in resource && resource.featured;
+    <FoundationIllustrationFrame icon={Network} status="200 / 8.4ms" title="request trace">
+      <div className="relative h-full p-4">
+        <span className="absolute bottom-8 left-[1.7rem] top-8 w-px bg-white/12" />
+        <span className="farm-trace-pulse absolute left-[1.5rem] top-8 z-10 size-1.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
+        <div className="relative z-20 grid h-full grid-rows-4 gap-1">
+          {steps.map((step, index) => {
+            const Icon = step.icon;
 
             return (
               <div
-                key={resource.label}
-                className={cx(
-                  "flex h-16 shrink-0 items-center justify-between border px-4 pt-3 transition-[height,margin,padding,transform,background-color,border-color] duration-500 ease-out group-hover:h-12 group-hover:translate-x-0 group-hover:pt-0",
-                  resource.offset,
-                  isFeatured
-                    ? "border-white bg-white text-black"
-                    : "border-white/10 bg-black text-white",
-                )}
+                key={step.label}
+                className="farm-trace-step grid min-h-0 grid-cols-[1.75rem_4rem_minmax(0,1fr)_auto] items-center gap-2 px-2 font-mono text-[9px] tracking-normal text-white/42"
+                data-initial={index === 0 ? "true" : undefined}
+                style={{ animationDelay: index * 2 + "s" }}
               >
-                <span className="flex min-w-0 items-center gap-2.5">
-                  <Icon
-                    aria-hidden
-                    className={cx(
-                      "size-3.5 shrink-0",
-                      isFeatured ? "text-black/72" : "text-white/52",
-                    )}
-                    strokeWidth={1.5}
-                  />
-                  <span className="truncate font-mono text-[10px] font-normal tracking-normal">
-                    {resource.label}
-                  </span>
-                </span>
-                <span
-                  className={cx(
-                    "ml-4 shrink-0 font-mono text-[9px] uppercase tracking-normal",
-                    isFeatured ? "text-black/52" : "text-white/28",
-                  )}
-                >
-                  {resource.kind}
-                </span>
+                <Icon aria-hidden className="size-3.5" strokeWidth={1.4} />
+                <span className="uppercase text-white/64">{step.label}</span>
+                <span className="truncate">{step.detail}</span>
+                <span className="text-[8px] text-white/24">{step.time}</span>
               </div>
             );
           })}
         </div>
       </div>
-    </div>
+    </FoundationIllustrationFrame>
+  );
+}
+
+function DocsVisual() {
+  const sources = [
+    { label: "guide.mdx", kind: "MDX", icon: FileText },
+    { label: "openapi.json", kind: "API", icon: Braces },
+    { label: "llms.txt", kind: "AI", icon: FileCode2 },
+  ] as const;
+  const previewLines = [82, 64, 91, 54] as const;
+
+  return (
+    <FoundationIllustrationFrame icon={BookOpenCheck} status="published" title="docs pipeline">
+      <div className="grid h-full grid-cols-[minmax(0,0.85fr)_2rem_minmax(0,1.2fr)] items-center gap-2 p-4">
+        <div className="grid gap-2">
+          {sources.map((source, index) => {
+            const Icon = source.icon;
+
+            return (
+              <div
+                key={source.label}
+                className="farm-doc-source flex h-11 min-w-0 items-center border border-white/8 px-2.5 font-mono text-[8px] tracking-normal text-white/42"
+                data-initial={index === 0 ? "true" : undefined}
+                style={{ animationDelay: index * 2 + "s" }}
+              >
+                <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.4} />
+                <span className="ml-2 min-w-0 flex-1 truncate">{source.label}</span>
+                <span className="ml-2 text-white/24">{source.kind}</span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="relative h-full">
+          <span className="absolute left-0 right-0 top-1/2 h-px bg-white/12" />
+          <span className="farm-doc-pulse absolute left-0 top-[calc(50%-2px)] size-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.72)]" />
+          <ArrowRight
+            aria-hidden
+            className="absolute right-0 top-1/2 size-3 -translate-y-1/2 text-white/42"
+            strokeWidth={1.4}
+          />
+        </div>
+
+        <div className="h-[178px] min-w-0 overflow-hidden border border-white/10 bg-black">
+          <div className="flex h-8 items-center justify-between border-b border-white/8 px-2.5 font-mono text-[7px] uppercase text-white/28">
+            <span>docs / getting-started</span>
+            <span className="text-white/52">live</span>
+          </div>
+          <div className="grid h-[146px] grid-cols-[2.5rem_minmax(0,1fr)]">
+            <div className="border-r border-white/8 p-2">
+              <span className="block h-px w-full bg-white/18" />
+              <span className="mt-3 block h-px w-3/4 bg-white/10" />
+              <span className="mt-3 block h-px w-full bg-white/10" />
+              <span className="mt-3 block h-px w-2/3 bg-white/10" />
+            </div>
+            <div className="min-w-0 p-3">
+              <p className="truncate font-mono text-[9px] text-white/72">Getting started</p>
+              <div className="mt-3 grid gap-2">
+                {previewLines.map((width, index) => (
+                  <span
+                    key={width}
+                    className="farm-doc-preview-line block h-px origin-left bg-white/16"
+                    style={{
+                      animationDelay: index * 0.18 + "s",
+                      width: width + "%",
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="mt-4 border border-white/8 bg-white/[0.025] p-2 font-mono text-[7px] text-white/46">
+                pnpm create farm@latest
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </FoundationIllustrationFrame>
   );
 }
 
 function MigrationVisual() {
   const rows = [
-    ["Next.js", "src/app preserved", "ready"],
-    ["Remix", "routes mapped", "ready"],
-    ["Express", "handlers inventoried", "ready"],
+    { source: "Next.js", evidence: "18 routes", result: "matched" },
+    { source: "Remix", evidence: "9 routes", result: "matched" },
+    { source: "Express", evidence: "5 handlers", result: "wrapped" },
   ] as const;
 
   return (
-    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
-        <div className="mt-4 grid min-h-0 flex-1 grid-rows-3 gap-2">
-          {rows.map(([source, detail, status]) => (
+    <FoundationIllustrationFrame
+      icon={GitCompareArrows}
+      status="0 conflicts"
+      title="migration audit"
+    >
+      <div className="grid h-full grid-rows-[auto_1fr_auto] p-4">
+        <div className="grid grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/8 px-2 pb-3 font-mono text-[8px] uppercase tracking-normal text-white/26">
+          <span>source inventory</span>
+          <ArrowRight aria-hidden className="size-3" strokeWidth={1.4} />
+          <span>farm manifest</span>
+          <span>evidence</span>
+        </div>
+
+        <div className="farm-migration-table relative grid content-center">
+          {rows.map((row, index) => (
             <div
-              key={source}
-              className="grid grid-cols-[4rem_1fr_auto] items-center gap-3 border border-white/8 px-3 py-2 font-mono text-[9px] sm:text-[10px]"
+              key={row.source}
+              className="farm-migration-row grid h-12 grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] items-center gap-2 border-t border-white/[0.065] px-2 font-mono text-[8px] tracking-normal text-white/42 first:border-t-0"
+              data-initial={index === 0 ? "true" : undefined}
+              style={{ animationDelay: index * 2 + "s" }}
             >
-              <span className="text-white">{source}</span>
-              <span className="truncate text-white/42">{detail}</span>
-              <span className="text-white/68">{status}</span>
+              <span className="truncate text-white/68">{row.source}</span>
+              <ArrowRight aria-hidden className="size-3" strokeWidth={1.4} />
+              <span className="truncate">{row.evidence}</span>
+              <span className="flex items-center gap-1.5 text-white/58">
+                <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
+                {row.result}
+              </span>
             </div>
           ))}
         </div>
+
+        <div className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-white/8 pt-3">
+          <span className="h-px overflow-hidden bg-white/10">
+            <span className="farm-migration-progress block h-full origin-left bg-white/72" />
+          </span>
+          <span className="font-mono text-[8px] uppercase tracking-normal text-white/42">
+            32 / 32 ready
+          </span>
+        </div>
       </div>
-    </div>
+    </FoundationIllustrationFrame>
   );
 }
 
