@@ -518,8 +518,8 @@ function HeadingSection({
 
 function TerminalVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex h-[320px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+    <div className="farm-feature-spotlight relative flex h-[360px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/58 shadow-[0_28px_70px_rgba(0,0,0,0.36)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
@@ -552,15 +552,13 @@ function TerminalVisual() {
 
 function TypedApiVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="absolute left-6 top-0 z-20 flex h-[30px] items-center border border-white/12 bg-black/72 px-3 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
-        GET /api/users/:id
-      </div>
+    <div className="farm-feature-spotlight relative flex h-[360px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={typedApiCode}
-        label="src/app/dashboard/page.tsx"
+        label="/api/users/:id"
         language="tsx"
+        prefix="GET"
       />
     </div>
   );
@@ -568,7 +566,7 @@ function TypedApiVisual() {
 
 function IntegrationVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
+    <div className="farm-feature-spotlight relative flex h-[360px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={integrationConfigCode}
@@ -581,8 +579,8 @@ function IntegrationVisual() {
 
 function BuildVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex h-[320px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+    <div className="farm-feature-spotlight relative flex h-[360px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/58 shadow-[0_28px_70px_rgba(0,0,0,0.36)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/34">
           <span className="flex items-center gap-1.5">
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
