@@ -24,10 +24,7 @@ export function HeroTitleFrame({ children }: HeroTitleFrameProps) {
 
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (!entry?.isIntersecting) return;
-
-        setIsVisible(true);
-        observer.disconnect();
+        setIsVisible(Boolean(entry?.isIntersecting));
       },
       { threshold: 0.3 },
     );

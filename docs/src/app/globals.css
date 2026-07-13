@@ -134,10 +134,11 @@
     opacity: 0;
     pointer-events: none;
     transform: translate3d(10px, 10px, 0);
+    will-change: inset, opacity, transform;
   }
 
   .farm-hero-title-frame[data-visible="true"] .farm-hero-title-frame-border {
-    animation: farm-hero-title-frame-reveal 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation: farm-hero-title-frame-cycle 7.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
   }
 
   .farm-hero-title-frame-corner {
@@ -490,21 +491,62 @@
   }
 }
 
-@keyframes farm-hero-title-frame-reveal {
-  0% {
+@keyframes farm-hero-title-frame-cycle {
+  0%,
+  100% {
+    top: 0;
     right: 100%;
     bottom: 100%;
+    left: 0;
     opacity: 0;
     transform: translate3d(10px, 10px, 0);
   }
-  12% {
+
+  3% {
     opacity: 1;
   }
-  100% {
+
+  18%,
+  34% {
+    top: 0;
     right: 0;
     bottom: 0;
+    left: 0;
     opacity: 1;
     transform: translate3d(0, 0, 0);
+  }
+
+  46%,
+  50% {
+    top: 100%;
+    right: 0;
+    bottom: 0;
+    left: 100%;
+    opacity: 0;
+    transform: translate3d(-10px, -10px, 0);
+  }
+
+  53% {
+    opacity: 1;
+  }
+
+  68%,
+  84% {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  96% {
+    top: 0;
+    right: 100%;
+    bottom: 100%;
+    left: 0;
+    opacity: 0;
+    transform: translate3d(10px, 10px, 0);
   }
 }
 
@@ -560,8 +602,10 @@
 
   .farm-hero-title-frame-border,
   .farm-hero-title-frame[data-visible="true"] .farm-hero-title-frame-border {
+    top: 0;
     right: 0;
     bottom: 0;
+    left: 0;
     opacity: 1;
     animation: none;
     transform: none;
