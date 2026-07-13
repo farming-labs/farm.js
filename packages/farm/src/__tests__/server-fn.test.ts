@@ -137,6 +137,78 @@ describe("createServerFn", () => {
     expectTypeOf(await signup({ email: "ada@example.com" })).toEqualTypeOf<{ ok: true }>();
   });
 
+  it("validates and filters handler results with an output schema", async () => {
+    const publicUserSchema = z.object({
+      id: z.string(),
+      email: z.string().email(),
+    });
+    const getUser = createServerFn({
+      input: z.object({ id: z.string() }),
+      output: publicUserSchema,
+      async handler({ input }) {
+        const databaseUser = {
+          id: input.id,
+          email: "ada@example.com",
+          passwordHash: "must-not-cross-the-action-boundary",
+        };
+
+        return databaseUser;
+      },
+    });
+
+    const result = await getUser({ id: "user-1" });
+
+    expect(result).toEqual({ id: "user-1", email: "ada@example.com" });
+    expect(result).not.toHaveProperty("passwordHash");
+    expectTypeOf(result).toEqualTypeOf<{ id: string; email: string }>();
+    expect(getUser.__farmServerFnOutput).toBe(publicUserSchema);
+    expect(Object.keys(getUser)).not.toContain("__farmServerFnOutput");
+  });
+
+  it("returns the transformed output type from asynchronous handlers", async () => {
+    const formatCount = createServerFn({
+      input: z.object({ count: z.number().int() }),
+      output: z.object({ count: z.number() }).transform(({ count }) => `count:${count}`),
+      async handler({ input }) {
+        expectTypeOf(input).toEqualTypeOf<{ count: number }>();
+        return { count: input.count };
+      },
+    });
+
+    expectTypeOf(formatCount).parameter(0).toEqualTypeOf<{ count: number } | FormData>();
+    const result = await formatCount({ count: 3 });
+    expect(result).toBe("count:3");
+    expectTypeOf(result).toEqualTypeOf<string>();
+  });
+
+  it("rejects results that fail the output contract", async () => {
+    const getProfile = createServerFn({
+      output: z.object({ displayName: z.string().min(1) }),
+      handler() {
+        return { displayName: 42 } as unknown as { displayName: string };
+      },
+    });
+
+    await expect(getProfile()).rejects.toBeTruthy();
+  });
+
+  it("reports invalid output parser contracts precisely", async () => {
+    const invalidOutput = {} as {
+      _input: { ok: boolean };
+      _output: { ok: boolean };
+    };
+    const action = createServerFn({
+      output: invalidOutput,
+      handler() {
+        return { ok: true };
+      },
+    });
+
+    await expect(action()).rejects.toThrow(
+      "createServerFn output must provide parse, parseAsync, or safeParse",
+    );
+  });
+
   it("provides the action request and cancellation signal to handlers", async () => {
     const controller = new AbortController();
     const request = new Request("https://app.example.com/action", {
