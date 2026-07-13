@@ -7,21 +7,20 @@ import {
   BookOpenText,
   Braces,
   CreditCard,
-  Database,
   ExternalLink,
   FileCode2,
   FileText,
+  FolderTree,
   Gauge,
+  GitCompareArrows,
   GitFork,
   KeyRound,
   Layers3,
-  Mail,
   Menu,
   Network,
   Plug,
   Rocket,
   Route,
-  ServerCog,
   Settings2,
   ShieldCheck,
   Terminal,
@@ -66,39 +65,6 @@ const ecosystemItems = [
   { label: "Prisma", brand: prismaIconUrl },
   { label: "Better Auth", brand: betterAuthIconUrl },
   { label: "Stripe", brand: stripeIconUrl },
-] as const;
-
-const stackItems = [
-  {
-    label: "Better Auth",
-    detail: "session + routes",
-    icon: ShieldCheck,
-  },
-  {
-    label: "Stripe",
-    detail: "billing + webhooks",
-    icon: CreditCard,
-  },
-  {
-    label: "Trigger.dev",
-    detail: "jobs + events",
-    icon: Workflow,
-  },
-  {
-    label: "Resend",
-    detail: "email + templates",
-    icon: Mail,
-  },
-  {
-    label: "Prisma",
-    detail: "schema + storage",
-    icon: Database,
-  },
-  {
-    label: "OpenAPI",
-    detail: "schema + clients",
-    icon: FileCode2,
-  },
 ] as const;
 
 const integrationDirectoryItems = [
@@ -591,36 +557,6 @@ function EcosystemStrip() {
   );
 }
 
-function HeadingSection({
-  index,
-  eyebrow,
-  icon,
-  title,
-  body,
-}: {
-  index: string;
-  eyebrow: string;
-  icon: LucideIcon;
-  title: string;
-  body?: string;
-}) {
-  return (
-    <section className="farm-wide-rule grid min-h-[320px] w-full lg:grid-cols-[14rem_1fr]">
-      <div className="flex items-start border-b border-white/12 p-6 text-white/36 lg:border-b-0 lg:border-r sm:p-8">
-        <IndexedLabel icon={icon} index={index} label={eyebrow} />
-      </div>
-      <div className="flex items-center px-6 py-16 sm:px-10 lg:px-14 lg:py-20">
-        <div className="max-w-4xl">
-          <h2 className="max-w-[18ch] text-balance text-4xl font-medium leading-[1.04] tracking-normal text-white sm:text-5xl lg:text-[3.5rem]">
-            {title}
-          </h2>
-          {body ? <p className="mt-6 max-w-2xl text-base leading-7 text-white/46">{body}</p> : null}
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function TerminalVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
@@ -787,175 +723,213 @@ function DeveloperExperienceGrid() {
   );
 }
 
-function StackMap() {
-  const integrationRows = [
-    [
-      {
-        key: "auth",
-        label: "Better Auth",
-        detail: "session + routes",
-        icon: ShieldCheck,
-        className: "flex-[1.1]",
-      },
-      { key: "blank-1", className: "flex-[0.45]" },
-      {
-        key: "billing",
-        label: "Stripe",
-        detail: "billing + webhooks",
-        icon: CreditCard,
-        className: "flex-[0.9]",
-      },
-    ],
-    [
-      { key: "blank-2", className: "flex-[0.35]" },
-      {
-        key: "database",
-        label: "Prisma",
-        detail: "schema + storage",
-        icon: Database,
-        className: "flex-1",
-      },
-      {
-        key: "config",
-        label: "farm.config.ts",
-        detail: "integration registry",
-        icon: Settings2,
-        className: "flex-[1.15]",
-        featured: true,
-      },
-      { key: "blank-3", className: "flex-[0.4]" },
-    ],
-    [
-      {
-        key: "jobs",
-        label: "Trigger.dev",
-        detail: "jobs + events",
-        icon: Workflow,
-        className: "flex-1",
-      },
-      {
-        key: "email",
-        label: "Resend",
-        detail: "email + templates",
-        icon: Mail,
-        className: "flex-[0.9]",
-      },
-      { key: "blank-4", className: "flex-[0.5]" },
-      {
-        key: "openapi",
-        label: "OpenAPI",
-        detail: "schema + clients",
-        icon: FileCode2,
-        className: "flex-1",
-      },
-    ],
-    [
-      { key: "blank-5", className: "flex-[0.55]" },
-      {
-        key: "docs",
-        label: "Docs registry",
-        detail: "MDX + references",
-        icon: BookOpenText,
-        className: "flex-1",
-      },
-      {
-        key: "routes",
-        label: "Route manifest",
-        detail: "pages + APIs",
-        icon: Route,
-        className: "flex-1",
-      },
-      { key: "blank-6", className: "flex-[0.35]" },
-    ],
+function FileTreeVisual() {
+  const files = [
+    ["src/app", "directory"],
+    ["  dashboard/page.tsx", "route"],
+    ["  api/users/route.ts", "api"],
+    ["  docs/page.md", "content"],
+    ["farm.config.ts", "config"],
   ] as const;
 
   return (
-    <section className="farm-full-rule farm-feature-spotlight group w-full">
-      <div className="relative z-10 grid gap-2 p-5 sm:hidden">
-        <div className="mb-3 border border-white/24 bg-black p-4 text-center">
-          <Settings2 aria-hidden className="mx-auto size-4 text-white/68" strokeWidth={1.5} />
-          <p className="mt-3 font-mono text-xs text-white">farm.config.ts</p>
-          <p className="mt-1 text-xs text-white/38">one framework contract</p>
+    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <div className="flex h-10 shrink-0 items-center border-b border-white/8 px-4 font-mono text-[10px] text-white/32">
+          project
         </div>
-        <div className="grid grid-cols-2 gap-2">
-          {stackItems.map((item) => {
-            const Icon = item.icon;
+        <div className="min-h-0 flex-1 py-3">
+          {files.map(([name, kind]) => (
+            <div key={name} className="grid grid-cols-[1fr_auto] px-4 py-2 font-mono text-[11px]">
+              <span
+                className={
+                  kind === "directory" || kind === "config" ? "text-white" : "text-white/58"
+                }
+              >
+                {name}
+              </span>
+              <span className="text-white/34">{kind}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiddlewareVisual() {
+  const events = [
+    ["request", "/dashboard/settings", "12:04:41.021"],
+    ["matcher", "/dashboard/:path*", "+0.2ms"],
+    ["session", "authenticated", "+1.6ms"],
+    ["render", "dashboard/settings", "+8.4ms"],
+  ] as const;
+
+  return (
+    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-rows-4 overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        {events.map(([event, detail, time], index) => (
+          <div
+            key={event}
+            className={cx(
+              "grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 font-mono text-[10px]",
+              index !== 0 && "border-t border-white/8",
+            )}
+          >
+            <span className="text-white/72">{event}</span>
+            <span className="truncate text-white/54">{detail}</span>
+            <span className="text-white/25">{time}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DocsVisual() {
+  const resources = [
+    {
+      label: "src/app/docs",
+      kind: "route",
+      icon: FolderTree,
+      offset: "translate-x-[28%]",
+    },
+    {
+      label: "getting-started.mdx",
+      kind: "MDX",
+      icon: FileText,
+      offset: "translate-x-[20%]",
+    },
+    {
+      label: "openapi.json",
+      kind: "API",
+      icon: Braces,
+      offset: "translate-x-[12%]",
+    },
+    {
+      label: "llms.txt",
+      kind: "AI",
+      icon: FileCode2,
+      offset: "translate-x-[4%]",
+      featured: true,
+    },
+  ] as const;
+
+  return (
+    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <div className="relative z-10 -mb-px -mr-px h-[290px] w-full max-w-full overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <div className="flex h-full flex-col justify-center -space-y-2 p-5 transition-[margin] duration-500 ease-out group-hover:space-y-2">
+          {resources.map((resource) => {
+            const Icon = resource.icon;
+            const isFeatured = "featured" in resource && resource.featured;
 
             return (
-              <div key={item.label} className="border border-white/10 bg-black p-3">
-                <div className="flex items-center gap-2">
-                  <Icon aria-hidden className="size-3.5 text-white/56" strokeWidth={1.5} />
-                  <p className="font-mono text-[11px] font-normal uppercase text-white/78">
-                    {item.label}
-                  </p>
-                </div>
-                <p className="mt-2 font-mono text-[9px] text-white/32">{item.detail}</p>
+              <div
+                key={resource.label}
+                className={cx(
+                  "flex h-16 shrink-0 items-center justify-between border px-4 pt-3 transition-[height,margin,padding,transform,background-color,border-color] duration-500 ease-out group-hover:h-12 group-hover:translate-x-0 group-hover:pt-0",
+                  resource.offset,
+                  isFeatured
+                    ? "border-white bg-white text-black"
+                    : "border-white/10 bg-black text-white",
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2.5">
+                  <Icon
+                    aria-hidden
+                    className={cx(
+                      "size-3.5 shrink-0",
+                      isFeatured ? "text-black/72" : "text-white/52",
+                    )}
+                    strokeWidth={1.5}
+                  />
+                  <span className="truncate font-mono text-[10px] font-normal tracking-normal">
+                    {resource.label}
+                  </span>
+                </span>
+                <span
+                  className={cx(
+                    "ml-4 shrink-0 font-mono text-[9px] uppercase tracking-normal",
+                    isFeatured ? "text-black/52" : "text-white/28",
+                  )}
+                >
+                  {resource.kind}
+                </span>
               </div>
             );
           })}
         </div>
       </div>
+    </div>
+  );
+}
 
-      <div className="relative z-10 hidden h-[520px] items-center overflow-hidden sm:flex">
-        <div className="mx-auto grid w-full max-w-6xl gap-2 px-6 transition-transform duration-500 ease-out lg:translate-x-[7%] lg:px-0 lg:group-hover:translate-x-0 lg:group-hover:scale-[0.98]">
-          {integrationRows.map((row, rowIndex) => (
-            <div key={rowIndex} className="flex w-full gap-2">
-              {row.map((cell) => {
-                if (!("label" in cell)) {
-                  return (
-                    <div
-                      key={cell.key}
-                      aria-hidden
-                      className={cx(
-                        "h-16 min-w-14 border border-white/[0.055] bg-black/70",
-                        cell.className,
-                      )}
-                    />
-                  );
-                }
+function MigrationVisual() {
+  const rows = [
+    ["Next.js", "src/app preserved", "ready"],
+    ["Remix", "routes mapped", "ready"],
+    ["Express", "handlers inventoried", "ready"],
+  ] as const;
 
-                const Icon = cell.icon;
-                const isFeatured = "featured" in cell && cell.featured;
-
-                return (
-                  <div
-                    key={cell.key}
-                    className={cx(
-                      "flex h-16 min-w-0 items-center border px-4",
-                      cell.className,
-                      isFeatured
-                        ? "border-white bg-white text-black"
-                        : "border-white/10 bg-black text-white",
-                    )}
-                  >
-                    <Icon
-                      aria-hidden
-                      className={cx(
-                        "size-4 shrink-0",
-                        isFeatured ? "text-black/68" : "text-white/48",
-                      )}
-                      strokeWidth={1.5}
-                    />
-                    <div className="ml-3 min-w-0">
-                      <p className="truncate font-mono text-[10px] font-normal uppercase tracking-normal">
-                        {cell.label}
-                      </p>
-                      <p
-                        className={cx(
-                          "mt-1 truncate font-mono text-[9px] tracking-normal",
-                          isFeatured ? "text-black/48" : "text-white/28",
-                        )}
-                      >
-                        {cell.detail}
-                      </p>
-                    </div>
-                  </div>
-                );
-              })}
+  return (
+    <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
+        <div className="mt-4 grid min-h-0 flex-1 grid-rows-3 gap-2">
+          {rows.map(([source, detail, status]) => (
+            <div
+              key={source}
+              className="grid grid-cols-[4rem_1fr_auto] items-center gap-3 border border-white/8 px-3 py-2 font-mono text-[9px] sm:text-[10px]"
+            >
+              <span className="text-white">{source}</span>
+              <span className="truncate text-white/42">{detail}</span>
+              <span className="text-white/68">{status}</span>
             </div>
           ))}
         </div>
       </div>
+    </div>
+  );
+}
+
+function FoundationGrid() {
+  return (
+    <section className="farm-full-rule grid w-full lg:grid-cols-2">
+      <FeatureCell
+        body="Pages, layouts, route handlers, loading states, markdown, and typed links live in the app directory."
+        icon={FolderTree}
+        index="02.1"
+        title="A Familiar App Router"
+      >
+        <FileTreeVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Config and file middleware are discovered, traced, tested, and compiled into deployment matchers."
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
+        icon={Network}
+        index="02.2"
+        title="Middleware You Can See"
+      >
+        <MiddlewareVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
+        className="border-t border-white/12"
+        icon={BookOpenText}
+        index="02.3"
+        title="Docs Are Part of the App"
+      >
+        <DocsVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Inventory routes from Next.js, Remix, Express, and custom servers before changing application source."
+        className="border-t border-white/12 lg:border-l"
+        icon={GitCompareArrows}
+        index="02.4"
+        title="Migrate With Evidence"
+      >
+        <MigrationVisual />
+      </FeatureCell>
     </section>
   );
 }
@@ -1152,14 +1126,7 @@ export default function HomePage(_props: PageProps) {
             <EcosystemStrip />
             <DeveloperExperienceGrid />
             <IntegrationsSection />
-            <HeadingSection
-              body="Framework integrations can register routes, server APIs, docs, generated clients, and lifecycle hooks together."
-              eyebrow="Product systems"
-              icon={ServerCog}
-              index="03"
-              title="Bring your product stack with you"
-            />
-            <StackMap />
+            <FoundationGrid />
             <FinalCta />
           </main>
           <Footer />
