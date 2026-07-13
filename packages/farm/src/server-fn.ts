@@ -53,17 +53,17 @@ export type ServerFnOutputOptions<
   output: TOutputSchema;
   handler: ServerFnHandler<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
-    InferServerFnSchemaInput<TOutputSchema>
+    unknown
   >;
 };
 
 export type ServerFn<TInput, TResult> = ([unknown] extends [TInput]
   ? (input?: TInput | FormData) => Promise<TResult>
   : (input: TInput | FormData) => Promise<TResult>) & {
-    readonly __farmServerFn: true;
-    readonly __farmServerFnInput?: unknown;
-    readonly __farmServerFnOutput?: unknown;
-  };
+  readonly __farmServerFn: true;
+  readonly __farmServerFnInput?: unknown;
+  readonly __farmServerFnOutput?: unknown;
+};
 
 export const FARM_SERVER_FN_SYMBOL = Symbol.for("farm.server-fn");
 
@@ -161,9 +161,7 @@ async function parseSchema(
     return schema.parse(value);
   }
 
-  throw new TypeError(
-    `createServerFn ${contract} must provide parse, parseAsync, or safeParse`,
-  );
+  throw new TypeError(`createServerFn ${contract} must provide parse, parseAsync, or safeParse`);
 }
 
 function unwrapSafeParseResult(result: unknown) {
