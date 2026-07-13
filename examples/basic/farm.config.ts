@@ -2,6 +2,7 @@ import { defineFarmConfig, type FarmPlugin } from '@farmjs/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farmjs/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
+import { integrationLab } from './src/lib/integration-lab.ts';
 
 const myCustomPlugin: FarmPlugin = {
   name: 'my-custom-plugin',
@@ -40,6 +41,8 @@ export default defineFarmConfig({
     serverComponents: true,
     serverActions: true,
   },
+
+  integrations: integrationLab,
 
   context: async ({ request, path }) => ({
     tenant: {

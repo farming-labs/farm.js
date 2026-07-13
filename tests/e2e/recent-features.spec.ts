@@ -207,4 +207,103 @@ test.describe("Recent feature integration", () => {
       result: { deleted: 0 },
     });
   });
+
+  test("runs integration handlers and typed browser and server callers", async ({
+    page,
+    request,
+  }) => {
+    const invalid = await request.post("/api/route-lab/message", {
+      data: { message: "" },
+    });
+    expect(invalid.status()).toBe(400);
+
+    const directRoute = await request.post("/api/route-lab/message", {
+      data: { message: "direct-routes" },
+      headers: { "x-request-id": "integration-direct" },
+    });
+    expect(directRoute.status()).toBe(200);
+    expect(directRoute.headers()["x-integration-after"]).toBe("routes");
+    await expect(directRoute.json()).resolves.toEqual(
+      expect.objectContaining({
+        source: "routes",
+        message: "direct-routes",
+        caller: "direct",
+        requestId: "integration-direct",
+        trace: ["integration-middleware", "route-middleware", "before", "handler"],
+        lifecycle: {
+          label: "configured",
+          setup: true,
+          ready: true,
+        },
+      }),
+    );
+
+    const directEndpoint = await request.post("/api/endpoint-lab/message", {
+      data: { message: "direct-endpoints" },
+    });
+    expect(directEndpoint.status()).toBe(200);
+    expect(directEndpoint.headers()["x-integration-after"]).toBe("endpoints");
+    await expect(directEndpoint.json()).resolves.toEqual(
+      expect.objectContaining({
+        source: "endpoints",
+        message: "direct-endpoints",
+        caller: "direct",
+        trace: ["handler"],
+      }),
+    );
+
+    const directContract = await request.post("/api/contract-lab/message", {
+      data: { message: "direct-api" },
+    });
+    expect(directContract.status()).toBe(200);
+    expect(directContract.headers()["x-integration-after"]).toBe("api");
+    await expect(directContract.json()).resolves.toEqual(
+      expect.objectContaining({
+        source: "api",
+        message: "direct-api",
+        caller: "direct",
+        trace: ["handler"],
+      }),
+    );
+
+    const serverCallers = await request.get("/api/integration-lab/server");
+    expect(serverCallers.status()).toBe(200);
+    await expect(serverCallers.json()).resolves.toEqual(
+      expect.objectContaining({
+        routes: expect.objectContaining({
+          source: "routes",
+          message: "server-routes",
+          caller: "server",
+        }),
+        endpoints: expect.objectContaining({
+          source: "endpoints",
+          message: "server-endpoints",
+          caller: "server",
+        }),
+        api: expect.objectContaining({
+          source: "api",
+          message: "server-api",
+          caller: "server",
+        }),
+      }),
+    );
+
+    await page.goto("/feature-lab/integrations");
+
+    await page.getByTestId("call-integration-routes").click();
+    await expect(page.getByTestId("integration-client-routes")).toContainText(
+      '"message":"browser-routes"',
+    );
+    await expect(page.getByTestId("integration-client-routes")).toContainText('"caller":"browser"');
+
+    await page.getByTestId("call-integration-endpoints").click();
+    await expect(page.getByTestId("integration-client-endpoints")).toContainText(
+      '"message":"browser-endpoints"',
+    );
+
+    await page.getByTestId("call-integration-api").click();
+    await expect(page.getByTestId("integration-client-api")).toContainText(
+      '"message":"browser-api"',
+    );
+  });
 });
