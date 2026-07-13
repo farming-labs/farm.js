@@ -1023,8 +1023,8 @@ function FinalCta() {
   return (
     <section className="farm-full-rule w-full">
       <div className="px-6 py-10 text-center sm:px-10 sm:py-12">
-        <h2 className="text-balance text-xl font-semibold leading-tight tracking-normal text-white sm:text-2xl">
-          From first route to production.
+        <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl">
+          One framework. The whole product.
         </h2>
         <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
           Build routing, APIs, integrations, docs, and deployment together in one React framework.
