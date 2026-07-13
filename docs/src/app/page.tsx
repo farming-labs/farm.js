@@ -741,21 +741,21 @@ function FoundationIllustrationFrame({
   return (
     <div
       aria-hidden
-      className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10"
+      className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10"
     >
-      <div className="relative z-10 -mb-px -mr-px flex h-[300px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
-        <div className="flex h-11 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] uppercase tracking-normal">
-          <span className="flex min-w-0 items-center gap-2 text-white/46">
-            <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+      <figure className="farm-foundation-frame relative z-10 -mb-px -mr-px flex h-[296px] w-full min-w-0 max-w-full flex-col overflow-hidden border border-white/12 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.28)] sm:h-[300px]">
+        <figcaption className="flex h-10 shrink-0 items-center justify-between border-b border-white/10 px-3.5 font-mono text-[9px] uppercase tracking-normal sm:px-4 sm:text-[10px]">
+          <span className="flex min-w-0 items-center gap-2 text-white/52">
+            <Icon aria-hidden className="size-3.5 shrink-0 text-white/62" strokeWidth={1.5} />
             <span className="truncate">{title}</span>
           </span>
-          <span className="ml-3 flex shrink-0 items-center gap-2 text-white/32">
-            <span className="size-1.5 bg-white/52" />
+          <span className="ml-3 flex shrink-0 items-center gap-2 text-white/38">
+            <span className="size-1.5 bg-white/70 shadow-[0_0_8px_rgba(255,255,255,0.32)]" />
             {status}
           </span>
-        </div>
+        </figcaption>
         <div className="relative min-h-0 flex-1 overflow-hidden">{children}</div>
-      </div>
+      </figure>
     </div>
   );
 }
@@ -789,40 +789,67 @@ function FileTreeVisual() {
 
   return (
     <FoundationIllustrationFrame icon={FolderOpen} status="4 routes" title="app directory">
-      <div className="grid h-full grid-rows-[1fr_auto] gap-2 p-4">
-        <div className="relative grid content-start gap-1">
-          <span className="absolute bottom-4 left-[1.9rem] top-8 w-px bg-white/10" />
-          {nodes.map((node) => {
-            const Icon = node.icon;
-            const sequence = "sequence" in node ? node.sequence : null;
+      <div className="grid h-full min-w-0 grid-cols-[minmax(0,1.18fr)_minmax(7.25rem,0.82fr)]">
+        <div className="relative min-w-0 border-r border-white/10 p-3">
+          <span className="absolute bottom-[2.15rem] left-[2.1rem] top-[2.8rem] w-px bg-white/12" />
+          <div className="relative grid content-start gap-1">
+            {nodes.map((node) => {
+              const Icon = node.icon;
+              const sequence = "sequence" in node ? node.sequence : null;
 
-            return (
-              <div
-                key={node.label}
-                className={cx(
-                  "relative flex h-8 min-w-0 items-center px-2 font-mono text-[9px] tracking-normal",
-                  node.depth > 0 && "ml-4",
-                  sequence === null
-                    ? "bg-white/[0.035] text-white/72"
-                    : "farm-tree-route text-white/46",
-                )}
-                data-initial={sequence === 0 ? "true" : undefined}
-                style={sequence === null ? undefined : { animationDelay: sequence * 2 + "s" }}
-              >
-                {node.depth > 0 ? <span className="mr-2 h-px w-2 shrink-0 bg-white/14" /> : null}
-                <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.4} />
-                <span className="ml-2 min-w-0 flex-1 truncate">{node.label}</span>
-                <span className="ml-3 shrink-0 text-[8px] uppercase opacity-52">{node.meta}</span>
-              </div>
-            );
-          })}
+              return (
+                <div
+                  key={node.label}
+                  className={cx(
+                    "relative flex h-8 min-w-0 items-center border border-transparent px-2 font-mono text-[9px] tracking-normal sm:text-[10px]",
+                    node.depth > 0 && "ml-3",
+                    sequence === null
+                      ? "bg-white/[0.04] text-white/78"
+                      : "farm-tree-route text-white/48",
+                  )}
+                  data-initial={sequence === 0 ? "true" : undefined}
+                  style={sequence === null ? undefined : { animationDelay: sequence * 2 + "s" }}
+                >
+                  {node.depth > 0 ? <span className="mr-2 h-px w-2 shrink-0 bg-white/18" /> : null}
+                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/68" strokeWidth={1.4} />
+                  <span className="ml-2 min-w-0 flex-1 truncate">{node.label}</span>
+                  <span className="ml-2 shrink-0 text-[8px] uppercase opacity-55">{node.meta}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="absolute bottom-3 left-3 right-3 flex h-7 items-center justify-between border-t border-white/10 px-2 font-mono text-[8px] uppercase tracking-normal text-white/34">
+            <span>manifest</span>
+            <span className="flex items-center gap-1.5 text-white/68">
+              <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
+              synced
+            </span>
+          </div>
         </div>
-        <div className="flex h-7 items-center justify-between border-t border-white/8 px-2 font-mono text-[8px] uppercase tracking-normal text-white/30">
-          <span>route manifest</span>
-          <span className="flex items-center gap-1.5 text-white/58">
-            <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
-            synced
-          </span>
+
+        <div className="flex min-w-0 flex-col justify-between p-3">
+          <div>
+            <span className="font-mono text-[8px] uppercase tracking-normal text-white/34">
+              route graph
+            </span>
+            <div className="mt-2 flex items-end gap-2">
+              <span className="font-geist-pixel text-[38px] leading-none text-white">04</span>
+              <span className="pb-1 font-mono text-[8px] uppercase text-white/38">ready</span>
+            </div>
+          </div>
+
+          <div className="grid gap-2 border-t border-white/10 pt-3 font-mono text-[8px] uppercase tracking-normal">
+            <span className="flex items-center justify-between gap-2 text-white/38">
+              pages <strong className="font-normal text-white/76">02</strong>
+            </span>
+            <span className="flex items-center justify-between gap-2 text-white/38">
+              handlers <strong className="font-normal text-white/76">01</strong>
+            </span>
+            <span className="flex items-center justify-between gap-2 text-white/38">
+              catch-all <strong className="font-normal text-white/76">01</strong>
+            </span>
+          </div>
         </div>
       </div>
     </FoundationIllustrationFrame>
@@ -859,27 +886,35 @@ function MiddlewareVisual() {
 
   return (
     <FoundationIllustrationFrame icon={Network} status="200 / 8.4ms" title="request trace">
-      <div className="relative h-full p-4">
-        <span className="absolute bottom-8 left-[1.7rem] top-8 w-px bg-white/12" />
-        <span className="farm-trace-pulse absolute left-[1.5rem] top-8 z-10 size-1.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.8)]" />
-        <div className="relative z-20 grid h-full grid-rows-4 gap-1">
+      <div className="relative grid h-full grid-rows-[1fr_auto] px-3 py-2.5">
+        <span className="absolute bottom-[3.65rem] left-8 top-[2.15rem] w-px bg-white/14" />
+        <span className="farm-trace-pulse absolute left-[1.81rem] top-[2.15rem] z-10 size-1.5 bg-white shadow-[0_0_12px_rgba(255,255,255,0.82)]" />
+        <div className="relative z-20 grid min-h-0 grid-rows-4 gap-1">
           {steps.map((step, index) => {
             const Icon = step.icon;
 
             return (
               <div
                 key={step.label}
-                className="farm-trace-step grid min-h-0 grid-cols-[1.75rem_4rem_minmax(0,1fr)_auto] items-center gap-2 px-2 font-mono text-[9px] tracking-normal text-white/42"
+                className="farm-trace-step grid min-h-0 grid-cols-[1.75rem_4.5rem_minmax(0,1fr)_2.75rem] items-center gap-2 border border-transparent px-2 font-mono text-[9px] tracking-normal text-white/46 sm:text-[10px]"
                 data-initial={index === 0 ? "true" : undefined}
                 style={{ animationDelay: index * 2 + "s" }}
               >
-                <Icon aria-hidden className="size-3.5" strokeWidth={1.4} />
-                <span className="uppercase text-white/64">{step.label}</span>
+                <Icon aria-hidden className="size-3.5 text-white/66" strokeWidth={1.4} />
+                <span className="uppercase text-white/72">{step.label}</span>
                 <span className="truncate">{step.detail}</span>
-                <span className="text-[8px] text-white/24">{step.time}</span>
+                <span className="text-right text-[8px] text-white/34">{step.time}</span>
               </div>
             );
           })}
+        </div>
+
+        <div className="relative z-20 mt-2 flex h-8 items-center justify-between border-t border-white/10 px-2 font-mono text-[8px] uppercase tracking-normal text-white/36">
+          <span>compiled matcher</span>
+          <span className="flex items-center gap-1.5 text-white/72">
+            <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
+            response 200
+          </span>
         </div>
       </div>
     </FoundationIllustrationFrame>
@@ -896,55 +931,62 @@ function DocsVisual() {
 
   return (
     <FoundationIllustrationFrame icon={BookOpenCheck} status="published" title="docs pipeline">
-      <div className="grid h-full grid-cols-[minmax(0,0.85fr)_2rem_minmax(0,1.2fr)] items-center gap-2 p-4">
-        <div className="grid gap-2">
-          {sources.map((source, index) => {
-            const Icon = source.icon;
+      <div className="grid h-full min-w-0 grid-cols-[7.75rem_1.5rem_minmax(0,1fr)] items-center gap-2 p-3">
+        <div className="min-w-0">
+          <span className="mb-2 block font-mono text-[8px] uppercase tracking-normal text-white/34">
+            content sources
+          </span>
+          <div className="grid gap-1.5">
+            {sources.map((source, index) => {
+              const Icon = source.icon;
 
-            return (
-              <div
-                key={source.label}
-                className="farm-doc-source flex h-11 min-w-0 items-center border border-white/8 px-2.5 font-mono text-[8px] tracking-normal text-white/42"
-                data-initial={index === 0 ? "true" : undefined}
-                style={{ animationDelay: index * 2 + "s" }}
-              >
-                <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.4} />
-                <span className="ml-2 min-w-0 flex-1 truncate">{source.label}</span>
-                <span className="ml-2 text-white/24">{source.kind}</span>
-              </div>
-            );
-          })}
+              return (
+                <div
+                  key={source.label}
+                  className="farm-doc-source flex h-10 min-w-0 items-center border border-white/10 px-2.5 font-mono text-[9px] tracking-normal text-white/46"
+                  data-initial={index === 0 ? "true" : undefined}
+                  style={{ animationDelay: index * 2 + "s" }}
+                >
+                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/66" strokeWidth={1.4} />
+                  <span className="ml-2 min-w-0 flex-1 truncate">{source.label}</span>
+                  <span className="ml-2 text-[8px] text-white/34">{source.kind}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         <div className="relative h-full">
-          <span className="absolute left-0 right-0 top-1/2 h-px bg-white/12" />
+          <span className="absolute left-0 right-0 top-1/2 h-px bg-white/16" />
           <span className="farm-doc-pulse absolute left-0 top-[calc(50%-2px)] size-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.72)]" />
           <ArrowRight
             aria-hidden
-            className="absolute right-0 top-1/2 size-3 -translate-y-1/2 text-white/42"
+            className="absolute right-0 top-1/2 size-3 -translate-y-1/2 text-white/56"
             strokeWidth={1.4}
           />
         </div>
 
-        <div className="h-[178px] min-w-0 overflow-hidden border border-white/10 bg-black">
-          <div className="flex h-8 items-center justify-between border-b border-white/8 px-2.5 font-mono text-[7px] uppercase text-white/28">
-            <span>docs / getting-started</span>
-            <span className="text-white/52">live</span>
+        <div className="h-[208px] min-w-0 overflow-hidden border border-white/12 bg-black">
+          <div className="flex h-8 items-center justify-between border-b border-white/10 px-2.5 font-mono text-[8px] uppercase text-white/36">
+            <span className="truncate">docs / getting-started</span>
+            <span className="ml-2 flex shrink-0 items-center gap-1.5 text-white/68">
+              <span className="size-1 bg-white/70" /> live
+            </span>
           </div>
-          <div className="grid h-[146px] grid-cols-[2.5rem_minmax(0,1fr)]">
-            <div className="border-r border-white/8 p-2">
-              <span className="block h-px w-full bg-white/18" />
-              <span className="mt-3 block h-px w-3/4 bg-white/10" />
-              <span className="mt-3 block h-px w-full bg-white/10" />
-              <span className="mt-3 block h-px w-2/3 bg-white/10" />
+          <div className="grid h-[176px] grid-cols-[2.75rem_minmax(0,1fr)]">
+            <div className="border-r border-white/10 p-2">
+              <span className="block h-px w-full bg-white/28" />
+              <span className="mt-3 block h-px w-3/4 bg-white/14" />
+              <span className="mt-3 block h-px w-full bg-white/14" />
+              <span className="mt-3 block h-px w-2/3 bg-white/14" />
             </div>
             <div className="min-w-0 p-3">
-              <p className="truncate font-mono text-[9px] text-white/72">Getting started</p>
+              <p className="truncate font-mono text-[10px] text-white/84">Getting started</p>
               <div className="mt-3 grid gap-2">
                 {previewLines.map((width, index) => (
                   <span
                     key={width}
-                    className="farm-doc-preview-line block h-px origin-left bg-white/16"
+                    className="farm-doc-preview-line block h-px origin-left bg-white/24"
                     style={{
                       animationDelay: index * 0.18 + "s",
                       width: width + "%",
@@ -952,7 +994,7 @@ function DocsVisual() {
                   />
                 ))}
               </div>
-              <div className="mt-4 border border-white/8 bg-white/[0.025] p-2 font-mono text-[7px] text-white/46">
+              <div className="mt-4 truncate border border-white/10 bg-white/[0.035] p-2 font-mono text-[8px] text-white/62">
                 pnpm create farm@latest
               </div>
             </div>
@@ -965,9 +1007,9 @@ function DocsVisual() {
 
 function MigrationVisual() {
   const rows = [
-    { source: "Next.js", evidence: "18 routes", result: "matched" },
-    { source: "Remix", evidence: "9 routes", result: "matched" },
-    { source: "Express", evidence: "5 handlers", result: "wrapped" },
+    { source: "/dashboard", target: "app/dashboard", icon: FileText },
+    { source: "/api/users", target: "api/users/route", icon: Braces },
+    { source: "middleware", target: "middleware.ts", icon: ShieldCheck },
   ] as const;
 
   return (
@@ -976,39 +1018,67 @@ function MigrationVisual() {
       status="0 conflicts"
       title="migration audit"
     >
-      <div className="grid h-full grid-rows-[auto_1fr_auto] p-4">
-        <div className="grid grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] items-center gap-2 border-b border-white/8 px-2 pb-3 font-mono text-[8px] uppercase tracking-normal text-white/26">
-          <span>source inventory</span>
-          <ArrowRight aria-hidden className="size-3" strokeWidth={1.4} />
-          <span>farm manifest</span>
-          <span>evidence</span>
-        </div>
-
-        <div className="farm-migration-table relative grid content-center">
-          {rows.map((row, index) => (
-            <div
-              key={row.source}
-              className="farm-migration-row grid h-12 grid-cols-[minmax(0,1fr)_1rem_minmax(0,1fr)_auto] items-center gap-2 border-t border-white/[0.065] px-2 font-mono text-[8px] tracking-normal text-white/42 first:border-t-0"
-              data-initial={index === 0 ? "true" : undefined}
-              style={{ animationDelay: index * 2 + "s" }}
-            >
-              <span className="truncate text-white/68">{row.source}</span>
-              <ArrowRight aria-hidden className="size-3" strokeWidth={1.4} />
-              <span className="truncate">{row.evidence}</span>
-              <span className="flex items-center gap-1.5 text-white/58">
-                <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
-                {row.result}
-              </span>
+      <div className="grid h-full grid-rows-[1fr_auto] gap-2 p-3">
+        <div className="farm-migration-table relative grid min-h-0 grid-cols-[minmax(0,1fr)_1.5rem_minmax(0,1fr)]">
+          <div className="grid min-w-0 grid-rows-[2rem_repeat(3,minmax(0,1fr))] border border-white/10">
+            <div className="flex h-8 items-center justify-between border-b border-white/10 px-2.5 font-mono text-[8px] uppercase text-white/38">
+              <span>source</span>
+              <span className="text-white/68">next.js</span>
             </div>
-          ))}
+            {rows.map((row, index) => {
+              const Icon = row.icon;
+
+              return (
+                <div
+                  key={row.source}
+                  className="farm-migration-row grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)] items-center gap-2 border border-transparent px-2.5 font-mono text-[9px] tracking-normal text-white/50"
+                  data-initial={index === 0 ? "true" : undefined}
+                  style={{ animationDelay: index * 2 + "s" }}
+                >
+                  <Icon aria-hidden className="size-3.5 text-white/62" strokeWidth={1.4} />
+                  <span className="truncate">{row.source}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="grid grid-rows-[2rem_repeat(3,minmax(0,1fr))] place-items-center text-white/42">
+            <span />
+            {rows.map((row) => (
+              <ArrowRight key={row.source} aria-hidden className="size-3.5" strokeWidth={1.4} />
+            ))}
+          </div>
+
+          <div className="grid min-w-0 grid-rows-[2rem_repeat(3,minmax(0,1fr))] border border-white/10">
+            <div className="flex h-8 items-center justify-between border-b border-white/10 px-2.5 font-mono text-[8px] uppercase text-white/38">
+              <span>target</span>
+              <span className="text-white/68">farm</span>
+            </div>
+            {rows.map((row, index) => {
+              const Icon = row.icon;
+
+              return (
+                <div
+                  key={row.target}
+                  className="farm-migration-row grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 border border-transparent px-2.5 font-mono text-[9px] tracking-normal text-white/50"
+                  data-initial={index === 0 ? "true" : undefined}
+                  style={{ animationDelay: index * 2 + "s" }}
+                >
+                  <Icon aria-hidden className="size-3.5 text-white/62" strokeWidth={1.4} />
+                  <span className="truncate">{row.target}</span>
+                  <CircleCheck aria-hidden className="size-3 text-white/66" strokeWidth={1.5} />
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="grid grid-cols-[1fr_auto] items-center gap-3 border-t border-white/8 pt-3">
+        <div className="grid h-7 grid-cols-[1fr_auto] items-center gap-3 border-t border-white/10 px-1 pt-2">
           <span className="h-px overflow-hidden bg-white/10">
             <span className="farm-migration-progress block h-full origin-left bg-white/72" />
           </span>
-          <span className="font-mono text-[8px] uppercase tracking-normal text-white/42">
-            32 / 32 ready
+          <span className="font-mono text-[8px] uppercase tracking-normal text-white/52">
+            32 files mapped
           </span>
         </div>
       </div>
@@ -1018,7 +1088,7 @@ function MigrationVisual() {
 
 function FoundationGrid() {
   return (
-    <section className="farm-full-rule grid w-full lg:grid-cols-2">
+    <section data-foundation-grid className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
         body="Pages, layouts, route handlers, loading states, markdown, and typed links live in the app directory."
         icon={FolderTree}

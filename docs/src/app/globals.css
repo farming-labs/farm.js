@@ -306,12 +306,23 @@
 
   .farm-tree-route,
   .farm-trace-step {
-    animation: farm-foundation-sequence-four 8s steps(1, end) infinite;
+    animation: farm-foundation-sequence-four 8s linear infinite;
   }
 
   .farm-doc-source,
   .farm-migration-row {
-    animation: farm-foundation-sequence-three 6s steps(1, end) infinite;
+    animation: farm-foundation-sequence-three 6s linear infinite;
+  }
+
+  .farm-foundation-frame::after {
+    position: absolute;
+    inset: 0;
+    z-index: 30;
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.025),
+      inset 1px 0 0 rgb(255 255 255 / 0.018);
+    content: "";
+    pointer-events: none;
   }
 
   .farm-trace-pulse {
@@ -708,13 +719,13 @@
 
   75% {
     opacity: 1;
-    transform: translate3d(0, 10.5rem, 0);
+    transform: translate3d(0, 8.25rem, 0);
   }
 
   88%,
   100% {
     opacity: 0;
-    transform: translate3d(0, 10.5rem, 0);
+    transform: translate3d(0, 8.25rem, 0);
   }
 }
 
@@ -731,7 +742,7 @@
 
   100% {
     opacity: 0;
-    transform: translate3d(1.7rem, 0, 0);
+    transform: translate3d(1.2rem, 0, 0);
   }
 }
 
