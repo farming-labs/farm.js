@@ -147,10 +147,10 @@
     isolation: isolate;
     background-color: #000;
     background-image: radial-gradient(
-      ellipse 112% 96% at 58% 8%,
-      transparent 34%,
-      rgb(255 255 255 / 0.03) 64%,
-      rgb(0 0 0 / 0.94) 100%
+      ellipse 88% 46% at 60% 22%,
+      rgb(255 255 255 / 0.045),
+      rgb(255 255 255 / 0.015) 42%,
+      transparent 76%
     );
   }
 
@@ -160,36 +160,34 @@
     z-index: 0;
     border-radius: 50%;
     content: "";
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 82%, transparent);
-    mask-image: linear-gradient(to bottom, transparent, #000 22%, #000 82%, transparent);
     pointer-events: none;
   }
 
   .farm-feature-spotlight::before {
-    inset: 10% 2% 8% 8%;
+    inset: 4% -8% 50% 2%;
     background: radial-gradient(
       ellipse at center,
-      rgb(255 255 255 / 0.18) 0%,
-      rgb(255 255 255 / 0.075) 36%,
-      rgb(255 255 255 / 0.025) 58%,
-      transparent 82%
+      rgb(255 255 255 / 0.22) 0%,
+      rgb(255 255 255 / 0.09) 36%,
+      rgb(255 255 255 / 0.025) 62%,
+      transparent 86%
     );
-    filter: blur(48px);
-    opacity: 0.68;
-    transform: translate3d(26px, -12px, 0);
+    filter: blur(36px);
+    opacity: 0.78;
+    transform: translate3d(24px, 18px, 0);
   }
 
   .farm-feature-spotlight::after {
-    inset: 18% 10% 28% 24%;
+    inset: 6% 4% 62% 22%;
     background: radial-gradient(
       ellipse at center,
-      rgb(255 255 255 / 0.12) 0%,
-      rgb(255 255 255 / 0.04) 42%,
-      transparent 78%
+      rgb(255 255 255 / 0.16) 0%,
+      rgb(255 255 255 / 0.055) 44%,
+      transparent 82%
     );
-    filter: blur(34px);
-    opacity: 0.56;
-    transform: translate3d(18px, -8px, 0);
+    filter: blur(22px);
+    opacity: 0.64;
+    transform: translate3d(18px, 10px, 0);
   }
 
   .farm-stack-map {

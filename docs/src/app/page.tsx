@@ -519,7 +519,7 @@ function HeadingSection({
 function TerminalVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/58 shadow-[0_28px_70px_rgba(0,0,0,0.36)] backdrop-blur-sm">
+      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
@@ -580,7 +580,7 @@ function IntegrationVisual() {
 function BuildVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/58 shadow-[0_28px_70px_rgba(0,0,0,0.36)] backdrop-blur-sm">
+      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/34">
           <span className="flex items-center gap-1.5">
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
@@ -693,7 +693,7 @@ function FileTreeVisual() {
 
   return (
     <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black/58 shadow-[0_24px_70px_rgba(0,0,0,0.34)] backdrop-blur-sm">
+      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
         <div className="flex h-10 shrink-0 items-center border-b border-white/8 px-4 font-mono text-[10px] text-white/32">
           project
         </div>
@@ -726,7 +726,7 @@ function MiddlewareVisual() {
 
   return (
     <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-rows-4 overflow-hidden border border-white/10 bg-black/58 shadow-[0_24px_70px_rgba(0,0,0,0.34)] backdrop-blur-sm">
+      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-rows-4 overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
         {events.map(([event, detail, time], index) => (
           <div
             key={event}
@@ -748,7 +748,7 @@ function MiddlewareVisual() {
 function DocsVisual() {
   return (
     <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-cols-[7rem_1fr] overflow-hidden border border-white/10 bg-black/58 shadow-[0_24px_70px_rgba(0,0,0,0.34)] backdrop-blur-sm sm:grid-cols-[9rem_1fr]">
+      <div className="relative z-10 -mb-px -mr-px grid h-[290px] w-full max-w-full grid-cols-[7rem_1fr] overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)] sm:grid-cols-[9rem_1fr]">
         <div className="border-r border-white/10 p-3 font-mono text-[9px] text-white/34">
           <p className="text-white/70">Introduction</p>
           <p className="mt-3">Routing</p>
@@ -779,7 +779,7 @@ function MigrationVisual() {
 
   return (
     <div className="farm-feature-spotlight flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black/58 p-4 shadow-[0_24px_70px_rgba(0,0,0,0.34)] backdrop-blur-sm">
+      <div className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full flex-col overflow-hidden border border-white/10 bg-black p-4 shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
         <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
         <div className="mt-4 grid min-h-0 flex-1 grid-rows-3 gap-2">
           {rows.map(([source, detail, status]) => (
