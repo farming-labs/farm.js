@@ -59,6 +59,27 @@ describe("generated server action security", () => {
     expect(entry).not.toContain("throw p.returnValue?.data");
   });
 
+  it("rejects stale actions before decoding and only reloads safe navigation", () => {
+    const serverEntry = generateRscEntry(context);
+    const clientEntry = generateClientEntry(context);
+
+    expect(serverEntry).toContain('const farmDeploymentId = "release-2"');
+    expect(serverEntry).toContain("createFarmDeploymentCookie(");
+    expect(serverEntry.indexOf("getFarmDeploymentMismatch(request")).toBeLessThan(
+      serverEntry.indexOf("validateServerActionRequest(request"),
+    );
+
+    expect(clientEntry).toContain("createFarmDeploymentRequestHeaders(farmDeploymentId");
+    expect(clientEntry).toContain("throw reportDeploymentMismatch(res)");
+    expect(clientEntry).toContain("location.assign(url)");
+
+    const actionStart = clientEntry.indexOf("setServerCallback(async");
+    const actionEnd = clientEntry.indexOf("// Debug logging helper");
+    const actionClient = clientEntry.slice(actionStart, actionEnd);
+    expect(actionClient).not.toContain("location.assign(");
+    expect(actionClient).not.toContain("location.reload(");
+  });
+
   it("merges layer route roots before project routes", async () => {
     const entry = generateRscEntry({
       ...context,
