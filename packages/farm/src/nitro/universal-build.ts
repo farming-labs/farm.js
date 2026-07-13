@@ -149,10 +149,10 @@ function hasFarmMiddlewareConfig(config: ResolvedFarmConfig["middleware"]): bool
   const configRecord = config as Record<string, unknown>;
   return Boolean(
     configRecord.matcher ||
-      configRecord.exclude ||
-      configRecord.runtime ||
-      configRecord.handler ||
-      (Array.isArray(configRecord.handlers) && configRecord.handlers.length > 0),
+    configRecord.exclude ||
+    configRecord.runtime ||
+    configRecord.handler ||
+    (Array.isArray(configRecord.handlers) && configRecord.handlers.length > 0),
   );
 }
 
@@ -855,6 +855,13 @@ let reactRoot = null;
 let currentPathname = null;
 let isHydrated = false;
 
+function resetReactRoot() {
+  if (!reactRoot) return;
+  reactRoot.unmount();
+  reactRoot = null;
+  isHydrated = false;
+}
+
 // Hydrate client components
 function hydrate() {
   const pathname = window.location.pathname;
@@ -936,7 +943,7 @@ const spaRouter = {
     // Server component - fetch HTML
     try {
       const html = await this.fetchPage(url.pathname + url.search);
-      if (!this.swapContent(html)) {
+      if (!this.swapContent(html, url.pathname + url.search)) {
         window.location.href = href;
         return;
       }
@@ -959,7 +966,7 @@ const spaRouter = {
     return response.text();
   },
   
-  swapContent: function(html) {
+  swapContent: function(html, targetPath) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     
@@ -985,16 +992,18 @@ const spaRouter = {
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
     if (!newRoot || !currentRoot) return this.swapDocument(doc);
+    resetReactRoot();
     currentRoot.innerHTML = newRoot.innerHTML;
 
     // Check if new page has a client component
-    const newPathname = window.location.pathname;
+    const targetUrl = new URL(targetPath || window.location.href, window.location.origin);
+    const newPathname = targetUrl.pathname;
     const matched = matchRoute(newPathname);
     if (matched) {
       // Re-hydrate the client component
       const Component = matched.route.Component;
       const params = matched.params;
-      const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+      const searchParams = Object.fromEntries(targetUrl.searchParams);
       const props = { params: params, searchParams: Promise.resolve(searchParams) };
       
       if (!reactRoot) {
@@ -1009,6 +1018,8 @@ const spaRouter = {
 
   swapDocument: function(doc) {
     if (!doc.documentElement || !doc.body) return false;
+
+    resetReactRoot();
 
     Array.from(document.documentElement.attributes).forEach(function(attr) {
       if (!doc.documentElement.hasAttribute(attr.name)) {
@@ -1085,13 +1096,16 @@ window.addEventListener("popstate", function() {
     const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
     
     const container = document.getElementById("root");
-    if (container && reactRoot) {
+    if (container) {
+      if (!reactRoot) {
+        reactRoot = createRoot(container);
+      }
       reactRoot.render(wrappedElement);
       currentPathname = pathname;
     }
   } else {
     spaRouter.fetchPage(pathname + window.location.search)
-      .then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })
+      .then(function(html) { if (!spaRouter.swapContent(html, pathname + window.location.search)) window.location.reload(); })
       .catch(function() { window.location.reload(); });
   }
 });
@@ -1244,7 +1258,10 @@ async function buildSSRInMemory(
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
   const configModulePath =
-    hasConfiguredIntegrations || hasObservabilityHandler || hasMdxComponentConfig || hasMiddlewareConfig
+    hasConfiguredIntegrations ||
+    hasObservabilityHandler ||
+    hasMdxComponentConfig ||
+    hasMiddlewareConfig
       ? await findFarmConfigPath(root)
       : null;
 

@@ -33,6 +33,9 @@
     --font-geist-sans: "Geist Sans";
     --font-geist-mono: "Geist Mono";
     --font-geist-pixel: "Geist Pixel Square";
+    --farm-bg: #000;
+    --farm-line: rgb(255 255 255 / 0.12);
+    --farm-line-soft: rgb(255 255 255 / 0.055);
   }
 
   html {
@@ -43,7 +46,196 @@
     font-family:
       var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
       "Liberation Mono", "Courier New", monospace;
+    margin: 0;
+    background: var(--farm-bg);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
+  }
+}
+
+@layer components {
+  .farm-announcement {
+    background: #000;
+  }
+
+  .farm-home .font-mono {
+    letter-spacing: 0;
+  }
+
+  .farm-page-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 1320px;
+    margin-inline: auto;
+  }
+
+  .farm-page-rail {
+    display: none;
+    min-width: 0;
+    border-inline: 1px solid var(--farm-line);
+    background-color: #000;
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 6px,
+      rgb(255 255 255 / 0.07) 6px,
+      rgb(255 255 255 / 0.07) 7px
+    );
+    background-attachment: fixed;
+  }
+
+  .farm-page-content {
+    border-inline: 1px solid var(--farm-line);
+  }
+
+  .farm-full-rule,
+  .farm-wide-rule,
+  .farm-top-rule {
+    position: relative;
+  }
+
+  .farm-full-rule::after,
+  .farm-wide-rule::before,
+  .farm-wide-rule::after,
+  .farm-top-rule::before {
+    position: absolute;
+    right: calc(50% - 50vw);
+    left: calc(50% - 50vw);
+    z-index: 20;
+    height: 1px;
+    background: var(--farm-line);
+    content: "";
+    pointer-events: none;
+  }
+
+  .farm-top-rule::before,
+  .farm-wide-rule::before {
+    top: -1px;
+  }
+
+  .farm-full-rule::after,
+  .farm-wide-rule::after {
+    bottom: -1px;
+  }
+
+  .farm-dot-grid {
+    background-image:
+      linear-gradient(to right, var(--farm-line-soft) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--farm-line-soft) 1px, transparent 1px);
+    background-size: 34px 34px;
+  }
+
+  .farm-scan-lines {
+    background-image: repeating-linear-gradient(
+      120deg,
+      transparent 0,
+      transparent 18px,
+      rgb(255 255 255 / 0.1) 19px,
+      transparent 20px
+    );
+  }
+
+  .farm-line-field {
+    background-color: #000;
+    background-image: repeating-linear-gradient(
+      90deg,
+      transparent 0,
+      transparent 31px,
+      rgb(255 255 255 / 0.055) 31px,
+      rgb(255 255 255 / 0.055) 32px
+    );
+  }
+
+  .farm-diagonal-field {
+    background-color: #000;
+    background-image: repeating-linear-gradient(
+      135deg,
+      rgb(255 255 255 / 0.045) 0,
+      rgb(255 255 255 / 0.045) 1px,
+      transparent 1px,
+      transparent 12px
+    );
+  }
+
+  .farm-stack-map {
+    background-color: #000;
+    background-image:
+      linear-gradient(to right, var(--farm-line-soft) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--farm-line-soft) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  .farm-footer-field {
+    background-color: #000;
+    background-image:
+      linear-gradient(to right, var(--farm-line-soft) 1px, transparent 1px),
+      linear-gradient(to bottom, var(--farm-line-soft) 1px, transparent 1px);
+    background-size: 48px 48px;
+  }
+
+  @media (min-width: 768px) {
+    .farm-page-grid {
+      grid-template-columns: 40px minmax(0, 1240px) 40px;
+    }
+
+    .farm-page-rail {
+      display: block;
+    }
+
+    .farm-page-content {
+      border-inline: 0;
+    }
+  }
+}
+
+@keyframes farm-flow {
+  to {
+    stroke-dashoffset: -68;
+  }
+}
+
+@keyframes farm-signal-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes farm-core-breathe {
+  0%,
+  100% {
+    opacity: 0.84;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.farm-runtime-line {
+  stroke-dasharray: 5 11;
+  animation: farm-flow 7s linear infinite;
+}
+
+.farm-signal {
+  animation: farm-signal-pulse 2.8s ease-in-out infinite;
+}
+
+.farm-core-face {
+  animation: farm-core-breathe 4.5s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .farm-runtime-line,
+  .farm-signal,
+  .farm-core-face {
+    animation: none;
   }
 }

@@ -218,6 +218,22 @@ export function farmPlugin(
             docs: farmConfig.docs,
           })
         : null;
+      const farmDocsFontAssets = new Map([
+        [
+          "/assets/Geist-Variable-CrgPqtmy.woff2",
+          path.join(
+            farmConfig.root,
+            "node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
+          ),
+        ],
+        [
+          "/assets/GeistMono-Variable-BNLlm6Cd.woff2",
+          path.join(
+            farmConfig.root,
+            "node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
+          ),
+        ],
+      ]);
 
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
       const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
@@ -283,6 +299,15 @@ export function farmPlugin(
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
         const requestPathname = new URL(fullUrl).pathname;
         const currentConfig = farmApp?.getConfig() ?? options;
+
+        const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
+        if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
+          res.statusCode = 200;
+          res.setHeader("Content-Type", "font/woff2");
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+          fs.createReadStream(farmDocsFontPath).pipe(res);
+          return;
+        }
 
         // Handle OpenAPI docs route
         if (openAPIManager && req.url === options.openapi?.route) {
@@ -1319,7 +1344,7 @@ function matchRoute(pathname, routeSegments) {
   for (let i = 0; i < routeSegments.length; i++) {
     const routeSeg = routeSegments[i];
     const pathSeg = pathSegments[i];
-    
+
     if (routeSeg.isCatchAll) {
       // Collect remaining segments
       params[routeSeg.segment] = pathSegments.slice(i).join('/');
@@ -1427,7 +1452,7 @@ class SPARouter {
       }
 
       const { route, params } = match;
-      
+
       // Parse search params
       const searchParams = {};
       url.searchParams.forEach((value, key) => {
@@ -1532,6 +1557,8 @@ class SPARouter {
   }
 
   async handlePopState(event) {
+    if (document.documentElement.dataset.farmDocsRuntime === 'true') return;
+
     const pathname = window.location.pathname;
     const search = window.location.search;
     
@@ -1774,14 +1801,19 @@ async function renderPage(pageData) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');
     const newRoot = doc.getElementById('root');
-    
-    if (newRoot) {
+
+    const resetReactRoots = () => {
       if (appRoot) { try { appRoot.unmount(); } catch(e) {} appRoot = null; }
       if (reactRoot) { try { reactRoot.unmount(); } catch(e) {} reactRoot = null; }
+      delete window.__FARM_REACT_ROOT__;
+      hasClientTakenOver = false;
+    };
+
+    if (newRoot) {
+      resetReactRoots();
       container.innerHTML = newRoot.innerHTML;
       const newTitle = doc.querySelector('title');
       if (newTitle) document.title = newTitle.textContent || document.title;
-      hasClientTakenOver = false;
       
       const shouldHydrate =
         route.shouldHydrate === true ||
@@ -1799,7 +1831,37 @@ async function renderPage(pageData) {
       console.log('[Farm.js] ⚡ HTML navigated to:', path);
       return true;
     }
-    return false;
+
+    if (!doc.documentElement || !doc.body) return false;
+
+    resetReactRoots();
+    Array.from(document.documentElement.attributes).forEach(function(attr) {
+      if (!doc.documentElement.hasAttribute(attr.name)) {
+        document.documentElement.removeAttribute(attr.name);
+      }
+    });
+    Array.from(doc.documentElement.attributes).forEach(function(attr) {
+      document.documentElement.setAttribute(attr.name, attr.value);
+    });
+
+    document.head.innerHTML = doc.head ? doc.head.innerHTML : '';
+    document.body.innerHTML = doc.body.innerHTML;
+    delete window.__farmDocsRuntime;
+    delete window.__farmDocsPageActionsRuntime;
+
+    setTimeout(function() {
+      Array.from(document.querySelectorAll('script')).forEach(function(script) {
+        const freshScript = document.createElement('script');
+        Array.from(script.attributes).forEach(function(attr) {
+          freshScript.setAttribute(attr.name, attr.value);
+        });
+        freshScript.textContent = script.textContent || '';
+        script.replaceWith(freshScript);
+      });
+    }, 0);
+
+    console.log('[Farm.js] ⚡ Document navigated to:', path);
+    return true;
   };
 
   try {
@@ -1993,6 +2055,8 @@ function isExternalUrl(href) {
 }
 
 document.addEventListener('click', function(event) {
+  if (document.documentElement.dataset.farmDocsRuntime === 'true') return;
+
   // Find the closest anchor element
   let target = event.target;
   while (target && target.tagName !== 'A') {

@@ -1,552 +1,485 @@
 import type { PageProps } from "@farmjs/core";
+import {
+  ArrowRight,
+  ArrowUpRight,
+  BadgeCheck,
+  Blocks,
+  BookOpen,
+  BookOpenText,
+  Braces,
+  CreditCard,
+  Database,
+  ExternalLink,
+  FileCode2,
+  FileText,
+  FolderTree,
+  Gauge,
+  GitCompareArrows,
+  GitFork,
+  Layers3,
+  Mail,
+  Menu,
+  Network,
+  PanelsTopLeft,
+  Plug,
+  Rocket,
+  Route,
+  ServerCog,
+  Settings2,
+  ShieldCheck,
+  Terminal,
+  Workflow,
+  X,
+  Zap,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import type { ReactNode } from "react";
+import betterAuthIconUrl from "simple-icons/icons/betterauth.svg?url";
+import githubIconUrl from "simple-icons/icons/github.svg?url";
+import prismaIconUrl from "simple-icons/icons/prisma.svg?url";
+import reactIconUrl from "simple-icons/icons/react.svg?url";
+import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
+import typescriptIconUrl from "simple-icons/icons/typescript.svg?url";
+import viteIconUrl from "simple-icons/icons/vite.svg?url";
+import { InstallCommand } from "../components/home/install-command";
 
 export const metadata = {
-  title: "Farm.js - React framework for product apps",
+  title: "Farm.js - The React framework for product apps",
   description:
-    "Farm.js is a React framework for product apps with app routing, typed APIs, middleware, integrations, docs, migrations, and production deployment.",
+    "Farm.js brings app routing, typed APIs, middleware, integrations, docs, migrations, and production deployment into one React framework.",
 };
 
 const navItems = [
-  { label: "Platform", href: "#platform" },
-  { label: "Runtime", href: "#runtime" },
-  { label: "Migrate", href: "#migrate" },
-  { label: "Docs", href: "/docs" },
+  { index: "01", label: "Guide", href: "/docs/getting-started", icon: BookOpen },
+  { index: "02", label: "Config", href: "/docs/configuration", icon: Settings2 },
+  { index: "03", label: "Integrations", href: "/docs/integrations", icon: Blocks },
+  { index: "04", label: "Resources", href: "#open-source", icon: FileText },
 ] as const;
 
-const sourcePrimitives = [
-  "Trigger.dev side menu",
-  "Trigger.dev compact table",
-  "Trigger.dev code chrome",
-  "Infisical cards",
-  "Infisical buttons",
-  "Infisical nav header",
+const ecosystemItems = [
+  { label: "React 19", brand: reactIconUrl },
+  { label: "Vite", brand: viteIconUrl },
+  { label: "Nitro", icon: Zap },
+  { label: "Prisma", brand: prismaIconUrl },
+  { label: "Better Auth", brand: betterAuthIconUrl },
+  { label: "Stripe", brand: stripeIconUrl },
 ] as const;
 
-const sideSections = [
+const stackItems = [
   {
-    label: "Application",
-    items: [
-      { name: "Overview", meta: "prod", active: true },
-      { name: "Routes", meta: "44" },
-      { name: "API handlers", meta: "12" },
-      { name: "Middleware", meta: "6" },
+    label: "Better Auth",
+    detail: "session + routes",
+    position: "left-[5%] top-[12%]",
+    icon: ShieldCheck,
+  },
+  {
+    label: "Stripe",
+    detail: "billing + webhooks",
+    position: "right-[5%] top-[12%]",
+    icon: CreditCard,
+  },
+  {
+    label: "Trigger.dev",
+    detail: "jobs + events",
+    position: "left-[3%] bottom-[15%]",
+    icon: Workflow,
+  },
+  {
+    label: "Resend",
+    detail: "email + templates",
+    position: "right-[3%] bottom-[15%]",
+    icon: Mail,
+  },
+  {
+    label: "Prisma",
+    detail: "schema + storage",
+    position: "left-[22%] top-[41%]",
+    icon: Database,
+  },
+  {
+    label: "OpenAPI",
+    detail: "schema + clients",
+    position: "right-[22%] top-[41%]",
+    icon: FileCode2,
+  },
+] as const;
+
+const footerGroups = [
+  {
+    title: "Framework",
+    icon: BookOpen,
+    links: [
+      ["Getting started", "/docs/getting-started"],
+      ["Routing", "/docs/routing"],
+      ["Middleware", "/docs/middleware"],
     ],
   },
   {
-    label: "Product systems",
-    items: [
-      { name: "Auth", meta: "better-auth" },
-      { name: "Billing", meta: "stripe" },
-      { name: "Jobs", meta: "trigger.dev" },
-      { name: "Docs", meta: "mdx" },
+    title: "Product",
+    icon: Layers3,
+    links: [
+      ["Integrations", "/docs/integrations"],
+      ["API client", "/docs/api-client"],
+      ["Deployment", "/docs/deployment"],
+    ],
+  },
+  {
+    title: "Open source",
+    icon: GitFork,
+    links: [
+      ["GitHub", "https://github.com/Kinfe123/farm.js"],
+      ["Migrations", "/docs/migrations"],
+      ["Plugin guide", "/docs/plugins/create-plugin"],
     ],
   },
 ] as const;
-
-const runtimeRows = [
-  ["route", "src/app/dashboard/page.tsx", "typed link", "ready"],
-  ["api", "src/app/api/users/route.ts", "client", "ready"],
-  ["middleware", "/dashboard/:path*", "auth gate", "matched"],
-  ["integration", "better-auth", "session ctx", "loaded"],
-  ["integration", "trigger.dev", "jobs client", "loaded"],
-  ["deploy", "vercel output", "manifest", "ready"],
-] as const;
-
-const eventRows = [
-  ["12:04:41", "middleware.start", "/dashboard/settings"],
-  ["12:04:41", "middleware.shortCircuit", "/sign-in"],
-  ["12:04:42", "route.render", "src/app/dashboard"],
-  ["12:04:43", "cache.tag", "team:acme"],
-] as const;
-
-const platformModules = [
-  {
-    label: "Framework",
-    title: "App routing that stays familiar",
-    body: "Pages, layouts, loading states, route handlers, params, and typed navigation live in src/app without inventing a new mental model.",
-    href: "/docs/routing",
-  },
-  {
-    label: "Runtime",
-    title: "Middleware as deployable behavior",
-    body: "Config middleware and file middleware are discovered, tested, built, and served the same way in production.",
-    href: "/docs/middleware",
-  },
-  {
-    label: "Product",
-    title: "Integrations with real contracts",
-    body: "Auth, billing, jobs, email, storage, and API systems register routes, generated clients, docs, and lifecycle hooks.",
-    href: "/docs/integrations",
-  },
-  {
-    label: "Operations",
-    title: "Docs, migrations, and deploy output",
-    body: "Human docs, OpenAPI surfaces, migration reports, middleware manifests, and platform targets stay reviewable from source.",
-    href: "/docs/deployment",
-  },
-] as const;
-
-const workflowSteps = [
-  [
-    "01",
-    "Create",
-    "pnpm create farm@latest",
-    "Start from the app router shape teams already know.",
-  ],
-  [
-    "02",
-    "Register",
-    "defineFarmConfig({ integrations })",
-    "Move product systems into framework-level contracts.",
-  ],
-  [
-    "03",
-    "Build",
-    "farm build --target vercel",
-    "Ship routes, middleware, docs, and generated clients together.",
-  ],
-] as const;
-
-const migrationRows = [
-  ["Next App Router", "src/app stays src/app"],
-  ["Remix routes", "file routes map into route segments"],
-  ["Express APIs", "handlers become typed route APIs"],
-  ["manual middleware", "config and file middleware get manifests"],
-] as const;
-
-const codeSample = `import { defineFarmConfig } from "@farmjs/core";
-import { betterAuth } from "@farmjs/better-auth";
-import { triggerDev } from "@farmjs/trigger";
-
-export default defineFarmConfig({
-  middleware: [
-    {
-      matcher: "/dashboard/:path*",
-      handler(ctx) {
-        if (!ctx.session) {
-          return Response.redirect(new URL("/sign-in", ctx.url));
-        }
-      },
-    },
-  ],
-  integrations: [betterAuth(), triggerDev()],
-});`;
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
 }
 
-function Arrow() {
+function BrandIcon({ src, className }: { src: string; className?: string }) {
+  return <img alt="" aria-hidden className={cx("brightness-0 invert", className)} src={src} />;
+}
+
+function GithubIcon({ className }: { className?: string }) {
+  return <BrandIcon className={className} src={githubIconUrl} />;
+}
+
+function IndexedLabel({
+  index,
+  icon: Icon,
+  label,
+}: {
+  index: string;
+  icon: LucideIcon;
+  label: string;
+}) {
   return (
-    <span aria-hidden className="font-mono text-xs">
-      -&gt;
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-normal text-current">
+      <span className="text-white/26">{index}</span>
+      <span aria-hidden className="text-white/18">
+        /
+      </span>
+      <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+      <span className="truncate">{label}</span>
     </span>
+  );
+}
+
+function FarmMark({ className }: { className?: string }) {
+  return (
+    <svg aria-hidden className={className} viewBox="0 0 32 32">
+      <path d="M4 5h24v5H10v5h13v5H10v7H4V5Z" fill="currentColor" />
+      <path d="M22 5h6l-5 5h-6l5-5Z" fill="black" />
+    </svg>
   );
 }
 
 function Wordmark() {
   return (
-    <a className="flex items-center gap-2 text-sm font-semibold text-white" href="/">
-      <span className="grid size-7 place-items-center rounded-md border border-white bg-white font-mono text-[12px] font-black leading-none text-black">
-        F
-      </span>
-      <span>Farm.js</span>
-    </a>
-  );
-}
-
-function Badge({
-  children,
-  tone = "dark",
-  className,
-}: {
-  children: ReactNode;
-  tone?: "dark" | "light" | "solid";
-  className?: string;
-}) {
-  return (
-    <span
-      className={cx(
-        "inline-flex h-[18px] max-w-full items-center rounded-sm border px-1.5 font-mono text-[10px] font-medium uppercase leading-none whitespace-nowrap",
-        tone === "solid" && "border-white bg-white text-black",
-        tone === "dark" && "border-white/15 bg-white/[0.035] text-white/60",
-        tone === "light" && "border-black/10 bg-black/[0.035] text-black/60",
-        className,
-      )}
+    <a
+      aria-label="Farm.js home"
+      className="flex shrink-0 items-center gap-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+      href="/"
     >
-      {children}
-    </span>
+      <span className="grid size-7 place-items-center bg-white text-black">
+        <FarmMark className="size-5" />
+      </span>
+      <span className="font-mono text-[13px] font-bold uppercase tracking-normal">
+        FARM<span className="text-white/52">.JS</span>
+      </span>
+    </a>
   );
 }
 
 function ButtonLink({
   href,
   children,
+  icon,
   variant = "primary",
 }: {
   href: string;
   children: ReactNode;
-  variant?: "primary" | "secondary" | "ghost";
+  icon?: ReactNode;
+  variant?: "primary" | "secondary";
 }) {
+  const isExternal = href.startsWith("http");
+
   return (
     <a
       className={cx(
-        "group inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-[5px] border px-4 text-sm font-semibold transition-all duration-150 active:scale-[0.99] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white/70",
-        variant === "primary" && "border-white bg-white text-black hover:bg-white/90",
+        "inline-flex h-11 min-w-0 items-center justify-center gap-2 border px-5 font-mono text-[11px] font-semibold uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+        variant === "primary" && "border-white bg-white text-black hover:bg-white/88",
         variant === "secondary" &&
-          "border-white/15 bg-white/[0.035] text-white hover:border-white/30 hover:bg-white/[0.06]",
-        variant === "ghost" &&
-          "border-transparent bg-transparent text-white/70 hover:bg-white/[0.06] hover:text-white",
+          "border-white/18 bg-black text-white hover:border-white/42 hover:bg-white/[0.06]",
       )}
       href={href}
     >
-      {children}
-      <Arrow />
+      {icon ? (
+        <span aria-hidden className="grid size-4 shrink-0 place-items-center">
+          {icon}
+        </span>
+      ) : null}
+      <span>{children}</span>
+      {isExternal ? (
+        <ExternalLink aria-hidden className="size-3.5" strokeWidth={1.5} />
+      ) : (
+        <ArrowRight aria-hidden className="size-3.5" strokeWidth={1.5} />
+      )}
+    </a>
+  );
+}
+
+function AnnouncementBar() {
+  return (
+    <a
+      className="farm-announcement flex h-8 items-center justify-center border-b border-white/12 px-4 font-mono text-[10px] font-semibold uppercase tracking-normal text-white/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+      href="https://github.com/Kinfe123/farm.js"
+    >
+      <GitFork aria-hidden className="mr-2 size-3 text-white/48" strokeWidth={1.5} />
+      <span className="mr-3 hidden text-white/30 sm:inline">Open source / MIT</span>
+      Farm.js beta is building in public
+      <ExternalLink aria-hidden className="ml-2 size-3 text-white" strokeWidth={1.5} />
     </a>
   );
 }
 
 function Header() {
   return (
-    <header className="fixed inset-x-0 top-0 z-50 w-screen max-w-[100vw] border-b border-white/10 bg-black/90 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between px-4 sm:px-6">
-        <Wordmark />
+    <header className="farm-full-rule sticky top-0 z-50 border-b border-white/12 bg-black/94 backdrop-blur-xl">
+      <div className="flex h-16 w-full items-stretch">
+        <div className="flex shrink-0 items-center px-4 sm:px-7">
+          <Wordmark />
+        </div>
 
-        <nav className="hidden items-center gap-6 md:flex">
+        <nav
+          aria-label="Primary navigation"
+          className="hidden min-w-0 flex-1 items-stretch border-l border-white/12 lg:flex"
+        >
           {navItems.map((item) => (
             <a
               key={item.label}
-              className="text-xs font-medium text-white/50 transition hover:text-white"
+              className="flex h-full min-w-0 flex-1 items-center border-r border-white/12 px-3 font-mono uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white xl:px-5"
               href={item.href}
             >
-              {item.label}
+              <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
             </a>
           ))}
         </nav>
 
-        <div className="flex items-center gap-2">
+        <div className="ml-auto hidden shrink-0 items-stretch lg:flex">
           <a
-            className="hidden h-8 items-center rounded-[5px] border border-white/15 px-3 text-xs font-semibold text-white/70 transition hover:border-white/30 hover:text-white sm:inline-flex"
+            aria-label="Open Farm.js on GitHub"
+            className="grid size-16 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="https://github.com/Kinfe123/farm.js"
+            title="GitHub"
           >
-            GitHub
+            <GithubIcon className="size-4" />
           </a>
           <a
-            className="inline-flex h-8 items-center rounded-[5px] bg-white px-3 text-xs font-bold text-black transition hover:bg-white/90"
-            href="/docs/getting-started"
+            className="inline-flex h-16 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-semibold uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            href="/docs"
           >
-            Start
+            <BookOpenText aria-hidden className="size-3.5" strokeWidth={1.6} />
+            Docs
           </a>
         </div>
+
+        <details className="group relative ml-auto border-l border-white/12 lg:hidden">
+          <summary className="grid size-16 cursor-pointer list-none place-items-center text-white transition-colors hover:bg-white/[0.04] [&::-webkit-details-marker]:hidden">
+            <span className="sr-only">Open navigation</span>
+            <Menu aria-hidden className="size-4 group-open:hidden" strokeWidth={1.5} />
+            <X aria-hidden className="hidden size-4 group-open:block" strokeWidth={1.5} />
+          </summary>
+          <nav
+            aria-label="Mobile navigation"
+            className="absolute -right-px top-16 w-screen overflow-hidden border border-white/14 bg-black shadow-2xl shadow-black/60"
+          >
+            {[...navItems, { index: "05", label: "Docs", href: "/docs", icon: BookOpenText }].map(
+              (item) => (
+                <a
+                  key={item.label}
+                  className="flex h-12 items-center border-b border-white/10 px-4 font-mono uppercase tracking-normal text-white/58 last:border-b-0 hover:bg-white/[0.04] hover:text-white"
+                  href={item.href}
+                >
+                  <IndexedLabel index={item.index} icon={item.icon} label={item.label} />
+                </a>
+              ),
+            )}
+          </nav>
+        </details>
       </div>
     </header>
   );
 }
 
-function SectionHeader({
-  eyebrow,
-  title,
-  body,
-  tone = "dark",
-}: {
-  eyebrow: string;
-  title: string;
-  body: string;
-  tone?: "dark" | "light";
-}) {
+function FarmRuntimeVisual() {
   return (
-    <div className="max-w-2xl">
-      <Badge tone={tone === "dark" ? "dark" : "light"}>{eyebrow}</Badge>
-      <h2
-        className={cx(
-          "mt-5 text-3xl font-semibold leading-[1.02] tracking-normal sm:text-5xl",
-          tone === "dark" ? "text-white" : "text-black",
-        )}
+    <div className="farm-runtime-visual farm-line-field relative flex min-h-[430px] items-center justify-center overflow-hidden bg-black sm:min-h-[520px] lg:min-h-[620px]">
+      <div className="farm-dot-grid absolute inset-0 opacity-30" />
+      <span className="absolute right-5 top-5 border border-white/10 bg-black px-2 py-1 font-mono text-[9px] uppercase text-white/32 sm:right-8 sm:top-8">
+        Runtime graph / 01
+      </span>
+
+      <svg
+        aria-labelledby="farm-runtime-title"
+        className="relative z-10 h-auto w-[112%] max-w-[650px]"
+        role="img"
+        viewBox="0 0 620 620"
       >
-        {title}
-      </h2>
-      <p
-        className={cx(
-          "mt-4 text-sm leading-6",
-          tone === "dark" ? "text-white/60" : "text-black/60",
-        )}
-      >
-        {body}
-      </p>
-    </div>
-  );
-}
+        <title id="farm-runtime-title">
+          Farm connects application routes, APIs, docs, integrations, and deployment output.
+        </title>
+        <g fill="none" stroke="white" strokeOpacity="0.2" strokeWidth="1.5">
+          <path className="farm-runtime-line" d="M206 276 134 194" />
+          <path className="farm-runtime-line" d="M414 276 486 194" />
+          <path className="farm-runtime-line" d="M206 364 128 452" />
+          <path className="farm-runtime-line" d="M414 364 492 452" />
+        </g>
 
-function SourceStrip() {
-  return (
-    <div className="mx-auto max-w-[1180px] border-x border-white/10 px-4 py-4 sm:px-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <p className="font-mono text-[11px] uppercase text-white/40">public repo component map</p>
-        <div className="flex flex-wrap gap-2">
-          {sourcePrimitives.map((item) => (
-            <Badge key={item}>{item}</Badge>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
+        <g className="farm-signal" fill="white">
+          <circle cx="166" cy="230" r="3" />
+          <circle cx="452" cy="232" r="3" />
+          <circle cx="164" cy="410" r="3" />
+          <circle cx="454" cy="410" r="3" />
+        </g>
 
-function SideMenuPreview() {
-  return (
-    <aside className="flex w-full shrink-0 flex-col border-b border-white/10 bg-white/[0.025] md:w-[220px] md:border-r md:border-b-0">
-      <div className="border-b border-white/10 p-3">
-        <div className="flex items-center gap-2 rounded-md border border-white/[0.09] bg-black p-2.5">
-          <span className="grid size-7 place-items-center rounded-md bg-white text-xs font-black text-black">
-            A
-          </span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold text-white">acme-web</p>
-            <p className="font-mono text-[10px] uppercase text-white/40">production</p>
-          </div>
-        </div>
-      </div>
-
-      <div className="space-y-5 p-3">
-        {sideSections.map((section) => (
-          <div key={section.label}>
-            <p className="mb-2 px-1 font-mono text-[10px] uppercase text-white/30">
-              {section.label}
-            </p>
-            <div className="space-y-1">
-              {section.items.map((item) => (
-                <a
-                  key={item.name}
-                  className={cx(
-                    "group flex h-8 items-center justify-between gap-3 overflow-hidden rounded px-2 text-sm transition",
-                    item.active
-                      ? "bg-white text-black"
-                      : "text-white/60 hover:bg-white/[0.055] hover:text-white",
-                  )}
-                  href="/docs"
-                >
-                  <span className="truncate font-medium">{item.name}</span>
-                  <span
-                    className={cx(
-                      "shrink-0 font-mono text-[10px]",
-                      item.active ? "text-black/50" : "text-white/30 group-hover:text-white/50",
-                    )}
-                  >
-                    {item.meta}
-                  </span>
-                </a>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="mt-auto border-t border-white/10 p-3">
-        <div className="rounded-md border border-white/[0.09] bg-white/[0.035] p-3">
-          <div className="flex items-center justify-between">
-            <p className="font-mono text-[10px] uppercase text-white/40">status</p>
-            <Badge>live</Badge>
-          </div>
-          <p className="mt-3 text-xs leading-5 text-white/50">
-            Build output, docs, and middleware manifest are in sync.
-          </p>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-function RuntimeTable() {
-  return (
-    <div className="overflow-x-auto rounded-md border border-white/[0.09] bg-black">
-      <table className="w-full min-w-[640px] whitespace-nowrap text-left">
-        <thead className="bg-white/[0.045] text-white">
-          <tr className="border-b border-white/[0.09]">
-            {["Type", "Source", "Contract", "State"].map((heading) => (
-              <th
-                key={heading}
-                className="px-3 py-2 font-mono text-[11px] font-medium uppercase text-white/40"
-              >
-                {heading}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {runtimeRows.map(([type, source, contract, state]) => (
-            <tr
-              key={`${type}-${source}`}
-              className="group border-b border-white/[0.07] last:border-b-0 hover:bg-white/[0.035]"
-            >
-              <td className="px-3 py-3 font-mono text-[11px] text-white/70">{type}</td>
-              <td className="max-w-[260px] truncate px-3 py-3 font-mono text-[11px] text-white/50">
-                {source}
-              </td>
-              <td className="px-3 py-3 font-mono text-[11px] text-white/50">{contract}</td>
-              <td className="px-3 py-3">
-                <Badge className="group-hover:border-white/25">{state}</Badge>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function CodeChrome() {
-  const lines = codeSample.split("\n");
-
-  return (
-    <div className="overflow-hidden rounded-md border border-white/[0.09] bg-black">
-      <div className="flex h-10 items-center justify-between border-b border-white/[0.09] bg-white/[0.035] px-3">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="size-2 rounded-full border border-white/50" />
-          <span className="size-2 rounded-full border border-white/30" />
-          <span className="size-2 rounded-full border border-white/20" />
-          <p className="ml-1 truncate font-mono text-[11px] text-white/50">farm.config.ts</p>
-        </div>
-        <button className="h-6 rounded-sm border border-white/10 px-2 font-mono text-[10px] uppercase text-white/60 transition hover:border-white/30 hover:text-white">
-          Copy
-        </button>
-      </div>
-      <pre className="max-h-[320px] overflow-auto p-0 text-[12px] leading-6">
-        <code>
-          {lines.map((line, index) => (
-            <span
-              key={`${index}-${line}`}
-              className={cx(
-                "grid grid-cols-[2.25rem_minmax(0,1fr)] px-3 font-mono",
-                index >= 6 && index <= 13 ? "bg-white/[0.035] text-white/80" : "text-white/60",
-              )}
-            >
-              <span className="select-none pr-3 text-right text-white/20">{index + 1}</span>
-              <span className="whitespace-pre">{line || " "}</span>
-            </span>
-          ))}
-        </code>
-      </pre>
-    </div>
-  );
-}
-
-function EventStream() {
-  return (
-    <div className="rounded-md border border-white/[0.09] bg-white/[0.03]">
-      <div className="flex items-center justify-between border-b border-white/[0.09] px-3 py-2">
-        <p className="font-mono text-[11px] uppercase text-white/40">observability</p>
-        <Badge>events</Badge>
-      </div>
-      <div>
-        {eventRows.map(([time, event, route]) => (
-          <div
-            key={`${time}-${event}`}
-            className="grid grid-cols-[72px_1fr] gap-3 border-b border-white/[0.06] px-3 py-2.5 last:border-b-0"
+        <g transform="translate(69 142)">
+          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="11"
+            textAnchor="middle"
+            x="66"
+            y="29"
           >
-            <span className="font-mono text-[11px] text-white/30">{time}</span>
-            <div className="min-w-0">
-              <p className="truncate font-mono text-[11px] text-white/70">{event}</p>
-              <p className="mt-0.5 truncate font-mono text-[10px] text-white/40">{route}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
+            ROUTES
+          </text>
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="9"
+            opacity="0.38"
+            textAnchor="middle"
+            x="66"
+            y="46"
+          >
+            pages + layouts
+          </text>
+        </g>
+        <g transform="translate(419 142)">
+          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="11"
+            textAnchor="middle"
+            x="66"
+            y="29"
+          >
+            APIs
+          </text>
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="9"
+            opacity="0.38"
+            textAnchor="middle"
+            x="66"
+            y="46"
+          >
+            typed callers
+          </text>
+        </g>
+        <g transform="translate(63 420)">
+          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="11"
+            textAnchor="middle"
+            x="66"
+            y="29"
+          >
+            INTEGRATIONS
+          </text>
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="9"
+            opacity="0.38"
+            textAnchor="middle"
+            x="66"
+            y="46"
+          >
+            auth + billing
+          </text>
+        </g>
+        <g transform="translate(425 420)">
+          <rect fill="black" height="66" stroke="white" strokeOpacity="0.22" width="132" />
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="11"
+            textAnchor="middle"
+            x="66"
+            y="29"
+          >
+            DEPLOY
+          </text>
+          <text
+            fill="white"
+            fontFamily="Geist Mono, monospace"
+            fontSize="9"
+            opacity="0.38"
+            textAnchor="middle"
+            x="66"
+            y="46"
+          >
+            manifests + output
+          </text>
+        </g>
 
-function MetricCard({ label, value, caption }: { label: string; value: string; caption: string }) {
-  return (
-    <div className="rounded-md border border-white/[0.09] bg-white/[0.03] p-3">
-      <p className="font-mono text-[10px] uppercase text-white/40">{label}</p>
-      <p className="mt-3 text-3xl font-semibold tracking-normal text-white">{value}</p>
-      <p className="mt-1 text-xs leading-5 text-white/50">{caption}</p>
-    </div>
-  );
-}
+        <polygon
+          fill="black"
+          points="184,332 310,258 436,332 310,406"
+          stroke="white"
+          strokeOpacity="0.12"
+          strokeWidth="2"
+        />
+        <polygon
+          fill="black"
+          points="184,310 310,236 436,310 310,384"
+          stroke="white"
+          strokeOpacity="0.26"
+          strokeWidth="2"
+        />
+        <polygon
+          className="farm-core-face"
+          fill="black"
+          points="184,286 310,212 436,286 310,360"
+          stroke="white"
+          strokeWidth="2"
+        />
+        <path d="M279 257h62v12h-46v12h33v12h-33v20h-16v-56Z" fill="white" />
+        <path d="M325 257h16l-13 12h-16l13-12Z" fill="black" />
+        <text
+          fill="white"
+          fontFamily="Geist Mono, monospace"
+          fontSize="9"
+          opacity="0.42"
+          textAnchor="middle"
+          x="310"
+          y="334"
+        >
+          APP RUNTIME
+        </text>
+      </svg>
 
-function AppPreview() {
-  return (
-    <div className="mx-auto mt-12 w-full min-w-0 max-w-[1180px] rounded-[12px] border border-white/10 bg-black p-1 shadow-[0_50px_150px_rgba(0,0,0,0.88)]">
-      <div className="min-w-0 overflow-hidden rounded-[9px] border border-white/[0.08] bg-black">
-        <div className="flex h-11 items-center justify-between border-b border-white/10 px-4">
-          <div className="flex items-center gap-2">
-            <span className="size-2.5 rounded-full border border-white/50" />
-            <span className="size-2.5 rounded-full border border-white/30" />
-            <span className="size-2.5 rounded-full border border-white/20" />
-          </div>
-          <div className="hidden items-center gap-2 md:flex">
-            <Badge>farm runtime</Badge>
-            <Badge>production</Badge>
-          </div>
-          <p className="font-mono text-[11px] text-white/40">localhost:4107</p>
-        </div>
-
-        <div className="w-full overflow-x-auto">
-          <div className="flex min-h-[650px] min-w-full flex-col md:min-w-[980px] md:flex-row">
-            <SideMenuPreview />
-
-            <section className="min-w-0 flex-1">
-              <div className="border-b border-white/10 bg-white/[0.018] px-4 py-3">
-                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 font-mono text-[11px] text-white/40">
-                      <span>Acme</span>
-                      <span>/</span>
-                      <span>Web</span>
-                      <span>/</span>
-                      <span className="text-white/70">Runtime</span>
-                    </div>
-                    <h2 className="mt-2 text-xl font-semibold tracking-normal text-white">
-                      Product runtime inventory
-                    </h2>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <button className="h-8 rounded-[5px] border border-white/15 px-3 text-xs font-semibold text-white/70 transition hover:border-white/30 hover:text-white">
-                      Dry run
-                    </button>
-                    <button className="h-8 rounded-[5px] border border-white bg-white px-3 text-xs font-bold text-black transition hover:bg-white/90">
-                      Deploy
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  {["Runtime", "Middleware", "Integrations", "Docs"].map((tab, index) => (
-                    <button
-                      key={tab}
-                      className={cx(
-                        "h-7 rounded-sm border px-2.5 text-xs font-medium transition",
-                        index === 0
-                          ? "border-white bg-white text-black"
-                          : "border-white/10 text-white/50 hover:border-white/25 hover:text-white",
-                      )}
-                    >
-                      {tab}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid gap-3 p-4 lg:grid-cols-[minmax(0,1fr)_360px]">
-                <div className="space-y-3">
-                  <div className="grid gap-3 sm:grid-cols-3">
-                    <MetricCard label="routes" value="44" caption="pages, layouts, and APIs" />
-                    <MetricCard label="middleware" value="6" caption="config plus file guards" />
-                    <MetricCard label="targets" value="3" caption="vercel, node, preview" />
-                  </div>
-                  <RuntimeTable />
-                </div>
-
-                <div className="space-y-3">
-                  <CodeChrome />
-                  <EventStream />
-                </div>
-              </div>
-            </section>
-          </div>
-        </div>
+      <div className="absolute bottom-5 left-5 flex items-center gap-2 font-mono text-[10px] text-white/34 sm:bottom-8 sm:left-8">
+        <span className="size-1.5 bg-white" /> ready in 126ms
       </div>
     </div>
   );
@@ -554,203 +487,666 @@ function AppPreview() {
 
 function Hero() {
   return (
-    <section className="relative w-screen max-w-[100vw] overflow-hidden border-b border-white/10 pt-28">
-      <div className="absolute inset-0 -z-10 opacity-[0.12] [background-image:linear-gradient(to_right,rgba(255,255,255,0.22)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.16)_1px,transparent_1px)] [background-size:72px_72px]" />
-      <div className="mx-auto w-full max-w-[1240px] px-4 pb-16 sm:px-6 sm:pb-24">
-        <div className="mx-auto w-full max-w-5xl text-center">
-          <a
-            className="inline-flex w-full max-w-full items-center justify-center gap-2 overflow-hidden rounded-[5px] border border-white/15 bg-white/[0.04] px-2.5 py-1.5 text-xs font-medium text-white/70 transition hover:border-white/30 hover:text-white sm:w-auto"
-            href="/docs/middleware"
-          >
-            <span className="shrink-0 rounded-[3px] bg-white px-1.5 py-0.5 font-mono text-[10px] font-black uppercase text-black">
-              New
-            </span>
-            <span className="block min-w-0 truncate">Production middleware runtime</span>
-          </a>
-
-          <h1 className="mx-auto mt-7 max-w-[310px] text-balance text-3xl font-semibold leading-[0.98] tracking-normal text-white sm:max-w-5xl sm:text-7xl sm:leading-[0.94] lg:text-8xl">
-            Farm.js is the React framework for product apps.
+    <section className="farm-full-rule grid w-full border-b border-white/12 lg:grid-cols-[1.08fr_0.92fr]">
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -left-px -top-px z-30 size-[9px] border-l border-t border-white/28"
+      />
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -bottom-px -right-px z-30 size-[9px] border-b border-r border-white/28"
+      />
+      <div className="flex min-h-[600px] flex-col justify-between gap-14 p-6 sm:p-10 lg:min-h-[620px] lg:p-12">
+        <div className="max-w-[34rem]">
+          <div className="text-white/42">
+            <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
+          </div>
+          <h1 className="mt-8 max-w-[11ch] text-balance text-5xl font-medium leading-[0.98] tracking-normal text-white sm:text-6xl xl:text-[4.75rem]">
+            The React Framework for Product Apps
           </h1>
-          <p className="mx-auto mt-6 max-w-[280px] text-sm leading-6 text-white/60 sm:max-w-2xl sm:text-lg sm:leading-8">
-            Keep the app router shape, then add the product runtime around it: typed APIs,
-            middleware, auth, billing, jobs, docs, migrations, and deploy output in one source tree.
+          <p className="mt-7 max-w-[31rem] text-base leading-7 text-white/58 sm:text-lg sm:leading-8">
+            Farm.js keeps the app router you already know, then brings typed APIs, middleware,
+            integrations, docs, and deployment into the same framework.
           </p>
-
-          <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <ButtonLink href="/docs/getting-started">Start building</ButtonLink>
-            <ButtonLink href="/docs/migrations" variant="secondary">
-              Migrate an app
+          <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+            <ButtonLink
+              href="/docs/getting-started"
+              icon={<BookOpen aria-hidden className="size-4" strokeWidth={1.5} />}
+            >
+              Get Started
+            </ButtonLink>
+            <ButtonLink
+              href="https://github.com/Kinfe123/farm.js"
+              icon={<GithubIcon className="size-4" />}
+              variant="secondary"
+            >
+              View on GitHub
             </ButtonLink>
           </div>
         </div>
 
-        <AppPreview />
+        <InstallCommand />
       </div>
-      <SourceStrip />
+      <div className="border-t border-white/12 lg:border-l lg:border-t-0">
+        <FarmRuntimeVisual />
+      </div>
     </section>
   );
 }
 
-function ModuleCard({
-  label,
+function EcosystemStrip() {
+  return (
+    <section className="farm-full-rule w-full border-b border-white/12">
+      <div className="grid border-b border-white/12 md:grid-cols-[14rem_1fr]">
+        <div className="flex items-center border-b border-white/12 px-6 py-5 text-white/36 md:border-b-0 md:border-r sm:px-8">
+          <IndexedLabel icon={Layers3} index="01" label="Product stack" />
+        </div>
+        <p className="px-6 py-5 text-sm font-medium text-white/72 sm:px-8">
+          Built around the tools product teams already use
+        </p>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6">
+        {ecosystemItems.map((item, index) => {
+          const Icon = "icon" in item ? item.icon : null;
+
+          return (
+            <div
+              key={item.label}
+              className={cx(
+                "flex h-20 items-center justify-center gap-2 border-white/12 px-3 text-center font-mono text-[11px] font-medium uppercase tracking-normal text-white/48 transition-colors hover:bg-white/[0.035] hover:text-white/80",
+                index % 2 !== 0 && "border-l",
+                index >= 2 && "border-t sm:border-t-0",
+                index % 3 !== 0 && "sm:border-l",
+                index >= 3 && "sm:border-t lg:border-t-0",
+                index !== 0 && "lg:border-l",
+              )}
+            >
+              <span className="grid size-8 shrink-0 place-items-center border border-white/14 text-white/68">
+                {"brand" in item ? (
+                  <BrandIcon className="size-3.5" src={item.brand} />
+                ) : Icon ? (
+                  <Icon aria-hidden className="size-4" strokeWidth={1.5} />
+                ) : null}
+              </span>
+              {item.label}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function HeadingSection({
+  index,
+  eyebrow,
+  icon,
   title,
   body,
-  href,
 }: {
-  label: string;
+  index: string;
+  eyebrow: string;
+  icon: LucideIcon;
   title: string;
-  body: string;
-  href: string;
+  body?: string;
 }) {
   return (
-    <a
-      className="group flex min-h-[290px] flex-col border border-black/10 bg-white p-5 transition hover:bg-black/[0.035]"
-      href={href}
-    >
-      <div className="flex items-center justify-between">
-        <Badge tone="light">{label}</Badge>
-        <span className="font-mono text-[11px] text-black/30 transition group-hover:text-black/60">
-          /docs
-        </span>
+    <section className="farm-wide-rule grid min-h-[320px] w-full border-b border-white/12 lg:grid-cols-[14rem_1fr]">
+      <div className="flex items-start border-b border-white/12 p-6 text-white/36 lg:border-b-0 lg:border-r sm:p-8">
+        <IndexedLabel icon={icon} index={index} label={eyebrow} />
       </div>
+      <div className="flex items-center px-6 py-16 sm:px-10 lg:px-14 lg:py-20">
+        <div className="max-w-4xl">
+          <h2 className="max-w-[18ch] text-balance text-4xl font-medium leading-[1.04] tracking-normal text-white sm:text-5xl lg:text-[3.5rem]">
+            {title}
+          </h2>
+          {body ? <p className="mt-6 max-w-2xl text-base leading-7 text-white/46">{body}</p> : null}
+        </div>
+      </div>
+    </section>
+  );
+}
 
-      <div className="mt-10 grid h-24 grid-cols-4 overflow-hidden rounded-md border border-black/10 bg-black/[0.035]">
-        {Array.from({ length: 16 }).map((_, index) => (
-          <span
-            key={index}
+function TerminalVisual() {
+  return (
+    <div
+      aria-label="Farm development server terminal output"
+      className="farm-line-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10"
+      role="img"
+    >
+      <div className="farm-scan-lines absolute inset-0 opacity-30" />
+      <div className="relative w-full max-w-[470px] border border-white/18 bg-black shadow-[0_28px_70px_rgba(0,0,0,0.6)]">
+        <div className="flex h-10 items-center justify-between border-b border-white/10 px-4">
+          <div className="flex gap-1.5">
+            <span className="size-2 rounded-full bg-white/22" />
+            <span className="size-2 rounded-full bg-white/14" />
+            <span className="size-2 rounded-full bg-white/10" />
+          </div>
+          <span className="font-mono text-[9px] text-white/28">terminal</span>
+        </div>
+        <div className="space-y-2 p-5 font-mono text-[11px] leading-5 sm:text-xs">
+          <p className="text-white/48">$ pnpm dev</p>
+          <p className="text-white">
+            <span className="font-semibold text-white">FARM</span> v0.0.3 ready in 126ms
+          </p>
+          <p className="text-white/54">
+            <span className="text-white/82">Local</span> http://localhost:3000
+          </p>
+          <p className="text-white/54">
+            <span className="text-white/82">Graph</span> 32 routes / 8 integrations
+          </p>
+          <p className="text-white/32">press h + enter to show help</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TypedApiVisual() {
+  const lines = [
+    "const user = await api.users.get({",
+    '  params: { id: "user_123" },',
+    "});",
+    "",
+    "user.name;",
+    "//   ^? string",
+  ];
+
+  return (
+    <div
+      aria-label="Typed Farm API client example"
+      className="farm-line-field relative flex min-h-[320px] items-end justify-end overflow-hidden bg-black pt-14"
+      role="img"
+    >
+      <div className="absolute left-8 top-9 border border-white/22 bg-black px-3 py-2 font-mono text-[10px] text-white/66">
+        GET /api/users/:id
+      </div>
+      <div className="w-[88%] border-l border-t border-white/12 bg-black py-5 shadow-[-20px_-20px_60px_rgba(0,0,0,0.42)]">
+        <div className="mb-4 flex items-center justify-between border-b border-white/8 px-5 pb-4">
+          <span className="font-mono text-[10px] text-white/35">src/app/dashboard/page.tsx</span>
+          <span className="font-mono text-[9px] text-white/50">typed</span>
+        </div>
+        <code className="block font-mono text-[11px] leading-6 text-white/68 sm:text-xs">
+          {lines.map((line, index) => (
+            <span key={`${line}-${index}`} className="grid grid-cols-[2rem_1fr] px-5">
+              <span className="select-none text-right text-white/18">{index + 1}</span>
+              <span className={index === 0 || index === 4 ? "text-white" : ""}>{line || " "}</span>
+            </span>
+          ))}
+        </code>
+      </div>
+    </div>
+  );
+}
+
+function IntegrationVisual() {
+  const items = ["auth", "billing", "email", "jobs", "storage", "docs"];
+
+  return (
+    <div
+      aria-label="Farm integration modules connected to framework configuration"
+      className="farm-dot-grid relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10"
+      role="img"
+    >
+      <div className="grid w-full max-w-[470px] grid-cols-2 gap-2 sm:grid-cols-3">
+        {items.map((item, index) => (
+          <div
+            key={item}
             className={cx(
-              "border-b border-r border-black/[0.08]",
-              index % 5 === 0 && "bg-black/[0.055]",
-              index === 5 && "bg-black text-white",
+              "flex h-20 flex-col justify-between border border-white/10 bg-black p-3 transition-colors hover:border-white/28 hover:bg-white/[0.025]",
+              index < 3 && "border-white/18",
             )}
-          />
+          >
+            <span className="font-mono text-[9px] text-white/28">0{index + 1}</span>
+            <span className="font-mono text-xs text-white/70">{item}</span>
+          </div>
         ))}
       </div>
-
-      <h3 className="mt-8 text-2xl font-semibold leading-tight tracking-normal text-black">
-        {title}
-      </h3>
-      <p className="mt-3 text-sm leading-6 text-black/60">{body}</p>
-      <span className="mt-auto inline-flex items-center gap-2 pt-8 text-sm font-semibold text-black">
-        Read the docs
-        <Arrow />
+      <span className="absolute bottom-5 border border-white/18 bg-black px-3 py-2 font-mono text-[10px] text-white/70 shadow-xl shadow-black/40">
+        defineFarmConfig()
       </span>
-    </a>
+    </div>
   );
 }
 
-function PlatformSection() {
+function BuildVisual() {
   return (
-    <section id="platform" className="bg-white py-20 text-black sm:py-28">
-      <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-        <div className="flex flex-col gap-8 lg:flex-row lg:items-end lg:justify-between">
-          <SectionHeader
-            tone="light"
-            eyebrow="Platform"
-            title="A framework surface for the whole product."
-            body="Farm treats framework files and product systems as one inventory so teams can review what the app owns before it ships."
-          />
-          <a
-            className="inline-flex h-10 w-fit items-center gap-2 rounded-[5px] border border-black/15 px-4 text-sm font-semibold text-black transition hover:border-black/30"
-            href="/docs"
-          >
-            Open docs
-            <Arrow />
-          </a>
-        </div>
-
-        <div className="mt-12 grid gap-px overflow-hidden rounded-[10px] border border-black/10 bg-black/10 md:grid-cols-2 lg:grid-cols-4">
-          {platformModules.map((module) => (
-            <ModuleCard key={module.title} {...module} />
-          ))}
-        </div>
+    <div
+      aria-label="Farm production build output"
+      className="farm-diagonal-field relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10"
+      role="img"
+    >
+      <div className="relative w-full max-w-[450px] border border-white/18 bg-black p-5 font-mono text-[10px] leading-5 text-white/58 shadow-[0_28px_70px_rgba(0,0,0,0.6)] sm:text-[11px]">
+        <p className="text-white">$ farm build --target vercel</p>
+        <p className="mt-3">
+          <span className="text-white">ok</span> route manifest ........ 44 routes
+        </p>
+        <p>
+          <span className="text-white">ok</span> middleware .............. 6 matchers
+        </p>
+        <p>
+          <span className="text-white">ok</span> generated client ........ 12 APIs
+        </p>
+        <p>
+          <span className="text-white">ok</span> deployment output ....... .vercel/output
+        </p>
+        <p className="mt-3 text-white/78">built in 842ms</p>
       </div>
+    </div>
+  );
+}
+
+function FeatureCell({
+  index,
+  icon: Icon,
+  title,
+  body,
+  className,
+  children,
+}: {
+  index: string;
+  icon: LucideIcon;
+  title: string;
+  body: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <article className={cx("flex min-h-[500px] flex-col justify-between", className)}>
+      <div className="p-6 sm:p-10">
+        <div className="-mx-6 mb-8 flex items-center justify-between border-b border-white/10 px-6 pb-5 sm:-mx-10 sm:px-10">
+          <span className="grid size-9 place-items-center border border-white/14 text-white/72">
+            <Icon aria-hidden className="size-4" strokeWidth={1.5} />
+          </span>
+          <span className="font-mono text-[10px] text-white/28">{index}</span>
+        </div>
+        <h3 className="font-mono text-sm font-semibold uppercase text-white sm:text-base">
+          {title}
+        </h3>
+        <p className="mt-3 max-w-[31rem] text-sm leading-6 text-white/47 sm:text-base sm:leading-7">
+          {body}
+        </p>
+      </div>
+      {children}
+    </article>
+  );
+}
+
+function DeveloperExperienceGrid() {
+  return (
+    <section className="farm-full-rule grid w-full border-b border-white/12 lg:grid-cols-2">
+      <FeatureCell
+        body="Start the app, route graph, generated clients, docs, and integration runtime together with one command."
+        icon={Terminal}
+        index="01.1"
+        title="One Server, Entire Product"
+      >
+        <TerminalVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Route handlers and generated callers share the same contract, from params to the final Response."
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
+        icon={Braces}
+        index="01.2"
+        title="Typed From Route to Client"
+      >
+        <TypedApiVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Auth, billing, email, jobs, storage, and docs register through one framework-level integration surface."
+        className="border-t border-white/12"
+        icon={Plug}
+        index="01.3"
+        title="Product Systems Included"
+      >
+        <IntegrationVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="The build carries routes, middleware, generated clients, and platform manifests into production together."
+        className="border-t border-white/12 lg:border-l"
+        icon={Rocket}
+        index="01.4"
+        title="Deployment-Aware Output"
+      >
+        <BuildVisual />
+      </FeatureCell>
     </section>
   );
 }
 
-function RuntimeSection() {
-  return (
-    <section id="runtime" className="border-y border-white/10 py-20 sm:py-28">
-      <div className="mx-auto grid max-w-[1180px] gap-10 px-4 sm:px-6 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
-        <SectionHeader
-          eyebrow="Runtime"
-          title="The production build gets the same behavior you tested."
-          body="Middleware matchers, app middleware files, generated clients, docs routes, and deployment manifests are part of the build contract."
-        />
+function FileTreeVisual() {
+  const files = [
+    ["src/app", "directory"],
+    ["  dashboard/page.tsx", "route"],
+    ["  api/users/route.ts", "api"],
+    ["  docs/page.md", "content"],
+    ["farm.config.ts", "config"],
+  ] as const;
 
-        <div className="overflow-hidden rounded-[10px] border border-white/10 bg-white/[0.025]">
-          <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
-            <p className="font-mono text-[11px] uppercase text-white/40">runtime contract</p>
-            <Badge>stable surface</Badge>
-          </div>
-          <RuntimeTable />
+  return (
+    <div className="farm-line-field min-h-[280px] overflow-hidden bg-black px-6 pt-8 sm:px-10">
+      <div className="mx-auto max-w-[460px] border-x border-t border-white/12 bg-black">
+        <div className="border-b border-white/10 px-4 py-3 font-mono text-[10px] text-white/32">
+          project
         </div>
-      </div>
-    </section>
-  );
-}
-
-function WorkflowSection() {
-  return (
-    <section className="bg-white py-20 text-black sm:py-28">
-      <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-        <SectionHeader
-          tone="light"
-          eyebrow="Workflow"
-          title="A boring path from source tree to deployed app."
-          body="Initialize a project, register the product systems, then ship the route tree and runtime assets together."
-        />
-
-        <div className="mt-12 grid gap-4 lg:grid-cols-3">
-          {workflowSteps.map(([step, title, command, body]) => (
-            <article
-              key={step}
-              className="rounded-[10px] border border-black/10 bg-black/[0.025] p-5"
-            >
-              <div className="flex items-center justify-between">
-                <Badge tone="light">{step}</Badge>
-                <span className="font-mono text-[11px] text-black/40">farm</span>
-              </div>
-              <h3 className="mt-8 text-2xl font-semibold tracking-normal">{title}</h3>
-              <p className="mt-3 text-sm leading-6 text-black/60">{body}</p>
-              <p className="mt-6 overflow-hidden rounded-md border border-black/10 bg-white px-3 py-2 font-mono text-[12px] text-black/70">
-                {command}
-              </p>
-            </article>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function MigrationSection() {
-  return (
-    <section id="migrate" className="border-t border-white/10 py-20 sm:py-28">
-      <div className="mx-auto grid max-w-[1180px] gap-10 px-4 sm:px-6 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
-        <SectionHeader
-          eyebrow="Migrate"
-          title="Bring an existing framework over without a blind rewrite."
-          body="The migrator reads framework evidence, maps files into Farm routes, and reports unsupported APIs before it writes."
-        />
-
-        <div className="rounded-[10px] border border-white/10 bg-white/[0.025] p-4">
-          <CodeChrome />
-
-          <div className="mt-4 overflow-hidden rounded-md border border-white/[0.09]">
-            {migrationRows.map(([from, to]) => (
-              <div
-                key={from}
-                className="grid gap-2 border-b border-white/[0.07] px-3 py-3 font-mono text-[11px] last:border-b-0 sm:grid-cols-[1fr_auto_1fr] sm:items-center"
+        <div className="py-3">
+          {files.map(([name, kind]) => (
+            <div key={name} className="grid grid-cols-[1fr_auto] px-4 py-2 font-mono text-[11px]">
+              <span
+                className={
+                  kind === "directory" || kind === "config" ? "text-white" : "text-white/58"
+                }
               >
-                <span className="min-w-0 truncate text-white/50">{from}</span>
-                <span className="hidden text-white/20 sm:block">-&gt;</span>
-                <span className="min-w-0 truncate text-white/80">{to}</span>
-              </div>
-            ))}
+                {name}
+              </span>
+              <span className="text-white/34">{kind}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiddlewareVisual() {
+  const events = [
+    ["request", "/dashboard/settings", "12:04:41.021"],
+    ["matcher", "/dashboard/:path*", "+0.2ms"],
+    ["session", "authenticated", "+1.6ms"],
+    ["render", "dashboard/settings", "+8.4ms"],
+  ] as const;
+
+  return (
+    <div className="farm-dot-grid min-h-[280px] p-6 sm:p-10">
+      <div className="mx-auto max-w-[470px] overflow-hidden border border-white/12 bg-black">
+        {events.map(([event, detail, time], index) => (
+          <div
+            key={event}
+            className={cx(
+              "grid grid-cols-[4.5rem_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3 font-mono text-[10px]",
+              index !== 0 && "border-t border-white/8",
+            )}
+          >
+            <span className="text-white/72">{event}</span>
+            <span className="truncate text-white/54">{detail}</span>
+            <span className="text-white/25">{time}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DocsVisual() {
+  return (
+    <div className="farm-line-field min-h-[280px] overflow-hidden bg-black px-5 pt-8 sm:px-10">
+      <div className="mx-auto grid max-w-[490px] grid-cols-[7rem_1fr] overflow-hidden border-x border-t border-white/12 bg-black sm:grid-cols-[9rem_1fr]">
+        <div className="border-r border-white/10 p-3 font-mono text-[9px] text-white/34">
+          <p className="text-white/70">Introduction</p>
+          <p className="mt-3">Routing</p>
+          <p className="mt-3">API client</p>
+          <p className="mt-3">Middleware</p>
+          <p className="mt-3">Deployment</p>
+        </div>
+        <div className="p-5">
+          <span className="font-mono text-[9px] text-white/52">GETTING STARTED</span>
+          <div className="mt-4 h-4 w-3/4 bg-white/80" />
+          <div className="mt-4 h-2 w-full bg-white/12" />
+          <div className="mt-2 h-2 w-5/6 bg-white/12" />
+          <div className="mt-5 border border-white/10 bg-black p-3 font-mono text-[9px] text-white/55">
+            pnpm create farm@latest
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function MigrationVisual() {
+  const rows = [
+    ["Next.js", "src/app preserved", "ready"],
+    ["Remix", "routes mapped", "ready"],
+    ["Express", "handlers inventoried", "ready"],
+  ] as const;
+
+  return (
+    <div className="farm-diagonal-field min-h-[280px] p-6 sm:p-10">
+      <div className="mx-auto max-w-[470px] border border-white/15 bg-black p-4">
+        <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
+        <div className="mt-4 space-y-2">
+          {rows.map(([source, detail, status]) => (
+            <div
+              key={source}
+              className="grid grid-cols-[4rem_1fr_auto] gap-3 border border-white/8 px-3 py-2 font-mono text-[9px] sm:text-[10px]"
+            >
+              <span className="text-white">{source}</span>
+              <span className="truncate text-white/42">{detail}</span>
+              <span className="text-white/68">{status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FoundationGrid() {
+  return (
+    <section className="farm-full-rule grid w-full border-b border-white/12 lg:grid-cols-2">
+      <FeatureCell
+        body="Pages, layouts, route handlers, loading states, markdown, and typed links live in the app directory."
+        icon={FolderTree}
+        index="02.1"
+        title="A Familiar App Router"
+      >
+        <FileTreeVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Config and file middleware are discovered, traced, tested, and compiled into deployment matchers."
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
+        icon={Network}
+        index="02.2"
+        title="Middleware You Can See"
+      >
+        <MiddlewareVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
+        className="border-t border-white/12"
+        icon={BookOpenText}
+        index="02.3"
+        title="Docs Are Part of the App"
+      >
+        <DocsVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Inventory routes from Next.js, Remix, Express, and custom servers before changing application source."
+        className="border-t border-white/12 lg:border-l"
+        icon={GitCompareArrows}
+        index="02.4"
+        title="Migrate With Evidence"
+      >
+        <MigrationVisual />
+      </FeatureCell>
+    </section>
+  );
+}
+
+function StackMap() {
+  return (
+    <section className="farm-full-rule farm-stack-map w-full border-b border-white/12">
+      <div className="grid gap-2 p-5 sm:hidden">
+        <div className="mb-3 border border-white/24 bg-black p-4 text-center">
+          <Settings2 aria-hidden className="mx-auto size-4 text-white/68" strokeWidth={1.5} />
+          <p className="mt-3 font-mono text-xs text-white">farm.config.ts</p>
+          <p className="mt-1 text-xs text-white/38">one framework contract</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          {stackItems.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <div key={item.label} className="border border-white/10 bg-black p-3">
+                <div className="flex items-center gap-2">
+                  <Icon aria-hidden className="size-3.5 text-white/56" strokeWidth={1.5} />
+                  <p className="font-mono text-[11px] font-medium uppercase text-white/78">
+                    {item.label}
+                  </p>
+                </div>
+                <p className="mt-2 font-mono text-[9px] text-white/32">{item.detail}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="relative hidden h-[520px] overflow-hidden sm:block">
+        <svg aria-hidden className="absolute inset-0 size-full" viewBox="0 0 1240 520">
+          <g fill="none" stroke="white" strokeDasharray="4 9" strokeOpacity="0.2" strokeWidth="1.3">
+            <path d="M620 260 170 86" />
+            <path d="M620 260 1070 86" />
+            <path d="M620 260 160 430" />
+            <path d="M620 260 1080 430" />
+            <path d="M620 260 360 250" />
+            <path d="M620 260 880 250" />
+          </g>
+        </svg>
+
+        <div className="absolute left-1/2 top-1/2 w-56 -translate-x-1/2 -translate-y-1/2 border border-white/28 bg-black p-5 text-center shadow-[0_0_50px_rgba(255,255,255,0.04)]">
+          <FarmMark className="mx-auto size-8 text-white" />
+          <div className="mt-3 flex items-center justify-center gap-2">
+            <Settings2 aria-hidden className="size-3.5 text-white/58" strokeWidth={1.5} />
+            <p className="font-mono text-sm text-white">farm.config.ts</p>
+          </div>
+          <p className="mt-2 text-xs leading-5 text-white/38">
+            one contract for routes, server APIs, docs, and lifecycle hooks
+          </p>
+        </div>
+
+        {stackItems.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <div
+              key={item.label}
+              className={cx("absolute w-40 border border-white/12 bg-black p-4", item.position)}
+            >
+              <div className="flex items-center gap-2">
+                <Icon aria-hidden className="size-3.5 text-white/52" strokeWidth={1.5} />
+                <p className="font-mono text-[11px] font-medium uppercase text-white/78">
+                  {item.label}
+                </p>
+              </div>
+              <p className="mt-2 font-mono text-[9px] text-white/32">{item.detail}</p>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function OpenSourceSection() {
+  const links = [
+    {
+      label: "Framework source",
+      body: "Read the router, runtime, build, and deployment implementation in the public repository.",
+      href: "https://github.com/Kinfe123/farm.js",
+      meta: "packages/farm",
+      icon: GithubIcon,
+    },
+    {
+      label: "Integration SDK",
+      body: "Build auth, billing, jobs, storage, and product-system contracts as first-class integrations.",
+      href: "/docs/plugins/create-plugin",
+      meta: "create a plugin",
+      icon: Plug,
+    },
+    {
+      label: "Migration tooling",
+      body: "Inspect a current application and produce a reviewable migration inventory before rewriting it.",
+      href: "/docs/migrations",
+      meta: "farm migrate",
+      icon: GitCompareArrows,
+    },
+  ] as const;
+
+  const stats = [
+    { value: "MIT", label: "licensed", icon: BadgeCheck },
+    { value: "19", label: "React", brand: reactIconUrl },
+    { value: "TS", label: "first", brand: typescriptIconUrl },
+  ] as const;
+
+  return (
+    <section id="open-source" className="farm-full-rule w-full border-b border-white/12">
+      <div className="grid gap-12 px-6 py-20 sm:px-10 lg:grid-cols-[1fr_auto] lg:items-end lg:px-14 lg:py-28">
+        <div className="max-w-2xl">
+          <div className="text-white/45">
+            <IndexedLabel icon={GitFork} index="04" label="Open source / MIT" />
+          </div>
+          <h2 className="mt-5 text-balance text-4xl font-medium leading-[1.04] tracking-normal text-white sm:text-5xl">
+            Built in public for the React ecosystem
+          </h2>
+          <p className="mt-5 max-w-xl text-base leading-7 text-white/48">
+            The framework, integration contracts, migration tooling, and documentation are all
+            reviewable source.
+          </p>
+        </div>
+        <div className="grid grid-cols-3 gap-6 sm:gap-10">
+          {stats.map((stat) => {
+            const Icon = "icon" in stat ? stat.icon : null;
+
+            return (
+              <div key={stat.label}>
+                <span className="mb-4 grid size-8 place-items-center border border-white/12 text-white/54">
+                  {"brand" in stat ? (
+                    <BrandIcon className="size-3.5" src={stat.brand} />
+                  ) : Icon ? (
+                    <Icon aria-hidden className="size-4" strokeWidth={1.5} />
+                  ) : null}
+                </span>
+                <p className="font-mono text-2xl font-medium text-white sm:text-3xl">
+                  {stat.value}
+                </p>
+                <p className="mt-2 font-mono text-[10px] uppercase text-white/35">{stat.label}</p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="grid border-t border-white/12 md:grid-cols-3">
+        {links.map((item, index) => (
+          <a
+            key={item.label}
+            className={cx(
+              "group flex min-h-[250px] flex-col justify-between p-6 transition-colors duration-150 hover:bg-white/[0.035] focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:p-8",
+              index !== 0 && "border-t border-white/12 md:border-l md:border-t-0",
+            )}
+            href={item.href}
+          >
+            <div>
+              <div className="-mx-6 flex items-center justify-between border-b border-white/10 px-6 pb-5 sm:-mx-8 sm:px-8">
+                <span className="grid size-9 place-items-center border border-white/14 text-white/68">
+                  <item.icon className="size-4" />
+                </span>
+                <p className="font-mono text-[10px] uppercase text-white/38">{item.meta}</p>
+              </div>
+              <h3 className="mt-6 font-mono text-sm font-semibold uppercase text-white">
+                {item.label}
+              </h3>
+              <p className="mt-3 text-sm leading-6 text-white/45">{item.body}</p>
+            </div>
+            <span className="mt-8 flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-normal text-white/60 transition-colors duration-150 group-hover:text-white">
+              Explore
+              {item.href.startsWith("http") ? (
+                <ArrowUpRight aria-hidden className="size-3.5" strokeWidth={1.5} />
+              ) : (
+                <ArrowRight aria-hidden className="size-3.5" strokeWidth={1.5} />
+              )}
+            </span>
+          </a>
+        ))}
       </div>
     </section>
   );
@@ -758,45 +1154,127 @@ function MigrationSection() {
 
 function FinalCta() {
   return (
-    <section className="bg-white py-16 text-black sm:py-20">
-      <div className="mx-auto max-w-[1180px] px-4 sm:px-6">
-        <div className="rounded-[10px] border border-black/10 bg-black p-5 text-white sm:p-6">
-          <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
-            <div>
-              <Badge>open source</Badge>
-              <h2 className="mt-4 text-3xl font-semibold leading-tight tracking-normal sm:text-5xl">
-                Build the product, not the glue.
-              </h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-white/60">
-                Start with Farm, migrate an existing app, or inspect the runtime contracts from
-                source.
-              </p>
-            </div>
-            <div className="flex flex-col gap-2 sm:flex-row">
-              <ButtonLink href="/docs/getting-started">Get started</ButtonLink>
-              <ButtonLink href="https://github.com/Kinfe123/farm.js" variant="secondary">
-                View source
-              </ButtonLink>
-            </div>
-          </div>
+    <section className="farm-full-rule farm-footer-field flex min-h-[520px] w-full items-center justify-center border-b border-white/12 px-6 py-20 text-center sm:px-10">
+      <div className="max-w-3xl">
+        <span className="mx-auto grid size-14 place-items-center border border-white/18 bg-white text-black">
+          <FarmMark className="size-8" />
+        </span>
+        <h2 className="mt-8 text-balance text-4xl font-medium leading-[1.02] tracking-normal text-white sm:text-6xl">
+          Start building with Farm.js
+        </h2>
+        <p className="mx-auto mt-6 max-w-xl text-base leading-7 text-white/48">
+          Build the product in one source tree, from the first route to production output.
+        </p>
+        <div className="mt-9 flex justify-center">
+          <ButtonLink
+            href="/docs/getting-started"
+            icon={<Rocket aria-hidden className="size-4" strokeWidth={1.5} />}
+          >
+            Get Started
+          </ButtonLink>
         </div>
       </div>
     </section>
   );
 }
 
+function Footer() {
+  return (
+    <footer className="w-full">
+      <div className="grid gap-12 px-6 py-14 sm:px-10 lg:grid-cols-[1fr_1.4fr] lg:px-14">
+        <div>
+          <Wordmark />
+          <p className="mt-5 max-w-sm text-sm leading-6 text-white/38">
+            A React framework for building integrated product applications.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
+          {footerGroups.map((group) => (
+            <div key={group.title}>
+              <h3 className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-normal text-white/42">
+                <group.icon aria-hidden className="size-3.5" strokeWidth={1.5} />
+                {group.title}
+              </h3>
+              <div className="mt-4 grid gap-3">
+                {group.links.map(([label, href]) => (
+                  <a
+                    key={label}
+                    className="group flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-normal text-white/48 hover:text-white"
+                    href={href}
+                  >
+                    <span>{label}</span>
+                    {href.startsWith("http") ? (
+                      <ArrowUpRight
+                        aria-hidden
+                        className="size-3 opacity-0 transition-opacity group-hover:opacity-100"
+                        strokeWidth={1.5}
+                      />
+                    ) : (
+                      <ArrowRight
+                        aria-hidden
+                        className="size-3 opacity-0 transition-opacity group-hover:opacity-100"
+                        strokeWidth={1.5}
+                      />
+                    )}
+                  </a>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="farm-top-rule flex flex-col gap-2 border-t border-white/12 px-6 py-5 font-mono text-[10px] tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between sm:px-10 lg:px-14">
+        <span>MIT License / Farm.js Team</span>
+        <a className="inline-flex items-center gap-1.5 hover:text-white" href="https://kinfish.dev">
+          kinfish.dev <ExternalLink aria-hidden className="size-3" strokeWidth={1.5} />
+        </a>
+      </div>
+    </footer>
+  );
+}
+
 export default function HomePage(_props: PageProps) {
   return (
-    <div className="min-h-screen w-screen max-w-[100vw] overflow-x-hidden bg-black font-sans text-white">
-      <Header />
-      <main>
-        <Hero />
-        <PlatformSection />
-        <RuntimeSection />
-        <WorkflowSection />
-        <MigrationSection />
-        <FinalCta />
-      </main>
+    <div className="farm-home min-h-screen overflow-x-hidden bg-black font-sans text-white selection:bg-white selection:text-black">
+      <AnnouncementBar />
+      <div className="farm-page-grid">
+        <div aria-hidden className="farm-page-rail" />
+        <div className="farm-page-content min-w-0">
+          <Header />
+          <main>
+            <Hero />
+            <EcosystemStrip />
+            <HeadingSection
+              body="Farm keeps the app loop fast while giving the framework a complete view of what the product owns."
+              eyebrow="Developer experience"
+              icon={Gauge}
+              index="01"
+              title="A better developer experience, from route to runtime"
+            />
+            <DeveloperExperienceGrid />
+            <HeadingSection
+              body="The familiar app directory stays simple. Farm composes the product systems around it."
+              eyebrow="Application foundation"
+              icon={PanelsTopLeft}
+              index="02"
+              title="A shared foundation for the whole application"
+            />
+            <FoundationGrid />
+            <HeadingSection
+              body="Framework integrations can register routes, server APIs, docs, generated clients, and lifecycle hooks together."
+              eyebrow="Product systems"
+              icon={ServerCog}
+              index="03"
+              title="Bring your product stack with you"
+            />
+            <StackMap />
+            <OpenSourceSection />
+            <FinalCta />
+          </main>
+          <Footer />
+        </div>
+        <div aria-hidden className="farm-page-rail" />
+      </div>
     </div>
   );
 }
