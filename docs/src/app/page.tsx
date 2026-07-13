@@ -446,7 +446,7 @@ function Hero() {
 function EcosystemStrip() {
   return (
     <section className="farm-full-rule w-full">
-      <div className="grid h-24 grid-cols-[11rem_minmax(0,1fr)] sm:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="grid h-16 grid-cols-[11rem_minmax(0,1fr)] sm:grid-cols-[14rem_minmax(0,1fr)]">
         <div className="flex min-w-0 items-center border-r border-white/12 px-4 text-white/36 sm:px-8">
           <IndexedLabel icon={Layers3} index="01" label="Product stack" />
         </div>
@@ -467,11 +467,11 @@ function EcosystemStrip() {
                   <div
                     key={`${copyIndex}-${item.label}`}
                     className={cx(
-                      "flex h-24 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 px-5 font-mono text-[10px] font-medium uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.04] hover:text-white/82 sm:w-44 sm:text-[11px]",
-                      itemIndex % 2 === 0 && "bg-white/[0.018]",
+                      "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-medium uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 sm:w-44 sm:text-[11px]",
+                      itemIndex % 2 === 0 && "bg-white/[0.045]",
                     )}
                   >
-                    <BrandIcon className="size-5 shrink-0 opacity-72" src={item.brand} />
+                    <BrandIcon className="size-[18px] shrink-0 opacity-72" src={item.brand} />
                     <span className="whitespace-nowrap">{item.label}</span>
                   </div>
                 ))}
