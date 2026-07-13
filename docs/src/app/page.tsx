@@ -41,6 +41,7 @@ import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import typescriptIconUrl from "simple-icons/icons/typescript.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
+import { CtaFrame } from "../components/home/cta-frame";
 import { HighlightedCode } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 
@@ -1022,13 +1023,15 @@ function OpenSourceSection() {
 function FinalCta() {
   return (
     <section className="farm-full-rule w-full">
-      <div className="px-6 py-10 text-center sm:px-10 sm:py-12">
-        <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl">
-          One framework. The whole product.
-        </h2>
-        <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
-          Build routing, APIs, integrations, docs, and deployment together in one React framework.
-        </p>
+      <div className="px-6 py-10 sm:px-10 sm:py-12">
+        <CtaFrame>
+          <h2 className="text-balance font-geist-pixel text-xl font-medium leading-[1.15] tracking-normal text-white sm:text-2xl">
+            One framework. The whole product.
+          </h2>
+          <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
+            Build routing, APIs, integrations, docs, and deployment together in one React framework.
+          </p>
+        </CtaFrame>
       </div>
       <div className="farm-top-rule flex flex-col items-center justify-center gap-2 bg-white/[0.035] p-4 sm:flex-row">
         <ButtonLink

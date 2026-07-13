@@ -124,6 +124,50 @@
     bottom: -1px;
   }
 
+  .farm-cta-frame-border {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    bottom: 100%;
+    left: 0;
+    border: 1px dashed rgb(255 255 255 / 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(10px, 10px, 0);
+  }
+
+  .farm-cta-frame[data-visible="true"] .farm-cta-frame-border {
+    animation: farm-cta-frame-reveal 900ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .farm-cta-frame-corner {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1px solid rgb(255 255 255 / 0.32);
+    background: #000;
+  }
+
+  .farm-cta-frame-corner-tl {
+    top: -5px;
+    left: -5px;
+  }
+
+  .farm-cta-frame-corner-tr {
+    top: -5px;
+    right: -5px;
+  }
+
+  .farm-cta-frame-corner-bl {
+    bottom: -5px;
+    left: -5px;
+  }
+
+  .farm-cta-frame-corner-br {
+    right: -5px;
+    bottom: -5px;
+  }
+
   .farm-dot-grid {
     background-image:
       linear-gradient(to right, var(--farm-line-soft) 1px, transparent 1px),
@@ -446,6 +490,24 @@
   }
 }
 
+@keyframes farm-cta-frame-reveal {
+  0% {
+    right: 100%;
+    bottom: 100%;
+    opacity: 0;
+    transform: translate3d(10px, 10px, 0);
+  }
+  12% {
+    opacity: 1;
+  }
+  100% {
+    right: 0;
+    bottom: 0;
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
 .farm-logo-viewport {
   -webkit-mask-image: linear-gradient(
     to right,
@@ -494,5 +556,14 @@
 
   .farm-logo-rail-copy[aria-hidden="true"] {
     display: none;
+  }
+
+  .farm-cta-frame-border,
+  .farm-cta-frame[data-visible="true"] .farm-cta-frame-border {
+    right: 0;
+    bottom: 0;
+    opacity: 1;
+    animation: none;
+    transform: none;
   }
 }
