@@ -922,22 +922,19 @@ function OpenSourceSection() {
       label: "Framework source",
       body: "Read the router, runtime, build, and deployment implementation in the public repository.",
       href: "https://github.com/Kinfe123/farm.js",
-      meta: "packages/farm",
-      icon: GithubIcon,
+      icon: <GithubIcon className="size-3.5" />,
     },
     {
       label: "Integration SDK",
       body: "Build auth, billing, jobs, storage, and product-system contracts as first-class integrations.",
       href: "/docs/plugins/create-plugin",
-      meta: "create a plugin",
-      icon: Plug,
+      icon: <Plug aria-hidden className="size-3.5" strokeWidth={1.5} />,
     },
     {
       label: "Migration tooling",
       body: "Inspect a current application and produce a reviewable migration inventory before rewriting it.",
       href: "/docs/migrations",
-      meta: "farm migrate",
-      icon: GitCompareArrows,
+      icon: <GitCompareArrows aria-hidden className="size-3.5" strokeWidth={1.5} />,
     },
   ] as const;
 
@@ -996,16 +993,17 @@ function OpenSourceSection() {
             href={item.href}
           >
             <div>
-              <div className="-mx-6 flex items-center justify-between border-b border-white/10 px-6 pb-5 sm:-mx-8 sm:px-8">
-                <span className="grid size-9 place-items-center border border-white/14 text-white/68">
-                  <item.icon className="size-4" />
+              <h3 className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-white/58">
+                <span className="text-white/26">04.{index + 1}</span>
+                <span aria-hidden className="text-white/18">
+                  /
                 </span>
-                <p className="font-mono text-[10px] uppercase text-white/38">{item.meta}</p>
-              </div>
-              <h3 className="mt-6 font-mono text-sm font-normal uppercase text-white">
-                {item.label}
+                <span aria-hidden className="grid size-3.5 shrink-0 place-items-center">
+                  {item.icon}
+                </span>
+                <span className="truncate">{item.label}</span>
               </h3>
-              <p className="mt-3 text-sm leading-6 text-white/45">{item.body}</p>
+              <p className="mt-6 text-sm leading-6 text-white/45">{item.body}</p>
             </div>
             <span className="mt-8 flex items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-white/60 transition-colors duration-150 group-hover:text-white">
               Explore
