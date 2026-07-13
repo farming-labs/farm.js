@@ -203,6 +203,26 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("Excellent");
     expect(response.body).toContain('window.__FARM_DEFERRED_DATA__={"d0"');
     expect(response.body).toContain('"status":"fulfilled"');
+    expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
+    expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
+  });
+
+  it("embeds the deployment identity in document responses", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer({
+      [routeModulePath]: {
+        default: function DashboardPage() {
+          return React.createElement("main", null, "Dashboard ready");
+        },
+      },
+    });
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
+    expect(response.headers.get("set-cookie")).toContain("__farm_deployment=release-2");
+    expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
+    expect(response.body).toContain('<meta name="farm-deployment-id" content="release-2">');
   });
 });
 
@@ -338,6 +358,8 @@ function createConfig(): Required<FarmConfig> {
     mdx: { markdownRoutes: true, className: "farm-markdown" } as any,
     observability: false,
     suppressLintOnLink: false,
+    deploymentId: "release-2",
+    generateBuildId: () => "release-2",
     experimental: {
       serverComponents: false,
       serverActions: false,

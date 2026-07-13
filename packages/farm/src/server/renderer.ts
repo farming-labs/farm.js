@@ -32,6 +32,7 @@ import {
 } from "../metadata";
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
+import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -59,6 +60,21 @@ interface PPRShellCacheOptions {
 function hasRequestHeader(req: FarmRequest, name: string): boolean {
   const value = req.headers[name.toLowerCase()];
   return Array.isArray(value) ? value.length > 0 : Boolean(value);
+}
+
+function serializeInlineValue(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function escapeHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function findPPRDynamicChunkIndex(chunk: string): number {
@@ -121,13 +137,6 @@ function createDocumentFooter(options: {
   <script type="module" src="/@farm/client.js"></script>
 </body>
 </html>`;
-}
-
-function serializeInlineValue(value: unknown): string {
-  return JSON.stringify(value)
-    .replace(/</g, "\\u003c")
-    .replace(/\u2028/g, "\\u2028")
-    .replace(/\u2029/g, "\\u2029");
 }
 
 function createDeferredHydrationScript(records: readonly DeferredRecord[]): string {
@@ -565,6 +574,8 @@ export class ServerRenderer {
         completeRender(res.statusCode || 200, pathname);
         return;
       }
+
+      this.applyDeploymentHeaders(req, res);
 
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
@@ -1205,6 +1216,7 @@ export class ServerRenderer {
       const streamStartTime = Date.now();
       const observabilityRoute =
         options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
+      const deploymentId = this.getDeploymentId();
       emitFarmEvent({ type: "render.stream.start", route: observabilityRoute });
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
@@ -1271,6 +1283,7 @@ export class ServerRenderer {
       const deferredProps = prepareDeferredData((req as any).__FARM_PROPS__ || {});
       const propsScript = `<script>
 window.__FARM_PROPS__ = ${serializeInlineValue(deferredProps.data)};
+window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
@@ -1306,6 +1319,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   <link rel="icon" href="data:,">
   <title>${title}</title>${metaTags}
   <link rel="stylesheet" href="/src/app/globals.css" />
@@ -1539,6 +1553,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
       ? `  <script type="module" src="/@farm/client.js"></script>`
       : "";
     const integrationManifestScript = `<script>
+window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(this.getDeploymentId())};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
 </script>`;
 
@@ -1547,6 +1562,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
   <link rel="icon" href="data:,">
   <title>Farm.js App</title>
   <link rel="stylesheet" href="/src/app/globals.css" />
@@ -1558,5 +1574,31 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 ${clientScript}
 </body>
 </html>`;
+  }
+
+  private applyDeploymentHeaders(req: FarmRequest, res: FarmResponse): void {
+    const deploymentId = this.getDeploymentId();
+    res.setHeader(FARM_DEPLOYMENT_ID_HEADER, deploymentId);
+    if ((req.method || "GET").toUpperCase() !== "GET") return;
+
+    const forwardedProto = req.headers["x-forwarded-proto"];
+    const isSecure =
+      (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)
+        ?.split(",")[0]
+        ?.trim() === "https" || Boolean((req.socket as any)?.encrypted);
+    const cookie = createFarmDeploymentCookie(deploymentId, this.config.basePath || "/", isSecure);
+    const existing = res.getHeader("Set-Cookie");
+
+    if (Array.isArray(existing)) {
+      res.setHeader("Set-Cookie", [...existing, cookie]);
+    } else if (existing) {
+      res.setHeader("Set-Cookie", [String(existing), cookie]);
+    } else {
+      res.setHeader("Set-Cookie", cookie);
+    }
+  }
+
+  private getDeploymentId(): string {
+    return this.config.deploymentId || "development";
   }
 }

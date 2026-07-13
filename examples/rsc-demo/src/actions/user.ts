@@ -8,6 +8,13 @@ import { z } from "zod";
 const messages: { id: number; name: string; message: string; timestamp: string }[] = [];
 let nextId = 1;
 
+const publicMessageSchema = z.object({
+  id: z.number().int(),
+  name: z.string(),
+  message: z.string(),
+  timestamp: z.string(),
+});
+
 /**
  * Submit a message - Server Action
  * This function runs on the server, even when called from a client component.
@@ -16,6 +23,10 @@ export const submitMessage = createServerFn({
   input: z.object({
     name: z.string().trim().min(1, "Name is required"),
     message: z.string().trim().min(1, "Message is required"),
+  }),
+  output: z.object({
+    success: z.literal(true),
+    message: publicMessageSchema,
   }),
   async handler({ input }) {
     // Simulate network delay

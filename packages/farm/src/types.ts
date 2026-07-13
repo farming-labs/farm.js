@@ -109,6 +109,8 @@ export interface FarmConfig {
   routeRules?: FarmRouteRules;
   context?: FarmContextFactory<any>;
   serverActions?: FarmServerActionsConfig;
+  /** Build identifier used to detect stale clients during rolling deployments. */
+  deploymentId?: string;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
@@ -414,17 +416,11 @@ export interface Metadata {
     languages?: Record<string, string>;
   };
   icons?:
-      | string
-      | {
-        icon?:
-          | string
-          | Array<string | { url: string; sizes?: string; type?: string }>;
-        shortcut?:
-          | string
-          | Array<string | { url: string; sizes?: string; type?: string }>;
-        apple?:
-          | string
-          | Array<string | { url: string; sizes?: string; type?: string }>;
+    | string
+    | {
+        icon?: string | Array<string | { url: string; sizes?: string; type?: string }>;
+        shortcut?: string | Array<string | { url: string; sizes?: string; type?: string }>;
+        apple?: string | Array<string | { url: string; sizes?: string; type?: string }>;
       };
   manifest?: string;
 }

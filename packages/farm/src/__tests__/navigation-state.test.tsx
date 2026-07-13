@@ -214,15 +214,45 @@ describe("navigation state and blocking", () => {
     expect(pageData.props.data.reviews.status).toBe("pending");
     expect(fetch).toHaveBeenCalledWith(
       "/__farm/page-data?path=%2Fproducts",
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          Accept: "application/x-farm-deferred+json, application/json",
-        }),
-      }),
+      expect.objectContaining({ headers: expect.any(Headers) }),
     );
+    const requestHeaders = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(requestHeaders.get("accept")).toBe("application/x-farm-deferred+json, application/json");
 
     reviews.resolve(["Excellent"]);
     await expect(pageData.props.data.reviews).resolves.toEqual(["Excellent"]);
+  });
+
+  it("reports stale prefetches without retrying or navigating", async () => {
+    const mismatchListener = vi.fn();
+    window.addEventListener("farm:deployment-mismatch", mismatchListener, { once: true });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "FARM_DEPLOYMENT_MISMATCH" }), {
+        status: 409,
+        headers: {
+          "x-farm-deployment-id": "release-2",
+          "x-farm-deployment-mismatch": "1",
+        },
+      }),
+    );
+
+    const router = new SPARouter({ deploymentId: "release-1" });
+    await router.prefetch("/reports");
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const requestHeaders = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(requestHeaders.get("x-farm-deployment-id")).toBe("release-1");
+    expect(mismatchListener).toHaveBeenCalledTimes(1);
+    const mismatchEvent = mismatchListener.mock.calls[0]?.[0];
+    expect(mismatchEvent).toBeInstanceOf(CustomEvent);
+    expect((mismatchEvent as CustomEvent).detail).toMatchObject({
+      code: "FARM_DEPLOYMENT_MISMATCH",
+      retryable: false,
+      clientDeploymentId: "release-1",
+      serverDeploymentId: "release-2",
+    });
+    expect(window.location.pathname).toBe("/");
   });
 
   it("restores registered nested scroll containers by key", () => {

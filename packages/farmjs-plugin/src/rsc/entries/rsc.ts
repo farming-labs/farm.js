@@ -34,6 +34,13 @@ import {
 `;
   }
   code += `} from '@vitejs/plugin-rsc/rsc';
+import {
+  createFarmDeploymentCookie,
+  createFarmDeploymentMismatchResponse,
+  getFarmDeploymentMismatch,
+} from '@farmjs/core/deployment';
+
+const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 `;
   if (ctx.actionsEnabled) {
     code += `import {
@@ -56,6 +63,15 @@ function debug(...args) {
 }
 
 function applyActionResponseHeaders(headers, request) {
+  headers.set('x-farm-deployment-id', farmDeploymentId);
+  const accept = request.headers.get('accept') || '';
+  if (request.method === 'GET' && !accept.includes('text/x-component')) {
+    headers.append('set-cookie', createFarmDeploymentCookie(
+      farmDeploymentId,
+      ${JSON.stringify(ctx.basePath)},
+      new URL(request.url).protocol === 'https:',
+    ));
+  }
   if (${ctx.actionsEnabled ? "true" : "false"} && request.method === 'POST') {
     headers.set('cache-control', 'no-store');
     headers.set('x-content-type-options', 'nosniff');
@@ -505,6 +521,11 @@ async function handler(request) {
   const url = new URL(request.url);
   try {
   debug('Handling request:', request.method, url.pathname);
+
+  const deploymentMismatch = getFarmDeploymentMismatch(request, farmDeploymentId);
+  if (deploymentMismatch) {
+    return createFarmDeploymentMismatchResponse(deploymentMismatch);
+  }
 
   ${
     ctx.actionsEnabled

@@ -4,7 +4,7 @@ type MaybePromise<T> = T | Promise<T>;
 
 // Generic schema type that works with Zod v3/v4 and similar validator APIs.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type AnySchema = {
+export type ServerFnSchema = {
   _input?: any;
   _output?: any;
   parse?: (data: unknown) => any;
@@ -13,8 +13,8 @@ type AnySchema = {
   safeParseAsync?: (data: unknown) => Promise<any>;
 };
 
-type InferInput<T> = T extends { _input: infer I } ? I : unknown;
-type InferOutput<T> = T extends { _output: infer O }
+export type InferServerFnSchemaInput<T> = T extends { _input: infer I } ? I : unknown;
+export type InferServerFnSchemaOutput<T> = T extends { _output: infer O }
   ? O
   : T extends { parse: (data: unknown) => infer R }
     ? R
@@ -36,9 +36,25 @@ export type ServerFnHandler<TInput, TResult> = (
   ctx: ServerFnContext<TInput>,
 ) => MaybePromise<TResult>;
 
-export type ServerFnOptions<TSchema extends AnySchema | undefined, TResult> = {
+export type ServerFnOptions<TSchema extends ServerFnSchema | undefined, TResult> = {
   input?: TSchema;
-  handler: ServerFnHandler<TSchema extends AnySchema ? InferOutput<TSchema> : unknown, TResult>;
+  output?: undefined;
+  handler: ServerFnHandler<
+    TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
+    TResult
+  >;
+};
+
+export type ServerFnOutputOptions<
+  TInputSchema extends ServerFnSchema | undefined,
+  TOutputSchema extends ServerFnSchema,
+> = {
+  input?: TInputSchema;
+  output: TOutputSchema;
+  handler: ServerFnHandler<
+    TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
+    unknown
+  >;
 };
 
 export type ServerFn<TInput, TResult> = ([unknown] extends [TInput]
@@ -46,19 +62,37 @@ export type ServerFn<TInput, TResult> = ([unknown] extends [TInput]
   : (input: TInput | FormData) => Promise<TResult>) & {
   readonly __farmServerFn: true;
   readonly __farmServerFnInput?: unknown;
+  readonly __farmServerFnOutput?: unknown;
 };
 
 export const FARM_SERVER_FN_SYMBOL = Symbol.for("farm.server-fn");
 
 const UNSAFE_FORM_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
-export function createServerFn<TSchema extends AnySchema, TResult>(
+export function createServerFn<
+  TInputSchema extends ServerFnSchema,
+  TOutputSchema extends ServerFnSchema,
+>(
+  options: ServerFnOutputOptions<TInputSchema, TOutputSchema>,
+): ServerFn<
+  InferServerFnSchemaInput<TInputSchema>,
+  Awaited<InferServerFnSchemaOutput<TOutputSchema>>
+>;
+export function createServerFn<TOutputSchema extends ServerFnSchema>(
+  options: ServerFnOutputOptions<undefined, TOutputSchema>,
+): ServerFn<unknown, Awaited<InferServerFnSchemaOutput<TOutputSchema>>>;
+export function createServerFn<TSchema extends ServerFnSchema, TResult>(
   options: ServerFnOptions<TSchema, TResult>,
-): ServerFn<InferInput<TSchema>, Awaited<TResult>>;
+): ServerFn<InferServerFnSchemaInput<TSchema>, Awaited<TResult>>;
 export function createServerFn<TResult>(
   options: ServerFnOptions<undefined, TResult>,
 ): ServerFn<unknown, Awaited<TResult>>;
-export function createServerFn(options: ServerFnOptions<AnySchema | undefined, unknown>) {
+export function createServerFn(options: {
+  input?: ServerFnSchema;
+  output?: ServerFnSchema;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  handler: ServerFnHandler<any, any>;
+}) {
   if (!options || typeof options.handler !== "function") {
     throw new TypeError("createServerFn requires a handler function");
   }
@@ -66,16 +100,18 @@ export function createServerFn(options: ServerFnOptions<AnySchema | undefined, u
   const serverFn = async (value: unknown) => {
     const formData = isFormData(value) ? value : undefined;
     const rawInput = formData ? formDataToObject(formData) : value;
-    const input = await parseInput(options.input, rawInput);
+    const input = await parseSchema(options.input, rawInput, "input");
     const executionContext = getServerActionExecutionContext();
 
-    return options.handler({
+    const result = await options.handler({
       input,
       rawInput,
       formData,
       request: executionContext?.request,
       signal: getServerActionSignal(),
     });
+
+    return parseSchema(options.output, result, "output");
   };
 
   Object.defineProperties(serverFn, {
@@ -91,33 +127,41 @@ export function createServerFn(options: ServerFnOptions<AnySchema | undefined, u
       value: options.input,
       enumerable: false,
     },
+    __farmServerFnOutput: {
+      value: options.output,
+      enumerable: false,
+    },
   });
 
   return serverFn as ServerFn<unknown, unknown>;
 }
 
-async function parseInput(schema: AnySchema | undefined, rawInput: unknown) {
-  if (!schema) return rawInput;
+async function parseSchema(
+  schema: ServerFnSchema | undefined,
+  value: unknown,
+  contract: "input" | "output",
+) {
+  if (!schema) return value;
 
   if (typeof schema.safeParseAsync === "function") {
-    const result = await schema.safeParseAsync(rawInput);
+    const result = await schema.safeParseAsync(value);
     return unwrapSafeParseResult(result);
   }
 
   if (typeof schema.safeParse === "function") {
-    const result = schema.safeParse(rawInput);
+    const result = schema.safeParse(value);
     return unwrapSafeParseResult(await result);
   }
 
   if (typeof schema.parseAsync === "function") {
-    return schema.parseAsync(rawInput);
+    return schema.parseAsync(value);
   }
 
   if (typeof schema.parse === "function") {
-    return schema.parse(rawInput);
+    return schema.parse(value);
   }
 
-  throw new TypeError("createServerFn input must provide parse, parseAsync, or safeParse");
+  throw new TypeError(`createServerFn ${contract} must provide parse, parseAsync, or safeParse`);
 }
 
 function unwrapSafeParseResult(result: unknown) {

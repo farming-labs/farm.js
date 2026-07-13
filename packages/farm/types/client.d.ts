@@ -264,13 +264,16 @@ declare module "@farmjs/core/client" {
 
   export type FarmNavigationListener = (state: FarmNavigationState) => void;
 
+  export interface RouterOptions {
+    prefetchTimeout?: number;
+    cacheMaxAge?: number;
+    scrollRestoration?: boolean;
+    shouldUseDocumentNavigation?: (pathname: string) => boolean;
+    deploymentId?: string;
+  }
+
   export class SPARouter {
-    constructor(options?: {
-      prefetchTimeout?: number;
-      cacheMaxAge?: number;
-      scrollRestoration?: boolean;
-      shouldUseDocumentNavigation?: (pathname: string) => boolean;
-    });
+    constructor(options?: RouterOptions);
     setNavigationHandler(handler: (data: Record<string, any>) => Promise<void>): void;
     navigate(href: string, options?: FarmNavigateOptions): Promise<void>;
     prefetch(href: string): Promise<void>;

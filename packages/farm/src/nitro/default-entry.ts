@@ -13,6 +13,7 @@ declare global {
         apiRouteManager?: APIRouteManager;
         serverRenderer?: ServerRenderer;
         env?: any;
+        deploymentId?: string;
       }
     | undefined;
 }
@@ -90,9 +91,13 @@ async function defaultHandler({
       end: () => {
         // Response will be collected
       },
-      setHeader: () => {},
+      setHeader: (name: string, value: string | number | readonly string[]) => {
+        nodeRes._headers[name] = value;
+      },
+      getHeader: (name: string) => nodeRes._headers[name],
       statusCode: 200,
       _chunks: [] as any[],
+      _headers: {} as Record<string, string | number | readonly string[]>,
     } as any;
 
     try {
@@ -100,12 +105,17 @@ async function defaultHandler({
 
       // Convert collected chunks to Response
       const body = nodeRes._chunks.join("");
+      const headers = new Headers({ "Content-Type": "text/html; charset=utf-8" });
+      for (const [name, value] of Object.entries(nodeRes._headers)) {
+        if (Array.isArray(value)) {
+          for (const item of value) headers.append(name, item);
+        } else {
+          headers.set(name, String(value));
+        }
+      }
       return new Response(body, {
         status: nodeRes.statusCode || 200,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          ...nodeRes._headers,
-        },
+        headers,
       });
     } catch (error) {
       return new Response(

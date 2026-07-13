@@ -105,6 +105,7 @@ export class FarmApp {
       routeRules: normalizeRouteRules(config.routeRules),
       context: config.context || (() => undefined),
       serverActions: resolveServerActionsConfig(config.serverActions),
+      deploymentId: config.deploymentId || "development",
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),

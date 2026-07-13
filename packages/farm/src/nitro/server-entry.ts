@@ -12,6 +12,11 @@ import { getClientModuleMetadata } from "../utils/client-component";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
 import { createDeferredDataResponse } from "../deferred";
+import {
+  createFarmDeploymentMismatchResponse,
+  getFarmDeploymentMismatch,
+  withFarmDeploymentResponse,
+} from "../deployment";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -24,6 +29,7 @@ declare global {
         apiRouteManager?: APIRouteManager;
         serverRenderer?: ServerRenderer;
         env?: any;
+        deploymentId?: string;
       }
     | undefined;
 }
@@ -47,6 +53,7 @@ function getManagers() {
       routeManager: registry.routeManager,
       apiRouteManager: registry.apiRouteManager,
       serverRenderer: registry.serverRenderer,
+      deploymentId: registry.deploymentId,
     };
   }
 
@@ -60,6 +67,7 @@ function getManagers() {
     routeManager: undefined,
     apiRouteManager: undefined,
     serverRenderer: undefined,
+    deploymentId: undefined,
   };
 }
 
@@ -80,11 +88,13 @@ async function defaultHandler({
   routeManager,
   apiRouteManager,
   serverRenderer,
+  deploymentId,
 }: {
   request: Request;
   routeManager?: RouteManager;
   apiRouteManager?: APIRouteManager;
   serverRenderer?: ServerRenderer;
+  deploymentId?: string;
 }): Promise<Response> {
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -94,6 +104,7 @@ async function defaultHandler({
   const rm = routeManager || managers.routeManager;
   const arm = apiRouteManager || managers.apiRouteManager;
   const sr = serverRenderer || managers.serverRenderer;
+  const activeDeploymentId = deploymentId || managers.deploymentId;
 
   // Debug logging for page-data endpoint
   if (pathname.includes("__farm")) {
@@ -111,6 +122,10 @@ async function defaultHandler({
   // Handle SPA page-data requests for client-side navigation
   if (pathname === "/__farm/page-data") {
     const targetPath = url.searchParams.get("path") || "/";
+    const deploymentMismatch = getFarmDeploymentMismatch(request, activeDeploymentId);
+    if (deploymentMismatch) {
+      return createFarmDeploymentMismatchResponse(deploymentMismatch);
+    }
 
     if (!rm) {
       return new Response(JSON.stringify({ error: "Route manager not available" }), {
@@ -209,17 +224,20 @@ async function defaultHandler({
         layoutModules: layouts.map((l) => l.modulePath),
       };
 
-      return createDeferredDataResponse(
-        pageData,
-        {
-          status: 200,
-          headers: { "Cache-Control": "private, max-age=0" },
-        },
-        {
-          onError(error, id) {
-            console.error(`[Farm.js] Deferred route data ${id} failed:`, error);
+      return withFarmDeploymentResponse(
+        createDeferredDataResponse(
+          pageData,
+          {
+            status: 200,
+            headers: { "Cache-Control": "private, max-age=0" },
           },
-        },
+          {
+            onError(error, id) {
+              console.error(`[Farm.js] Deferred route data ${id} failed:`, error);
+            },
+          },
+        ),
+        activeDeploymentId,
       );
     } catch (error) {
       console.error("[Farm.js] Page data error:", error);
@@ -277,7 +295,10 @@ async function defaultHandler({
       end: () => {
         // Response will be collected
       },
-      setHeader: () => {},
+      setHeader: (name: string, value: string | number | readonly string[]) => {
+        nodeRes._headers[name] = value;
+      },
+      getHeader: (name: string) => nodeRes._headers[name],
       statusCode: 200,
       _chunks: [] as any[],
       _headers: {} as Record<string, string>,
@@ -288,12 +309,17 @@ async function defaultHandler({
 
       // Convert collected chunks to Response
       const body = nodeRes._chunks.join("");
+      const headers = new Headers({ "Content-Type": "text/html; charset=utf-8" });
+      for (const [name, value] of Object.entries(nodeRes._headers)) {
+        if (Array.isArray(value)) {
+          for (const item of value) headers.append(name, item);
+        } else if (value !== undefined) {
+          headers.set(name, String(value));
+        }
+      }
       return new Response(body, {
         status: nodeRes.statusCode || 200,
-        headers: {
-          "Content-Type": "text/html; charset=utf-8",
-          ...nodeRes._headers,
-        },
+        headers,
       });
     } catch (error) {
       return new Response(

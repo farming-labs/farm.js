@@ -15,7 +15,7 @@ export function MessageForm() {
       if (!name || !message) return undefined;
 
       return {
-        success: true,
+        success: true as const,
         message: {
           id: -1,
           name,

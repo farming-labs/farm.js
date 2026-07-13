@@ -43,6 +43,9 @@ const { farmApiPlugin, farmMiddlewarePlugin } = require_(
 const { resolveServerActionsConfig } = require_(
   "@farmjs/core/server-action-security",
 ) as typeof import("@farmjs/core/server-action-security");
+const { normalizeFarmDeploymentId } = require_(
+  "@farmjs/core/deployment",
+) as typeof import("@farmjs/core/deployment");
 const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
   "@farmjs/core/server",
 ) as typeof import("@farmjs/core/server");
@@ -68,6 +71,8 @@ export interface FarmRscConfig {
   debug?: boolean;
   encryptActions?: boolean;
   serverActions?: FarmServerActionsConfig;
+  deploymentId?: string;
+  generateBuildId?: () => string | Promise<string>;
   routesDir?: string;
   entries?: {
     rsc?: string;
@@ -98,6 +103,8 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     outDir: config.outDir ?? "dist",
     basePath: config.basePath ?? "/",
     serverActions: config.serverActions,
+    deploymentId: config.deploymentId,
+    generateBuildId: config.generateBuildId,
 
     // Vite server configuration
     server: {
@@ -121,6 +128,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
         debug,
         encryptActions: config.encryptActions,
         serverActions: config.serverActions,
+        deploymentId: config.deploymentId,
         routesDir: config.routesDir,
         entries: config.entries,
       }),
@@ -214,6 +222,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
 
   // Store for debugging
   const debug = options.debug ?? false;
+  const automaticDeploymentId = `build-${Date.now()}`;
 
   const getColors = () => {
     try {
@@ -293,6 +302,8 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           extends?: readonly FarmLayerEntry[];
           layers?: readonly ResolvedFarmLayer[];
           serverActions?: FarmServerActionsConfig;
+          deploymentId?: string;
+          generateBuildId?: () => string | Promise<string>;
         };
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
@@ -318,6 +329,16 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         // Read user's directory configuration
         const srcDir = c.srcDir ?? "src";
         const outDir = c.outDir ?? "dist";
+        const deploymentId = normalizeFarmDeploymentId(
+          options.deploymentId ||
+            c.deploymentId ||
+            process.env.FARM_DEPLOYMENT_ID ||
+            process.env.VERCEL_GIT_COMMIT_SHA ||
+            process.env.CF_PAGES_COMMIT_SHA ||
+            (process.env.NODE_ENV === "production"
+              ? ((await c.generateBuildId?.()) ?? automaticDeploymentId)
+              : "development"),
+        );
         rscBuildRoot = root;
         const entriesDir = path.join(root, ".farm", "rsc-entries");
         await fs.mkdir(entriesDir, { recursive: true });
@@ -345,6 +366,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             allowedOrigins:
               options.serverActions?.allowedOrigins ?? c.serverActions?.allowedOrigins,
           }),
+          deploymentId,
           debug,
         };
 
@@ -601,12 +623,21 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           const actionBlock = entryContext.actionsEnabled
             ? `
 import { setServerCallback, encodeReply, createTemporaryReferenceSet, createFromReadableStream } from '@vitejs/plugin-rsc/browser';
+import {
+  createFarmDeploymentMismatchError,
+  createFarmDeploymentRequestHeaders,
+  isFarmDeploymentMismatchResponse,
+} from '@farmjs/core/deployment';
+const farmDeploymentId = ${JSON.stringify(entryContext.deploymentId)};
 setServerCallback(async (id, args) => {
   const refs = createTemporaryReferenceSet();
   const body = await encodeReply(args, { temporaryReferences: refs });
-  const headers = { 'x-farm-action-id': id, 'Accept': 'text/x-component' };
-  if (typeof body === 'string') headers['Content-Type'] = 'text/plain; charset=utf-8';
-  else if (!(body instanceof FormData)) headers['Content-Type'] = 'application/octet-stream';
+  const headers = createFarmDeploymentRequestHeaders(farmDeploymentId, {
+    'x-farm-action-id': id,
+    'Accept': 'text/x-component',
+  });
+  if (typeof body === 'string') headers.set('Content-Type', 'text/plain; charset=utf-8');
+  else if (!(body instanceof FormData)) headers.set('Content-Type', 'application/octet-stream');
   const res = await fetch(location.href, {
     method: 'POST',
     headers,
@@ -615,6 +646,11 @@ setServerCallback(async (id, args) => {
     credentials: 'same-origin',
     redirect: 'error',
   });
+  if (isFarmDeploymentMismatchResponse(res, farmDeploymentId)) {
+    const error = createFarmDeploymentMismatchError(res, farmDeploymentId);
+    globalThis.dispatchEvent?.(new CustomEvent('farm:deployment-mismatch', { detail: error }));
+    throw error;
+  }
   if (!res.ok) throw new Error('Server action failed: ' + res.status);
   const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
   if (p?.returnValue?.ok) return p.returnValue.data;
