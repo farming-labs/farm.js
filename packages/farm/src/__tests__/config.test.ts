@@ -143,6 +143,43 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it("resolves explicit and generated deployment IDs", async () => {
+    delete process.env.FARM_DEPLOYMENT_ID;
+    delete process.env.VERCEL_GIT_COMMIT_SHA;
+    delete process.env.CF_PAGES_COMMIT_SHA;
+    const explicit = await resolveConfig({ deploymentId: "release-explicit" }, "production");
+    let generationCalls = 0;
+    const generated = await resolveConfig(
+      {
+        generateBuildId() {
+          generationCalls += 1;
+          return "release-generated";
+        },
+      },
+      "production",
+    );
+
+    expect(explicit.deploymentId).toBe("release-explicit");
+    expect(generated.deploymentId).toBe("release-generated");
+    expect(generationCalls).toBe(1);
+  });
+
+  it("uses a stable development deployment ID without invoking the build generator", async () => {
+    let generationCalls = 0;
+    const config = await resolveConfig(
+      {
+        generateBuildId() {
+          generationCalls += 1;
+          return "should-not-run";
+        },
+      },
+      "development",
+    );
+
+    expect(config.deploymentId).toBe("development");
+    expect(generationCalls).toBe(0);
+  });
+
   it("resolves secure server action defaults and overrides", async () => {
     const defaults = await resolveConfig({}, "production");
     expect(defaults.serverActions).toEqual({
