@@ -36,6 +36,22 @@ describe("deferred route data", () => {
     await expect(revived.reviews).resolves.toEqual(["clear", "typed"]);
   });
 
+  it("preserves repeated deferred references in hydration values", async () => {
+    const source = createControlledPromise<{ self: Deferred<unknown> }>();
+    const value = defer(source.promise);
+    const prepared = prepareDeferredData({ value });
+    source.resolve({ self: value });
+    await value;
+    await Promise.resolve();
+
+    const revived = reviveDeferredData(prepared.data, snapshotDeferredData(prepared.records)) as {
+      value: Promise<{ self: Promise<unknown> }>;
+    };
+    const resolved = await revived.value;
+
+    expect(resolved.self).toBe(revived.value);
+  });
+
   it("returns immediate data while deferred fields continue streaming", async () => {
     const source = createControlledPromise<string[]>();
     const response = createDeferredDataResponse({

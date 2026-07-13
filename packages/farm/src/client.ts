@@ -84,8 +84,6 @@ export {
   replaceState,
 } from "./client/spa-router";
 export { installChunkErrorRecovery, isChunkLoadError } from "./client/chunk-recovery";
-export { readDeferredDataResponse, reviveDeferredData } from "./deferred";
-export type { Deferred, DeferredSettlements } from "./deferred";
 export type {
   LinkProps,
   PrefetchBehavior,

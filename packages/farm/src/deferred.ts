@@ -158,7 +158,7 @@ export function createDeferredDataResponse(
                 );
                 for (const nestedRecord of nestedRecords) schedule(nestedRecord);
               } catch (error) {
-                options.onError?.(error, record.id);
+                reportDeferredError(options, error, record.id);
                 controller.enqueue(
                   encoder.encode(
                     encodeDeferredMessage({
@@ -172,7 +172,7 @@ export function createDeferredDataResponse(
             },
             (error) => {
               if (cancelled) return;
-              options.onError?.(error, record.id);
+              reportDeferredError(options, error, record.id);
               controller.enqueue(
                 encoder.encode(
                   encodeDeferredMessage({
@@ -187,7 +187,8 @@ export function createDeferredDataResponse(
           .finally(finishRecord);
       };
 
-      for (const record of [...context.records]) schedule(record);
+      const initialRecords = context.records.slice();
+      for (const record of initialRecords) schedule(record);
     },
     cancel() {
       cancelled = true;
@@ -337,23 +338,32 @@ function reviveDeferredValue(
   value: unknown,
   controllers: Map<string, ControlledDeferred>,
   settlements?: DeferredSettlements,
+  applyingSettlements = new Set<string>(),
 ): unknown {
   if (isDeferredMarker(value)) {
-    const controller = getControlledDeferred(value[FARM_DEFERRED_MARKER], controllers);
-    const settlement = settlements?.[value[FARM_DEFERRED_MARKER]];
+    const id = value[FARM_DEFERRED_MARKER];
+    const controller = getControlledDeferred(id, controllers);
+    const settlement = settlements?.[id];
     if (settlement && controller.promise.status === "pending") {
+      if (applyingSettlements.has(id)) return controller.promise;
+      applyingSettlements.add(id);
       if (settlement.status === "fulfilled") {
-        controller.resolve(reviveDeferredValue(settlement.value, controllers, settlements));
+        controller.resolve(
+          reviveDeferredValue(settlement.value, controllers, settlements, applyingSettlements),
+        );
       } else {
         controller.reject(new DeferredDataError(settlement.error.message));
       }
+      applyingSettlements.delete(id);
     } else if (settlements && controller.promise.status === "pending") {
       controller.reject(new DeferredDataError("Deferred route data was not resolved"));
     }
     return controller.promise;
   }
   if (Array.isArray(value)) {
-    return value.map((item) => reviveDeferredValue(item, controllers, settlements));
+    return value.map((item) =>
+      reviveDeferredValue(item, controllers, settlements, applyingSettlements),
+    );
   }
   if (!value || typeof value !== "object") return value;
 
@@ -361,7 +371,7 @@ function reviveDeferredValue(
   if (prototype !== Object.prototype && prototype !== null) return value;
   const output: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(value)) {
-    output[key] = reviveDeferredValue(item, controllers, settlements);
+    output[key] = reviveDeferredValue(item, controllers, settlements, applyingSettlements);
   }
   return output;
 }
@@ -444,6 +454,18 @@ function createDeferredPublicError() {
 
 function createRejectedSettlement(): DeferredSettlement {
   return { status: "rejected", error: createDeferredPublicError() };
+}
+
+function reportDeferredError(
+  options: DeferredDataResponseOptions,
+  error: unknown,
+  id: string,
+): void {
+  try {
+    options.onError?.(error, id);
+  } catch {
+    // Error reporting must not break the response stream.
+  }
 }
 
 function encodeDeferredMessage(message: Record<string, unknown>): string {
