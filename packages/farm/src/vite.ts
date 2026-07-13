@@ -46,6 +46,11 @@ import * as path from "path";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
+import {
+  createFarmDeploymentMismatchResponse,
+  FARM_DEPLOYMENT_ID_HEADER,
+  getFarmDeploymentMismatch,
+} from "./deployment";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -1016,6 +1021,13 @@ export function farmPlugin(
           const targetPath = urlObj.searchParams.get("path") || "/";
 
           try {
+            const request = createRequestFromNodeRequest(req, urlObj);
+            const deploymentMismatch = getFarmDeploymentMismatch(request, farmConfig.deploymentId);
+            if (deploymentMismatch) {
+              await sendWebResponse(res, createFarmDeploymentMismatchResponse(deploymentMismatch));
+              return;
+            }
+
             const routeManager = farmApp.getRouteManager();
             if (pm) {
               await pm.runHookParallel("beforeRouteMatch", {
@@ -1081,7 +1093,7 @@ export function farmPlugin(
               searchParams[key] = value;
             });
             const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
-              request: createRequestFromNodeRequest(req, urlObj),
+              request,
               params,
               search: searchParams,
               path: targetUrl.pathname,
@@ -1136,6 +1148,7 @@ export function farmPlugin(
             res.statusCode = 200;
             res.setHeader("Content-Type", "application/json");
             res.setHeader("Cache-Control", "private, max-age=0");
+            res.setHeader(FARM_DEPLOYMENT_ID_HEADER, farmConfig.deploymentId);
             res.end(JSON.stringify(pageData));
             return;
           } catch (error) {
@@ -2112,6 +2125,11 @@ function generateClientCode(
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
 import { installChunkErrorRecovery, SPARouter } from '@farmjs/core/client'
+import {
+  createFarmDeploymentMismatchError,
+  createFarmDeploymentRequestHeaders,
+  isFarmDeploymentMismatchResponse,
+} from '@farmjs/core/deployment'
 ${providerImportBlock}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
@@ -2729,7 +2747,16 @@ async function renderPage(pageData) {
   // Helper to fetch HTML and swap content, then re-hydrate if client component
   const fetchAndSwapHTML = async () => {
     console.log('[Farm.js] Fetching HTML for:', path);
-    const response = await fetch(path, { headers: { 'Accept': 'text/html' } });
+    const deploymentId = window.__FARM_DEPLOYMENT_ID__;
+    const response = await fetch(path, {
+      headers: createFarmDeploymentRequestHeaders(deploymentId, { 'Accept': 'text/html' }),
+    });
+    if (isFarmDeploymentMismatchResponse(response, deploymentId)) {
+      const error = createFarmDeploymentMismatchError(response, deploymentId || 'unknown');
+      window.dispatchEvent(new CustomEvent('farm:deployment-mismatch', { detail: error }));
+      window.location.assign(path);
+      return false;
+    }
     const html = await response.text();
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, 'text/html');

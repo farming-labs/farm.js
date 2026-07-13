@@ -10,6 +10,9 @@ export interface FarmRscPluginOptions {
   /** Security policy applied to server action requests. */
   serverActions?: FarmServerActionsConfig;
 
+  /** Build identifier used to reject requests from stale browser deployments. */
+  deploymentId?: string;
+
   /**
    * Override the auto-generated virtual entries with custom files.
    * If not provided, virtual entries are generated automatically based on
@@ -80,6 +83,9 @@ export interface EntryContext {
 
   /** Normalized server action request security policy. */
   serverActions: ResolvedFarmServerActionsConfig;
+
+  /** Resolved build identifier embedded into the server and browser entries. */
+  deploymentId: string;
 
   /** Whether debug mode is enabled */
   debug: boolean;

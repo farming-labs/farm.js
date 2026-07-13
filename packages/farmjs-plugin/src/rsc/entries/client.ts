@@ -18,6 +18,11 @@ import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
 import { rscStream } from 'rsc-html-stream/client';
+import {
+  createFarmDeploymentMismatchError,
+  createFarmDeploymentRequestHeaders,
+  isFarmDeploymentMismatchResponse,
+} from '@farmjs/core/deployment';
 `;
 
   if (ctx.actionsEnabled) {
@@ -42,12 +47,12 @@ setServerCallback(async (id, args) => {
   debug('Invoking server action:', id);
   const refs = createTemporaryReferenceSet();
   const body = await encodeReply(args, { temporaryReferences: refs });
-  const headers = {
+  const headers = createFarmDeploymentRequestHeaders(farmDeploymentId, {
     'x-farm-action-id': id,
     'Accept': 'text/x-component',
-  };
-  if (typeof body === 'string') headers['Content-Type'] = 'text/plain; charset=utf-8';
-  else if (!(body instanceof FormData)) headers['Content-Type'] = 'application/octet-stream';
+  });
+  if (typeof body === 'string') headers.set('Content-Type', 'text/plain; charset=utf-8');
+  else if (!(body instanceof FormData)) headers.set('Content-Type', 'application/octet-stream');
   const res = await fetch(location.href, {
     method: 'POST',
     headers,
@@ -56,6 +61,9 @@ setServerCallback(async (id, args) => {
     credentials: 'same-origin',
     redirect: 'error',
   });
+  if (isFarmDeploymentMismatchResponse(res, farmDeploymentId)) {
+    throw reportDeploymentMismatch(res);
+  }
   if (!res.ok) {
     const text = await res.text();
     console.error('[Farm.js] Server action request failed:', res.status, text);
@@ -91,6 +99,14 @@ const setPayloadRef = { current: null };
 
   return `${imports}
 ${actionSetup}
+const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
+
+function reportDeploymentMismatch(response) {
+  const error = createFarmDeploymentMismatchError(response, farmDeploymentId);
+  globalThis.dispatchEvent?.(new CustomEvent('farm:deployment-mismatch', { detail: error }));
+  return error;
+}
+
 // Debug logging helper
 function debug(...args) {
   ${debugLog}
@@ -177,8 +193,15 @@ async function main() {
     try {
       // Request RSC format instead of HTML
       const res = await fetch(url, {
-        headers: { Accept: 'text/x-component' },
+        headers: createFarmDeploymentRequestHeaders(farmDeploymentId, {
+          Accept: 'text/x-component',
+        }),
       });
+      if (isFarmDeploymentMismatchResponse(res, farmDeploymentId)) {
+        reportDeploymentMismatch(res);
+        location.assign(url);
+        return;
+      }
       
       if (!res.ok) {
         console.error('[Farm.js] RSC fetch failed:', res.status);

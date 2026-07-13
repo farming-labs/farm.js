@@ -126,18 +126,14 @@ describe("file route loading.tsx and error.tsx", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.body).toContain("<title>Dashboard stats</title>");
-    expect(response.body).toContain(
-      '<meta name="description" content="Dashboard overview">',
-    );
+    expect(response.body).toContain('<meta name="description" content="Dashboard overview">');
     expect(response.body).toContain('<meta property="og:title" content="Dashboard stats">');
     expect(response.body).toContain('<meta property="og:site_name" content="Farm">');
     expect(response.body).toContain(
       '<meta property="og:image" content="/dashboard/opengraph-image">',
     );
     expect(response.body).toContain('<meta property="og:image:width" content="1200">');
-    expect(response.body).toContain(
-      '<meta property="og:image:alt" content="Dashboard preview">',
-    );
+    expect(response.body).toContain('<meta property="og:image:alt" content="Dashboard preview">');
   });
 
   it("serves opengraph-image.tsx as a metadata image endpoint", async () => {
@@ -170,12 +166,27 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("<svg");
     expect(response.body).toContain("OG /dashboard");
   });
+
+  it("embeds the deployment identity in document responses", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer({
+      [routeModulePath]: {
+        default: function DashboardPage() {
+          return React.createElement("main", null, "Dashboard ready");
+        },
+      },
+    });
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.headers.get("x-farm-deployment-id")).toBe("release-2");
+    expect(response.headers.get("set-cookie")).toContain("__farm_deployment=release-2");
+    expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
+    expect(response.body).toContain('<meta name="farm-deployment-id" content="release-2">');
+  });
 });
 
-function createRenderer(
-  modules: Record<string, any>,
-  options: { opengraphImage?: boolean } = {},
-) {
+function createRenderer(modules: Record<string, any>, options: { opengraphImage?: boolean } = {}) {
   const metadataImageEntry = {
     pattern: "/dashboard",
     modulePath: ogImageModulePath,
@@ -298,6 +309,8 @@ function createConfig(): Required<FarmConfig> {
     mdx: { markdownRoutes: true, className: "farm-markdown" } as any,
     observability: false,
     suppressLintOnLink: false,
+    deploymentId: "release-2",
+    generateBuildId: () => "release-2",
     experimental: {
       serverComponents: false,
       serverActions: false,
@@ -330,7 +343,11 @@ function createMockResponse(): MockResponse {
     getHeader(key: string) {
       return this.headers.get(key.toLowerCase());
     },
-    write(chunk: unknown, _encoding?: BufferEncoding | ((error?: Error | null) => void), cb?: (error?: Error | null) => void) {
+    write(
+      chunk: unknown,
+      _encoding?: BufferEncoding | ((error?: Error | null) => void),
+      cb?: (error?: Error | null) => void,
+    ) {
       this.headersSent = true;
       this.body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk ?? "");
       const callback = typeof _encoding === "function" ? _encoding : cb;

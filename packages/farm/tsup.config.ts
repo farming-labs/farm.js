@@ -29,6 +29,7 @@ export default defineConfig({
     "server-fn": "src/server-fn.ts",
     "server-fn-client": "src/server-fn-client.ts",
     "server-action-security": "src/server-action-security.ts",
+    deployment: "src/deployment.ts",
     env: "src/env.ts",
     "env-types": "src/env-types.ts",
     environment: "src/environment.ts",

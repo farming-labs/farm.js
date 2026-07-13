@@ -46,6 +46,7 @@ export default defineFarmConfig({
 | md            | Exposing markdown mirrors like /pricing.md.                                       |
 | mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
 | deploy        | Selecting a target, preset, and output directory.                                 |
+| deploymentId  | Detecting stale browser requests during rolling deployments.                      |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
 | serverActions | Restricting trusted action origins and request body size.                         |
 | openapi       | Publishing API reference docs.                                                    |
@@ -229,6 +230,28 @@ export default defineFarmConfig({
 
 `deploy.target` selects the deployment provider. Farm resolves that to the matching Nitro preset and output shape unless you override it.
 
+### Deployment identity
+
+Farm assigns one deployment ID to the server and browser output so requests from an older open page can be detected safely.
+
+```ts
+export default defineFarmConfig({
+  deploymentId: process.env.RELEASE_ID,
+});
+```
+
+When `deploymentId` is omitted, Farm checks `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_COMMIT_SHA`, and `CF_PAGES_COMMIT_SHA`, then calls `generateBuildId` for production builds. Development uses `"development"`.
+
+For a custom build ID, return one stable value for every instance of the same release:
+
+```ts
+export default defineFarmConfig({
+  generateBuildId: async () => process.env.GIT_SHA || `build-${Date.now()}`,
+});
+```
+
+Prefer a CI release or commit identifier when a deployment runs on multiple servers. See [Deployment](/docs/deployment#rolling-deployment-safety) for mismatch behavior.
+
 ## Production notes
 
 - Keep secrets in environment variables, not committed config.
@@ -238,5 +261,6 @@ export default defineFarmConfig({
 - Prefer route-level exports such as `dynamic`, `revalidate`, and `ppr` when behavior belongs to one page.
 - Prefer `routeRules` for broad URL patterns and platform-level cache/header behavior.
 - Keep `serverActions.allowedOrigins` empty unless the deployment has a known proxy-origin mismatch.
+- Give every rolling release one stable `deploymentId`; do not generate a different value per server instance.
 - Treat every server action as a public endpoint and authorize the current user inside the action or middleware.
 - Keep `farm.config.ts` as the single control plane instead of spreading framework behavior across many root files.

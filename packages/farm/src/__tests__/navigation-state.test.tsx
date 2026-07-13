@@ -5,7 +5,13 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBlocker, useNavigation, useScrollRestoration } from "../client/router";
-import { navigateTo, pushState, readPageState, replaceState, SPARouter } from "../client/spa-router";
+import {
+  navigateTo,
+  pushState,
+  readPageState,
+  replaceState,
+  SPARouter,
+} from "../client/spa-router";
 
 describe("navigation state and blocking", () => {
   let container: HTMLDivElement;
@@ -18,15 +24,16 @@ describe("navigation state and blocking", () => {
     (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            props: {},
-            modulePath: "/src/app/page.tsx",
-            metadata: { title: "Next" },
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              props: {},
+              modulePath: "/src/app/page.tsx",
+              metadata: { title: "Next" },
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
       ),
     );
   });
@@ -178,6 +185,36 @@ describe("navigation state and blocking", () => {
       }),
     );
     expect(window.location.pathname).toBe("/gallery");
+  });
+
+  it("reports stale prefetches without retrying or navigating", async () => {
+    const mismatchListener = vi.fn();
+    window.addEventListener("farm:deployment-mismatch", mismatchListener, { once: true });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: "FARM_DEPLOYMENT_MISMATCH" }), {
+        status: 409,
+        headers: {
+          "x-farm-deployment-id": "release-2",
+          "x-farm-deployment-mismatch": "1",
+        },
+      }),
+    );
+
+    const router = new SPARouter({ deploymentId: "release-1" });
+    await router.prefetch("/reports");
+
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const requestHeaders = vi.mocked(fetch).mock.calls[0]?.[1]?.headers as Headers;
+    expect(requestHeaders.get("x-farm-deployment-id")).toBe("release-1");
+    expect(mismatchListener).toHaveBeenCalledTimes(1);
+    expect((mismatchListener.mock.calls[0]?.[0] as CustomEvent).detail).toMatchObject({
+      code: "FARM_DEPLOYMENT_MISMATCH",
+      retryable: false,
+      clientDeploymentId: "release-1",
+      serverDeploymentId: "release-2",
+    });
+    expect(window.location.pathname).toBe("/");
   });
 
   it("restores registered nested scroll containers by key", () => {

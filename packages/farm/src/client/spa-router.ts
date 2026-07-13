@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  createFarmDeploymentMismatchError,
+  createFarmDeploymentRequestHeaders,
+  isFarmDeploymentMismatchResponse,
+} from "../deployment";
+
 /**
  * Farm.js SPA Router
  *
@@ -25,11 +31,12 @@ interface PageData {
   layoutModules?: string[];
 }
 
-interface RouterOptions {
+export interface RouterOptions {
   prefetchTimeout?: number;
   cacheMaxAge?: number;
   scrollRestoration?: boolean;
   shouldUseDocumentNavigation?: (pathname: string) => boolean;
+  deploymentId?: string;
 }
 
 interface CacheEntry {
@@ -95,7 +102,8 @@ export class SPARouter {
   private navigationListeners: Set<FarmNavigationListener> = new Set();
   private navigationState: FarmNavigationState = IDLE_NAVIGATION_STATE;
   private scrollElements: Map<string, HTMLElement> = new Map();
-  private options: Required<RouterOptions>;
+  private options: Required<Omit<RouterOptions, "deploymentId">> &
+    Pick<RouterOptions, "deploymentId">;
   private onNavigate?: (data: PageData) => Promise<void>;
 
   constructor(options: RouterOptions = {}) {
@@ -104,6 +112,7 @@ export class SPARouter {
       cacheMaxAge: options.cacheMaxAge ?? 30000, // 30 seconds
       scrollRestoration: options.scrollRestoration ?? true,
       shouldUseDocumentNavigation: options.shouldUseDocumentNavigation ?? (() => false),
+      deploymentId: options.deploymentId ?? readBrowserDeploymentId(),
     };
 
     if (typeof window !== "undefined") {
@@ -217,7 +226,7 @@ export class SPARouter {
     this.prefetchingUrls.add(fullPath);
 
     try {
-      await this.fetchPageData(fullPath);
+      await this.fetchPageData(fullPath, false);
     } catch (error) {
       console.warn("[Farm.js] Prefetch failed:", href, error);
     } finally {
@@ -379,7 +388,7 @@ export class SPARouter {
   /**
    * Fetch page data from cache or server
    */
-  private async fetchPageData(path: string): Promise<PageData> {
+  private async fetchPageData(path: string, recover = true): Promise<PageData> {
     // Check cache first
     const cached = this.cache.get(path);
     if (cached && Date.now() - cached.timestamp < this.options.cacheMaxAge) {
@@ -388,11 +397,23 @@ export class SPARouter {
 
     // Fetch from server
     const response = await fetch(`/__farm/page-data?path=${encodeURIComponent(path)}`, {
-      headers: {
+      headers: createFarmDeploymentRequestHeaders(this.options.deploymentId, {
         Accept: "application/json",
         "X-Farm-SPA": "1",
-      },
+      }),
     });
+
+    if (isFarmDeploymentMismatchResponse(response, this.options.deploymentId)) {
+      const error = createFarmDeploymentMismatchError(
+        response,
+        this.options.deploymentId || "unknown",
+      );
+      dispatchDeploymentMismatch(error);
+      if (recover) {
+        window.location.assign(path);
+      }
+      throw error;
+    }
 
     if (!response.ok) {
       throw new Error(`Failed to fetch page data: ${response.status}`);
@@ -585,6 +606,21 @@ export class SPARouter {
   clearCache(): void {
     this.cache.clear();
   }
+}
+
+function readBrowserDeploymentId(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+
+  const runtimeId = (window as Window & { __FARM_DEPLOYMENT_ID__?: unknown })
+    .__FARM_DEPLOYMENT_ID__;
+  if (typeof runtimeId === "string" && runtimeId) return runtimeId;
+
+  return document.querySelector<HTMLMetaElement>('meta[name="farm-deployment-id"]')?.content;
+}
+
+function dispatchDeploymentMismatch(error: Error): void {
+  if (typeof window === "undefined" || typeof CustomEvent === "undefined") return;
+  window.dispatchEvent(new CustomEvent("farm:deployment-mismatch", { detail: error }));
 }
 
 /**
