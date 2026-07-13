@@ -32,7 +32,7 @@ export function HighlightedCode({ className, code, label, language }: Highlighte
       </figcaption>
       <pre
         aria-label={`${label} code`}
-        className="max-w-full overflow-x-auto py-4 font-mono text-[10.5px] leading-6 tracking-normal sm:text-[11px]"
+        className="min-h-0 max-w-full flex-1 overflow-x-auto py-4 font-mono text-[10.5px] leading-6 tracking-normal sm:text-[11px]"
         tabIndex={0}
       >
         <code

@@ -518,8 +518,8 @@ function HeadingSection({
 
 function TerminalVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
-      <figure className="relative z-10 -mb-px -mr-px w-full max-w-[470px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+    <div className="farm-feature-spotlight relative flex h-[320px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
@@ -530,7 +530,7 @@ function TerminalVisual() {
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> pnpm dev
           </span>
         </figcaption>
-        <pre className="overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
+        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
           <code className="block min-w-max">
             <span className="block text-white/48">$ pnpm dev</span>
             <span className="mt-2 block text-white">
@@ -552,12 +552,12 @@ function TerminalVisual() {
 
 function TypedApiVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 pt-16 sm:pl-10 sm:pt-16">
-      <div className="absolute left-6 top-7 z-20 border border-white/12 bg-black/72 px-3 py-2 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
+    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <div className="absolute left-6 top-0 z-20 flex h-[30px] items-center border border-white/12 bg-black/72 px-3 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
         GET /api/users/:id
       </div>
       <HighlightedCode
-        className="relative z-10 -mb-px -mr-px w-full max-w-[470px]"
+        className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={typedApiCode}
         label="src/app/dashboard/page.tsx"
         language="tsx"
@@ -568,9 +568,9 @@ function TypedApiVisual() {
 
 function IntegrationVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
+    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
       <HighlightedCode
-        className="relative z-10 -mb-px -mr-px w-full max-w-[470px]"
+        className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={integrationConfigCode}
         label="farm.config.ts"
         language="ts"
@@ -581,15 +581,15 @@ function IntegrationVisual() {
 
 function BuildVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
-      <figure className="relative z-10 -mb-px -mr-px w-full max-w-[450px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+    <div className="farm-feature-spotlight relative flex h-[320px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <figure className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/34">
           <span className="flex items-center gap-1.5">
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
           </span>
           <span>bash</span>
         </figcaption>
-        <pre className="overflow-x-auto p-5 font-mono text-[10px] leading-6 tracking-normal text-white/58 sm:text-[11px]">
+        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-6 tracking-normal text-white/58 sm:text-[11px]">
           <code className="block min-w-max">
             <span className="block text-white">$ farm build --target vercel</span>
             <span className="mt-2 block">

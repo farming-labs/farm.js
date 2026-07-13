@@ -174,7 +174,7 @@
     );
     filter: blur(52px);
     opacity: 0.68;
-    transform: translate3d(0, -6%, 0);
+    transform: translate3d(28px, -22px, 0);
   }
 
   .farm-feature-spotlight::after {
@@ -187,6 +187,7 @@
     );
     filter: blur(38px);
     opacity: 0.62;
+    transform: translate3d(18px, -14px, 0);
   }
 
   .farm-stack-map {
