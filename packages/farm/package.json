@@ -87,6 +87,9 @@
       "environment/vite": [
         "./dist/environment/vite.d.ts"
       ],
+      "testing": [
+        "./dist/testing.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -273,6 +276,11 @@
       "types": "./dist/routes.d.ts",
       "import": "./dist/routes.mjs",
       "require": "./dist/routes.cjs"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.mjs",
+      "require": "./dist/testing.cjs"
     }
   },
   "scripts": {
