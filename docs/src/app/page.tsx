@@ -1021,25 +1021,20 @@ function OpenSourceSection() {
 
 function FinalCta() {
   return (
-    <section className="farm-full-rule farm-footer-field flex min-h-[520px] w-full items-center justify-center px-6 py-20 text-center sm:px-10">
-      <div className="max-w-3xl">
-        <span className="mx-auto grid size-14 place-items-center border border-white/18 bg-white text-black">
-          <FarmMark className="size-8" />
-        </span>
-        <h2 className="mt-8 text-balance text-4xl font-medium leading-[1.02] tracking-normal text-white sm:text-6xl">
-          Start building with Farm.js
+    <section className="farm-full-rule w-full">
+      <div className="px-6 py-10 text-center sm:px-10 sm:py-12">
+        <h2 className="text-balance text-xl font-semibold leading-tight tracking-normal text-white sm:text-2xl">
+          From first route to production.
         </h2>
-        <p className="mx-auto mt-6 max-w-xl text-base leading-7 text-white/48">
-          Build the product in one source tree, from the first route to production output.
+        <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
+          Build routing, APIs, integrations, docs, and deployment together in one React framework.
         </p>
-        <div className="mt-9 flex justify-center">
-          <ButtonLink
-            href="/docs/getting-started"
-            icon={<Rocket aria-hidden className="size-4" strokeWidth={1.5} />}
-          >
-            Get Started
-          </ButtonLink>
-        </div>
+      </div>
+      <div className="farm-top-rule flex flex-col items-center justify-center gap-2 bg-white/[0.035] p-4 sm:flex-row">
+        <ButtonLink href="/docs" variant="secondary">
+          Read the Docs
+        </ButtonLink>
+        <ButtonLink href="/docs/getting-started">Get Started</ButtonLink>
       </div>
     </section>
   );
