@@ -147,8 +147,8 @@
     isolation: isolate;
     background-color: #000;
     background-image: radial-gradient(
-      ellipse 88% 46% at 60% 22%,
-      rgb(255 255 255 / 0.045),
+      ellipse 84% 42% at 50% 18%,
+      rgb(255 255 255 / 0.05),
       rgb(255 255 255 / 0.015) 42%,
       transparent 76%
     );
@@ -164,7 +164,7 @@
   }
 
   .farm-feature-spotlight::before {
-    inset: 4% -8% 50% 2%;
+    inset: 2% -5% 54% 0;
     background: radial-gradient(
       ellipse at center,
       rgb(255 255 255 / 0.22) 0%,
@@ -172,22 +172,22 @@
       rgb(255 255 255 / 0.025) 62%,
       transparent 86%
     );
-    filter: blur(36px);
-    opacity: 0.78;
-    transform: translate3d(24px, 18px, 0);
+    filter: blur(34px);
+    opacity: 0.76;
+    transform: translate3d(-6px, 8px, 0);
   }
 
   .farm-feature-spotlight::after {
-    inset: 6% 4% 62% 22%;
+    inset: 8% 76% 18% 0;
     background: radial-gradient(
-      ellipse at center,
-      rgb(255 255 255 / 0.16) 0%,
-      rgb(255 255 255 / 0.055) 44%,
+      ellipse at 100% 28%,
+      rgb(255 255 255 / 0.18) 0%,
+      rgb(255 255 255 / 0.065) 42%,
       transparent 82%
     );
     filter: blur(22px);
-    opacity: 0.64;
-    transform: translate3d(18px, 10px, 0);
+    opacity: 0.68;
+    transform: translate3d(6px, -2px, 0);
   }
 
   .farm-stack-map {
