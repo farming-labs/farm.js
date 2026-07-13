@@ -54,13 +54,37 @@ export const { api, apiClient } = createIntegrations<AppIntegrations>({
 
 ## Integration surface
 
-An integration can contribute any of these pieces:
+An integration can contribute any of these pieces. The three HTTP fields are alternatives for
+different authoring needs; you normally do not define all three.
+
+| HTTP field  | Handles requests? | Produces typed callers?                    | Use it when                                                                                                                             |
+| ----------- | ----------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `routes`    | Yes               | Yes, when entries use `integrationRoute.*` | The integration owns the handlers and a flat array or route factory is easiest to read. This is the recommended default.                |
+| `endpoints` | Yes               | Yes, when entries use `endpoint.*`         | The integration owns the handlers, but a nested object makes a large set of routes easier to organize. Farm flattens it into `routes`.  |
+| `api`       | No                | Yes                                        | The HTTP handlers already exist elsewhere, or you deliberately need a custom caller tree. It is a caller contract, not a route handler. |
+
+For typed `routes` and `endpoints`, Farm derives the caller tree from each URL. For example,
+`/api/billing/checkout` becomes `api.billing.checkout.post(...)` after the integration is registered
+as `billing`. The object keys inside `endpoints` only organize the source code; they do not rename
+the derived caller.
+
+Plain route objects still mount handlers, but they do not carry typed caller metadata. Use
+`integrationRoute.*` or the `endpoint.*` factory when you want Farm to infer request and response
+types for `api` and `apiClient`.
+
+An explicit `api` field replaces that derived caller tree for the integration. It does not mount an
+HTTP handler, so every operation in it must point to a route implemented by `routes`, `endpoints`,
+the app, or another server.
+
+The `api:` field in an integration definition is the **caller contract**. The `api` returned by
+`createIntegrations` is the **server caller** built from that contract; `apiClient` is its browser
+counterpart. See [Choosing `routes`, `endpoints`, or `api`](/docs/integrations/custom#choose-the-http-surface)
+for side-by-side examples.
+
+Other integration fields are independent of that HTTP choice:
 
 | Surface | What it is for |
 | --- | --- |
-| `api` | A typed client/server callable API tree. |
-| `routes` | HTTP route handlers declared as an array or factory. |
-| `endpoints` | A nested object version of routes that also derives API callers. |
 | `middleware` | Integration-owned request behavior for matchers outside a single endpoint. |
 | `providers` | React provider metadata and optional wrapper components. |
 | `schema` | Storage models used by `ctx.args.db` through the ORM layer. |
@@ -75,7 +99,9 @@ An integration can contribute any of these pieces:
 
 ## Route ownership
 
-Integration routes use the same web primitives as normal route handlers. The handler receives the `Request` and a context object with params, parsed input, request metadata, shared request context, integration metadata, and `args` for storage.
+Integration handlers declared through either `routes` or `endpoints` use the same web primitives as
+normal route handlers. The handler receives the `Request` and a context object with params, parsed
+input, request metadata, shared request context, integration metadata, and `args` for storage.
 
 **src/integrations/local-demo.ts**
 
@@ -115,7 +141,8 @@ Farm validates the body and query before route middleware, `before` hooks, or th
 
 ## Caller shape
 
-Typed routes can derive their caller tree from their path:
+Typed routes derive their caller tree from their path, so this integration does not need an explicit
+`api` field:
 
 **src/lib/api.ts**
 
