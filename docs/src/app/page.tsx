@@ -252,7 +252,7 @@ function ButtonLink({
 function AnnouncementBar() {
   return (
     <a
-      className="farm-announcement flex h-8 items-center justify-center border-b border-white/12 px-4 font-mono text-[10px] font-semibold uppercase tracking-normal text-white/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+      className="farm-announcement flex h-5 items-center justify-center border-b border-white/12 px-4 font-mono text-[10px] font-semibold uppercase tracking-normal text-white/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
       href="https://github.com/Kinfe123/farm.js"
     >
       <GitFork aria-hidden className="mr-2 size-3 text-white/48" strokeWidth={1.5} />
@@ -266,7 +266,7 @@ function AnnouncementBar() {
 function Header() {
   return (
     <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
-      <div className="flex h-16 w-full items-stretch">
+      <div className="flex h-11 w-full items-stretch">
         <div className="flex shrink-0 items-center px-4 sm:px-7">
           <Wordmark />
         </div>
@@ -289,14 +289,14 @@ function Header() {
         <div className="ml-auto hidden shrink-0 items-stretch lg:flex">
           <a
             aria-label="Open Farm.js on GitHub"
-            className="grid size-16 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            className="grid size-11 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="https://github.com/Kinfe123/farm.js"
             title="GitHub"
           >
             <GithubIcon className="size-4" />
           </a>
           <a
-            className="inline-flex h-16 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-semibold uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-semibold uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="/docs"
           >
             <BookOpenText aria-hidden className="size-3.5" strokeWidth={1.6} />
@@ -305,14 +305,14 @@ function Header() {
         </div>
 
         <details className="group relative ml-auto border-l border-white/12 lg:hidden">
-          <summary className="grid size-16 cursor-pointer list-none place-items-center text-white transition-colors hover:bg-white/[0.04] [&::-webkit-details-marker]:hidden">
+          <summary className="grid size-11 cursor-pointer list-none place-items-center text-white transition-colors hover:bg-white/[0.04] [&::-webkit-details-marker]:hidden">
             <span className="sr-only">Open navigation</span>
             <Menu aria-hidden className="size-4 group-open:hidden" strokeWidth={1.5} />
             <X aria-hidden className="hidden size-4 group-open:block" strokeWidth={1.5} />
           </summary>
           <nav
             aria-label="Mobile navigation"
-            className="absolute -right-px top-16 w-screen overflow-hidden border border-white/14 bg-black shadow-2xl shadow-black/60"
+            className="absolute -right-px top-11 w-screen overflow-hidden border border-white/14 bg-black shadow-2xl shadow-black/60"
           >
             {[...navItems, { index: "05", label: "Docs", href: "/docs", icon: BookOpenText }].map(
               (item) => (
