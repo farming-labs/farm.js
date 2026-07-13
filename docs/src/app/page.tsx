@@ -1031,10 +1031,19 @@ function FinalCta() {
         </p>
       </div>
       <div className="farm-top-rule flex flex-col items-center justify-center gap-2 bg-white/[0.035] p-4 sm:flex-row">
-        <ButtonLink href="/docs" variant="secondary">
+        <ButtonLink
+          href="/docs"
+          icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
+          variant="secondary"
+        >
           Read the Docs
         </ButtonLink>
-        <ButtonLink href="/docs/getting-started">Get Started</ButtonLink>
+        <ButtonLink
+          href="/docs/getting-started"
+          icon={<Rocket aria-hidden className="size-4" strokeWidth={1.5} />}
+        >
+          Get Started
+        </ButtonLink>
       </div>
     </section>
   );
