@@ -174,7 +174,7 @@ function IndexedLabel({
   label: string;
 }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-medium uppercase tracking-normal text-current">
+    <span className="flex min-w-0 items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-current">
       <span className="text-white/26">{index}</span>
       <span aria-hidden className="text-white/18">
         /
@@ -204,7 +204,7 @@ function Wordmark() {
       <span className="grid size-7 place-items-center bg-white text-black">
         <FarmMark className="size-5" />
       </span>
-      <span className="font-mono text-[13px] font-bold uppercase tracking-normal">
+      <span className="font-mono text-[13px] font-normal uppercase tracking-normal">
         FARM<span className="text-white/52">.JS</span>
       </span>
     </a>
@@ -227,7 +227,7 @@ function ButtonLink({
   return (
     <a
       className={cx(
-        "inline-flex h-11 min-w-0 items-center justify-center gap-2 border px-5 font-mono text-[11px] font-semibold uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+        "inline-flex h-11 min-w-0 items-center justify-center gap-2 border px-5 font-mono text-[11px] font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
         variant === "primary" && "border-white bg-white text-black hover:bg-white/88",
         variant === "secondary" &&
           "border-white/18 bg-black text-white hover:border-white/42 hover:bg-white/[0.06]",
@@ -252,7 +252,7 @@ function ButtonLink({
 function AnnouncementBar() {
   return (
     <a
-      className="farm-announcement flex h-5 items-center justify-center border-b border-white/12 px-4 font-mono text-[10px] font-semibold uppercase tracking-normal text-white/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+      className="farm-announcement flex h-5 items-center justify-center border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
       href="https://github.com/Kinfe123/farm.js"
     >
       <GitFork aria-hidden className="mr-2 size-3 text-white/48" strokeWidth={1.5} />
@@ -296,7 +296,7 @@ function Header() {
             <GithubIcon className="size-4" />
           </a>
           <a
-            className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-semibold uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+            className="inline-flex h-11 items-center gap-1.5 border-l border-white/12 bg-white px-5 font-mono text-[10px] font-normal uppercase tracking-normal text-black transition-colors duration-150 hover:bg-white/88 focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
             href="/docs"
           >
             <BookOpenText aria-hidden className="size-3.5" strokeWidth={1.6} />
@@ -468,7 +468,7 @@ function EcosystemStrip() {
                   <div
                     key={`${copyIndex}-${item.label}`}
                     className={cx(
-                      "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-medium uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 sm:w-44 sm:text-[11px]",
+                      "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 sm:w-44 sm:text-[11px]",
                       itemIndex % 2 === 0 && "bg-white/[0.045]",
                     )}
                   >
@@ -856,7 +856,7 @@ function StackMap() {
               <div key={item.label} className="border border-white/10 bg-black p-3">
                 <div className="flex items-center gap-2">
                   <Icon aria-hidden className="size-3.5 text-white/56" strokeWidth={1.5} />
-                  <p className="font-mono text-[11px] font-medium uppercase text-white/78">
+                  <p className="font-mono text-[11px] font-normal uppercase text-white/78">
                     {item.label}
                   </p>
                 </div>
@@ -900,7 +900,7 @@ function StackMap() {
             >
               <div className="flex items-center gap-2">
                 <Icon aria-hidden className="size-3.5 text-white/52" strokeWidth={1.5} />
-                <p className="font-mono text-[11px] font-medium uppercase text-white/78">
+                <p className="font-mono text-[11px] font-normal uppercase text-white/78">
                   {item.label}
                 </p>
               </div>
@@ -999,12 +999,12 @@ function OpenSourceSection() {
                 </span>
                 <p className="font-mono text-[10px] uppercase text-white/38">{item.meta}</p>
               </div>
-              <h3 className="mt-6 font-mono text-sm font-semibold uppercase text-white">
+              <h3 className="mt-6 font-mono text-sm font-normal uppercase text-white">
                 {item.label}
               </h3>
               <p className="mt-3 text-sm leading-6 text-white/45">{item.body}</p>
             </div>
-            <span className="mt-8 flex items-center gap-1.5 font-mono text-[10px] font-semibold uppercase tracking-normal text-white/60 transition-colors duration-150 group-hover:text-white">
+            <span className="mt-8 flex items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-white/60 transition-colors duration-150 group-hover:text-white">
               Explore
               {item.href.startsWith("http") ? (
                 <ArrowUpRight aria-hidden className="size-3.5" strokeWidth={1.5} />
