@@ -1181,11 +1181,11 @@ function IntegrationsSection() {
       className="farm-wide-rule grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]"
     >
       <div className="flex items-start border-b border-white/12 p-6 text-white/36 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
-        <IndexedLabel icon={Blocks} index="01" label="Developer experience" />
+        <IndexedLabel icon={Blocks} index="01" label="Connected systems" />
       </div>
 
       <div className="grid min-w-0 md:grid-cols-2">
-        <div className="flex min-h-[440px] items-center border-b border-white/12 p-6 sm:p-10 md:border-b-0 md:border-r lg:min-h-[500px] lg:p-12">
+        <div className="flex min-h-[440px] items-center p-6 sm:p-10 lg:min-h-[500px] lg:p-12">
           <div className="max-w-lg">
             <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
               Connect the systems your product already uses
