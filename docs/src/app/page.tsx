@@ -1176,86 +1176,92 @@ function StackMap() {
 
 function IntegrationsSection() {
   return (
-    <section id="integrations" className="farm-full-rule grid w-full lg:grid-cols-2">
-      <div className="flex min-h-[460px] flex-col justify-between border-b border-white/12 px-6 py-12 sm:px-10 sm:py-16 lg:min-h-[520px] lg:border-b-0 lg:border-r lg:px-14">
-        <div className="max-w-xl">
-          <div className="text-white/45">
-            <IndexedLabel icon={Blocks} index="04" label="Developer experience" />
-          </div>
-          <h2 className="mt-6 text-balance text-4xl font-medium leading-[1.04] tracking-normal text-white sm:text-5xl">
-            Connect the systems your product already uses
-          </h2>
-          <p className="mt-5 max-w-lg text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-            Auth, billing, email, jobs, storage, API keys, and UI scaffolds register through one
-            framework-level integration contract.
-          </p>
-        </div>
-        <div className="mt-10 flex flex-col gap-2 sm:flex-row">
-          <ButtonLink
-            href="/docs/integrations"
-            icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
-          >
-            Explore Integrations
-          </ButtonLink>
-          <ButtonLink
-            href="/docs/integrations/custom"
-            icon={<Plug aria-hidden className="size-4" strokeWidth={1.5} />}
-            variant="secondary"
-          >
-            Custom Integration
-          </ButtonLink>
-        </div>
+    <section
+      id="integrations"
+      className="farm-wide-rule grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]"
+    >
+      <div className="flex items-start border-b border-white/12 p-6 text-white/36 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
+        <IndexedLabel icon={Blocks} index="01" label="Developer experience" />
       </div>
 
-      <div className="relative flex min-h-[460px] items-end justify-end overflow-hidden px-5 pt-10 sm:px-10 lg:min-h-[520px] lg:px-12">
-        <div className="relative aspect-[5/6] w-full max-w-80">
-          <div
-            aria-hidden
-            className="absolute inset-0"
-            style={{
-              backgroundImage:
-                "linear-gradient(to right, rgb(255 255 255 / 0.11) 1px, transparent 1px), linear-gradient(to bottom, rgb(255 255 255 / 0.11) 1px, transparent 1px)",
-              backgroundSize: "20% 16.6666667%",
-              maskImage: "radial-gradient(ellipse at center, black 68%, transparent 100%)",
-              WebkitMaskImage: "radial-gradient(ellipse at center, black 68%, transparent 100%)",
-            }}
-          />
-
-          {integrationDirectoryItems.map((item) => {
-            const Icon = "icon" in item ? item.icon : null;
-
-            return (
-              <a
-                key={item.label}
-                aria-label={`${item.label} integration documentation`}
-                className="group absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-                href={item.href}
-                style={{
-                  height: "16.6666667%",
-                  left: `${item.col * 20}%`,
-                  top: `${item.row * (100 / 6)}%`,
-                  width: "20%",
-                }}
-                title={`${item.label} integration`}
+      <div className="grid min-w-0 md:grid-cols-2">
+        <div className="flex min-h-[440px] items-center border-b border-white/12 p-6 sm:p-10 md:border-b-0 md:border-r lg:min-h-[500px] lg:p-12">
+          <div className="max-w-lg">
+            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+              Connect the systems your product already uses
+            </h2>
+            <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+              Auth, billing, email, jobs, storage, API keys, and UI scaffolds register through one
+              framework-level integration contract.
+            </p>
+            <div className="mt-8 flex max-w-[17rem] flex-col gap-2">
+              <ButtonLink
+                href="/docs/integrations"
+                icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
-                {"brand" in item ? (
-                  <BrandIcon
-                    className="size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100"
-                    src={item.brand}
-                  />
-                ) : Icon ? (
-                  <Icon
-                    aria-hidden
-                    className="size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black"
-                    strokeWidth={1.35}
-                  />
-                ) : null}
-                <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
-                  {item.label}
-                </span>
-              </a>
-            );
-          })}
+                Explore Integrations
+              </ButtonLink>
+              <ButtonLink
+                href="/docs/integrations/custom"
+                icon={<Plug aria-hidden className="size-4" strokeWidth={1.5} />}
+                variant="secondary"
+              >
+                Custom Integration
+              </ButtonLink>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative flex min-h-[440px] items-end justify-end overflow-hidden px-5 pt-10 sm:px-10 lg:min-h-[500px] lg:px-12">
+          <div className="relative aspect-[5/6] w-full max-w-80">
+            <div
+              aria-hidden
+              className="absolute inset-0"
+              style={{
+                backgroundImage:
+                  "linear-gradient(to right, rgb(255 255 255 / 0.11) 1px, transparent 1px), linear-gradient(to bottom, rgb(255 255 255 / 0.11) 1px, transparent 1px)",
+                backgroundSize: "20% 16.6666667%",
+                maskImage: "radial-gradient(ellipse at center, black 68%, transparent 100%)",
+                WebkitMaskImage: "radial-gradient(ellipse at center, black 68%, transparent 100%)",
+              }}
+            />
+
+            {integrationDirectoryItems.map((item) => {
+              const Icon = "icon" in item ? item.icon : null;
+
+              return (
+                <a
+                  key={item.label}
+                  aria-label={`${item.label} integration documentation`}
+                  className="group absolute grid place-items-center bg-white/[0.055] transition-[background-color,color] duration-150 hover:z-10 hover:bg-white focus-visible:z-10 focus-visible:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+                  href={item.href}
+                  style={{
+                    height: "16.6666667%",
+                    left: `${item.col * 20}%`,
+                    top: `${item.row * (100 / 6)}%`,
+                    width: "20%",
+                  }}
+                  title={`${item.label} integration`}
+                >
+                  {"brand" in item ? (
+                    <BrandIcon
+                      className="size-7 opacity-60 transition-[filter,opacity,transform] duration-150 group-hover:-translate-y-1 group-hover:invert-0 group-hover:opacity-100 group-focus-visible:-translate-y-1 group-focus-visible:invert-0 group-focus-visible:opacity-100"
+                      src={item.brand}
+                    />
+                  ) : Icon ? (
+                    <Icon
+                      aria-hidden
+                      className="size-7 text-white/60 transition-[color,transform] duration-150 group-hover:-translate-y-1 group-hover:text-black group-focus-visible:-translate-y-1 group-focus-visible:text-black"
+                      strokeWidth={1.35}
+                    />
+                  ) : null}
+                  <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-black/55 opacity-0 transition-[opacity,transform] duration-150 group-hover:translate-y-0 group-hover:opacity-100 group-focus-visible:translate-y-0 group-focus-visible:opacity-100">
+                    {item.label}
+                  </span>
+                </a>
+              );
+            })}
+          </div>
         </div>
       </div>
     </section>
@@ -1358,13 +1364,7 @@ export default function HomePage(_props: PageProps) {
           <main>
             <Hero />
             <EcosystemStrip />
-            <HeadingSection
-              body="Farm keeps the app loop fast while giving the framework a complete view of what the product owns."
-              eyebrow="Developer experience"
-              icon={Gauge}
-              index="01"
-              title="A better developer experience, from route to runtime"
-            />
+            <IntegrationsSection />
             <DeveloperExperienceGrid />
             <HeadingSection
               body="The familiar app directory stays simple. Farm composes the product systems around it."
@@ -1382,7 +1382,6 @@ export default function HomePage(_props: PageProps) {
               title="Bring your product stack with you"
             />
             <StackMap />
-            <IntegrationsSection />
             <FinalCta />
           </main>
           <Footer />
