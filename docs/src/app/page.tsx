@@ -617,29 +617,21 @@ function FeatureCell({
   icon: Icon,
   title,
   body,
-  className,
   children,
 }: {
   index: string;
   icon: LucideIcon;
   title: string;
   body: string;
-  className?: string;
   children: ReactNode;
 }) {
   return (
-    <article className={cx("flex min-h-[500px] min-w-0 flex-col justify-between", className)}>
+    <article className="flex min-h-[500px] min-w-0 flex-col justify-between">
       <div className="p-6 sm:p-10">
-        <div className="-mx-6 mb-8 flex items-center justify-between border-b border-white/10 px-6 pb-5 sm:-mx-10 sm:px-10">
-          <span className="grid size-9 place-items-center border border-white/14 text-white/72">
-            <Icon aria-hidden className="size-4" strokeWidth={1.5} />
-          </span>
-          <span className="font-mono text-[10px] text-white/28">{index}</span>
-        </div>
-        <h3 className="font-mono text-[11px] font-medium uppercase text-white/52 sm:text-xs">
-          {title}
+        <h3 className="text-white/52">
+          <IndexedLabel icon={Icon} index={index} label={title} />
         </h3>
-        <p className="mt-4 max-w-[31rem] font-geist-pixel text-xl font-medium leading-[1.28] tracking-normal text-white/88 sm:text-2xl">
+        <p className="mt-6 max-w-[31rem] font-geist-pixel text-xl font-medium leading-[1.28] tracking-normal text-white/88 sm:text-2xl">
           {body}
         </p>
       </div>
@@ -661,7 +653,6 @@ function DeveloperExperienceGrid() {
       </FeatureCell>
       <FeatureCell
         body="Route handlers and generated callers share the same contract, from params to the final Response."
-        className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={Braces}
         index="01.2"
         title="Typed From Route to Client"
@@ -670,7 +661,6 @@ function DeveloperExperienceGrid() {
       </FeatureCell>
       <FeatureCell
         body="Auth, billing, email, jobs, storage, and docs register through one framework-level integration surface."
-        className="border-t border-white/12"
         icon={Plug}
         index="01.3"
         title="Product Systems Included"
@@ -679,7 +669,6 @@ function DeveloperExperienceGrid() {
       </FeatureCell>
       <FeatureCell
         body="The build carries routes, middleware, generated clients, and platform manifests into production together."
-        className="border-t border-white/12 lg:border-l"
         icon={Rocket}
         index="01.4"
         title="Deployment-Aware Output"
@@ -819,7 +808,6 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="Config and file middleware are discovered, traced, tested, and compiled into deployment matchers."
-        className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={Network}
         index="02.2"
         title="Middleware You Can See"
@@ -828,7 +816,6 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
-        className="border-t border-white/12"
         icon={BookOpenText}
         index="02.3"
         title="Docs Are Part of the App"
@@ -837,7 +824,6 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="Inventory routes from Next.js, Remix, Express, and custom servers before changing application source."
-        className="border-t border-white/12 lg:border-l"
         icon={GitCompareArrows}
         index="02.4"
         title="Migrate With Evidence"

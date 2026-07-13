@@ -149,7 +149,7 @@
     background-image: radial-gradient(
       ellipse 125% 115% at 50% 0%,
       transparent 34%,
-      rgb(255 255 255 / 0.028) 66%,
+      rgb(255 255 255 / 0.04) 66%,
       rgb(0 0 0 / 0.94) 100%
     );
   }
@@ -164,7 +164,7 @@
   }
 
   .farm-feature-spotlight::before {
-    inset: 6% 8% 14%;
+    inset: 0 2% 8%;
     background: radial-gradient(
       ellipse at center,
       rgb(255 255 255 / 0.18) 0%,
@@ -172,21 +172,21 @@
       rgb(255 255 255 / 0.03) 55%,
       transparent 82%
     );
-    filter: blur(46px);
-    opacity: 0.5;
+    filter: blur(52px);
+    opacity: 0.68;
     transform: translate3d(0, -6%, 0);
   }
 
   .farm-feature-spotlight::after {
-    inset: 18% 18% 28%;
+    inset: 14% 12% 20%;
     background: radial-gradient(
       ellipse at center,
       rgb(255 255 255 / 0.12) 0%,
       rgb(255 255 255 / 0.04) 40%,
       transparent 74%
     );
-    filter: blur(32px);
-    opacity: 0.5;
+    filter: blur(38px);
+    opacity: 0.62;
   }
 
   .farm-stack-map {
