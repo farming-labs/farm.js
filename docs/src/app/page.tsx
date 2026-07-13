@@ -414,7 +414,7 @@ function Hero() {
             <span className="block">React Framework</span>
             <span className="block text-white/82">for Product Apps</span>
           </h1>
-          <p className="mt-6 max-w-[32rem] font-mono text-[13px] leading-6 tracking-normal text-white/56 sm:text-sm sm:leading-6">
+          <p className="mt-6 max-w-[32rem] text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
             Farm.js keeps the app router you already know, then brings typed APIs, middleware,
             integrations, docs, and deployment into the same framework.
           </p>
