@@ -518,8 +518,8 @@ function HeadingSection({
 
 function TerminalVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
-      <figure className="relative z-10 w-full max-w-[470px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
+      <figure className="relative z-10 -mb-px -mr-px w-full max-w-[470px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4">
           <div className="flex gap-1.5">
             <span className="size-2 rounded-full bg-white/22" />
@@ -552,12 +552,12 @@ function TerminalVisual() {
 
 function TypedApiVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 pt-16 sm:p-10 sm:pt-16">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 pt-16 sm:pl-10 sm:pt-16">
       <div className="absolute left-6 top-7 z-20 border border-white/12 bg-black/72 px-3 py-2 font-mono text-[10px] text-white/66 backdrop-blur-sm sm:left-8">
         GET /api/users/:id
       </div>
       <HighlightedCode
-        className="relative z-10 w-full max-w-[470px]"
+        className="relative z-10 -mb-px -mr-px w-full max-w-[470px]"
         code={typedApiCode}
         label="src/app/dashboard/page.tsx"
         language="tsx"
@@ -568,9 +568,9 @@ function TypedApiVisual() {
 
 function IntegrationVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-center justify-center overflow-hidden p-6 sm:p-10">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
       <HighlightedCode
-        className="relative z-10 w-full max-w-[470px]"
+        className="relative z-10 -mb-px -mr-px w-full max-w-[470px]"
         code={integrationConfigCode}
         label="farm.config.ts"
         language="ts"
@@ -581,8 +581,8 @@ function IntegrationVisual() {
 
 function BuildVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[320px] items-center justify-center overflow-hidden p-6 sm:p-10">
-      <figure className="relative z-10 w-full max-w-[450px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
+    <div className="farm-feature-spotlight relative flex min-h-[320px] items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
+      <figure className="relative z-10 -mb-px -mr-px w-full max-w-[450px] overflow-hidden border border-white/10 bg-black/72 shadow-[0_28px_70px_rgba(0,0,0,0.6)] backdrop-blur-sm">
         <figcaption className="flex h-10 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/34">
           <span className="flex items-center gap-1.5">
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> production build
@@ -617,16 +617,18 @@ function FeatureCell({
   icon: Icon,
   title,
   body,
+  className,
   children,
 }: {
   index: string;
   icon: LucideIcon;
   title: string;
   body: string;
+  className?: string;
   children: ReactNode;
 }) {
   return (
-    <article className="flex min-h-[500px] min-w-0 flex-col justify-between">
+    <article className={cx("flex min-h-[500px] min-w-0 flex-col justify-between", className)}>
       <div className="p-6 sm:p-10">
         <h3 className="text-white/52">
           <IndexedLabel icon={Icon} index={index} label={title} />
@@ -653,6 +655,7 @@ function DeveloperExperienceGrid() {
       </FeatureCell>
       <FeatureCell
         body="Route handlers and generated callers share the same contract, from params to the final Response."
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={Braces}
         index="01.2"
         title="Typed From Route to Client"
@@ -661,6 +664,7 @@ function DeveloperExperienceGrid() {
       </FeatureCell>
       <FeatureCell
         body="Auth, billing, email, jobs, storage, and docs register through one framework-level integration surface."
+        className="border-t border-white/12"
         icon={Plug}
         index="01.3"
         title="Product Systems Included"
@@ -669,6 +673,7 @@ function DeveloperExperienceGrid() {
       </FeatureCell>
       <FeatureCell
         body="The build carries routes, middleware, generated clients, and platform manifests into production together."
+        className="border-t border-white/12 lg:border-l"
         icon={Rocket}
         index="01.4"
         title="Deployment-Aware Output"
@@ -689,8 +694,8 @@ function FileTreeVisual() {
   ] as const;
 
   return (
-    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden px-6 pt-8 sm:px-10">
-      <div className="relative z-10 mx-auto max-w-[460px] border-x border-t border-white/12 bg-black/72 backdrop-blur-sm">
+    <div className="farm-feature-spotlight flex min-h-[280px] items-end justify-end overflow-hidden pl-6 pt-8 sm:pl-10">
+      <div className="relative z-10 -mb-px -mr-px w-full max-w-[460px] border border-white/12 bg-black/72 backdrop-blur-sm">
         <div className="border-b border-white/10 px-4 py-3 font-mono text-[10px] text-white/32">
           project
         </div>
@@ -722,8 +727,8 @@ function MiddlewareVisual() {
   ] as const;
 
   return (
-    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden p-6 sm:p-10">
-      <div className="relative z-10 mx-auto max-w-[470px] overflow-hidden border border-white/12 bg-black/72 backdrop-blur-sm">
+    <div className="farm-feature-spotlight flex min-h-[280px] items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
+      <div className="relative z-10 -mb-px -mr-px w-full max-w-[470px] overflow-hidden border border-white/12 bg-black/72 backdrop-blur-sm">
         {events.map(([event, detail, time], index) => (
           <div
             key={event}
@@ -744,8 +749,8 @@ function MiddlewareVisual() {
 
 function DocsVisual() {
   return (
-    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden px-5 pt-8 sm:px-10">
-      <div className="relative z-10 mx-auto grid max-w-[490px] grid-cols-[7rem_1fr] overflow-hidden border-x border-t border-white/12 bg-black/72 backdrop-blur-sm sm:grid-cols-[9rem_1fr]">
+    <div className="farm-feature-spotlight flex min-h-[280px] items-end justify-end overflow-hidden pl-5 pt-8 sm:pl-10">
+      <div className="relative z-10 -mb-px -mr-px grid w-full max-w-[490px] grid-cols-[7rem_1fr] overflow-hidden border border-white/12 bg-black/72 backdrop-blur-sm sm:grid-cols-[9rem_1fr]">
         <div className="border-r border-white/10 p-3 font-mono text-[9px] text-white/34">
           <p className="text-white/70">Introduction</p>
           <p className="mt-3">Routing</p>
@@ -775,8 +780,8 @@ function MigrationVisual() {
   ] as const;
 
   return (
-    <div className="farm-feature-spotlight min-h-[280px] overflow-hidden p-6 sm:p-10">
-      <div className="relative z-10 mx-auto max-w-[470px] border border-white/15 bg-black/72 p-4 backdrop-blur-sm">
+    <div className="farm-feature-spotlight flex min-h-[280px] items-end justify-end overflow-hidden pl-6 pt-6 sm:pl-10 sm:pt-10">
+      <div className="relative z-10 -mb-px -mr-px w-full max-w-[470px] border border-white/15 bg-black/72 p-4 backdrop-blur-sm">
         <p className="font-mono text-[10px] text-white/32">migration.report.json</p>
         <div className="mt-4 space-y-2">
           {rows.map(([source, detail, status]) => (
@@ -808,6 +813,7 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="Config and file middleware are discovered, traced, tested, and compiled into deployment matchers."
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={Network}
         index="02.2"
         title="Middleware You Can See"
@@ -816,6 +822,7 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
+        className="border-t border-white/12"
         icon={BookOpenText}
         index="02.3"
         title="Docs Are Part of the App"
@@ -824,6 +831,7 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="Inventory routes from Next.js, Remix, Express, and custom servers before changing application source."
+        className="border-t border-white/12 lg:border-l"
         icon={GitCompareArrows}
         index="02.4"
         title="Migrate With Evidence"
