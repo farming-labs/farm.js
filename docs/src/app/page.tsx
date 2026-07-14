@@ -7,6 +7,7 @@ import {
   BookOpenText,
   Braces,
   CircleCheck,
+  CloudCog,
   CreditCard,
   ExternalLink,
   FileText,
@@ -21,6 +22,7 @@ import {
   Plug,
   Rocket,
   Route,
+  Server,
   Settings2,
   ShieldCheck,
   Terminal,
@@ -32,13 +34,23 @@ import type { ReactNode } from "react";
 import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
 import betterAuthIconUrl from "simple-icons/icons/betterauth.svg?url";
 import clerkIconUrl from "simple-icons/icons/clerk.svg?url";
+import cloudflarePagesIconUrl from "simple-icons/icons/cloudflarepages.svg?url";
+import denoIconUrl from "simple-icons/icons/deno.svg?url";
+import digitalOceanIconUrl from "simple-icons/icons/digitalocean.svg?url";
+import dockerIconUrl from "simple-icons/icons/docker.svg?url";
+import firebaseIconUrl from "simple-icons/icons/firebase.svg?url";
+import flyIconUrl from "simple-icons/icons/flydotio.svg?url";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
+import netlifyIconUrl from "simple-icons/icons/netlify.svg?url";
 import prismaIconUrl from "simple-icons/icons/prisma.svg?url";
+import railwayIconUrl from "simple-icons/icons/railway.svg?url";
 import reactIconUrl from "simple-icons/icons/react.svg?url";
+import renderIconUrl from "simple-icons/icons/render.svg?url";
 import resendIconUrl from "simple-icons/icons/resend.svg?url";
 import shadcnIconUrl from "simple-icons/icons/shadcnui.svg?url";
 import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import supabaseIconUrl from "simple-icons/icons/supabase.svg?url";
+import vercelIconUrl from "simple-icons/icons/vercel.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
@@ -178,6 +190,27 @@ const integrationDirectoryItems = [
   },
 ] as const;
 
+const deploymentTiles = [
+  { row: 0, col: 1, label: "Self-hosted Node", icon: Server, featured: true },
+  { row: 0, col: 3, label: "Vercel", brand: vercelIconUrl, featured: true },
+  { row: 1, col: 0, label: "Cloudflare Pages", brand: cloudflarePagesIconUrl, featured: true },
+  { row: 1, col: 2, label: "Netlify", brand: netlifyIconUrl, featured: true },
+  { row: 1, col: 4, label: "Docker", brand: dockerIconUrl, featured: false },
+  { row: 2, col: 1, label: "AWS and Azure", icon: CloudCog, featured: false },
+  { row: 2, col: 3, label: "Deno", brand: denoIconUrl, featured: false },
+  {
+    row: 3,
+    col: 0,
+    label: "DigitalOcean",
+    brand: digitalOceanIconUrl,
+    featured: false,
+  },
+  { row: 3, col: 2, label: "Render", brand: renderIconUrl, featured: false },
+  { row: 3, col: 4, label: "Railway", brand: railwayIconUrl, featured: false },
+  { row: 4, col: 1, label: "Fly.io", brand: flyIconUrl, featured: false },
+  { row: 4, col: 3, label: "Firebase", brand: firebaseIconUrl, featured: false },
+] as const;
+
 const footerGroups = [
   {
     title: "Framework",
@@ -223,13 +256,6 @@ export default defineFarmConfig({
     billing(),
     jobs(),
   ],
-});`;
-
-const middlewareRouteCode = `import { middleware } from "@farmjs/core/middleware";
-
-export default middleware().use(async (ctx, next) => {
-  ctx.data.set("request.startedAt", Date.now());
-  await next();
 });`;
 
 const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";
@@ -786,13 +812,76 @@ function FileTreeVisual() {
   );
 }
 
-function MiddlewareVisual() {
+function DeploymentVisual() {
   return (
-    <FoundationCodeVisual
-      code={middlewareRouteCode}
-      label="src/app/dashboard/middleware.ts"
-      language="ts"
-    />
+    <FoundationCanvas interactive>
+      <a
+        aria-label="Explore Farm.js deployment targets"
+        className="group/deployment absolute inset-0 flex items-center justify-center overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+        href="/docs/deployment"
+        title="Deployment documentation"
+      >
+        <span
+          aria-hidden
+          className="absolute left-1/2 top-[46%] h-28 w-[78%] -translate-x-1/2 -translate-y-1/2 bg-white/[0.08] blur-3xl"
+        />
+        <div
+          aria-hidden
+          className="relative size-[18rem] sm:size-[19rem]"
+          style={{
+            maskImage:
+              "radial-gradient(ellipse at center, black 56%, rgb(0 0 0 / 0.86) 74%, rgb(0 0 0 / 0.25) 92%, transparent 108%)",
+            WebkitMaskImage:
+              "radial-gradient(ellipse at center, black 56%, rgb(0 0 0 / 0.86) 74%, rgb(0 0 0 / 0.25) 92%, transparent 108%)",
+          }}
+        >
+          {deploymentTiles.map((tile) => {
+            const Icon = "icon" in tile ? tile.icon : null;
+
+            return (
+              <div
+                key={tile.label}
+                className={cx(
+                  "group/tile absolute grid place-items-center overflow-hidden rounded-[3px] border transition-[background-color,border-color,transform] duration-200 group-hover/deployment:-translate-y-0.5",
+                  tile.featured
+                    ? "border-white/16 bg-white/[0.10]"
+                    : "border-white/[0.09] bg-white/[0.045]",
+                )}
+                style={{
+                  height: "20%",
+                  left: `${tile.col * 20}%`,
+                  top: `${tile.row * 20}%`,
+                  width: "20%",
+                }}
+                title={tile.label}
+              >
+                {"brand" in tile ? (
+                  <BrandIcon
+                    className={cx(
+                      "size-7 transition-[opacity,transform] duration-200 group-hover/tile:-translate-y-1",
+                      tile.featured ? "opacity-88" : "opacity-58",
+                    )}
+                    src={tile.brand}
+                  />
+                ) : Icon ? (
+                  <Icon
+                    aria-hidden
+                    className={cx(
+                      "size-7 transition-[color,transform] duration-200 group-hover/tile:-translate-y-1",
+                      tile.featured ? "text-white/88" : "text-white/58",
+                    )}
+                    strokeWidth={1.35}
+                  />
+                ) : null}
+                <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-white/72 opacity-0 transition-[opacity,transform] duration-200 group-hover/tile:translate-y-0 group-hover/tile:opacity-100">
+                  {tile.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </a>
+    </FoundationCanvas>
   );
 }
 
@@ -890,13 +979,13 @@ function FoundationGrid() {
         <FileTreeVisual />
       </FeatureCell>
       <FeatureCell
-        body="Config and file middleware are discovered, traced, tested, and compiled into deployment matchers."
+        body="Deploy to Vercel, Cloudflare, Netlify, or self-hosted Node, then reach the wider provider ecosystem through Nitro presets."
         className="border-t border-white/12 lg:border-l lg:border-t-0"
-        icon={Network}
+        icon={CloudCog}
         index="02.2"
-        title="Middleware You Can See"
+        title="Deploy Almost Anywhere"
       >
-        <MiddlewareVisual />
+        <DeploymentVisual />
       </FeatureCell>
       <FeatureCell
         body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
