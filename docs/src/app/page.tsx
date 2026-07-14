@@ -46,6 +46,7 @@ import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
 import { HighlightedCode } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
+import { FlickeringGrid } from "../components/ui/flickering-grid";
 
 export const metadata = {
   title: "Farm.js - The React framework for product apps",
@@ -420,71 +421,9 @@ function Header() {
   );
 }
 
-function FarmRuntimeVisual() {
-  return (
-    <div
-      aria-label="A layered monochrome Farm build pipeline connecting source files to routes, server APIs, and deployment output."
-      className="farm-runtime-visual farm-line-field relative flex min-h-[430px] items-center justify-center overflow-hidden bg-black sm:min-h-[520px] lg:min-h-[620px]"
-      role="img"
-    >
-      <div aria-hidden className="farm-dot-grid absolute inset-0 opacity-20" />
-      <div aria-hidden className="absolute inset-x-0 top-1/2 h-px bg-white/[0.045]" />
-      <div aria-hidden className="absolute inset-y-0 left-1/2 w-px bg-white/[0.045]" />
-
-      <span className="absolute right-5 top-5 z-20 border border-white/10 bg-black px-2 py-1 font-mono text-[9px] uppercase tracking-normal text-white/32 sm:right-8 sm:top-8">
-        Build pipeline / 01
-      </span>
-
-      <div aria-hidden className="farm-prism-scene z-10">
-        <span className="farm-prism-node farm-prism-node-tsx">
-          TSX
-          <small>routes</small>
-        </span>
-        <span className="farm-prism-node farm-prism-node-api">
-          API
-          <small>typed</small>
-        </span>
-        <span className="farm-prism-node farm-prism-node-mdx">
-          MDX
-          <small>docs</small>
-        </span>
-        <span className="farm-prism-node farm-prism-node-edge">
-          Edge
-          <small>deploy</small>
-        </span>
-
-        <div className="farm-prism-stack">
-          <div className="farm-prism-plane farm-prism-plane-source" />
-          <div className="farm-prism-plane farm-prism-plane-router" />
-          <div className="farm-prism-plane farm-prism-plane-runtime" />
-          <div className="farm-prism-plane farm-prism-plane-output" />
-
-          <span className="absolute left-1/2 top-[13%] -translate-x-1/2 font-mono text-[8px] uppercase tracking-normal text-white/24">
-            Source modules
-          </span>
-          <span className="absolute left-1/2 top-[33%] -translate-x-1/2 font-mono text-[8px] uppercase tracking-normal text-white/34">
-            Route graph
-          </span>
-          <span className="absolute left-1/2 top-[75%] -translate-x-1/2 font-mono text-[8px] uppercase tracking-normal text-white/32">
-            Production output
-          </span>
-
-          <div className="farm-prism-mark">
-            <FarmMark className="size-16" />
-          </div>
-        </div>
-      </div>
-
-      <div className="absolute bottom-5 left-5 z-20 flex items-center gap-2 font-mono text-[10px] tracking-normal text-white/34 sm:bottom-8 sm:left-8">
-        <span className="size-1.5 bg-white" /> 24 routes / 12 APIs / ready
-      </div>
-    </div>
-  );
-}
-
 function Hero() {
   return (
-    <section className="farm-full-rule grid w-full lg:grid-cols-[1.08fr_0.92fr]">
+    <section className="farm-full-rule relative w-full overflow-hidden">
       <span
         aria-hidden
         className="pointer-events-none absolute -left-px -top-px z-30 size-[9px] border-l border-t border-white/28"
@@ -493,42 +432,52 @@ function Hero() {
         aria-hidden
         className="pointer-events-none absolute -bottom-px -right-px z-30 size-[9px] border-b border-r border-white/28"
       />
-      <div className="flex min-h-[600px] flex-col justify-between gap-14 p-6 sm:p-10 lg:min-h-[620px] lg:p-12">
-        <div className="max-w-[38rem]">
-          <div className="text-white/42">
-            <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
-          </div>
-          <HeroTitleFrame>
-            <h1 className="max-w-[16ch] text-[2.375rem] font-medium leading-[1.02] tracking-normal text-white sm:text-[3.5rem] lg:text-[2.75rem] min-[1120px]:text-[3.25rem] xl:text-[4rem]">
-              <span className="block">React Framework</span>
-              <span className="block text-white/82">for Product Apps</span>
-            </h1>
-          </HeroTitleFrame>
-          <p className="mt-6 max-w-[32rem] text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
-            Farm.js keeps the app router you already know, then brings typed APIs, middleware,
-            integrations, docs, and deployment into the same framework.
-          </p>
-          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <ButtonLink
-              href="/docs/getting-started"
-              icon={<BookOpen aria-hidden className="size-4" strokeWidth={1.5} />}
-            >
-              Get Started
-            </ButtonLink>
-            <ButtonLink
-              href="https://github.com/Kinfe123/farm.js"
-              icon={<GithubIcon className="size-4" />}
-              variant="secondary"
-            >
-              View on GitHub
-            </ButtonLink>
-          </div>
+      <div className="relative z-10 mx-auto flex w-full max-w-[58rem] flex-col items-center px-6 pb-36 pt-11 text-center sm:px-10 sm:pb-40 sm:pt-12 lg:px-12">
+        <div className="text-white/42">
+          <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
         </div>
-
-        <InstallCommand />
+        <HeroTitleFrame>
+          <h1 className="max-w-[18ch] text-[1.875rem] font-medium leading-[1.02] tracking-normal text-white min-[400px]:text-[2.125rem] min-[420px]:text-[2.5rem] sm:text-[3.75rem] lg:text-[4rem]">
+            <span className="block">React Framework</span>
+            <span className="block text-white/82">for Product Apps</span>
+          </h1>
+        </HeroTitleFrame>
+        <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
+          Farm.js keeps the app router you already know, then brings typed APIs, middleware,
+          integrations, docs, and deployment into the same framework.
+        </p>
+        <div className="mt-7 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
+          <ButtonLink
+            href="/docs/getting-started"
+            icon={<BookOpen aria-hidden className="size-4" strokeWidth={1.5} />}
+          >
+            Get Started
+          </ButtonLink>
+          <ButtonLink
+            href="https://github.com/Kinfe123/farm.js"
+            icon={<GithubIcon className="size-4" />}
+            variant="secondary"
+          >
+            View on GitHub
+          </ButtonLink>
+        </div>
+        <div className="mt-8 w-full max-w-[44rem] text-left">
+          <InstallCommand />
+        </div>
       </div>
-      <div className="border-t border-white/12 lg:border-l lg:border-t-0">
-        <FarmRuntimeVisual />
+
+      <div
+        aria-hidden
+        className="farm-hero-flicker pointer-events-none absolute inset-x-0 bottom-0 h-48 sm:h-56"
+      >
+        <FlickeringGrid
+          className="absolute inset-0"
+          color="rgb(255, 255, 255)"
+          flickerChance={0.9}
+          gridGap={7}
+          maxOpacity={0.34}
+          squareSize={2}
+        />
       </div>
     </section>
   );

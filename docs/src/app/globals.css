@@ -169,21 +169,20 @@
     bottom: -5px;
   }
 
-  .farm-dot-grid {
-    background-image:
-      linear-gradient(to right, var(--farm-line-soft) 1px, transparent 1px),
-      linear-gradient(to bottom, var(--farm-line-soft) 1px, transparent 1px);
-    background-size: 34px 34px;
-  }
-
-  .farm-line-field {
-    background-color: #000;
-    background-image: repeating-linear-gradient(
-      90deg,
-      transparent 0,
-      transparent 31px,
-      rgb(255 255 255 / 0.055) 31px,
-      rgb(255 255 255 / 0.055) 32px
+  .farm-hero-flicker {
+    -webkit-mask-image: radial-gradient(
+      ellipse 180% 75% at 50% -26%,
+      transparent 58%,
+      rgb(0 0 0 / 0.08) 64%,
+      rgb(0 0 0 / 0.52) 72%,
+      #000 80%
+    );
+    mask-image: radial-gradient(
+      ellipse 180% 75% at 50% -26%,
+      transparent 58%,
+      rgb(0 0 0 / 0.08) 64%,
+      rgb(0 0 0 / 0.52) 72%,
+      #000 80%
     );
   }
 
@@ -379,157 +378,6 @@
     font-style: italic;
   }
 
-  .farm-prism-scene {
-    position: relative;
-    width: min(100%, 560px);
-    height: 430px;
-    isolation: isolate;
-  }
-
-  .farm-prism-stack {
-    position: absolute;
-    inset: 0;
-    animation: farm-prism-float 6.5s ease-in-out infinite;
-  }
-
-  .farm-prism-plane {
-    position: absolute;
-    left: 50%;
-    width: var(--farm-prism-size);
-    aspect-ratio: 1;
-    border: 1px solid rgb(255 255 255 / var(--farm-prism-opacity));
-    background: #020202;
-    box-shadow:
-      inset 0 0 0 1px rgb(255 255 255 / 0.025),
-      0 var(--farm-prism-edge) 0 rgb(255 255 255 / var(--farm-prism-edge-opacity));
-    transform: translate(-50%, -50%) rotateX(62deg) rotateZ(45deg);
-    transform-style: preserve-3d;
-  }
-
-  .farm-prism-plane-source {
-    --farm-prism-size: 168px;
-    --farm-prism-opacity: 0.2;
-    --farm-prism-edge: 5px;
-    --farm-prism-edge-opacity: 0.035;
-    top: 25%;
-  }
-
-  .farm-prism-plane-router {
-    --farm-prism-size: 218px;
-    --farm-prism-opacity: 0.28;
-    --farm-prism-edge: 7px;
-    --farm-prism-edge-opacity: 0.055;
-    top: 43%;
-  }
-
-  .farm-prism-plane-runtime {
-    --farm-prism-size: 270px;
-    --farm-prism-opacity: 0.52;
-    --farm-prism-edge: 11px;
-    --farm-prism-edge-opacity: 0.1;
-    top: 63%;
-    filter: drop-shadow(0 0 24px rgb(255 255 255 / 0.08));
-  }
-
-  .farm-prism-plane-output {
-    --farm-prism-size: 228px;
-    --farm-prism-opacity: 0.16;
-    --farm-prism-edge: 6px;
-    --farm-prism-edge-opacity: 0.035;
-    top: 80%;
-  }
-
-  .farm-prism-mark {
-    position: absolute;
-    top: 52%;
-    left: 50%;
-    display: grid;
-    width: 108px;
-    aspect-ratio: 1;
-    place-items: center;
-    color: #000;
-    background: #fff;
-    clip-path: polygon(50% 0, 100% 22%, 86% 82%, 50% 100%, 14% 82%, 0 22%);
-    filter: drop-shadow(0 0 30px rgb(255 255 255 / 0.2));
-    transform: translate(-50%, -50%);
-  }
-
-  .farm-prism-node {
-    position: absolute;
-    z-index: 10;
-    display: grid;
-    width: 64px;
-    height: 44px;
-    place-content: center;
-    border: 1px solid rgb(255 255 255 / 0.18);
-    background: #000;
-    font-family: var(--font-geist-mono), monospace;
-    font-size: 9px;
-    line-height: 1;
-    color: rgb(255 255 255 / 0.68);
-    text-align: center;
-    text-transform: uppercase;
-  }
-
-  .farm-prism-node::after {
-    position: absolute;
-    top: 50%;
-    width: 74px;
-    height: 1px;
-    background: rgb(255 255 255 / 0.15);
-    content: "";
-  }
-
-  .farm-prism-node small {
-    margin-top: 5px;
-    font-size: 7px;
-    color: rgb(255 255 255 / 0.3);
-  }
-
-  .farm-prism-node-tsx {
-    top: 24%;
-    left: 7%;
-  }
-
-  .farm-prism-node-tsx::after {
-    left: 100%;
-    transform: rotate(22deg);
-    transform-origin: left;
-  }
-
-  .farm-prism-node-api {
-    top: 19%;
-    right: 7%;
-  }
-
-  .farm-prism-node-api::after {
-    right: 100%;
-    transform: rotate(-22deg);
-    transform-origin: right;
-  }
-
-  .farm-prism-node-mdx {
-    bottom: 16%;
-    left: 4%;
-  }
-
-  .farm-prism-node-mdx::after {
-    left: 100%;
-    transform: rotate(-20deg);
-    transform-origin: left;
-  }
-
-  .farm-prism-node-edge {
-    right: 4%;
-    bottom: 13%;
-  }
-
-  .farm-prism-node-edge::after {
-    right: 100%;
-    transform: rotate(20deg);
-    transform-origin: right;
-  }
-
   @media (min-width: 768px) {
     .farm-page-grid {
       grid-template-columns: 40px minmax(0, 1240px) 40px;
@@ -542,40 +390,6 @@
     .farm-page-content {
       border-inline: 0;
     }
-
-    .farm-prism-scene {
-      height: 520px;
-    }
-
-    .farm-prism-plane-source {
-      --farm-prism-size: 188px;
-    }
-
-    .farm-prism-plane-router {
-      --farm-prism-size: 242px;
-    }
-
-    .farm-prism-plane-runtime {
-      --farm-prism-size: 304px;
-    }
-
-    .farm-prism-plane-output {
-      --farm-prism-size: 258px;
-    }
-
-    .farm-prism-mark {
-      width: 124px;
-    }
-  }
-}
-
-@keyframes farm-prism-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-9px);
   }
 }
 
@@ -764,10 +578,6 @@
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;
-  }
-
-  .farm-prism-stack {
-    animation: none;
   }
 
   .farm-logo-rail {
