@@ -434,7 +434,7 @@ function Hero() {
       />
       <div className="relative z-10 mx-auto flex w-full max-w-[58rem] flex-col items-center px-6 pb-16 pt-11 text-center sm:px-10 sm:pb-20 sm:pt-12 lg:px-12">
         <div className="text-white/42">
-          <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
+          <IndexedLabel icon={Route} index="00" label="App Router / Typed APIs / One Runtime" />
         </div>
         <HeroTitleFrame>
           <h1 className="max-w-[18ch] text-[1.875rem] font-medium leading-[1.02] tracking-normal text-white min-[400px]:text-[2.125rem] min-[420px]:text-[2.5rem] sm:text-[3.75rem] lg:text-[4rem]">
@@ -468,7 +468,7 @@ function Hero() {
 
       <div
         aria-hidden
-        className="farm-hero-flicker pointer-events-none absolute inset-x-0 -bottom-px h-64 sm:h-72"
+        className="farm-hero-flicker pointer-events-none absolute inset-x-0 -bottom-px h-80 sm:h-96"
       >
         <FlickeringGrid
           className="absolute inset-0"
