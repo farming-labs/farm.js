@@ -111,7 +111,7 @@ function writeRscEntryFile(buildDir: string, rendererPath: string, ssrPath?: str
   const code = `
 ${setSsLoader}
 import * as entryExports from "./${relRenderer}";
-import { fromWebHandler } from "h3";
+import { defineEventHandler } from "h3";
 
 function getFetchHandler(exports) {
   const def = exports?.default;
@@ -121,7 +121,35 @@ function getFetchHandler(exports) {
 }
 
 const handler = getFetchHandler(entryExports);
-export default fromWebHandler(handler);
+
+function createRscRequest(event) {
+  const node = event.node;
+  if (!node?.req || !node?.res) return event.req;
+
+  const controller = new AbortController();
+  const cleanup = () => {
+    node.req.off("aborted", abort);
+    node.res.off("close", close);
+    node.res.off("finish", cleanup);
+  };
+  const abort = () => {
+    if (!controller.signal.aborted) controller.abort();
+    cleanup();
+  };
+  const close = () => {
+    if (!node.res.writableEnded) abort();
+    else cleanup();
+  };
+
+  node.req.once("aborted", abort);
+  node.res.once("close", close);
+  node.res.once("finish", cleanup);
+  if (node.req.aborted) abort();
+
+  return new Request(event.req, { signal: controller.signal });
+}
+
+export default defineEventHandler((event) => handler(createRscRequest(event)));
 `.trim();
   const entryPath = path.join(buildDir, "rsc-entry.mjs");
   mkdirSync(buildDir, { recursive: true });
