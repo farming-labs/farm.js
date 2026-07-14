@@ -195,6 +195,11 @@
       "import": "./dist/server-fn-client.mjs",
       "require": "./dist/server-fn-client.cjs"
     },
+    "./server-query": {
+      "types": "./dist/server-query.d.ts",
+      "import": "./dist/server-query.mjs",
+      "require": "./dist/server-query.cjs"
+    },
     "./server-action-security": {
       "types": "./dist/server-action-security.d.ts",
       "import": "./dist/server-action-security.mjs",
