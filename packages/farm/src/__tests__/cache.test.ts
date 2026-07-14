@@ -16,6 +16,10 @@ import {
   resetFarmObservability,
   type FarmEvent,
 } from "../observability";
+import {
+  getServerActionInvalidations,
+  runWithServerActionRequest,
+} from "../server-action-security";
 
 describe("server cache primitives", () => {
   afterEach(() => {
@@ -175,6 +179,17 @@ describe("server cache primitives", () => {
         { tags: [createRouteDataCacheTag(key)] },
       ),
     ).resolves.toEqual({ id: "123", calls: 3 });
+  });
+
+  it("records structured invalidations during a server action", async () => {
+    const request = new Request("https://farm.test/products", { method: "POST" });
+
+    const invalidations = await runWithServerActionRequest(request, async () => {
+      invalidate(["product", "123"]);
+      return getServerActionInvalidations();
+    });
+
+    expect(invalidations).toEqual([createFarmCacheKey(["product", "123"])]);
   });
 
   it("expires entries using revalidate seconds", async () => {

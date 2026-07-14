@@ -23,6 +23,7 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farmjs/core/deployment';
+import { applyFarmCacheInvalidations } from '@farmjs/core/cache';
 `;
 
   if (ctx.actionsEnabled) {
@@ -82,6 +83,7 @@ setServerCallback(async (id, args) => {
     return;
   }
   setPayloadRef.current?.(p);
+  applyFarmCacheInvalidations(p.returnValue?.invalidations);
   if (!p.returnValue || !p.returnValue.ok) {
     debug('Server action failed:', id);
     const error = new Error(p.returnValue?.data?.message || 'Server function failed');

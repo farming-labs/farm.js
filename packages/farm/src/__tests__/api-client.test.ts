@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAPIClient, createServerAPIClient } from "../api/client";
+import { getFarmClientDataCache } from "../client-cache";
 import { endpoint } from "../integration-api";
 import { defineIntegration, integrationRoute, resolveIntegrationPlugins } from "../integrations";
 import { PluginManager } from "../plugin";
@@ -50,9 +51,29 @@ function createDeferred<T>() {
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  getFarmClientDataCache().clear();
 });
 
 describe("createAPIClient", () => {
+  it("shares structured cache keys across API client instances", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ id: "1", name: "Alice" }));
+    globalThis.fetch = fetchMock as any;
+
+    const first = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const second = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const cache = {
+      key: ["user", "1"] as const,
+      policy: "cache-first" as const,
+      staleTime: 10_000,
+    };
+
+    await first.users.get({ query: { limit: "1" } }, { cache });
+    const cached = await second.users.get({ query: { limit: "1" } }, { cache });
+
+    expect(cached.data).toEqual({ id: "1", name: "Alice" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("returns cached data on cache-first and emits status events", async () => {
     const fetchMock = vi.fn(async () =>
       buildResponse({
