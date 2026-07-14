@@ -423,7 +423,7 @@ function Header() {
 
 function Hero() {
   return (
-    <section className="farm-full-rule relative w-full overflow-hidden">
+    <section className="farm-full-rule farm-hero-rule relative w-full overflow-hidden">
       <span
         aria-hidden
         className="pointer-events-none absolute -left-px -top-px z-30 size-[9px] border-l border-t border-white/28"
@@ -432,7 +432,7 @@ function Hero() {
         aria-hidden
         className="pointer-events-none absolute -bottom-px -right-px z-30 size-[9px] border-b border-r border-white/28"
       />
-      <div className="relative z-10 mx-auto flex w-full max-w-[58rem] flex-col items-center px-6 pb-36 pt-11 text-center sm:px-10 sm:pb-40 sm:pt-12 lg:px-12">
+      <div className="relative z-10 mx-auto flex w-full max-w-[58rem] flex-col items-center px-6 pb-16 pt-11 text-center sm:px-10 sm:pb-20 sm:pt-12 lg:px-12">
         <div className="text-white/42">
           <IndexedLabel icon={Route} index="00" label="React 19 / TypeScript / Universal" />
         </div>
@@ -468,14 +468,14 @@ function Hero() {
 
       <div
         aria-hidden
-        className="farm-hero-flicker pointer-events-none absolute inset-x-0 bottom-0 h-48 sm:h-56"
+        className="farm-hero-flicker pointer-events-none absolute inset-x-0 -bottom-px h-64 sm:h-72"
       >
         <FlickeringGrid
           className="absolute inset-0"
           color="rgb(255, 255, 255)"
           flickerChance={0.9}
           gridGap={7}
-          maxOpacity={0.34}
+          maxOpacity={0.36}
           squareSize={2}
         />
       </div>

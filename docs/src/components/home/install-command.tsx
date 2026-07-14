@@ -99,7 +99,7 @@ export function InstallCommand() {
   }
 
   return (
-    <div className="overflow-hidden border border-white/14 bg-black/95 shadow-[0_22px_70px_rgba(0,0,0,0.52)] backdrop-blur-sm">
+    <div className="overflow-hidden border border-white/14 bg-black/95 shadow-[0_12px_36px_rgba(0,0,0,0.34)] backdrop-blur-sm">
       <div
         aria-label="Package manager"
         className="grid min-w-0 grid-cols-4 border-b border-white/10"
@@ -110,7 +110,7 @@ export function InstallCommand() {
             key={item.label}
             aria-controls="install-command-panel"
             aria-selected={activeIndex === index}
-            className="group relative flex h-11 min-w-0 items-center justify-center gap-2 border-r border-white/10 px-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-12 sm:text-[11px]"
+            className="group relative flex h-9 min-w-0 items-center justify-center gap-1.5 border-r border-white/10 px-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-10 sm:gap-2 sm:text-[10px]"
             id={`install-tab-${item.label.toLowerCase()}`}
             onClick={() => selectCommand(index)}
             onKeyDown={(event) => handleTabKeyDown(event, index)}
@@ -124,7 +124,7 @@ export function InstallCommand() {
             <img
               alt=""
               aria-hidden="true"
-              className={`size-3.5 shrink-0 select-none transition-[filter,opacity] duration-150 sm:size-4 ${
+              className={`size-3 shrink-0 select-none transition-[filter,opacity] duration-150 sm:size-3.5 ${
                 activeIndex === index
                   ? "brightness-0 opacity-90"
                   : "brightness-0 invert opacity-48 group-hover:opacity-90"
@@ -138,7 +138,7 @@ export function InstallCommand() {
 
       <div
         aria-labelledby={`install-tab-${activeCommand.label.toLowerCase()}`}
-        className="grid min-h-14 min-w-0 grid-cols-[2.75rem_minmax(0,1fr)_auto] items-stretch sm:min-h-16 sm:grid-cols-[3.25rem_minmax(0,1fr)_auto]"
+        className="grid min-h-11 min-w-0 grid-cols-[2.5rem_minmax(0,1fr)_auto] items-stretch sm:min-h-12 sm:grid-cols-[2.75rem_minmax(0,1fr)_auto]"
         id="install-command-panel"
         role="tabpanel"
       >
@@ -146,17 +146,17 @@ export function InstallCommand() {
           aria-hidden
           className="grid place-items-center border-r border-white/10 bg-white/[0.035] text-white/48"
         >
-          <Terminal className="size-3.5 sm:size-4" strokeWidth={1.5} />
+          <Terminal className="size-3 sm:size-3.5" strokeWidth={1.5} />
         </span>
-        <code className="flex min-w-0 items-center overflow-x-auto whitespace-nowrap px-3 font-mono text-xs tracking-normal text-white/78 sm:px-5 sm:text-[13px]">
-          <span aria-hidden className="mr-2.5 text-white/28">
+        <code className="flex min-w-0 items-center overflow-x-auto whitespace-nowrap px-3 font-mono text-[11px] tracking-normal text-white/78 sm:px-4 sm:text-xs">
+          <span aria-hidden className="mr-2 text-white/28">
             $
           </span>
           {activeCommand.command}
         </code>
         <button
           aria-label={`${copyLabel} install command`}
-          className="inline-flex min-w-12 shrink-0 items-center justify-center gap-2 border-l border-white/10 bg-white/[0.025] px-3 font-mono text-[9px] font-normal uppercase tracking-normal text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.075] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:min-w-[6.25rem] sm:px-4 sm:text-[10px]"
+          className="inline-flex min-w-11 shrink-0 items-center justify-center gap-1.5 border-l border-white/10 bg-white/[0.025] px-2.5 font-mono text-[9px] font-normal uppercase tracking-normal text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.075] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:min-w-[5.5rem] sm:px-3 sm:text-[10px]"
           onClick={copyCommand}
           title={`${copyLabel} install command`}
           type="button"

@@ -124,6 +124,11 @@
     bottom: -1px;
   }
 
+  .farm-hero-rule::after {
+    bottom: 0;
+    background: rgb(255 255 255 / 0.16);
+  }
+
   .farm-hero-title-frame-border {
     position: absolute;
     top: 0;
@@ -171,18 +176,22 @@
 
   .farm-hero-flicker {
     -webkit-mask-image: radial-gradient(
-      ellipse 180% 75% at 50% -26%,
-      transparent 58%,
-      rgb(0 0 0 / 0.08) 64%,
-      rgb(0 0 0 / 0.52) 72%,
-      #000 80%
+      ellipse 220% 78% at 50% -20%,
+      transparent 55%,
+      rgb(0 0 0 / 0.04) 62%,
+      rgb(0 0 0 / 0.16) 70%,
+      rgb(0 0 0 / 0.42) 80%,
+      rgb(0 0 0 / 0.76) 90%,
+      #000 100%
     );
     mask-image: radial-gradient(
-      ellipse 180% 75% at 50% -26%,
-      transparent 58%,
-      rgb(0 0 0 / 0.08) 64%,
-      rgb(0 0 0 / 0.52) 72%,
-      #000 80%
+      ellipse 220% 78% at 50% -20%,
+      transparent 55%,
+      rgb(0 0 0 / 0.04) 62%,
+      rgb(0 0 0 / 0.16) 70%,
+      rgb(0 0 0 / 0.42) 80%,
+      rgb(0 0 0 / 0.76) 90%,
+      #000 100%
     );
   }
 
