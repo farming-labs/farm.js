@@ -443,8 +443,8 @@ function Hero() {
           </h1>
         </HeroTitleFrame>
         <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
-          Farm.js keeps the app router you already know, then brings typed APIs, middleware,
-          integrations, docs, and deployment into the same framework.
+          Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
+          integrations, docs, and deployment so they work together as one product.
         </p>
         <div className="mt-7 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
           <ButtonLink
