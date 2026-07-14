@@ -46,6 +46,12 @@ export default function RootLayout({
               >
                 Form
               </a>
+              <a
+                href="/server-fn-middleware"
+                className="text-slate-300 hover:text-white transition-colors"
+              >
+                Middleware
+              </a>
             </div>
           </div>
         </div>
