@@ -23,11 +23,15 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farmjs/core/deployment';
-import { applyFarmCacheInvalidations } from '@farmjs/core/cache';
 `;
 
   if (ctx.actionsEnabled) {
     imports += `import { setServerCallback, encodeReply, createTemporaryReferenceSet } from '@vitejs/plugin-rsc/browser';
+import { applyFarmCacheInvalidations } from '@farmjs/core/cache';
+import {
+  beginFarmServerQueryAction,
+  completeFarmServerQueryAction,
+} from '@farmjs/core/server-query/client';
 `;
   }
 
@@ -46,6 +50,7 @@ if (typeof globalThis.__viteRscCallServer !== 'function') {
 // Register real callback (replaces placeholder above)
 setServerCallback(async (id, args) => {
   debug('Invoking server action:', id);
+  const serverQueryInvocation = beginFarmServerQueryAction(id, args);
   const refs = createTemporaryReferenceSet();
   const body = await encodeReply(args, { temporaryReferences: refs });
   const headers = createFarmDeploymentRequestHeaders(farmDeploymentId, {
@@ -90,7 +95,7 @@ setServerCallback(async (id, args) => {
     error.name = 'ServerActionError';
     throw error;
   }
-  return p.returnValue.data;
+  return completeFarmServerQueryAction(serverQueryInvocation, p.returnValue.data);
 });
 `;
   } else {

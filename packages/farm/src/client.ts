@@ -8,6 +8,12 @@ export type {
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "./api/client";
+export { fetchServerQuery, prefetchServerQuery, useServerQuery } from "./server-query-client";
+export type {
+  ServerQueryFetchOptions,
+  UseServerQueryOptions,
+  UseServerQueryResult,
+} from "./server-query-client";
 export {
   api,
   endpoint,

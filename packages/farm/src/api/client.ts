@@ -409,7 +409,7 @@ export function createAPIClient<
       : undefined;
     const configuredCacheKey = clientOptions?.key ?? cacheOptions?.key;
     const cacheKey = normalizeFarmClientCacheKey(
-      configuredCacheKey ?? buildCacheKey(methodUpper, path, input),
+      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL),
     ) as CacheKey<any>;
     const now = Date.now();
 
@@ -440,7 +440,7 @@ export function createAPIClient<
           update.length === 2
             ? [update[0], undefined, update[1]]
             : [update[0], update[1], update[2]];
-        const targetKey = resolveTargetKey(routeMeta, target, targetInput);
+        const targetKey = resolveTargetKey(routeMeta, target, targetInput, baseURL);
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
@@ -632,7 +632,7 @@ export function createAPIClient<
           };
 
       for (const target of invalidateOptions.targets) {
-        const targetKey = resolveTargetKey(routeMeta, target);
+        const targetKey = resolveTargetKey(routeMeta, target, undefined, baseURL);
         if (!targetKey) continue;
 
         const existing = cacheState.get(targetKey);
@@ -682,7 +682,7 @@ export function createAPIClient<
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy([], request, routeMeta, rootAliases) as APIClient<
+  return createNestedProxy([], request, routeMeta, baseURL, rootAliases) as APIClient<
     TRouter,
     TIntegrations
   >;
@@ -706,6 +706,7 @@ function createNestedProxy(
   path: string[],
   client: any,
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
+  baseURL: string,
   rootAliases?: Record<string, unknown>,
 ): any {
   const target = () => {};
@@ -717,7 +718,7 @@ function createNestedProxy(
       }
 
       // Add prop to path and return new proxy
-      return createNestedProxy([...path, prop], client, routeMeta, rootAliases);
+      return createNestedProxy([...path, prop], client, routeMeta, baseURL, rootAliases);
     },
 
     // When calling as a function
@@ -751,7 +752,7 @@ function createNestedProxy(
     },
   });
 
-  routeMeta.set(proxy, { path: [...path] });
+  routeMeta.set(proxy, { path: [...path], baseURL });
   return proxy;
 }
 
@@ -820,6 +821,7 @@ type InflightEntry = {
 
 type RouteMeta = {
   path: string[];
+  baseURL: string;
 };
 
 type OptimisticSnapshot = {
@@ -827,10 +829,11 @@ type OptimisticSnapshot = {
   entry?: CacheEntry;
 };
 
-function buildCacheKey(method: string, path: string, input: any): string {
+function buildCacheKey(method: string, path: string, input: any, baseURL: string): string {
   const keyInput =
     input && typeof input === "object" ? { query: input.query, body: input.body } : input;
-  return `${method}:${path}:${stableStringify(keyInput ?? {})}`;
+  const url = new URL(path, baseURL);
+  return `${method}:${url.origin}${url.pathname}:${stableStringify(keyInput ?? {})}`;
 }
 
 function stableStringify(value: any): string {
@@ -877,6 +880,7 @@ function resolveTargetKey(
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
   target: InvalidateTarget | AnyRouteRef,
   input?: unknown,
+  baseURL = "http://localhost:3000",
 ): string | null {
   if (!target) return null;
 
@@ -887,19 +891,19 @@ function resolveTargetKey(
     if (!meta) return null;
 
     const { method, routePath } = resolveRouteMeta(meta);
-    return buildCacheKey(method, routePath, input ?? {});
+    return buildCacheKey(method, routePath, input ?? {}, meta.baseURL);
   }
 
   if (Array.isArray(target)) {
     const [route, routeInput] = target;
-    return resolveTargetKey(routeMeta, route, routeInput);
+    return resolveTargetKey(routeMeta, route, routeInput, baseURL);
   }
 
   if ("key" in target) return normalizeFarmClientCacheKey(target.key);
 
   if ("path" in target) {
     const method = target.method ?? "GET";
-    return buildCacheKey(method, target.path, target.input ?? {});
+    return buildCacheKey(method, target.path, target.input ?? {}, baseURL);
   }
 
   return null;

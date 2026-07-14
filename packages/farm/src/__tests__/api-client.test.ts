@@ -74,6 +74,20 @@ describe("createAPIClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps default cache keys isolated by API origin", async () => {
+    const fetchMock = vi.fn(async (url: string) => buildResponse({ origin: new URL(url).origin }));
+    globalThis.fetch = fetchMock as any;
+
+    const first = createAPIClient<APIRouter>({ baseURL: "https://first.example" });
+    const second = createAPIClient<APIRouter>({ baseURL: "https://second.example" });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    await first.users.get({ query: { limit: "1" } }, { cache });
+    await second.users.get({ query: { limit: "1" } }, { cache });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("returns cached data on cache-first and emits status events", async () => {
     const fetchMock = vi.fn(async () =>
       buildResponse({
