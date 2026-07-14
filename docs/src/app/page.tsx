@@ -213,6 +213,7 @@ const footerGroups = [
   {
     title: "Framework",
     icon: BookOpen,
+    action: ["Read guide", "/docs/getting-started"],
     links: [
       ["Getting started", "/docs/getting-started"],
       ["Routing", "/docs/routing"],
@@ -222,6 +223,7 @@ const footerGroups = [
   {
     title: "Product",
     icon: Layers3,
+    action: ["Explore integrations", "/docs/integrations"],
     links: [
       ["Integrations", "/docs/integrations"],
       ["API client", "/docs/api-client"],
@@ -231,6 +233,7 @@ const footerGroups = [
   {
     title: "Open source",
     icon: GitFork,
+    action: ["View source", "https://github.com/Kinfe123/farm.js"],
     links: [
       ["GitHub", "https://github.com/Kinfe123/farm.js"],
       ["Migrations", "/docs/migrations"],
@@ -1122,54 +1125,101 @@ function FinalCta() {
   );
 }
 
+type FooterLink = readonly [label: string, href: string];
+
+function FooterActionLink({
+  href,
+  icon: Icon,
+  label,
+}: {
+  href: string;
+  icon: LucideIcon;
+  label: string;
+}) {
+  const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
+
+  return (
+    <a
+      className="group flex h-12 items-center justify-between border-b border-white/12 px-4 font-mono text-[9px] font-normal uppercase tracking-normal text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+      href={href}
+    >
+      <span className="flex min-w-0 items-center gap-2">
+        <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+        <span className="truncate">{label}</span>
+      </span>
+      <DirectionIcon
+        aria-hidden
+        className="size-3.5 shrink-0 text-white/30 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/72"
+        strokeWidth={1.5}
+      />
+    </a>
+  );
+}
+
+function FooterLinksGroup({ title, links }: { title: string; links: readonly FooterLink[] }) {
+  return (
+    <div className="px-4 py-4 md:min-h-[154px]">
+      <h3 className="mb-2 font-mono text-[8px] font-normal uppercase tracking-normal text-white/28">
+        {title}
+      </h3>
+      <ul className="grid">
+        {links.map(([label, href]) => {
+          const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
+
+          return (
+            <li key={label}>
+              <a
+                className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                href={href}
+              >
+                <span>{label}</span>
+                <DirectionIcon
+                  aria-hidden
+                  className="size-3 shrink-0 text-white/0 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/56"
+                  strokeWidth={1.5}
+                />
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 function Footer() {
   return (
-    <footer className="w-full">
-      <div className="grid gap-12 px-6 py-14 sm:px-10 lg:grid-cols-[1fr_1.4fr] lg:px-14">
+    <footer className="farm-top-rule w-full">
+      <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
         <div>
-          <Wordmark />
-          <p className="mt-5 max-w-sm text-sm leading-6 text-white/38">
-            A React framework for building integrated product applications.
-          </p>
+          <div className="flex h-12 items-center justify-between border-b border-white/12 px-4">
+            <Wordmark />
+            <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
+              Framework
+            </span>
+          </div>
+          <div className="px-4 py-4 md:min-h-[154px]">
+            <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 tracking-normal text-white/42">
+              A React framework for building integrated product applications.
+            </p>
+            <p className="mt-5 font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
+              React 19 / TypeScript / Universal
+            </p>
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
-          {footerGroups.map((group) => (
-            <div key={group.title}>
-              <h3 className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-normal text-white/42">
-                <group.icon aria-hidden className="size-3.5" strokeWidth={1.5} />
-                {group.title}
-              </h3>
-              <div className="mt-4 grid gap-3">
-                {group.links.map(([label, href]) => (
-                  <a
-                    key={label}
-                    className="group flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-normal text-white/48 hover:text-white"
-                    href={href}
-                  >
-                    <span>{label}</span>
-                    {href.startsWith("http") ? (
-                      <ArrowUpRight
-                        aria-hidden
-                        className="size-3 opacity-0 transition-opacity group-hover:opacity-100"
-                        strokeWidth={1.5}
-                      />
-                    ) : (
-                      <ArrowRight
-                        aria-hidden
-                        className="size-3 opacity-0 transition-opacity group-hover:opacity-100"
-                        strokeWidth={1.5}
-                      />
-                    )}
-                  </a>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
+        {footerGroups.map((group) => (
+          <div key={group.title}>
+            <FooterActionLink href={group.action[1]} icon={group.icon} label={group.action[0]} />
+            <FooterLinksGroup links={group.links} title={group.title} />
+          </div>
+        ))}
       </div>
-      <div className="farm-top-rule flex flex-col gap-2 px-6 py-5 font-mono text-[10px] tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between sm:px-10 lg:px-14">
-        <span>MIT License / Farm.js Team</span>
-        <a className="inline-flex items-center gap-1.5 hover:text-white" href="https://kinfish.dev">
+      <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[8px] font-normal uppercase tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between">
+        <span>&copy; {new Date().getFullYear()} Farm.js / MIT License</span>
+        <a
+          className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+          href="https://kinfish.dev"
+        >
           kinfish.dev <ExternalLink aria-hidden className="size-3" strokeWidth={1.5} />
         </a>
       </div>
