@@ -52,6 +52,12 @@ export default function RootLayout({
               >
                 Middleware
               </a>
+              <a
+                href="/server-query"
+                className="text-slate-300 hover:text-white transition-colors"
+              >
+                Queries
+              </a>
             </div>
           </div>
         </div>

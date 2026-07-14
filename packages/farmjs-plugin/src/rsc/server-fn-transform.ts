@@ -1,6 +1,6 @@
-const CREATE_SERVER_FN_IMPORT_RE =
-  /\bimport\s+(?:type\s+)?([\s\S]*?)\s+from\s*["']@farmjs\/core(?:\/server-fn)?["']\s*;?/g;
-const EXPORT_CREATE_SERVER_FN_RE =
+const SERVER_FUNCTION_FACTORY_IMPORT_RE =
+  /\bimport\s+(?:type\s+)?(?:[A-Za-z_$][\w$]*\s*,\s*)?(\{[^}]*\})\s+from\s*["']@farmjs\/core(?:\/(?:server-fn|server-query))?["']\s*;?/g;
+const EXPORT_SERVER_FUNCTION_FACTORY_RE =
   /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*([A-Za-z_$][\w$]*)\s*\(/g;
 const MODULE_EXT_RE = /\.[cm]?[jt]sx?$/;
 const DECLARATION_RE = /(^|\n)\s*["']([^"']+)["']\s*;?/g;
@@ -14,22 +14,27 @@ export function transformFarmServerFns(
   code: string,
   id: string,
 ): FarmServerFnTransformResult | null {
-  if (!isTransformableModule(id) || !code.includes("createServerFn")) return null;
+  if (
+    !isTransformableModule(id) ||
+    (!code.includes("createServerFn") && !code.includes("createServerQuery"))
+  ) {
+    return null;
+  }
 
-  const createServerFnNames = findCreateServerFnImportNames(code);
-  if (createServerFnNames.size === 0) return null;
+  const factoryNames = findServerFunctionFactoryImportNames(code);
+  if (factoryNames.size === 0) return null;
 
-  const replacements = findServerFnExportReplacements(code, createServerFnNames);
+  const replacements = findServerFnExportReplacements(code, factoryNames);
   if (replacements.length === 0) return null;
 
   if (hasModuleDirective(code, "use client")) {
     throw new Error(
-      "createServerFn exports must live in a server module. Move them out of the 'use client' file.",
+      "createServerFn and createServerQuery exports must live in a server module. Move them out of the 'use client' file.",
     );
   }
 
   let output = code;
-  for (const replacement of replacements.sort((a, b) => b.start - a.start)) {
+  for (const replacement of [...replacements].sort((a, b) => b.start - a.start)) {
     output = output.slice(0, replacement.start) + replacement.code + output.slice(replacement.end);
   }
 
@@ -48,10 +53,10 @@ function isTransformableModule(id: string) {
   return MODULE_EXT_RE.test(cleanId) && !/\.d\.[cm]?ts$/.test(cleanId);
 }
 
-function findCreateServerFnImportNames(code: string) {
-  const names = new Set<string>();
+function findServerFunctionFactoryImportNames(code: string) {
+  const names = new Map<string, "fn" | "query">();
 
-  for (const match of code.matchAll(CREATE_SERVER_FN_IMPORT_RE)) {
+  for (const match of code.matchAll(SERVER_FUNCTION_FACTORY_IMPORT_RE)) {
     const importClause = match[1] ?? "";
     const namedStart = importClause.indexOf("{");
     const namedEnd = importClause.lastIndexOf("}");
@@ -60,9 +65,12 @@ function findCreateServerFnImportNames(code: string) {
     const namedImports = importClause.slice(namedStart + 1, namedEnd).split(",");
     for (const specifier of namedImports) {
       const normalized = specifier.trim().replace(/^type\s+/, "");
-      const specifierMatch = normalized.match(/^createServerFn(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      const specifierMatch = normalized.match(
+        /^(createServerFn|createServerQuery)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/,
+      );
       if (specifierMatch) {
-        names.add(specifierMatch[1] ?? "createServerFn");
+        const factory = specifierMatch[1]!;
+        names.set(specifierMatch[2] ?? factory, factory === "createServerFn" ? "fn" : "query");
       }
     }
   }
@@ -70,7 +78,7 @@ function findCreateServerFnImportNames(code: string) {
   return names;
 }
 
-function findServerFnExportReplacements(code: string, createServerFnNames: Set<string>) {
+function findServerFnExportReplacements(code: string, factoryNames: Map<string, "fn" | "query">) {
   const replacements: Array<{
     start: number;
     end: number;
@@ -78,10 +86,11 @@ function findServerFnExportReplacements(code: string, createServerFnNames: Set<s
     exportName: string;
   }> = [];
 
-  for (const match of code.matchAll(EXPORT_CREATE_SERVER_FN_RE)) {
+  for (const match of code.matchAll(EXPORT_SERVER_FUNCTION_FACTORY_RE)) {
     const exportName = match[1];
     const calleeName = match[2];
-    if (!exportName || !calleeName || !createServerFnNames.has(calleeName)) continue;
+    const factory = calleeName ? factoryNames.get(calleeName) : undefined;
+    if (!exportName || !calleeName || !factory) continue;
 
     const openParenIndex = (match.index ?? 0) + match[0].length - 1;
     const callEnd = findMatchingParen(code, openParenIndex);
@@ -93,7 +102,7 @@ function findServerFnExportReplacements(code: string, createServerFnNames: Set<s
 
     const calleeIndex = code.indexOf(calleeName, match.index);
     const callExpression = code.slice(calleeIndex, callEnd + 1);
-    const privateName = `$$farm_server_fn_${exportName}`;
+    const privateName = `$$farm_server_${factory}_${exportName}`;
 
     replacements.push({
       start: match.index ?? 0,
