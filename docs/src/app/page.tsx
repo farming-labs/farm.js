@@ -34,12 +34,15 @@ import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
 import betterAuthIconUrl from "simple-icons/icons/betterauth.svg?url";
 import clerkIconUrl from "simple-icons/icons/clerk.svg?url";
 import cloudflareIconUrl from "simple-icons/icons/cloudflare.svg?url";
+import denoIconUrl from "simple-icons/icons/deno.svg?url";
 import dockerIconUrl from "simple-icons/icons/docker.svg?url";
+import firebaseIconUrl from "simple-icons/icons/firebase.svg?url";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import netlifyIconUrl from "simple-icons/icons/netlify.svg?url";
 import nodeIconUrl from "simple-icons/icons/nodedotjs.svg?url";
 import prismaIconUrl from "simple-icons/icons/prisma.svg?url";
 import reactIconUrl from "simple-icons/icons/react.svg?url";
+import renderIconUrl from "simple-icons/icons/render.svg?url";
 import resendIconUrl from "simple-icons/icons/resend.svg?url";
 import shadcnIconUrl from "simple-icons/icons/shadcnui.svg?url";
 import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
@@ -192,18 +195,18 @@ type DeploymentTile = {
 };
 
 const deploymentTiles: readonly DeploymentTile[] = [
-  { row: 0, col: 1, label: "Self-hosted Node", brand: nodeIconUrl },
+  { row: 0, col: 1 },
   { row: 0, col: 3, label: "Vercel", brand: vercelIconUrl },
   { row: 1, col: 0 },
   { row: 1, col: 2, label: "Cloudflare", brand: cloudflareIconUrl },
-  { row: 1, col: 4 },
+  { row: 1, col: 4, label: "Firebase", brand: firebaseIconUrl },
   { row: 2, col: 1, label: "Netlify", brand: netlifyIconUrl },
   { row: 2, col: 3, label: "Docker", brand: dockerIconUrl },
   { row: 3, col: 0 },
   { row: 3, col: 2, label: "Nitro presets", brand: nitroIconUrl },
-  { row: 3, col: 4 },
-  { row: 4, col: 1 },
-  { row: 4, col: 3 },
+  { row: 3, col: 4, label: "Render", brand: renderIconUrl },
+  { row: 4, col: 1, label: "Self-host", brand: nodeIconUrl },
+  { row: 4, col: 3, label: "Deno", brand: denoIconUrl },
 ];
 
 const footerGroups = [
