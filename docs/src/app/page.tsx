@@ -9,9 +9,7 @@ import {
   CircleCheck,
   CreditCard,
   ExternalLink,
-  FileCode2,
   FileText,
-  FolderOpen,
   FolderTree,
   Gauge,
   GitCompareArrows,
@@ -46,6 +44,8 @@ import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
 import { HighlightedCode } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
+import { FileTree } from "../components/ui/file-tree";
+import type { FileTreeNode } from "../components/ui/file-tree";
 import { FlickeringGrid } from "../components/ui/flickering-grid";
 
 export const metadata = {
@@ -702,10 +702,16 @@ function DeveloperExperienceGrid() {
   );
 }
 
-function FoundationCanvas({ children }: { children: ReactNode }) {
+function FoundationCanvas({
+  children,
+  interactive = false,
+}: {
+  children: ReactNode;
+  interactive?: boolean;
+}) {
   return (
     <div
-      aria-hidden
+      aria-hidden={interactive ? undefined : true}
       className="farm-feature-spotlight relative h-[320px] min-w-0 overflow-hidden sm:h-[328px]"
     >
       <div className="relative z-10 h-full w-full">{children}</div>
@@ -735,86 +741,47 @@ function FoundationCodeVisual({
 }
 
 function FileTreeVisual() {
-  const nodes = [
-    { label: "layout.tsx", meta: "shell", icon: FileCode2, depth: 1, sequence: 0 },
-    { label: "page.tsx", meta: "/", icon: FileCode2, depth: 1, sequence: 1 },
+  const nodes: readonly FileTreeNode[] = [
     {
-      label: "dashboard/page.tsx",
-      meta: "/dashboard",
-      icon: FileCode2,
-      depth: 1,
-      sequence: 2,
+      name: "app",
+      type: "folder",
+      meta: "root",
+      defaultOpen: true,
+      children: [
+        { name: "layout.tsx", type: "file", extension: "tsx", meta: "shell" },
+        { name: "page.tsx", type: "file", extension: "tsx", meta: "/" },
+        {
+          name: "dashboard",
+          type: "folder",
+          meta: "/dashboard",
+          defaultOpen: true,
+          children: [{ name: "page.tsx", type: "file", extension: "tsx", meta: "route" }],
+        },
+        {
+          name: "api",
+          type: "folder",
+          meta: "/api",
+          defaultOpen: true,
+          children: [
+            {
+              name: "users",
+              type: "folder",
+              defaultOpen: true,
+              children: [{ name: "route.ts", type: "file", extension: "route", meta: "GET" }],
+            },
+          ],
+        },
+      ],
     },
-    {
-      label: "api/users/route.ts",
-      meta: "GET",
-      icon: Braces,
-      depth: 1,
-      sequence: 3,
-    },
-  ] as const;
+  ];
 
   return (
-    <FoundationCanvas>
-      <div className="farm-illustration-surface absolute -bottom-px -right-px top-8 w-[calc(100%-1.5rem)] overflow-hidden border border-white/12 bg-black sm:w-[calc(100%-2.5rem)]">
-        <div className="flex h-10 items-center justify-between border-b border-white/10 px-3.5 font-mono text-[9px] uppercase tracking-normal text-white/42 sm:px-4 sm:text-[10px]">
-          <span className="flex items-center gap-2 text-white/68">
-            <FolderOpen aria-hidden className="size-3.5" strokeWidth={1.5} />
-            app
-          </span>
-          <span>route explorer</span>
-        </div>
-
-        <div className="relative h-[calc(100%-2.5rem)] px-3 py-3 sm:px-4">
-          <span className="absolute bottom-14 left-[2.05rem] top-[2.9rem] w-px bg-white/14 sm:left-[2.3rem]" />
-
-          <div className="flex h-9 items-center gap-2 bg-white/[0.04] px-2.5 font-mono text-[10px] text-white/76">
-            <FolderOpen aria-hidden className="size-3.5 text-white/74" strokeWidth={1.4} />
-            <span>app</span>
-            <span className="ml-auto text-[8px] uppercase text-white/30">root</span>
-          </div>
-
-          <div className="mt-1 grid gap-1 pl-3 sm:pr-32">
-            {nodes.map((node) => {
-              const Icon = node.icon;
-
-              return (
-                <div
-                  key={node.label}
-                  className="farm-tree-route relative flex h-9 min-w-0 items-center border border-transparent px-2 font-mono text-[9px] tracking-normal text-white/48 sm:text-[10px]"
-                  data-initial={node.sequence === 0 ? "true" : undefined}
-                  style={{ animationDelay: node.sequence * 2 + "s" }}
-                >
-                  <span className="mr-2 h-px w-2 shrink-0 bg-white/18" />
-                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/66" strokeWidth={1.4} />
-                  <span className="ml-2 min-w-0 flex-1 truncate">{node.label}</span>
-                  <span className="ml-2 shrink-0 text-[8px] uppercase opacity-55">{node.meta}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          <span className="absolute bottom-4 left-4 font-mono text-[8px] uppercase tracking-normal text-white/28">
-            filesystem routes
-          </span>
-        </div>
-
-        <div className="farm-tree-manifest farm-illustration-surface absolute -bottom-px -right-px w-[8.75rem] border border-white/14 bg-black p-3 shadow-[-18px_-18px_48px_rgba(0,0,0,0.72)] sm:w-40 sm:p-4">
-          <span className="font-mono text-[8px] uppercase tracking-normal text-white/32">
-            route graph
-          </span>
-          <div className="mt-2 flex items-end gap-2">
-            <span className="font-geist-pixel text-[38px] leading-none text-white sm:text-[42px]">
-              04
-            </span>
-            <span className="pb-1 font-mono text-[8px] uppercase text-white/42">routes</span>
-          </div>
-          <div className="mt-4 flex items-center gap-1.5 border-t border-white/10 pt-3 font-mono text-[8px] uppercase text-white/68">
-            <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
-            manifest synced
-          </div>
-        </div>
-      </div>
+    <FoundationCanvas interactive>
+      <FileTree
+        className="farm-illustration-surface absolute -bottom-px -right-px top-4 w-[calc(100%-1.5rem)] sm:w-[calc(100%-2.5rem)]"
+        data={nodes}
+        defaultSelectedPath="app/page.tsx"
+      />
     </FoundationCanvas>
   );
 }

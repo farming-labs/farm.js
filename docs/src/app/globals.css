@@ -320,15 +320,10 @@
       inset 0 1px 0 rgb(255 255 255 / 0.025);
   }
 
-  .farm-tree-route {
-    animation: farm-foundation-sequence-four 8s linear infinite;
-  }
-
   .farm-migration-row {
     animation: farm-foundation-sequence-three 6s linear infinite;
   }
 
-  .farm-tree-manifest,
   .farm-migration-source,
   .farm-migration-target {
     animation: farm-illustration-float 7s ease-in-out infinite;
@@ -470,24 +465,6 @@
   }
 }
 
-@keyframes farm-foundation-sequence-four {
-  0%,
-  22% {
-    color: rgb(255 255 255 / 0.9);
-    background: rgb(255 255 255 / 0.075);
-    border-color: rgb(255 255 255 / 0.2);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
-  }
-
-  25%,
-  100% {
-    color: rgb(255 255 255 / 0.42);
-    background: transparent;
-    border-color: rgb(255 255 255 / 0.08);
-    box-shadow: inset 2px 0 0 transparent;
-  }
-}
-
 @keyframes farm-foundation-sequence-three {
   0%,
   30% {
@@ -573,8 +550,6 @@
     animation-play-state: paused;
   }
 
-  .group:hover .farm-tree-route,
-  .group:hover .farm-tree-manifest,
   .group:hover .farm-migration-row,
   .group:hover .farm-migration-source,
   .group:hover .farm-migration-target,
@@ -609,8 +584,6 @@
     transform: none;
   }
 
-  .farm-tree-route,
-  .farm-tree-manifest,
   .farm-migration-row,
   .farm-migration-source,
   .farm-migration-target,
@@ -619,7 +592,6 @@
     animation: none;
   }
 
-  .farm-tree-route[data-initial="true"],
   .farm-migration-row[data-initial="true"] {
     color: rgb(255 255 255 / 0.9);
     background: rgb(255 255 255 / 0.075);
