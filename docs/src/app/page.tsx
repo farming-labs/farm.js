@@ -454,7 +454,7 @@ function Hero() {
             Get Started
           </ButtonLink>
         </div>
-        <div className="mt-8 w-full max-w-[44rem] text-left">
+        <div className="mt-7 w-[calc(100%-1rem)] max-w-[40rem] text-left">
           <InstallCommand />
         </div>
       </div>
