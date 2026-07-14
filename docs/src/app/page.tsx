@@ -304,11 +304,13 @@ function ButtonLink({
   href,
   children,
   icon,
+  size = "default",
   variant = "primary",
 }: {
   href: string;
   children: ReactNode;
   icon?: ReactNode;
+  size?: "default" | "compact";
   variant?: "primary" | "secondary";
 }) {
   const isExternal = href.startsWith("http");
@@ -316,7 +318,9 @@ function ButtonLink({
   return (
     <a
       className={cx(
-        "inline-flex h-11 min-w-0 items-center justify-center gap-2 border px-5 font-mono text-[11px] font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+        "inline-flex min-w-0 items-center justify-center border font-mono font-normal uppercase tracking-normal transition-[background-color,border-color,color,transform] duration-150 active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+        size === "default" && "h-11 gap-2 px-5 text-[11px]",
+        size === "compact" && "h-9 gap-1.5 px-4 text-[10px]",
         variant === "primary" && "border-white bg-white text-black hover:bg-white/88",
         variant === "secondary" &&
           "border-white/18 bg-black text-white hover:border-white/42 hover:bg-white/[0.06]",
@@ -324,15 +328,29 @@ function ButtonLink({
       href={href}
     >
       {icon ? (
-        <span aria-hidden className="grid size-4 shrink-0 place-items-center">
+        <span
+          aria-hidden
+          className={cx(
+            "grid shrink-0 place-items-center",
+            size === "compact" ? "size-3.5" : "size-4",
+          )}
+        >
           {icon}
         </span>
       ) : null}
       <span>{children}</span>
       {isExternal ? (
-        <ExternalLink aria-hidden className="size-3.5" strokeWidth={1.5} />
+        <ExternalLink
+          aria-hidden
+          className={size === "compact" ? "size-3" : "size-3.5"}
+          strokeWidth={1.5}
+        />
       ) : (
-        <ArrowRight aria-hidden className="size-3.5" strokeWidth={1.5} />
+        <ArrowRight
+          aria-hidden
+          className={size === "compact" ? "size-3" : "size-3.5"}
+          strokeWidth={1.5}
+        />
       )}
     </a>
   );
@@ -446,10 +464,11 @@ function Hero() {
           Bring the stack you already use. Farm.js connects your app router, typed APIs, middleware,
           integrations, docs, and deployment so they work together as one product.
         </p>
-        <div className="mt-7 flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
+        <div className="mt-6 flex justify-center">
           <ButtonLink
             href="/docs/getting-started"
-            icon={<BookOpen aria-hidden className="size-4" strokeWidth={1.5} />}
+            icon={<BookOpen aria-hidden className="size-3.5" strokeWidth={1.5} />}
+            size="compact"
           >
             Get Started
           </ButtonLink>
