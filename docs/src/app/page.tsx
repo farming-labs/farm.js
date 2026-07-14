@@ -22,7 +22,6 @@ import {
   Plug,
   Rocket,
   Route,
-  Server,
   Settings2,
   ShieldCheck,
   Terminal,
@@ -34,18 +33,13 @@ import type { ReactNode } from "react";
 import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
 import betterAuthIconUrl from "simple-icons/icons/betterauth.svg?url";
 import clerkIconUrl from "simple-icons/icons/clerk.svg?url";
-import cloudflarePagesIconUrl from "simple-icons/icons/cloudflarepages.svg?url";
-import denoIconUrl from "simple-icons/icons/deno.svg?url";
-import digitalOceanIconUrl from "simple-icons/icons/digitalocean.svg?url";
+import cloudflareIconUrl from "simple-icons/icons/cloudflare.svg?url";
 import dockerIconUrl from "simple-icons/icons/docker.svg?url";
-import firebaseIconUrl from "simple-icons/icons/firebase.svg?url";
-import flyIconUrl from "simple-icons/icons/flydotio.svg?url";
 import githubIconUrl from "simple-icons/icons/github.svg?url";
 import netlifyIconUrl from "simple-icons/icons/netlify.svg?url";
+import nodeIconUrl from "simple-icons/icons/nodedotjs.svg?url";
 import prismaIconUrl from "simple-icons/icons/prisma.svg?url";
-import railwayIconUrl from "simple-icons/icons/railway.svg?url";
 import reactIconUrl from "simple-icons/icons/react.svg?url";
-import renderIconUrl from "simple-icons/icons/render.svg?url";
 import resendIconUrl from "simple-icons/icons/resend.svg?url";
 import shadcnIconUrl from "simple-icons/icons/shadcnui.svg?url";
 import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
@@ -190,26 +184,27 @@ const integrationDirectoryItems = [
   },
 ] as const;
 
-const deploymentTiles = [
-  { row: 0, col: 1, label: "Self-hosted Node", icon: Server, featured: true },
-  { row: 0, col: 3, label: "Vercel", brand: vercelIconUrl, featured: true },
-  { row: 1, col: 0, label: "Cloudflare Pages", brand: cloudflarePagesIconUrl, featured: true },
-  { row: 1, col: 2, label: "Netlify", brand: netlifyIconUrl, featured: true },
-  { row: 1, col: 4, label: "Docker", brand: dockerIconUrl, featured: false },
-  { row: 2, col: 1, label: "AWS and Azure", icon: CloudCog, featured: false },
-  { row: 2, col: 3, label: "Deno", brand: denoIconUrl, featured: false },
-  {
-    row: 3,
-    col: 0,
-    label: "DigitalOcean",
-    brand: digitalOceanIconUrl,
-    featured: false,
-  },
-  { row: 3, col: 2, label: "Render", brand: renderIconUrl, featured: false },
-  { row: 3, col: 4, label: "Railway", brand: railwayIconUrl, featured: false },
-  { row: 4, col: 1, label: "Fly.io", brand: flyIconUrl, featured: false },
-  { row: 4, col: 3, label: "Firebase", brand: firebaseIconUrl, featured: false },
-] as const;
+type DeploymentTile = {
+  row: number;
+  col: number;
+  label?: string;
+  brand?: string;
+};
+
+const deploymentTiles: readonly DeploymentTile[] = [
+  { row: 0, col: 1, label: "Self-hosted Node", brand: nodeIconUrl },
+  { row: 0, col: 3, label: "Vercel", brand: vercelIconUrl },
+  { row: 1, col: 0 },
+  { row: 1, col: 2, label: "Cloudflare", brand: cloudflareIconUrl },
+  { row: 1, col: 4 },
+  { row: 2, col: 1, label: "Netlify", brand: netlifyIconUrl },
+  { row: 2, col: 3, label: "Docker", brand: dockerIconUrl },
+  { row: 3, col: 0 },
+  { row: 3, col: 2, label: "Nitro presets", brand: nitroIconUrl },
+  { row: 3, col: 4 },
+  { row: 4, col: 1 },
+  { row: 4, col: 3 },
+];
 
 const footerGroups = [
   {
@@ -731,14 +726,19 @@ function DeveloperExperienceGrid() {
 function FoundationCanvas({
   children,
   interactive = false,
+  spotlight = true,
 }: {
   children: ReactNode;
   interactive?: boolean;
+  spotlight?: boolean;
 }) {
   return (
     <div
       aria-hidden={interactive ? undefined : true}
-      className="farm-feature-spotlight relative h-[320px] min-w-0 overflow-hidden sm:h-[328px]"
+      className={cx(
+        "relative h-[320px] min-w-0 overflow-hidden sm:h-[328px]",
+        spotlight && "farm-feature-spotlight",
+      )}
     >
       <div className="relative z-10 h-full w-full">{children}</div>
     </div>
@@ -814,71 +814,57 @@ function FileTreeVisual() {
 
 function DeploymentVisual() {
   return (
-    <FoundationCanvas interactive>
+    <FoundationCanvas interactive spotlight={false}>
       <a
         aria-label="Explore Farm.js deployment targets"
-        className="group/deployment absolute inset-0 flex items-center justify-center overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+        className="group/deployment absolute inset-0 flex items-center justify-center overflow-hidden px-6 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white sm:px-10"
         href="/docs/deployment"
         title="Deployment documentation"
       >
         <span
           aria-hidden
-          className="absolute left-1/2 top-[46%] h-28 w-[78%] -translate-x-1/2 -translate-y-1/2 bg-white/[0.08] blur-3xl"
+          className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgb(255_255_255/0.025),transparent_66%)]"
         />
         <div
           aria-hidden
-          className="relative size-[18rem] sm:size-[19rem]"
+          className="relative size-[19rem] sm:size-[20rem]"
           style={{
             maskImage:
-              "radial-gradient(ellipse at center, black 56%, rgb(0 0 0 / 0.86) 74%, rgb(0 0 0 / 0.25) 92%, transparent 108%)",
+              "radial-gradient(ellipse at center, black 68%, rgb(0 0 0 / 0.76) 86%, transparent 108%)",
             WebkitMaskImage:
-              "radial-gradient(ellipse at center, black 56%, rgb(0 0 0 / 0.86) 74%, rgb(0 0 0 / 0.25) 92%, transparent 108%)",
+              "radial-gradient(ellipse at center, black 68%, rgb(0 0 0 / 0.76) 86%, transparent 108%)",
           }}
         >
-          {deploymentTiles.map((tile) => {
-            const Icon = "icon" in tile ? tile.icon : null;
-
-            return (
-              <div
-                key={tile.label}
-                className={cx(
-                  "group/tile absolute grid place-items-center overflow-hidden rounded-[3px] border transition-[background-color,border-color,transform] duration-200 group-hover/deployment:-translate-y-0.5",
-                  tile.featured
-                    ? "border-white/16 bg-white/[0.10]"
-                    : "border-white/[0.09] bg-white/[0.045]",
-                )}
-                style={{
-                  height: "20%",
-                  left: `${tile.col * 20}%`,
-                  top: `${tile.row * 20}%`,
-                  width: "20%",
-                }}
-                title={tile.label}
-              >
-                {"brand" in tile ? (
+          {deploymentTiles.map((tile) => (
+            <div
+              key={`${tile.row}_${tile.col}`}
+              className={cx(
+                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-[3px] border border-white/[0.08] transition-[background-color,border-color] duration-150",
+                tile.brand
+                  ? "bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075]"
+                  : "bg-white/[0.012]",
+              )}
+              style={{
+                left: `${tile.col * 20}%`,
+                top: `${tile.row * 20}%`,
+              }}
+              title={tile.label}
+            >
+              {tile.brand ? (
+                <>
                   <BrandIcon
-                    className={cx(
-                      "size-7 transition-[opacity,transform] duration-200 group-hover/tile:-translate-y-1",
-                      tile.featured ? "opacity-88" : "opacity-58",
-                    )}
+                    className="size-7 opacity-72 transition-[opacity,transform] duration-150 group-hover/tile:-translate-y-1 group-hover/tile:opacity-90"
                     src={tile.brand}
                   />
-                ) : Icon ? (
-                  <Icon
-                    aria-hidden
-                    className={cx(
-                      "size-7 transition-[color,transform] duration-200 group-hover/tile:-translate-y-1",
-                      tile.featured ? "text-white/88" : "text-white/58",
-                    )}
-                    strokeWidth={1.35}
-                  />
-                ) : null}
-                <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-white/72 opacity-0 transition-[opacity,transform] duration-200 group-hover/tile:translate-y-0 group-hover/tile:opacity-100">
-                  {tile.label}
-                </span>
-              </div>
-            );
-          })}
+                  <span className="pointer-events-none absolute inset-x-1 bottom-1 translate-y-1 truncate text-center font-mono text-[7px] font-normal uppercase tracking-normal text-white/68 opacity-0 transition-[opacity,transform] duration-150 group-hover/tile:translate-y-0 group-hover/tile:opacity-100">
+                    {tile.label}
+                  </span>
+                </>
+              ) : (
+                <span className="size-px bg-white/12" />
+              )}
+            </div>
+          ))}
         </div>
       </a>
     </FoundationCanvas>
