@@ -438,7 +438,7 @@ function Hero() {
         </div>
         <HeroTitleFrame>
           <h1 className="max-w-[18ch] text-[1.875rem] font-medium leading-[1.02] tracking-normal text-white min-[400px]:text-[2.125rem] min-[420px]:text-[2.5rem] sm:text-[3.75rem] lg:text-[4rem]">
-            <span className="block">React Framework</span>
+            <span className="block">A React Framework</span>
             <span className="block text-white/82">for Product Apps</span>
           </h1>
         </HeroTitleFrame>
@@ -452,13 +452,6 @@ function Hero() {
             icon={<BookOpen aria-hidden className="size-4" strokeWidth={1.5} />}
           >
             Get Started
-          </ButtonLink>
-          <ButtonLink
-            href="https://github.com/Kinfe123/farm.js"
-            icon={<GithubIcon className="size-4" />}
-            variant="secondary"
-          >
-            View on GitHub
           </ButtonLink>
         </div>
         <div className="mt-8 w-full max-w-[44rem] text-left">
