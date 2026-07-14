@@ -18,15 +18,11 @@ import { createFarmCacheKey, getFarmDataCache } from "@farmjs/core/cache";
 const cache = getFarmDataCache();
 const key = createFarmCacheKey(["products", "featured"]);
 
-const products = await cache.getOrSet(
-  key,
-  () => fetchProducts(),
-  {
-    tags: ["products"],
-    paths: ["/pricing"],
-    revalidate: 300,
-  },
-);
+const products = await cache.getOrSet(key, () => fetchProducts(), {
+  tags: ["products"],
+  paths: ["/pricing"],
+  revalidate: 300,
+});
 ```
 
 ## Revalidate
@@ -60,20 +56,18 @@ Use stable keys for data and broad tags for invalidation. Keys identify one cach
 ```ts
 const key = createFarmCacheKey(["products", productId]);
 
-const product = await cache.getOrSet(
-  key,
-  () => getProduct(productId),
-  {
-    tags: ["products", `product:${productId}`],
-    paths: ["/pricing"],
-    revalidate: 300,
-  },
-);
+const product = await cache.getOrSet(key, () => getProduct(productId), {
+  tags: ["products", `product:${productId}`],
+  paths: ["/pricing"],
+  revalidate: 300,
+});
 ```
 
 ## Invalidate after writes
 
 After a mutation, invalidate the route path and any data tags that feed the page.
+
+For structured route data and [`createServerQuery`](/docs/server-queries) entries, call `invalidate(["resource", id])`. Farm uses the same route-data tag on the server and carries the invalidation to browser query and API consumers after a server action.
 
 **src/app/api/products/route.ts**
 
