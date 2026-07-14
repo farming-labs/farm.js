@@ -31,6 +31,20 @@ export const product = query({ key: () => ["product"], handler: async () => true
     expect(result?.code).toContain("$$farm_server_query_product");
   });
 
+  it("does not let adjacent core imports consume server function imports", () => {
+    const result = transformFarmServerFns(
+      `import { invalidate } from "@farmjs/core/cache";
+import { createServerFn } from "@farmjs/core/server-fn";
+import { createServerQuery } from "@farmjs/core/server-query";
+export const product = createServerQuery({ key: () => ["product"], handler: async () => true });
+export const update = createServerFn({ handler: async () => { invalidate(["product"]); } });`,
+      "/app/src/product.ts",
+    );
+
+    expect(result?.exports).toEqual(["product", "update"]);
+    expect(result?.code).toContain("export async function update(input)");
+  });
+
   it("rejects query declarations in client modules", () => {
     expect(() =>
       transformFarmServerFns(
