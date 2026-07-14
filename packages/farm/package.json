@@ -200,6 +200,11 @@
       "import": "./dist/server-query.mjs",
       "require": "./dist/server-query.cjs"
     },
+    "./server-query/client": {
+      "types": "./dist/server-query-client.d.ts",
+      "import": "./dist/server-query-client.mjs",
+      "require": "./dist/server-query-client.cjs"
+    },
     "./server-action-security": {
       "types": "./dist/server-action-security.d.ts",
       "import": "./dist/server-action-security.mjs",

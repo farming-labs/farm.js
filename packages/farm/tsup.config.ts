@@ -30,6 +30,7 @@ export default defineConfig({
     "server-fn": "src/server-fn.ts",
     "server-fn-client": "src/server-fn-client.ts",
     "server-query": "src/server-query.ts",
+    "server-query-client": "src/server-query-client.ts",
     "server-action-security": "src/server-action-security.ts",
     deployment: "src/deployment.ts",
     env: "src/env.ts",

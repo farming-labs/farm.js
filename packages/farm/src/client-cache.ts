@@ -124,6 +124,11 @@ export class FarmClientDataCache {
     }
 
     this.entries.delete(alias);
+    const aliasInflight = this.inflight.get(alias);
+    if (aliasInflight && !this.inflight.has(resolved)) {
+      this.inflight.set(resolved, aliasInflight);
+    }
+    this.inflight.delete(alias);
     this.aliases.set(alias, resolved);
     this.emit(alias);
     this.emit(resolved);
