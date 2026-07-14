@@ -23,7 +23,6 @@ import {
   Plug,
   Rocket,
   Route,
-  ScanLine,
   Settings2,
   ShieldCheck,
   Terminal,
@@ -223,6 +222,22 @@ export default defineFarmConfig({
     billing(),
     jobs(),
   ],
+});`;
+
+const middlewareRouteCode = `import { middleware } from "@farmjs/core/middleware";
+
+export default middleware().use(async (ctx, next) => {
+  ctx.data.set("request.startedAt", Date.now());
+  await next();
+});`;
+
+const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";
+
+export default defineDocs({
+  entry: "docs",
+  docsPath: "/docs",
+  search: { enabled: true },
+  pageActions: { copyMarkdown: { enabled: true } },
 });`;
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -737,6 +752,27 @@ function FoundationCanvas({ children }: { children: ReactNode }) {
   );
 }
 
+function FoundationCodeVisual({
+  code,
+  label,
+  language,
+}: {
+  code: string;
+  label: string;
+  language: string;
+}) {
+  return (
+    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
+      <HighlightedCode
+        className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
+        code={code}
+        label={label}
+        language={language}
+      />
+    </div>
+  );
+}
+
 function FileTreeVisual() {
   const nodes = [
     { label: "layout.tsx", meta: "shell", icon: FileCode2, depth: 1, sequence: 0 },
@@ -823,192 +859,17 @@ function FileTreeVisual() {
 }
 
 function MiddlewareVisual() {
-  const steps = [
-    {
-      label: "request",
-      detail: "GET /dashboard/settings",
-      time: "0.0ms",
-      icon: Route,
-    },
-    {
-      label: "matcher",
-      detail: "/dashboard/:path*",
-      time: "+0.2",
-      icon: ScanLine,
-    },
-    {
-      label: "session",
-      detail: "authenticated",
-      time: "+1.6",
-      icon: ShieldCheck,
-    },
-    {
-      label: "render",
-      detail: "dashboard/settings",
-      time: "+8.4",
-      icon: CircleCheck,
-    },
-  ] as const;
-
   return (
-    <FoundationCanvas>
-      <div className="absolute inset-x-6 bottom-0 top-3 sm:inset-x-10 sm:top-4">
-        <svg
-          aria-hidden
-          className="absolute inset-0 size-full overflow-visible"
-          preserveAspectRatio="none"
-          viewBox="0 0 100 100"
-        >
-          <path
-            className="farm-flow-path"
-            d="M20 12 C20 25 34 24 34 38 S66 50 66 63 S80 77 80 91"
-            fill="none"
-            pathLength={100}
-            stroke="currentColor"
-            strokeWidth="0.45"
-            vectorEffect="non-scaling-stroke"
-          />
-          <path
-            className="farm-flow-beam"
-            d="M20 12 C20 25 34 24 34 38 S66 50 66 63 S80 77 80 91"
-            fill="none"
-            pathLength={100}
-            stroke="currentColor"
-            strokeDasharray="10 90"
-            strokeWidth="1.15"
-            vectorEffect="non-scaling-stroke"
-          />
-        </svg>
-
-        {steps.map((step, index) => {
-          const Icon = step.icon;
-          const positions = [
-            "left-0 top-1",
-            "left-[12%] top-[28%]",
-            "right-[12%] top-[54%]",
-            "-right-px -bottom-px",
-          ] as const;
-
-          return (
-            <div
-              key={step.label}
-              className={cx(
-                "farm-flow-node farm-illustration-surface absolute flex h-[3.25rem] w-[52%] max-w-[15rem] min-w-0 items-center gap-2.5 border border-white/12 bg-black px-3 font-mono tracking-normal shadow-[0_16px_36px_rgba(0,0,0,0.5)]",
-                positions[index],
-              )}
-              data-initial={index === 0 ? "true" : undefined}
-              style={{ animationDelay: index * 2 + "s" }}
-            >
-              <Icon aria-hidden className="size-4 shrink-0 text-white/72" strokeWidth={1.4} />
-              <span className="min-w-0 flex-1">
-                <strong className="block text-[9px] font-normal uppercase text-white/72 sm:text-[10px]">
-                  {step.label}
-                </strong>
-                <small className="block truncate text-[8px] text-white/38 sm:text-[9px]">
-                  {step.detail}
-                </small>
-              </span>
-              <span className="shrink-0 text-[8px] text-white/34">{step.time}</span>
-            </div>
-          );
-        })}
-
-        <span className="absolute bottom-3 left-0 flex items-center gap-1.5 font-mono text-[8px] uppercase tracking-normal text-white/38">
-          <span className="size-1 bg-white/72" /> live request trace
-        </span>
-      </div>
-    </FoundationCanvas>
+    <FoundationCodeVisual
+      code={middlewareRouteCode}
+      label="src/app/dashboard/middleware.ts"
+      language="ts"
+    />
   );
 }
 
 function DocsVisual() {
-  const sources = [
-    { label: "guide.mdx", kind: "MDX", icon: FileText },
-    { label: "openapi.json", kind: "API", icon: Braces },
-    { label: "llms.txt", kind: "AI", icon: FileCode2 },
-  ] as const;
-  const previewLines = [82, 64, 91, 54] as const;
-
-  return (
-    <FoundationCanvas>
-      <div className="absolute left-6 top-10 z-10 w-[46%] max-w-[14rem] sm:left-10 sm:top-12">
-        <span className="mb-3 block font-mono text-[8px] uppercase tracking-normal text-white/30">
-          content sources
-        </span>
-        <div className="relative h-[10.5rem]">
-          {sources.map((source, index) => {
-            const Icon = source.icon;
-
-            return (
-              <div
-                key={source.label}
-                className="farm-doc-source farm-illustration-surface absolute left-0 flex h-14 w-full min-w-0 items-center border border-white/12 bg-black px-3 font-mono tracking-normal text-white/46 shadow-[0_14px_34px_rgba(0,0,0,0.5)]"
-                data-initial={index === 0 ? "true" : undefined}
-                style={{
-                  animationDelay: index * 2 + "s",
-                  top: index * 50 + "px",
-                  transform: `translateX(${index * 8}px)`,
-                }}
-              >
-                <Icon aria-hidden className="size-4 shrink-0 text-white/70" strokeWidth={1.4} />
-                <span className="ml-2.5 min-w-0 flex-1 truncate text-[9px] sm:text-[10px]">
-                  {source.label}
-                </span>
-                <span className="ml-2 text-[8px] text-white/34">{source.kind}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <span className="farm-doc-connector absolute left-[42%] top-[48%] z-20 h-px w-[13%] bg-white/16">
-        <span className="farm-doc-pulse absolute left-0 top-[-2px] size-1 bg-white shadow-[0_0_10px_rgba(255,255,255,0.78)]" />
-        <ArrowRight
-          aria-hidden
-          className="absolute -right-1 top-1/2 size-3 -translate-y-1/2 text-white/64"
-          strokeWidth={1.4}
-        />
-      </span>
-
-      <div className="farm-doc-browser farm-illustration-surface absolute -bottom-px -right-px z-30 h-[14.5rem] w-[70%] min-w-0 overflow-hidden border border-white/14 bg-black shadow-[-22px_-18px_54px_rgba(0,0,0,0.68)] sm:h-[15rem] sm:w-[68%]">
-        <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/38">
-          <span className="truncate">docs / getting-started</span>
-          <span className="ml-2 flex shrink-0 items-center gap-1.5 text-white/72">
-            <span className="size-1 bg-white/72" /> published
-          </span>
-        </div>
-
-        <div className="grid h-[calc(100%-2.25rem)] grid-cols-[3rem_minmax(0,1fr)] sm:grid-cols-[3.5rem_minmax(0,1fr)]">
-          <div className="border-r border-white/10 p-2.5">
-            <span className="block h-px w-full bg-white/30" />
-            <span className="mt-3 block h-px w-3/4 bg-white/14" />
-            <span className="mt-3 block h-px w-full bg-white/14" />
-            <span className="mt-3 block h-px w-2/3 bg-white/14" />
-          </div>
-          <div className="min-w-0 p-3.5 sm:p-4">
-            <p className="truncate font-mono text-[11px] text-white/88 sm:text-xs">
-              Getting started
-            </p>
-            <div className="mt-4 grid gap-2.5">
-              {previewLines.map((width, index) => (
-                <span
-                  key={width}
-                  className="farm-doc-preview-line block h-px origin-left bg-white/24"
-                  style={{
-                    animationDelay: index * 0.18 + "s",
-                    width: width + "%",
-                  }}
-                />
-              ))}
-            </div>
-            <div className="mt-5 truncate border border-white/10 bg-white/[0.035] p-2.5 font-mono text-[8px] text-white/66 sm:text-[9px]">
-              pnpm create farm@latest
-            </div>
-          </div>
-        </div>
-      </div>
-    </FoundationCanvas>
-  );
+  return <FoundationCodeVisual code={docsConfigCode} label="docs.config.ts" language="ts" />;
 }
 
 function MigrationVisual() {

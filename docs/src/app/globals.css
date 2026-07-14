@@ -312,48 +312,23 @@
       inset 0 1px 0 rgb(255 255 255 / 0.025);
   }
 
-  .farm-tree-route,
-  .farm-flow-node {
+  .farm-tree-route {
     animation: farm-foundation-sequence-four 8s linear infinite;
   }
 
-  .farm-doc-source,
   .farm-migration-row {
     animation: farm-foundation-sequence-three 6s linear infinite;
   }
 
   .farm-tree-manifest,
-  .farm-doc-browser,
   .farm-migration-source,
   .farm-migration-target {
     animation: farm-illustration-float 7s ease-in-out infinite;
     will-change: transform;
   }
 
-  .farm-doc-browser,
   .farm-migration-target {
     animation-delay: -2.2s;
-  }
-
-  .farm-flow-path {
-    color: rgb(255 255 255 / 0.16);
-  }
-
-  .farm-flow-beam {
-    color: rgb(255 255 255 / 0.9);
-    filter: drop-shadow(0 0 5px rgb(255 255 255 / 0.58));
-    animation: farm-flow-beam 5.5s linear infinite;
-    will-change: stroke-dashoffset;
-  }
-
-  .farm-doc-pulse {
-    animation: farm-doc-pulse 2s ease-in-out infinite;
-    will-change: opacity, transform;
-  }
-
-  .farm-doc-preview-line {
-    animation: farm-doc-preview-line 6s ease-in-out infinite;
-    will-change: opacity, transform;
   }
 
   .farm-migration-link {
@@ -719,54 +694,6 @@
   }
 }
 
-@keyframes farm-flow-beam {
-  0% {
-    opacity: 0;
-    stroke-dashoffset: 10;
-  }
-
-  12%,
-  78% {
-    opacity: 1;
-  }
-
-  100% {
-    opacity: 0;
-    stroke-dashoffset: -90;
-  }
-}
-
-@keyframes farm-doc-pulse {
-  0% {
-    opacity: 0;
-    transform: translate3d(-0.25rem, 0, 0);
-  }
-
-  18%,
-  70% {
-    opacity: 1;
-  }
-
-  100% {
-    opacity: 0;
-    transform: translate3d(1.2rem, 0, 0);
-  }
-}
-
-@keyframes farm-doc-preview-line {
-  0%,
-  100% {
-    opacity: 0.24;
-    transform: scaleX(0.28);
-  }
-
-  18%,
-  72% {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-}
-
 @keyframes farm-migration-link {
   0%,
   100% {
@@ -825,12 +752,6 @@
 
   .group:hover .farm-tree-route,
   .group:hover .farm-tree-manifest,
-  .group:hover .farm-flow-node,
-  .group:hover .farm-flow-beam,
-  .group:hover .farm-doc-source,
-  .group:hover .farm-doc-pulse,
-  .group:hover .farm-doc-browser,
-  .group:hover .farm-doc-preview-line,
   .group:hover .farm-migration-row,
   .group:hover .farm-migration-source,
   .group:hover .farm-migration-target,
@@ -871,11 +792,6 @@
 
   .farm-tree-route,
   .farm-tree-manifest,
-  .farm-flow-node,
-  .farm-flow-beam,
-  .farm-doc-source,
-  .farm-doc-browser,
-  .farm-doc-preview-line,
   .farm-migration-row,
   .farm-migration-source,
   .farm-migration-target,
@@ -885,8 +801,6 @@
   }
 
   .farm-tree-route[data-initial="true"],
-  .farm-flow-node[data-initial="true"],
-  .farm-doc-source[data-initial="true"],
   .farm-migration-row[data-initial="true"] {
     color: rgb(255 255 255 / 0.9);
     background: rgb(255 255 255 / 0.075);
@@ -894,14 +808,11 @@
     box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
   }
 
-  .farm-doc-preview-line,
   .farm-migration-progress {
     opacity: 1;
     transform: scaleX(1);
   }
 
-  .farm-flow-beam,
-  .farm-doc-pulse,
   .farm-migration-link {
     display: none;
   }
