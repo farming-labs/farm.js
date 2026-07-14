@@ -155,6 +155,62 @@ Output parsing also runs for direct server calls, form actions, and browser call
 reject the function just like invalid input. Keep the output contract narrow for private data;
 do not rely on TypeScript alone to prevent an extra database field from being returned at runtime.
 
+### Composable middleware
+
+Use `createServerMiddleware` for server-only behavior shared by several functions, such as session
+loading, authorization, transactions, rate limits, and auditing. Middleware can depend on other
+middleware, and every context value is inferred by functions that install it.
+
+```ts
+import { createServerFn, createServerMiddleware } from "@farmjs/core/server-fn";
+
+const withSession = createServerMiddleware({
+  async handler({ request, next }) {
+    if (!request) throw new Error("A request is required");
+
+    const session = await getSession(request);
+    if (!session.user) throw new UnauthorizedError();
+
+    return next({ context: { session } });
+  },
+});
+
+const withTransaction = createServerMiddleware({
+  middleware: [withSession],
+  async handler({ context, next }) {
+    return db.transaction((tx) => next({ context: { tx } }));
+  },
+});
+
+export const renameProject = createServerFn({
+  middleware: [withTransaction],
+  input: z.object({ projectId: z.string(), name: z.string().min(1) }),
+  async handler({ input, context }) {
+    // context.session and context.tx are both typed.
+    await requireProjectEditor(context.session, input.projectId);
+    return context.tx.project.update({
+      where: { id: input.projectId },
+      data: { name: input.name },
+    });
+  },
+});
+```
+
+Dependencies run first and are de-duplicated by middleware identity. For
+`middleware: [withTransaction, withAudit]`, a shared `withSession` dependency runs once. The chain
+uses onion ordering: code before `await next()` runs from outer to inner, and code after it unwinds
+from inner to outer.
+
+Every middleware must call `next()` exactly once and return its result. Throw to reject a request;
+middleware cannot silently skip the handler. Input validation finishes before the chain starts,
+while output validation runs after the whole chain unwinds. Context is created on the server,
+shallowly frozen, and never accepted from the browser.
+
+Keep shared authentication in middleware, but still perform resource-specific authorization where
+the resource is loaded. Derive identities, roles, tenant IDs, and rate-limit keys from the trusted
+request or server state, never from unvalidated client fields. Middleware errors use the same
+sanitized server-action error boundary as handler errors.
+
 **src/components/todo-form.tsx**
 
 ```tsx
@@ -188,7 +244,7 @@ export function TodoForm() {
 
 The optimistic callback receives the raw input, `formData` for form submissions, and the current result. Return `undefined` when a submission should not change the optimistic result. Use `rollbackOnError` for reversible UI state; keep authorization and validation on the server function itself.
 
-When the function is called from the browser, `request` is the underlying Web `Request` and `signal` aborts with that request. A direct server-side call has no `request` and receives a stable, non-aborted signal. Pass `signal` to database or network clients that support cancellation.
+When the function is called from the browser, `request` is the underlying Web `Request` and `signal` aborts with that request. A direct call made while rendering can inherit the current render request; a background or direct call outside request scope has no `request` and receives a stable, non-aborted signal. The same values are available to middleware. Pass `signal` to database or network clients that support cancellation.
 
 Farm validates action origin metadata, accepted form/RSC content types, action ID shape, and request size before decoding an action. Browser calls use same-origin credentials and refuse redirects. Unexpected thrown values are logged on the server but become a generic `ServerActionError` in the browser, so secrets and stack traces are not serialized.
 

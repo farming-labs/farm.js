@@ -110,7 +110,7 @@ The helpers return JSON 404 and 405 responses just like the API route manager. T
 
 ## Test server functions
 
-`serverFn` keeps input and return inference, including Zod validation and `FormData` conversion. It also installs the request and cancellation signal that the handler reads.
+`serverFn` keeps input and return inference, including Zod validation and `FormData` conversion. It also installs the request and cancellation signal that the handler reads. Any `createServerMiddleware` dependencies run through the same chain as production, including their typed context, ordering, and errors.
 
 ```ts
 import { expect, test } from "vitest";
