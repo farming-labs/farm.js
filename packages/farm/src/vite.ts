@@ -12,6 +12,7 @@ import { generateRouteTypes } from "./routing/generate-route-types";
 import {
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
+  getFarmDocsDocumentNavigationMatchers,
   getFarmDocsRouteTypeEntries,
   isFarmDocsAPIRequest,
 } from "./docs";
@@ -913,11 +914,15 @@ export function farmPlugin(
 
     load(id) {
       if (id === "/@farm/client" || id === "/@farm/client.js") {
+        const resolvedConfig = farmApp?.getConfig();
+        const integrations = resolvedConfig?.integrations || options.integrations;
+
         return generateClientCode(
-          getIntegrationProviders(farmApp?.getConfig().integrations || options.integrations),
-          getIntegrationDocumentNavigationMatchers(
-            farmApp?.getConfig().integrations || options.integrations,
-          ),
+          getIntegrationProviders(integrations),
+          [
+            ...getIntegrationDocumentNavigationMatchers(integrations),
+            ...getFarmDocsDocumentNavigationMatchers(resolvedConfig?.docs),
+          ],
         );
       }
 

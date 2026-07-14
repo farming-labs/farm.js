@@ -1,6 +1,7 @@
 export {
   createFarmDocsHandler,
   discoverFarmDocsPages,
+  getFarmDocsDocumentNavigationMatchers,
   getFarmDocsRouteTypeEntries,
   isFarmDocsRequest,
   loadFarmDocsPage,
