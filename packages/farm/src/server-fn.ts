@@ -1,4 +1,5 @@
 import { getServerActionExecutionContext, getServerActionSignal } from "./server-action-security";
+import { _resolveCurrentRequest } from "./server/request-bridge";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -22,7 +23,37 @@ export type InferServerFnSchemaOutput<T> = T extends { _output: infer O }
 
 export type ServerFnFormInput = FormData;
 
-export type ServerFnContext<TInput> = {
+type Simplify<T> = { [TKey in keyof T]: T[TKey] } & {};
+type AssignContext<TCurrent extends object, TNext extends object> = Simplify<
+  Omit<TCurrent, keyof TNext> & TNext
+>;
+type MiddlewareContext<TMiddleware> =
+  TMiddleware extends ServerFnMiddleware<infer TContext> ? TContext : {};
+
+export type ServerFnMiddlewareContext<
+  TMiddlewares extends readonly AnyServerFnMiddleware[],
+  TContext extends object = {},
+> = TMiddlewares extends readonly [infer TMiddleware, ...infer TRest]
+  ? TMiddleware extends AnyServerFnMiddleware
+    ? TRest extends readonly AnyServerFnMiddleware[]
+      ? ServerFnMiddlewareContext<TRest, AssignContext<TContext, MiddlewareContext<TMiddleware>>>
+      : TContext
+    : TContext
+  : number extends TMiddlewares["length"]
+    ? Simplify<TContext & MiddlewareContext<TMiddlewares[number]>>
+    : Simplify<TContext>;
+
+declare const SERVER_FN_MIDDLEWARE_CONTEXT: unique symbol;
+
+export type ServerFnMiddlewareContinuation<TContext extends object = {}> = {
+  readonly [SERVER_FN_MIDDLEWARE_CONTEXT]: TContext;
+};
+
+export type ServerFnMiddlewareNext = <TContext extends object = {}>(options?: {
+  context?: TContext;
+}) => Promise<ServerFnMiddlewareContinuation<TContext>>;
+
+export type ServerFnContext<TInput, TContext extends object = {}> = {
   input: TInput;
   rawInput: unknown;
   formData?: FormData;
@@ -30,30 +61,72 @@ export type ServerFnContext<TInput> = {
   request?: Request;
   /** Aborts when the underlying action request is cancelled. */
   signal: AbortSignal;
+  /** Context produced by this server function's middleware chain. */
+  context: Readonly<TContext>;
 };
 
-export type ServerFnHandler<TInput, TResult> = (
-  ctx: ServerFnContext<TInput>,
+export type ServerFnHandler<TInput, TResult, TContext extends object = {}> = (
+  ctx: ServerFnContext<TInput, TContext>,
 ) => MaybePromise<TResult>;
 
-export type ServerFnOptions<TSchema extends ServerFnSchema | undefined, TResult> = {
+export type ServerFnMiddlewareHandlerContext<TContext extends object = {}> = ServerFnContext<
+  unknown,
+  TContext
+> & {
+  next: ServerFnMiddlewareNext;
+};
+
+export type ServerFnMiddlewareHandler<
+  TContext extends object = {},
+  TProvidedContext extends object = {},
+> = (
+  ctx: ServerFnMiddlewareHandlerContext<TContext>,
+) => MaybePromise<ServerFnMiddlewareContinuation<TProvidedContext>>;
+
+export type ServerFnMiddleware<TContext extends object = {}> = {
+  readonly __farmServerFnMiddleware: true;
+  readonly __farmServerFnMiddlewareContext?: TContext;
+  readonly middleware: readonly AnyServerFnMiddleware[];
+  readonly handler: ServerFnMiddlewareHandler<any, any>;
+};
+
+export type AnyServerFnMiddleware = ServerFnMiddleware<any>;
+
+export type ServerFnMiddlewareOptions<
+  TMiddlewares extends readonly AnyServerFnMiddleware[],
+  TProvidedContext extends object,
+> = {
+  middleware?: TMiddlewares;
+  handler: ServerFnMiddlewareHandler<ServerFnMiddlewareContext<TMiddlewares>, TProvidedContext>;
+};
+
+export type ServerFnOptions<
+  TSchema extends ServerFnSchema | undefined,
+  TResult,
+  TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+> = {
   input?: TSchema;
   output?: undefined;
+  middleware?: TMiddlewares;
   handler: ServerFnHandler<
     TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
-    TResult
+    TResult,
+    ServerFnMiddlewareContext<TMiddlewares>
   >;
 };
 
 export type ServerFnOutputOptions<
   TInputSchema extends ServerFnSchema | undefined,
   TOutputSchema extends ServerFnSchema,
+  TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
 > = {
   input?: TInputSchema;
   output: TOutputSchema;
+  middleware?: TMiddlewares;
   handler: ServerFnHandler<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
-    unknown
+    unknown,
+    ServerFnMiddlewareContext<TMiddlewares>
   >;
 };
 
@@ -69,47 +142,86 @@ export const FARM_SERVER_FN_SYMBOL = Symbol.for("farm.server-fn");
 
 const UNSAFE_FORM_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 
+export function createServerMiddleware<
+  const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+  TProvidedContext extends object = {},
+>(
+  options: ServerFnMiddlewareOptions<TMiddlewares, TProvidedContext>,
+): ServerFnMiddleware<AssignContext<ServerFnMiddlewareContext<TMiddlewares>, TProvidedContext>>;
+export function createServerMiddleware(options: {
+  middleware?: readonly AnyServerFnMiddleware[];
+  handler: ServerFnMiddlewareHandler<any, any>;
+}): ServerFnMiddleware<any> {
+  if (!options || typeof options.handler !== "function") {
+    throw new TypeError("createServerMiddleware requires a handler function");
+  }
+
+  const middleware = Object.freeze([...(options.middleware ?? [])]);
+  for (const entry of middleware) {
+    assertServerFnMiddleware(entry);
+  }
+
+  return Object.freeze({
+    __farmServerFnMiddleware: true as const,
+    middleware,
+    handler: options.handler,
+  });
+}
+
 export function createServerFn<
   TInputSchema extends ServerFnSchema,
   TOutputSchema extends ServerFnSchema,
+  const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
 >(
-  options: ServerFnOutputOptions<TInputSchema, TOutputSchema>,
+  options: ServerFnOutputOptions<TInputSchema, TOutputSchema, TMiddlewares>,
 ): ServerFn<
   InferServerFnSchemaInput<TInputSchema>,
   Awaited<InferServerFnSchemaOutput<TOutputSchema>>
 >;
-export function createServerFn<TOutputSchema extends ServerFnSchema>(
-  options: ServerFnOutputOptions<undefined, TOutputSchema>,
+export function createServerFn<
+  TOutputSchema extends ServerFnSchema,
+  const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+>(
+  options: ServerFnOutputOptions<undefined, TOutputSchema, TMiddlewares>,
 ): ServerFn<unknown, Awaited<InferServerFnSchemaOutput<TOutputSchema>>>;
-export function createServerFn<TSchema extends ServerFnSchema, TResult>(
-  options: ServerFnOptions<TSchema, TResult>,
+export function createServerFn<
+  TSchema extends ServerFnSchema,
+  TResult,
+  const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+>(
+  options: ServerFnOptions<TSchema, TResult, TMiddlewares>,
 ): ServerFn<InferServerFnSchemaInput<TSchema>, Awaited<TResult>>;
-export function createServerFn<TResult>(
-  options: ServerFnOptions<undefined, TResult>,
-): ServerFn<unknown, Awaited<TResult>>;
+export function createServerFn<
+  TResult,
+  const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+>(options: ServerFnOptions<undefined, TResult, TMiddlewares>): ServerFn<unknown, Awaited<TResult>>;
 export function createServerFn(options: {
   input?: ServerFnSchema;
   output?: ServerFnSchema;
+  middleware?: readonly AnyServerFnMiddleware[];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: ServerFnHandler<any, any>;
+  handler: ServerFnHandler<any, any, any>;
 }) {
   if (!options || typeof options.handler !== "function") {
     throw new TypeError("createServerFn requires a handler function");
   }
 
+  const middleware = resolveServerFnMiddleware(options.middleware);
   const serverFn = async (value: unknown) => {
     const formData = isFormData(value) ? value : undefined;
     const rawInput = formData ? formDataToObject(formData) : value;
     const input = await parseSchema(options.input, rawInput, "input");
     const executionContext = getServerActionExecutionContext();
-
-    const result = await options.handler({
+    const request = executionContext?.request ?? _resolveCurrentRequest();
+    const signal = executionContext?.signal ?? request?.signal ?? getServerActionSignal();
+    const handlerContext = {
       input,
       rawInput,
       formData,
-      request: executionContext?.request,
-      signal: getServerActionSignal(),
-    });
+      request,
+      signal,
+    };
+    const result = await runServerFnMiddleware(middleware, handlerContext, options.handler);
 
     return parseSchema(options.output, result, "output");
   };
@@ -131,9 +243,105 @@ export function createServerFn(options: {
       value: options.output,
       enumerable: false,
     },
+    __farmServerFnMiddleware: {
+      value: middleware,
+      enumerable: false,
+    },
   });
 
   return serverFn as ServerFn<unknown, unknown>;
+}
+
+type ServerFnBaseContext = Omit<ServerFnContext<unknown, {}>, "context">;
+
+async function runServerFnMiddleware(
+  middleware: readonly AnyServerFnMiddleware[],
+  handlerContext: ServerFnBaseContext,
+  handler: ServerFnHandler<any, any, any>,
+) {
+  const dispatch = async (index: number, context: Readonly<object>): Promise<unknown> => {
+    const current = middleware[index];
+    if (!current) {
+      return handler({ ...handlerContext, context });
+    }
+
+    let nextCalled = false;
+    const result = await current.handler({
+      ...handlerContext,
+      context,
+      next: async (nextOptions) => {
+        if (nextCalled) {
+          throw new Error("Server function middleware next() can only be called once");
+        }
+        nextCalled = true;
+
+        return dispatch(index + 1, mergeServerFnContext(context, nextOptions?.context)) as Promise<
+          ServerFnMiddlewareContinuation<any>
+        >;
+      },
+    });
+
+    if (!nextCalled) {
+      throw new Error("Server function middleware must call next()");
+    }
+
+    return result;
+  };
+
+  return dispatch(0, Object.freeze(Object.create(null)));
+}
+
+function resolveServerFnMiddleware(
+  middleware: readonly AnyServerFnMiddleware[] | undefined,
+): readonly AnyServerFnMiddleware[] {
+  const resolved: AnyServerFnMiddleware[] = [];
+  const seen = new Set<AnyServerFnMiddleware>();
+  const visiting = new Set<AnyServerFnMiddleware>();
+
+  const visit = (entry: AnyServerFnMiddleware) => {
+    assertServerFnMiddleware(entry);
+    if (seen.has(entry)) return;
+    if (visiting.has(entry)) {
+      throw new Error("Server function middleware dependencies cannot contain a cycle");
+    }
+
+    visiting.add(entry);
+    for (const dependency of entry.middleware) {
+      visit(dependency);
+    }
+    visiting.delete(entry);
+    seen.add(entry);
+    resolved.push(entry);
+  };
+
+  for (const entry of middleware ?? []) {
+    visit(entry);
+  }
+
+  return Object.freeze(resolved);
+}
+
+function assertServerFnMiddleware(value: unknown): asserts value is AnyServerFnMiddleware {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value as { __farmServerFnMiddleware?: unknown }).__farmServerFnMiddleware !== true ||
+    typeof (value as { handler?: unknown }).handler !== "function" ||
+    !Array.isArray((value as { middleware?: unknown }).middleware)
+  ) {
+    throw new TypeError("createServerFn middleware must be created with createServerMiddleware");
+  }
+}
+
+function mergeServerFnContext(current: Readonly<object>, added: object | undefined) {
+  if (
+    added !== undefined &&
+    (added === null || typeof added !== "object" || Array.isArray(added))
+  ) {
+    throw new TypeError("Server function middleware context must be an object");
+  }
+
+  return Object.freeze(Object.assign(Object.create(null), current, added));
 }
 
 async function parseSchema(

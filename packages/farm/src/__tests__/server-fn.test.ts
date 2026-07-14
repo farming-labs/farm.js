@@ -2,8 +2,9 @@
 
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { createServerFn, FARM_SERVER_FN_SYMBOL } from "../server-fn";
+import { createServerFn, createServerMiddleware, FARM_SERVER_FN_SYMBOL } from "../server-fn";
 import { runWithServerActionRequest } from "../server-action-security";
+import { _runWithCurrentRequest } from "../server/request";
 
 describe("createServerFn", () => {
   it("validates object input before calling the handler", async () => {
@@ -229,5 +230,140 @@ describe("createServerFn", () => {
     expect(result.signal).toBe(request.signal);
     controller.abort();
     expect(result.signal.aborted).toBe(true);
+  });
+
+  it("composes middleware dependencies with typed server context", async () => {
+    const trace: string[] = [];
+    const requireUser = createServerMiddleware({
+      async handler({ request, signal, next }) {
+        trace.push("auth:before");
+        expect(request?.headers.get("x-user-id")).toBe("user-1");
+        expect(signal).toBe(request?.signal);
+
+        const result = await next({
+          context: {
+            user: {
+              id: request!.headers.get("x-user-id")!,
+              role: "admin" as const,
+            },
+          },
+        });
+        trace.push("auth:after");
+        return result;
+      },
+    });
+    const requireAdmin = createServerMiddleware({
+      middleware: [requireUser],
+      async handler({ context, next }) {
+        expectTypeOf(context.user).toEqualTypeOf<{
+          id: string;
+          role: "admin";
+        }>();
+        trace.push("admin:before");
+        const result = await next({ context: { permission: "products:write" as const } });
+        trace.push("admin:after");
+        return result;
+      },
+    });
+    const audit = createServerMiddleware({
+      middleware: [requireUser],
+      async handler({ context, next }) {
+        expectTypeOf(context.user.id).toEqualTypeOf<string>();
+        trace.push(`audit:${context.user.id}:before`);
+        const result = await next();
+        trace.push(`audit:${context.user.id}:after`);
+        return result;
+      },
+    });
+    const updateProduct = createServerFn({
+      middleware: [requireAdmin, audit],
+      input: z.object({ id: z.string() }),
+      async handler({ input, context }) {
+        expectTypeOf(context.permission).toEqualTypeOf<"products:write">();
+        expectTypeOf(context.user.role).toEqualTypeOf<"admin">();
+        trace.push("handler");
+        return {
+          id: input.id,
+          userId: context.user.id,
+          permission: context.permission,
+        };
+      },
+    });
+    const request = new Request("https://app.example.com/actions/update-product", {
+      headers: { "x-user-id": "user-1" },
+    });
+
+    const result = await runWithServerActionRequest(request, () =>
+      updateProduct({ id: "product-1" }),
+    );
+
+    expect(result).toEqual({
+      id: "product-1",
+      userId: "user-1",
+      permission: "products:write",
+    });
+    expect(trace).toEqual([
+      "auth:before",
+      "admin:before",
+      "audit:user-1:before",
+      "handler",
+      "audit:user-1:after",
+      "admin:after",
+      "auth:after",
+    ]);
+  });
+
+  it("uses the current render request for direct server calls", async () => {
+    const request = new Request("https://app.example.com/dashboard", {
+      headers: { "x-tenant": "acme" },
+    });
+    const tenant = createServerMiddleware({
+      handler({ request: currentRequest, next }) {
+        return next({
+          context: { tenant: currentRequest?.headers.get("x-tenant") ?? "public" },
+        });
+      },
+    });
+    const inspect = createServerFn({
+      middleware: [tenant],
+      handler({ request: currentRequest, context, signal }) {
+        return {
+          request: currentRequest,
+          tenant: context.tenant,
+          signal,
+        };
+      },
+    });
+
+    const result = await _runWithCurrentRequest(request, () => inspect());
+
+    expect(result.request).toBe(request);
+    expect(result.tenant).toBe("acme");
+    expect(result.signal).toBe(request.signal);
+  });
+
+  it("rejects middleware that skips or calls next more than once", async () => {
+    const skipsNext = createServerMiddleware({
+      handler: (() => Promise.resolve({ ok: false })) as any,
+    });
+    const callsNextTwice = createServerMiddleware({
+      async handler({ next }) {
+        await next();
+        return next();
+      },
+    });
+    const skipped = createServerFn({
+      middleware: [skipsNext],
+      handler: () => ({ ok: true }),
+    });
+    const repeated = createServerFn({
+      middleware: [callsNextTwice],
+      handler: () => ({ ok: true }),
+    });
+
+    await expect(skipped()).rejects.toThrow("Server function middleware must call next()");
+    await expect(repeated()).rejects.toThrow(
+      "Server function middleware next() can only be called once",
+    );
   });
 });

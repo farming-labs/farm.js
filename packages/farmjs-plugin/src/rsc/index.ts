@@ -345,11 +345,11 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         const configuredRoutesDir =
           options.routesDir === undefined ? "app" : options.routesDir.trim();
         const routeRoots = getFarmSourceRoots(c).map((source) => {
-          const routeDirectory = configuredRoutesDir
-            ? path.join(source.root, source.srcDir, configuredRoutesDir)
-            : path.join(source.root, source.srcDir);
-          const relative = path.relative(entriesDir, routeDirectory).replace(/\\/g, "/");
-          const base = relative.startsWith(".") ? relative : `./${relative}`;
+          const routeSuffix = configuredRoutesDir ? `/${configuredRoutesDir}` : "";
+          const projectSourceDir = source.srcDir.replace(/\\/g, "/").replace(/^\.?\//, "");
+          const base = source.layer
+            ? `#layers/${source.name}${routeSuffix}`
+            : `/${projectSourceDir}${routeSuffix}`;
           return { name: source.name, base, glob: base };
         });
         // Build context for entry generators
@@ -430,26 +430,29 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               ...(farmCorePath
                 ? [
                     {
-                      find: "@farmjs/core/middleware",
+                      find: /^@farmjs\/core\/middleware$/,
                       replacement: path.join(farmCorePath, "dist/middleware.mjs"),
                     },
                     {
-                      find: "@farmjs/core/api",
+                      find: /^@farmjs\/core\/api$/,
                       replacement: path.join(farmCorePath, "dist/api.mjs"),
                     },
                     {
-                      find: "@farmjs/core/server-fn",
+                      find: /^@farmjs\/core\/server-fn$/,
                       replacement: path.join(farmCorePath, "dist/server-fn.mjs"),
                     },
                     {
-                      find: "@farmjs/core/server-action-security",
+                      find: /^@farmjs\/core\/server-action-security$/,
                       replacement: path.join(farmCorePath, "dist/server-action-security.mjs"),
                     },
                     {
                       find: /^@farmjs\/core\/environment$/,
                       replacement: path.join(farmCorePath, "dist/environment.mjs"),
                     },
-                    { find: "@farmjs/core", replacement: farmCorePath },
+                    {
+                      find: /^@farmjs\/core$/,
+                      replacement: path.join(farmCorePath, "dist/index.mjs"),
+                    },
                   ]
                 : []),
             ],
