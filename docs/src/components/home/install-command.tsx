@@ -131,7 +131,7 @@ export function InstallCommand() {
               key={item.label}
               aria-controls="install-command-panel"
               aria-selected={activeIndex === index}
-              className="group relative flex h-8 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 font-mono text-[9px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-9 sm:gap-1.5 sm:px-1.5"
+              className="group relative flex h-7 min-w-0 items-center justify-center gap-1 border-r border-white/10 px-1 font-mono text-[8px] font-normal uppercase tracking-normal text-white/42 transition-[background-color,color] duration-150 last:border-r-0 hover:bg-white/[0.055] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white aria-selected:bg-white aria-selected:text-black sm:h-8 sm:text-[9px]"
               id={`install-tab-${item.label.toLowerCase()}`}
               onClick={() => selectCommand(index)}
               onKeyDown={(event) => handleTabKeyDown(event, index)}
@@ -146,7 +146,7 @@ export function InstallCommand() {
                 <img
                   alt=""
                   aria-hidden="true"
-                  className={`size-2.5 shrink-0 select-none transition-[filter,opacity] duration-150 sm:size-3 ${
+                  className={`size-2.5 shrink-0 select-none transition-[filter,opacity] duration-150 ${
                     activeIndex === index
                       ? "brightness-0 opacity-90"
                       : "brightness-0 invert opacity-48 group-hover:opacity-90"
@@ -156,7 +156,7 @@ export function InstallCommand() {
               ) : TabIcon ? (
                 <TabIcon
                   aria-hidden
-                  className={`size-2.5 shrink-0 transition-opacity duration-150 sm:size-3 ${
+                  className={`size-2.5 shrink-0 transition-opacity duration-150 ${
                     activeIndex === index ? "opacity-90" : "opacity-48 group-hover:opacity-90"
                   }`}
                   strokeWidth={1.5}
@@ -170,7 +170,7 @@ export function InstallCommand() {
 
       <div
         aria-labelledby={`install-tab-${activeCommand.label.toLowerCase()}`}
-        className="grid min-h-10 min-w-0 grid-cols-[2.25rem_minmax(0,1fr)_auto] items-stretch sm:min-h-11 sm:grid-cols-[2.5rem_minmax(0,1fr)_auto]"
+        className="grid min-h-9 min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-stretch sm:min-h-10 sm:grid-cols-[2.25rem_minmax(0,1fr)_auto]"
         id="install-command-panel"
         role="tabpanel"
       >
@@ -178,10 +178,10 @@ export function InstallCommand() {
           aria-hidden
           className="grid place-items-center border-r border-white/10 bg-white/[0.035] text-white/48"
         >
-          <ActiveCommandIcon className="size-3" strokeWidth={1.5} />
+          <ActiveCommandIcon className="size-2.5" strokeWidth={1.5} />
         </span>
         <code
-          className="flex min-w-0 items-center overflow-x-auto whitespace-nowrap px-2.5 font-mono text-[10px] tracking-normal text-white/78 sm:px-3 sm:text-[11px]"
+          className="flex min-w-0 items-center overflow-x-auto whitespace-nowrap px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px]"
           title={activeCommand.command}
         >
           <span aria-hidden className="mr-2 text-white/28">
@@ -191,14 +191,14 @@ export function InstallCommand() {
         </code>
         <button
           aria-label={`${copyLabel} ${copyTarget}`}
-          className="inline-flex min-w-10 shrink-0 items-center justify-center gap-1.5 border-l border-white/10 bg-white/[0.025] px-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.075] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:min-w-[4.75rem] sm:px-2.5"
+          className="inline-flex min-w-9 shrink-0 items-center justify-center gap-1 border-l border-white/10 bg-white/[0.025] px-1.5 font-mono text-[8px] font-normal uppercase tracking-normal text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.075] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:min-w-[4.25rem] sm:px-2 sm:text-[9px]"
           onClick={copyCommand}
           title={`${copyLabel} ${copyTarget}`}
           type="button"
         >
           <CopyStateIcon
             aria-hidden
-            className={copyState === "copying" ? "size-3 animate-spin" : "size-3"}
+            className={copyState === "copying" ? "size-2.5 animate-spin" : "size-2.5"}
             strokeWidth={1.5}
           />
           <span className="hidden sm:inline">{copyLabel}</span>
