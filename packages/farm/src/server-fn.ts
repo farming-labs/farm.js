@@ -210,7 +210,7 @@ export function createServerFn(options: {
   const serverFn = async (value: unknown) => {
     const formData = isFormData(value) ? value : undefined;
     const rawInput = formData ? formDataToObject(formData) : value;
-    const input = await parseSchema(options.input, rawInput, "input");
+    const input = await _parseServerFnSchema(options.input, rawInput, "input");
     const executionContext = getServerActionExecutionContext();
     const request = executionContext?.request ?? _resolveCurrentRequest();
     const signal = executionContext?.signal ?? request?.signal ?? getServerActionSignal();
@@ -223,7 +223,7 @@ export function createServerFn(options: {
     };
     const result = await runServerFnMiddleware(middleware, handlerContext, options.handler);
 
-    return parseSchema(options.output, result, "output");
+    return _parseServerFnSchema(options.output, result, "output");
   };
 
   Object.defineProperties(serverFn, {
@@ -344,10 +344,11 @@ function mergeServerFnContext(current: Readonly<object>, added: object | undefin
   return Object.freeze(Object.assign(Object.create(null), current, added));
 }
 
-async function parseSchema(
+export async function _parseServerFnSchema(
   schema: ServerFnSchema | undefined,
   value: unknown,
   contract: "input" | "output",
+  owner = "createServerFn",
 ) {
   if (!schema) return value;
 
@@ -369,7 +370,7 @@ async function parseSchema(
     return schema.parse(value);
   }
 
-  throw new TypeError(`createServerFn ${contract} must provide parse, parseAsync, or safeParse`);
+  throw new TypeError(`${owner} ${contract} must provide parse, parseAsync, or safeParse`);
 }
 
 function unwrapSafeParseResult(result: unknown) {
