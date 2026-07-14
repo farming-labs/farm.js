@@ -482,11 +482,9 @@ function Hero() {
           <IndexedLabel icon={Route} index="00" label="App Router / Typed APIs / One Runtime" />
         </div>
         <HeroTitleFrame>
-          <h1 className="max-w-full text-[1.875rem] font-medium leading-[1.02] tracking-normal text-white min-[400px]:text-[2.125rem] min-[420px]:text-[2.5rem] sm:text-[3.75rem] lg:text-[4rem]">
+          <h1 className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
             <span className="block">A Framework</span>
-            <span className="block whitespace-nowrap text-[1.125rem] text-white/82 min-[400px]:text-[1.375rem] min-[420px]:text-[1.5rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
-              for Product integrated Apps
-            </span>
+            <span className="block whitespace-nowrap">for Product integrated Apps</span>
           </h1>
         </HeroTitleFrame>
         <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
