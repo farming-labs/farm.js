@@ -33,6 +33,10 @@
     --font-geist-sans: "Geist Sans";
     --font-geist-mono: "Geist Mono";
     --font-geist-pixel: "Geist Pixel Square";
+    --farm-bg: #000;
+    --farm-line: rgb(255 255 255 / 0.12);
+    --farm-line-soft: rgb(255 255 255 / 0.055);
+    --farm-rule: rgb(255 255 255 / 0.09);
   }
 
   html {
@@ -43,7 +47,564 @@
     font-family:
       var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
       "Liberation Mono", "Courier New", monospace;
+    margin: 0;
+    background: var(--farm-bg);
     font-synthesis: none;
     text-rendering: optimizeLegibility;
+  }
+}
+
+@layer components {
+  .farm-announcement {
+    background: #000;
+  }
+
+  .farm-home .font-mono {
+    letter-spacing: 0;
+  }
+
+  .farm-home .font-geist-pixel {
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: optimizeSpeed;
+  }
+
+  .farm-page-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    max-width: 1320px;
+    margin-inline: auto;
+  }
+
+  .farm-page-rail {
+    display: none;
+    min-width: 0;
+    border-inline: 1px solid var(--farm-line);
+    background-color: #000;
+    background-image: repeating-linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 6px,
+      rgb(255 255 255 / 0.07) 6px,
+      rgb(255 255 255 / 0.07) 7px
+    );
+    background-attachment: fixed;
+  }
+
+  .farm-page-content {
+    border-inline: 1px solid var(--farm-line);
+  }
+
+  .farm-full-rule,
+  .farm-wide-rule,
+  .farm-top-rule {
+    position: relative;
+  }
+
+  .farm-full-rule::after,
+  .farm-wide-rule::after,
+  .farm-top-rule::before {
+    position: absolute;
+    right: calc(50% - 50vw);
+    left: calc(50% - 50vw);
+    z-index: 20;
+    height: 1px;
+    background: var(--farm-rule);
+    content: "";
+    pointer-events: none;
+  }
+
+  .farm-top-rule::before {
+    top: -1px;
+  }
+
+  .farm-full-rule::after,
+  .farm-wide-rule::after {
+    bottom: -1px;
+  }
+
+  .farm-hero-rule::after {
+    bottom: 0;
+    background: rgb(255 255 255 / 0.16);
+  }
+
+  .farm-hero-title-frame-border {
+    position: absolute;
+    top: 0;
+    right: 100%;
+    bottom: 100%;
+    left: 0;
+    border: 1px dashed rgb(255 255 255 / 0.28);
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(10px, 10px, 0);
+    will-change: inset, opacity, transform;
+  }
+
+  .farm-hero-title-frame[data-visible="true"] .farm-hero-title-frame-border {
+    animation: farm-hero-title-frame-cycle 7.2s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+  }
+
+  .farm-hero-title-frame-corner {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border: 1px solid rgb(255 255 255 / 0.32);
+    background: #000;
+  }
+
+  .farm-hero-title-frame-corner-tl {
+    top: -5px;
+    left: -5px;
+  }
+
+  .farm-hero-title-frame-corner-tr {
+    top: -5px;
+    right: -5px;
+  }
+
+  .farm-hero-title-frame-corner-bl {
+    bottom: -5px;
+    left: -5px;
+  }
+
+  .farm-hero-title-frame-corner-br {
+    right: -5px;
+    bottom: -5px;
+  }
+
+  .farm-hero-flicker {
+    -webkit-mask-image: radial-gradient(
+      ellipse 220% 78% at 50% -20%,
+      transparent 55%,
+      rgb(0 0 0 / 0.04) 62%,
+      rgb(0 0 0 / 0.16) 70%,
+      rgb(0 0 0 / 0.42) 80%,
+      rgb(0 0 0 / 0.76) 90%,
+      #000 100%
+    );
+    mask-image: radial-gradient(
+      ellipse 220% 78% at 50% -20%,
+      transparent 55%,
+      rgb(0 0 0 / 0.04) 62%,
+      rgb(0 0 0 / 0.16) 70%,
+      rgb(0 0 0 / 0.42) 80%,
+      rgb(0 0 0 / 0.76) 90%,
+      #000 100%
+    );
+  }
+
+  .farm-feature-spotlight {
+    position: relative;
+    isolation: isolate;
+    background-color: #000;
+    background-image: radial-gradient(
+      ellipse 84% 42% at 50% 18%,
+      rgb(255 255 255 / 0.05),
+      rgb(255 255 255 / 0.015) 42%,
+      transparent 76%
+    );
+  }
+
+  .farm-feature-spotlight::before,
+  .farm-feature-spotlight::after {
+    position: absolute;
+    z-index: 0;
+    border-radius: 50%;
+    content: "";
+    pointer-events: none;
+  }
+
+  .farm-feature-spotlight::before {
+    inset: 2% -5% 54% 0;
+    background: radial-gradient(
+      ellipse at center,
+      rgb(255 255 255 / 0.22) 0%,
+      rgb(255 255 255 / 0.09) 36%,
+      rgb(255 255 255 / 0.025) 62%,
+      transparent 86%
+    );
+    filter: blur(34px);
+    opacity: 0.76;
+    transform: translate3d(-6px, 8px, 0);
+  }
+
+  .farm-feature-spotlight::after {
+    inset: 8% 76% 18% 0;
+    background: radial-gradient(
+      ellipse at 100% 28%,
+      rgb(255 255 255 / 0.18) 0%,
+      rgb(255 255 255 / 0.065) 42%,
+      transparent 82%
+    );
+    filter: blur(22px);
+    opacity: 0.68;
+    transform: translate3d(6px, -2px, 0);
+  }
+
+  .farm-integration-visual {
+    isolation: isolate;
+  }
+
+  .farm-integration-visual::before {
+    position: absolute;
+    inset: -10% -18%;
+    z-index: -1;
+    background: radial-gradient(
+      ellipse at center,
+      rgb(255 255 255 / 0.105) 0%,
+      rgb(255 255 255 / 0.055) 42%,
+      rgb(255 255 255 / 0.018) 62%,
+      transparent 80%
+    );
+    content: "";
+    filter: blur(28px);
+    pointer-events: none;
+  }
+
+  .farm-integration-visual::after {
+    position: absolute;
+    inset: -4% -7%;
+    z-index: 2;
+    background: radial-gradient(
+      ellipse 78% 80% at center,
+      transparent 48%,
+      rgb(0 0 0 / 0.08) 65%,
+      rgb(0 0 0 / 0.48) 84%,
+      rgb(0 0 0 / 0.9) 100%
+    );
+    backdrop-filter: blur(5px);
+    content: "";
+    -webkit-mask-image: radial-gradient(
+      ellipse 78% 80% at center,
+      transparent 0%,
+      transparent 52%,
+      rgb(0 0 0 / 0.35) 70%,
+      black 100%
+    );
+    mask-image: radial-gradient(
+      ellipse 78% 80% at center,
+      transparent 0%,
+      transparent 52%,
+      rgb(0 0 0 / 0.35) 70%,
+      black 100%
+    );
+    pointer-events: none;
+  }
+
+  .farm-integration-directory {
+    -webkit-mask-image: radial-gradient(
+      ellipse 88% 86% at center,
+      black 0%,
+      black 54%,
+      rgb(0 0 0 / 0.82) 68%,
+      rgb(0 0 0 / 0.3) 84%,
+      transparent 100%
+    );
+    mask-image: radial-gradient(
+      ellipse 88% 86% at center,
+      black 0%,
+      black 54%,
+      rgb(0 0 0 / 0.82) 68%,
+      rgb(0 0 0 / 0.3) 84%,
+      transparent 100%
+    );
+  }
+
+  .farm-illustration-surface {
+    background-color: #000;
+    background-image: linear-gradient(180deg, rgb(255 255 255 / 0.025), transparent 36%);
+    box-shadow:
+      0 18px 48px rgb(0 0 0 / 0.38),
+      inset 0 1px 0 rgb(255 255 255 / 0.025);
+  }
+
+  .farm-migration-row {
+    animation: farm-foundation-sequence-three 6s linear infinite;
+  }
+
+  .farm-migration-source,
+  .farm-migration-target {
+    animation: farm-illustration-float 7s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .farm-migration-target {
+    animation-delay: -2.2s;
+  }
+
+  .farm-migration-link {
+    animation: farm-migration-link 3s ease-in-out infinite;
+  }
+
+  .farm-migration-progress {
+    animation: farm-migration-progress 6s ease-in-out infinite;
+    will-change: transform;
+  }
+
+  .farm-highlighted-code {
+    --sh-class: rgb(255 255 255 / 0.86);
+    --sh-identifier: rgb(255 255 255 / 0.64);
+    --sh-string: rgb(255 255 255 / 0.94);
+    --sh-keyword: #fff;
+    --sh-comment: rgb(255 255 255 / 0.3);
+    --sh-property: rgb(255 255 255 / 0.78);
+    --sh-sign: rgb(255 255 255 / 0.42);
+    --sh-space: inherit;
+    counter-reset: farm-code-line;
+  }
+
+  .farm-highlighted-code .sh__line {
+    display: block;
+    min-width: max-content;
+    min-height: 1.5rem;
+    padding-right: 1.25rem;
+    white-space: pre;
+    counter-increment: farm-code-line;
+  }
+
+  .farm-highlighted-code .sh__line::before {
+    display: inline-block;
+    width: 2rem;
+    margin-right: 1rem;
+    color: rgb(255 255 255 / 0.18);
+    text-align: right;
+    content: counter(farm-code-line);
+    user-select: none;
+  }
+
+  .farm-highlighted-code .sh__token--keyword {
+    font-weight: 650;
+  }
+
+  .farm-highlighted-code .sh__token--comment {
+    font-style: italic;
+  }
+
+  @media (min-width: 768px) {
+    .farm-page-grid {
+      grid-template-columns: 40px minmax(0, 1240px) 40px;
+    }
+
+    .farm-page-rail {
+      display: block;
+    }
+
+    .farm-page-content {
+      border-inline: 0;
+    }
+  }
+}
+
+@keyframes farm-logo-rail {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes farm-hero-title-frame-cycle {
+  0%,
+  100% {
+    top: 0;
+    right: 100%;
+    bottom: 100%;
+    left: 0;
+    opacity: 0;
+    transform: translate3d(10px, 10px, 0);
+  }
+
+  3% {
+    opacity: 1;
+  }
+
+  18%,
+  34% {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  46%,
+  50% {
+    top: 100%;
+    right: 0;
+    bottom: 0;
+    left: 100%;
+    opacity: 0;
+    transform: translate3d(-10px, -10px, 0);
+  }
+
+  53% {
+    opacity: 1;
+  }
+
+  68%,
+  84% {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  96% {
+    top: 0;
+    right: 100%;
+    bottom: 100%;
+    left: 0;
+    opacity: 0;
+    transform: translate3d(10px, 10px, 0);
+  }
+}
+
+@keyframes farm-foundation-sequence-three {
+  0%,
+  30% {
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.075);
+    border-color: rgb(255 255 255 / 0.2);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
+  }
+
+  33.333%,
+  100% {
+    color: rgb(255 255 255 / 0.42);
+    background: transparent;
+    border-color: rgb(255 255 255 / 0.08);
+    box-shadow: inset 2px 0 0 transparent;
+  }
+}
+
+@keyframes farm-illustration-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, -3px, 0);
+  }
+}
+
+@keyframes farm-migration-link {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: translate3d(-2px, 0, 0);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate3d(2px, 0, 0);
+  }
+}
+
+@keyframes farm-migration-progress {
+  0%,
+  8% {
+    transform: scaleX(0.08);
+  }
+
+  76%,
+  100% {
+    transform: scaleX(1);
+  }
+}
+
+.farm-logo-viewport {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1.5rem,
+    #000 calc(100% - 1.5rem),
+    transparent
+  );
+}
+
+.farm-logo-rail {
+  animation: farm-logo-rail 24s linear infinite;
+  will-change: transform;
+}
+
+.farm-logo-viewport:focus .farm-logo-rail {
+  animation-play-state: paused;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .farm-logo-viewport:hover .farm-logo-rail {
+    animation-play-state: paused;
+  }
+
+  .group:hover .farm-migration-row,
+  .group:hover .farm-migration-source,
+  .group:hover .farm-migration-target,
+  .group:hover .farm-migration-link,
+  .group:hover .farm-migration-progress {
+    animation-play-state: paused;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .farm-logo-rail {
+    animation: none;
+    transform: none;
+  }
+
+  .farm-logo-rail-copy[aria-hidden="true"] {
+    display: none;
+  }
+
+  .farm-hero-title-frame-border,
+  .farm-hero-title-frame[data-visible="true"] .farm-hero-title-frame-border {
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    opacity: 1;
+    animation: none;
+    transform: none;
+  }
+
+  .farm-migration-row,
+  .farm-migration-source,
+  .farm-migration-target,
+  .farm-migration-link,
+  .farm-migration-progress {
+    animation: none;
+  }
+
+  .farm-migration-row[data-initial="true"] {
+    color: rgb(255 255 255 / 0.9);
+    background: rgb(255 255 255 / 0.075);
+    border-color: rgb(255 255 255 / 0.2);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
+  }
+
+  .farm-migration-progress {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+
+  .farm-migration-link {
+    display: none;
   }
 }

@@ -434,7 +434,9 @@ export class SPARouter {
   /**
    * Handle browser back/forward navigation
    */
-  private async handlePopState(event: PopStateEvent): Promise<void> {
+  private async handlePopState(_event: PopStateEvent): Promise<void> {
+    if (document.documentElement.dataset.farmDocsRuntime === "true") return;
+
     const path = window.location.pathname + window.location.search;
 
     if (

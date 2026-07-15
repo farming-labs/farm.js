@@ -56,7 +56,7 @@ importers:
         version: 0.2.44(react@19.2.4)(supports-color@10.2.2)
       '@farming-labs/theme':
         specifier: ^0.2.44
-        version: 0.2.44(@farming-labs/docs@0.2.44)(@types/react-dom@18.3.7)(@types/react@18.3.26)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        version: 0.2.44(@farming-labs/docs@0.2.44)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@farmjs/core':
         specifier: workspace:*
         version: link:../packages/farm
@@ -66,12 +66,21 @@ importers:
       better-call:
         specifier: ^1.0.19
         version: 1.0.19
+      lucide-react:
+        specifier: 1.23.0
+        version: 1.23.0(react@19.2.4)
       react:
         specifier: ^19.0.0
         version: 19.2.4
       react-dom:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
+      simple-icons:
+        specifier: 16.25.0
+        version: 16.25.0
+      sugar-high:
+        specifier: 0.9.5
+        version: 0.9.5
       zod:
         specifier: ^4.3.6
         version: 4.3.6
@@ -3505,7 +3514,7 @@ packages:
     resolution: {integrity: sha512-L36KN/y7UVdlbxQYVBqtPebKjfYfRuVDyzhCBnOM64HnhkmmWtUAt2HNvx6/jvv9ixe2uXS1aLj6o8cn+QOU7w==}
     dev: false
 
-  /@farming-labs/theme@0.2.44(@farming-labs/docs@0.2.44)(@types/react-dom@18.3.7)(@types/react@18.3.26)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(tailwindcss@3.4.18):
+  /@farming-labs/theme@0.2.44(@farming-labs/docs@0.2.44)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(tailwindcss@3.4.18):
     resolution: {integrity: sha512-sNvbpaCkh+qiaaWjeVZZ0XyC/90FsDvrKfgz/auW+BsoTtG2xhgGRYabGvnkp42CEX0fLtu7JGw2TOLdZQxNlg==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
@@ -3514,7 +3523,7 @@ packages:
       react-dom: '>=19.2.0'
     dependencies:
       '@farming-labs/docs': 0.2.44(react@19.2.4)(supports-color@10.2.2)
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(zod@4.3.6)
+      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(zod@4.3.6)
       fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
       next: 16.2.4(@playwright/test@1.58.2)(react-dom@19.2.4)(react@19.2.4)
@@ -9670,7 +9679,7 @@ packages:
     requiresBuild: true
     optional: true
 
-  /fumadocs-core@16.7.16(@types/react@18.3.26)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(zod@4.3.6):
+  /fumadocs-core@16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(zod@4.3.6):
     resolution: {integrity: sha512-OXZMJPS/HVAfCw8/VEgsOEQNWUXq7+U2v1A/DbKmI0Vbb08uPCUpbIqVSj4kmGr46L+Pa/PZgG596Z7iPhlbCg==}
     peerDependencies:
       '@mdx-js/mdx': '*'
@@ -9736,6 +9745,7 @@ packages:
       github-slugger: 2.0.0
       hast-util-to-estree: 3.1.3(supports-color@10.2.2)
       hast-util-to-jsx-runtime: 2.3.6(supports-color@10.2.2)
+      lucide-react: 1.23.0(react@19.2.4)
       mdast-util-mdx: 3.0.0(supports-color@10.2.2)
       mdast-util-to-markdown: 2.1.2
       next: 16.2.4(@playwright/test@1.58.2)(react-dom@19.2.4)(react@19.2.4)
@@ -9788,7 +9798,7 @@ packages:
       '@radix-ui/react-tabs': 1.1.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.4)(react@19.2.4)
       '@types/react': 18.3.26
       class-variance-authority: 0.7.1
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(zod@4.3.6)
+      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(zod@4.3.6)
       lucide-react: 1.23.0(react@19.2.4)
       motion: 12.42.2(react-dom@19.2.4)(react@19.2.4)
       next: 16.2.4(@playwright/test@1.58.2)(react-dom@19.2.4)(react@19.2.4)
@@ -13807,6 +13817,11 @@ packages:
       decompress-response: 6.0.0
       once: 1.4.0
       simple-concat: 1.0.1
+    dev: false
+
+  /simple-icons@16.25.0:
+    resolution: {integrity: sha512-ReYPfbqjkTBovxjerHw2tf6E1rQdaCqNJKaJbd78Mui8w+78xQlE1aDO/2ekID++n8qa+1t+oaueYLeiSoQsIA==}
+    engines: {node: '>=0.12.18'}
     dev: false
 
   /sirv@2.0.4:

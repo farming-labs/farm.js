@@ -142,8 +142,39 @@ describe("client component path resolution", () => {
     expect(source).toContain("delete window.__farmDocsRuntime;");
     expect(source).toContain("script.replaceWith(freshScript);");
     expect(source).toContain('document.documentElement.dataset.farmDocsRuntime === "true"');
+    expect(source).toContain("this.swapContent(html, url.pathname + url.search)");
+    expect(source).toContain(
+      "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
+    );
+    expect(source).toContain("resetReactRoot();");
     expect(source).toContain(
       ".then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })",
+    );
+    expect(source).toContain(
+      ".then(function(html) { if (!spaRouter.swapContent(html, pathname + window.location.search)) window.location.reload(); })",
+    );
+  });
+
+  it("uses a document swap when dev navigation enters the docs runtime", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+    const routerSource = fs.readFileSync(
+      path.join(process.cwd(), "src", "client", "spa-router.ts"),
+      "utf-8",
+    );
+
+    expect(source).toContain("if (!doc.documentElement || !doc.body) return false;");
+    expect(source).toContain("document.head.innerHTML = doc.head ? doc.head.innerHTML : '';");
+    expect(source).toContain("document.body.innerHTML = doc.body.innerHTML;");
+    expect(source).toContain("delete window.__farmDocsRuntime;");
+    expect(source).toContain("script.replaceWith(freshScript);");
+    expect(source).toContain(
+      "if (document.documentElement.dataset.farmDocsRuntime === 'true') return;",
+    );
+    expect(source).toContain(
+      "async handlePopState(event) {\n    if (document.documentElement.dataset.farmDocsRuntime === 'true') return;",
+    );
+    expect(routerSource).toContain(
+      'if (document.documentElement.dataset.farmDocsRuntime === "true") return;',
     );
   });
 });

@@ -9,8 +9,39 @@ import {
   createDocsAPI,
   createFarmDocsAPIHandler,
   createFarmDocsHandler,
+  getFarmDocsDocumentNavigationMatchers,
   isFarmDocsAPIRequest,
 } from "../docs";
+
+describe("getFarmDocsDocumentNavigationMatchers", () => {
+  it("routes enabled docs trees through document navigation", () => {
+    expect(
+      getFarmDocsDocumentNavigationMatchers({
+        enabled: true,
+        entry: "/docs",
+        config: { entry: "docs" },
+      }),
+    ).toEqual(["/docs(.*)"]);
+
+    expect(
+      getFarmDocsDocumentNavigationMatchers({
+        enabled: true,
+        entry: "/",
+        config: { entry: "docs" },
+      }),
+    ).toEqual(["/(.*)"]);
+  });
+
+  it("does not register document navigation for disabled docs", () => {
+    expect(
+      getFarmDocsDocumentNavigationMatchers({
+        enabled: false,
+        entry: "/docs",
+        config: { entry: "docs" },
+      }),
+    ).toEqual([]);
+  });
+});
 
 describe("createFarmDocsHandler", () => {
   async function createDocsFixture() {

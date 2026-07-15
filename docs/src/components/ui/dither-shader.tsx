@@ -46,6 +46,10 @@ function createDitherScript(config: DitherShaderScriptConfig) {
 
   canvas.dataset.farmDitherMounted = "true";
 
+  if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    config.animated = false;
+  }
+
   if (!window.__farmDitherShaderMount) {
     window.__farmDitherShaderMount = function (canvas, config) {
       var context = canvas.getContext("2d", { alpha: true });

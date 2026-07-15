@@ -143,6 +143,14 @@ export function getFarmDocsRouteTypeEntries(docs: FarmDocsResolvedConfig | undef
   return [entry, `${entry}/[...docs]`];
 }
 
+export function getFarmDocsDocumentNavigationMatchers(
+  docs: FarmDocsResolvedConfig | undefined,
+): string[] {
+  if (!docs?.enabled) return [];
+  const entry = normalizeEntry(docs.entry);
+  return [entry === "/" ? "/(.*)" : `${entry}(.*)`];
+}
+
 function getRequestSlug(docs: FarmDocsResolvedConfig, request: Request): string {
   const pathname = new URL(request.url).pathname;
   const entry = normalizeEntry(docs.entry);
