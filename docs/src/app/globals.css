@@ -343,6 +343,12 @@
     will-change: transform;
   }
 
+  .farm-terminal-sequence {
+    clip-path: inset(0 0 100% 0);
+    animation: farm-terminal-sequence 8.4s infinite;
+    will-change: clip-path, opacity;
+  }
+
   .farm-highlighted-code {
     --sh-class: rgb(255 255 255 / 0.86);
     --sh-identifier: rgb(255 255 255 / 0.64);
@@ -403,6 +409,32 @@
   }
   to {
     transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@keyframes farm-terminal-sequence {
+  0% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 1;
+    animation-timing-function: steps(7, end);
+  }
+
+  64%,
+  88% {
+    clip-path: inset(0);
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+
+  94%,
+  99.99% {
+    clip-path: inset(0);
+    opacity: 0;
+  }
+
+  100% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 1;
   }
 }
 
@@ -551,6 +583,7 @@
   }
 
   .group:hover .farm-migration-row,
+  .group:hover .farm-terminal-sequence,
   .group:hover .farm-migration-source,
   .group:hover .farm-migration-target,
   .group:hover .farm-migration-link,
@@ -585,11 +618,17 @@
   }
 
   .farm-migration-row,
+  .farm-terminal-sequence,
   .farm-migration-source,
   .farm-migration-target,
   .farm-migration-link,
   .farm-migration-progress {
     animation: none;
+  }
+
+  .farm-terminal-sequence {
+    clip-path: inset(0);
+    opacity: 1;
   }
 
   .farm-migration-row[data-initial="true"] {

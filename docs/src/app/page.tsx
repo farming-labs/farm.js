@@ -617,18 +617,25 @@ function TerminalVisual() {
           </span>
         </figcaption>
         <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-5 tracking-normal sm:text-[11px] sm:leading-6">
-          <code className="block min-w-0 space-y-1.5 whitespace-pre-wrap break-words">
-            <span className="block text-white/48">$ pnpm dev</span>
-            <span className="block text-white">
-              <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in{" "}
-              <span className="text-white/88">84ms</span>
+          <code className="block min-w-0 whitespace-pre-wrap break-words">
+            <span className="farm-terminal-sequence block min-w-max space-y-1.5">
+              <span className="block text-white/48">$ pnpm dev</span>
+              <span className="block text-white">
+                <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in{" "}
+                <span className="text-white/88">84ms</span>
+              </span>
+              <span className="block whitespace-nowrap text-white/58">
+                <span className="inline-block w-[5.25rem] text-white/82">➜ Local:</span>
+                http://localhost:3000/
+              </span>
+              <span className="block whitespace-nowrap text-white/48">
+                <span className="inline-block w-[5.25rem] text-white/68">➜ Network:</span>
+                http://192.168.1.24:3000/
+              </span>
+              <TerminalRequestLine duration={8} method="GET" path="/contact" type="PAGE" />
+              <TerminalRequestLine duration={5} method="POST" path="/api/waitlist" type="API" />
+              <TerminalRequestLine duration={11} method="GET" path="/docs" type="PAGE" />
             </span>
-            <span className="block text-white/54">
-              <span className="text-white/82">➜ Local:</span> http://localhost:3000/
-            </span>
-            <TerminalRequestLine duration={8} method="GET" path="/contact" type="PAGE" />
-            <TerminalRequestLine duration={5} method="POST" path="/api/waitlist" type="API" />
-            <TerminalRequestLine duration={11} method="GET" path="/docs" type="PAGE" />
           </code>
         </pre>
       </figure>
