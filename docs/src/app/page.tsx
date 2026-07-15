@@ -242,21 +242,20 @@ const footerGroups = [
   },
 ] as const;
 
-const typedApiCode = `const user = await api.users.get({
-  params: { id: "user_123" },
+const typedApiCode = `const { data, error } = await api.users.get({
+  query: { limit: "5" },
 });
 
-user.name;
-//   ^? string`;
+if (error) throw error;
+
+data?.users[0]?.name;
+//   ^? string | undefined`;
 
 const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
+import { appIntegrations } from "./src/lib/integrations";
 
 export default defineConfig({
-  integrations: [
-    auth(),
-    billing(),
-    jobs(),
-  ],
+  integrations: appIntegrations,
 });`;
 
 const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";
@@ -574,6 +573,35 @@ function EcosystemStrip() {
   );
 }
 
+function TerminalRequestLine({
+  type,
+  method,
+  path,
+  duration,
+}: {
+  type: "PAGE" | "API";
+  method: "GET" | "POST";
+  path: string;
+  duration: number;
+}) {
+  const isApi = type === "API";
+
+  return (
+    <span className="block whitespace-nowrap text-white/54">
+      <span className="text-white/28">[</span>
+      <span className="text-white/86">FARM</span>
+      <span className="text-white/28">]</span> <span className="text-white/28">[</span>
+      <span className={isApi ? "text-white/86" : "text-white/62"}>{type}</span>
+      <span className="text-white/28">]</span> <span className="text-white/28">[</span>
+      <span className="text-white/72">{method}</span>
+      <span className="text-white/28">]</span>{" "}
+      <span className={isApi ? "text-white/72" : "text-white/66"}>{path}</span>{" "}
+      <span className="text-white/24">-</span> <span className="text-white/84">200</span>{" "}
+      <span className={isApi ? "text-white/38" : "text-white/34"}>({duration}ms)</span>
+    </span>
+  );
+}
+
 function TerminalVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
@@ -588,19 +616,34 @@ function TerminalVisual() {
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> pnpm dev
           </span>
         </figcaption>
-        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
-          <code className="block min-w-max">
-            <span className="block text-white/48">$ pnpm dev</span>
-            <span className="mt-2 block text-white">
-              <span className="font-semibold text-white">FARM</span> v0.0.3 ready in 126ms
+        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-5 tracking-normal sm:text-[11px] sm:leading-6">
+          <code className="block min-w-0 whitespace-pre-wrap break-words">
+            <span className="block min-w-max">
+              <span className="block h-5 whitespace-nowrap text-white/48 sm:h-6">
+                <span>$ </span>
+                <span className="farm-terminal-command-text inline-block align-bottom">
+                  pnpm dev
+                </span>
+                <span aria-hidden className="farm-terminal-command-cursor inline-block" />
+              </span>
+              <span className="farm-terminal-output mt-1.5 block space-y-1.5">
+                <span className="block text-white">
+                  <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in{" "}
+                  <span className="text-white/88">84ms</span>
+                </span>
+                <span className="block whitespace-nowrap text-white/58">
+                  <span className="inline-block w-[4.5rem] text-white/82">➜ Local:</span>
+                  http://localhost:3000/
+                </span>
+                <span className="!mt-0.5 block whitespace-nowrap text-white/48">
+                  <span className="inline-block w-[4.5rem] text-white/68">➜ Network:</span>
+                  http://192.168.1.24:3000/
+                </span>
+                <TerminalRequestLine duration={8} method="GET" path="/contact" type="PAGE" />
+                <TerminalRequestLine duration={5} method="POST" path="/api/waitlist" type="API" />
+                <TerminalRequestLine duration={11} method="GET" path="/docs" type="PAGE" />
+              </span>
             </span>
-            <span className="block text-white/54">
-              <span className="text-white/82">Local</span> http://localhost:3000
-            </span>
-            <span className="block text-white/54">
-              <span className="text-white/82">Graph</span> 32 routes / 8 integrations
-            </span>
-            <span className="mt-2 block text-white/32">press h + enter to show help</span>
           </code>
         </pre>
       </figure>
@@ -614,7 +657,7 @@ function TypedApiVisual() {
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={typedApiCode}
-        label="/api/users/:id"
+        label="/api/users"
         language="tsx"
         prefix="GET"
       />
@@ -645,22 +688,36 @@ function BuildVisual() {
           </span>
           <span>bash</span>
         </figcaption>
-        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-6 tracking-normal text-white/58 sm:text-[11px]">
-          <code className="block min-w-max">
-            <span className="block text-white">$ farm build --target vercel</span>
-            <span className="mt-2 block">
-              <span className="text-white">ok</span> route manifest ........ 44 routes
+        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-5 tracking-normal text-white/58 sm:text-[11px] sm:leading-6">
+          <code className="block min-w-0 whitespace-pre-wrap break-words">
+            <span className="block h-5 whitespace-nowrap text-white sm:h-6">
+              <span>$ </span>
+              <span className="farm-build-command-text inline-block align-bottom">
+                farm build --preset vercel
+              </span>
+              <span aria-hidden className="farm-build-command-cursor inline-block" />
             </span>
-            <span className="block">
-              <span className="text-white">ok</span> middleware .............. 6 matchers
+            <span className="farm-build-output mt-2 block">
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[info]</span> 🚜 Building Farm.js application with
+                preset: vercel...
+              </span>
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[info]</span> 🔍 Discovering routes and API
+                endpoints...
+              </span>
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[info]</span> 📦 Building client and SSR bundles in
+                parallel...
+              </span>
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[success]</span> ✅ Build completed in{" "}
+                <span className="font-semibold text-white">1.24s</span>
+              </span>
+              <span className="block whitespace-nowrap text-white/78">
+                <span className="text-white">[info]</span> 📁 Output directory: .vercel/output
+              </span>
             </span>
-            <span className="block">
-              <span className="text-white">ok</span> generated client ........ 12 APIs
-            </span>
-            <span className="block">
-              <span className="text-white">ok</span> deployment output ....... .vercel/output
-            </span>
-            <span className="mt-2 block text-white/78">built in 842ms</span>
           </code>
         </pre>
       </figure>
@@ -707,11 +764,11 @@ function DeveloperExperienceGrid() {
   return (
     <section className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
-        body="Run pages, APIs, docs, and integrations together in the same development server."
+        body="Start the whole app once, then see every page request and response time as you work."
         icon={Terminal}
         index="01.1"
         label="Development"
-        title="One command runs the app"
+        title="A blazingly fast dev server"
       >
         <TerminalVisual />
       </FeatureCell>
