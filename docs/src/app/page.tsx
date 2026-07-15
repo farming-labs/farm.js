@@ -758,7 +758,7 @@ function DeveloperExperienceGrid() {
         icon={Terminal}
         index="01.1"
         label="Development"
-        title="A dev server that starts in milliseconds"
+        title="A blazingly fast dev server"
       >
         <TerminalVisual />
       </FeatureCell>
