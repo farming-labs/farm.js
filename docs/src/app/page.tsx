@@ -1219,7 +1219,13 @@ function Footer() {
             <div className="flex min-w-0 items-center gap-2.5">
               <FarmingLabsBrand />
               <span aria-hidden className="h-4 w-px bg-white/14" />
-              <Wordmark />
+              <a
+                aria-label="Farm.js home"
+                className="font-mono text-[11px] font-normal uppercase tracking-normal text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+                href="/"
+              >
+                FARM<span className="text-white/52">.JS</span>
+              </a>
             </div>
             <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
               @farming-labs/*
