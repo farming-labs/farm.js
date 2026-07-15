@@ -148,17 +148,20 @@ export default function ApiDemoPage() {
 import { createEndpoint } from "@farmjs/core/api";
 import { z } from "zod";
 
-export const GET = createEndpoint({
-  query: z.object({
-    name: z.string().optional(),
-  }),
-  handler: async ({ query }) => {
+export const GET = createEndpoint(
+  {
+    method: "GET",
+    query: z.object({
+      name: z.string().optional(),
+    }),
+  },
+  async ({ query }) => {
     return {
       message: \`Hello, \${query.name || "World"}!\`,
       timestamp: new Date().toISOString(),
     };
   },
-});`}
+);`}
         </pre>
       </div>
     </div>
