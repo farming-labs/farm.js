@@ -671,6 +671,7 @@ function BuildVisual() {
 function FeatureCell({
   index,
   icon: Icon,
+  label,
   title,
   body,
   className,
@@ -678,6 +679,7 @@ function FeatureCell({
 }: {
   index: string;
   icon: LucideIcon;
+  label: string;
   title: string;
   body: string;
   className?: string;
@@ -686,10 +688,13 @@ function FeatureCell({
   return (
     <article className={cx("group flex min-h-[500px] min-w-0 flex-col justify-between", className)}>
       <div className="p-6 sm:p-10">
-        <h3 className="text-white/52">
-          <IndexedLabel icon={Icon} index={index} label={title} />
+        <div className="text-white/52">
+          <IndexedLabel icon={Icon} index={index} label={label} />
+        </div>
+        <h3 className="mt-6 max-w-[31rem] text-balance font-geist-pixel text-xl font-medium leading-[1.2] tracking-normal text-white/92 sm:text-2xl">
+          {title}
         </h3>
-        <p className="mt-6 max-w-[31rem] font-geist-pixel text-xl font-medium leading-[1.28] tracking-normal text-white/88 sm:text-2xl">
+        <p className="mt-3 max-w-[31rem] text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
           {body}
         </p>
       </div>
@@ -702,37 +707,41 @@ function DeveloperExperienceGrid() {
   return (
     <section className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
-        body="Start the app, route graph, generated clients, docs, and integration runtime together with one command."
+        body="Run pages, APIs, docs, and integrations together in the same development server."
         icon={Terminal}
         index="01.1"
-        title="One Server, Entire Product"
+        label="Development"
+        title="One command runs the app"
       >
         <TerminalVisual />
       </FeatureCell>
       <FeatureCell
-        body="Route handlers and generated callers share the same contract, from params to the final Response."
+        body="Define an API route once. Farm.js generates a client with typed inputs and responses."
         className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={Braces}
         index="01.2"
-        title="Typed From Route to Client"
+        label="Typed APIs"
+        title="Types from route to client"
       >
         <TypedApiVisual />
       </FeatureCell>
       <FeatureCell
-        body="Auth, billing, email, jobs, storage, and docs register through one framework-level integration surface."
+        body="Bring in auth, billing, email, jobs, storage, and docs through one integration system."
         className="border-t border-white/12"
         icon={Plug}
         index="01.3"
-        title="Product Systems Included"
+        label="Integrations"
+        title="Add product features as integrations"
       >
         <IntegrationVisual />
       </FeatureCell>
       <FeatureCell
-        body="The build carries routes, middleware, generated clients, and platform manifests into production together."
+        body="Farm.js packages routes, middleware, typed clients, and deployment config into one production build."
         className="border-t border-white/12 lg:border-l"
         icon={Rocket}
         index="01.4"
-        title="Deployment-Aware Output"
+        label="Production"
+        title="Build once. Deploy together."
       >
         <BuildVisual />
       </FeatureCell>
@@ -974,37 +983,41 @@ function FoundationGrid() {
   return (
     <section data-foundation-grid className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
-        body="Pages, layouts, route handlers, loading states, markdown, and typed links live in the app directory."
+        body="Build pages, layouts, API routes, loading states, and typed links in one app directory."
         icon={FolderTree}
         index="02.1"
-        title="A Familiar App Router"
+        label="Routing"
+        title="The app router you know"
       >
         <FileTreeVisual />
       </FeatureCell>
       <FeatureCell
-        body="Deploy to Vercel, Cloudflare, Netlify, or self-hosted Node, then reach the wider provider ecosystem through Nitro presets."
+        body="Ship to Vercel, Cloudflare, Netlify, or self-hosted Node with built-in Nitro presets."
         className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={CloudCog}
         index="02.2"
-        title="Deploy Almost Anywhere"
+        label="Deployment"
+        title="Deploy where you want"
       >
         <DeploymentVisual />
       </FeatureCell>
       <FeatureCell
-        body="The documentation site ships beside the product, with MDX pages, references, and OpenAPI surfaces."
+        body="Write docs once, then serve pages, Markdown, search, and agent-ready endpoints from the same source."
         className="border-t border-white/12"
         icon={BookOpenText}
         index="02.3"
-        title="Docs Are Part of the App"
+        label="Documentation"
+        title="Docs for people and agents"
       >
         <DocsVisual />
       </FeatureCell>
       <FeatureCell
-        body="Inventory routes from Next.js, Remix, Express, and custom servers before changing application source."
+        body="Preview Next.js and TanStack Router migrations before Farm.js writes any files."
         className="border-t border-white/12 lg:border-l"
         icon={GitCompareArrows}
         index="02.4"
-        title="Migrate With Evidence"
+        label="Migration"
+        title="Migrate without surprises"
       >
         <MigrationVisual />
       </FeatureCell>
@@ -1026,11 +1039,11 @@ function IntegrationsSection() {
         <div className="relative z-10 flex items-center">
           <div className="max-w-lg">
             <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
-              Connect the systems your product already uses
+              Bring the tools you already use
             </h2>
             <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-              Auth, billing, email, jobs, storage, API keys, and UI scaffolds register through one
-              framework-level integration contract.
+              Choose built-in integrations for auth, billing, email, jobs, storage, API keys, and
+              UI, or connect your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">
               <ButtonLink
