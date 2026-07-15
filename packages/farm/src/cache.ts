@@ -1,4 +1,7 @@
 import { emitFarmEvent } from "./observability";
+import { notifyFarmCacheInvalidation } from "./cache-invalidation";
+
+export { applyFarmCacheInvalidations } from "./cache-invalidation";
 
 export type RevalidateTagProfile =
   | "max"
@@ -326,7 +329,9 @@ export function revalidatePath(routePath: string): void {
 }
 
 export function invalidate(key: RouteDataCacheKey): void {
+  const clientKey = createRouteDataCacheKey(key);
   getFarmDataCache().revalidateTag(createRouteDataCacheTag(key), { source: "updateTag" });
+  notifyFarmCacheInvalidation(clientKey);
 }
 
 export function invalidateRouteData(key: RouteDataCacheKey): void {

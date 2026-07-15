@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { subscribeFarmCacheInvalidation } from "./cache-invalidation";
 
 export const DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT = 1_000_000;
 
@@ -51,6 +52,7 @@ export class ServerActionRequestError extends Error {
 type ServerActionExecutionContext = {
   request: Request;
   signal: AbortSignal;
+  invalidations: Set<string>;
 };
 
 const SERVER_ACTION_STORAGE_KEY = Symbol.for("farm.serverActionStorage");
@@ -199,6 +201,7 @@ export function runWithServerActionRequest<T>(
     {
       request,
       signal: request.signal,
+      invalidations: new Set(),
     },
     callback,
   );
@@ -211,6 +214,14 @@ export function getServerActionExecutionContext(): ServerActionExecutionContext 
 export function getServerActionSignal(): AbortSignal {
   return getServerActionExecutionContext()?.signal ?? getFallbackAbortController().signal;
 }
+
+export function getServerActionInvalidations(): readonly string[] {
+  return Array.from(getServerActionExecutionContext()?.invalidations ?? []);
+}
+
+subscribeFarmCacheInvalidation((key) => {
+  getServerActionExecutionContext()?.invalidations.add(key);
+});
 
 function getServerActionStorage(): AsyncLocalStorage<ServerActionExecutionContext> {
   const globalState = globalThis as GlobalWithServerActionStorage;
