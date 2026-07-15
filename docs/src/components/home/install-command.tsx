@@ -54,6 +54,8 @@ const commands: readonly CommandOption[] = [
 export function InstallCommand() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
+  const [fadeEdges, setFadeEdges] = useState({ left: false, right: false });
+  const commandScrollRef = useRef<HTMLElement | null>(null);
   const resetTimer = useRef<number | undefined>(undefined);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeCommand = commands[activeIndex];
@@ -79,6 +81,37 @@ export function InstallCommand() {
   useEffect(() => {
     return () => window.clearTimeout(resetTimer.current);
   }, []);
+
+  useEffect(() => {
+    const scrollArea = commandScrollRef.current;
+    if (!scrollArea) return;
+
+    scrollArea.scrollLeft = 0;
+
+    function updateFadeEdges() {
+      const maxScrollLeft = Math.max(0, scrollArea.scrollWidth - scrollArea.clientWidth);
+      const nextEdges = {
+        left: scrollArea.scrollLeft > 1,
+        right: scrollArea.scrollLeft < maxScrollLeft - 1,
+      };
+
+      setFadeEdges((currentEdges) =>
+        currentEdges.left === nextEdges.left && currentEdges.right === nextEdges.right
+          ? currentEdges
+          : nextEdges,
+      );
+    }
+
+    updateFadeEdges();
+    scrollArea.addEventListener("scroll", updateFadeEdges, { passive: true });
+    const resizeObserver = new ResizeObserver(updateFadeEdges);
+    resizeObserver.observe(scrollArea);
+
+    return () => {
+      scrollArea.removeEventListener("scroll", updateFadeEdges);
+      resizeObserver.disconnect();
+    };
+  }, [activeIndex]);
 
   function selectCommand(index: number) {
     window.clearTimeout(resetTimer.current);
@@ -200,15 +233,34 @@ export function InstallCommand() {
         >
           <ActiveCommandIcon className="size-2.5" strokeWidth={1.5} />
         </span>
-        <code
-          className="flex min-w-0 items-center overflow-x-auto whitespace-nowrap px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px]"
-          title={activeCommand.command}
-        >
-          <span aria-hidden className="mr-2 text-white/28">
-            {activeCommand.kind === "agent" ? "AI" : "$"}
-          </span>
-          {activeCommand.command}
-        </code>
+        <div className="relative min-w-0 overflow-hidden">
+          <code
+            className="flex h-full min-w-0 items-center overflow-x-auto whitespace-nowrap px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px]"
+            ref={commandScrollRef}
+            title={activeCommand.command}
+          >
+            <span aria-hidden className="mr-2 text-white/28">
+              {activeCommand.kind === "agent" ? "AI" : "$"}
+            </span>
+            {activeCommand.command}
+          </code>
+          {activeCommand.kind === "agent" ? (
+            <>
+              <span
+                aria-hidden
+                className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-black via-black/80 to-transparent transition-opacity duration-200 ${
+                  fadeEdges.left ? "opacity-100" : "opacity-0"
+                }`}
+              />
+              <span
+                aria-hidden
+                className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-black via-black/80 to-transparent transition-opacity duration-200 ${
+                  fadeEdges.right ? "opacity-100" : "opacity-0"
+                }`}
+              />
+            </>
+          ) : null}
+        </div>
         <button
           aria-label={`${copyLabel} ${copyTarget}`}
           className="inline-flex min-w-9 shrink-0 items-center justify-center gap-1 border-l border-white/10 bg-white/[0.025] px-1.5 font-mono text-[8px] font-normal uppercase tracking-normal text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.075] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white sm:min-w-[4.25rem] sm:px-2 sm:text-[9px]"
