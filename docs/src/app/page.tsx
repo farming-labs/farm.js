@@ -1239,7 +1239,7 @@ function FooterActionLink({
 function FooterLinksGroup({ title, links }: { title: string; links: readonly FooterLink[] }) {
   return (
     <div className="px-4 py-4 md:min-h-[154px]">
-      <h3 className="mb-2 font-mono text-[8px] font-normal uppercase tracking-normal text-white/28">
+      <h3 className="mb-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/42">
         {title}
       </h3>
       <ul className="grid">
@@ -1297,7 +1297,7 @@ function Footer() {
           </div>
         ))}
       </div>
-      <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[8px] font-normal uppercase tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between">
+      <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[10px] font-normal uppercase tracking-normal text-white/36 sm:flex-row sm:items-center sm:justify-between">
         <span>&copy; {new Date().getFullYear()} Farm.js</span>
         <a
           className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
