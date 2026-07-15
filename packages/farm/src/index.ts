@@ -111,6 +111,7 @@ export * from "./client";
 export * from "./ssg";
 export * from "./cache";
 export * from "./deferred";
+export * from "./after";
 export {
   getFarmRedirectError,
   isFarmNotFoundError,

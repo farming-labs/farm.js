@@ -45,6 +45,9 @@
       "deferred": [
         "./dist/deferred.d.ts"
       ],
+      "after": [
+        "./dist/after.d.ts"
+      ],
       "navigation": [
         "./dist/navigation.d.ts"
       ],
@@ -149,6 +152,11 @@
       "types": "./dist/deferred.d.ts",
       "import": "./dist/deferred.mjs",
       "require": "./dist/deferred.cjs"
+    },
+    "./after": {
+      "types": "./dist/after.d.ts",
+      "import": "./dist/after.mjs",
+      "require": "./dist/after.cjs"
     },
     "./navigation": {
       "types": "./dist/navigation.d.ts",
