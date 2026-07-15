@@ -69,6 +69,44 @@ describe("after", () => {
     errorSpy.mockRestore();
   });
 
+  it("continues when the callback error reporter also throws", async () => {
+    const events: string[] = [];
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      throw new Error("log transport failed");
+    });
+
+    const response = await _runWithAfterRequest(new Request("https://farm.local/audit"), () => {
+      after(() => {
+        events.push("failed");
+        throw new Error("audit failed");
+      });
+      after(() => {
+        events.push("continued");
+      });
+      return new Response("ok");
+    });
+
+    await response.text();
+    await vi.waitFor(() => expect(events).toContain("continued"));
+    expect(events).toEqual(["failed", "continued"]);
+    errorSpy.mockRestore();
+  });
+
+  it("preserves non-standard platform responses", async () => {
+    const platformResponse = Response.error();
+    let didRun = false;
+
+    const response = await _runWithAfterRequest(new Request("https://farm.local/proxy"), () => {
+      after(() => {
+        didRun = true;
+      });
+      return platformResponse;
+    });
+
+    expect(response).toBe(platformResponse);
+    await vi.waitFor(() => expect(didRun).toBe(true));
+  });
+
   it("preserves request-local context from the registration site", async () => {
     const requestScope = new AsyncLocalStorage<string>();
     let observed: string | undefined;

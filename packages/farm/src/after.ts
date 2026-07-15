@@ -44,6 +44,14 @@ function defaultAfterErrorReporter(error: unknown): void {
   console.error("[Farm.js] after() callback failed:", error);
 }
 
+function reportAfterError(state: AfterRequestState, error: unknown): void {
+  try {
+    state.reportError(error);
+  } catch {
+    // Error reporting must never interrupt the remaining post-response work.
+  }
+}
+
 function createAfterRequestState(
   reportError: (error: unknown) => void = defaultAfterErrorReporter,
 ): AfterRequestState {
@@ -75,7 +83,7 @@ function createAfterRequestState(
         try {
           await task.result;
         } catch (error) {
-          state.reportError(error);
+          reportAfterError(state, error);
         }
       }
 
@@ -95,7 +103,7 @@ function registerPlatformLifetime(
   try {
     context.waitUntil(state.completion);
   } catch (error) {
-    state.reportError(error);
+    reportAfterError(state, error);
   }
 }
 
@@ -109,7 +117,7 @@ function registerResponseFinishedHook(
     context.onResponseFinished(state.finishResponse);
     return true;
   } catch (error) {
-    state.reportError(error);
+    reportAfterError(state, error);
     return false;
   }
 }
@@ -123,7 +131,14 @@ function wrapResponseBody(
   request: Request,
   state: AfterRequestState,
 ): Response {
-  if (request.method === "HEAD" || !response.body || response.bodyUsed || response.body.locked) {
+  if (
+    request.method === "HEAD" ||
+    response.status < 200 ||
+    response.status > 599 ||
+    !response.body ||
+    response.bodyUsed ||
+    response.body.locked
+  ) {
     finishSoon(state);
     return response;
   }
