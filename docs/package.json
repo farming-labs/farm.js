@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @farmjs/core build && pnpm run prisma:generate && farm dev",
-    "build": "pnpm --filter @farmjs/core build && pnpm run prisma:generate && farm build",
+    "dev": "pnpm --filter @farmjs/core build && pnpm --filter @farmjs/cli build && pnpm run prisma:generate && farm dev",
+    "build": "pnpm --filter @farmjs/core build && pnpm --filter @farmjs/cli build && pnpm run prisma:generate && farm build",
     "preview": "farm preview",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://user:password@localhost:5432/farmjs} prisma generate",
     "db:push": "prisma db push"
