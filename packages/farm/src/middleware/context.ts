@@ -118,6 +118,7 @@ export function createContext(
   const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
   const headers = new Map<string, string>();
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
+  const locals = parent?.locals ? new Map(parent.locals) : new Map<string, any>();
   const cookies = new CookieJarImpl(req, res);
 
   // Copy existing headers
@@ -153,6 +154,7 @@ export function createContext(
       server: viteServer,
     },
     data,
+    locals,
     headers,
     cookies,
     _handled: false,

@@ -83,6 +83,7 @@ export default defineRoutes(({ api }) => [
     path.join(root, "src", "app", "dashboard", "settings", "page.tsx"),
     `
 import React from "react";
+import { DashboardIdentity } from "../dashboard-identity";
 
 export default function DashboardPage(props: any) {
   const middlewareData = props.middleware?.data;
@@ -93,7 +94,28 @@ export default function DashboardPage(props: any) {
   return React.createElement(
     "main",
     null,
-    \`production middleware: \${configArea} / \${configPath} / \${fileArea} / \${props.path}\`
+    \`production middleware: \${configArea} / \${configPath} / \${fileArea} / \${props.path}\`,
+    React.createElement(DashboardIdentity)
+  );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "dashboard-identity.tsx"),
+    `
+import React from "react";
+import { getMiddlewareContext } from "@farmjs/core/middleware";
+import type { DashboardContext } from "./middleware";
+
+export function DashboardIdentity() {
+  const context = getMiddlewareContext<DashboardContext>();
+  const session = context.get("session");
+  const requestPath = context.get("requestPath");
+
+  return React.createElement(
+    "span",
+    null,
+    \` / server context: \${session?.userId || "missing"} / \${requestPath || "missing"}\`
   );
 }
 `.trim(),
@@ -101,10 +123,30 @@ export default function DashboardPage(props: any) {
   await fs.writeFile(
     path.join(root, "src", "app", "dashboard", "middleware.ts"),
     `
-export default async function dashboardMiddleware(ctx: any, next: () => Promise<void>) {
-  ctx.data.set("file.area", "dashboard-file");
-  ctx.headers.set("x-farm-middleware", "yes");
-  if (ctx.pathname === "/dashboard/file-response") {
+import type { RequestMiddlewareContext } from "@farmjs/core/middleware";
+
+export interface DashboardContext {
+  session: { userId: string; secret: string };
+  requestPath: string;
+}
+
+export const config = {
+  matcher: "/dashboard/:path*",
+};
+
+export async function middleware(
+  request: Request,
+  context: RequestMiddlewareContext<DashboardContext>,
+) {
+  const pathname = new URL(request.url).pathname;
+  context.set("session", {
+    userId: "dashboard-user",
+    secret: "never-serialize-this-session-secret",
+  });
+  context.set("requestPath", pathname);
+  context.data.set("file.area", "dashboard-file");
+  context.headers.set("x-farm-middleware", "yes");
+  if (pathname === "/dashboard/file-response") {
     return new Response("blocked by file middleware", {
       status: 418,
       headers: {
@@ -112,7 +154,6 @@ export default async function dashboardMiddleware(ctx: any, next: () => Promise<
       },
     });
   }
-  await next();
 }
 `.trim(),
   );
@@ -121,6 +162,7 @@ export default async function dashboardMiddleware(ctx: any, next: () => Promise<
     `
 export default async function userMiddleware(ctx: any, next: () => Promise<void>) {
   ctx.data.set("file.userId", ctx.params.id || "missing-id");
+  ctx.locals.set("file.userId", ctx.params.id || "missing-id");
   await next();
 }
 `.trim(),
@@ -129,12 +171,14 @@ export default async function userMiddleware(ctx: any, next: () => Promise<void>
     path.join(root, "src", "app", "users", "[id]", "settings", "page.tsx"),
     `
 import React from "react";
+import { getMiddlewareContext } from "@farmjs/core/middleware";
 
 export default function UserSettingsPage(props: any) {
+  const context = getMiddlewareContext<{ "file.userId": string }>();
   return React.createElement(
     "main",
     null,
-    \`user settings: \${props.middleware?.data.get("file.userId") || "missing"} / \${props.params.id}\`
+    \`user settings: \${props.middleware?.data.get("file.userId") || "missing"} / \${context.get("file.userId") || "missing-context"} / \${props.params.id}\`
   );
 }
 `.trim(),
