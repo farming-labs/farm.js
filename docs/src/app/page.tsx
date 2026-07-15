@@ -242,21 +242,20 @@ const footerGroups = [
   },
 ] as const;
 
-const typedApiCode = `const user = await api.users.get({
-  params: { id: "user_123" },
+const typedApiCode = `const { data, error } = await api.users.get({
+  query: { limit: "5" },
 });
 
-user.name;
-//   ^? string`;
+if (error) throw error;
+
+data?.users[0]?.name;
+//   ^? string | undefined`;
 
 const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
+import { appIntegrations } from "./src/lib/integrations";
 
 export default defineConfig({
-  integrations: [
-    auth(),
-    billing(),
-    jobs(),
-  ],
+  integrations: appIntegrations,
 });`;
 
 const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";
@@ -589,18 +588,20 @@ function TerminalVisual() {
           </span>
         </figcaption>
         <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
-          <code className="block min-w-max">
+          <code className="block min-w-0 whitespace-pre-wrap break-words">
             <span className="block text-white/48">$ pnpm dev</span>
+            <span className="mt-2 block text-white/48">
+              [info] 📦 Enabled built-in Tailwind support (@tailwindcss/vite)
+            </span>
             <span className="mt-2 block text-white">
-              <span className="font-semibold text-white">FARM</span> v0.0.3 ready in 126ms
+              <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in 386ms
             </span>
             <span className="block text-white/54">
-              <span className="text-white/82">Local</span> http://localhost:3000
+              <span className="text-white/82">➜ Local:</span> http://localhost:3000/
             </span>
             <span className="block text-white/54">
-              <span className="text-white/82">Graph</span> 32 routes / 8 integrations
+              <span className="text-white/82">➜ Network:</span> use --host to expose
             </span>
-            <span className="mt-2 block text-white/32">press h + enter to show help</span>
           </code>
         </pre>
       </figure>
@@ -614,7 +615,7 @@ function TypedApiVisual() {
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={typedApiCode}
-        label="/api/users/:id"
+        label="/api/users"
         language="tsx"
         prefix="GET"
       />
@@ -645,22 +646,26 @@ function BuildVisual() {
           </span>
           <span>bash</span>
         </figcaption>
-        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-6 tracking-normal text-white/58 sm:text-[11px]">
-          <code className="block min-w-max">
-            <span className="block text-white">$ farm build --target vercel</span>
+        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-5 tracking-normal text-white/58 sm:text-[11px] sm:leading-6">
+          <code className="block min-w-0 whitespace-pre-wrap break-words">
+            <span className="block text-white">$ farm build --preset vercel</span>
             <span className="mt-2 block">
-              <span className="text-white">ok</span> route manifest ........ 44 routes
+              <span className="text-white">[info]</span> 🚜 Building Farm.js application with
+              preset: vercel...
             </span>
             <span className="block">
-              <span className="text-white">ok</span> middleware .............. 6 matchers
+              <span className="text-white">[info]</span> 🔍 Discovering routes and API endpoints...
             </span>
             <span className="block">
-              <span className="text-white">ok</span> generated client ........ 12 APIs
+              <span className="text-white">[info]</span> 📦 Building client and SSR bundles in
+              parallel...
             </span>
             <span className="block">
-              <span className="text-white">ok</span> deployment output ....... .vercel/output
+              <span className="text-white">[success]</span> ✅ Build completed successfully!
             </span>
-            <span className="mt-2 block text-white/78">built in 842ms</span>
+            <span className="block text-white/78">
+              <span className="text-white">[info]</span> 📁 Output directory: .vercel/output
+            </span>
           </code>
         </pre>
       </figure>

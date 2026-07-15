@@ -25,10 +25,30 @@ const commands: readonly CommandOption[] = [
     icon: Bot,
     kind: "agent",
   },
-  { label: "npm", command: "npm create farm@latest", brand: npmIconUrl, kind: "install" },
-  { label: "Yarn", command: "yarn create farm", brand: yarnIconUrl, kind: "install" },
-  { label: "pnpm", command: "pnpm create farm@latest", brand: pnpmIconUrl, kind: "install" },
-  { label: "Bun", command: "bun create farm", brand: bunIconUrl, kind: "install" },
+  {
+    label: "npm",
+    command: "npx @farmjs/create-app@beta",
+    brand: npmIconUrl,
+    kind: "install",
+  },
+  {
+    label: "Yarn",
+    command: "yarn dlx @farmjs/create-app@beta",
+    brand: yarnIconUrl,
+    kind: "install",
+  },
+  {
+    label: "pnpm",
+    command: "pnpm dlx @farmjs/create-app@beta",
+    brand: pnpmIconUrl,
+    kind: "install",
+  },
+  {
+    label: "Bun",
+    command: "bunx @farmjs/create-app@beta",
+    brand: bunIconUrl,
+    kind: "install",
+  },
 ];
 
 export function InstallCommand() {
