@@ -329,6 +329,15 @@ function FarmingLabsBrand() {
   );
 }
 
+function BrandLockup() {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <FarmingLabsBrand />
+      <Wordmark className="text-[11px]" />
+    </div>
+  );
+}
+
 function ButtonLink({
   href,
   children,
@@ -404,7 +413,7 @@ function Header() {
     <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
       <div className="flex h-11 w-full items-stretch">
         <div className="flex shrink-0 items-center px-4 sm:px-7">
-          <Wordmark className="text-[13px]" />
+          <BrandLockup />
         </div>
 
         <nav
@@ -1205,10 +1214,7 @@ function Footer() {
       <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
         <div>
           <div className="flex h-12 items-center border-b border-white/12 px-4">
-            <div className="flex min-w-0 items-center gap-2.5">
-              <FarmingLabsBrand />
-              <Wordmark className="text-[11px]" />
-            </div>
+            <BrandLockup />
           </div>
           <div className="px-4 py-4 md:min-h-[154px]">
             <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 tracking-normal text-white/42">
@@ -1229,12 +1235,12 @@ function Footer() {
         ))}
       </div>
       <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[8px] font-normal uppercase tracking-normal text-white/28 sm:flex-row sm:items-center sm:justify-between">
-        <span>&copy; {new Date().getFullYear()} Farm.js / MIT License</span>
+        <span>&copy; {new Date().getFullYear()} Farm.js</span>
         <a
           className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-          href="https://kinfish.dev"
+          href="https://www.farming-labs.dev"
         >
-          kinfish.dev <ExternalLink aria-hidden className="size-3" strokeWidth={1.5} />
+          farming-labs.dev <ExternalLink aria-hidden className="size-3" strokeWidth={1.5} />
         </a>
       </div>
     </footer>
