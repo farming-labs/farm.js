@@ -54,8 +54,6 @@ const commands: readonly CommandOption[] = [
 export function InstallCommand() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [copyState, setCopyState] = useState<"idle" | "copying" | "copied" | "failed">("idle");
-  const [fadeEdges, setFadeEdges] = useState({ left: false, right: false });
-  const commandScrollRef = useRef<HTMLElement | null>(null);
   const resetTimer = useRef<number | undefined>(undefined);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeCommand = commands[activeIndex];
@@ -81,37 +79,6 @@ export function InstallCommand() {
   useEffect(() => {
     return () => window.clearTimeout(resetTimer.current);
   }, []);
-
-  useEffect(() => {
-    const scrollArea = commandScrollRef.current;
-    if (!scrollArea) return;
-
-    scrollArea.scrollLeft = 0;
-
-    function updateFadeEdges() {
-      const maxScrollLeft = Math.max(0, scrollArea.scrollWidth - scrollArea.clientWidth);
-      const nextEdges = {
-        left: scrollArea.scrollLeft > 1,
-        right: scrollArea.scrollLeft < maxScrollLeft - 1,
-      };
-
-      setFadeEdges((currentEdges) =>
-        currentEdges.left === nextEdges.left && currentEdges.right === nextEdges.right
-          ? currentEdges
-          : nextEdges,
-      );
-    }
-
-    updateFadeEdges();
-    scrollArea.addEventListener("scroll", updateFadeEdges, { passive: true });
-    const resizeObserver = new ResizeObserver(updateFadeEdges);
-    resizeObserver.observe(scrollArea);
-
-    return () => {
-      scrollArea.removeEventListener("scroll", updateFadeEdges);
-      resizeObserver.disconnect();
-    };
-  }, [activeIndex]);
 
   function selectCommand(index: number) {
     window.clearTimeout(resetTimer.current);
@@ -233,33 +200,23 @@ export function InstallCommand() {
         >
           <ActiveCommandIcon className="size-2.5" strokeWidth={1.5} />
         </span>
-        <div className="relative min-w-0 overflow-hidden">
+        <div className="min-w-0 overflow-hidden">
           <code
-            className="flex h-full min-w-0 items-center overflow-x-auto whitespace-nowrap px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px]"
-            ref={commandScrollRef}
+            className={`flex h-full min-w-0 px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px] ${
+              activeCommand.kind === "agent" ? "items-start py-2 leading-4" : "items-center"
+            }`}
             title={activeCommand.command}
           >
-            <span aria-hidden className="mr-2 text-white/28">
+            <span
+              aria-hidden
+              className={`mr-2 shrink-0 text-white/28 ${
+                activeCommand.kind === "agent" ? "pt-px" : ""
+              }`}
+            >
               {activeCommand.kind === "agent" ? "AI" : "$"}
             </span>
-            {activeCommand.command}
+            <span className="min-w-0 whitespace-normal break-words">{activeCommand.command}</span>
           </code>
-          {activeCommand.kind === "agent" ? (
-            <>
-              <span
-                aria-hidden
-                className={`pointer-events-none absolute inset-y-0 left-0 w-8 bg-gradient-to-r from-black via-black/80 to-transparent transition-opacity duration-200 ${
-                  fadeEdges.left ? "opacity-100" : "opacity-0"
-                }`}
-              />
-              <span
-                aria-hidden
-                className={`pointer-events-none absolute inset-y-0 right-0 w-8 bg-gradient-to-l from-black via-black/80 to-transparent transition-opacity duration-200 ${
-                  fadeEdges.right ? "opacity-100" : "opacity-0"
-                }`}
-              />
-            </>
-          ) : null}
         </div>
         <button
           aria-label={`${copyLabel} ${copyTarget}`}
