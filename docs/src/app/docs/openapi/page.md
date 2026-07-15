@@ -37,16 +37,19 @@ Farm scans API route files and generates an OpenAPI 3.0.3 spec from the discover
 import { createEndpoint } from "@farmjs/core/api";
 import { z } from "zod";
 
-export const GET = createEndpoint({
-  query: z.object({
-    limit: z.coerce.number().int().positive().default(20),
-  }),
-  async handler({ input }) {
+export const GET = createEndpoint(
+  {
+    method: "GET",
+    query: z.object({
+      limit: z.coerce.number().int().positive().default(20),
+    }),
+  },
+  async ({ query }) => {
     return Response.json({
-      users: await listUsers(input.query.limit),
+      users: await listUsers(query.limit),
     });
   },
-});
+);
 ```
 
 The route appears in the generated reference with a typed `limit` query parameter.

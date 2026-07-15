@@ -18,14 +18,17 @@ API route modules export HTTP methods. Farm discovers them, runs the route pipel
 import { createEndpoint } from "@farmjs/core/api";
 import { z } from "zod";
 
-export const POST = createEndpoint({
-  body: z.object({
-    name: z.string().min(1),
-  }),
-  async handler({ input }) {
-    return Response.json({ message: "Hello " + input.body.name });
+export const POST = createEndpoint(
+  {
+    method: "POST",
+    body: z.object({
+      name: z.string().min(1),
+    }),
   },
-});
+  async ({ body }) => {
+    return Response.json({ message: "Hello " + body.name });
+  },
+);
 ```
 
 ## Next-style exports
@@ -61,21 +64,102 @@ Use `createEndpoint` when you want input validation and typed client generation.
 ## Body and query input
 
 ```ts
-export const GET = createEndpoint({
-  query: z.object({
-    q: z.string().optional(),
-    page: z.coerce.number().int().positive().default(1),
-  }),
-  async handler({ input }) {
+export const GET = createEndpoint(
+  {
+    method: "GET",
+    query: z.object({
+      q: z.string().optional(),
+      page: z.coerce.number().int().positive().default(1),
+    }),
+  },
+  async ({ query }) => {
     return Response.json({
-      q: input.query.q ?? "",
-      page: input.query.page,
+      q: query.q ?? "",
+      page: query.page,
     });
   },
-});
+);
 ```
 
-Farm parses and validates input before the handler runs. Invalid input returns a `400` response with structured validation issues.
+Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
+
+## Endpoint middleware
+
+Put plain async functions in `middleware`. There is no middleware factory and no `next()` callback. Functions run in declaration order after endpoint input validation.
+
+**src/app/api/projects/[id]/route.ts**
+
+```ts
+import { createEndpoint, type EndpointMiddlewareContext } from "@farmjs/core/api";
+import { z } from "zod";
+
+type Session = {
+  user: { id: string; roles: string[] };
+};
+
+async function requireAuth({ request }: EndpointMiddlewareContext) {
+  const session = await getSession(request);
+
+  if (!session?.user) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  return { session: session as Session };
+}
+
+const requireRole =
+  (role: string) =>
+  async ({ context }: EndpointMiddlewareContext<{ session: Session }>) => {
+    return context.session.user.roles.includes(role);
+  };
+
+async function loadProject({
+  body,
+  context,
+  params,
+}: EndpointMiddlewareContext<{ session: Session }, { name: string }>) {
+  const project = await db.project.findUniqueOrThrow({
+    where: {
+      id: String(params.id),
+      ownerId: context.session.user.id,
+    },
+  });
+
+  return { project };
+}
+
+export const PATCH = createEndpoint(
+  {
+    method: "PATCH",
+    body: z.object({ name: z.string().min(1) }),
+    middleware: [requireAuth, requireRole("admin"), loadProject],
+  },
+  async ({ body, context }) => {
+    // context.session and context.project are inferred from middleware returns.
+    return db.project.update({
+      where: { id: context.project.id },
+      data: { name: body.name },
+    });
+  },
+);
+```
+
+Middleware return values have deliberate control-flow meaning:
+
+| Return value | Result                                                                                   |
+| ------------ | ---------------------------------------------------------------------------------------- |
+| Plain object | Shallow-merges its properties into typed `context` for later middleware and the handler. |
+| `true`       | Continues without adding context.                                                        |
+| `false`      | Stops and returns Farm's JSON `403 Forbidden` response.                                  |
+| `Response`   | Stops and returns that response unchanged. Use this for custom status, body, or headers. |
+
+Only literal `false` is the default denial signal. Returning `null`, `undefined`, an array, or another value is an error, which catches forgotten returns instead of silently skipping authorization. Context is shallowly frozen, duplicate keys are rejected, and `__proto__`, `constructor`, and `prototype` cannot be provided as context keys.
+
+Endpoint middleware is local to one `createEndpoint` declaration and can use its validated input. Use `src/app/**/middleware.ts` for path-level behavior shared by many routes, such as request tracing, common headers, or an early rewrite before endpoint parsing.
+
+> **Authorization boundary**
+>
+> Derive users, roles, tenants, and rate-limit identities from the trusted `Request` or server state. Middleware context is created only on the server and is never accepted from client input. Keep resource-specific permission checks close to the resource query even when shared authentication runs in middleware.
 
 ## Client inference
 

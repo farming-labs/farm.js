@@ -71,16 +71,19 @@ Farm API routes live beside pages and use the same route tree. Define an endpoin
 import { createEndpoint } from "@farmjs/core/api";
 import { z } from "zod";
 
-export const POST = createEndpoint({
-  body: z.object({
-    name: z.string().min(1),
-  }),
-  async handler({ input }) {
+export const POST = createEndpoint(
+  {
+    method: "POST",
+    body: z.object({
+      name: z.string().min(1),
+    }),
+  },
+  async ({ body }) => {
     return Response.json({
-      message: `Hello ${input.body.name}`,
+      message: `Hello ${body.name}`,
     });
   },
-});
+);
 ```
 
 **src/components/hello-button.tsx**

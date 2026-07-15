@@ -181,9 +181,11 @@ describe("APIRouteManager", () => {
             {
               method: "GET",
               query: z.object({ view: z.enum(["summary", "details"]) }),
+              middleware: [({ params }) => ({ projectId: params.id })],
             },
             async (ctx) => ({
               id: ctx.params.id,
+              middlewareProjectId: ctx.context.projectId,
               view: ctx.query.view,
               hasRequest: ctx.request instanceof Request,
             }),
@@ -202,6 +204,7 @@ describe("APIRouteManager", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       id: "farm",
+      middlewareProjectId: "farm",
       view: "details",
       hasRequest: true,
     });
