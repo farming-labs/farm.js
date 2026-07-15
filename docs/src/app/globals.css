@@ -464,6 +464,17 @@
   }
 }
 
+@keyframes farm-agent-command-scroll {
+  0%,
+  8% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  100% {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
 @keyframes farm-terminal-command-type {
   0% {
     width: 0;
@@ -744,6 +755,28 @@
   );
 }
 
+.farm-agent-command-viewport {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1rem,
+    #000 calc(100% - 1rem),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 1rem,
+    #000 calc(100% - 1rem),
+    transparent
+  );
+}
+
+.farm-agent-command-track {
+  animation: farm-agent-command-scroll 36s linear infinite;
+  will-change: transform;
+}
+
 .farm-logo-rail {
   animation: farm-logo-rail 24s linear infinite;
   will-change: transform;
@@ -754,6 +787,10 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
+  .farm-agent-command-viewport:hover .farm-agent-command-track {
+    animation-play-state: paused;
+  }
+
   .farm-logo-viewport:hover .farm-logo-rail {
     animation-play-state: paused;
   }
@@ -778,6 +815,15 @@
   }
 
   .farm-logo-rail-copy[aria-hidden="true"] {
+    display: none;
+  }
+
+  .farm-agent-command-track {
+    animation: none;
+    transform: none;
+  }
+
+  .farm-agent-command-copy[aria-hidden="true"] {
     display: none;
   }
 
