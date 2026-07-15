@@ -39,6 +39,11 @@ import {
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
 } from '@farmjs/core/deployment';
+import {
+  _runWithMiddlewareContext,
+  _runWithMiddlewareData,
+  createProductionMiddlewareRunner,
+} from '@farmjs/core/middleware';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 `;
@@ -125,6 +130,13 @@ const errors = mergeRouteModules([${routeRoots
 const middlewares = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: middlewares${index} }`)
     .join(", ")}]);
+const farmMiddlewareRunner = createProductionMiddlewareRunner({
+  modules: Object.entries(middlewares).map(([filePath, module]) => ({
+    path: middlewarePathToRoute(filePath),
+    filePath,
+    module,
+  })),
+});
 
 debug('Discovered pages:', Object.keys(pages));
 debug('Discovered layouts:', Object.keys(layouts));
@@ -196,163 +208,10 @@ function middlewarePathToRoute(filePath) {
 }
 
 /**
- * Get all applicable middleware for a pathname (from root to most specific)
- */
-function getApplicableMiddleware(pathname) {
-  const applicable = [];
-  const normalizedPath = pathname.replace(/\\/$/, '') || '/';
-  
-  for (const [filePath, module] of Object.entries(middlewares)) {
-    const mwPath = middlewarePathToRoute(filePath);
-    
-    // Root middleware (/) applies to everything
-    // Other middleware applies to their path and sub-paths
-    if (mwPath === '/' || normalizedPath.startsWith(mwPath) || normalizedPath === mwPath) {
-      applicable.push({
-        path: mwPath,
-        filePath,
-        module,
-        config: module.config,
-      });
-    }
-  }
-  
-  // Sort by path depth (root first, then nested)
-  applicable.sort((a, b) => {
-    const depthA = a.path.split('/').filter(Boolean).length;
-    const depthB = b.path.split('/').filter(Boolean).length;
-    return depthA - depthB;
-  });
-  
-  return applicable;
-}
-
-/**
- * Create a middleware context
- */
-function createMiddlewareContext(request, url) {
-  return {
-    method: request.method,
-    url: url.href,
-    pathname: url.pathname,
-    searchParams: url.searchParams,
-    headers: new Map(),
-    data: new Map(),
-    request,
-  };
-}
-
-/**
  * Execute middleware chain for a request
- * Returns { handled: boolean, ctx: context } 
  */
-async function executeMiddleware(request, url) {
-  const applicable = getApplicableMiddleware(url.pathname);
-  
-  if (applicable.length === 0) {
-    return { handled: false, ctx: createMiddlewareContext(request, url) };
-  }
-  
-  const startTime = Date.now();
-  const method = request.method || 'GET';
-  
-  // Log middleware execution in [FARM] [MIDDLEWARE] [METHOD] format
-  try {
-    const picoModule = await import('picocolors');
-    const pico = picoModule.default || picoModule;
-    const pc = typeof pico.createColors === 'function' ? pico.createColors(true) : pico;
-    const logMsg = [
-      pc.dim('[') + pc.bold(pc.blue('FARM')) + pc.dim(']'),
-      pc.dim('[') + pc.bold(pc.magenta('MIDDLEWARE')) + pc.dim(']'),
-      pc.dim('[') + pc.bold(pc.white(method.padEnd(3))) + pc.dim(']'),
-      pc.gray('Executing middleware: '),
-      pc.gray(url.pathname),
-      pc.dim(' (' + applicable.length + ' middleware)'),
-    ].join(' ');
-    console.log(logMsg);
-  } catch {
-    console.log('[FARM] [MIDDLEWARE] [' + method + '] Executing middleware: ' + url.pathname + ' (' + applicable.length + ' middleware)');
-  }
-  
-  let ctx = createMiddlewareContext(request, url);
-  
-  for (const mw of applicable) {
-    const module = mw.module;
-    let handlers = [];
-    
-    // Get handlers from the middleware module
-    if (module.default) {
-      const defaultExport = module.default;
-      
-      // Check if it has a build method (middleware chain object)
-      if (typeof defaultExport === 'object' && 'build' in defaultExport) {
-        if (typeof defaultExport.setBasePath === 'function') {
-          defaultExport.setBasePath(mw.path);
-        }
-        const built = defaultExport.build();
-        handlers = built.handlers || [];
-      } else if (typeof defaultExport === 'function') {
-        handlers = [defaultExport];
-      }
-    }
-    
-    // Execute handlers in sequence
-    for (const handler of handlers) {
-      let nextCalled = false;
-      const next = async () => { nextCalled = true; };
-      
-      try {
-        await handler(ctx, next);
-      } catch (err) {
-        console.error('[Middleware] Error in', mw.path, err);
-        throw err;
-      }
-      
-      // If next() was not called, middleware handled the request
-      if (!nextCalled && ctx._response) {
-        // Log middleware completion
-        const duration = Date.now() - startTime;
-        try {
-          const picoModule2 = await import('picocolors');
-          const pico2 = picoModule2.default || picoModule2;
-          const pc2 = typeof pico2.createColors === 'function' ? pico2.createColors(true) : pico2;
-          const logMsg = [
-            pc2.dim('[') + pc2.bold(pc2.blue('FARM')) + pc2.dim(']'),
-            pc2.dim('[') + pc2.bold(pc2.magenta('MIDDLEWARE')) + pc2.dim(']'),
-            pc2.dim('[') + pc2.bold(pc2.white(method.padEnd(3))) + pc2.dim(']'),
-            pc2.gray('Completed'),
-            pc2.gray(url.pathname),
-            pc2.dim('(' + duration + 'ms)'),
-          ].join(' ');
-          console.log(logMsg);
-        } catch {
-          console.log('[FARM] [MIDDLEWARE] [' + method + '] Completed ' + url.pathname + ' (' + duration + 'ms)');
-        }
-        return { handled: true, ctx, response: ctx._response };
-      }
-    }
-  }
-  
-  // Log middleware completion
-  const duration = Date.now() - startTime;
-  try {
-    const picoModule3 = await import('picocolors');
-    const pico3 = picoModule3.default || picoModule3;
-    const pc3 = typeof pico3.createColors === 'function' ? pico3.createColors(true) : pico3;
-    const logMsg = [
-      pc3.dim('[') + pc3.bold(pc3.blue('FARM')) + pc3.dim(']'),
-      pc3.dim('[') + pc3.bold(pc3.magenta('MIDDLEWARE')) + pc3.dim(']'),
-      pc3.dim('[') + pc3.bold(pc3.white(method.padEnd(3))) + pc3.dim(']'),
-      pc3.gray('Completed'),
-      pc3.gray(url.pathname),
-      pc3.dim('(' + duration + 'ms)'),
-    ].join(' ');
-    console.log(logMsg);
-  } catch {
-    console.log('[FARM] [MIDDLEWARE] [' + method + '] Completed ' + url.pathname + ' (' + duration + 'ms)');
-  }
-  
-  return { handled: false, ctx };
+async function executeMiddleware(request) {
+  return farmMiddlewareRunner(request);
 }
 
 /**
@@ -518,7 +377,7 @@ function getLayout(pageFilePath) {
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
  */
 async function handler(request) {
-  const url = new URL(request.url);
+  let url = new URL(request.url);
   try {
   debug('Handling request:', request.method, url.pathname);
 
@@ -549,20 +408,26 @@ async function handler(request) {
   }
 
   // Execute middleware first
-  const middlewareResult = await executeMiddleware(request, url);
+  const middlewareResult = await executeMiddleware(request);
   
   // If middleware handled the request (e.g., redirect, auth), return the response
-  if (middlewareResult.handled && middlewareResult.response) {
+  if (middlewareResult.response) {
     return middlewareResult.response;
   }
-  
+
+  request = middlewareResult.request;
+  url = new URL(request.url);
+
   // Extract middleware data and headers for page rendering
-  const middlewareData = Object.fromEntries(middlewareResult.ctx.data);
-  const middlewareHeaders = new Headers();
-  for (const [key, value] of middlewareResult.ctx.headers) {
-    middlewareHeaders.set(key, value);
+  const middlewareData = Object.fromEntries(middlewareResult.data);
+  const middlewareContext = middlewareResult.context;
+  const middlewareHeaders = new Headers(middlewareResult.headers);
+  if (middlewareResult.data.size || middlewareContext.size) {
+    middlewareHeaders.set('cache-control', 'private, no-store');
   }
-  
+
+  return await _runWithMiddlewareData(middlewareResult.data, () =>
+    _runWithMiddlewareContext(middlewareContext, async () => {
   const glob = '';
 `;
 
@@ -830,6 +695,8 @@ async function handler(request) {
   responseHeaders.set('content-type', 'text/html');
   applyActionResponseHeaders(responseHeaders, request);
   return new Response(html, { headers: responseHeaders });
+    })
+  );
   } catch (err) {
     console.error('[RSC] Handler error:', err);
     if (request.method === 'POST') {

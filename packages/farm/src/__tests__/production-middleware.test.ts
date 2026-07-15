@@ -36,9 +36,12 @@ describe("production middleware runtime", () => {
 
       expect(response.status).toBe(200);
       expect(response.headers.get("x-farm-middleware")).toBe("yes");
+      expect(response.headers.get("cache-control")).toBe("private, no-store");
       expect(html).toContain(
         "production middleware: dashboard / settings / dashboard-file / /dashboard/settings",
       );
+      expect(html).toContain("server context: dashboard-user / /dashboard/settings");
+      expect(html).not.toContain("never-serialize-this-session-secret");
       expect((globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type)).toEqual([
         "middleware.start",
         "middleware.complete",
@@ -86,7 +89,7 @@ describe("production middleware runtime", () => {
       );
       const userHtml = await userResponse.text();
       expect(userResponse.status).toBe(200);
-      expect(userHtml).toContain("user settings: 42 / 42");
+      expect(userHtml).toContain("user settings: 42 / 42 / 42");
       expect((globalThis as any).__farmMiddlewareEvents[0]).toMatchObject({
         route: "/users/[id]",
         pathname: "/users/42/settings",

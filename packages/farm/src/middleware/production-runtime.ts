@@ -10,6 +10,7 @@ import type {
   MiddlewareResult,
 } from "./types";
 import { emitFarmEvent } from "../observability";
+import { normalizeMiddlewareModule } from "./module";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -26,6 +27,7 @@ export interface ProductionMiddlewareResult {
   request: Request;
   response: Response | null;
   data: Map<string, any>;
+  context: Map<string, any>;
   headers: Headers;
   handled: boolean;
 }
@@ -201,6 +203,7 @@ function createWebMiddlewareContext(
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
+  const locals = parent?.locals ? new Map(parent.locals) : new Map<string, any>();
   const headers = new Map<string, string>();
 
   if (parent?.headers) {
@@ -224,6 +227,7 @@ function createWebMiddlewareContext(
       hmr: false,
     },
     data,
+    locals,
     headers,
     cookies: new WebCookieJar(currentRequest, headers),
     _handled: false as boolean,
@@ -533,37 +537,16 @@ function normalizeFileMiddleware(
   const entries: ProductionMiddlewareEntry[] = [];
 
   for (const moduleEntry of modules) {
-    const middlewareModule = moduleEntry.module as MiddlewareModule;
-    const defaultExport = middlewareModule.default;
-    const handlers: MiddlewareFunction[] = [];
-    let config = middlewareModule.config;
-
-    if (!defaultExport) {
-      continue;
-    }
-
-    if (typeof defaultExport === "object" && "build" in defaultExport) {
-      if (typeof (defaultExport as any).setBasePath === "function") {
-        (defaultExport as any).setBasePath(moduleEntry.path);
-      }
-      const built = (defaultExport as any).build();
-      if (Array.isArray(built?.handlers)) {
-        handlers.push(...built.handlers);
-      }
-      config = config || built?.config;
-    } else if (typeof defaultExport === "function") {
-      handlers.push(defaultExport as MiddlewareFunction);
-    }
-
-    if (handlers.length === 0) {
+    const normalized = normalizeMiddlewareModule(moduleEntry.module, moduleEntry.path);
+    if (!normalized) {
       continue;
     }
 
     entries.push({
       path: moduleEntry.path,
       filePath: moduleEntry.filePath || moduleEntry.path,
-      handlers,
-      config,
+      handlers: normalized.handlers,
+      config: normalized.config,
       source: "file",
     });
   }
@@ -598,6 +581,7 @@ function emptyResult(request: Request): ProductionMiddlewareResult {
     request,
     response: null,
     data: new Map(),
+    context: new Map(),
     headers: new Headers(),
     handled: false,
   };
@@ -647,6 +631,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         request: currentRequest,
         response: null,
         data: new Map(ctx.data),
+        context: new Map(ctx.locals),
         headers: mapToHeaders(ctx.headers),
         handled: false,
       };
@@ -699,6 +684,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             request: currentRequest,
             response,
             data: new Map(ctx.data),
+            context: new Map(ctx.locals),
             headers: mapToHeaders(ctx.headers),
             handled: true,
           };
@@ -715,6 +701,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             request: currentRequest,
             response,
             data: new Map(ctx.data),
+            context: new Map(ctx.locals),
             headers: mapToHeaders(ctx.headers),
             handled: true,
           };
@@ -736,6 +723,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
 
       parentData = {
         data: new Map(ctx.data),
+        locals: new Map(ctx.locals),
         headers: headersToRecord(ctx.headers),
       };
     }
@@ -744,6 +732,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       request: currentRequest,
       response: null,
       data: new Map(ctx.data),
+      context: new Map(ctx.locals),
       headers: mapToHeaders(ctx.headers),
       handled: false,
     };

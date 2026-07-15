@@ -34,6 +34,32 @@ declare module "@farmjs/core/middleware" {
     getAll(): Record<string, string>;
   }
 
+  type MiddlewareStoreKey<TValues extends Record<string, any>> = Extract<keyof TValues, string>;
+
+  export interface ReadonlyMiddlewareStore<
+    TValues extends Record<string, any> = Record<string, any>,
+  > {
+    readonly size: number;
+    get<TKey extends MiddlewareStoreKey<TValues>>(key: TKey): TValues[TKey] | undefined;
+    has<TKey extends MiddlewareStoreKey<TValues>>(key: TKey): boolean;
+    entries(): IterableIterator<
+      [MiddlewareStoreKey<TValues>, TValues[MiddlewareStoreKey<TValues>]]
+    >;
+    keys(): IterableIterator<MiddlewareStoreKey<TValues>>;
+    values(): IterableIterator<TValues[MiddlewareStoreKey<TValues>]>;
+    [Symbol.iterator](): IterableIterator<
+      [MiddlewareStoreKey<TValues>, TValues[MiddlewareStoreKey<TValues>]]
+    >;
+  }
+
+  export interface MiddlewareStore<
+    TValues extends Record<string, any> = Record<string, any>,
+  > extends ReadonlyMiddlewareStore<TValues> {
+    clear(): void;
+    delete<TKey extends MiddlewareStoreKey<TValues>>(key: TKey): boolean;
+    set<TKey extends MiddlewareStoreKey<TValues>>(key: TKey, value: TValues[TKey]): this;
+  }
+
   /**
    * Middleware context passed to each middleware function
    */
@@ -50,6 +76,8 @@ declare module "@farmjs/core/middleware" {
     cookies: CookieJar;
     /** Key-value data store for passing data between middleware */
     data: Map<string, unknown>;
+    /** Server-only request context shared with Server Components */
+    locals: Map<string, unknown>;
     /** Set a response to short-circuit the middleware chain */
     _response?: Response;
     /** Send a response and stop middleware chain */
@@ -69,6 +97,39 @@ declare module "@farmjs/core/middleware" {
     ctx: MiddlewareContext,
     next: NextFunction,
   ) => void | Promise<void>;
+
+  export interface RequestMiddlewareContext<
+    TLocals extends Record<string, any> = Record<string, any>,
+    TData extends Record<string, any> = Record<string, any>,
+  > {
+    readonly url: URL;
+    readonly pathname: string;
+    readonly searchParams: URLSearchParams;
+    readonly method: string;
+    readonly params: Record<string, string>;
+    readonly route: string;
+    readonly locals: MiddlewareStore<TLocals>;
+    readonly data: MiddlewareStore<TData>;
+    readonly headers: Map<string, string>;
+    readonly cookies: CookieJar;
+    get<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey): TLocals[TKey] | undefined;
+    has<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey): boolean;
+    set<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey, value: TLocals[TKey]): void;
+    delete<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey): boolean;
+    redirect(url: string, status?: number): void;
+    rewrite(url: string): void;
+    json(data: unknown, status?: number): void;
+    text(content: string, status?: number): void;
+    html(content: string, status?: number): void;
+  }
+
+  export type RequestMiddleware<
+    TLocals extends Record<string, any> = Record<string, any>,
+    TData extends Record<string, any> = Record<string, any>,
+  > = (
+    request: Request,
+    context: RequestMiddlewareContext<TLocals, TData>,
+  ) => void | Response | Promise<void | Response>;
 
   /**
    * Rate limit configuration
@@ -160,18 +221,20 @@ declare module "@farmjs/core/middleware" {
   /**
    * Get middleware data from context
    */
-  export function getMiddlewareData<T = unknown>(
-    ctx: MiddlewareContext,
-    key: string,
-  ): T | undefined;
+  export function getMiddlewareData<T extends Record<string, any> = Record<string, any>>(): Map<
+    keyof T,
+    T[keyof T]
+  >;
+
+  /** Get server-only middleware context for the current request. */
+  export function getMiddlewareContext<
+    T extends Record<string, any> = Record<string, any>,
+  >(): ReadonlyMiddlewareStore<T>;
 
   /**
    * Get middleware value (alias for getMiddlewareData)
    */
-  export function getMiddlewareValue<T = unknown>(
-    ctx: MiddlewareContext,
-    key: string,
-  ): T | undefined;
+  export function getMiddlewareValue<T = unknown>(key: string): T | undefined;
 
   /**
    * Get data from middleware context

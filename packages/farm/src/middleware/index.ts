@@ -7,7 +7,13 @@
 export { middleware, getRateLimitStatus } from "./chain";
 export { createContext } from "./context";
 export { MiddlewareManager } from "./manager";
-export { getMiddlewareData, getMiddlewareValue } from "./server";
+export {
+  getMiddlewareContext,
+  getMiddlewareData,
+  getMiddlewareValue,
+  _runWithMiddlewareContext,
+  _runWithMiddlewareData,
+} from "./server";
 export { unwrapMiddleware, getFromMiddleware, hasMiddlewareData } from "./helpers";
 export {
   createProductionMiddlewareRunner,
@@ -18,6 +24,10 @@ export * from "./vite-plugin";
 export type {
   MiddlewareContext,
   MiddlewareFunction,
+  RequestMiddleware,
+  RequestMiddlewareContext,
+  MiddlewareStore,
+  ReadonlyMiddlewareStore,
   MiddlewareChain,
   MiddlewareConfig,
   CookieJar,

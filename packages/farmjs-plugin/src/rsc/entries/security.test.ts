@@ -59,6 +59,17 @@ describe("generated server action security", () => {
     expect(entry).not.toContain("throw p.returnValue?.data");
   });
 
+  it("uses the shared middleware runtime and server context during RSC rendering", () => {
+    const entry = generateRscEntry(context);
+
+    expect(entry).toContain("createProductionMiddlewareRunner");
+    expect(entry).toContain("path: middlewarePathToRoute(filePath)");
+    expect(entry).toContain("const middlewareContext = middlewareResult.context");
+    expect(entry).toContain("_runWithMiddlewareData(middlewareResult.data");
+    expect(entry).toContain("_runWithMiddlewareContext(middlewareContext");
+    expect(entry).toContain("middlewareHeaders.set('cache-control', 'private, no-store')");
+  });
+
   it("rejects stale actions before decoding and only reloads safe navigation", () => {
     const serverEntry = generateRscEntry(context);
     const clientEntry = generateClientEntry(context);
