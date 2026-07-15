@@ -253,11 +253,11 @@ data?.users[0]?.name;
 const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
 import { auth, billing, jobs } from "./src/lib/integrations";
 export default defineConfig({
-  extends: ["./layers/commerce"],
-  integrations: { auth, billing, jobs },
-  routeRules: { "/store/**": { swr: 300 } },
-  serverActions: { bodySizeLimit: "1mb" },
-  deploy: { target: "vercel" },
+    extends: ["./layers/commerce"],
+    integrations: { auth, billing, jobs },
+    routeRules: { "/store/**": { swr: 300 } },
+    serverActions: { bodySizeLimit: "1mb" },
+    deploy: { target: "vercel" },
 });`;
 
 const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";

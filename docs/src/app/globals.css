@@ -417,7 +417,8 @@
     display: block;
     min-width: max-content;
     min-height: 1.5rem;
-    padding-right: 1.25rem;
+    padding-right: 1.5rem;
+    padding-left: 0.75rem;
     white-space: pre;
     counter-increment: farm-code-line;
   }
