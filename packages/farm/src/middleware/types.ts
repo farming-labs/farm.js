@@ -13,12 +13,85 @@ import type { ViteDevServer } from "vite";
 export type MiddlewareResult = void | Response;
 export type NextFunction = () => Promise<MiddlewareResult>;
 
+type MiddlewareStoreKey<TValues extends Record<string, any>> = Extract<keyof TValues, string>;
+
+/**
+ * A typed view over the request-scoped maps used by middleware.
+ */
+export interface ReadonlyMiddlewareStore<
+  TValues extends Record<string, any> = Record<string, any>,
+> {
+  readonly size: number;
+  get<TKey extends MiddlewareStoreKey<TValues>>(key: TKey): TValues[TKey] | undefined;
+  has<TKey extends MiddlewareStoreKey<TValues>>(key: TKey): boolean;
+  entries(): IterableIterator<[MiddlewareStoreKey<TValues>, TValues[MiddlewareStoreKey<TValues>]]>;
+  keys(): IterableIterator<MiddlewareStoreKey<TValues>>;
+  values(): IterableIterator<TValues[MiddlewareStoreKey<TValues>]>;
+  forEach(
+    callback: (
+      value: TValues[MiddlewareStoreKey<TValues>],
+      key: MiddlewareStoreKey<TValues>,
+      store: ReadonlyMiddlewareStore<TValues>,
+    ) => void,
+    thisArg?: any,
+  ): void;
+  [Symbol.iterator](): IterableIterator<
+    [MiddlewareStoreKey<TValues>, TValues[MiddlewareStoreKey<TValues>]]
+  >;
+}
+
+export interface MiddlewareStore<
+  TValues extends Record<string, any> = Record<string, any>,
+> extends ReadonlyMiddlewareStore<TValues> {
+  clear(): void;
+  delete<TKey extends MiddlewareStoreKey<TValues>>(key: TKey): boolean;
+  set<TKey extends MiddlewareStoreKey<TValues>>(key: TKey, value: TValues[TKey]): this;
+}
+
 /**
  * Middleware function signature
  */
 export type MiddlewareFunction = (
   ctx: MiddlewareContext,
   next: NextFunction,
+) => MiddlewareResult | Promise<MiddlewareResult>;
+
+/**
+ * Context passed to a named, request-first middleware export.
+ * `locals` and the get/set helpers stay on the server. `data` can be exposed
+ * through page props and should contain only serializable, client-safe values.
+ */
+export interface RequestMiddlewareContext<
+  TLocals extends Record<string, any> = Record<string, any>,
+  TData extends Record<string, any> = Record<string, any>,
+> {
+  readonly url: URL;
+  readonly pathname: string;
+  readonly searchParams: URLSearchParams;
+  readonly method: string;
+  readonly params: Record<string, string>;
+  readonly route: string;
+  readonly locals: MiddlewareStore<TLocals>;
+  readonly data: MiddlewareStore<TData>;
+  readonly headers: Map<string, string>;
+  readonly cookies: CookieJar;
+  get<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey): TLocals[TKey] | undefined;
+  has<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey): boolean;
+  set<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey, value: TLocals[TKey]): void;
+  delete<TKey extends MiddlewareStoreKey<TLocals>>(key: TKey): boolean;
+  redirect(url: string, status?: number): void;
+  rewrite(url: string): void;
+  json(data: any, status?: number): void;
+  text(content: string, status?: number): void;
+  html(content: string, status?: number): void;
+}
+
+export type RequestMiddleware<
+  TLocals extends Record<string, any> = Record<string, any>,
+  TData extends Record<string, any> = Record<string, any>,
+> = (
+  request: Request,
+  context: RequestMiddlewareContext<TLocals, TData>,
 ) => MiddlewareResult | Promise<MiddlewareResult>;
 
 /**
@@ -108,6 +181,7 @@ export interface MiddlewareContext {
   // Parent middleware data (for cascading)
   parent?: {
     data: Map<string, any>;
+    locals?: Map<string, any>;
     headers: Record<string, string>;
   };
 
@@ -120,6 +194,9 @@ export interface MiddlewareContext {
 
   // Data storage between middleware and pages
   data: Map<string, any>;
+
+  // Server-only request context shared with nested middleware and components
+  locals: Map<string, any>;
 
   // Helpers
   headers: Map<string, string>;
@@ -185,6 +262,7 @@ export interface MiddlewareChain {
  * Middleware module export
  */
 export interface MiddlewareModule {
-  default: MiddlewareChain | MiddlewareFunction;
+  default?: MiddlewareChain | MiddlewareFunction;
+  middleware?: RequestMiddleware;
   config?: MiddlewareConfig;
 }

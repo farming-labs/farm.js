@@ -12,12 +12,12 @@ import type {
   FarmMiddlewareConfig,
   MiddlewareFunction,
   MiddlewareMatcher,
-  MiddlewareModule,
   MiddlewareConfig,
   MiddlewareContext,
   MiddlewareResult,
 } from "./types";
 import { createContext } from "./context";
+import { normalizeMiddlewareModule } from "./module";
 import { logger } from "../utils";
 import { sendWebResponse } from "../server/response";
 import { emitFarmEvent } from "../observability";
@@ -173,34 +173,19 @@ export class MiddlewareManager {
         module = await import(/* @vite-ignore */ fileUrl);
       }
 
-      const middlewareModule = module as MiddlewareModule;
-
-      if (!middlewareModule.default) {
-        logger.warn(`Middleware file ${filePath} does not have a default export`);
+      const normalized = normalizeMiddlewareModule(module, routePath);
+      if (!normalized) {
+        logger.warn(
+          `Middleware file ${filePath} must export a default handler or a named middleware handler`,
+        );
         return null;
-      }
-
-      const defaultExport = middlewareModule.default;
-      let handlers: MiddlewareFunction[] = [];
-
-      // Check if it has a build method (middleware chain object)
-      if (defaultExport && typeof defaultExport === "object" && "build" in defaultExport) {
-        // Set the base path for route-scoped middleware (when/rewrite auto-scoping)
-        if (typeof (defaultExport as any).setBasePath === "function") {
-          (defaultExport as any).setBasePath(routePath);
-        }
-        const built = (defaultExport as any).build();
-        handlers = built.handlers;
-      } else if (typeof defaultExport === "function") {
-        // Plain middleware function
-        handlers = [defaultExport as MiddlewareFunction];
       }
 
       return {
         path: routePath,
         filePath,
-        handlers,
-        config: middlewareModule.config,
+        handlers: normalized.handlers,
+        config: normalized.config,
         source: "file",
       };
     } catch (error) {
@@ -360,6 +345,7 @@ export class MiddlewareManager {
 
       parentData = {
         data: new Map(ctx.data),
+        locals: new Map(ctx.locals),
         headers: Object.fromEntries(ctx.headers),
       };
     }
@@ -373,6 +359,7 @@ export class MiddlewareManager {
     }
 
     (req as any).__FARM_MIDDLEWARE_DATA__ = new Map(ctx.data);
+    (req as any).__FARM_MIDDLEWARE_CONTEXT__ = new Map(ctx.locals);
 
     return false; // Continue to page rendering
   }

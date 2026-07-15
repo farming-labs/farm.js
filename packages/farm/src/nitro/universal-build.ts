@@ -530,7 +530,7 @@ async function buildClient(
           },
           load(id) {
             if (id === "\0empty-module") {
-              return "export default {}; export const getMiddlewareData = () => ({}); export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
+              return "const emptyMiddlewareStore = new Map(); export default {}; export const getMiddlewareContext = () => emptyMiddlewareStore; export const getMiddlewareData = () => emptyMiddlewareStore; export const getMiddlewareValue = () => undefined; export const middleware = () => ({});";
             }
             if (id === "\0empty-api-route") {
               // Stub for API routes - only used in type context, provide empty exports
@@ -1566,7 +1566,7 @@ function generateVirtualEntryCode(
   const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
   const navigationHelpersImport = `import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "farm/navigation";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
-  const middlewareRuntimeImport = `import { applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
+  const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
     : "";
@@ -1916,12 +1916,14 @@ function resolvePPRConfig(routeModule) {
   return { enabled, revalidate };
 }
 
-function getPPRShellBypassReason(request) {
+function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   const method = request.method.toUpperCase();
   if (method !== "GET" && method !== "HEAD") return "method";
   if (request.headers.get("cookie")) return "cookie";
   if (request.headers.get("authorization")) return "authorization";
   if (request.headers.get("x-farm-ppr-refresh")) return "refresh";
+  if (middlewareData?.size) return "middleware-data";
+  if (middlewareContext?.size) return "middleware-context";
   return undefined;
 }
 
@@ -2005,6 +2007,7 @@ async function handleRequest(request) {
   }
   request = middlewareResult.request;
   const middlewareData = middlewareResult.data;
+  const middlewareContext = middlewareResult.context;
   const middlewareHeaders = middlewareResult.headers;
   url = new URL(request.url);
   pathname = url.pathname;
@@ -2049,7 +2052,9 @@ async function handleRequest(request) {
     
     try {
       const pprConfig = resolvePPRConfig(route.module);
-      const pprBypassReason = pprConfig.enabled ? getPPRShellBypassReason(request) : undefined;
+      const pprBypassReason = pprConfig.enabled
+        ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
+        : undefined;
       const pprCanCache = pprConfig.enabled && !pprBypassReason;
       const pprCacheKey = pprCanCache ? getPPRShellCacheKey(url) : null;
       if (pprConfig.enabled && pprBypassReason) {
@@ -2123,47 +2128,50 @@ async function handleRequest(request) {
               };
             })();
         
-        // First, render the page content
-        let pageElement;
-        
-        // Check if the component is async
-        if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
-          // For async components, execute to get the element
-          try {
-            const result = await PageComponent(pageProps);
-            if (React.isValidElement(result)) {
-              pageElement = result;
+        const html = await _runWithMiddlewareData(middlewareData, () =>
+          _runWithMiddlewareContext(middlewareContext, async () => {
+            // First, render the page content
+            let pageElement;
+
+            // Check if the component is async
+            if (PageComponent.constructor.name === "AsyncFunction" || PageComponent.toString().includes("async")) {
+              // For async components, execute to get the element
+              try {
+                const result = await PageComponent(pageProps);
+                if (React.isValidElement(result)) {
+                  pageElement = result;
+                } else {
+                  pageElement = React.createElement("div", null, String(result));
+                }
+              } catch (asyncError) {
+                if (isFarmRedirectError(asyncError) || isFarmNotFoundError(asyncError)) {
+                  throw asyncError;
+                }
+                // If async rendering fails, try sync rendering as fallback
+                pageElement = React.createElement(PageComponent, pageProps);
+              }
             } else {
-              pageElement = React.createElement("div", null, String(result));
+              // Sync component - create element directly
+              pageElement = React.createElement(PageComponent, pageProps);
             }
-          } catch (asyncError) {
-            if (isFarmRedirectError(asyncError) || isFarmNotFoundError(asyncError)) {
-              throw asyncError;
+
+            // Wrap with layouts (from innermost to outermost)
+            // Layouts are sorted by depth (root first), so we process in reverse
+            let wrappedElement = pageElement;
+            for (let i = applicableLayouts.length - 1; i >= 0; i--) {
+              const layout = applicableLayouts[i];
+              const LayoutComponent = layout.module.default;
+              if (LayoutComponent) {
+                wrappedElement = React.createElement(LayoutComponent, {
+                  children: wrappedElement,
+                  params,
+                });
+              }
             }
-            // If async rendering fails, try sync rendering as fallback
-            pageElement = React.createElement(PageComponent, pageProps);
-          }
-        } else {
-          // Sync component - create element directly
-          pageElement = React.createElement(PageComponent, pageProps);
-        }
-        
-        // Wrap with layouts (from innermost to outermost)
-        // Layouts are sorted by depth (root first), so we process in reverse
-        let wrappedElement = pageElement;
-        for (let i = applicableLayouts.length - 1; i >= 0; i--) {
-          const layout = applicableLayouts[i];
-          const LayoutComponent = layout.module.default;
-          if (LayoutComponent) {
-            wrappedElement = React.createElement(LayoutComponent, {
-              children: wrappedElement,
-              params,
-            });
-          }
-        }
-        
-        // Render to string
-        const html = ReactDOMServer.renderToString(wrappedElement);
+
+            return ReactDOMServer.renderToString(wrappedElement);
+          })
+        );
         
         // Collect metadata from layouts and page (page overrides layouts)
         let mergedMetadata = {};
@@ -2238,9 +2246,14 @@ async function handleRequest(request) {
         // Include client CSS and hydration script
         // Add caching headers for edge caching (Vercel, Cloudflare, etc.)
         // s-maxage: cache at edge for 60s, stale-while-revalidate: serve stale while updating
+        const hasRequestScopedMiddleware = Boolean(
+          middlewareData?.size || middlewareContext?.size
+        );
         const responseHeaders = {
           "Content-Type": "text/html; charset=utf-8",
-          "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          "Cache-Control": hasRequestScopedMiddleware
+            ? "private, no-store"
+            : "public, s-maxage=60, stale-while-revalidate=300",
           ...(pprConfig.enabled ? getPPRHeaders(pprCanCache ? "miss" : "bypass", pprConfig) : {}),
         };
 

@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, expectTypeOf, vi, beforeEach } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { middleware, getRateLimitStatus } from "../middleware/chain";
 import { createContext } from "../middleware/context";
 import { MiddlewareManager } from "../middleware/manager";
@@ -6,10 +9,18 @@ import {
   _setCurrentMiddlewareData,
   _clearCurrentMiddlewareData,
   getMiddlewareData,
+  getMiddlewareContext,
   getMiddlewareValue,
   _runWithMiddlewareData,
+  _runWithMiddlewareContext,
 } from "../middleware/server";
-import type { MiddlewareContext, RateLimitStorage } from "../middleware/types";
+import { normalizeMiddlewareModule } from "../middleware/module";
+import { farmMiddlewarePlugin } from "../middleware/vite-plugin";
+import type {
+  MiddlewareContext,
+  RateLimitStorage,
+  RequestMiddlewareContext,
+} from "../middleware/types";
 import {
   configureFarmObservability,
   resetFarmObservability,
@@ -1584,6 +1595,127 @@ describe("URL Rewriting", () => {
   });
 });
 
+describe("Named request middleware", () => {
+  interface DashboardContext {
+    session: { userId: string };
+    requestPath: string;
+  }
+
+  it("passes a Web Request and typed request context without requiring next", async () => {
+    const normalized = normalizeMiddlewareModule(
+      {
+        async middleware(request: Request, context: RequestMiddlewareContext<DashboardContext>) {
+          context.set("session", { userId: request.headers.get("x-user-id") || "anonymous" });
+          context.set("requestPath", new URL(request.url).pathname);
+          context.data.set("client.theme", "dark");
+          context.headers.set("x-named-middleware", "yes");
+        },
+        config: { matcher: "/dashboard/:path*" },
+      },
+      "/dashboard",
+    );
+
+    expect(normalized?.handlers).toHaveLength(1);
+    expect(normalized?.config).toEqual({ matcher: "/dashboard/:path*" });
+
+    const req = createMockRequest("/dashboard/settings");
+    req.headers["x-user-id"] = "user-42";
+    const ctx = createContext(req, createMockResponse());
+    await normalized!.handlers[0](ctx, async () => {
+      throw new Error("named middleware should continue automatically");
+    });
+
+    expect(ctx.locals.get("session")).toEqual({ userId: "user-42" });
+    expect(ctx.locals.get("requestPath")).toBe("/dashboard/settings");
+    expect(ctx.data.get("client.theme")).toBe("dark");
+    expect(ctx.headers.get("x-named-middleware")).toBe("yes");
+  });
+
+  it("uses the same named-export runtime through the standalone Vite plugin", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-named-middleware-"));
+    const middlewareFile = path.join(root, "src", "app", "dashboard", "middleware.ts");
+    await fs.mkdir(path.dirname(middlewareFile), { recursive: true });
+    await fs.writeFile(middlewareFile, "export {};\n");
+
+    try {
+      const server = {
+        config: { root },
+        hot: undefined,
+        ssrLoadModule: vi.fn().mockResolvedValue({
+          config: { matcher: "/dashboard/:path*" },
+          middleware(request: Request, context: RequestMiddlewareContext<DashboardContext>) {
+            context.set("requestPath", new URL(request.url).pathname);
+            context.set("session", { userId: "vite-user" });
+          },
+        }),
+        moduleGraph: { invalidateModule: vi.fn() },
+        ws: { send: vi.fn() },
+      };
+      const plugin = farmMiddlewarePlugin();
+      (plugin.configureServer as (server: any) => void)(server);
+      await (server as any).__farmMiddleware__.waitForDiscovery();
+
+      const req = createMockRequest("/dashboard/settings");
+      const handled = await (server as any).__farmMiddleware__.execute(req, createMockResponse());
+
+      expect(handled).toBe(false);
+      expect((req as any).__FARM_MIDDLEWARE_CONTEXT__).toEqual(
+        new Map([
+          ["requestPath", "/dashboard/settings"],
+          ["session", { userId: "vite-user" }],
+        ]),
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves Response short-circuiting", async () => {
+    const normalized = normalizeMiddlewareModule(
+      {
+        middleware(request: Request) {
+          return new Response(new URL(request.url).pathname, { status: 401 });
+        },
+      },
+      "/dashboard",
+    );
+    const ctx = createContext(createMockRequest("/dashboard/private"), createMockResponse());
+
+    const response = await normalized!.handlers[0](ctx, async () => undefined);
+
+    expect(response).toBeInstanceOf(Response);
+    const webResponse = response as Response;
+    expect(webResponse.status).toBe(401);
+    await expect(webResponse.text()).resolves.toBe("/dashboard/private");
+  });
+
+  it("rejects ambiguous default and named exports", () => {
+    expect(() =>
+      normalizeMiddlewareModule(
+        {
+          default: async () => {},
+          middleware: async () => {},
+        },
+        "/",
+      ),
+    ).toThrow("cannot export both");
+  });
+
+  it("keeps context keys and values correlated in TypeScript", () => {
+    const assertContextTypes = (context: RequestMiddlewareContext<DashboardContext>) => {
+      expectTypeOf(context.get("session")).toEqualTypeOf<{ userId: string } | undefined>();
+      expectTypeOf(context.get("requestPath")).toEqualTypeOf<string | undefined>();
+      context.set("session", { userId: "user-42" });
+      // @ts-expect-error session values must match DashboardContext.
+      context.set("session", { userId: 42 });
+      // @ts-expect-error unknown context keys are rejected.
+      context.get("missing");
+    };
+
+    expectTypeOf(assertContextTypes).toBeFunction();
+  });
+});
+
 describe("Middleware Data Access (getMiddlewareData)", () => {
   it("should retrieve middleware data without props", () => {
     // Set data
@@ -1641,6 +1773,34 @@ describe("Middleware Data Access (getMiddlewareData)", () => {
 
     expect(req1).toBe("req-1");
     expect(req2).toBe("req-2");
+  });
+
+  it("shares server-only context with nested components without crossing requests", async () => {
+    interface DashboardContextSnapshot {
+      session: { userId: string };
+      secret: string;
+    }
+
+    const [req1, req2] = await Promise.all([
+      _runWithMiddlewareContext(
+        { session: { userId: "user-1" }, secret: "first-secret" },
+        async () => {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          return getMiddlewareContext<DashboardContextSnapshot>().get("session")?.userId;
+        },
+      ),
+      _runWithMiddlewareContext(
+        { session: { userId: "user-2" }, secret: "second-secret" },
+        async () => {
+          await new Promise((resolve) => setTimeout(resolve, 1));
+          return getMiddlewareContext<DashboardContextSnapshot>().get("session")?.userId;
+        },
+      ),
+    ]);
+
+    expect(req1).toBe("user-1");
+    expect(req2).toBe("user-2");
+    expect(getMiddlewareContext().size).toBe(0);
   });
 });
 
@@ -1943,6 +2103,7 @@ describe("Middleware Manager Data Flow", () => {
         handlers: [
           async (ctx: MiddlewareContext, next: () => Promise<void>) => {
             ctx.data.set("requestId", "req-abc");
+            ctx.locals.set("session", { userId: "user-42" });
             await next();
           },
         ],
@@ -1953,6 +2114,7 @@ describe("Middleware Manager Data Flow", () => {
         handlers: [
           async (ctx: MiddlewareContext, next: () => Promise<void>) => {
             ctx.data.set("seenRequestId", ctx.data.get("requestId"));
+            ctx.locals.set("seenUserId", ctx.locals.get("session")?.userId);
             await next();
           },
         ],
@@ -1966,6 +2128,10 @@ describe("Middleware Manager Data Flow", () => {
     expect(middlewareData).toBeInstanceOf(Map);
     expect(middlewareData.get("requestId")).toBe("req-abc");
     expect(middlewareData.get("seenRequestId")).toBe("req-abc");
+    const middlewareContext = (req as any).__FARM_MIDDLEWARE_CONTEXT__;
+    expect(middlewareContext).toBeInstanceOf(Map);
+    expect(middlewareContext.get("session")).toEqual({ userId: "user-42" });
+    expect(middlewareContext.get("seenUserId")).toBe("user-42");
   });
 });
 

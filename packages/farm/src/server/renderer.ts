@@ -15,7 +15,12 @@ import type { RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
-import { _runWithMiddlewareData, _clearCurrentMiddlewareData } from "../middleware/server";
+import {
+  _clearCurrentMiddlewareContext,
+  _clearCurrentMiddlewareData,
+  _runWithMiddlewareContext,
+  _runWithMiddlewareData,
+} from "../middleware/server";
 import { getRequestContextSnapshot } from "../request-context";
 import { matchSSGPage, resolveRouteRenderingConfigFromFile } from "../ssg";
 import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "../integrations";
@@ -377,6 +382,7 @@ export class ServerRenderer {
   private getPPRShellBypassReason(
     req: FarmRequest,
     middlewareMap: Map<string, any>,
+    middlewareContext: Map<string, any>,
     pluginExposedContext: Map<string, any>,
   ): string | undefined {
     const method = (req.method || "GET").toUpperCase();
@@ -398,6 +404,10 @@ export class ServerRenderer {
 
     if (middlewareMap.size > 0) {
       return "middleware-data";
+    }
+
+    if (middlewareContext.size > 0) {
+      return "middleware-context";
     }
 
     if (pluginExposedContext.size > 0) {
@@ -544,6 +554,7 @@ export class ServerRenderer {
     let layouts: Array<{ modulePath: string }> = [];
     let searchParamsObject: Record<string, string | string[] | undefined> = {};
     let middlewareMap = new Map<string, any>();
+    let middlewareContext = new Map<string, any>();
     let pluginExposedContext = new Map<string, any>();
     let errorBoundaryEntry: { modulePath: string } | null = null;
     let pprRefreshRoute: string | null = null;
@@ -613,6 +624,7 @@ export class ServerRenderer {
       errorBoundaryEntry = this.routeManager.getMatchingError(pathname);
 
       middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
+      middlewareContext = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_CONTEXT__);
       pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
       const currentRequest = createWebRequestFromFarmRequest(req);
       const routeContext = await this.resolveRouteContext({
@@ -689,7 +701,7 @@ export class ServerRenderer {
         route.modulePath,
       );
       const pprBypassReason = renderingConfig.ppr
-        ? this.getPPRShellBypassReason(req, middlewareMap, pluginExposedContext)
+        ? this.getPPRShellBypassReason(req, middlewareMap, middlewareContext, pluginExposedContext)
         : undefined;
       const canCachePPRShell = renderingConfig.ppr && !pprBypassReason;
       const pprShellOptions: PPRShellCacheOptions | undefined = canCachePPRShell
@@ -799,98 +811,109 @@ export class ServerRenderer {
       const middlewareDataForContext = middlewareMap;
 
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
-        await _runWithCurrentRequest(currentRequest, async () => {
-          let pageElement = React.createElement(
-            PageComponent as React.ComponentType<unknown>,
-            pageProps as React.Attributes,
-          );
-
-          if (LoadingFallbackComponent) {
-            const loadingFallback = React.createElement(LoadingFallbackComponent, {
-              ...createRouteStateProps({
-                params,
-                searchParamsObject,
-                path: pathname,
-                middlewareMap,
-                pluginExposedContext,
-              }),
-            } as React.Attributes);
-
-            pageElement = React.createElement(
-              React.Suspense,
-              { fallback: loadingFallback },
-              pageElement,
+        await _runWithMiddlewareContext(middlewareContext, async () => {
+          await _runWithCurrentRequest(currentRequest, async () => {
+            let pageElement = React.createElement(
+              PageComponent as React.ComponentType<unknown>,
+              pageProps as React.Attributes,
             );
-          }
 
-          // Wrap hydratable pages in a targeted container so the client can attach
-          // without re-hydrating the surrounding layout shell.
-          if (isClientComponent || shouldHydrate) {
-            pageElement = React.createElement(
-              "div",
-              { id: "__farm_page__", "data-farm-client": "true" },
-              pageElement,
-            );
-          }
+            if (LoadingFallbackComponent) {
+              const loadingFallback = React.createElement(LoadingFallbackComponent, {
+                ...createRouteStateProps({
+                  params,
+                  searchParamsObject,
+                  path: pathname,
+                  middlewareMap,
+                  pluginExposedContext,
+                }),
+              } as React.Attributes);
 
-          let wrappedElement: React.ReactElement = pageElement;
-          for (let i = layoutModules.length - 1; i >= 0; i--) {
-            const layoutModule = layoutModules[i];
-            const LayoutComponent = layoutModule.default;
-            wrappedElement = React.createElement(
-              LayoutComponent as React.ComponentType<unknown>,
-              {
-                children: wrappedElement,
-                params,
-              } as React.Attributes,
-            );
-          }
+              pageElement = React.createElement(
+                React.Suspense,
+                { fallback: loadingFallback },
+                pageElement,
+              );
+            }
 
-          if (ErrorFallbackComponent) {
-            wrappedElement = React.createElement(
-              FarmRouteErrorBoundary,
-              {
-                Fallback: ErrorFallbackComponent,
-                fallbackProps: {
-                  ...createRouteStateProps({
-                    params,
-                    searchParamsObject,
-                    path: pathname,
-                    middlewareMap,
-                    pluginExposedContext,
-                  }),
+            // Wrap hydratable pages in a targeted container so the client can attach
+            // without re-hydrating the surrounding layout shell.
+            if (isClientComponent || shouldHydrate) {
+              pageElement = React.createElement(
+                "div",
+                { id: "__farm_page__", "data-farm-client": "true" },
+                pageElement,
+              );
+            }
+
+            let wrappedElement: React.ReactElement = pageElement;
+            for (let i = layoutModules.length - 1; i >= 0; i--) {
+              const layoutModule = layoutModules[i];
+              const LayoutComponent = layoutModule.default;
+              wrappedElement = React.createElement(
+                LayoutComponent as React.ComponentType<unknown>,
+                {
+                  children: wrappedElement,
+                  params,
+                } as React.Attributes,
+              );
+            }
+
+            if (ErrorFallbackComponent) {
+              wrappedElement = React.createElement(
+                FarmRouteErrorBoundary,
+                {
+                  Fallback: ErrorFallbackComponent,
+                  fallbackProps: {
+                    ...createRouteStateProps({
+                      params,
+                      searchParamsObject,
+                      path: pathname,
+                      middlewareMap,
+                      pluginExposedContext,
+                    }),
+                  },
                 },
+                wrappedElement,
+              );
+            }
+
+            const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
+            const pprHeaders = renderingConfig.ppr
+              ? this.getPPRHeaders(pprShellOptions ? "miss" : "bypass", renderingConfig.revalidate)
+              : undefined;
+
+            // Render with middleware data available
+            await this.renderWithSSR(
+              integratedElement,
+              req,
+              res,
+              () => {
+                _clearCurrentMiddlewareData();
+                _clearCurrentMiddlewareContext();
               },
-              wrappedElement,
+              {
+                responseHeaders: pprHeaders,
+                captureStaticShell: Boolean(pprShellOptions),
+                observabilityRoute: pathname,
+                onSuspenseHoleDetected: pprShellOptions
+                  ? () => emitFarmEvent({ type: "ppr.suspense.holeDetected", route: pathname })
+                  : undefined,
+                onComplete:
+                  pprShellOptions && req.method !== "HEAD"
+                    ? (html) => this.cachePPRShell(pprShellOptions, html)
+                    : undefined,
+              },
             );
-          }
-
-          const integratedElement = await this.wrapWithIntegrationProviders(wrappedElement);
-          const pprHeaders = renderingConfig.ppr
-            ? this.getPPRHeaders(pprShellOptions ? "miss" : "bypass", renderingConfig.revalidate)
-            : undefined;
-
-          // Render with middleware data available
-          await this.renderWithSSR(integratedElement, req, res, _clearCurrentMiddlewareData, {
-            responseHeaders: pprHeaders,
-            captureStaticShell: Boolean(pprShellOptions),
-            observabilityRoute: pathname,
-            onSuspenseHoleDetected: pprShellOptions
-              ? () => emitFarmEvent({ type: "ppr.suspense.holeDetected", route: pathname })
-              : undefined,
-            onComplete:
-              pprShellOptions && req.method !== "HEAD"
-                ? (html) => this.cachePPRShell(pprShellOptions, html)
-                : undefined,
+            if (pprRefreshRoute) {
+              emitFarmEvent({
+                type: "ppr.refresh.complete",
+                route: pprRefreshRoute,
+                durationMs: Date.now() - renderStartTime,
+              });
+            }
+            completeRender(res.statusCode || 200, pathname);
           });
-          if (pprRefreshRoute) {
-            emitFarmEvent({
-              type: "ppr.refresh.complete",
-              route: pprRefreshRoute,
-              durationMs: Date.now() - renderStartTime,
-            });
-          }
-          completeRender(res.statusCode || 200, pathname);
         });
       });
     } catch (error) {
@@ -944,6 +967,7 @@ export class ServerRenderer {
           layouts,
           searchParamsObject,
           middlewareMap,
+          middlewareContext,
           pluginExposedContext,
           error,
           errorModulePath: errorBoundaryEntry.modulePath,
@@ -1140,6 +1164,7 @@ export class ServerRenderer {
       layouts: Array<{ modulePath: string }>;
       searchParamsObject: Record<string, string | string[] | undefined>;
       middlewareMap: Map<string, any>;
+      middlewareContext: Map<string, any>;
       pluginExposedContext: Map<string, any>;
       error: unknown;
       errorModulePath: string;
@@ -1187,7 +1212,11 @@ export class ServerRenderer {
       }
 
       const ReactDOMServer = await import("react-dom/server");
-      const html = ReactDOMServer.renderToString(wrapped);
+      const html = await _runWithMiddlewareData(options.middlewareMap, () =>
+        _runWithMiddlewareContext(options.middlewareContext, () =>
+          ReactDOMServer.renderToString(wrapped),
+        ),
+      );
       res.statusCode = 500;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.write(this.createFullHTML(html));

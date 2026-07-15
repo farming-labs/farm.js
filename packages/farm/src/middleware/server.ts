@@ -3,9 +3,26 @@
  */
 
 import { AsyncLocalStorage } from "async_hooks";
+import type { ReadonlyMiddlewareStore } from "./types";
 
 type MiddlewareStoreInput = Record<string, any> | Map<string, any>;
-const middlewareStore = new AsyncLocalStorage<Map<string, any>>();
+const MIDDLEWARE_DATA_STORE_KEY = Symbol.for("farm.middlewareDataStore");
+const MIDDLEWARE_CONTEXT_STORE_KEY = Symbol.for("farm.middlewareContextStore");
+
+function getGlobalMiddlewareStore(key: symbol): AsyncLocalStorage<Map<string, any>> {
+  const state = globalThis as typeof globalThis & Record<symbol, unknown>;
+  const existing = state[key];
+  if (existing instanceof AsyncLocalStorage) {
+    return existing as AsyncLocalStorage<Map<string, any>>;
+  }
+
+  const store = new AsyncLocalStorage<Map<string, any>>();
+  state[key] = store;
+  return store;
+}
+
+const middlewareStore = getGlobalMiddlewareStore(MIDDLEWARE_DATA_STORE_KEY);
+const middlewareContextStore = getGlobalMiddlewareStore(MIDDLEWARE_CONTEXT_STORE_KEY);
 
 function toMiddlewareMap(data: MiddlewareStoreInput): Map<string, any> {
   if (data instanceof Map) {
@@ -30,6 +47,11 @@ export function _clearCurrentMiddlewareData(): void {
   middlewareStore.enterWith(new Map());
 }
 
+/** Internal: Clear server-only middleware context after rendering. */
+export function _clearCurrentMiddlewareContext(): void {
+  middlewareContextStore.enterWith(new Map());
+}
+
 /**
  * Internal: Run code with middleware data available
  * This is called by the server renderer
@@ -39,6 +61,14 @@ export async function _runWithMiddlewareData<T>(
   fn: () => T | Promise<T>,
 ): Promise<T> {
   return middlewareStore.run(toMiddlewareMap(data), fn);
+}
+
+/** Internal: Run code with server-only middleware context available. */
+export async function _runWithMiddlewareContext<T>(
+  context: MiddlewareStoreInput,
+  fn: () => T | Promise<T>,
+): Promise<T> {
+  return middlewareContextStore.run(toMiddlewareMap(context), fn);
 }
 
 /**
@@ -84,6 +114,17 @@ export function getMiddlewareData<T extends Record<string, any> = Record<string,
 export function getMiddlewareValue<T = any>(key: string): T | undefined {
   const data = getMiddlewareData();
   return data.get(key);
+}
+
+/**
+ * Read server-only values set by route middleware for the current request.
+ * The returned store is available to the matched page, layouts, and nested
+ * Server Components, but is never added to hydration props.
+ */
+export function getMiddlewareContext<
+  T extends Record<string, any> = Record<string, any>,
+>(): ReadonlyMiddlewareStore<T> {
+  return (middlewareContextStore.getStore() || new Map()) as unknown as ReadonlyMiddlewareStore<T>;
 }
 
 /**
