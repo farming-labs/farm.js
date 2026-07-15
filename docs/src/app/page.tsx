@@ -573,6 +573,35 @@ function EcosystemStrip() {
   );
 }
 
+function TerminalRequestLine({
+  type,
+  method,
+  path,
+  duration,
+}: {
+  type: "PAGE" | "API";
+  method: "GET" | "POST";
+  path: string;
+  duration: number;
+}) {
+  const isApi = type === "API";
+
+  return (
+    <span className="block whitespace-nowrap text-white/54">
+      <span className="text-white/28">[</span>
+      <span className="text-white/86">FARM</span>
+      <span className="text-white/28">]</span> <span className="text-white/28">[</span>
+      <span className={isApi ? "text-white/86" : "text-white/62"}>{type}</span>
+      <span className="text-white/28">]</span> <span className="text-white/28">[</span>
+      <span className="text-white/72">{method}</span>
+      <span className="text-white/28">]</span>{" "}
+      <span className={isApi ? "text-white/72" : "text-white/66"}>{path}</span>{" "}
+      <span className="text-white/24">-</span> <span className="text-white/84">200</span>{" "}
+      <span className={isApi ? "text-white/38" : "text-white/34"}>({duration}ms)</span>
+    </span>
+  );
+}
+
 function TerminalVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] items-end justify-end overflow-hidden pl-6 sm:pl-10">
@@ -592,23 +621,14 @@ function TerminalVisual() {
             <span className="block text-white/48">$ pnpm dev</span>
             <span className="block text-white">
               <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in{" "}
-              <span className="text-white/72">386ms</span>
+              <span className="text-white/88">84ms</span>
             </span>
             <span className="block text-white/54">
               <span className="text-white/82">➜ Local:</span> http://localhost:3000/
             </span>
-            <span className="block text-white/54">
-              <span className="text-white/72">[FARM] [PAGE] [GET]</span> /contact - 200{" "}
-              <span className="text-white/36">(8ms)</span>
-            </span>
-            <span className="block text-white/54">
-              <span className="text-white/72">[FARM] [PAGE] [GET]</span> /about - 200{" "}
-              <span className="text-white/36">(6ms)</span>
-            </span>
-            <span className="block text-white/54">
-              <span className="text-white/72">[FARM] [PAGE] [GET]</span> /docs - 200{" "}
-              <span className="text-white/36">(11ms)</span>
-            </span>
+            <TerminalRequestLine duration={8} method="GET" path="/contact" type="PAGE" />
+            <TerminalRequestLine duration={5} method="POST" path="/api/waitlist" type="API" />
+            <TerminalRequestLine duration={11} method="GET" path="/docs" type="PAGE" />
           </code>
         </pre>
       </figure>
