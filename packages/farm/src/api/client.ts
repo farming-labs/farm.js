@@ -6,6 +6,13 @@ import {
   type IntegrationServerClientOptions,
   type IntegrationServerClientRoot,
 } from "../integration-client";
+import {
+  getFarmClientDataCache,
+  normalizeFarmClientCacheKey,
+  type FarmClientCacheEntry,
+  type FarmClientCacheKey,
+  type FarmClientDataCache,
+} from "../client-cache";
 
 export type APIClientOptions = {
   baseURL?: string;
@@ -82,7 +89,7 @@ export type ResponseEvent<TData = unknown, TError = Error> = {
 export type CachePolicy = "cache-first" | "network-only" | "stale-while-revalidate";
 
 export type CacheOptions = {
-  key?: string;
+  key?: FarmClientCacheKey;
   policy?: CachePolicy;
   staleTime?: number;
   gcTime?: number;
@@ -97,7 +104,7 @@ export type RetryOptions = {
 export type InvalidateTarget =
   | string
   | {
-      key: string;
+      key: FarmClientCacheKey;
     }
   | {
       path: string;
@@ -127,7 +134,7 @@ export type ClientOptions<
   TError = unknown,
   TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
 > = {
-  key?: CacheKey<TData> | string;
+  key?: CacheKey<TData> | FarmClientCacheKey;
   cache?: CacheOptions;
   retry?: RetryOptions;
   invalidate?: InvalidateOptions;
@@ -310,15 +317,13 @@ export type ServerAPIClient<
  * });
  * ```
  */
-export function createAPIClient<
-  TRouter extends Record<string, any>,
->(options: APIClientWithoutIntegrationsOptions): RouteAPIClient<TRouter>;
+export function createAPIClient<TRouter extends Record<string, any>>(
+  options: APIClientWithoutIntegrationsOptions,
+): RouteAPIClient<TRouter>;
 export function createAPIClient<
   TRouter extends Record<string, any>,
   TIntegrations extends Record<string, any> = {},
->(
-  options?: APIClientOptions,
-): APIClient<TRouter, TIntegrations>;
+>(options?: APIClientOptions): APIClient<TRouter, TIntegrations>;
 export function createAPIClient<
   TRouter extends Record<string, any>,
   TIntegrations extends Record<string, any> = {},
@@ -346,7 +351,7 @@ export function createAPIClient<
           integrations: integrationsClient<TIntegrations>(integrationOptions),
         };
 
-  const cacheState = new Map<string, CacheEntry>();
+  const cacheState = getFarmClientDataCache();
   const inflightState = new Map<string, InflightEntry>();
   const routeMeta = new WeakMap<AnyRouteRef, RouteMeta>();
   let requestCounter = 0;
@@ -402,9 +407,10 @@ export function createAPIClient<
           ...clientOptions.cache,
         }
       : undefined;
-    const cacheKey = (clientOptions?.key ||
-      cacheOptions?.key ||
-      buildCacheKey(methodUpper, path, input)) as CacheKey<any>;
+    const configuredCacheKey = clientOptions?.key ?? cacheOptions?.key;
+    const cacheKey = normalizeFarmClientCacheKey(
+      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL),
+    ) as CacheKey<any>;
     const now = Date.now();
 
     const emitStatus = (phase: StatusPhase, payload?: Partial<StatusEvent>) => {
@@ -434,7 +440,7 @@ export function createAPIClient<
           update.length === 2
             ? [update[0], undefined, update[1]]
             : [update[0], update[1], update[2]];
-        const targetKey = resolveTargetKey(routeMeta, target, targetInput);
+        const targetKey = resolveTargetKey(routeMeta, target, targetInput, baseURL);
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
@@ -626,7 +632,7 @@ export function createAPIClient<
           };
 
       for (const target of invalidateOptions.targets) {
-        const targetKey = resolveTargetKey(routeMeta, target);
+        const targetKey = resolveTargetKey(routeMeta, target, undefined, baseURL);
         if (!targetKey) continue;
 
         const existing = cacheState.get(targetKey);
@@ -676,7 +682,10 @@ export function createAPIClient<
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy([], request, routeMeta, rootAliases) as APIClient<TRouter, TIntegrations>;
+  return createNestedProxy([], request, routeMeta, baseURL, rootAliases) as APIClient<
+    TRouter,
+    TIntegrations
+  >;
 }
 
 /**
@@ -697,6 +706,7 @@ function createNestedProxy(
   path: string[],
   client: any,
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
+  baseURL: string,
   rootAliases?: Record<string, unknown>,
 ): any {
   const target = () => {};
@@ -708,7 +718,7 @@ function createNestedProxy(
       }
 
       // Add prop to path and return new proxy
-      return createNestedProxy([...path, prop], client, routeMeta, rootAliases);
+      return createNestedProxy([...path, prop], client, routeMeta, baseURL, rootAliases);
     },
 
     // When calling as a function
@@ -742,7 +752,7 @@ function createNestedProxy(
     },
   });
 
-  routeMeta.set(proxy, { path: [...path] });
+  routeMeta.set(proxy, { path: [...path], baseURL });
   return proxy;
 }
 
@@ -802,13 +812,7 @@ export function createServerAPIClient<
   return endpoints as ServerAPIClient<TEndpoints, TIntegrations>;
 }
 
-type CacheEntry = {
-  data: any;
-  updatedAt: number;
-  staleAt: number;
-  gcAt?: number;
-  invalidatedAt?: number;
-};
+type CacheEntry = FarmClientCacheEntry<any>;
 
 type InflightEntry = {
   promise: Promise<APIResult<any, Error>>;
@@ -817,6 +821,7 @@ type InflightEntry = {
 
 type RouteMeta = {
   path: string[];
+  baseURL: string;
 };
 
 type OptimisticSnapshot = {
@@ -824,10 +829,11 @@ type OptimisticSnapshot = {
   entry?: CacheEntry;
 };
 
-function buildCacheKey(method: string, path: string, input: any): string {
+function buildCacheKey(method: string, path: string, input: any, baseURL: string): string {
   const keyInput =
     input && typeof input === "object" ? { query: input.query, body: input.body } : input;
-  return `${method}:${path}:${stableStringify(keyInput ?? {})}`;
+  const url = new URL(path, baseURL);
+  return `${method}:${url.origin}${url.pathname}:${stableStringify(keyInput ?? {})}`;
 }
 
 function stableStringify(value: any): string {
@@ -850,7 +856,7 @@ function getGcAt(now: number, gcTime?: number): number | undefined {
 }
 
 function getValidCacheEntry(
-  cacheState: Map<string, CacheEntry>,
+  cacheState: FarmClientDataCache,
   key: string,
   now: number,
 ): CacheEntry | undefined {
@@ -874,6 +880,7 @@ function resolveTargetKey(
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
   target: InvalidateTarget | AnyRouteRef,
   input?: unknown,
+  baseURL = "http://localhost:3000",
 ): string | null {
   if (!target) return null;
 
@@ -884,19 +891,19 @@ function resolveTargetKey(
     if (!meta) return null;
 
     const { method, routePath } = resolveRouteMeta(meta);
-    return buildCacheKey(method, routePath, input ?? {});
+    return buildCacheKey(method, routePath, input ?? {}, meta.baseURL);
   }
 
   if (Array.isArray(target)) {
     const [route, routeInput] = target;
-    return resolveTargetKey(routeMeta, route, routeInput);
+    return resolveTargetKey(routeMeta, route, routeInput, baseURL);
   }
 
-  if ("key" in target) return target.key;
+  if ("key" in target) return normalizeFarmClientCacheKey(target.key);
 
   if ("path" in target) {
     const method = target.method ?? "GET";
-    return buildCacheKey(method, target.path, target.input ?? {});
+    return buildCacheKey(method, target.path, target.input ?? {}, baseURL);
   }
 
   return null;

@@ -43,6 +43,23 @@ if (result.error) {
 - optimistic: update cached query data before the server response returns.
 - onRequest, onResponse, onSuccess, onError, onSettled, and onStatus: observe the full client lifecycle.
 
+Use a structured cache key when an API response intentionally shares data with route data or a [`createServerQuery`](/docs/server-queries):
+
+```ts
+const product = await api.products.get(
+  { query: { id } },
+  {
+    cache: {
+      key: ["product", id],
+      policy: "stale-while-revalidate",
+      staleTime: 30_000,
+    },
+  },
+);
+```
+
+Structured keys use Farm's route-data key contract. Default API cache keys include the API origin and remain isolated from other clients.
+
 ## Result shape
 
 API and integration callers return a consistent result object:

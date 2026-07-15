@@ -51,6 +51,7 @@ const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
   if (ctx.actionsEnabled) {
     code += `import {
   createServerActionRequestErrorResponse,
+  getServerActionInvalidations,
   prepareServerActionRequest,
   runWithServerActionRequest,
   sanitizeServerActionError,
@@ -489,8 +490,11 @@ async function handleFarmRequest(request) {
       }
 
       try {
-        const data = await runWithServerActionRequest(request, () => action.apply(null, args));
-        returnValue = { ok: true, data };
+        const result = await runWithServerActionRequest(request, async () => {
+          const data = await action.apply(null, args);
+          return { data, invalidations: getServerActionInvalidations() };
+        });
+        returnValue = { ok: true, data: result.data, invalidations: result.invalidations };
         debug('Server action succeeded:', actionId);
       } catch (e) {
         if (request.signal.aborted) {
