@@ -690,24 +690,33 @@ function BuildVisual() {
         </figcaption>
         <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-5 tracking-normal text-white/58 sm:text-[11px] sm:leading-6">
           <code className="block min-w-0 whitespace-pre-wrap break-words">
-            <span className="block text-white">$ farm build --preset vercel</span>
-            <span className="mt-2 block">
-              <span className="text-white">[info]</span> 🚜 Building Farm.js application with
-              preset: vercel...
+            <span className="block h-5 whitespace-nowrap text-white sm:h-6">
+              <span>$ </span>
+              <span className="farm-build-command-text inline-block align-bottom">
+                farm build --preset vercel
+              </span>
+              <span aria-hidden className="farm-build-command-cursor inline-block" />
             </span>
-            <span className="block">
-              <span className="text-white">[info]</span> 🔍 Discovering routes and API endpoints...
-            </span>
-            <span className="block">
-              <span className="text-white">[info]</span> 📦 Building client and SSR bundles in
-              parallel...
-            </span>
-            <span className="block">
-              <span className="text-white">[success]</span> ✅ Build completed in{" "}
-              <span className="font-semibold text-white">1.24s</span>
-            </span>
-            <span className="block text-white/78">
-              <span className="text-white">[info]</span> 📁 Output directory: .vercel/output
+            <span className="farm-build-output mt-2 block">
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[info]</span> 🚜 Building Farm.js application with
+                preset: vercel...
+              </span>
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[info]</span> 🔍 Discovering routes and API
+                endpoints...
+              </span>
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[info]</span> 📦 Building client and SSR bundles in
+                parallel...
+              </span>
+              <span className="block whitespace-nowrap">
+                <span className="text-white">[success]</span> ✅ Build completed in{" "}
+                <span className="font-semibold text-white">1.24s</span>
+              </span>
+              <span className="block whitespace-nowrap text-white/78">
+                <span className="text-white">[info]</span> 📁 Output directory: .vercel/output
+              </span>
             </span>
           </code>
         </pre>

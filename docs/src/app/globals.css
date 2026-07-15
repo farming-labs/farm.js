@@ -372,6 +372,35 @@
     will-change: clip-path, opacity;
   }
 
+  .farm-build-command-text {
+    width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    animation: farm-build-command-type 10.8s infinite;
+    will-change: width, opacity;
+  }
+
+  .farm-build-command-cursor {
+    margin-left: 0.2em;
+    vertical-align: -0.12em;
+    animation: farm-build-cursor-window 10.8s linear infinite;
+  }
+
+  .farm-build-command-cursor::before {
+    display: block;
+    width: 0.45em;
+    height: 1.05em;
+    background: rgb(255 255 255 / 0.74);
+    animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
+    content: "";
+  }
+
+  .farm-build-output {
+    clip-path: inset(0 0 100% 0);
+    animation: farm-build-output 10.8s infinite;
+    will-change: clip-path, opacity;
+  }
+
   .farm-highlighted-code {
     --sh-class: rgb(255 255 255 / 0.86);
     --sh-identifier: rgb(255 255 255 / 0.64);
@@ -498,6 +527,75 @@
   }
 
   68%,
+  88% {
+    clip-path: inset(0);
+    opacity: 1;
+    animation-timing-function: linear;
+  }
+
+  94%,
+  99.99% {
+    clip-path: inset(0);
+    opacity: 0;
+  }
+
+  100% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 1;
+  }
+}
+
+@keyframes farm-build-command-type {
+  0% {
+    width: 0;
+    opacity: 1;
+  }
+
+  2% {
+    width: 0;
+    opacity: 1;
+    animation-timing-function: steps(26, end);
+  }
+
+  11%,
+  88% {
+    width: 26ch;
+    opacity: 1;
+  }
+
+  94%,
+  99.99% {
+    width: 26ch;
+    opacity: 0;
+  }
+
+  100% {
+    width: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes farm-build-cursor-window {
+  0%,
+  14% {
+    opacity: 1;
+  }
+
+  14.01%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes farm-build-output {
+  0%,
+  14% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 1;
+    animation-timing-function: steps(5, start);
+  }
+
+  56%,
   88% {
     clip-path: inset(0);
     opacity: 1;
@@ -699,6 +797,10 @@
   .farm-terminal-command-cursor,
   .farm-terminal-command-cursor::before,
   .farm-terminal-output,
+  .farm-build-command-text,
+  .farm-build-command-cursor,
+  .farm-build-command-cursor::before,
+  .farm-build-output,
   .farm-migration-source,
   .farm-migration-target,
   .farm-migration-link,
@@ -706,17 +808,20 @@
     animation: none;
   }
 
-  .farm-terminal-command-text {
+  .farm-terminal-command-text,
+  .farm-build-command-text {
     width: auto;
     overflow: visible;
     opacity: 1;
   }
 
-  .farm-terminal-command-cursor {
+  .farm-terminal-command-cursor,
+  .farm-build-command-cursor {
     display: none;
   }
 
-  .farm-terminal-output {
+  .farm-terminal-output,
+  .farm-build-output {
     clip-path: inset(0);
     opacity: 1;
   }
