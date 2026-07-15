@@ -17,6 +17,7 @@
 import type { Plugin, ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "node:module";
+import { _withAfterNodeMiddleware } from "@farmjs/core/after";
 
 // Create require for ESM compatibility
 const require_ = createRequire(import.meta.url);
@@ -542,7 +543,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
       // Add middleware to handle requests
       return () => {
-        server.middlewares.use(async (req, res, next) => {
+        server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
           const url = req.url || "/";
           const pathname = url.split("?")[0];
 
@@ -573,7 +574,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
           }
 
           next();
-        });
+        }));
       };
     },
 

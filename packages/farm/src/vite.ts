@@ -48,6 +48,7 @@ import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { createDeferredDataResponse } from "./deferred";
+import { _withAfterNodeMiddleware } from "./after";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -665,7 +666,7 @@ export function farmPlugin(
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
-      server.middlewares.use(async (req, res, next) => {
+      server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
         const requestUrl = req.url || "/";
         const requestMethod = req.method || "GET";
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
@@ -1356,7 +1357,7 @@ export function farmPlugin(
           await emitPluginError("render-page", error, { pathname });
           next(error);
         }
-      });
+      }));
     },
 
     resolveId(id) {

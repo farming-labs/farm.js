@@ -42,7 +42,7 @@ function rscRendererResolvePlugin(rendererPath: string, ssrPath?: string): Plugi
       return `
 ${setSsLoader}
 import * as entryExports from "${VIRTUAL_RENDERER_INNER}";
-import { fromWebHandler } from "h3";
+import { defineEventHandler } from "h3";
 
 function getFetchHandler(exports) {
   const def = exports?.default;
@@ -52,7 +52,9 @@ function getFetchHandler(exports) {
 }
 
 const handler = getFetchHandler(entryExports);
-export default fromWebHandler(handler);
+export default defineEventHandler((event) => handler(event.req, {
+  waitUntil: (promise) => event.waitUntil(promise),
+}));
 `.trim();
     },
   };

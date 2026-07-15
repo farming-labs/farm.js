@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type AfterCallback = () => void | Promise<void>;
 
@@ -115,7 +115,7 @@ function registerResponseFinishedHook(
 }
 
 function finishSoon(state: AfterRequestState): void {
-  queueMicrotask(state.finishResponse);
+  setTimeout(state.finishResponse, 0);
 }
 
 function wrapResponseBody(
@@ -249,4 +249,21 @@ export async function _runWithAfterNodeResponse<T>(
   registerPlatformLifetime(state, context);
 
   return await afterStorage.run(state, handler);
+}
+
+/** @internal Add Farm's post-response lifecycle to a Node middleware. */
+export function _withAfterNodeMiddleware(
+  handler: (
+    request: IncomingMessage,
+    response: ServerResponse,
+    next: (error?: unknown) => void,
+  ) => void | Promise<void>,
+): (
+  request: IncomingMessage,
+  response: ServerResponse,
+  next: (error?: unknown) => void,
+) => Promise<void> {
+  return async (request, response, next) => {
+    await _runWithAfterNodeResponse(response, () => handler(request, response, next));
+  };
 }

@@ -1,7 +1,12 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { EventEmitter } from "node:events";
-import type { ServerResponse } from "node:http";
-import { after, _runWithAfterNodeResponse, _runWithAfterRequest } from "../after";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import {
+  after,
+  _runWithAfterNodeResponse,
+  _runWithAfterRequest,
+  _withAfterNodeMiddleware,
+} from "../after";
 
 describe("after", () => {
   it("rejects calls outside a server request", () => {
@@ -140,6 +145,36 @@ describe("after", () => {
     expect(didRun).toBe(false);
     response.emit("finish");
     await lifetime;
+    expect(didRun).toBe(true);
+  });
+
+  it("keeps the lifecycle active for downstream Node middleware", async () => {
+    class MockResponse extends EventEmitter {
+      writableEnded = false;
+    }
+
+    const request = {} as IncomingMessage;
+    const response = new MockResponse() as unknown as ServerResponse;
+    let didRun = false;
+    let resolveRan!: () => void;
+    const ran = new Promise<void>((resolve) => {
+      resolveRan = resolve;
+    });
+
+    const middleware = _withAfterNodeMiddleware((_request, _response, next) => {
+      next();
+    });
+
+    await middleware(request, response, () => {
+      after(() => {
+        didRun = true;
+        resolveRan();
+      });
+    });
+
+    expect(didRun).toBe(false);
+    response.emit("finish");
+    await ran;
     expect(didRun).toBe(true);
   });
 });

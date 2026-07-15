@@ -18,6 +18,7 @@
 import type { Plugin, ViteDevServer } from "vite";
 import { API_ROUTE_METHODS, invokeAPIRouteEndpoint, matchAPIRoute } from "./route-manager";
 import { sendWebResponse } from "../server/response";
+import { _withAfterNodeMiddleware } from "../after";
 import { getProgrammaticRouteManifest, isProgrammaticRoutesFileName } from "../routes";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
 import { toViteModuleId } from "../utils";
@@ -307,7 +308,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
       // Add middleware to handle API requests
       return () => {
-        server.middlewares.use(async (req, res, next) => {
+        server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
           const url = req.url || "/";
           const pathname = url.split("?")[0];
           const method = req.method || "GET";
@@ -382,7 +383,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ error: "Internal server error" }));
           }
-        });
+        }));
       };
     },
 

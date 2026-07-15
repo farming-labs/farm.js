@@ -23,6 +23,7 @@
  */
 
 import type { Plugin, ViteDevServer } from "vite";
+import { _withAfterNodeMiddleware } from "@farmjs/core/after";
 
 export interface FarmApiOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -411,7 +412,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
       // Add middleware to handle API requests
       return () => {
-        server.middlewares.use(async (req, res, next) => {
+        server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
           const url = req.url || "/";
           const pathname = url.split("?")[0];
           const method = req.method || "GET";
@@ -496,7 +497,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ error: "Internal server error" }));
           }
-        });
+        }));
       };
     },
 
