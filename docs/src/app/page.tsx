@@ -1216,7 +1216,7 @@ function FooterActionLink({
 
   return (
     <a
-      className="group flex h-12 items-center justify-between border-b border-white/12 px-4 font-mono text-[9px] font-normal uppercase tracking-normal text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+      className="group flex h-12 items-center justify-between border-b border-white/12 px-4 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/58 transition-[background-color,color] duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
       href={href}
     >
       <span className="flex min-w-0 items-center gap-2">
@@ -1239,7 +1239,7 @@ function FooterActionLink({
 function FooterLinksGroup({ title, links }: { title: string; links: readonly FooterLink[] }) {
   return (
     <div className="px-4 py-4 md:min-h-[154px]">
-      <h3 className="mb-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/42">
+      <h3 className="mb-2 font-mono text-[10px] font-normal uppercase !tracking-[0.04em] text-white/34">
         {title}
       </h3>
       <ul className="grid">
@@ -1250,7 +1250,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
           return (
             <li key={label}>
               <a
-                className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+                className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase !tracking-[0.04em] text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 href={href}
               >
                 <span className="flex items-center gap-2">
@@ -1280,8 +1280,8 @@ function Footer() {
             <BrandLockup />
           </div>
           <div className="px-4 py-4 md:min-h-[154px]">
-            <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 tracking-normal text-white/42">
-              Farm.js is the React framework for product applications in the Farming Labs ecosystem.
+            <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 !tracking-[0.04em] text-white/42">
+              A Framework for Product integrated Apps
             </p>
           </div>
         </div>
@@ -1297,7 +1297,7 @@ function Footer() {
           </div>
         ))}
       </div>
-      <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[10px] font-normal uppercase tracking-normal text-white/36 sm:flex-row sm:items-center sm:justify-between">
+      <div className="farm-top-rule flex flex-col gap-2 px-4 py-3 font-mono text-[10px] font-normal uppercase !tracking-[0.04em] text-white/34 sm:flex-row sm:items-center sm:justify-between">
         <span>&copy; {new Date().getFullYear()} Farm.js</span>
         <a
           className="inline-flex items-center gap-1.5 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
