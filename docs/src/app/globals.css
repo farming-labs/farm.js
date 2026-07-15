@@ -320,26 +320,26 @@
       inset 0 1px 0 rgb(255 255 255 / 0.025);
   }
 
-  .farm-migration-row {
+  .farm-layer-row {
     animation: farm-foundation-sequence-three 6s linear infinite;
   }
 
-  .farm-migration-source,
-  .farm-migration-target {
+  .farm-layer-source,
+  .farm-layer-target {
     animation: farm-illustration-float 7s ease-in-out infinite;
     will-change: transform;
   }
 
-  .farm-migration-target {
+  .farm-layer-target {
     animation-delay: -2.2s;
   }
 
-  .farm-migration-link {
-    animation: farm-migration-link 3s ease-in-out infinite;
+  .farm-layer-link {
+    animation: farm-layer-link 3s ease-in-out infinite;
   }
 
-  .farm-migration-progress {
-    animation: farm-migration-progress 6s ease-in-out infinite;
+  .farm-layer-progress {
+    animation: farm-layer-progress 6s ease-in-out infinite;
     will-change: transform;
   }
 
@@ -713,7 +713,7 @@
   }
 }
 
-@keyframes farm-migration-link {
+@keyframes farm-layer-link {
   0%,
   100% {
     opacity: 0.38;
@@ -726,7 +726,7 @@
   }
 }
 
-@keyframes farm-migration-progress {
+@keyframes farm-layer-progress {
   0%,
   8% {
     transform: scaleX(0.08);
@@ -795,11 +795,11 @@
     animation-play-state: paused;
   }
 
-  .group:hover .farm-migration-row,
-  .group:hover .farm-migration-source,
-  .group:hover .farm-migration-target,
-  .group:hover .farm-migration-link,
-  .group:hover .farm-migration-progress {
+  .group:hover .farm-layer-row,
+  .group:hover .farm-layer-source,
+  .group:hover .farm-layer-target,
+  .group:hover .farm-layer-link,
+  .group:hover .farm-layer-progress {
     animation-play-state: paused;
   }
 }
@@ -838,7 +838,7 @@
     transform: none;
   }
 
-  .farm-migration-row,
+  .farm-layer-row,
   .farm-terminal-command-text,
   .farm-terminal-command-cursor,
   .farm-terminal-command-cursor::before,
@@ -847,10 +847,10 @@
   .farm-build-command-cursor,
   .farm-build-command-cursor::before,
   .farm-build-output,
-  .farm-migration-source,
-  .farm-migration-target,
-  .farm-migration-link,
-  .farm-migration-progress {
+  .farm-layer-source,
+  .farm-layer-target,
+  .farm-layer-link,
+  .farm-layer-progress {
     animation: none;
   }
 
@@ -872,19 +872,19 @@
     opacity: 1;
   }
 
-  .farm-migration-row[data-initial="true"] {
+  .farm-layer-row[data-initial="true"] {
     color: rgb(255 255 255 / 0.9);
     background: rgb(255 255 255 / 0.075);
     border-color: rgb(255 255 255 / 0.2);
     box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
   }
 
-  .farm-migration-progress {
+  .farm-layer-progress {
     opacity: 1;
     transform: scaleX(1);
   }
 
-  .farm-migration-link {
+  .farm-layer-link {
     display: none;
   }
 }
