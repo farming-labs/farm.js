@@ -301,28 +301,17 @@ function IndexedLabel({
   );
 }
 
-function FarmMark({ className }: { className?: string }) {
-  return (
-    <svg aria-hidden className={className} viewBox="0 0 32 32">
-      <path d="M4 5h24v5H10v5h13v5H10v7H4V5Z" fill="currentColor" />
-      <path d="M22 5h6l-5 5h-6l5-5Z" fill="black" />
-    </svg>
-  );
-}
-
-function Wordmark() {
+function Wordmark({ className }: { className?: string }) {
   return (
     <a
       aria-label="Farm.js home"
-      className="flex shrink-0 items-center gap-2 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+      className={cx(
+        "shrink-0 font-mono font-normal uppercase tracking-normal text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white",
+        className,
+      )}
       href="/"
     >
-      <span className="grid size-7 place-items-center bg-white text-black">
-        <FarmMark className="size-5" />
-      </span>
-      <span className="font-mono text-[13px] font-normal uppercase tracking-normal">
-        FARM<span className="text-white/52">.JS</span>
-      </span>
+      FARM<span className="text-white/52">.JS</span>
     </a>
   );
 }
@@ -415,7 +404,7 @@ function Header() {
     <header className="farm-full-rule sticky top-0 z-50 bg-black/94 backdrop-blur-xl">
       <div className="flex h-11 w-full items-stretch">
         <div className="flex shrink-0 items-center px-4 sm:px-7">
-          <Wordmark />
+          <Wordmark className="text-[13px]" />
         </div>
 
         <nav
@@ -1215,21 +1204,11 @@ function Footer() {
     <footer className="farm-top-rule w-full">
       <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
         <div>
-          <div className="flex h-12 items-center justify-between border-b border-white/12 px-4">
+          <div className="flex h-12 items-center border-b border-white/12 px-4">
             <div className="flex min-w-0 items-center gap-2.5">
               <FarmingLabsBrand />
-              <span aria-hidden className="h-4 w-px bg-white/14" />
-              <a
-                aria-label="Farm.js home"
-                className="font-mono text-[11px] font-normal uppercase tracking-normal text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
-                href="/"
-              >
-                FARM<span className="text-white/52">.JS</span>
-              </a>
+              <Wordmark className="text-[11px]" />
             </div>
-            <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
-              @farming-labs/*
-            </span>
           </div>
           <div className="px-4 py-4 md:min-h-[154px]">
             <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 tracking-normal text-white/42">
