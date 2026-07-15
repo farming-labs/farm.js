@@ -703,7 +703,8 @@ function BuildVisual() {
               parallel...
             </span>
             <span className="block">
-              <span className="text-white">[success]</span> ✅ Build completed successfully!
+              <span className="text-white">[success]</span> ✅ Build completed in{" "}
+              <span className="font-semibold text-white">1.24s</span>
             </span>
             <span className="block text-white/78">
               <span className="text-white">[info]</span> 📁 Output directory: .vercel/output
