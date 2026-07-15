@@ -588,12 +588,9 @@ function TerminalVisual() {
           </span>
         </figcaption>
         <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
-          <code className="block min-w-0 whitespace-pre-wrap break-words">
+          <code className="block min-w-0 space-y-1.5 whitespace-pre-wrap break-words">
             <span className="block text-white/48">$ pnpm dev</span>
-            <span className="mt-2 block text-white/48">
-              [info] 📦 Enabled built-in Tailwind support (@tailwindcss/vite)
-            </span>
-            <span className="mt-2 block text-white">
+            <span className="block text-white">
               <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in 386ms
             </span>
             <span className="block text-white/54">
