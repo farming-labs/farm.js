@@ -9,6 +9,7 @@ export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
 export { definePlugin, PluginManager } from "./plugin";
 export {
+  defineConfig,
   defineFarmConfig,
   resolveConfig,
   loadConfig,

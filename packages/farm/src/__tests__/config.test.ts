@@ -5,6 +5,8 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  defineConfig,
+  defineFarmConfig,
   loadConfig,
   resolveConfig,
   resolveDeployConfig,
@@ -33,6 +35,19 @@ afterEach(() => {
 
     process.env[key] = value;
   }
+});
+
+describe("config helpers", () => {
+  it("supports concise and framework-specific names", () => {
+    const config = {
+      srcDir: "app",
+      deploy: { target: "vercel" as const },
+    };
+
+    expect(defineConfig).toBe(defineFarmConfig);
+    expect(defineConfig(config)).toBe(config);
+    expect(defineFarmConfig(config)).toBe(config);
+  });
 });
 
 describe("loadConfig", () => {

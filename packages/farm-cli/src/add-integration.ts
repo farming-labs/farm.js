@@ -801,10 +801,10 @@ async function updateFarmConfig(input: {
   if (!configFile) {
     const newConfigFile = path.join(input.root, "farm.config.ts");
     const importPath = toImportPath(path.relative(input.root, input.registryFile));
-    const source = `import { defineFarmConfig } from "@farmjs/core";
+    const source = `import { defineConfig } from "@farmjs/core";
 import { appIntegrations } from "${importPath}";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: appIntegrations,
 });
 `;
@@ -849,8 +849,9 @@ export default defineFarmConfig({
 }
 
 function insertIntegrationsConfig(source: string) {
-  if (/defineFarmConfig\s*\(\s*\{/.test(source)) {
-    return source.replace(/defineFarmConfig\s*\(\s*\{/, (match) => {
+  const defineConfigCall = /\bdefine(?:Farm)?Config\s*\(\s*\{/;
+  if (defineConfigCall.test(source)) {
+    return source.replace(defineConfigCall, (match) => {
       return `${match}\n  integrations: appIntegrations,`;
     });
   }

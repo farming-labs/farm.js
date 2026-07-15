@@ -59,6 +59,8 @@ test("adds a supabase integration to a new app", async () => {
     assert.match(registry, /import \{ supabaseIntegration \}/);
     assert.match(registry, /auth: supabaseIntegration/);
     assert.match(component, /supabase\(\{/);
+    assert.match(config, /import \{ defineConfig \} from "@farmjs\/core"/);
+    assert.match(config, /export default defineConfig\(\{/);
     assert.match(config, /integrations: appIntegrations/);
   } finally {
     await rm(root, { recursive: true, force: true });
@@ -122,6 +124,43 @@ export default defineFarmConfig({
     assert.match(config, /import \{ appIntegrations \}/);
     assert.match(config, /integrations: appIntegrations/);
     assert.match(config, /vite:/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("adds an integration to a config using defineConfig", async () => {
+  const root = await createTempProject({
+    packageJson: {
+      type: "module",
+      dependencies: {
+        "@farmjs/core": "workspace:*",
+      },
+    },
+  });
+
+  try {
+    await writeFile(
+      path.join(root, "farm.config.ts"),
+      `import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  srcDir: "src",
+});
+`,
+      "utf8",
+    );
+
+    await addFarmIntegration({
+      root,
+      provider: "stripe",
+    });
+
+    const config = await readFile(path.join(root, "farm.config.ts"), "utf8");
+
+    assert.match(config, /defineConfig\(\{/);
+    assert.match(config, /integrations: appIntegrations/);
+    assert.match(config, /srcDir: "src"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

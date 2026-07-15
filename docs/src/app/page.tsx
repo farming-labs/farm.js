@@ -249,9 +249,9 @@ const typedApiCode = `const user = await api.users.get({
 user.name;
 //   ^? string`;
 
-const integrationConfigCode = `import { defineFarmConfig } from "@farmjs/core";
+const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: [
     auth(),
     billing(),
