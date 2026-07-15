@@ -214,6 +214,7 @@ const footerGroups = [
   {
     title: "Framework",
     icon: BookOpen,
+    brand: null,
     action: ["Read guide", "/docs/getting-started"],
     links: [
       ["Getting started", "/docs/getting-started"],
@@ -224,6 +225,7 @@ const footerGroups = [
   {
     title: "Product",
     icon: Layers3,
+    brand: null,
     action: ["Explore integrations", "/docs/integrations"],
     links: [
       ["Integrations", "/docs/integrations"],
@@ -234,6 +236,7 @@ const footerGroups = [
   {
     title: "Open source",
     icon: GitFork,
+    brand: githubIconUrl,
     action: ["View source", "https://github.com/Kinfe123/farm.js"],
     links: [["GitHub", "https://github.com/Kinfe123/farm.js"]],
   },
@@ -328,13 +331,11 @@ function FarmingLabsBrand() {
   return (
     <a
       aria-label="Farming Labs brand assets"
-      className="flex shrink-0 items-center gap-2.5 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+      className="flex shrink-0 items-center text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
       href="https://www.farming-labs.dev/brand"
+      title="Farming Labs brand"
     >
       <img alt="" aria-hidden className="h-[19px] w-auto" src={farmingLabsLogoUrl} />
-      <span className="font-mono text-[10px] font-normal uppercase tracking-normal text-white/72">
-        Farming-Labs
-      </span>
     </a>
   );
 }
@@ -1140,10 +1141,12 @@ function FinalCta() {
 type FooterLink = readonly [label: string, href: string];
 
 function FooterActionLink({
+  brand,
   href,
   icon: Icon,
   label,
 }: {
+  brand: string | null;
   href: string;
   icon: LucideIcon;
   label: string;
@@ -1156,7 +1159,11 @@ function FooterActionLink({
       href={href}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+        {brand ? (
+          <BrandIcon className="size-3.5 shrink-0 opacity-72" src={brand} />
+        ) : (
+          <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+        )}
         <span className="truncate">{label}</span>
       </span>
       <DirectionIcon
@@ -1209,7 +1216,11 @@ function Footer() {
       <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
         <div>
           <div className="flex h-12 items-center justify-between border-b border-white/12 px-4">
-            <FarmingLabsBrand />
+            <div className="flex min-w-0 items-center gap-2.5">
+              <FarmingLabsBrand />
+              <span aria-hidden className="h-4 w-px bg-white/14" />
+              <Wordmark />
+            </div>
             <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
               @farming-labs/*
             </span>
@@ -1222,7 +1233,12 @@ function Footer() {
         </div>
         {footerGroups.map((group) => (
           <div key={group.title}>
-            <FooterActionLink href={group.action[1]} icon={group.icon} label={group.action[0]} />
+            <FooterActionLink
+              brand={group.brand}
+              href={group.action[1]}
+              icon={group.icon}
+              label={group.action[0]}
+            />
             <FooterLinksGroup links={group.links} title={group.title} />
           </div>
         ))}
