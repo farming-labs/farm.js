@@ -260,13 +260,14 @@ export default defineConfig({
     deploy: { target: "vercel" },
 });`;
 
-const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";
-
-export default defineDocs({
-  entry: "docs",
-  docsPath: "/docs",
-  search: { enabled: true },
-  pageActions: { copyMarkdown: { enabled: true } },
+const docsConfigCode = `import { defineConfig } from "@farmjs/core";
+export default defineConfig({
+    docs: {
+        enabled: true,
+        entry: "/docs",
+        search: true,
+        mcp: true,
+    },
 });`;
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -957,7 +958,7 @@ function DeploymentVisual() {
 }
 
 function DocsVisual() {
-  return <FoundationCodeVisual code={docsConfigCode} label="docs.config.ts" language="ts" />;
+  return <FoundationCodeVisual code={docsConfigCode} label="farm.config.ts" language="ts" />;
 }
 
 function LayersVisual() {
@@ -1089,7 +1090,7 @@ function FoundationGrid() {
         <DeploymentVisual />
       </FeatureCell>
       <FeatureCell
-        body="Write docs once, then serve pages, Markdown, search, and agent-ready endpoints from the same source."
+        body="Enable docs in your app config, then serve pages, Markdown, search, and agent-ready endpoints from the same source."
         className="border-t border-white/12"
         icon={BookOpenText}
         index="02.3"
