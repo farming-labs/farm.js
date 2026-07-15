@@ -1117,14 +1117,7 @@ function FinalCta() {
           Build routing, APIs, integrations, docs, and deployment together in one React framework.
         </p>
       </div>
-      <div className="farm-top-rule flex flex-col items-center justify-center gap-2 bg-white/[0.035] p-4 sm:flex-row">
-        <ButtonLink
-          href="/docs"
-          icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
-          variant="secondary"
-        >
-          Read the Docs
-        </ButtonLink>
+      <div className="farm-top-rule flex items-center justify-center bg-white/[0.035] p-4">
         <ButtonLink
           href="/docs/getting-started"
           icon={<Rocket aria-hidden className="size-4" strokeWidth={1.5} />}
@@ -1210,7 +1203,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
 
 function Footer() {
   return (
-    <footer className="farm-top-rule w-full">
+    <footer className="w-full">
       <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
         <div>
           <div className="flex h-12 items-center border-b border-white/12 px-4">
