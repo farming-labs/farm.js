@@ -661,10 +661,6 @@
   }
 
   .group:hover .farm-migration-row,
-  .group:hover .farm-terminal-command-text,
-  .group:hover .farm-terminal-command-cursor,
-  .group:hover .farm-terminal-command-cursor::before,
-  .group:hover .farm-terminal-output,
   .group:hover .farm-migration-source,
   .group:hover .farm-migration-target,
   .group:hover .farm-migration-link,
