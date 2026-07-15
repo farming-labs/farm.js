@@ -49,6 +49,7 @@ import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import supabaseIconUrl from "simple-icons/icons/supabase.svg?url";
 import vercelIconUrl from "simple-icons/icons/vercel.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
+import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
 import { HighlightedCode } from "../components/home/highlighted-code";
@@ -234,11 +235,7 @@ const footerGroups = [
     title: "Open source",
     icon: GitFork,
     action: ["View source", "https://github.com/Kinfe123/farm.js"],
-    links: [
-      ["GitHub", "https://github.com/Kinfe123/farm.js"],
-      ["Migrations", "/docs/migrations"],
-      ["Plugin guide", "/docs/plugins/create-plugin"],
-    ],
+    links: [["GitHub", "https://github.com/Kinfe123/farm.js"]],
   },
 ] as const;
 
@@ -322,6 +319,21 @@ function Wordmark() {
       </span>
       <span className="font-mono text-[13px] font-normal uppercase tracking-normal">
         FARM<span className="text-white/52">.JS</span>
+      </span>
+    </a>
+  );
+}
+
+function FarmingLabsBrand() {
+  return (
+    <a
+      aria-label="Farming Labs brand assets"
+      className="flex shrink-0 items-center gap-2.5 text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-white"
+      href="https://www.farming-labs.dev/brand"
+    >
+      <img alt="" aria-hidden className="h-[19px] w-auto" src={farmingLabsLogoUrl} />
+      <span className="font-mono text-[10px] font-normal uppercase tracking-normal text-white/72">
+        Farming-Labs
       </span>
     </a>
   );
@@ -1165,6 +1177,7 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
       <ul className="grid">
         {links.map(([label, href]) => {
           const DirectionIcon = href.startsWith("http") ? ArrowUpRight : ArrowRight;
+          const isGitHub = href.includes("github.com");
 
           return (
             <li key={label}>
@@ -1172,7 +1185,10 @@ function FooterLinksGroup({ title, links }: { title: string; links: readonly Foo
                 className="group flex min-h-7 items-center justify-between gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
                 href={href}
               >
-                <span>{label}</span>
+                <span className="flex items-center gap-2">
+                  {isGitHub ? <GithubIcon className="size-3.5 opacity-72" /> : null}
+                  <span>{label}</span>
+                </span>
                 <DirectionIcon
                   aria-hidden
                   className="size-3 shrink-0 text-white/0 transition-[color,transform] duration-150 group-hover:translate-x-0.5 group-hover:text-white/56"
@@ -1193,17 +1209,14 @@ function Footer() {
       <div className="grid grid-cols-1 divide-y divide-white/12 md:grid-cols-4 md:divide-x md:divide-y-0">
         <div>
           <div className="flex h-12 items-center justify-between border-b border-white/12 px-4">
-            <Wordmark />
+            <FarmingLabsBrand />
             <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
-              Framework
+              @farming-labs/*
             </span>
           </div>
           <div className="px-4 py-4 md:min-h-[154px]">
             <p className="max-w-[15rem] font-mono text-[9px] font-normal uppercase leading-5 tracking-normal text-white/42">
-              A React framework for building integrated product applications.
-            </p>
-            <p className="mt-5 font-mono text-[8px] font-normal uppercase tracking-normal text-white/24">
-              React 19 / TypeScript / Universal
+              Farm.js is the React framework for product applications in the Farming Labs ecosystem.
             </p>
           </div>
         </div>
