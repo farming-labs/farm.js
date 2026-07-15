@@ -587,17 +587,27 @@ function TerminalVisual() {
             <Terminal aria-hidden className="size-3" strokeWidth={1.5} /> pnpm dev
           </span>
         </figcaption>
-        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[11px] leading-6 tracking-normal sm:text-xs">
+        <pre className="min-h-0 flex-1 overflow-x-auto p-5 font-mono text-[10px] leading-5 tracking-normal sm:text-[11px] sm:leading-6">
           <code className="block min-w-0 space-y-1.5 whitespace-pre-wrap break-words">
             <span className="block text-white/48">$ pnpm dev</span>
             <span className="block text-white">
-              <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in 386ms
+              <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in{" "}
+              <span className="text-white/72">386ms</span>
             </span>
             <span className="block text-white/54">
               <span className="text-white/82">➜ Local:</span> http://localhost:3000/
             </span>
             <span className="block text-white/54">
-              <span className="text-white/82">➜ Network:</span> use --host to expose
+              <span className="text-white/72">[FARM] [PAGE] [GET]</span> /contact - 200{" "}
+              <span className="text-white/36">(8ms)</span>
+            </span>
+            <span className="block text-white/54">
+              <span className="text-white/72">[FARM] [PAGE] [GET]</span> /about - 200{" "}
+              <span className="text-white/36">(6ms)</span>
+            </span>
+            <span className="block text-white/54">
+              <span className="text-white/72">[FARM] [PAGE] [GET]</span> /docs - 200{" "}
+              <span className="text-white/36">(11ms)</span>
             </span>
           </code>
         </pre>
@@ -709,11 +719,11 @@ function DeveloperExperienceGrid() {
   return (
     <section className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
-        body="Run pages, APIs, docs, and integrations together in the same development server."
+        body="Start the whole app once, then see every page request and response time as you work."
         icon={Terminal}
         index="01.1"
         label="Development"
-        title="One command runs the app"
+        title="A dev server that starts in milliseconds"
       >
         <TerminalVisual />
       </FeatureCell>
