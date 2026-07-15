@@ -14,8 +14,8 @@ describe("generateFarmTypeArtifacts", () => {
     writeFileSync(
       path.join(root, "farm.config.ts"),
       [
-        'import { defineFarmConfig } from "@farmjs/core";',
-        "export default defineFarmConfig({",
+        'import { defineConfig } from "@farmjs/core";',
+        "export default defineConfig({",
         "  env: {",
         "    server: { DATABASE_URL: { parse: (value: unknown) => String(value) } },",
         "    public: { PUBLIC_APP_URL: { parse: (value: unknown) => String(value) } },",

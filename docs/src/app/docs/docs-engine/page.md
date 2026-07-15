@@ -13,7 +13,9 @@ Serve a @farming-labs/docs-powered docs runtime from Farm config, including huma
 **farm.config.ts**
 
 ```ts
-export default defineFarmConfig({
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
   docs: {
     entry: "/docs",
   },

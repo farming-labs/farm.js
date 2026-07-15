@@ -53,13 +53,13 @@ Use `"use client"` when a component uses React hooks, browser APIs, or client-on
 
 ## Config Spec
 
-Farm apps use `defineFarmConfig`:
+Farm apps use `defineConfig`. The older `defineFarmConfig` name is an exact supported alias:
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { appIntegrations } from "./src/lib/integrations.ts";
 
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
   },
@@ -363,7 +363,7 @@ const sqlite = sqliteStorage({
   tableName: "app_store",
 });
 
-export default defineFarmConfig({
+export default defineConfig({
   storage: {
     mounts: {
       app: sqlite,

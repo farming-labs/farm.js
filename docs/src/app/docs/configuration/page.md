@@ -13,9 +13,9 @@ Use farm.config.ts as the single project control plane for source paths, integra
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   srcDir: "src",
   deploy: {
     target: "vercel",
@@ -32,6 +32,26 @@ export default defineFarmConfig({
   },
 });
 ```
+
+`defineConfig` is the concise Farm helper. `defineFarmConfig` is the same typed function and remains fully supported for existing applications.
+
+### Docs config
+
+Use `defineDocs` for docs-specific navigation, search, theme, and metadata in a separate `docs.config.ts`:
+
+```ts
+import { defineDocs } from "@farming-labs/docs";
+
+export default defineDocs({
+  entry: "docs",
+  docsPath: "/docs",
+  nav: {
+    title: "Farm.js Docs",
+  },
+});
+```
+
+`defineConfig` configures the Farm application. `defineDocs` configures the docs experience mounted by that application.
 
 ## Important options
 
@@ -56,7 +76,7 @@ export default defineFarmConfig({
 Use `extends` to compose ordinary Farm-shaped directories and packages. Entries apply from left to right, and project files and configuration have final priority.
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   extends: ["@company/farm-base", "./layers/commerce"],
 });
 ```
@@ -68,9 +88,9 @@ A layer may contain an optional plain `farm.config.ts` plus its own `src/app`, c
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
     serverActions: true,
@@ -121,9 +141,9 @@ export default async function BlogPage() {
 Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   routeRules: {
     "/": { prerender: true },
     "/blog/**": { swr: 3600 },
@@ -167,11 +187,11 @@ src/lib/integrations.ts
 ## Integrations in config
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { stripe } from "@farmjs/integrations/stripe";
 import { supabase } from "@farmjs/integrations/supabase";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     billing: stripe({
       secretKey: process.env.STRIPE_SECRET_KEY,
@@ -191,9 +211,9 @@ The keys become typed namespaces. `billing` becomes `api.billing`, and `auth` be
 Use `migrations.commands` when the app needs a predictable command before build or deploy. This keeps schema setup close to the storage and integration config without turning the framework into a migration engine.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   migrations: {
     commands: [
       "pnpm drizzle-kit migrate",
@@ -220,7 +240,7 @@ Each command runs from the project root unless it sets `cwd`. Commands run in or
 ## Deployment config
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target: "vercel",
     outputDir: ".vercel/output",
@@ -235,7 +255,7 @@ export default defineFarmConfig({
 Farm assigns one deployment ID to the server and browser output so requests from an older open page can be detected safely.
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   deploymentId: process.env.RELEASE_ID,
 });
 ```
@@ -245,7 +265,7 @@ When `deploymentId` is omitted, Farm checks `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_CO
 For a custom build ID, return one stable value for every instance of the same release:
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   generateBuildId: async () => process.env.GIT_SHA || `build-${Date.now()}`,
 });
 ```

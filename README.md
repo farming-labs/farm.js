@@ -43,15 +43,17 @@ yarn add @farmjs/core react react-dom
 Create a `farm.config.ts`:
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   srcDir: "src",
   deploy: {
     target: "vercel",
   },
 });
 ```
+
+`defineFarmConfig` remains supported as an exact alias of `defineConfig`.
 
 Create your first page in `src/app/page.tsx`:
 
@@ -110,9 +112,9 @@ my-farm-app/
 Farm.js supports a powerful configuration system via `farm.config.ts`:
 
 ```typescript
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
   },
@@ -172,9 +174,9 @@ src/app/
 Required config:
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
   },

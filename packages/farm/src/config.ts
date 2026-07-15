@@ -279,9 +279,13 @@ export type FarmLayerConfig = Omit<
   | "deploymentId"
 >;
 
+/** Define a Farm application config while preserving literal types. */
 export function defineFarmConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
   return config;
 }
+
+/** Concise alias for {@link defineFarmConfig}. */
+export const defineConfig = defineFarmConfig;
 
 export function normalizeDeployTarget(target?: FarmDeployTarget): FarmDeployTarget | undefined {
   if (!target) return undefined;
