@@ -20,6 +20,7 @@ A compact map of the main package exports and where to learn more.
 | @farmjs/core/query | Query and route param types. |
 | @farmjs/core/storage | Storage clients and mount helpers. |
 | @farmjs/core/cache | Data cache, revalidation, cache keys. |
+| @farmjs/core/after | Post-response server work with `after()`. |
 | @farmjs/integrations | Auth, billing, email, jobs, AI, API keys, provider clients. |
 
 ## Recommended reading path
@@ -41,6 +42,7 @@ A compact map of the main package exports and where to learn more.
 | `@farmjs/core/headers` | `headers`, `cookies`. |
 | `@farmjs/core/router` | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`. |
 | `@farmjs/core/storage` | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`. |
+| `@farmjs/core/after` | `after` for short work that starts after the current response finishes. |
 | `@farmjs/integrations/stripe` | Stripe billing integration. |
 | `@farmjs/integrations/auth` | Better Auth, Auth.js, Clerk, Auth0, WorkOS helpers when using the auth barrel. |
 | `@farmjs/integrations/supabase` | Supabase auth integration. |
