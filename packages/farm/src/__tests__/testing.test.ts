@@ -257,12 +257,13 @@ describe("Farm test API harness", () => {
         method: "PATCH",
         body: z.object({ name: z.string().min(2) }),
         query: z.object({ source: z.enum(["form", "api"]) }),
+        middleware: [({ headers }) => ({ tenant: headers["x-tenant"] })],
       },
-      ({ body, query, params, headers }) => ({
+      ({ body, query, params, context }) => ({
         id: params.id,
         name: body.name,
         source: query.source,
-        tenant: headers["x-tenant"],
+        tenant: context.tenant,
       }),
     );
     const ProjectApi = api("/api/projects/[id]", { PATCH: updateProject });

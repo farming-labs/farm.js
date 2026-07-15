@@ -392,10 +392,15 @@ export async function invokeAPIRouteEndpoint(
     return bodyValidation;
   }
 
+  const headersValidation = validateInput(types.headers, headers, "Invalid request headers");
+  if (headersValidation instanceof Response) {
+    return headersValidation;
+  }
+
   const result = await farmHandler({
     query: queryValidation,
     body: bodyValidation,
-    headers,
+    headers: headersValidation,
     request,
     context: {},
     params,
