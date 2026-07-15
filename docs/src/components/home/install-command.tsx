@@ -21,7 +21,7 @@ const commands: readonly CommandOption[] = [
   {
     label: "Agent",
     command:
-      "Use Farm.js to build this React product app. Read the project docs first, then follow its app router, typed API, middleware, integration, and deployment conventions.",
+      "Use Farm.js to build this production-ready React product app. Read the project docs first, then follow its App Router, typed APIs, server functions, middleware, integrations, environment boundaries, data loading, and deployment conventions. Preserve existing patterns, validate external input, keep secrets server-only, add focused tests, and run type checks plus a production build before finishing.",
     icon: Bot,
     kind: "agent",
   },
@@ -202,20 +202,35 @@ export function InstallCommand() {
         </span>
         <div className="min-w-0 overflow-hidden">
           <code
-            className={`flex h-full min-w-0 px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px] ${
-              activeCommand.kind === "agent" ? "items-start py-2 leading-4" : "items-center"
-            }`}
+            className="flex h-full min-w-0 items-center px-2 font-mono text-[9px] tracking-normal text-white/78 sm:px-2.5 sm:text-[10px]"
             title={activeCommand.command}
           >
-            <span
-              aria-hidden
-              className={`mr-2 shrink-0 text-white/28 ${
-                activeCommand.kind === "agent" ? "pt-px" : ""
-              }`}
-            >
+            <span aria-hidden className="mr-2 shrink-0 text-white/28">
               {activeCommand.kind === "agent" ? "AI" : "$"}
             </span>
-            <span className="min-w-0 whitespace-normal break-words">{activeCommand.command}</span>
+            {activeCommand.kind === "agent" ? (
+              <>
+                <span className="sr-only">{activeCommand.command}</span>
+                <span
+                  aria-hidden
+                  className="farm-agent-command-viewport min-w-0 flex-1 overflow-hidden px-3"
+                >
+                  <span className="farm-agent-command-track flex w-max items-center whitespace-nowrap">
+                    {([0, 1] as const).map((copyIndex) => (
+                      <span
+                        key={copyIndex}
+                        aria-hidden={copyIndex === 1 ? true : undefined}
+                        className="farm-agent-command-copy shrink-0 pr-8"
+                      >
+                        {activeCommand.command}
+                      </span>
+                    ))}
+                  </span>
+                </span>
+              </>
+            ) : (
+              <span className="min-w-0 truncate whitespace-nowrap">{activeCommand.command}</span>
+            )}
           </code>
         </div>
         <button
