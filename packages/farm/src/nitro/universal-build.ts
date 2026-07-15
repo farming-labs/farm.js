@@ -1565,6 +1565,7 @@ function generateVirtualEntryCode(
       : "";
   const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
   const navigationHelpersImport = `import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "farm/navigation";`;
+  const afterHelpersImport = `import { _runWithAfterRequest } from "farm/after";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
   const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
@@ -1646,6 +1647,7 @@ ${notFoundImport}
 ${apiRouteHelpersImport}
 ${cacheHelpersImport}
 ${navigationHelpersImport}
+${afterHelpersImport}
 ${observabilityHelpersImport}
 ${middlewareRuntimeImport}
 ${docsHandlerImport}
@@ -1960,7 +1962,7 @@ function getCachedPPRShell(cacheKey) {
 /**
  * Main request handler - created at runtime with bundled routes
  */
-async function handleRequest(request) {
+async function handleFarmRequest(request) {
   let url = new URL(request.url);
   let pathname = url.pathname;
   const requestStartTime = Date.now();
@@ -1994,7 +1996,7 @@ async function handleRequest(request) {
       request: request.clone(),
       config: farmMarkdownConfig,
       routeExists: (targetPathname) => Boolean(matchPageRoute(targetPathname)),
-      renderPage: (targetRequest) => handleRequest(targetRequest),
+      renderPage: (targetRequest) => handleFarmRequest(targetRequest),
     });
     if (markdownResponse) {
       return markdownResponse;
@@ -2496,7 +2498,9 @@ async function handleRequest(request) {
 }
 
 // Export as Web Standard fetch API
-export const fetch = handleRequest;
+export async function fetch(request, context) {
+  return _runWithAfterRequest(request, () => handleFarmRequest(request), context);
+}
 export default { fetch };
   `.trim();
 }
@@ -2554,11 +2558,13 @@ async function buildNitroUniversal(
 // Farm.js Nitro Entry
 // This file imports h3 and the SSR handler, wrapping it for Nitro
 
-import { fromWebHandler } from 'h3'
+import { defineEventHandler } from 'h3'
 import handler from './${ssrEntryFile}'
 
 // Export the wrapped handler for Nitro
-export default fromWebHandler(handler.fetch)
+export default defineEventHandler((event) => handler.fetch(event.req, {
+  waitUntil: (promise) => event.waitUntil(promise),
+}))
   `.trim();
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);

@@ -20,6 +20,7 @@ export default defineConfig({
     storage: "src/storage/index.ts",
     cache: "src/cache.ts",
     deferred: "src/deferred.ts",
+    after: "src/after.ts",
     navigation: "src/navigation.ts",
     headers: "src/headers.ts",
     docs: "src/docs/index.ts",

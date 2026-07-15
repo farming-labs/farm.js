@@ -44,6 +44,7 @@ import {
   _runWithMiddlewareData,
   createProductionMiddlewareRunner,
 } from '@farmjs/core/middleware';
+import { _runWithAfterRequest } from '@farmjs/core/after';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 `;
@@ -377,7 +378,7 @@ function getLayout(pageFilePath) {
  * Main request handler - entry point for both dev and production (Nitro).
  * Exported as { fetch: handler } for the RSC/Nitro contract (see vite-plugin-rsc-deploy-example).
  */
-async function handler(request) {
+async function handleFarmRequest(request) {
   let url = new URL(request.url);
   try {
   debug('Handling request:', request.method, url.pathname);
@@ -761,6 +762,10 @@ async function handler(request) {
       headers: { 'Content-Type': 'application/json' },
     });
   }
+}
+
+async function handler(request, context) {
+  return _runWithAfterRequest(request, () => handleFarmRequest(request), context);
 }
 
 export default { fetch: handler };

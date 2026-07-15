@@ -149,7 +149,9 @@ function createRscRequest(event) {
   return new Request(event.req, { signal: controller.signal });
 }
 
-export default defineEventHandler((event) => handler(createRscRequest(event)));
+export default defineEventHandler((event) => handler(createRscRequest(event), {
+  waitUntil: (promise) => event.waitUntil(promise),
+}));
 `.trim();
   const entryPath = path.join(buildDir, "rsc-entry.mjs");
   mkdirSync(buildDir, { recursive: true });

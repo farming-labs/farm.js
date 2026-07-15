@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { H3Event, fromWebHandler, toResponse as h3_toResponse } from "h3";
+import { _runWithAfterRequest } from "../after";
 
 // Optional: If you want h3 utilities (cookies, sessions, etc.)
 const eventStorage = new AsyncLocalStorage<{ h3Event: H3Event }>();
@@ -17,7 +18,11 @@ export function requestHandler(handler: RequestHandler): RequestHandler {
   return (request: Request, requestOpts?: any) => {
     const h3Event = new H3Event(request);
 
-    const response = eventStorage.run({ h3Event }, () => handler(request, requestOpts));
+    const response = _runWithAfterRequest(
+      request,
+      () => eventStorage.run({ h3Event }, () => handler(request, requestOpts)),
+      requestOpts?.context,
+    );
 
     return h3_toResponse(response, h3Event);
   };

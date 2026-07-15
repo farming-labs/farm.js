@@ -56,6 +56,7 @@ Provider integrations and custom integration contracts.
 
 Cache, PPR, observability, instant preview, and deployment output.
 
+- [Post-response Work](/docs/after): Schedule short server work with after() without delaying the response.
 - [Cache and PPR](/docs/cache-ppr): Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation, and static shell caching for PPR pages.
 - [Observability](/docs/observability): Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, storage, cache, PPR, builds, plugins, and errors.
 - [Cron and Workflows](/docs/workflows): Define lightweight scheduled and manually-triggered server workflows with Nitro tasks and URL-based schedulers.

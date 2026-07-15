@@ -7,6 +7,7 @@ export type RoutePath =
   | "/"
   | "/docs"
   | `/docs/${string}`
+  | "/docs/after"
   | "/docs/api-client"
   | "/docs/api-routes"
   | "/docs/cache-ppr"
@@ -59,6 +60,7 @@ export type RoutePattern =
   | "/"
   | "/docs"
   | "/docs/[...docs]"
+  | "/docs/after"
   | "/docs/api-client"
   | "/docs/api-routes"
   | "/docs/cache-ppr"

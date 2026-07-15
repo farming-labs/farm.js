@@ -125,9 +125,11 @@ export function farmNitroPlugin(nitroConfig?: NitroConfig): Array<PluginOption> 
                 virtual: {
                   ...nitroConfig?.virtual,
                   [virtualEntry]: `
-import { fromWebHandler } from 'h3'
+import { defineEventHandler } from 'h3'
 import handler from '${ssrEntryFile}'
-export default fromWebHandler(handler.fetch)
+export default defineEventHandler((event) => handler.fetch(event.req, {
+  waitUntil: (promise) => event.waitUntil(promise),
+}))
                   `.trim(),
                 },
               };
