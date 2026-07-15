@@ -632,11 +632,11 @@ function TerminalVisual() {
                   <span className="text-white/88">84ms</span>
                 </span>
                 <span className="block whitespace-nowrap text-white/58">
-                  <span className="inline-block w-[5.25rem] text-white/82">➜ Local:</span>
+                  <span className="inline-block w-[4.5rem] text-white/82">➜ Local:</span>
                   http://localhost:3000/
                 </span>
-                <span className="block whitespace-nowrap text-white/48">
-                  <span className="inline-block w-[5.25rem] text-white/68">➜ Network:</span>
+                <span className="!mt-0.5 block whitespace-nowrap text-white/48">
+                  <span className="inline-block w-[4.5rem] text-white/68">➜ Network:</span>
                   http://192.168.1.24:3000/
                 </span>
                 <TerminalRequestLine duration={8} method="GET" path="/contact" type="PAGE" />
