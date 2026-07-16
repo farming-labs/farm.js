@@ -17,6 +17,20 @@ type CommandOption = {
   icon?: LucideIcon;
 };
 
+function copyWithSelection(value: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const didCopy = document.execCommand("copy");
+  textarea.remove();
+  return didCopy;
+}
+
 const commands: readonly CommandOption[] = [
   {
     label: "Agent",
@@ -104,6 +118,7 @@ export function InstallCommand() {
     let didCopy = false;
     let clipboardTimer: number | undefined;
     setCopyState("copying");
+    const fallbackCopySucceeded = copyWithSelection(activeCommand.command);
 
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
@@ -119,14 +134,7 @@ export function InstallCommand() {
       ]);
       didCopy = true;
     } catch {
-      const textarea = document.createElement("textarea");
-      textarea.value = activeCommand.command;
-      textarea.style.position = "fixed";
-      textarea.style.opacity = "0";
-      document.body.appendChild(textarea);
-      textarea.select();
-      didCopy = document.execCommand("copy");
-      textarea.remove();
+      didCopy = fallbackCopySucceeded;
     } finally {
       window.clearTimeout(clipboardTimer);
     }
@@ -208,29 +216,7 @@ export function InstallCommand() {
             <span aria-hidden className="mr-2 shrink-0 text-white/28">
               {activeCommand.kind === "agent" ? "AI" : "$"}
             </span>
-            {activeCommand.kind === "agent" ? (
-              <>
-                <span className="sr-only">{activeCommand.command}</span>
-                <span
-                  aria-hidden
-                  className="farm-agent-command-viewport min-w-0 flex-1 overflow-hidden px-3"
-                >
-                  <span className="farm-agent-command-track flex w-max items-center whitespace-nowrap">
-                    {([0, 1] as const).map((copyIndex) => (
-                      <span
-                        key={copyIndex}
-                        aria-hidden={copyIndex === 1 ? true : undefined}
-                        className="farm-agent-command-copy shrink-0 pr-8"
-                      >
-                        {activeCommand.command}
-                      </span>
-                    ))}
-                  </span>
-                </span>
-              </>
-            ) : (
-              <span className="min-w-0 truncate whitespace-nowrap">{activeCommand.command}</span>
-            )}
+            <span className="min-w-0 truncate whitespace-nowrap">{activeCommand.command}</span>
           </code>
         </div>
         <button

@@ -13,7 +13,6 @@ import {
   FileText,
   FolderTree,
   Gauge,
-  GitCompareArrows,
   GitFork,
   KeyRound,
   Layers3,
@@ -252,19 +251,23 @@ data?.users[0]?.name;
 //   ^? string | undefined`;
 
 const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
-import { appIntegrations } from "./src/lib/integrations";
-
+import { auth, billing, jobs } from "./src/lib/integrations";
 export default defineConfig({
-  integrations: appIntegrations,
+    extends: ["./layers/commerce"],
+    integrations: { auth, billing, jobs },
+    routeRules: { "/store/**": { swr: 300 } },
+    serverActions: { bodySizeLimit: "1mb" },
+    deploy: { target: "vercel" },
 });`;
 
-const docsConfigCode = `import { defineDocs } from "@farming-labs/docs";
-
-export default defineDocs({
-  entry: "docs",
-  docsPath: "/docs",
-  search: { enabled: true },
-  pageActions: { copyMarkdown: { enabled: true } },
+const docsConfigCode = `import { defineConfig } from "@farmjs/core";
+export default defineConfig({
+    docs: {
+        enabled: true,
+        entry: "/docs",
+        search: true,
+        mcp: true,
+    },
 });`;
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -955,83 +958,111 @@ function DeploymentVisual() {
 }
 
 function DocsVisual() {
-  return <FoundationCodeVisual code={docsConfigCode} label="docs.config.ts" language="ts" />;
+  return <FoundationCodeVisual code={docsConfigCode} label="farm.config.ts" language="ts" />;
 }
 
-function MigrationVisual() {
-  const rows = [
-    { source: "/dashboard", target: "app/dashboard", icon: FileText },
-    { source: "/api/users", target: "api/users/route", icon: Braces },
-    { source: "middleware", target: "middleware.ts", icon: ShieldCheck },
+function LayersVisual() {
+  const layerRows = [
+    { name: "farm-base", detail: "routes + middleware", icon: Layers3 },
+    { name: "admin-layer", detail: "auth + admin", icon: ShieldCheck },
+    { name: "commerce", detail: "products + checkout", icon: CreditCard },
+  ] as const;
+  const resolvedRows = [
+    { label: "routes + APIs", state: "composed", icon: Route },
+    { label: "middleware + config", state: "merged", icon: Settings2 },
+    { label: "generated types", state: "ready", icon: Braces },
   ] as const;
 
   return (
-    <FoundationCanvas>
-      <div className="farm-migration-source farm-illustration-surface absolute left-6 top-6 z-10 h-[10.5rem] w-[64%] max-w-[22rem] overflow-hidden border border-white/10 bg-black opacity-60 shadow-[0_14px_40px_rgba(0,0,0,0.45)] sm:left-10 sm:top-8">
-        <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/40">
-          <span>source inventory</span>
-          <span className="text-white/68">next.js</span>
-        </div>
-        <div className="grid h-[calc(100%-2.25rem)] grid-rows-3">
-          {rows.map((row, index) => {
-            const Icon = row.icon;
+    <FoundationCanvas interactive>
+      <a
+        aria-label="Learn how Farm Layers compose an application"
+        className="group/layers absolute inset-0 overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+        href="/docs/layers"
+        title="Farm Layers documentation"
+      >
+        <div
+          aria-hidden
+          className="farm-layer-source farm-illustration-surface absolute left-6 top-6 z-10 h-[10.5rem] w-[66%] max-w-[23rem] overflow-hidden border border-white/10 bg-black opacity-62 shadow-[0_14px_40px_rgba(0,0,0,0.45)] transition-opacity duration-150 group-hover/layers:opacity-80 sm:left-10 sm:top-8"
+        >
+          <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/40">
+            <span>extends[3]</span>
+            <span className="text-white/68">low -&gt; high</span>
+          </div>
+          <div className="grid h-[calc(100%-2.25rem)] grid-rows-3">
+            {layerRows.map((row, index) => {
+              const Icon = row.icon;
 
-            return (
-              <div
-                key={row.source}
-                className="farm-migration-row flex min-h-0 min-w-0 items-center gap-2.5 border border-transparent px-3 font-mono text-[9px] tracking-normal text-white/50 sm:text-[10px]"
-                data-initial={index === 0 ? "true" : undefined}
-                style={{ animationDelay: index * 2 + "s" }}
-              >
-                <Icon aria-hidden className="size-3.5 shrink-0 text-white/64" strokeWidth={1.4} />
-                <span className="truncate">{row.source}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="farm-migration-link absolute left-[48%] top-[42%] z-20 flex items-center gap-2 text-white/62 sm:left-[54%] sm:top-[44%]">
-        <span className="h-px w-8 bg-white/18 sm:w-12" />
-        <GitCompareArrows aria-hidden className="size-5" strokeWidth={1.35} />
-      </div>
-
-      <div className="farm-migration-target farm-illustration-surface absolute -bottom-px -right-px z-30 h-[13rem] w-[72%] max-w-[25rem] overflow-hidden border border-white/14 bg-black shadow-[-24px_-20px_56px_rgba(0,0,0,0.72)] sm:h-[13.5rem] sm:w-[70%]">
-        <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/40">
-          <span>farm manifest</span>
-          <span className="flex items-center gap-1.5 text-white/72">
-            <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} /> 0 conflicts
-          </span>
-        </div>
-
-        <div className="grid h-[calc(100%-4.25rem)] grid-rows-3">
-          {rows.map((row, index) => {
-            const Icon = row.icon;
-
-            return (
-              <div
-                key={row.target}
-                className="farm-migration-row grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 border border-transparent px-3 font-mono text-[9px] tracking-normal text-white/50 sm:text-[10px]"
-                data-initial={index === 0 ? "true" : undefined}
-                style={{ animationDelay: index * 2 + "s" }}
-              >
-                <Icon aria-hidden className="size-3.5 shrink-0 text-white/66" strokeWidth={1.4} />
-                <span className="truncate">{row.target}</span>
-                <CircleCheck aria-hidden className="size-3 text-white/70" strokeWidth={1.5} />
-              </div>
-            );
-          })}
+              return (
+                <div
+                  key={row.name}
+                  className="farm-layer-row grid min-h-0 min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 border border-transparent px-3 font-mono text-[9px] tracking-normal text-white/50 sm:text-[10px]"
+                  data-initial={index === 0 ? "true" : undefined}
+                  style={{ animationDelay: index * 2 + "s" }}
+                >
+                  <span className="text-[8px] text-white/28">0{index + 1}</span>
+                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/64" strokeWidth={1.4} />
+                  <span className="min-w-0">
+                    <span className="block truncate text-white/72">{row.name}</span>
+                    <span className="block truncate text-[8px] text-white/34">{row.detail}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
-        <div className="absolute bottom-0 left-0 right-0 flex h-8 items-center gap-3 border-t border-white/10 px-3">
-          <span className="h-px flex-1 overflow-hidden bg-white/10">
-            <span className="farm-migration-progress block h-full origin-left bg-white/76" />
-          </span>
-          <span className="font-mono text-[8px] uppercase tracking-normal text-white/56">
-            32 / 32 mapped
-          </span>
+        <div
+          aria-hidden
+          className="farm-layer-link absolute left-[49%] top-[42%] z-20 flex items-center gap-2 text-white/62 sm:left-[55%] sm:top-[44%]"
+        >
+          <span className="h-px w-8 bg-white/18 sm:w-12" />
+          <Network className="size-5" strokeWidth={1.35} />
         </div>
-      </div>
+
+        <div
+          aria-hidden
+          className="farm-layer-target farm-illustration-surface absolute -bottom-px -right-px z-30 h-[13rem] w-[74%] max-w-[25rem] overflow-hidden border border-white/14 bg-black shadow-[-24px_-20px_56px_rgba(0,0,0,0.72)] sm:h-[13.5rem] sm:w-[70%]"
+        >
+          <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/40">
+            <span>resolved app</span>
+            <span className="flex items-center gap-1.5 text-white/72">
+              <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} /> project wins
+            </span>
+          </div>
+
+          <div className="grid h-[calc(100%-4.25rem)] grid-rows-3">
+            {resolvedRows.map((row, index) => {
+              const Icon = row.icon;
+
+              return (
+                <div
+                  key={row.label}
+                  className="farm-layer-row grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 border border-transparent px-3 font-mono text-[9px] tracking-normal text-white/50 sm:text-[10px]"
+                  data-initial={index === 0 ? "true" : undefined}
+                  style={{ animationDelay: index * 2 + "s" }}
+                >
+                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/66" strokeWidth={1.4} />
+                  <span className="truncate">{row.label}</span>
+                  <span className="flex items-center gap-1 text-[8px] uppercase text-white/62">
+                    {row.state}
+                    <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="absolute bottom-0 left-0 right-0 flex h-8 items-center gap-3 border-t border-white/10 px-3">
+            <span className="h-px flex-1 overflow-hidden bg-white/10">
+              <span className="farm-layer-progress block h-full origin-left bg-white/76" />
+            </span>
+            <span className="font-mono text-[8px] uppercase tracking-normal text-white/56">
+              #layers/* ready
+            </span>
+          </div>
+        </div>
+      </a>
     </FoundationCanvas>
   );
 }
@@ -1059,7 +1090,7 @@ function FoundationGrid() {
         <DeploymentVisual />
       </FeatureCell>
       <FeatureCell
-        body="Write docs once, then serve pages, Markdown, search, and agent-ready endpoints from the same source."
+        body="Enable docs in your app config, then serve pages, Markdown, search, and agent-ready endpoints from the same source."
         className="border-t border-white/12"
         icon={BookOpenText}
         index="02.3"
@@ -1069,14 +1100,14 @@ function FoundationGrid() {
         <DocsVisual />
       </FeatureCell>
       <FeatureCell
-        body="Preview Next.js and TanStack Router migrations before Farm.js writes any files."
+        body="Compose routes, middleware, integrations, components, and config from local or package layers. Project files always win."
         className="border-t border-white/12 lg:border-l"
-        icon={GitCompareArrows}
+        icon={Layers3}
         index="02.4"
-        label="Migration"
-        title="Migrate without surprises"
+        label="Layers"
+        title="Share architecture, not boilerplate"
       >
-        <MigrationVisual />
+        <LayersVisual />
       </FeatureCell>
     </section>
   );
