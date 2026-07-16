@@ -28,12 +28,12 @@ export interface IntegrationLabResult {
 const TRACE_KEY = 'integration-lab:trace';
 
 function appendTrace(context: FarmIntegrationHandlerContext, step: string) {
-  const trace = context.requestContext.get<string[]>(TRACE_KEY) || [];
-  context.requestContext.set(TRACE_KEY, [...trace, step]);
+  const trace = context.req.get<string[]>(TRACE_KEY) || [];
+  context.req.set(TRACE_KEY, [...trace, step]);
 }
 
 function readTrace(context: FarmIntegrationHandlerContext) {
-  return context.requestContext.get<string[]>(TRACE_KEY) || [];
+  return context.req.get<string[]>(TRACE_KEY) || [];
 }
 
 function readCaller(context: FarmIntegrationHandlerContext) {

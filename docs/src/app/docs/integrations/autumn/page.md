@@ -101,13 +101,13 @@ autumn({
   secretKey: process.env.AUTUMN_SECRET_KEY,
   billing: {
     async resolveOwner(ctx) {
-      const organizationId = ctx.requestContext.get<string>("organization.id");
+      const organizationId = ctx.req.get<string>("organization.id");
 
       return organizationId
         ? {
             id: organizationId,
             kind: "organization",
-            email: ctx.requestContext.get<string>("user.email") ?? null,
+            email: ctx.req.get<string>("user.email") ?? null,
           }
         : null;
     },
