@@ -25,6 +25,10 @@ import {
 import { routeRulesToNitroRouteRules } from "../route-rules";
 import { getFarmAppDirectories } from "../layers";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
+import {
+  createFarmDocsLastModifiedManifest,
+  FARM_DOCS_LAST_MODIFIED_MANIFEST,
+} from "../docs/last-modified";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -2754,9 +2758,16 @@ async function copyFarmDocsContentForVercel(
   if (!docsContentDir) return;
 
   const bundledContentDir = path.join(nitroFuncDir, "chunks", "nitro", "farm-docs-content");
+  const lastModifiedManifest = createFarmDocsLastModifiedManifest(docsContentDir, {
+    fallback: "now",
+  });
   await fs.rm(bundledContentDir, { recursive: true, force: true });
   await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
   await fs.cp(docsContentDir, bundledContentDir, { recursive: true, force: true });
+  await fs.writeFile(
+    path.join(bundledContentDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),
+    `${JSON.stringify(lastModifiedManifest, null, 2)}\n`,
+  );
 
   logger.info(`📚 Bundled docs content for Vercel: ${path.relative(root, docsContentDir)}`);
 }

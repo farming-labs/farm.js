@@ -76,6 +76,24 @@ The docs runtime can serve human pages and machine-readable output from the same
 
 That means docs content only needs to be written once.
 
+## Last updated dates
+
+When `lastUpdated` is enabled, Farm uses the latest Git commit for each markdown page instead of
+trusting deployment file timestamps. Production builds preserve those dates in the bundled docs
+content, so archive or copy metadata cannot turn into a misleading footer date.
+
+Set an explicit date in frontmatter when a page needs editorial control:
+
+```md
+---
+title: "Release Policy"
+lastModified: "2026-07-16"
+---
+```
+
+Explicit frontmatter wins over generated Git metadata. When Git history is unavailable, local docs
+fall back to the source file timestamp and copied production docs fall back to the build date.
+
 ## Override behavior
 
 When `docs.entry` is enabled in `farm.config.ts`, Farm can mount docs pages and docs API routes automatically. Add explicit route wrappers only when the app wants to override default rendering, authentication, or response behavior.
