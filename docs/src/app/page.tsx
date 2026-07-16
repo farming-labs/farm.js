@@ -286,6 +286,7 @@ export default defineConfig({
     id: "consume",
     label: "Consume / app/farm.config.ts",
     language: "ts",
+    highlightLines: [5],
     code: `import { defineFarmConfig } from "@farmjs/core";
 export default defineFarmConfig({
     extends: [

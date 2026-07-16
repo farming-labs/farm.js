@@ -8,6 +8,7 @@ import { highlight } from "sugar-high";
 interface HighlightedCodeProps {
   className?: string;
   code: string;
+  highlightLines?: readonly number[];
   label: string;
   language: string;
   prefix?: string;
@@ -15,6 +16,7 @@ interface HighlightedCodeProps {
 
 export interface HighlightedCodeTab {
   code: string;
+  highlightLines?: readonly number[];
   id: string;
   label: string;
   language: string;
@@ -39,19 +41,26 @@ function HighlightedCodeBody({
   ariaLabel,
   ariaLabelledBy,
   code,
+  highlightLines = [],
   id,
   role,
 }: {
   ariaLabel?: string;
   ariaLabelledBy?: string;
   code: string;
+  highlightLines?: readonly number[];
   id?: string;
   role?: "tabpanel";
 }) {
-  const highlightedCode = highlight(code.trim()).replace(
-    /<\/span>\n<span class="sh__line"/g,
-    '</span><span class="sh__line"',
-  );
+  const highlightedLineNumbers = new Set(highlightLines);
+  const highlightedCode = highlight(code.trim())
+    .split("\n")
+    .map((line, index) =>
+      highlightedLineNumbers.has(index + 1)
+        ? line.replace('class="sh__line"', 'class="sh__line sh__line--highlighted"')
+        : line,
+    )
+    .join("");
 
   return (
     <pre
@@ -73,6 +82,7 @@ function HighlightedCodeBody({
 export function HighlightedCode({
   className,
   code,
+  highlightLines,
   label,
   language,
   prefix,
@@ -87,7 +97,11 @@ export function HighlightedCode({
         </span>
         <span className="shrink-0 uppercase text-white/24">{language}</span>
       </figcaption>
-      <HighlightedCodeBody ariaLabel={`${prefix ? `${prefix} ` : ""}${label} code`} code={code} />
+      <HighlightedCodeBody
+        ariaLabel={`${prefix ? `${prefix} ` : ""}${label} code`}
+        code={code}
+        highlightLines={highlightLines}
+      />
     </figure>
   );
 }
@@ -163,6 +177,7 @@ export function HighlightedCodeTabs({
       <HighlightedCodeBody
         ariaLabelledBy={`${groupId}-${activeTab.id}-tab`}
         code={activeTab.code}
+        highlightLines={activeTab.highlightLines}
         id={panelId}
         role="tabpanel"
       />
