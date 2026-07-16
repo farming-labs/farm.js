@@ -8,6 +8,7 @@ import {
   Braces,
   CloudCog,
   CreditCard,
+  Database,
   ExternalLink,
   FileText,
   FolderTree,
@@ -298,6 +299,69 @@ export default defineConfig({
         "./layers/commerce",
     ],
 });`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const storageCodeTabs = [
+  {
+    id: "configure",
+    label: "Configure / farm.config.ts",
+    language: "ts",
+    highlightLines: [4, 5],
+    code: `export default defineConfig({
+    storage: {
+        mounts: {
+            app: sqliteStorage({ path: "./data.sqlite" }),
+            cache: redisStorage({ url: process.env.REDIS_URL! }),
+        },
+    },
+});`,
+  },
+  {
+    id: "use",
+    label: "Use / preferences.ts",
+    language: "ts",
+    highlightLines: [1, 3, 7],
+    code: `const app = getStorage("app");
+
+await app.setItem("settings:1", {
+    theme: "dark",
+});
+
+const settings = await app.getItem<Settings>("settings:1");`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const createRouteHelper = ["create", "Route"].join("");
+
+const routeCodeTabs = [
+  {
+    id: "contract",
+    label: "Contract / product.route.tsx",
+    language: "tsx",
+    highlightLines: [1, 2, 3, 4],
+    code: `export const ProductRoute = ${createRouteHelper}("/products/[id]", {
+    params: z.object({ id: z.string() }),
+    search: { schema: ProductSearch, stripDefaults: true },
+    guard: ({ context }) => requireUser(context.session),
+    pending: ProductSkeleton,
+    error: ProductError,
+    render: "dynamic",
+    component: ProductPage,
+});`,
+  },
+  {
+    id: "data",
+    label: "Data / product.route.tsx",
+    language: "tsx",
+    highlightLines: [2, 3, 4],
+    code: `data: {
+    key: ({ params }) => ["product", params.id],
+    staleTime: "30s",
+    main: async ({ params }) => ({
+        product: await getProduct(params.id),
+    }),
+},`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
@@ -889,17 +953,21 @@ function FoundationCodeVisual({
 }
 
 function FoundationCodeTabsVisual({
+  id,
   tabs,
+  tabsLabel,
 }: {
+  id: string;
   tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+  tabsLabel: string;
 }) {
   return (
     <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
       <HighlightedCodeTabs
         className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
-        id="farm-layers-code"
+        id={id}
         tabs={tabs}
-        tabsLabel="Farm Layers examples"
+        tabsLabel={tabsLabel}
       />
     </div>
   );
@@ -1022,7 +1090,33 @@ function DocsVisual() {
 }
 
 function LayersVisual() {
-  return <FoundationCodeTabsVisual tabs={layersConfigTabs} />;
+  return (
+    <FoundationCodeTabsVisual
+      id="farm-layers-code"
+      tabs={layersConfigTabs}
+      tabsLabel="Farm Layers examples"
+    />
+  );
+}
+
+function StorageVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      id="farm-storage-code"
+      tabs={storageCodeTabs}
+      tabsLabel="Farm storage examples"
+    />
+  );
+}
+
+function AdvancedRoutesVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      id="farm-advanced-routes-code"
+      tabs={routeCodeTabs}
+      tabsLabel="Farm advanced route examples"
+    />
+  );
 }
 
 function FoundationGrid() {
@@ -1066,6 +1160,26 @@ function FoundationGrid() {
         title="Share architecture, not boilerplate"
       >
         <LayersVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Mount SQLite, Redis, S3, or any supported driver once, then reuse the storage layer across server code, middleware, rate limits, and integrations."
+        className="border-t border-white/12"
+        icon={Database}
+        index="02.5"
+        label="Storage"
+        title="Storage built into the runtime"
+      >
+        <StorageVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Keep validated params and search, guards, cached data, pending and error UI, and rendering policy in one typed route definition."
+        className="border-t border-white/12 lg:border-l"
+        icon={Route}
+        index="02.6"
+        label="Advanced routes"
+        title="Configure the whole route in one place"
+      >
+        <AdvancedRoutesVisual />
       </FeatureCell>
     </section>
   );
