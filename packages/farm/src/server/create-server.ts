@@ -257,7 +257,7 @@ export async function createServer(config: FarmConfig = {}) {
             hasWarned: false,
           },
         },
-        resolvedConfig?.vite,
+        finalConfig.vite,
       ),
     );
 

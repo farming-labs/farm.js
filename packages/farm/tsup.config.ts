@@ -39,6 +39,7 @@ export default defineConfig({
     environment: "src/environment.ts",
     "environment/vite": "src/environment-vite.ts",
     testing: "src/testing.ts",
+    "agent-runtime": "src/agent-runtime.ts",
   },
   format: ["cjs", "esm"],
   dts: true,
