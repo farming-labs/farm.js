@@ -24,6 +24,7 @@ export interface HighlightedCodeTab {
 
 interface HighlightedCodeTabsProps {
   className?: string;
+  compact?: boolean;
   id: string;
   tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
   tabsLabel?: string;
@@ -42,6 +43,7 @@ function HighlightedCodeBody({
   ariaLabel,
   ariaLabelledBy,
   code,
+  compact = false,
   highlightLines = [],
   id,
   role,
@@ -49,6 +51,7 @@ function HighlightedCodeBody({
   ariaLabel?: string;
   ariaLabelledBy?: string;
   code: string;
+  compact?: boolean;
   highlightLines?: readonly number[];
   id?: string;
   role?: "tabpanel";
@@ -67,13 +70,23 @@ function HighlightedCodeBody({
     <pre
       aria-label={ariaLabel}
       aria-labelledby={ariaLabelledBy}
-      className="min-h-0 max-w-full flex-1 overflow-x-auto py-4 font-mono text-[10.5px] leading-6 tracking-normal sm:text-[11px]"
+      className={[
+        "min-h-0 max-w-full flex-1 overflow-x-auto font-mono tracking-normal",
+        compact
+          ? "py-2 text-[10px] leading-5 sm:text-[10.5px]"
+          : "py-4 text-[10.5px] leading-6 sm:text-[11px]",
+      ].join(" ")}
       id={id}
       role={role}
       tabIndex={0}
     >
       <code
-        className="farm-highlighted-code block min-w-full"
+        className={[
+          "farm-highlighted-code block min-w-full",
+          compact && "farm-highlighted-code--compact",
+        ]
+          .filter(Boolean)
+          .join(" ")}
         dangerouslySetInnerHTML={{ __html: highlightedCode }}
       />
     </pre>
@@ -109,6 +122,7 @@ export function HighlightedCode({
 
 export function HighlightedCodeTabs({
   className,
+  compact = false,
   id,
   tabs,
   tabsLabel = "Code examples",
@@ -178,6 +192,7 @@ export function HighlightedCodeTabs({
       <HighlightedCodeBody
         ariaLabelledBy={`${id}-${activeTab.id}-tab`}
         code={activeTab.code}
+        compact={compact}
         highlightLines={activeTab.highlightLines}
         id={panelId}
         role="tabpanel"

@@ -419,6 +419,10 @@
     color: rgb(255 255 255 / 0.48);
   }
 
+  .farm-highlighted-code--compact .sh__line {
+    min-height: 1.25rem;
+  }
+
   .farm-highlighted-code .sh__token--keyword {
     font-weight: 650;
   }

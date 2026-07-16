@@ -339,7 +339,7 @@ const routeCodeTabs = [
     id: "route",
     label: "Route / src/farm.route.ts",
     language: "ts",
-    highlightLines: [4, 5, 6],
+    highlightLines: [4, 5, 6, 8, 9],
     code: `export const ProductRoute = ${createRouteHelper}("/products/[id]", {
     params: ProductParams,
     data: {
@@ -347,6 +347,8 @@ const routeCodeTabs = [
         main: ({ params, before }) => getProduct(params.id, before.id),
         after: ({ data }) => recordView(data.id),
     },
+    pending: ProductSkeleton,
+    error: ProductError,
     component: ProductPage,
 });`,
   },
@@ -354,11 +356,16 @@ const routeCodeTabs = [
     id: "component",
     label: "Use / product-page.tsx",
     language: "tsx",
-    highlightLines: [2, 4],
+    highlightLines: [2, 6, 7],
     code: `export function ProductPage({
     data,
 }: ProductPageProps) {
-    return <h1>{data.name}</h1>;
+    return (
+        <main>
+            <h1>{data.name}</h1>
+            <p>{data.description}</p>
+        </main>
+    );
 }`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
@@ -951,10 +958,12 @@ function FoundationCodeVisual({
 }
 
 function FoundationCodeTabsVisual({
+  compact = false,
   id,
   tabs,
   tabsLabel,
 }: {
+  compact?: boolean;
   id: string;
   tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
   tabsLabel: string;
@@ -963,6 +972,7 @@ function FoundationCodeTabsVisual({
     <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
       <HighlightedCodeTabs
         className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
+        compact={compact}
         id={id}
         tabs={tabs}
         tabsLabel={tabsLabel}
@@ -1110,6 +1120,7 @@ function StorageVisual() {
 function AdvancedRoutesVisual() {
   return (
     <FoundationCodeTabsVisual
+      compact
       id="farm-advanced-routes-code"
       tabs={routeCodeTabs}
       tabsLabel="Farm advanced route examples"
