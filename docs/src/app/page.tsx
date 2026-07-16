@@ -275,12 +275,12 @@ const layersConfigTabs = [
     id: "share",
     label: "Share / layer/farm.config.ts",
     language: "ts",
-    code: `import type { FarmLayerConfig } from "@farmjs/core";
-export default {
+    code: `import { defineConfig } from "@farmjs/core";
+export default defineConfig({
     routeRules: {
         "/products/**": { swr: 300 },
     },
-} satisfies FarmLayerConfig;`,
+});`,
   },
   {
     id: "consume",
