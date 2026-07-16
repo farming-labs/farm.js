@@ -270,6 +270,10 @@ export default defineConfig({
     },
 });`;
 
+const typedApiHighlightLines = [1, 7, 8] as const;
+const integrationHighlightLines = [5] as const;
+const docsHighlightLines = [3, 4] as const;
+
 const layersConfigTabs = [
   {
     id: "share",
@@ -687,6 +691,7 @@ function TypedApiVisual() {
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={typedApiCode}
+        highlightLines={typedApiHighlightLines}
         label="/api/users"
         language="tsx"
         prefix="GET"
@@ -701,6 +706,7 @@ function IntegrationVisual() {
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={integrationConfigCode}
+        highlightLines={integrationHighlightLines}
         label="farm.config.ts"
         language="ts"
       />
@@ -860,10 +866,12 @@ function FoundationCanvas({
 
 function FoundationCodeVisual({
   code,
+  highlightLines,
   label,
   language,
 }: {
   code: string;
+  highlightLines?: readonly number[];
   label: string;
   language: string;
 }) {
@@ -872,6 +880,7 @@ function FoundationCodeVisual({
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
         code={code}
+        highlightLines={highlightLines}
         label={label}
         language={language}
       />
@@ -1001,7 +1010,14 @@ function DeploymentVisual() {
 }
 
 function DocsVisual() {
-  return <FoundationCodeVisual code={docsConfigCode} label="farm.config.ts" language="ts" />;
+  return (
+    <FoundationCodeVisual
+      code={docsConfigCode}
+      highlightLines={docsHighlightLines}
+      label="farm.config.ts"
+      language="ts"
+    />
+  );
 }
 
 function LayersVisual() {
@@ -1080,13 +1096,6 @@ function IntegrationsSection() {
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
                 Explore Integrations
-              </ButtonLink>
-              <ButtonLink
-                href="/docs/integrations/custom"
-                icon={<Plug aria-hidden className="size-4" strokeWidth={1.5} />}
-                variant="secondary"
-              >
-                Custom Integration
               </ButtonLink>
             </div>
           </div>
