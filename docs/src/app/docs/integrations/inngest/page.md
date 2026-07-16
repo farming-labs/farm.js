@@ -1,12 +1,14 @@
 ---
 title: "Inngest Integration"
-description: "Run Farm tasks through Inngest with durable events, functions, and schedules."
+description: "Send typed events to existing Inngest functions, batch them, and inspect runs from Farm."
 section: "Integrations"
 ---
 
 # Inngest Integration
 
-Inngest is the event-driven workflow runtime for durable functions, retries, fan-out, schedules, and background app flows.
+The Inngest runtime turns each Farm task into an event name, sends single or batched events, and reads function runs by the returned event ID.
+
+The current adapter is intentionally narrower than the Trigger.dev runtime. It supports triggering, batching, status, and idempotent event IDs. It does not currently expose delay, scheduling, cancellation, tags, queues, retries, TTL, or concurrency options.
 
 ## Add Inngest
 
@@ -24,72 +26,165 @@ farm add integration jobs-inngest --ui
 import { inngest, jobs } from "@farmjs/integrations/jobs";
 import { tasks } from "./jobs";
 
-export const integrations = {
+export const appIntegrations = {
   jobs: jobs({
-    tasks,
     runtime: inngest({
+      appId: process.env.INNGEST_APP_ID,
       eventKey: process.env.INNGEST_EVENT_KEY,
       signingKey: process.env.INNGEST_SIGNING_KEY,
     }),
+    tasks,
   }),
-};
+} as const;
 ```
 
-## Use it
+## Environment variables
 
-**Caller**
+| Variable              | Current use                                                    |
+| --------------------- | -------------------------------------------------------------- |
+| `INNGEST_EVENT_KEY`   | Required to send single and batch events.                      |
+| `INNGEST_SIGNING_KEY` | Required to look up runs for an event ID.                      |
+| `INNGEST_APP_ID`      | Optional app identifier recorded in integration configuration. |
 
-```ts
-await api.jobs.syncCustomer.trigger({
-  body: {
-    input: {
-      customerId: "cus_123",
-    },
-  },
-});
-```
+The runtime is reported as configured only when both event and signing keys are available.
 
-## Farm task mapping
+## Match the provider function
 
-Inngest is mounted through the Jobs integration. Define tasks once, then choose `inngest(...)` as the runtime.
+**src/lib/jobs.ts**
 
 ```ts
+import { defineTasks, task } from "@farmjs/integrations/jobs";
+
 export const tasks = defineTasks({
-  syncCustomer: task({
-    id: "sync-customer",
-    description: "Sync one customer after a billing event.",
-    async run(input: { customerId: string }) {
+  importCsv: task({
+    id: "import-csv",
+    description: "Import one uploaded CSV file.",
+    defaults: {
+      idempotencyKey(input: { fileId: string }) {
+        return `import:${input.fileId}`;
+      },
+    },
+    async run(input: { fileId: string }) {
       return {
-        synced: true,
-        customerId: input.customerId,
+        processed: input.fileId.length,
       };
     },
   }),
 });
 ```
 
-The app keeps the same Farm caller shape:
+With the default prefix, Farm sends this event:
+
+```text
+farm/import-csv
+```
+
+Deploy an Inngest function that listens for that exact event name. The event payload is placed in `event.data`, and the computed idempotency key is sent as the event `id`. The typed status caller treats provider output as the local `run` return type without runtime validation.
+
+The local `run` callback supplies TypeScript input/output inference. Farm does not execute or register it as an Inngest function.
+
+## Change the event prefix
 
 ```ts
-const run = await api.jobs.syncCustomer.trigger({
-  body: {
-    input: {
-      customerId: "cus_123",
-    },
-  },
+inngest({
+  eventKey: process.env.INNGEST_EVENT_KEY,
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+  eventNamePrefix: "acme",
 });
+```
 
-await api.jobs.syncCustomer.status({
-  query: {
-    handleId: run.data!.handleId,
+The same task now sends `acme/import-csv`.
+
+## Trigger one event
+
+```ts
+const result = await api.jobs.importCsv.trigger({
+  body: {
+    fileId: "file_123",
   },
 });
 ```
 
-## Production notes
+The returned `handleId` is Inngest's event ID, not a run ID. Farm uses it to ask Inngest for associated function runs.
 
-- Set `INNGEST_EVENT_KEY` and `INNGEST_SIGNING_KEY`.
-- Prefer event-shaped task input when the workflow is driven by product events.
-- Use retries for network/provider calls and idempotency for mutation-heavy jobs.
-- Store handle IDs when the UI needs status reads.
-- Test local development, signing, retries, and scheduled runs before shipping.
+An explicit per-call idempotency key is also supported:
+
+```ts
+await api.jobs.importCsv.trigger({
+  body: {
+    fileId: "file_123",
+    $options: {
+      idempotencyKey: "import:file_123:v2",
+    },
+  },
+});
+```
+
+## Batch events
+
+```ts
+const batch = await api.jobs.importCsv.batchTrigger({
+  body: {
+    items: [{ fileId: "file_123" }, { fileId: "file_456" }, { fileId: "file_789" }],
+  },
+});
+```
+
+Farm sends the event array to the Inngest ingestion endpoint. The result contains one handle per accepted event and `batchId: null`.
+
+## Read status
+
+```ts
+const status = await api.jobs.importCsv.status({
+  query: {
+    handleId: result.data!.handleId,
+  },
+});
+```
+
+If Inngest has accepted the event but no function run is visible yet, Farm returns normalized status `queued` with provider status `EVENT_ACCEPTED`. Once a run exists, the result includes its run ID, normalized state, timestamps, output, error, and raw response.
+
+## Current limitations
+
+The shared Jobs API still contains `schedule` and `cancel`, but the Inngest adapter reports unsupported behavior instead of silently ignoring it:
+
+| Operation or option             | Current result                                  |
+| ------------------------------- | ----------------------------------------------- |
+| `$options.delay`                | `400`                                           |
+| `$options.debounce`             | `400`                                           |
+| `$options.tags`                 | `400`                                           |
+| `api.jobs.<task>.schedule(...)` | `400` because delayed launch is not implemented |
+| `api.jobs.<task>.cancel(...)`   | `501`                                           |
+| `defaults.queue`                | Integration setup error                         |
+| `defaults.retry`                | Integration setup error                         |
+| `defaults.ttl`                  | Integration setup error                         |
+| `defaults.concurrencyKey`       | Integration setup error                         |
+| `defaults.tags`                 | Integration setup error                         |
+
+`defaults.idempotencyKey` and batch triggering are supported.
+
+A cron-shaped `schedule` field on the task is exposed in metadata only. It does not register an Inngest cron function.
+
+## Custom endpoints
+
+The defaults are `https://inn.gs` for event ingestion and `https://api.inngest.com` for run status:
+
+```ts
+inngest({
+  eventKey: process.env.INNGEST_EVENT_KEY,
+  signingKey: process.env.INNGEST_SIGNING_KEY,
+  eventBaseUrl: "https://inngest-ingest.example.com",
+  apiBaseUrl: "https://inngest-api.example.com",
+});
+```
+
+Use these options for compatible proxies, test services, or supported self-hosted endpoints.
+
+## Production checklist
+
+- Deploy a function for every generated event name.
+- Keep task IDs and `eventNamePrefix` stable.
+- Use deterministic idempotency keys for retryable product events.
+- Store the event handle when a later request needs status.
+- Restrict job routes to trusted users or server code.
+- Do not add Trigger-only defaults to tasks mounted with Inngest.
