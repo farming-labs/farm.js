@@ -37,12 +37,15 @@ Farm also recognizes compact rendering directives at the top of route modules. T
 **src/app/blog/page.tsx**
 
 ```tsx
-"use ppr: 60";
+"use ssg; 60";
 
 export default function BlogPage() {
   return <main>Blog</main>;
 }
 ```
+
+`use ssg; 60` statically generates the route and revalidates it every 60 seconds. Farm also accepts
+`use ssg`, `use dynamic`, and `use ppr; 60` when those rendering modes fit the route.
 
 ## Dynamic rendering
 

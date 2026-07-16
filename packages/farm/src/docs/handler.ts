@@ -23,6 +23,7 @@ import {
 } from "@farming-labs/docs";
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
+import { resolveFarmDocsPageLastModified } from "./last-modified";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
@@ -227,17 +228,6 @@ function titleFromMarkdown(body: string, fallback: string): string {
   return heading || fallback;
 }
 
-function getPageLastModified(sourcePath: string, frontmatter: Record<string, string>): string {
-  const configured =
-    frontmatter.lastModified ||
-    frontmatter.lastmod ||
-    frontmatter.lastUpdated ||
-    frontmatter.updatedAt;
-  if (configured) return configured;
-
-  return statSync(sourcePath).mtime.toISOString();
-}
-
 export function loadFarmDocsPage(
   contentDir: string,
   docs: FarmDocsResolvedConfig,
@@ -257,7 +247,7 @@ export function loadFarmDocsPage(
     description: frontmatter.description,
     href,
     sourcePath,
-    lastModified: getPageLastModified(sourcePath, frontmatter),
+    lastModified: resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter),
     frontmatter,
     body,
   };
@@ -322,7 +312,7 @@ export function discoverFarmDocsPages(
         section: frontmatter.section,
         href: createDocsHref(docs.entry, slug),
         sourcePath: absolutePath,
-        lastModified: getPageLastModified(absolutePath, frontmatter),
+        lastModified: resolveFarmDocsPageLastModified(contentDir, absolutePath, frontmatter),
       });
     }
   };

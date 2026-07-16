@@ -60,6 +60,62 @@ const product = await api.products.get(
 
 Structured keys use Farm's route-data key contract. Default API cache keys include the API origin and remain isolated from other clients.
 
+## Optimistic cache updates
+
+Farm's cache lifecycle is intentionally familiar to React Query and TanStack Query users, but it is
+implemented by Farm's own typed API client and shared cache. A mutation can update an existing
+query result immediately, roll it back after an error, and invalidate it after the server responds.
+
+```ts
+const products = await api.products.get(
+  { query: { category } },
+  {
+    cache: {
+      key: ["products", category],
+      policy: "stale-while-revalidate",
+      staleTime: 30_000,
+    },
+  },
+);
+
+const createProduct = api.products.post(
+  {
+    body: {
+      name,
+      category,
+    },
+  },
+  {
+    optimistic: {
+      update: [
+        [
+          products.key,
+          (current) => ({
+            ...current,
+            products: [
+              { id: "optimistic", name, category },
+              ...(current?.products ?? []),
+            ],
+          }),
+        ],
+      ],
+      rollbackOnError: true,
+    },
+    invalidate: [products.key],
+  },
+);
+
+await createProduct;
+```
+
+The updater runs synchronously before the POST finishes. `products.key` preserves the cached
+response type, so `current` is inferred from `api.products.get`. You can also target a generated
+route directly with `[api.products.get, { query: { category } }, updater]`.
+
+With `rollbackOnError: true`, Farm restores the exact previous cache entry when the mutation fails.
+After the request settles, invalidation marks the key stale so mounted consumers or the next read
+can load the canonical server result.
+
 ## Result shape
 
 API and integration callers return a consistent result object:

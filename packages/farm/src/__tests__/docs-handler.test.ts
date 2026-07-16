@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,10 @@ import {
   getFarmDocsDocumentNavigationMatchers,
   isFarmDocsAPIRequest,
 } from "../docs";
+import {
+  createFarmDocsLastModifiedManifest,
+  FARM_DOCS_LAST_MODIFIED_MANIFEST,
+} from "../docs/last-modified";
 
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
@@ -170,7 +175,7 @@ describe("createFarmDocsHandler", () => {
       },
       { root, srcDir: "src" },
     );
-    return { root, docs };
+    return { root, docs, docsDir };
   }
 
   it("serves docs markdown files as HTML", async () => {
@@ -298,6 +303,74 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("uses generated metadata instead of deployment file timestamps", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    const sourcePath = path.join(docsDir, "page.md");
+    const copiedTimestamp = new Date("2018-10-20T12:00:00.000Z");
+    const lastModified = "2026-07-14T12:00:00.000Z";
+
+    await fs.utimes(sourcePath, copiedTimestamp, copiedTimestamp);
+    const manifest = createFarmDocsLastModifiedManifest(docsDir, {
+      fallback: "now",
+      now: new Date(lastModified),
+    });
+    await fs.writeFile(
+      path.join(docsDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),
+      JSON.stringify(manifest),
+    );
+
+    expect(manifest.pages["page.md"]).toBe(lastModified);
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(
+      new Request("http://farm.test/docs", {
+        headers: { accept: "text/html" },
+      }),
+    );
+
+    expect(response?.status).toBe(200);
+    const html = await response?.text();
+    expect(html).toContain(`datetime="${lastModified}"`);
+    expect(html).toContain("July 14, 2026");
+    expect(html).not.toContain("October 20, 2018");
+  });
+
+  it("generates page dates from Git history before file timestamps", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-git-dates-"));
+    const docsDir = path.join(root, "docs");
+    const sourcePath = path.join(docsDir, "page.md");
+    const commitDate = "2026-06-12T09:30:00.000Z";
+
+    await fs.mkdir(docsDir, { recursive: true });
+    await fs.writeFile(sourcePath, "# Git-backed date");
+    execFileSync("git", ["init"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["config", "user.email", "farm@example.com"], {
+      cwd: root,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["config", "user.name", "Farm Docs"], {
+      cwd: root,
+      stdio: "ignore",
+    });
+    execFileSync("git", ["add", "docs/page.md"], { cwd: root, stdio: "ignore" });
+    execFileSync("git", ["commit", "-m", "docs: add page"], {
+      cwd: root,
+      stdio: "ignore",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_DATE: commitDate,
+        GIT_COMMITTER_DATE: commitDate,
+      },
+    });
+
+    const copiedTimestamp = new Date("2018-10-20T12:00:00.000Z");
+    await fs.utimes(sourcePath, copiedTimestamp, copiedTimestamp);
+
+    const manifest = createFarmDocsLastModifiedManifest(docsDir);
+
+    expect(new Date(manifest.pages["page.md"]).toISOString()).toBe(commitDate);
   });
 
   it("renders docs-style breadcrumbs only for nested docs pages", async () => {
