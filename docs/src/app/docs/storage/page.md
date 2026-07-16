@@ -28,10 +28,10 @@ await appStorage.setItem("settings", { theme: "light" });
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { redisStorage, sqliteStorage } from "@farmjs/core/storage";
 
-export default defineFarmConfig({
+export default defineConfig({
   storage: {
     mounts: {
       app: sqliteStorage({ path: "./.farm/storage/app.sqlite" }),
@@ -50,12 +50,12 @@ export default defineFarmConfig({
 `storage.client` can also carry an app-owned database client for schema-backed integrations.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { DatabaseSync } from "node:sqlite";
 
 const db = new DatabaseSync("farm.sqlite");
 
-export default defineFarmConfig({
+export default defineConfig({
   storage: {
     client: db,
   },
@@ -71,9 +71,9 @@ Farm can generate integration schema artifacts with `farm generate`, then run yo
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   storage: {
     client: db,
   },

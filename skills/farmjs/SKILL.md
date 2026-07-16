@@ -53,7 +53,7 @@ Use `"use client"` when a component uses React hooks, browser APIs, or client-on
 
 ## Config Spec
 
-Farm apps use `defineConfig`. The older `defineFarmConfig` name is an exact supported alias:
+Farm apps use `defineConfig`. The older `defineFarmConfig` name remains available as a deprecated exact alias:
 
 ```ts
 import { defineConfig } from "@farmjs/core";

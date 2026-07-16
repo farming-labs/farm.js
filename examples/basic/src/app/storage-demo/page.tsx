@@ -113,7 +113,7 @@ export const redis = redisStorage({
 
 await sqlite.setItem("settings", { theme: "light" });
 
-export default defineFarmConfig({
+export default defineConfig({
   storage: {
     mounts: {
       app: sqlite,

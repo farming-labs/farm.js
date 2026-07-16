@@ -77,9 +77,9 @@ farm migrate --command "pnpm prisma migrate deploy"
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   migrations: {
     commands: [
       {

@@ -13,9 +13,9 @@ A layer does not call a special registration function. The consuming application
 ## Consume layers
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   extends: ["@company/farm-base", "@company/admin-layer", "./layers/commerce"],
 });
 ```
@@ -59,7 +59,7 @@ export default {
 } satisfies FarmLayerConfig;
 ```
 
-`FarmLayerConfig` is an optional type-only helper. A plain default object works without importing anything, and the existing `defineFarmConfig` helper also works. There is no `defineFarmLayer` API.
+`FarmLayerConfig` is an optional type-only helper. A plain default object works without importing anything, and `defineConfig` works too. There is no `defineFarmLayer` API.
 
 ## Override layer files
 

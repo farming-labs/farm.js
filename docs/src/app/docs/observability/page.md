@@ -41,9 +41,9 @@ onFarmEvent((event) => {
 Use config-level observability when an app should log or forward events from startup.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   observability: {
     logs: true,
     events: ["cache.hit", "cache.miss", "ppr.shell.cached"],
@@ -99,9 +99,9 @@ Middleware events are emitted for both `farm.config.ts` middleware entries and `
 | `middleware.error` | `route`, `pathname`, `name`, `error` |
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   observability: {
     onEvent(event) {
       if (event.type === "middleware.shortCircuit") {

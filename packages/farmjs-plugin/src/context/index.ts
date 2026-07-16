@@ -61,7 +61,7 @@ function getHeader(req: RequestLike, name: string): string | undefined {
  * ```ts
  * import { contextPlugin } from "@farmjs/plugin/context";
  *
- * export default defineFarmConfig({
+ * export default defineConfig({
  *   plugins: [contextPlugin()],
  * });
  * ```

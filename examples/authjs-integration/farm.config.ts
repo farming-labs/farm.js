@@ -1,8 +1,8 @@
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { authjs } from "@farmjs/integrations/authjs";
 import { nextAuth } from "./auth.ts";
 
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
   },

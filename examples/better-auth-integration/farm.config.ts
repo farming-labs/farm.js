@@ -1,8 +1,8 @@
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { betterAuth } from "@farmjs/integrations/better-auth";
 import { auth } from "./src/lib/auth.ts";
 
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
   },

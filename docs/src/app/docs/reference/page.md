@@ -35,7 +35,7 @@ A compact map of the main package exports and where to learn more.
 
 | Package | Exports |
 | --- | --- |
-| `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineFarmConfig`. |
+| `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`. |
 | `@farmjs/core/workflows` | `defineCron`, `defineWorkflow`, `defineTask` for lightweight scheduled and manually-triggered server workflows. |
 | `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
 | `@farmjs/core/navigation` | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`. |

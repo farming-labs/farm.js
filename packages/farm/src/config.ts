@@ -280,12 +280,12 @@ export type FarmLayerConfig = Omit<
 >;
 
 /** Define a Farm application config while preserving literal types. */
-export function defineFarmConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
+export function defineConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
   return config;
 }
 
-/** Concise alias for {@link defineFarmConfig}. */
-export const defineConfig = defineFarmConfig;
+/** @deprecated Use {@link defineConfig}. */
+export const defineFarmConfig = defineConfig;
 
 export function normalizeDeployTarget(target?: FarmDeployTarget): FarmDeployTarget | undefined {
   if (!target) return undefined;

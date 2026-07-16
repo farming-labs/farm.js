@@ -15,10 +15,10 @@ Integrations are built on top of plugins. If you are wrapping Stripe, Auth, Rese
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { createCompressionPlugin, createLoggerPlugin } from "@farmjs/core/plugin/server";
 
-export default defineFarmConfig({
+export default defineConfig({
   plugins: [
     createLoggerPlugin({}),
     createCompressionPlugin({}),
@@ -74,7 +74,7 @@ Hooks that return a value can transform the current value when Farm runs them se
 Plugins can set `enforce`:
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   plugins: [
     {
       name: "early",

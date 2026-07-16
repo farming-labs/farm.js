@@ -79,7 +79,7 @@ the ones published by Farm:
 ```ts
 import { localDemo } from "./src/lib/integrations/local-demo/index.ts";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     auth: supabase(...),
     localDemo: localDemo(),

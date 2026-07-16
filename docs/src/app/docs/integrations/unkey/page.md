@@ -13,10 +13,10 @@ Create, verify, revoke, update, and delete API keys, plus protect routes with ke
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { unkey } from "@farmjs/integrations/unkey";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     keys: unkey({
       rootKey: process.env.UNKEY_ROOT_KEY,

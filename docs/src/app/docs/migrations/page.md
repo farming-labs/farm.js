@@ -105,9 +105,9 @@ The migration report flags loaders, `beforeLoad`, search params, and `Route.use*
 `farm migrate` without a framework source still runs one-shot commands from `migrations.commands` in `farm.config.ts`.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   migrations: {
     commands: [
       {

@@ -1,7 +1,7 @@
-import { defineFarmConfig } from '@farmjs/core';
+import { defineConfig } from '@farmjs/core';
 import { createLoggerPlugin } from '@farmjs/core/plugin/server';
 
-export default defineFarmConfig({
+export default defineConfig({
   srcDir: 'src',
   deploy: {
     target: 'vercel',

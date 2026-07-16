@@ -38,7 +38,7 @@ afterEach(() => {
 });
 
 describe("config helpers", () => {
-  it("supports concise and framework-specific names", () => {
+  it("keeps defineFarmConfig as an exact compatibility alias", () => {
     const config = {
       srcDir: "app",
       deploy: { target: "vercel" as const },

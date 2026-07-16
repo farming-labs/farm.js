@@ -37,7 +37,7 @@ This creates `/about` automatically. Because the route is source-authored markdo
 **farm.config.ts**
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   mdx: {
     components: "./src/markdown-components.tsx",
     markdownRoutes: true,
@@ -62,7 +62,7 @@ Set `mdx.markdownRoutes` to `false` when source-authored pages should render as 
 **farm.config.ts**
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   md: {
     expose: ["/", "/pricing", "/docs"],
     cache: 60,
@@ -89,7 +89,7 @@ export default defineFarmConfig({
 Use `md: true` when an internal app or documentation site should expose markdown mirrors for every rendered page.
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   md: true,
 });
 ```
@@ -101,7 +101,7 @@ For public apps, prefer an explicit list so private or account pages are not exp
 Routes can include a display title and cache override.
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   md: {
     expose: [
       {

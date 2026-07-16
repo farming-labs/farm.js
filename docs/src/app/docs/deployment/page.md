@@ -13,7 +13,7 @@ Build deployable output with Farm's deploy config and Nitro presets. Farm owns r
 **farm.config.ts**
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target: "vercel",
     output: ".vercel/output",
@@ -46,11 +46,11 @@ Use `deploy.target` when you want one config file to control the platform output
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
 const target = process.env.FARM_DEPLOY_TARGET ?? "vercel";
 
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target,
     cloudflare: {
@@ -106,9 +106,9 @@ Mutation requests are rejected before their action body is decoded or the handle
 Farm resolves the ID from explicit config, `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_COMMIT_SHA`, or `CF_PAGES_COMMIT_SHA`. Otherwise, production uses `generateBuildId` and development uses `"development"`.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   deploymentId: process.env.RELEASE_ID,
 });
 ```
@@ -136,9 +136,9 @@ Use `target: "node"` when you want to run the app on your own server, VPS, conta
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target: "node",
     output: ".output",
@@ -173,9 +173,9 @@ Farm can also build for any Nitro preset that Nitro can resolve. Use `deploy.pre
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     preset: process.env.NITRO_PRESET || "node-server",
     output: ".output",
@@ -224,9 +224,9 @@ Farm reads deployment settings from `farm.config.ts`, so a minimal project does 
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target: "vercel",
   },
@@ -240,7 +240,7 @@ When `target` is `vercel`, Farm uses the Vercel Nitro preset and writes Build Ou
 Use `output` for the compact form or `outputDir` when you want the explicit option name.
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target: "netlify",
     output: ".output",
@@ -266,7 +266,7 @@ For other Nitro presets, use the host's documented deploy command or CI workflow
 Keep environment variables in the platform's environment manager or local `.env` files. Farm config can reference `process.env`, and integrations should validate required provider keys during setup.
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     billing: stripe({
       secretKey: process.env.STRIPE_SECRET_KEY,

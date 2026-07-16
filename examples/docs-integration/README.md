@@ -6,9 +6,9 @@ entry and `/api/docs/*` machine routes.
 
 ```ts
 // farm.config.ts
-import { defineFarmConfig } from '@farmjs/core';
+import { defineConfig } from '@farmjs/core';
 
-export default defineFarmConfig({
+export default defineConfig({
   docs: {
     entry: '/docs',
   },

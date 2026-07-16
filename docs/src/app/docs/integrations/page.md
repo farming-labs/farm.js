@@ -15,11 +15,11 @@ Farm treats every integration as a small server plugin. That means an integratio
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { stripe } from "@farmjs/integrations/stripe";
 import { betterAuth } from "@farmjs/integrations/better-auth";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     billing: stripe({
       secretKey: process.env.STRIPE_SECRET_KEY,
