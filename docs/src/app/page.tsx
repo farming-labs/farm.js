@@ -8,6 +8,7 @@ import {
   Braces,
   CloudCog,
   CreditCard,
+  Database,
   ExternalLink,
   FileText,
   FolderTree,
@@ -298,6 +299,74 @@ export default defineConfig({
         "./layers/commerce",
     ],
 });`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const storageCodeTabs = [
+  {
+    id: "configure",
+    label: "Configure / farm.config.ts",
+    language: "ts",
+    highlightLines: [4, 5],
+    code: `export default defineConfig({
+    storage: {
+        mounts: {
+            app: sqliteStorage({ path: "./data.sqlite" }),
+            cache: redisStorage({ url: process.env.REDIS_URL! }),
+        },
+    },
+});`,
+  },
+  {
+    id: "use",
+    label: "Use / preferences.ts",
+    language: "ts",
+    highlightLines: [1, 3, 7],
+    code: `const app = getStorage("app");
+
+await app.setItem("settings:1", {
+    theme: "dark",
+});
+
+const settings = await app.getItem<Settings>("settings:1");`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const createRouteHelper = ["create", "Route"].join("");
+
+const routeCodeTabs = [
+  {
+    id: "route",
+    label: "Route / src/farm.route.ts",
+    language: "ts",
+    highlightLines: [4, 5, 6, 8, 9],
+    code: `export const ProductRoute = ${createRouteHelper}("/products/[id]", {
+    params: ProductParams,
+    data: {
+        before: ({ context }) => requireUser(context.session),
+        main: ({ params, before }) => getProduct(params.id, before.id),
+        after: ({ data }) => recordView(data.id),
+    },
+    pending: ProductSkeleton,
+    error: ProductError,
+    component: ProductPage,
+});`,
+  },
+  {
+    id: "component",
+    label: "Use / product-page.tsx",
+    language: "tsx",
+    highlightLines: [2, 6, 7],
+    code: `export function ProductPage({
+    data,
+}: ProductPageProps) {
+    return (
+        <main>
+            <h1>{data.name}</h1>
+            <p>{data.description}</p>
+        </main>
+    );
+}`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
@@ -889,17 +958,24 @@ function FoundationCodeVisual({
 }
 
 function FoundationCodeTabsVisual({
+  compact = false,
+  id,
   tabs,
+  tabsLabel,
 }: {
+  compact?: boolean;
+  id: string;
   tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+  tabsLabel: string;
 }) {
   return (
     <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
       <HighlightedCodeTabs
         className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
-        id="farm-layers-code"
+        compact={compact}
+        id={id}
         tabs={tabs}
-        tabsLabel="Farm Layers examples"
+        tabsLabel={tabsLabel}
       />
     </div>
   );
@@ -1022,7 +1098,34 @@ function DocsVisual() {
 }
 
 function LayersVisual() {
-  return <FoundationCodeTabsVisual tabs={layersConfigTabs} />;
+  return (
+    <FoundationCodeTabsVisual
+      id="farm-layers-code"
+      tabs={layersConfigTabs}
+      tabsLabel="Farm Layers examples"
+    />
+  );
+}
+
+function StorageVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      id="farm-storage-code"
+      tabs={storageCodeTabs}
+      tabsLabel="Farm storage examples"
+    />
+  );
+}
+
+function AdvancedRoutesVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      compact
+      id="farm-advanced-routes-code"
+      tabs={routeCodeTabs}
+      tabsLabel="Farm advanced route examples"
+    />
+  );
 }
 
 function FoundationGrid() {
@@ -1066,6 +1169,26 @@ function FoundationGrid() {
         title="Share architecture, not boilerplate"
       >
         <LayersVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Mount SQLite, Redis, S3, or any supported driver once, then reuse the storage layer across server code, middleware, rate limits, and integrations."
+        className="border-t border-white/12"
+        icon={Database}
+        index="02.5"
+        label="Storage"
+        title="Storage built into the runtime"
+      >
+        <StorageVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Validate params, prepare request data, load the page, and run post-load work in one typed route definition."
+        className="border-t border-white/12 lg:border-l"
+        icon={Route}
+        index="02.6"
+        label="Advanced routes"
+        title="Configure the whole route in one place"
+      >
+        <AdvancedRoutesVisual />
       </FeatureCell>
     </section>
   );
