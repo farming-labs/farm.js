@@ -205,7 +205,150 @@ The names are conventions chosen by the application, except for framework-owned 
 
 ## Supported drivers
 
-- memory, local filesystem, SQLite, libSQL, PGlite, Postgres, MySQL, Redis, Upstash Redis, MongoDB, S3, Netlify Blobs, Vercel KV, and Vercel Blob.
+Farm supports storage at three levels:
+
+1. Farm convenience helpers for common databases, caches, and object stores.
+2. Direct driver configuration through `driver: "name"`.
+3. Existing or custom `unstorage` driver instances through `databaseStorage()`, `driverStorage()`, or `defineStorageClient()`.
+
+The root store and every mount can use a different supported driver.
+
+### Farm storage helpers
+
+Import these helpers from `@farmjs/core/storage`:
+
+| Helper                                        | Driver                   | Common use                                                                        |
+| --------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
+| `memoryStorage()`                             | `memory`                 | Tests, local development, and disposable process-local state.                     |
+| `localStorage({ base })`                      | Farm alias for `fs-lite` | Local persistent files, development caches, and self-hosted single-instance apps. |
+| `sqliteStorage({ path, tableName })`          | `sqlite` / `node-sqlite` | Durable local application state with no external service.                         |
+| `postgresStorage(...)` / `pgStorage(...)`     | `postgres`               | Shared durable key/value state backed by Postgres.                                |
+| `mysqlStorage(...)` / `mysql2Storage(...)`    | `mysql`                  | Shared durable key/value state backed by MySQL.                                   |
+| `pgliteStorage(...)`                          | `pglite`                 | Embedded Postgres-compatible storage.                                             |
+| `planetscaleStorage(...)`                     | `planetscale`            | PlanetScale-backed durable storage.                                               |
+| `libsqlStorage(...)`                          | `libsql`                 | Local or remote libSQL/Turso-compatible storage.                                  |
+| `redisStorage(...)`                           | `redis`                  | Shared caches, rate limits, sessions, counters, and short-lived state.            |
+| `upstashStorage(...)`                         | `upstash`                | HTTP-based Redis storage for serverless and edge-style deployments.               |
+| `mongodbStorage(...)`                         | `mongodb`                | Durable document-backed key/value storage.                                        |
+| `s3Storage(...)`                              | `s3`                     | S3-compatible object-backed values.                                               |
+| `netlifyBlobsStorage(...)`                    | `netlify-blobs`          | Named or deploy-scoped Netlify Blob stores.                                       |
+| `vercelKVStorage(...)`                        | `vercel-kv`              | Vercel KV/Redis-backed shared state.                                              |
+| `vercelBlobStorage(...)`                      | `vercel-blob`            | Public Vercel Blob-backed values.                                                 |
+| `createStorageClient({ driver, ...options })` | Any supported name       | Create a reusable client from direct driver configuration.                        |
+| `databaseStorage(database, { tableName })`    | `db0`                    | Reuse an existing `db0` database instance.                                        |
+| `driverStorage(driver)`                       | Custom                   | Wrap an existing `unstorage` driver or driver factory.                            |
+| `defineStorageClient(factory)`                | Custom                   | Lazily create a custom synchronous or asynchronous driver.                        |
+
+### Configure drivers directly
+
+Helpers and direct configuration produce the same Farm storage client behavior. Driver options can be written inline or inside `options`. If both are present, values inside `options` take precedence.
+
+**farm.config.ts**
+
+```ts
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  storage: {
+    driver: "sqlite",
+    path: "./.farm/storage/root.sqlite",
+    tableName: "farm_root",
+    mounts: {
+      cache: {
+        driver: "redis",
+        url: process.env.REDIS_URL!,
+        ttl: 300,
+      },
+      uploads: {
+        driver: "s3",
+        endpoint: "https://s3.us-east-1.amazonaws.com",
+        region: "us-east-1",
+        bucket: process.env.S3_BUCKET!,
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY!,
+      },
+    },
+  },
+});
+```
+
+In this example, `getStorage()` uses SQLite, `getStorage("cache")` uses Redis, and `getStorage("uploads")` uses S3.
+
+### Database driver names
+
+Farm resolves these names through `db0` and exposes the result as key/value storage:
+
+| Accepted driver names          | Database connector      | Important configuration                                           |
+| ------------------------------ | ----------------------- | ----------------------------------------------------------------- |
+| `sqlite`, `node-sqlite`        | Node SQLite             | `path` or `name`, plus optional `tableName`.                      |
+| `sqlite3`                      | `sqlite3`               | `path` or `name`, plus optional `tableName`.                      |
+| `better-sqlite3`               | `better-sqlite3`        | `path` or `name`, plus optional `tableName`.                      |
+| `postgres`, `postgresql`, `pg` | PostgreSQL              | `url` or standard `pg` client options, plus optional `tableName`. |
+| `mysql`, `mysql2`              | MySQL                   | Standard `mysql2` connection options, plus optional `tableName`.  |
+| `pglite`                       | PGlite                  | PGlite connector options, plus optional `tableName`.              |
+| `planetscale`                  | PlanetScale             | PlanetScale client options, plus optional `tableName`.            |
+| `libsql`, `libsql-node`        | libSQL Node client      | `url`, optional `authToken`, and optional `tableName`.            |
+| `libsql-http`                  | libSQL HTTP client      | `url`, optional `authToken`, and optional `tableName`.            |
+| `db0`                          | Existing `db0` database | Pass `{ database, tableName? }` inside `options`.                 |
+
+These drivers create or use a key/value table for Farm storage. They are separate from passing a raw database or ORM object through `storage.client` for integration models.
+
+### Complete built-in driver set
+
+Farm also accepts the built-in driver names exported by its installed `unstorage` version. Kebab-case and camel-case names shown on the same row are aliases.
+
+| Category                | Accepted driver names                               | Intended use                                                                            |
+| ----------------------- | --------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| Process memory          | `memory`                                            | Fast, process-local, non-durable state.                                                 |
+| Disabled storage        | `null`                                              | Discard writes and always read empty state. Useful for explicitly disabling a store.    |
+| Layered storage         | `overlay`                                           | Combine multiple driver layers. Requires configured driver instances in `layers`.       |
+| Bounded memory          | `lru-cache`, `lruCache`                             | Process-local cache with size and TTL controls.                                         |
+| Filesystem              | `local`, `fs-lite`, `fsLite`, `fs`                  | Persistent files. `local` is Farm's shorthand for `fs-lite`; `fs` adds watcher support. |
+| Remote HTTP             | `http`                                              | Read and write through an HTTP storage endpoint.                                        |
+| GitHub content          | `github`                                            | Read-only, cached repository content access.                                            |
+| Redis                   | `redis`                                             | Shared cache, counters, sessions, and rate limits.                                      |
+| Upstash Redis           | `upstash`                                           | REST-based Redis for serverless runtimes.                                               |
+| MongoDB                 | `mongodb`                                           | MongoDB collection-backed values.                                                       |
+| S3-compatible objects   | `s3`                                                | AWS S3, Cloudflare R2's S3 API, and compatible providers.                               |
+| UploadThing             | `uploadthing`                                       | UploadThing-backed object values.                                                       |
+| Netlify                 | `netlify-blobs`, `netlifyBlobs`                     | Named or deploy-scoped Netlify Blob storage.                                            |
+| Vercel KV               | `vercel-kv`, `vercelKV`                             | Vercel-managed Redis-compatible key/value storage.                                      |
+| Vercel Blob             | `vercel-blob`, `vercelBlob`                         | Vercel Blob object storage.                                                             |
+| Vercel Runtime Cache    | `vercel-runtime-cache`, `vercelRuntimeCache`        | Ephemeral regional runtime cache with TTL and tags.                                     |
+| Cloudflare KV binding   | `cloudflare-kv-binding`, `cloudflareKVBinding`      | A KV namespace bound to a Cloudflare runtime.                                           |
+| Cloudflare KV HTTP      | `cloudflare-kv-http`, `cloudflareKVHttp`            | Cloudflare KV through the REST API.                                                     |
+| Cloudflare R2 binding   | `cloudflare-r2-binding`, `cloudflareR2Binding`      | An R2 bucket bound to a Cloudflare runtime.                                             |
+| Azure App Configuration | `azure-app-configuration`, `azureAppConfiguration`  | Azure App Configuration key/value data.                                                 |
+| Azure Cosmos DB         | `azure-cosmos`, `azureCosmos`                       | Cosmos DB container-backed values.                                                      |
+| Azure Key Vault         | `azure-key-vault`, `azureKeyVault`                  | Secret-backed values in Azure Key Vault.                                                |
+| Azure Blob Storage      | `azure-storage-blob`, `azureStorageBlob`            | Azure container-backed object values.                                                   |
+| Azure Table Storage     | `azure-storage-table`, `azureStorageTable`          | Azure table-backed key/value state.                                                     |
+| Deno KV                 | `deno-kv`, `denoKV`                                 | Deno runtime KV storage.                                                                |
+| Deno KV from Node       | `deno-kv-node`, `denoKVNode`                        | Deno KV through the Node-compatible client.                                             |
+| IndexedDB               | `indexedb`                                          | IndexedDB-backed values in a compatible browser runtime.                                |
+| Web Storage             | `localstorage`, `session-storage`, `sessionStorage` | Browser local or session storage.                                                       |
+| Capacitor               | `capacitor-preferences`, `capacitorPreferences`     | Capacitor Preferences-backed mobile storage.                                            |
+
+Farm application storage normally initializes on the server. Browser-only drivers require a compatible custom runtime and should not be used as a reason to call `getStorage()` from client components.
+
+Most remote and platform drivers load an optional provider SDK. Install the package required by the selected driver, such as `ioredis`, `mongodb`, `@upstash/redis`, `@vercel/kv`, `@vercel/blob`, `@netlify/blobs`, `aws4fetch`, `uploadthing`, the relevant Azure SDK, `@deno/kv`, `idb-keyval`, or `lru-cache`. Database aliases may likewise require `sqlite3`, `better-sqlite3`, `mysql2`, `@electric-sql/pglite`, `@planetscale/database`, or `@libsql/client`; the `sqlite` alias uses Node's built-in `node:sqlite`. Cloudflare binding drivers instead require the corresponding runtime binding.
+
+### Custom drivers
+
+Use `driverStorage()` when a compatible driver already exists:
+
+```ts
+import { driverStorage } from "@farmjs/core/storage";
+import createCustomDriver from "my-unstorage-driver";
+
+export const customStorage = driverStorage(() =>
+  createCustomDriver({
+    endpoint: process.env.CUSTOM_STORAGE_URL!,
+  }),
+);
+```
+
+The wrapped driver can be mounted or used as the root Farm storage client just like a built-in helper.
 
 ## Runtime clients for integrations
 
