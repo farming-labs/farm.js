@@ -15,6 +15,7 @@ out/
 **/src/.farm-client-entry.tsx
 **/.eve/
 **/.output/
+**/.farm-cf-agent.wrangler.jsonc
 
 # Environment variables
 .env
