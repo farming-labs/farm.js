@@ -6,7 +6,6 @@ import {
   BookOpen,
   BookOpenText,
   Braces,
-  CircleCheck,
   CloudCog,
   CreditCard,
   ExternalLink,
@@ -51,7 +50,8 @@ import viteIconUrl from "simple-icons/icons/vite.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
-import { HighlightedCode } from "../components/home/highlighted-code";
+import { HighlightedCode, HighlightedCodeTabs } from "../components/home/highlighted-code";
+import type { HighlightedCodeTab } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 import { FileTree } from "../components/ui/file-tree";
 import type { FileTreeNode } from "../components/ui/file-tree";
@@ -269,6 +269,37 @@ export default defineConfig({
         mcp: true,
     },
 });`;
+
+const typedApiHighlightLines = [1, 7, 8] as const;
+const integrationHighlightLines = [5] as const;
+const docsHighlightLines = [3, 4] as const;
+
+const layersConfigTabs = [
+  {
+    id: "share",
+    label: "Share / layer/farm.config.ts",
+    language: "ts",
+    code: `import { defineConfig } from "@farmjs/core";
+export default defineConfig({
+    routeRules: {
+        "/products/**": { swr: 300 },
+    },
+});`,
+  },
+  {
+    id: "consume",
+    label: "Consume / app/farm.config.ts",
+    language: "ts",
+    highlightLines: [5],
+    code: `import { defineFarmConfig } from "@farmjs/core";
+export default defineFarmConfig({
+    extends: [
+        "@company/farm-base",
+        "./layers/commerce",
+    ],
+});`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -660,6 +691,7 @@ function TypedApiVisual() {
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={typedApiCode}
+        highlightLines={typedApiHighlightLines}
         label="/api/users"
         language="tsx"
         prefix="GET"
@@ -674,6 +706,7 @@ function IntegrationVisual() {
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
         code={integrationConfigCode}
+        highlightLines={integrationHighlightLines}
         label="farm.config.ts"
         language="ts"
       />
@@ -833,10 +866,12 @@ function FoundationCanvas({
 
 function FoundationCodeVisual({
   code,
+  highlightLines,
   label,
   language,
 }: {
   code: string;
+  highlightLines?: readonly number[];
   label: string;
   language: string;
 }) {
@@ -845,8 +880,26 @@ function FoundationCodeVisual({
       <HighlightedCode
         className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
         code={code}
+        highlightLines={highlightLines}
         label={label}
         language={language}
+      />
+    </div>
+  );
+}
+
+function FoundationCodeTabsVisual({
+  tabs,
+}: {
+  tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+}) {
+  return (
+    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
+      <HighlightedCodeTabs
+        className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
+        id="farm-layers-code"
+        tabs={tabs}
+        tabsLabel="Farm Layers examples"
       />
     </div>
   );
@@ -958,113 +1011,18 @@ function DeploymentVisual() {
 }
 
 function DocsVisual() {
-  return <FoundationCodeVisual code={docsConfigCode} label="farm.config.ts" language="ts" />;
+  return (
+    <FoundationCodeVisual
+      code={docsConfigCode}
+      highlightLines={docsHighlightLines}
+      label="farm.config.ts"
+      language="ts"
+    />
+  );
 }
 
 function LayersVisual() {
-  const layerRows = [
-    { name: "farm-base", detail: "routes + middleware", icon: Layers3 },
-    { name: "admin-layer", detail: "auth + admin", icon: ShieldCheck },
-    { name: "commerce", detail: "products + checkout", icon: CreditCard },
-  ] as const;
-  const resolvedRows = [
-    { label: "routes + APIs", state: "composed", icon: Route },
-    { label: "middleware + config", state: "merged", icon: Settings2 },
-    { label: "generated types", state: "ready", icon: Braces },
-  ] as const;
-
-  return (
-    <FoundationCanvas interactive>
-      <a
-        aria-label="Learn how Farm Layers compose an application"
-        className="group/layers absolute inset-0 overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-        href="/docs/layers"
-        title="Farm Layers documentation"
-      >
-        <div
-          aria-hidden
-          className="farm-layer-source farm-illustration-surface absolute left-6 top-6 z-10 h-[10.5rem] w-[66%] max-w-[23rem] overflow-hidden border border-white/10 bg-black opacity-62 shadow-[0_14px_40px_rgba(0,0,0,0.45)] transition-opacity duration-150 group-hover/layers:opacity-80 sm:left-10 sm:top-8"
-        >
-          <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/40">
-            <span>extends[3]</span>
-            <span className="text-white/68">low -&gt; high</span>
-          </div>
-          <div className="grid h-[calc(100%-2.25rem)] grid-rows-3">
-            {layerRows.map((row, index) => {
-              const Icon = row.icon;
-
-              return (
-                <div
-                  key={row.name}
-                  className="farm-layer-row grid min-h-0 min-w-0 grid-cols-[auto_auto_minmax(0,1fr)] items-center gap-2 border border-transparent px-3 font-mono text-[9px] tracking-normal text-white/50 sm:text-[10px]"
-                  data-initial={index === 0 ? "true" : undefined}
-                  style={{ animationDelay: index * 2 + "s" }}
-                >
-                  <span className="text-[8px] text-white/28">0{index + 1}</span>
-                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/64" strokeWidth={1.4} />
-                  <span className="min-w-0">
-                    <span className="block truncate text-white/72">{row.name}</span>
-                    <span className="block truncate text-[8px] text-white/34">{row.detail}</span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        <div
-          aria-hidden
-          className="farm-layer-link absolute left-[49%] top-[42%] z-20 flex items-center gap-2 text-white/62 sm:left-[55%] sm:top-[44%]"
-        >
-          <span className="h-px w-8 bg-white/18 sm:w-12" />
-          <Network className="size-5" strokeWidth={1.35} />
-        </div>
-
-        <div
-          aria-hidden
-          className="farm-layer-target farm-illustration-surface absolute -bottom-px -right-px z-30 h-[13rem] w-[74%] max-w-[25rem] overflow-hidden border border-white/14 bg-black shadow-[-24px_-20px_56px_rgba(0,0,0,0.72)] sm:h-[13.5rem] sm:w-[70%]"
-        >
-          <div className="flex h-9 items-center justify-between border-b border-white/10 px-3 font-mono text-[8px] uppercase text-white/40">
-            <span>resolved app</span>
-            <span className="flex items-center gap-1.5 text-white/72">
-              <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} /> project wins
-            </span>
-          </div>
-
-          <div className="grid h-[calc(100%-4.25rem)] grid-rows-3">
-            {resolvedRows.map((row, index) => {
-              const Icon = row.icon;
-
-              return (
-                <div
-                  key={row.label}
-                  className="farm-layer-row grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2.5 border border-transparent px-3 font-mono text-[9px] tracking-normal text-white/50 sm:text-[10px]"
-                  data-initial={index === 0 ? "true" : undefined}
-                  style={{ animationDelay: index * 2 + "s" }}
-                >
-                  <Icon aria-hidden className="size-3.5 shrink-0 text-white/66" strokeWidth={1.4} />
-                  <span className="truncate">{row.label}</span>
-                  <span className="flex items-center gap-1 text-[8px] uppercase text-white/62">
-                    {row.state}
-                    <CircleCheck aria-hidden className="size-3" strokeWidth={1.5} />
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="absolute bottom-0 left-0 right-0 flex h-8 items-center gap-3 border-t border-white/10 px-3">
-            <span className="h-px flex-1 overflow-hidden bg-white/10">
-              <span className="farm-layer-progress block h-full origin-left bg-white/76" />
-            </span>
-            <span className="font-mono text-[8px] uppercase tracking-normal text-white/56">
-              #layers/* ready
-            </span>
-          </div>
-        </div>
-      </a>
-    </FoundationCanvas>
-  );
+  return <FoundationCodeTabsVisual tabs={layersConfigTabs} />;
 }
 
 function FoundationGrid() {
@@ -1139,13 +1097,6 @@ function IntegrationsSection() {
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
                 Explore Integrations
-              </ButtonLink>
-              <ButtonLink
-                href="/docs/integrations/custom"
-                icon={<Plug aria-hidden className="size-4" strokeWidth={1.5} />}
-                variant="secondary"
-              >
-                Custom Integration
               </ButtonLink>
             </div>
           </div>

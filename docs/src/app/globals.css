@@ -320,29 +320,6 @@
       inset 0 1px 0 rgb(255 255 255 / 0.025);
   }
 
-  .farm-layer-row {
-    animation: farm-foundation-sequence-three 6s linear infinite;
-  }
-
-  .farm-layer-source,
-  .farm-layer-target {
-    animation: farm-illustration-float 7s ease-in-out infinite;
-    will-change: transform;
-  }
-
-  .farm-layer-target {
-    animation-delay: -2.2s;
-  }
-
-  .farm-layer-link {
-    animation: farm-layer-link 3s ease-in-out infinite;
-  }
-
-  .farm-layer-progress {
-    animation: farm-layer-progress 6s ease-in-out infinite;
-    will-change: transform;
-  }
-
   .farm-terminal-command-text {
     width: 0;
     overflow: hidden;
@@ -431,6 +408,15 @@
     text-align: right;
     content: counter(farm-code-line);
     user-select: none;
+  }
+
+  .farm-highlighted-code .sh__line--highlighted {
+    background: rgb(255 255 255 / 0.055);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.68);
+  }
+
+  .farm-highlighted-code .sh__line--highlighted::before {
+    color: rgb(255 255 255 / 0.48);
   }
 
   .farm-highlighted-code .sh__token--keyword {
@@ -674,60 +660,6 @@
   }
 }
 
-@keyframes farm-foundation-sequence-three {
-  0%,
-  30% {
-    color: rgb(255 255 255 / 0.9);
-    background: rgb(255 255 255 / 0.075);
-    border-color: rgb(255 255 255 / 0.2);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
-  }
-
-  33.333%,
-  100% {
-    color: rgb(255 255 255 / 0.42);
-    background: transparent;
-    border-color: rgb(255 255 255 / 0.08);
-    box-shadow: inset 2px 0 0 transparent;
-  }
-}
-
-@keyframes farm-illustration-float {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  50% {
-    transform: translate3d(0, -3px, 0);
-  }
-}
-
-@keyframes farm-layer-link {
-  0%,
-  100% {
-    opacity: 0.38;
-    transform: translate3d(-2px, 0, 0);
-  }
-
-  50% {
-    opacity: 1;
-    transform: translate3d(2px, 0, 0);
-  }
-}
-
-@keyframes farm-layer-progress {
-  0%,
-  8% {
-    transform: scaleX(0.08);
-  }
-
-  76%,
-  100% {
-    transform: scaleX(1);
-  }
-}
-
 .farm-logo-viewport {
   -webkit-mask-image: linear-gradient(
     to right,
@@ -758,14 +690,6 @@
   .farm-logo-viewport:hover .farm-logo-rail {
     animation-play-state: paused;
   }
-
-  .group:hover .farm-layer-row,
-  .group:hover .farm-layer-source,
-  .group:hover .farm-layer-target,
-  .group:hover .farm-layer-link,
-  .group:hover .farm-layer-progress {
-    animation-play-state: paused;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -793,7 +717,6 @@
     transform: none;
   }
 
-  .farm-layer-row,
   .farm-terminal-command-text,
   .farm-terminal-command-cursor,
   .farm-terminal-command-cursor::before,
@@ -801,11 +724,7 @@
   .farm-build-command-text,
   .farm-build-command-cursor,
   .farm-build-command-cursor::before,
-  .farm-build-output,
-  .farm-layer-source,
-  .farm-layer-target,
-  .farm-layer-link,
-  .farm-layer-progress {
+  .farm-build-output {
     animation: none;
   }
 
@@ -825,21 +744,5 @@
   .farm-build-output {
     clip-path: inset(0);
     opacity: 1;
-  }
-
-  .farm-layer-row[data-initial="true"] {
-    color: rgb(255 255 255 / 0.9);
-    background: rgb(255 255 255 / 0.075);
-    border-color: rgb(255 255 255 / 0.2);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
-  }
-
-  .farm-layer-progress {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-
-  .farm-layer-link {
-    display: none;
   }
 }
