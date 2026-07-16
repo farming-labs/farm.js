@@ -17,6 +17,7 @@ describe("Cloudflare Agents integration", () => {
 
     expect(integration.category).toBe("agent");
     expect(integration.type).toBe("cloudflare");
+    expect(integration.serverRuntime).toBe(true);
     expect(integration.instance).toMatchObject({
       provider: "cloudflare",
       routePrefix: "/agents",
@@ -26,6 +27,12 @@ describe("Cloudflare Agents integration", () => {
     expect(integration.routes?.map((route) => route.path)).toEqual([
       "/agents/[...farmAgentRuntimePath]",
     ]);
+  });
+
+  it("leaves production agent routes to the composed Cloudflare Worker", () => {
+    const integration = cfAgent({ dev: false });
+
+    expect(integration.serverRuntime).toBe(false);
   });
 
   it("builds a deterministic Wrangler command and enforces Node 22", () => {

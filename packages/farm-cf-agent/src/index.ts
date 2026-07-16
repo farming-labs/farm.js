@@ -60,6 +60,7 @@ export function cfAgent(options: CloudflareAgentOptions = {}): CloudflareAgentIn
   return createAgentRuntimeIntegration({
     provider: "cloudflare",
     routePrefix,
+    serverRuntime: Boolean(externalOrigin),
     origin: options.origin,
     originEnv: "CF_AGENT_ORIGIN",
     webSockets: true,

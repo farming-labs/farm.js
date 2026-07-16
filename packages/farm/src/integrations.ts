@@ -450,6 +450,8 @@ export interface FarmIntegration<
   slot?: FarmIntegrationCategory;
   type: string;
   instance: unknown;
+  /** Set to false when a platform adapter owns this integration's production routes. */
+  serverRuntime?: boolean;
   api?: FarmIntegrationAPI;
   schema?: TSchema;
   config?: FarmIntegrationConfigInput<TConfig, TSchema>;

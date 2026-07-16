@@ -50,6 +50,8 @@ export interface FarmAgentRuntimeBuildContext extends BundleResultPayload {
 export interface FarmAgentRuntimeIntegrationOptions {
   provider: string;
   routePrefix: string;
+  /** Whether Farm's production server must dispatch this runtime's proxy routes. */
+  serverRuntime?: boolean;
   additionalRoutePrefixes?: readonly string[];
   origin?: string;
   originEnv?: string | readonly string[];
@@ -143,6 +145,7 @@ export function createAgentRuntimeIntegration(
   return defineIntegration({
     category: "agent",
     type: provider,
+    serverRuntime: options.serverRuntime,
     instance: runtimeInstance,
     async setup(context) {
       if (!context.isDev || state.origin || !options.startDev) {

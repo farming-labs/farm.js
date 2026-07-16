@@ -1305,7 +1305,9 @@ async function buildSSRInMemory(
     `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, ${apiRoutes.length} API routes, and ${middlewareRoutes.length} middleware files`,
   );
 
-  const hasConfiguredIntegrations = Object.keys(config.integrations || {}).length > 0;
+  const hasConfiguredIntegrations = Object.values(config.integrations || {}).some(
+    (integration) => integration?.serverRuntime !== false,
+  );
   const hasObservabilityHandler =
     !!config.observability &&
     typeof config.observability === "object" &&
