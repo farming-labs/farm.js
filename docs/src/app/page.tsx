@@ -6,7 +6,6 @@ import {
   BookOpen,
   BookOpenText,
   Braces,
-  CircleCheck,
   CloudCog,
   CreditCard,
   ExternalLink,
@@ -268,6 +267,15 @@ export default defineConfig({
         search: true,
         mcp: true,
     },
+});`;
+
+const layersConfigCode = `import { defineFarmConfig } from "@farmjs/core";
+export default defineFarmConfig({
+    extends: [
+        "@company/farm-base",
+        "@company/admin-layer",
+        "./layers/commerce",
+    ],
 });`;
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -962,177 +970,7 @@ function DocsVisual() {
 }
 
 function LayersVisual() {
-  const layerSources = [
-    { name: "farm-base", detail: "routes + middleware", icon: Layers3 },
-    { name: "admin-layer", detail: "auth + admin", icon: ShieldCheck },
-    { name: "commerce", detail: "catalog + checkout", icon: CreditCard },
-    { name: "project", detail: "overrides /products", icon: FolderTree, project: true },
-  ] as const;
-  const resolvedRows = [
-    { label: "/products", kind: "page", owner: "project", icon: Route, project: true },
-    { label: "/admin", kind: "layout", owner: "admin", icon: ShieldCheck },
-    { label: "/api/cart", kind: "api", owner: "commerce", icon: Braces },
-  ] as const;
-
-  return (
-    <FoundationCanvas interactive>
-      <a
-        aria-label="Learn how Farm Layers compose an application"
-        className="farm-layer-diagram group/layers absolute inset-0 overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
-        href="/docs/layers"
-        id="layers-visual"
-        title="Farm Layers documentation"
-      >
-        <div
-          aria-hidden
-          className="absolute inset-x-6 top-4 flex h-7 items-center justify-between border-y border-white/8 px-2.5 font-mono text-[7.5px] uppercase tracking-normal text-white/38 sm:inset-x-10 sm:top-5 sm:h-8 sm:px-3 sm:text-[8px]"
-        >
-          <span className="flex items-center gap-1.5">
-            <Network aria-hidden className="size-3 text-white/58" strokeWidth={1.4} /> composition
-            graph
-          </span>
-          <span className="flex items-center gap-1.5 text-white/58">
-            low <ArrowRight aria-hidden className="size-2.5" strokeWidth={1.4} /> project priority
-          </span>
-        </div>
-
-        <div
-          aria-hidden
-          className="absolute inset-x-6 bottom-5 top-[3.25rem] grid min-w-0 grid-cols-[minmax(0,4.25fr)_2.75rem_minmax(0,5fr)] sm:inset-x-10 sm:bottom-6 sm:top-[3.75rem] sm:grid-cols-[minmax(0,4fr)_4rem_minmax(0,5fr)]"
-        >
-          <div className="relative z-10 grid min-w-0 grid-rows-4 gap-1.5 py-1">
-            {layerSources.map((source, index) => {
-              const Icon = source.icon;
-
-              return (
-                <div
-                  key={source.name}
-                  className={cx(
-                    "farm-layer-source-node relative grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 border border-white/10 bg-black/88 px-2 font-mono tracking-normal transition-[border-color,background-color] duration-150 group-hover/layers:border-white/16 sm:gap-2 sm:px-2.5",
-                    source.project && "farm-layer-project-node",
-                  )}
-                >
-                  <Icon
-                    aria-hidden
-                    className={cx(
-                      "size-3 shrink-0 text-white/46 sm:size-3.5",
-                      source.project && "text-white/86",
-                    )}
-                    strokeWidth={1.4}
-                  />
-                  <span className="min-w-0">
-                    <span
-                      className={cx(
-                        "block truncate text-[8.5px] text-white/66 sm:text-[9px]",
-                        source.project && "text-white/94",
-                      )}
-                    >
-                      {source.name}
-                    </span>
-                    <span className="block truncate text-[7px] text-white/32 sm:text-[7.5px]">
-                      {source.detail}
-                    </span>
-                  </span>
-                  <span
-                    className={cx(
-                      "text-[7px] text-white/28 sm:text-[7.5px]",
-                      source.project && "text-white/66",
-                    )}
-                  >
-                    {source.project ? "APP" : `0${index + 1}`}
-                  </span>
-
-                  <span className="farm-layer-wire absolute left-full top-1/2 h-px w-[1.625rem] bg-white/12 sm:w-8">
-                    <span
-                      className="farm-layer-signal absolute -top-px left-0 h-[3px] w-1.5 bg-white"
-                      style={{ animationDelay: `${index * 2}s` }}
-                    />
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="relative min-w-0">
-            <span className="farm-layer-spine absolute bottom-[12%] left-1/2 top-[12%] w-px -translate-x-1/2 bg-white/12" />
-            <span className="absolute left-1/2 right-0 top-1/2 h-px bg-white/12">
-              <span className="farm-layer-output-signal absolute -top-px left-0 h-[3px] w-1.5 bg-white" />
-            </span>
-            <span className="farm-layer-resolver absolute left-1/2 top-1/2 z-10 flex size-9 -translate-x-1/2 -translate-y-1/2 items-center justify-center border border-white/18 bg-black text-white/78 shadow-[0_0_0_4px_rgba(0,0,0,0.88)] sm:size-10">
-              <Network aria-hidden className="size-4" strokeWidth={1.35} />
-              <span className="absolute -bottom-4 font-mono text-[7px] uppercase tracking-normal text-white/34 sm:text-[7.5px]">
-                resolve
-              </span>
-            </span>
-          </div>
-
-          <div className="farm-illustration-surface relative z-10 flex min-w-0 flex-col overflow-hidden border border-white/14 bg-black shadow-[-18px_16px_52px_rgba(0,0,0,0.5)] transition-colors duration-150 group-hover/layers:border-white/20">
-            <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/10 px-2 font-mono text-[7px] uppercase tracking-normal text-white/42 sm:h-9 sm:px-3 sm:text-[7.5px]">
-              <span>resolved app</span>
-              <span className="flex items-center gap-1 text-white/68">
-                <CircleCheck aria-hidden className="size-2.5" strokeWidth={1.5} /> project wins
-              </span>
-            </div>
-
-            <div className="grid min-h-0 flex-1 grid-rows-3">
-              {resolvedRows.map((row) => {
-                const Icon = row.icon;
-
-                return (
-                  <div
-                    key={row.label}
-                    className={cx(
-                      "grid min-h-0 min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-1.5 border-b border-white/8 px-2 font-mono tracking-normal text-white/48 last:border-b-0 sm:gap-2 sm:px-3",
-                      row.project && "farm-layer-project-result",
-                    )}
-                  >
-                    <Icon
-                      aria-hidden
-                      className={cx(
-                        "size-3 shrink-0 text-white/42 sm:size-3.5",
-                        row.project && "text-white/90",
-                      )}
-                      strokeWidth={1.4}
-                    />
-                    <span className="min-w-0">
-                      <span
-                        className={cx(
-                          "block truncate text-[8.5px] text-white/70 sm:text-[9px]",
-                          row.project && "text-white",
-                        )}
-                      >
-                        {row.label}
-                      </span>
-                      <span className="block text-[7px] uppercase text-white/30 sm:text-[7.5px]">
-                        {row.kind}
-                      </span>
-                    </span>
-                    <span
-                      className={cx(
-                        "text-[7px] uppercase text-white/36 sm:text-[7.5px]",
-                        row.project && "text-white/76",
-                      )}
-                    >
-                      {row.owner}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex h-7 shrink-0 items-center justify-between border-t border-white/10 px-2 font-mono text-[7px] uppercase tracking-normal text-white/38 sm:h-8 sm:px-3 sm:text-[7.5px]">
-              <span className="flex items-center gap-1.5">
-                <Braces aria-hidden className="size-2.5" strokeWidth={1.4} /> generated types
-              </span>
-              <span className="flex items-center gap-1 text-white/62">
-                ready <CircleCheck aria-hidden className="size-2.5" strokeWidth={1.5} />
-              </span>
-            </div>
-          </div>
-        </div>
-      </a>
-    </FoundationCanvas>
-  );
+  return <FoundationCodeVisual code={layersConfigCode} label="farm.config.ts" language="ts" />;
 }
 
 function FoundationGrid() {

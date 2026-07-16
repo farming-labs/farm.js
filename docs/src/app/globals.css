@@ -320,48 +320,6 @@
       inset 0 1px 0 rgb(255 255 255 / 0.025);
   }
 
-  .farm-layer-diagram::before {
-    position: absolute;
-    inset: 0;
-    background-image:
-      linear-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px);
-    background-size: 24px 24px;
-    opacity: 0.72;
-    -webkit-mask-image: linear-gradient(to bottom, transparent, black 18%, black 88%, transparent);
-    mask-image: linear-gradient(to bottom, transparent, black 18%, black 88%, transparent);
-    pointer-events: none;
-    content: "";
-  }
-
-  .farm-layer-project-node {
-    border-color: rgb(255 255 255 / 0.26);
-    background: rgb(255 255 255 / 0.065);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.82);
-  }
-
-  .farm-layer-project-result {
-    background: rgb(255 255 255 / 0.07);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.88);
-  }
-
-  .farm-layer-signal {
-    opacity: 0;
-    animation: farm-layer-signal 8s linear infinite;
-    will-change: transform, opacity;
-  }
-
-  .farm-layer-output-signal {
-    opacity: 0;
-    animation: farm-layer-output-signal 2s ease-in-out infinite;
-    will-change: transform, opacity;
-  }
-
-  .farm-layer-resolver {
-    animation: farm-layer-resolver 2s ease-in-out infinite;
-    will-change: border-color, color, box-shadow;
-  }
-
   .farm-terminal-command-text {
     width: 0;
     overflow: hidden;
@@ -693,69 +651,6 @@
   }
 }
 
-@keyframes farm-layer-signal {
-  0%,
-  4% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0);
-  }
-
-  8% {
-    opacity: 1;
-  }
-
-  18% {
-    opacity: 0.95;
-    transform: translate3d(300%, 0, 0);
-  }
-
-  22%,
-  100% {
-    opacity: 0;
-    transform: translate3d(380%, 0, 0);
-  }
-}
-
-@keyframes farm-layer-output-signal {
-  0%,
-  12% {
-    opacity: 0;
-    transform: translate3d(0, 0, 0);
-  }
-
-  32% {
-    opacity: 1;
-  }
-
-  82% {
-    opacity: 0.9;
-    transform: translate3d(300%, 0, 0);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translate3d(380%, 0, 0);
-  }
-}
-
-@keyframes farm-layer-resolver {
-  0%,
-  100% {
-    color: rgb(255 255 255 / 0.62);
-    border-color: rgb(255 255 255 / 0.18);
-    box-shadow: 0 0 0 4px rgb(0 0 0 / 0.88);
-  }
-
-  46%,
-  62% {
-    color: rgb(255 255 255 / 0.96);
-    border-color: rgb(255 255 255 / 0.44);
-    box-shadow:
-      0 0 0 4px rgb(0 0 0 / 0.88),
-      0 0 20px rgb(255 255 255 / 0.08);
-  }
-}
-
 .farm-logo-viewport {
   -webkit-mask-image: linear-gradient(
     to right,
@@ -784,12 +679,6 @@
 
 @media (hover: hover) and (pointer: fine) {
   .farm-logo-viewport:hover .farm-logo-rail {
-    animation-play-state: paused;
-  }
-
-  .farm-layer-diagram:hover .farm-layer-signal,
-  .farm-layer-diagram:hover .farm-layer-output-signal,
-  .farm-layer-diagram:hover .farm-layer-resolver {
     animation-play-state: paused;
   }
 }
@@ -826,10 +715,7 @@
   .farm-build-command-text,
   .farm-build-command-cursor,
   .farm-build-command-cursor::before,
-  .farm-build-output,
-  .farm-layer-signal,
-  .farm-layer-output-signal,
-  .farm-layer-resolver {
+  .farm-build-output {
     animation: none;
   }
 
@@ -849,15 +735,5 @@
   .farm-build-output {
     clip-path: inset(0);
     opacity: 1;
-  }
-
-  .farm-layer-signal,
-  .farm-layer-output-signal {
-    display: none;
-  }
-
-  .farm-layer-resolver {
-    color: rgb(255 255 255 / 0.86);
-    border-color: rgb(255 255 255 / 0.32);
   }
 }
