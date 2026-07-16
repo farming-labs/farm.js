@@ -2,7 +2,7 @@
 
 import { Code2 } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { useId, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { highlight } from "sugar-high";
 
 interface HighlightedCodeProps {
@@ -24,6 +24,7 @@ export interface HighlightedCodeTab {
 
 interface HighlightedCodeTabsProps {
   className?: string;
+  id: string;
   tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
   tabsLabel?: string;
 }
@@ -108,14 +109,14 @@ export function HighlightedCode({
 
 export function HighlightedCodeTabs({
   className,
+  id,
   tabs,
   tabsLabel = "Code examples",
 }: HighlightedCodeTabsProps) {
   const [activeIndex, setActiveIndex] = useState(0);
-  const groupId = useId();
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeTab = tabs[activeIndex] ?? tabs[0];
-  const panelId = `${groupId}-panel`;
+  const panelId = `${id}-panel`;
 
   function selectTab(index: number) {
     setActiveIndex(index);
@@ -146,7 +147,7 @@ export function HighlightedCodeTabs({
         </span>
         <span aria-label={tabsLabel} className="flex min-w-0 flex-1 items-stretch" role="tablist">
           {tabs.map((tab, index) => {
-            const tabId = `${groupId}-${tab.id}-tab`;
+            const tabId = `${id}-${tab.id}-tab`;
 
             return (
               <button
@@ -175,7 +176,7 @@ export function HighlightedCodeTabs({
         </span>
       </figcaption>
       <HighlightedCodeBody
-        ariaLabelledBy={`${groupId}-${activeTab.id}-tab`}
+        ariaLabelledBy={`${id}-${activeTab.id}-tab`}
         code={activeTab.code}
         highlightLines={activeTab.highlightLines}
         id={panelId}

@@ -897,6 +897,7 @@ function FoundationCodeTabsVisual({
     <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
       <HighlightedCodeTabs
         className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
+        id="farm-layers-code"
         tabs={tabs}
         tabsLabel="Farm Layers examples"
       />
