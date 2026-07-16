@@ -33,7 +33,7 @@ export default defineConfig({
 });
 ```
 
-`defineConfig` is the concise Farm helper. `defineFarmConfig` is the same typed function and remains fully supported for existing applications.
+`defineConfig` is the canonical Farm helper. `defineFarmConfig` remains available as a deprecated exact alias for existing applications.
 
 ### Docs config
 

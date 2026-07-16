@@ -20,10 +20,10 @@ Use Better Auth, Auth.js, Clerk, Auth0, WorkOS, or Supabase without hand-rolling
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { supabase } from "@farmjs/integrations/supabase";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     auth: supabase({
       url: process.env.SUPABASE_URL,

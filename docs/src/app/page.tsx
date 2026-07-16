@@ -291,8 +291,8 @@ export default defineConfig({
     label: "Consume / app/farm.config.ts",
     language: "ts",
     highlightLines: [5],
-    code: `import { defineFarmConfig } from "@farmjs/core";
-export default defineFarmConfig({
+    code: `import { defineConfig } from "@farmjs/core";
+export default defineConfig({
     extends: [
         "@company/farm-base",
         "./layers/commerce",

@@ -1,6 +1,6 @@
-import { defineFarmConfig } from '@farmjs/core';
+import { defineConfig } from '@farmjs/core';
 
-export default defineFarmConfig({
+export default defineConfig({
   srcDir: 'src',
   deploy: {
     target: 'vercel',

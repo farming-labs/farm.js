@@ -84,9 +84,9 @@ curl -X POST https://app.example.com/api/_farm/workflows/sync-cms \
 The default config is enough for most apps.
 
 ```ts title="farm.config.ts"
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   workflows: true,
 });
 ```
@@ -94,9 +94,9 @@ export default defineFarmConfig({
 Customize the scanned directory, route, or secret env when needed.
 
 ```ts title="farm.config.ts"
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   workflows: {
     dir: "src/background",
     route: "/api/internal/workflows",

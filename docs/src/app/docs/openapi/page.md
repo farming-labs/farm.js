@@ -13,7 +13,7 @@ Generate and publish API reference docs from Farm API route metadata, with Scala
 **farm.config.ts**
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   openapi: {
     enabled: true,
     route: "/docs/reference",
@@ -57,7 +57,7 @@ The route appears in the generated reference with a typed `limit` query paramete
 ## Add metadata
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   openapi: {
     enabled: true,
     route: "/docs/reference",

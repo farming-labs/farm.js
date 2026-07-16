@@ -8,9 +8,9 @@ description: How Farm registers the docs API while keeping a Next-style override
 Farm registers the docs API automatically from `farm.config.ts`:
 
 ```ts
-import { defineFarmConfig } from '@farmjs/core';
+import { defineConfig } from '@farmjs/core';
 
-export default defineFarmConfig({
+export default defineConfig({
   docs: {
     entry: '/docs',
   },

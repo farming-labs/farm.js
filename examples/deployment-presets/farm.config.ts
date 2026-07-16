@@ -1,10 +1,10 @@
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
 const preset = process.env.NITRO_PRESET;
 const target = preset ? undefined : process.env.FARM_DEPLOY_TARGET || "vercel";
 const isSelfHosted = target === "node";
 
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target,
     preset,

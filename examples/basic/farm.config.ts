@@ -1,4 +1,4 @@
-import { defineFarmConfig, type FarmPlugin } from '@farmjs/core';
+import { defineConfig, type FarmPlugin } from '@farmjs/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farmjs/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
@@ -19,7 +19,7 @@ const myCustomPlugin: FarmPlugin = {
   },
 };
 
-export default defineFarmConfig({
+export default defineConfig({
   extends: ['./layers/recent-features'],
   srcDir: 'src',
   outDir: 'dist',

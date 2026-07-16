@@ -53,7 +53,7 @@ export default defineConfig({
 });
 ```
 
-`defineFarmConfig` remains supported as an exact alias of `defineConfig`.
+`defineFarmConfig` remains available as a deprecated exact alias of `defineConfig`.
 
 Create your first page in `src/app/page.tsx`:
 

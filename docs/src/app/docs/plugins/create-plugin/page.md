@@ -34,10 +34,10 @@ export const requestIdPlugin = definePlugin({
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { requestIdPlugin } from "./src/lib/request-id-plugin";
 
-export default defineFarmConfig({
+export default defineConfig({
   plugins: [requestIdPlugin],
 });
 ```

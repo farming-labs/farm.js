@@ -130,9 +130,9 @@ Config-defined handlers run before discovered route middleware. Data placed in `
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   middleware: [
     {
       matcher: ["/dashboard/:path*"],
@@ -148,9 +148,9 @@ export default defineFarmConfig({
 Multiple config middleware entries can match the same request. They run in array order before file middleware.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   middleware: [
     {
       matcher: ["/dashboard/:path*", "/account/:path*"],
@@ -186,9 +186,9 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 When a matcher has params, the handler can read them from `ctx.params`.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   middleware: [
     {
       matcher: "/dashboard/:path*",
@@ -206,9 +206,9 @@ export default defineFarmConfig({
 Use a matcher-only config when you want every discovered middleware file to run only inside a route area.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   middleware: {
     matcher: "/dashboard/:path*",
   },
@@ -243,9 +243,9 @@ export default middleware().use(async (ctx, next) => {
 The same protection can live in config when the rule should be managed globally.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   middleware: [
     {
       matcher: "/dashboard/:path*",
@@ -268,9 +268,9 @@ export default defineFarmConfig({
 Middleware handlers can also return a Web `Response`. Returned responses stop the middleware chain and are sent directly.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   middleware: [
     {
       matcher: "/dashboard/:path*",
@@ -321,9 +321,9 @@ Middleware emits observability events in development and production. Subscribe w
 | `middleware.error`        | A handler throws.                                              | `route`, `pathname`, `name`, `error`      |
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 
-export default defineFarmConfig({
+export default defineConfig({
   observability: {
     onEvent(event) {
       if (event.type.startsWith("middleware.")) {

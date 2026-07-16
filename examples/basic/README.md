@@ -31,7 +31,7 @@ This example enables route-level `loading.tsx` and `error.tsx` boundaries with:
 
 ```ts
 // examples/basic/farm.config.ts
-export default defineFarmConfig({
+export default defineConfig({
   experimental: {
     serverComponents: true,
     serverActions: true,
@@ -44,7 +44,7 @@ export default defineFarmConfig({
 The example also keeps deployment and Vite tweaks in the same file:
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   deploy: {
     target: "vercel",
   },
@@ -61,7 +61,7 @@ No root `vite.config.ts` or `vercel.json` is required for the basic example.
 This example exposes agent-readable markdown mirrors for a few normal pages:
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   md: {
     expose: ["/", "/about", "/contact"],
     cache: 60,
@@ -91,7 +91,7 @@ storage, build, plugins, and errors. This example can enable the default logs or
 custom handler from `farm.config.ts`:
 
 ```ts
-export default defineFarmConfig({
+export default defineConfig({
   observability: {
     logs: true,
     onEvent(event) {

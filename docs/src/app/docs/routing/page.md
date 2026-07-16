@@ -322,11 +322,11 @@ Use this for tab state, pagination defaults, locale/tenant preservation, preview
 Use `context` in `farm.config.ts` for request-scoped dependencies that guards and route data need: sessions, tenants, feature flags, or database clients. The value is available to programmatic route `guard`, `data.before`, `data.main`, cache key functions, and `data.after`.
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { db } from "./src/db";
 import { getSession } from "./src/session";
 
-export default defineFarmConfig({
+export default defineConfig({
   context: async ({ request }) => ({
     session: await getSession(request),
     db,

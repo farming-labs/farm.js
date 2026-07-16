@@ -36,10 +36,10 @@ export const acme = defineIntegration({
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { acme } from "./src/integrations/acme";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     acme,
   },
@@ -80,10 +80,10 @@ Register the integration once. The `billing` key becomes the first segment after
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { billing } from "./src/integrations/billing";
 
-export default defineFarmConfig({
+export default defineConfig({
   integrations: {
     billing,
   },
@@ -740,13 +740,13 @@ The app supplies the storage client once:
 **farm.config.ts**
 
 ```ts
-import { defineFarmConfig } from "@farmjs/core";
+import { defineConfig } from "@farmjs/core";
 import { DatabaseSync } from "node:sqlite";
 import { billing } from "./src/integrations/billing";
 
 const sqlite = new DatabaseSync("farm.sqlite");
 
-export default defineFarmConfig({
+export default defineConfig({
   storage: {
     client: sqlite,
   },
