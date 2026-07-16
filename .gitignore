@@ -16,6 +16,7 @@ out/
 **/.eve/
 **/.output/
 **/.farm-cf-agent.wrangler.jsonc
+**/.wrangler/
 
 # Environment variables
 .env
