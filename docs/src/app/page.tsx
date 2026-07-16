@@ -50,7 +50,8 @@ import viteIconUrl from "simple-icons/icons/vite.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
-import { HighlightedCode } from "../components/home/highlighted-code";
+import { HighlightedCode, HighlightedCodeTabs } from "../components/home/highlighted-code";
+import type { HighlightedCodeTab } from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 import { FileTree } from "../components/ui/file-tree";
 import type { FileTreeNode } from "../components/ui/file-tree";
@@ -269,14 +270,31 @@ export default defineConfig({
     },
 });`;
 
-const layersConfigCode = `import { defineFarmConfig } from "@farmjs/core";
+const layersConfigTabs = [
+  {
+    id: "share",
+    label: "Share / layer/farm.config.ts",
+    language: "ts",
+    code: `import type { FarmLayerConfig } from "@farmjs/core";
+export default {
+    routeRules: {
+        "/products/**": { swr: 300 },
+    },
+} satisfies FarmLayerConfig;`,
+  },
+  {
+    id: "consume",
+    label: "Consume / app/farm.config.ts",
+    language: "ts",
+    code: `import { defineFarmConfig } from "@farmjs/core";
 export default defineFarmConfig({
     extends: [
         "@company/farm-base",
-        "@company/admin-layer",
         "./layers/commerce",
     ],
-});`;
+});`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
 function cx(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(" ");
@@ -860,6 +878,22 @@ function FoundationCodeVisual({
   );
 }
 
+function FoundationCodeTabsVisual({
+  tabs,
+}: {
+  tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+}) {
+  return (
+    <div className="farm-feature-spotlight relative flex h-[320px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:h-[328px] sm:pl-10">
+      <HighlightedCodeTabs
+        className="relative z-10 -mb-px -mr-px flex h-[296px] w-full max-w-full shrink-0 flex-col sm:h-[300px]"
+        tabs={tabs}
+        tabsLabel="Farm Layers examples"
+      />
+    </div>
+  );
+}
+
 function FileTreeVisual() {
   const nodes: readonly FileTreeNode[] = [
     {
@@ -970,7 +1004,7 @@ function DocsVisual() {
 }
 
 function LayersVisual() {
-  return <FoundationCodeVisual code={layersConfigCode} label="farm.config.ts" language="ts" />;
+  return <FoundationCodeTabsVisual tabs={layersConfigTabs} />;
 }
 
 function FoundationGrid() {
