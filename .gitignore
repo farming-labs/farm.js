@@ -13,6 +13,8 @@ out/
 .farm/
 **/.farm/
 **/src/.farm-client-entry.tsx
+**/.eve/
+**/.output/
 
 # Environment variables
 .env

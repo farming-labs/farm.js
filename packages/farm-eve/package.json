@@ -1,0 +1,55 @@
+{
+  "name": "@farmjs/eve",
+  "version": "0.0.1",
+  "description": "First-class Eve agent runtime integration for Farm.js",
+  "keywords": [
+    "agents",
+    "eve",
+    "farmjs",
+    "vercel"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-eve"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "eve": "0.24.6",
+    "tsup": "^8.5.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.1"
+  },
+  "peerDependencies": {
+    "eve": ">=0.24.6 <1"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}
