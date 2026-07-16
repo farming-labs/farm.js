@@ -8,6 +8,11 @@ section: "Data and APIs"
 
 `createServerQuery` defines a typed server read with one structured cache key. The same declaration works during server rendering, through a generated browser server reference, with browser prefetch, and in `useServerQuery`.
 
+The browser lifecycle is intentionally familiar to React Query and TanStack Query users: request
+deduplication, prefetching, `staleTime`, stale-while-revalidate, focus and reconnect refresh, shared
+invalidation, and optimistic cache writes. Farm implements this behavior in its own cache and
+generated server references; it does not install or wrap TanStack Query.
+
 ## Declare a query
 
 **src/features/products/queries.ts**
@@ -160,6 +165,50 @@ const result = await api.products.get(
 ```
 
 The route, API caller, and server query now read and invalidate the same canonical key. Default API keys remain isolated by request origin; only an explicit structured key opts into cross-feature sharing.
+
+### Share optimistic updates
+
+API mutations can optimistically update data watched by `useServerQuery` when both features use the
+same structured key and the same data shape:
+
+```ts
+const products = await api.products.get(
+  { query: { category } },
+  {
+    cache: {
+      key: ["products", category],
+      policy: "stale-while-revalidate",
+      staleTime: 30_000,
+    },
+  },
+);
+
+await api.products.post(
+  { body: draft },
+  {
+    optimistic: {
+      update: [
+        [
+          products.key,
+          (current) => ({
+            ...current,
+            products: [
+              { ...draft, id: "optimistic" },
+              ...(current?.products ?? []),
+            ],
+          }),
+        ],
+      ],
+      rollbackOnError: true,
+    },
+    invalidate: [products.key],
+  },
+);
+```
+
+This works through the shared Farm client cache; `useServerQuery` does not expose a separate
+optimistic option. Keep the API response and server-query result contracts identical whenever they
+share a key.
 
 ## Cache lifetime
 
