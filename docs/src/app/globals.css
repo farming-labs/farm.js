@@ -320,27 +320,46 @@
       inset 0 1px 0 rgb(255 255 255 / 0.025);
   }
 
-  .farm-layer-row {
-    animation: farm-foundation-sequence-three 6s linear infinite;
+  .farm-layer-diagram::before {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgb(255 255 255 / 0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgb(255 255 255 / 0.025) 1px, transparent 1px);
+    background-size: 24px 24px;
+    opacity: 0.72;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 18%, black 88%, transparent);
+    mask-image: linear-gradient(to bottom, transparent, black 18%, black 88%, transparent);
+    pointer-events: none;
+    content: "";
   }
 
-  .farm-layer-source,
-  .farm-layer-target {
-    animation: farm-illustration-float 7s ease-in-out infinite;
-    will-change: transform;
+  .farm-layer-project-node {
+    border-color: rgb(255 255 255 / 0.26);
+    background: rgb(255 255 255 / 0.065);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.82);
   }
 
-  .farm-layer-target {
-    animation-delay: -2.2s;
+  .farm-layer-project-result {
+    background: rgb(255 255 255 / 0.07);
+    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.88);
   }
 
-  .farm-layer-link {
-    animation: farm-layer-link 3s ease-in-out infinite;
+  .farm-layer-signal {
+    opacity: 0;
+    animation: farm-layer-signal 8s linear infinite;
+    will-change: transform, opacity;
   }
 
-  .farm-layer-progress {
-    animation: farm-layer-progress 6s ease-in-out infinite;
-    will-change: transform;
+  .farm-layer-output-signal {
+    opacity: 0;
+    animation: farm-layer-output-signal 2s ease-in-out infinite;
+    will-change: transform, opacity;
+  }
+
+  .farm-layer-resolver {
+    animation: farm-layer-resolver 2s ease-in-out infinite;
+    will-change: border-color, color, box-shadow;
   }
 
   .farm-terminal-command-text {
@@ -674,57 +693,66 @@
   }
 }
 
-@keyframes farm-foundation-sequence-three {
+@keyframes farm-layer-signal {
   0%,
-  30% {
-    color: rgb(255 255 255 / 0.9);
-    background: rgb(255 255 255 / 0.075);
-    border-color: rgb(255 255 255 / 0.2);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
-  }
-
-  33.333%,
-  100% {
-    color: rgb(255 255 255 / 0.42);
-    background: transparent;
-    border-color: rgb(255 255 255 / 0.08);
-    box-shadow: inset 2px 0 0 transparent;
-  }
-}
-
-@keyframes farm-illustration-float {
-  0%,
-  100% {
+  4% {
+    opacity: 0;
     transform: translate3d(0, 0, 0);
   }
 
-  50% {
-    transform: translate3d(0, -3px, 0);
-  }
-}
-
-@keyframes farm-layer-link {
-  0%,
-  100% {
-    opacity: 0.38;
-    transform: translate3d(-2px, 0, 0);
-  }
-
-  50% {
-    opacity: 1;
-    transform: translate3d(2px, 0, 0);
-  }
-}
-
-@keyframes farm-layer-progress {
-  0%,
   8% {
-    transform: scaleX(0.08);
+    opacity: 1;
   }
 
-  76%,
+  18% {
+    opacity: 0.95;
+    transform: translate3d(300%, 0, 0);
+  }
+
+  22%,
   100% {
-    transform: scaleX(1);
+    opacity: 0;
+    transform: translate3d(380%, 0, 0);
+  }
+}
+
+@keyframes farm-layer-output-signal {
+  0%,
+  12% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0);
+  }
+
+  32% {
+    opacity: 1;
+  }
+
+  82% {
+    opacity: 0.9;
+    transform: translate3d(300%, 0, 0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(380%, 0, 0);
+  }
+}
+
+@keyframes farm-layer-resolver {
+  0%,
+  100% {
+    color: rgb(255 255 255 / 0.62);
+    border-color: rgb(255 255 255 / 0.18);
+    box-shadow: 0 0 0 4px rgb(0 0 0 / 0.88);
+  }
+
+  46%,
+  62% {
+    color: rgb(255 255 255 / 0.96);
+    border-color: rgb(255 255 255 / 0.44);
+    box-shadow:
+      0 0 0 4px rgb(0 0 0 / 0.88),
+      0 0 20px rgb(255 255 255 / 0.08);
   }
 }
 
@@ -759,11 +787,9 @@
     animation-play-state: paused;
   }
 
-  .group:hover .farm-layer-row,
-  .group:hover .farm-layer-source,
-  .group:hover .farm-layer-target,
-  .group:hover .farm-layer-link,
-  .group:hover .farm-layer-progress {
+  .farm-layer-diagram:hover .farm-layer-signal,
+  .farm-layer-diagram:hover .farm-layer-output-signal,
+  .farm-layer-diagram:hover .farm-layer-resolver {
     animation-play-state: paused;
   }
 }
@@ -793,7 +819,6 @@
     transform: none;
   }
 
-  .farm-layer-row,
   .farm-terminal-command-text,
   .farm-terminal-command-cursor,
   .farm-terminal-command-cursor::before,
@@ -802,10 +827,9 @@
   .farm-build-command-cursor,
   .farm-build-command-cursor::before,
   .farm-build-output,
-  .farm-layer-source,
-  .farm-layer-target,
-  .farm-layer-link,
-  .farm-layer-progress {
+  .farm-layer-signal,
+  .farm-layer-output-signal,
+  .farm-layer-resolver {
     animation: none;
   }
 
@@ -827,19 +851,13 @@
     opacity: 1;
   }
 
-  .farm-layer-row[data-initial="true"] {
-    color: rgb(255 255 255 / 0.9);
-    background: rgb(255 255 255 / 0.075);
-    border-color: rgb(255 255 255 / 0.2);
-    box-shadow: inset 2px 0 0 rgb(255 255 255 / 0.76);
-  }
-
-  .farm-layer-progress {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-
-  .farm-layer-link {
+  .farm-layer-signal,
+  .farm-layer-output-signal {
     display: none;
+  }
+
+  .farm-layer-resolver {
+    color: rgb(255 255 255 / 0.86);
+    border-color: rgb(255 255 255 / 0.32);
   }
 }
