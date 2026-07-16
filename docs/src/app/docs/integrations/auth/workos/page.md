@@ -1,12 +1,14 @@
 ---
 title: "WorkOS Integration"
-description: "Add WorkOS auth, organizations, and enterprise-ready callback flows through Farm."
+description: "Add WorkOS AuthKit login, sealed sessions, logout, and protected routes to Farm."
 section: "Integrations"
 ---
 
 # WorkOS Integration
 
-WorkOS is the enterprise auth option for SSO, organizations, directory sync, and role-aware app flows.
+Use WorkOS for B2B authentication when AuthKit, enterprise SSO, and organization-aware sessions should sit behind Farm-owned routes.
+
+This adapter covers AuthKit sign-in and sealed sessions. Directory Sync and other WorkOS APIs remain separate application integrations.
 
 ## Add WorkOS
 
@@ -21,60 +23,142 @@ farm add integration workos --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { workos } from "@farmjs/integrations/auth";
+import { workos } from "@farmjs/integrations/workos";
 
-export const integrations = {
+export const appIntegrations = {
   auth: workos({
-    apiKey: process.env.WORKOS_API_KEY,
     clientId: process.env.WORKOS_CLIENT_ID,
-    redirectUri: "/api/auth/callback",
+    apiKey: process.env.WORKOS_API_KEY,
+    cookiePassword: process.env.WORKOS_COOKIE_PASSWORD,
+    callbackPath: "/callback",
+    protectedRoutes: ["/dashboard(.*)"],
   }),
-};
+} as const;
+
+export type AppIntegrations = typeof appIntegrations;
 ```
 
-## Use it
+Farm builds the absolute redirect URI from the incoming request origin and `callbackPath`. Register that exact URL in WorkOS, for example `https://app.example.com/callback`.
 
-**Caller**
+## Environment variables
+
+| Variable                      | Required    | Purpose                                        |
+| ----------------------------- | ----------- | ---------------------------------------------- |
+| `WORKOS_CLIENT_ID`            | Yes         | AuthKit client ID.                             |
+| `WORKOS_API_KEY`              | Yes         | Server-side WorkOS API key.                    |
+| `WORKOS_COOKIE_PASSWORD`      | Production  | Encrypts and seals the AuthKit session cookie. |
+| `FARM_WORKOS_COOKIE_PASSWORD` | Alternative | Backward-compatible cookie password name.      |
+
+Development has a local fallback cookie password. Production startup fails without an explicit password.
+
+## Routes and methods
+
+| Method | Default route   | Purpose                                                          |
+| ------ | --------------- | ---------------------------------------------------------------- |
+| `GET`  | `/login`        | Starts AuthKit sign-in.                                          |
+| `GET`  | `/signup`       | Starts AuthKit sign-up.                                          |
+| `GET`  | `/callback`     | Exchanges the code and stores the sealed session.                |
+| `POST` | `/logout`       | Clears the cookie and redirects through WorkOS logout.           |
+| `GET`  | `/auth/session` | Returns the authenticated user, session ID, and organization ID. |
+
+Override these routes with `loginPath`, `signUpPath`, `callbackPath`, `logoutPath`, and `sessionPath`.
+
+## Start an AuthKit flow
+
+Document navigation redirects directly:
+
+```tsx
+<a href="/login?returnTo=/dashboard">Sign in</a>
+<a href="/signup?returnTo=/dashboard">Create account</a>
+```
+
+The typed client returns the provider URL:
 
 ```ts
-const login = await api.auth.login.get({
+const result = await apiClient.auth.login.get({
   query: {
     returnTo: "/dashboard",
   },
 });
 
-if (login.data?.redirectTo) {
-  window.location.href = login.data.redirectTo;
+if (result.data) {
+  window.location.assign(result.data.redirectTo);
 }
 ```
 
-## What WorkOS adds
+## Read the sealed session
 
-| Route | Purpose |
-| --- | --- |
-| `/login` | Starts WorkOS sign-in. |
-| `/signup` | Starts WorkOS sign-up. |
-| `/callback` | Exchanges the authorization code and stores the sealed session. |
-| `/logout` | Clears the local session and redirects through WorkOS logout. |
-| `/auth/session` | Reads the current sealed-session-backed user state. |
+```ts
+const result = await api.auth.session.get();
 
-The route paths can be overridden when the app wants `/auth/login` style URLs.
+if (result.error && "status" in result.error && result.error.status === 401) {
+  // No authenticated WorkOS session.
+}
 
-## Protected routes
+const organizationId = result.data?.organizationId;
+const user = result.data?.user;
+```
+
+An authenticated response contains:
+
+```ts
+{
+  authenticated: true;
+  sessionId?: string;
+  organizationId?: string;
+  user: {
+    id: string;
+    email: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    profilePictureUrl?: string | null;
+  };
+}
+```
+
+The organization ID is useful for looking up your app's tenant record. Authorization roles and permissions still need to be resolved by your application.
+
+## Logout
+
+```ts
+const result = await apiClient.auth.logout.post();
+
+if (result.data) {
+  window.location.assign(result.data.redirectTo);
+}
+```
+
+Farm clears the local cookie first. If a sealed session exists, WorkOS supplies the final logout URL; otherwise the user returns to the app origin.
+
+## Protect app routes
 
 ```ts
 workos({
-  clientId: process.env.WORKOS_CLIENT_ID,
-  apiKey: process.env.WORKOS_API_KEY,
-  cookiePassword: process.env.WORKOS_COOKIE_PASSWORD,
-  protectedRoutes: ["/dashboard(.*)", "/api/private/[...path]"],
+  protectedRoutes: ["/dashboard(.*)", "/settings(.*)"],
 });
 ```
 
-## Production notes
+Signed-out requests receive a `307` redirect to `/login` with the original root-relative path in `returnTo`.
 
-- Set `WORKOS_CLIENT_ID`, `WORKOS_API_KEY`, and `WORKOS_COOKIE_PASSWORD`.
-- Use a strong cookie password in production.
-- Configure redirect URIs in WorkOS to match your Farm callback route.
-- Test sign-in, sign-up, callback, logout, and session reads.
-- Decide how organizations and roles map into your app database.
+## Options
+
+| Option            | Default            | Use                                |
+| ----------------- | ------------------ | ---------------------------------- |
+| `clientId`        | `WORKOS_CLIENT_ID` | AuthKit client ID.                 |
+| `apiKey`          | `WORKOS_API_KEY`   | Server API key.                    |
+| `cookiePassword`  | WorkOS cookie env  | Sealed-session password.           |
+| `cookieName`      | `wos-session`      | Session cookie name.               |
+| `loginPath`       | `/login`           | Sign-in route.                     |
+| `signUpPath`      | `/signup`          | Sign-up route.                     |
+| `callbackPath`    | `/callback`        | AuthKit callback route.            |
+| `logoutPath`      | `/logout`          | Logout route.                      |
+| `sessionPath`     | `/auth/session`    | Session JSON route.                |
+| `protectedRoutes` | None               | One matcher or a list of matchers. |
+
+## Production checklist
+
+- Register the production callback URL in WorkOS.
+- Use a strong `WORKOS_COOKIE_PASSWORD`.
+- Confirm the public request origin is preserved by your proxy.
+- Test personal and organization-backed sessions.
+- Map `organizationId` to an application tenant before authorizing tenant data.

@@ -1,12 +1,14 @@
 ---
 title: "Trigger.dev Integration"
-description: "Run Farm tasks through Trigger.dev with typed trigger, status, and cancel APIs."
+description: "Trigger, schedule, batch, inspect, and cancel existing Trigger.dev tasks through typed Farm callers."
 section: "Integrations"
 ---
 
 # Trigger.dev Integration
 
-Trigger.dev is the workflow runtime for long-running background jobs, retries, schedules, queues, and production task observability.
+The Trigger.dev runtime maps Farm task contracts to existing Trigger.dev task IDs. It supports the complete Jobs integration surface: trigger, batch trigger, one-off scheduling, status, cancellation, queues, retries, TTL, tags, concurrency, idempotency, delay, and debounce.
+
+Farm calls Trigger.dev over its HTTP API. It does not deploy the provider task.
 
 ## Add Trigger.dev
 
@@ -24,70 +26,193 @@ farm add integration jobs-trigger --ui
 import { jobs, trigger } from "@farmjs/integrations/jobs";
 import { tasks } from "./jobs";
 
-export const integrations = {
+export const appIntegrations = {
   jobs: jobs({
-    tasks,
     runtime: trigger({
       apiKey: process.env.TRIGGER_SECRET_KEY,
+      projectRef: process.env.TRIGGER_PROJECT_REF,
+      webhookSecret: process.env.TRIGGER_WEBHOOK_SECRET,
     }),
+    tasks,
   }),
-};
+} as const;
 ```
 
-## Use it
+## Environment variables
 
-**Caller**
+| Variable                 | Current use                                                                                  |
+| ------------------------ | -------------------------------------------------------------------------------------------- |
+| `TRIGGER_SECRET_KEY`     | Required to trigger, batch, read status, and cancel.                                         |
+| `TRIGGER_PROJECT_REF`    | Optional project reference added to Farm's trigger request context.                          |
+| `TRIGGER_WEBHOOK_SECRET` | Reserved in runtime config for future webhook support. It is not used by the current routes. |
 
-```ts
-await api.jobs.sendWelcomeEmail.trigger({
-  body: {
-    input: {
-      userId: "user_123",
-    },
-  },
-});
-```
+`apiKey`, `projectRef`, and `webhookSecret` options override their matching environment variables.
 
-## Farm task mapping
+## Match the provider task
 
-Trigger.dev is mounted through the Jobs integration. Define tasks once with `defineTasks`, then choose `trigger(...)` as the runtime.
+**src/lib/jobs.ts**
 
 ```ts
+import { defineTasks, task } from "@farmjs/integrations/jobs";
+
 export const tasks = defineTasks({
   sendWelcomeEmail: task({
     id: "send-welcome-email",
+    description: "Send the first email after signup.",
+    defaults: {
+      queue: {
+        name: "email",
+        concurrencyLimit: 2,
+      },
+      retry: {
+        attempts: 3,
+      },
+      ttl: "10m",
+      tags: ["email"],
+      idempotencyKey(input: { userId: string }) {
+        return `welcome:${input.userId}`;
+      },
+    },
     async run(input: { userId: string }) {
       return {
-        sent: true,
-        userId: input.userId,
+        messageId: `msg_${input.userId}`,
       };
     },
   }),
 });
 ```
 
-Farm turns `sendWelcomeEmail` into typed callers such as:
+Deploy a Trigger.dev task whose ID is exactly `send-welcome-email`. Farm sends the input as Trigger.dev's `payload` and adds source/task context. The typed status caller treats provider output as the local `run` return type, but Farm does not validate that output at runtime.
+
+The local `run` callback supplies TypeScript input/output inference. The Farm integration route does not execute it.
+
+## Trigger a run
 
 ```ts
-await api.jobs.sendWelcomeEmail.trigger({
+const result = await api.jobs.sendWelcomeEmail.trigger({
   body: {
-    input: {
-      userId: "user_123",
+    userId: "usr_123",
+    $options: {
+      delay: "30s",
+      debounce: {
+        key: "welcome:usr_123",
+        delay: "10s",
+      },
+      tags: ["signup"],
     },
-  },
-});
-
-await api.jobs.sendWelcomeEmail.status({
-  query: {
-    handleId: "run_123",
   },
 });
 ```
 
-## Production notes
+Farm merges task defaults and per-call options before sending the request.
 
-- Set the Trigger.dev secret/project config required by your runtime.
-- Use queues and retry defaults on the task definition for predictable load.
-- Keep task IDs stable because provider dashboards and Farm callers depend on them.
-- Store returned `handleId` when users need status polling.
-- Use batch trigger for bulk work instead of loops from the browser.
+## Option mapping
+
+| Farm definition or call                                | Trigger.dev launch option |
+| ------------------------------------------------------ | ------------------------- |
+| `defaults.queue`                                       | `queue`                   |
+| `defaults.retry.attempts`                              | `maxAttempts`             |
+| `defaults.ttl`                                         | `ttl`                     |
+| `defaults.concurrencyKey`                              | `concurrencyKey`          |
+| `defaults.idempotencyKey` or `$options.idempotencyKey` | `idempotencyKey`          |
+| default and per-call tags                              | merged `tags`             |
+| `$options.delay` or `$schedule` timing                 | `delay`                   |
+| `$options.debounce`                                    | `debounce`                |
+
+Per-call tags are deduplicated with default tags. A per-call idempotency key overrides the computed task default.
+
+## One-off scheduling
+
+Use `after` for a relative delay:
+
+```ts
+await api.jobs.sendWelcomeEmail.schedule({
+  body: {
+    userId: "usr_123",
+    $schedule: {
+      after: "10m",
+      tags: ["scheduled"],
+    },
+  },
+});
+```
+
+Or use `at` with an ISO date string or `Date`:
+
+```ts
+await api.jobs.sendWelcomeEmail.schedule({
+  body: {
+    userId: "usr_123",
+    $schedule: {
+      at: new Date("2026-08-01T09:00:00.000Z"),
+    },
+  },
+});
+```
+
+Exactly one of `at` or `after` is required. Farm sends it through Trigger.dev's task trigger endpoint as `delay`.
+
+A cron-shaped `schedule` on the task definition is metadata only and does not create a Trigger.dev schedule.
+
+## Batch trigger
+
+```ts
+const batch = await api.jobs.sendWelcomeEmail.batchTrigger({
+  body: {
+    items: [
+      {
+        userId: "usr_123",
+        $options: {
+          idempotencyKey: "welcome:usr_123",
+        },
+      },
+      {
+        userId: "usr_456",
+        $options: {
+          idempotencyKey: "welcome:usr_456",
+        },
+      },
+    ],
+  },
+});
+```
+
+Farm calls Trigger.dev's task batch endpoint and returns `batchId` plus each run handle.
+
+## Status and cancellation
+
+```ts
+const status = await api.jobs.sendWelcomeEmail.status({
+  query: {
+    handleId: result.data!.handleId,
+  },
+});
+
+await api.jobs.sendWelcomeEmail.cancel({
+  body: {
+    handleId: result.data!.handleId,
+  },
+});
+```
+
+Status includes normalized and provider-native states, timestamps, output, error, tags, and the raw Trigger.dev response.
+
+## Custom API endpoint
+
+The default base is `https://api.trigger.dev`. Override it for a compatible proxy or test service:
+
+```ts
+trigger({
+  apiKey: process.env.TRIGGER_SECRET_KEY,
+  apiBaseUrl: "https://trigger-proxy.example.com",
+});
+```
+
+## Production checklist
+
+- Deploy a Trigger.dev task for every Farm task ID.
+- Keep task IDs stable after callers ship.
+- Store `handleId` when status or cancellation is needed later.
+- Restrict job routes to trusted users or server code.
+- Verify retry, queue, TTL, and concurrency behavior in the Trigger.dev dashboard.
+- Treat `TRIGGER_WEBHOOK_SECRET` as reserved until webhook handling is implemented.
