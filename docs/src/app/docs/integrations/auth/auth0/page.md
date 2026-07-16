@@ -1,12 +1,14 @@
 ---
 title: "Auth0 Integration"
-description: "Wire Auth0 login, callback, logout, and session routes from Farm config."
+description: "Add Auth0 login, callback, logout, profile, and protected-route flows to Farm."
 section: "Integrations"
 ---
 
 # Auth0 Integration
 
-Auth0 fits teams that want hosted identity, enterprise providers, and a config-first login and callback flow.
+Use Auth0 when the identity provider should host login and enterprise connections while Farm owns the application-facing OAuth routes and local session.
+
+The built-in flow uses Authorization Code with PKCE, validates signed state, reads the user profile, and stores that profile in a signed HTTP-only cookie.
 
 ## Add Auth0
 
@@ -21,61 +23,133 @@ farm add integration auth0 --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { auth0 } from "@farmjs/integrations/auth";
+import { auth0 } from "@farmjs/integrations/auth0";
 
-export const integrations = {
+export const appIntegrations = {
   auth: auth0({
     domain: process.env.AUTH0_DOMAIN,
     clientId: process.env.AUTH0_CLIENT_ID,
     clientSecret: process.env.AUTH0_CLIENT_SECRET,
-    callbackUrl: "/api/auth/callback",
+    secret: process.env.AUTH0_SECRET,
+    appBaseUrl: process.env.APP_BASE_URL,
+    callbackPath: "/auth/callback",
+    protectedRoutes: ["/dashboard(.*)"],
   }),
-};
+} as const;
+
+export type AppIntegrations = typeof appIntegrations;
 ```
 
-## Use it
+`callbackPath` stays root-relative. Farm combines it with `APP_BASE_URL`, or the incoming request origin, to create the callback URL sent to Auth0.
 
-**Caller**
+You can use `callbackUrl` instead, but it must be absolute:
 
 ```ts
-const login = await api.auth.login.get({
+auth0({
+  callbackUrl: "https://app.example.com/auth/callback",
+});
+```
+
+## Environment variables
+
+| Variable              | Required                  | Purpose                                                                   |
+| --------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `AUTH0_DOMAIN`        | Yes                       | Tenant domain without a required protocol, such as `tenant.us.auth0.com`. |
+| `AUTH0_CLIENT_ID`     | Yes                       | OAuth application client ID.                                              |
+| `AUTH0_CLIENT_SECRET` | Depends on client type    | Used by confidential clients during code exchange.                        |
+| `AUTH0_SECRET`        | Production                | Signs state and local session cookies.                                    |
+| `APP_BASE_URL`        | Recommended in production | Public app origin used for callbacks and protected-route redirects.       |
+
+Farm provides a development-only fallback for `AUTH0_SECRET`. Production startup fails when no secret is configured.
+
+## Routes and methods
+
+| Method | Default route    | Purpose                                                            |
+| ------ | ---------------- | ------------------------------------------------------------------ |
+| `GET`  | `/auth/login`    | Starts login. Accepts `returnTo`.                                  |
+| `GET`  | `/auth/signup`   | Starts signup with Auth0's signup screen hint.                     |
+| `GET`  | `/auth/callback` | Validates state, exchanges the code, and writes the local session. |
+| `GET`  | `/auth/logout`   | Clears the local session and redirects through Auth0 logout.       |
+| `GET`  | `/auth/profile`  | Returns the current local profile or `401`.                        |
+
+Every path can be changed with `loginPath`, `signUpPath`, `callbackPath`, `logoutPath`, or `profilePath`.
+
+## Start login
+
+Normal document navigation redirects directly:
+
+```tsx
+<a href="/auth/login?returnTo=/dashboard">Sign in</a>
+```
+
+The typed integration client asks for the redirect URL as JSON:
+
+```ts
+const result = await apiClient.auth.login.get({
   query: {
     returnTo: "/dashboard",
   },
 });
 
-if (login.data?.redirectTo) {
-  window.location.href = login.data.redirectTo;
+if (result.data) {
+  window.location.assign(result.data.redirectTo);
 }
 ```
 
-## What Auth0 adds
+Signup uses the same shape through `apiClient.auth.signup.get(...)`.
 
-| Route | Purpose |
-| --- | --- |
-| `/auth/login` | Starts login and returns or performs a redirect. |
-| `/auth/signup` | Starts signup and returns or performs a redirect. |
-| `/auth/callback` | Exchanges the authorization code and writes the session cookie. |
-| `/auth/logout` | Clears the local session and redirects to Auth0 logout. |
-| `/auth/profile` | Reads the local Auth0 session profile. |
+## Read the profile
 
-The route paths can be overridden when the app needs a different URL structure.
+```ts
+const result = await api.auth.profile.get();
 
-## Protected routes
+if (result.error && "status" in result.error && result.error.status === 401) {
+  // No valid local Auth0 session.
+}
+
+const user = result.data?.user;
+```
+
+The session cookie contains the fetched Auth0 profile and an expiry derived from the token response. The integration does not persist refresh tokens, so an expired local session requires a new login.
+
+## Protect app routes
 
 ```ts
 auth0({
-  domain: process.env.AUTH0_DOMAIN,
-  clientId: process.env.AUTH0_CLIENT_ID,
-  clientSecret: process.env.AUTH0_CLIENT_SECRET,
-  secret: process.env.AUTH0_SECRET,
-  protectedRoutes: ["/dashboard(.*)"],
+  protectedRoutes: ["/dashboard(.*)", "/settings(.*)"],
 });
 ```
 
-## Production notes
+A signed-out request is redirected with status `307` to:
 
-- Set `AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET`, and `APP_BASE_URL`.
-- Register the callback URL in the Auth0 dashboard.
-- Use `returnTo` for post-login navigation.
-- Test state validation, callback errors, logout redirects, and expired sessions.
+```text
+/auth/login?returnTo=/the/original/path
+```
+
+Only root-relative `returnTo` values are accepted. Invalid or external values fall back to `/dashboard`.
+
+## Options
+
+| Option                    | Default                | Use                                                                          |
+| ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `domain`                  | `AUTH0_DOMAIN`         | Auth0 tenant domain.                                                         |
+| `clientId`                | `AUTH0_CLIENT_ID`      | OAuth client ID.                                                             |
+| `clientSecret`            | `AUTH0_CLIENT_SECRET`  | OAuth client secret for confidential clients.                                |
+| `secret`                  | `AUTH0_SECRET`         | Cookie and state signing secret.                                             |
+| `appBaseUrl`              | `APP_BASE_URL`         | Public app origin.                                                           |
+| `callbackUrl`             | None                   | Absolute callback URL.                                                       |
+| `callbackPath`            | `/auth/callback`       | Callback route when `callbackUrl` is not supplied.                           |
+| `audience`                | None                   | Optional Auth0 API audience.                                                 |
+| `scopes`                  | `openid profile email` | Requested OAuth scopes.                                                      |
+| `tokenEndpointAuthMethod` | `auto`                 | `client_secret_basic`, `client_secret_post`, `none`, or automatic selection. |
+| `protectedRoutes`         | None                   | One matcher or a list of matchers.                                           |
+
+Advanced adapters can pass `instance: { middleware, matcher }`. In that mode Farm mounts the supplied middleware and does not create the built-in login, callback, logout, or profile routes.
+
+## Production checklist
+
+- Allow the exact callback URL in Auth0.
+- Allow the app origin as a logout URL.
+- Use a strong `AUTH0_SECRET`.
+- Set `APP_BASE_URL` behind proxies or custom domains.
+- Test bad state, callback errors, expired cookies, login return paths, and logout.

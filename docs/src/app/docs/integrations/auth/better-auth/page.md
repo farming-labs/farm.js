@@ -1,12 +1,12 @@
 ---
 title: "Better Auth Integration"
-description: "Own Better Auth routes, sessions, and callbacks from Farm's integration layer."
+description: "Mount a Better Auth instance in Farm and use its native client, storage, methods, and plugins."
 section: "Integrations"
 ---
 
 # Better Auth Integration
 
-Better Auth is the local-first auth option for apps that want to own routes, sessions, storage, and callbacks without losing Farm's typed integration API.
+Use Better Auth when the app should own its auth database, methods, plugins, and session policy. Farm mounts the Better Auth handler, while Better Auth remains the source of truth for the auth API.
 
 ## Add Better Auth
 
@@ -16,40 +16,9 @@ Better Auth is the local-first auth option for apps that want to own routes, ses
 farm add integration better-auth --ui
 ```
 
-## Configure
+Install `better-auth` plus the database driver or adapter selected by the application.
 
-**src/lib/integrations.ts**
-
-```ts
-import { betterAuth } from "@farmjs/integrations/auth";
-import { auth } from "./auth";
-
-export const integrations = {
-  auth: betterAuth({
-    instance: auth,
-  }),
-};
-```
-
-## Use it
-
-**Mounted route**
-
-```ts
-const response = await fetch("/api/auth/session", {
-  credentials: "include",
-});
-
-const session = await response.json();
-```
-
-Farm mounts the Better Auth handler and keeps it discoverable in the integration registry. The session shape, sign-in methods, plugins, and adapter behavior still come from your Better Auth instance, so use the Better Auth client helpers when you want the full provider DX.
-
-## What Better Auth adds
-
-Better Auth is mounted at `/api/auth/[...auth]` with `GET` and `POST` handlers. The integration delegates to your Better Auth instance, so providers, sessions, plugins, and storage stay in your Better Auth config while Farm owns registration, route discovery, logging, and typed integration wiring.
-
-## Full app shape
+## Create the server instance
 
 **src/lib/auth.ts**
 
@@ -57,32 +26,96 @@ Better Auth is mounted at `/api/auth/[...auth]` with `GET` and `POST` handlers. 
 import { betterAuth } from "better-auth";
 
 export const auth = betterAuth({
-  database: {
-    provider: "sqlite",
-    url: "file:./auth.sqlite",
-  },
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL: process.env.BETTER_AUTH_URL,
   emailAndPassword: {
     enabled: true,
   },
 });
 ```
 
+Configure the production database, social providers, plugins, and callbacks in this object. They are not duplicated in Farm config.
+
+## Register it
+
 **src/lib/integrations.ts**
 
 ```ts
-import { betterAuth } from "@farmjs/integrations/auth";
+import { betterAuth } from "@farmjs/integrations/better-auth";
 import { auth } from "./auth";
 
-export const integrations = {
+export const appIntegrations = {
   auth: betterAuth({
     instance: auth,
   }),
-};
+} as const;
 ```
 
-## Production notes
+Farm mounts the instance handler for both methods:
 
-- Keep the Better Auth secret and database credentials server-only.
-- Let Better Auth own provider callbacks and session persistence.
-- Use Farm middleware or integration route hooks for app-specific authorization.
-- Test sign-in, sign-up, session reads, logout, and callback routes through the Farm dev server.
+```text
+GET  /api/auth/[...auth]
+POST /api/auth/[...auth]
+```
+
+There is no app-local `src/app/api/auth/[...auth]/route.ts` file to maintain.
+
+## Create the browser client
+
+**src/lib/auth-client.ts**
+
+```ts
+import { createAuthClient } from "better-auth/react";
+
+export const authClient = createAuthClient({
+  baseURL: "",
+});
+```
+
+An empty `baseURL` keeps browser calls on the current Farm origin.
+
+## Use Better Auth
+
+```ts
+const result = await authClient.signIn.email({
+  email: "ada@example.com",
+  password: "correct-horse-battery-staple",
+});
+```
+
+```ts
+const session = await authClient.getSession();
+await authClient.signOut();
+```
+
+The available methods and response types come from Better Auth and its plugins. Farm does not generate a parallel `api.auth` caller tree for the catch-all handler.
+
+## Protect application routes
+
+`betterAuth(...)` does not accept `protectedRoutes`. Read the session with Better Auth in server code or call the instance from [Farm middleware](/docs/middleware), then apply your app's authorization rules.
+
+For client-only guards, wait for `authClient.getSession()` before rendering private data, but keep sensitive authorization on the server.
+
+## What Farm owns
+
+| Farm                                              | Better Auth                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------ |
+| Registers the integration in `farm.config.ts`.    | Defines users, accounts, sessions, and verification records. |
+| Mounts `GET` and `POST` on `/api/auth/[...auth]`. | Routes each auth action inside the catch-all handler.        |
+| Adds integration logging around mounted requests. | Owns adapters, providers, plugins, callbacks, and cookies.   |
+| Removes the need for a manual route module.       | Supplies the React client and server APIs.                   |
+
+## Adapter options
+
+| Option     | Required | Use                                                    |
+| ---------- | -------- | ------------------------------------------------------ |
+| `instance` | Yes      | Better Auth instance with a `handler(request)` method. |
+| `log`      | No       | Farm integration lifecycle and route logger.           |
+
+## Production checklist
+
+- Set a strong `BETTER_AUTH_SECRET` and the public `BETTER_AUTH_URL`.
+- Configure a persistent production database and run Better Auth migrations.
+- Keep database and OAuth credentials server-only.
+- Verify trusted origins, cookies, and proxy headers on the deployed origin.
+- Test sign-up, sign-in, session reads, sign-out, provider callbacks, and every enabled plugin.
