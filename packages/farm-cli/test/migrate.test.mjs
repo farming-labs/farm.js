@@ -227,7 +227,9 @@ export default function AboutPage() {
     assert.match(page, /from "@farmjs\/core\/navigation";/);
     assert.match(page, /from "@farmjs\/core\/headers";/);
     assert.doesNotMatch(page, /from "next\//);
-    assert.match(await readFile(path.join(root, "farm.config.ts"), "utf8"), /defineFarmConfig/);
+    const farmConfig = await readFile(path.join(root, "farm.config.ts"), "utf8");
+    assert.match(farmConfig, /defineConfig/);
+    assert.doesNotMatch(farmConfig, /defineFarmConfig/);
 
     const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
     assert.equal(packageJson.scripts.dev, "farm dev");
