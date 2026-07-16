@@ -309,7 +309,7 @@ export async function buildUniversal(
       // Client build (to disk)
       buildClient(config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
       // SSR build (in memory)
-      buildSSRInMemory(config, root, srcDir, routeManager, apiRouteManager, serverRenderer),
+      buildSSRInMemory(config, root, srcDir, routeManager, apiRouteManager, serverRenderer, preset),
     ]);
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile } = ssrResult;
@@ -1186,6 +1186,7 @@ async function buildSSRInMemory(
   routeManager: RouteManager,
   apiRouteManager: APIRouteManager,
   serverRenderer: ServerRenderer,
+  preset: string,
 ): Promise<{ bundle: OutputBundle; entryFile: string }> {
   const { farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
@@ -1403,7 +1404,11 @@ async function buildSSRInMemory(
         ],
         // Don't externalize these - bundle them into the SSR output
         // Keep this list minimal for faster builds
-        noExternal: ["@farmjs/core", "better-call", "react", "react-dom", "react-dom/server"],
+        noExternal: [
+          "@farmjs/core",
+          "better-call",
+          ...(preset === "cloudflare-module" ? [] : ["react", "react-dom", "react-dom/server"]),
+        ],
       },
       define: {
         __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
