@@ -336,32 +336,30 @@ const createRouteHelper = ["create", "Route"].join("");
 
 const routeCodeTabs = [
   {
-    id: "contract",
-    label: "Contract / product.route.tsx",
-    language: "tsx",
-    highlightLines: [1, 2, 3, 4],
+    id: "route",
+    label: "Route / src/farm.route.ts",
+    language: "ts",
+    highlightLines: [4, 5, 6],
     code: `export const ProductRoute = ${createRouteHelper}("/products/[id]", {
-    params: z.object({ id: z.string() }),
-    search: { schema: ProductSearch, stripDefaults: true },
-    guard: ({ context }) => requireUser(context.session),
-    pending: ProductSkeleton,
-    error: ProductError,
-    render: "dynamic",
+    params: ProductParams,
+    data: {
+        before: ({ context }) => requireUser(context.session),
+        main: ({ params, before }) => getProduct(params.id, before.id),
+        after: ({ data }) => recordView(data.id),
+    },
     component: ProductPage,
 });`,
   },
   {
-    id: "data",
-    label: "Data / product.route.tsx",
+    id: "component",
+    label: "Use / product-page.tsx",
     language: "tsx",
-    highlightLines: [2, 3, 4],
-    code: `data: {
-    key: ({ params }) => ["product", params.id],
-    staleTime: "30s",
-    main: async ({ params }) => ({
-        product: await getProduct(params.id),
-    }),
-},`,
+    highlightLines: [2, 4],
+    code: `export function ProductPage({
+    data,
+}: ProductPageProps) {
+    return <h1>{data.name}</h1>;
+}`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
@@ -1172,7 +1170,7 @@ function FoundationGrid() {
         <StorageVisual />
       </FeatureCell>
       <FeatureCell
-        body="Keep validated params and search, guards, cached data, pending and error UI, and rendering policy in one typed route definition."
+        body="Validate params, prepare request data, load the page, and run post-load work in one typed route definition."
         className="border-t border-white/12 lg:border-l"
         icon={Route}
         index="02.6"
