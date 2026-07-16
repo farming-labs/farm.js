@@ -247,7 +247,7 @@ function hasRelativePrefix(value: string): boolean {
 
 function assertInsideRoot(root: string, target: string, label: string): void {
   const pathFromRoot = relative(root, target);
-  if (pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
+  if (pathFromRoot === ".." || pathFromRoot.startsWith(`..${sep}`) || isAbsolute(pathFromRoot)) {
     throw new Error(`${label} must be inside the Farm project root.`);
   }
 }
