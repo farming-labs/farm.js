@@ -1204,14 +1204,14 @@ describe("integration client", () => {
           middleware: [
             {
               handler(_request, context) {
-                context.requestContext.set("direct-route", "yes");
-                context.requestContext.set("direct-route-order", ["first"]);
+                context.req.set("direct-route", "yes");
+                context.req.set("direct-route-order", ["first"]);
               },
             },
             {
               handler(_request, context) {
-                const order = context.requestContext.get<string[]>("direct-route-order") || [];
-                context.requestContext.set("direct-route-order", [...order, "second"]);
+                const order = context.req.get<string[]>("direct-route-order") || [];
+                context.req.set("direct-route-order", [...order, "second"]);
               },
             },
           ],
@@ -1219,8 +1219,8 @@ describe("integration client", () => {
             handlerSpy();
             return Response.json({
               ok: true,
-              direct: context.requestContext.get("direct-route") === "yes",
-              middlewareOrder: context.requestContext.get<string[]>("direct-route-order") || [],
+              direct: context.req.get("direct-route") === "yes",
+              middlewareOrder: context.req.get<string[]>("direct-route-order") || [],
             });
           },
         }),

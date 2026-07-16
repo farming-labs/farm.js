@@ -80,7 +80,7 @@ declare module "@farmjs/core" {
     query?: FarmIntegrationInputSchema<TQuery>;
   }
 
-  export interface FarmIntegrationRequestContextStore {
+  export interface FarmRequestStore {
     get<T = unknown>(key: string): T | undefined;
     set(key: string, value: unknown, options?: { exposeToPage?: boolean }): void;
     has(key: string): boolean;
@@ -88,6 +88,9 @@ declare module "@farmjs/core" {
     clear(): void;
     snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
   }
+
+  /** @deprecated Use FarmRequestStore. */
+  export type FarmIntegrationRequestContextStore = FarmRequestStore;
 
   export const FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY: "farm.integration.internalDispatch";
 
@@ -202,7 +205,9 @@ declare module "@farmjs/core" {
       path: string;
       methods: readonly string[];
     };
-    requestContext: FarmIntegrationRequestContextStore;
+    req: FarmRequestStore;
+    /** @deprecated Use req instead. */
+    requestContext: FarmRequestStore;
     config: Record<string, unknown>;
     isDev: boolean;
     isProd: boolean;

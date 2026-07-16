@@ -10,7 +10,7 @@ import type {
   InferIntegrationAPIFromRoutes,
 } from "./integration-api";
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
-import type { FarmPlugin, FarmPluginContext } from "./plugin";
+import type { FarmPlugin, FarmPluginContext, FarmRequestStore } from "./plugin";
 import {
   clearRequestContext,
   deleteRequestContext,
@@ -114,14 +114,8 @@ export interface FarmIntegrationRouteInputSchemas<TBody = unknown, TQuery = unkn
   query?: FarmIntegrationInputSchema<TQuery>;
 }
 
-export interface FarmIntegrationRequestContextStore {
-  get<T = unknown>(key: string): T | undefined;
-  set(key: string, value: unknown, options?: { exposeToPage?: boolean }): void;
-  has(key: string): boolean;
-  delete(key: string): boolean;
-  clear(): void;
-  snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
-}
+/** @deprecated Use `FarmRequestStore` and access it through `ctx.req`. */
+export type FarmIntegrationRequestContextStore = FarmRequestStore;
 
 export const FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY = "farm.integration.internalDispatch";
 
@@ -235,7 +229,9 @@ export interface FarmIntegrationHandlerContext<
     path: string;
     methods: readonly string[];
   };
-  requestContext: FarmIntegrationRequestContextStore;
+  req: FarmRequestStore;
+  /** @deprecated Use `req` instead. */
+  requestContext: FarmRequestStore;
   config: FarmPluginContext["config"];
   isDev: boolean;
   isProd: boolean;
@@ -1729,7 +1725,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           },
           request,
           requestId,
-          context: handlerContext.requestContext.snapshot(),
+          context: handlerContext.req.snapshot(),
         });
 
         try {
@@ -1750,7 +1746,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
               response,
               requestId,
               durationMs: Date.now() - startedAt,
-              context: handlerContext.requestContext.snapshot(),
+              context: handlerContext.req.snapshot(),
             });
             return;
           }
@@ -1768,7 +1764,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             request,
             requestId,
             durationMs: Date.now() - startedAt,
-            context: handlerContext.requestContext.snapshot(),
+            context: handlerContext.req.snapshot(),
           });
         } catch (error) {
           await integration.log?.({
@@ -1785,7 +1781,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             requestId,
             durationMs: Date.now() - startedAt,
             error,
-            context: handlerContext.requestContext.snapshot(),
+            context: handlerContext.req.snapshot(),
           });
           throw error;
         }
@@ -1827,7 +1823,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
           },
           request,
           requestId,
-          context: handlerContext.requestContext.snapshot(),
+          context: handlerContext.req.snapshot(),
         });
 
         try {
@@ -1848,7 +1844,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
               response: validation.response,
               requestId,
               durationMs: Date.now() - startedAt,
-              context: handlerContext.requestContext.snapshot(),
+              context: handlerContext.req.snapshot(),
             });
             return;
           }
@@ -1872,7 +1868,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
                 response: middlewareResponse,
                 requestId,
                 durationMs: Date.now() - startedAt,
-                context: handlerContext.requestContext.snapshot(),
+                context: handlerContext.req.snapshot(),
               });
               return;
             }
@@ -1905,7 +1901,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
               response,
               requestId,
               durationMs: Date.now() - startedAt,
-              context: handlerContext.requestContext.snapshot(),
+              context: handlerContext.req.snapshot(),
             });
             return;
           }
@@ -1932,7 +1928,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             response,
             requestId,
             durationMs: Date.now() - startedAt,
-            context: handlerContext.requestContext.snapshot(),
+            context: handlerContext.req.snapshot(),
           });
           return;
         } catch (error) {
@@ -1950,7 +1946,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
             requestId,
             durationMs: Date.now() - startedAt,
             error,
-            context: handlerContext.requestContext.snapshot(),
+            context: handlerContext.req.snapshot(),
           });
           throw error;
         }
@@ -1969,6 +1965,12 @@ function createIntegrationHandlerContext(input: {
   requestId: string;
   pluginContext: FarmPluginContext;
 }): FarmIntegrationHandlerContext {
+  const req = createIntegrationRequestContextStore(
+    input.rawRequest,
+    input.request,
+    input.pluginContext,
+  );
+
   return {
     request: input.request,
     requestId: input.requestId,
@@ -1989,11 +1991,8 @@ function createIntegrationHandlerContext(input: {
       instance: input.integration.instance,
     },
     route: input.route,
-    requestContext: createIntegrationRequestContextStore(
-      input.rawRequest,
-      input.request,
-      input.pluginContext,
-    ),
+    req,
+    requestContext: req,
     config: input.pluginContext.config,
     isDev: input.pluginContext.isDev,
     isProd: input.pluginContext.isProd,
@@ -2532,7 +2531,7 @@ export async function dispatchIntegrationRequest(
       },
       request,
       requestId,
-      context: handlerContext.requestContext.snapshot(),
+      context: handlerContext.req.snapshot(),
     });
 
     try {
@@ -2552,7 +2551,7 @@ export async function dispatchIntegrationRequest(
           response,
           requestId,
           durationMs: Date.now() - startedAt,
-          context: handlerContext.requestContext.snapshot(),
+          context: handlerContext.req.snapshot(),
         });
         return response;
       }
@@ -2570,7 +2569,7 @@ export async function dispatchIntegrationRequest(
         request,
         requestId,
         durationMs: Date.now() - startedAt,
-        context: handlerContext.requestContext.snapshot(),
+        context: handlerContext.req.snapshot(),
       });
     } catch (error) {
       await integration.log?.({
@@ -2587,7 +2586,7 @@ export async function dispatchIntegrationRequest(
         requestId,
         durationMs: Date.now() - startedAt,
         error,
-        context: handlerContext.requestContext.snapshot(),
+        context: handlerContext.req.snapshot(),
       });
       throw error;
     }
@@ -2630,7 +2629,7 @@ export async function dispatchIntegrationRequest(
       },
       request,
       requestId,
-      context: handlerContext.requestContext.snapshot(),
+      context: handlerContext.req.snapshot(),
     });
 
     try {
@@ -2650,7 +2649,7 @@ export async function dispatchIntegrationRequest(
           response: validation.response,
           requestId,
           durationMs: Date.now() - startedAt,
-          context: handlerContext.requestContext.snapshot(),
+          context: handlerContext.req.snapshot(),
         });
         return validation.response;
       }
@@ -2673,7 +2672,7 @@ export async function dispatchIntegrationRequest(
             response: middlewareResponse,
             requestId,
             durationMs: Date.now() - startedAt,
-            context: handlerContext.requestContext.snapshot(),
+            context: handlerContext.req.snapshot(),
           });
           return middlewareResponse;
         }
@@ -2701,7 +2700,7 @@ export async function dispatchIntegrationRequest(
           response,
           requestId,
           durationMs: Date.now() - startedAt,
-          context: handlerContext.requestContext.snapshot(),
+          context: handlerContext.req.snapshot(),
         });
         return response;
       }
@@ -2727,7 +2726,7 @@ export async function dispatchIntegrationRequest(
         response,
         requestId,
         durationMs: Date.now() - startedAt,
-        context: handlerContext.requestContext.snapshot(),
+        context: handlerContext.req.snapshot(),
       });
       return response;
     } catch (error) {
@@ -2745,7 +2744,7 @@ export async function dispatchIntegrationRequest(
         requestId,
         durationMs: Date.now() - startedAt,
         error,
-        context: handlerContext.requestContext.snapshot(),
+        context: handlerContext.req.snapshot(),
       });
       throw error;
     }
@@ -2812,13 +2811,10 @@ function createServerIntegrationHandlerContext(input: {
   data?: FarmIntegrationData;
   internal?: boolean;
 }): FarmIntegrationHandlerContext {
-  const requestContext = createServerIntegrationRequestContextStore(
-    input.request,
-    input.currentRequest,
-  );
+  const req = createServerIntegrationRequestContextStore(input.request, input.currentRequest);
 
   if (input.internal) {
-    requestContext.set(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY, true);
+    req.set(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY, true);
   }
 
   return {
@@ -2841,7 +2837,8 @@ function createServerIntegrationHandlerContext(input: {
       instance: input.runtime.integration.instance,
     },
     route: input.route,
-    requestContext,
+    req,
+    requestContext: req,
     config: input.runtime.config,
     isDev: input.runtime.isDev,
     isProd: input.runtime.isProd,

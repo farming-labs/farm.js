@@ -6,14 +6,9 @@ interface RequestLike {
 }
 
 interface PluginContextLike {
-  requestContext: {
-    set: (
-      target: RequestLike,
-      key: string,
-      value: any,
-      options?: { exposeToPage?: boolean },
-    ) => void;
-    get: <T = any>(target: RequestLike, key: string) => T | undefined;
+  req: {
+    set: (key: string, value: any, options?: { exposeToPage?: boolean }) => void;
+    get: <T = any>(key: string) => T | undefined;
   };
 }
 
@@ -95,24 +90,24 @@ export function contextPlugin(options: ContextPluginOptions = {}): ContextPlugin
       const requestId = getHeader(req, requestIdHeader) || randomUUID();
       const locale = getHeader(req, localeHeader) || "en";
 
-      context.requestContext.set(req, "requestId", requestId, { exposeToPage: true });
-      context.requestContext.set(req, "locale", locale, { exposeToPage: true });
+      context.req.set("requestId", requestId, { exposeToPage: true });
+      context.req.set("locale", locale, { exposeToPage: true });
 
       if (exposePathname) {
-        context.requestContext.set(req, "pathname", pathname, { exposeToPage: true });
+        context.req.set("pathname", pathname, { exposeToPage: true });
       }
 
       // Private value stays available only to plugin hooks.
-      context.requestContext.set(req, "internal:requestStart", Date.now());
+      context.req.set("internal:requestStart", Date.now());
       if (beforeRequestCb) {
         beforeRequestCb({ requestId, locale, pathname });
       }
     },
     afterResponse(req, res, context) {
       if (!afterResponseCb) return;
-      const requestId = context.requestContext.get<string>(req, "requestId") || "unknown";
-      const locale = context.requestContext.get<string>(req, "locale") || "en";
-      const started = context.requestContext.get<number>(req, "internal:requestStart");
+      const requestId = context.req.get<string>("requestId") || "unknown";
+      const locale = context.req.get<string>("locale") || "en";
+      const started = context.req.get<number>("internal:requestStart");
       const pathname = req.url || "/";
       const durationMs = typeof started === "number" ? Date.now() - started : 0;
       const statusCode =

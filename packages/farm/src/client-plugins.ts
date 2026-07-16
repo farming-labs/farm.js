@@ -1,5 +1,10 @@
 // Client-side plugins export (for future client-side plugin support)
-export type { FarmPlugin, FarmPluginContext } from "./plugin";
+export type {
+  FarmPlugin,
+  FarmPluginContext,
+  FarmRequestPluginContext,
+  FarmRequestStore,
+} from "./plugin";
 export { definePlugin } from "./plugin";
 
 // Note: Currently Farm.js plugins are primarily server-side.
