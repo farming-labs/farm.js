@@ -74,9 +74,9 @@ function createStatusResponse(
     pathname: context.pathname,
     requestId: context.requestId,
     bootedAt: instance.bootedAt,
-    lastAction: context.requestContext.get("local-demo:last-action"),
+    lastAction: context.req.get("local-demo:last-action"),
     middlewareOrder:
-      context.requestContext.get<string[]>("local-demo:middleware-order") || [],
+      context.req.get<string[]>("local-demo:middleware-order") || [],
     timestamp: new Date().toISOString(),
   });
 }
@@ -86,8 +86,8 @@ function appendMiddlewareStep(
   step: string,
 ) {
   const current =
-    context.requestContext.get<string[]>("local-demo:middleware-order") || [];
-  context.requestContext.set("local-demo:middleware-order", [...current, step]);
+    context.req.get<string[]>("local-demo:middleware-order") || [];
+  context.req.set("local-demo:middleware-order", [...current, step]);
 }
 
 export const localDemoRoutes = [
@@ -99,13 +99,13 @@ export const localDemoRoutes = [
     middleware: [
       {
         handler(_request, context) {
-          context.requestContext.set("local-demo:last-action", "status");
+          context.req.set("local-demo:last-action", "status");
           appendMiddlewareStep(context, "status:first");
         },
       },
       {
         handler(_request, context) {
-          const lists = context.requestContext.get<string[]>("local-demo:middleware-order") || [];
+          const lists = context.req.get<string[]>("local-demo:middleware-order") || [];
           appendMiddlewareStep(context, "status:second");
         },
       },
@@ -128,7 +128,7 @@ export const localDemoRoutes = [
     middleware: [
       {
         handler(_request, context) {
-          context.requestContext.set("local-demo:last-action", "echo");
+          context.req.set("local-demo:last-action", "echo");
           appendMiddlewareStep(context, "echo:first");
         },
       },
@@ -153,7 +153,7 @@ export const localDemoRoutes = [
         );
       }
 
-      context.requestContext.set("local-demo:last-message", message);
+      context.req.set("local-demo:last-message", message);
       return Response.json({
         ok: true,
         message,
@@ -161,9 +161,9 @@ export const localDemoRoutes = [
         length: message.length,
         pathname: context.pathname,
         requestId: context.requestId,
-        lastAction: context.requestContext.get("local-demo:last-action"),
+        lastAction: context.req.get("local-demo:last-action"),
         middlewareOrder:
-          context.requestContext.get<string[]>("local-demo:middleware-order") || [],
+          context.req.get<string[]>("local-demo:middleware-order") || [],
         timestamp: new Date().toISOString(),
       });
     },

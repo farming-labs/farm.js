@@ -114,7 +114,7 @@ stripe({
   webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
   billing: {
     async resolveOwner(ctx) {
-      const userId = ctx.requestContext.get<string>("user.id");
+      const userId = ctx.req.get<string>("user.id");
 
       if (!userId) {
         return null;
@@ -123,7 +123,7 @@ stripe({
       return {
         id: userId,
         kind: "user",
-        email: ctx.requestContext.get<string>("user.email") ?? null,
+        email: ctx.req.get<string>("user.email") ?? null,
       };
     },
   },

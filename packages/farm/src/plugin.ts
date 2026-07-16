@@ -23,12 +23,27 @@ export interface PluginRequestContext {
   getAll: (target: FarmRequest | Request, options?: { exposedOnly?: boolean }) => Map<string, any>;
 }
 
+export interface FarmRequestStore {
+  set(key: string, value: unknown, options?: { exposeToPage?: boolean }): void;
+  get<T = unknown>(key: string): T | undefined;
+  has(key: string): boolean;
+  delete(key: string): boolean;
+  clear(): void;
+  snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
+}
+
 export interface FarmPluginContext {
   config: FarmConfig;
   viteServer?: ViteDevServer;
   isDev: boolean;
   isProd: boolean;
+  /** @deprecated Use `ctx.req` inside request hooks. */
   requestContext: PluginRequestContext;
+}
+
+export interface FarmRequestPluginContext extends FarmPluginContext {
+  /** Request-scoped values for the current hook invocation. */
+  readonly req: FarmRequestStore;
 }
 
 export interface RouteDiscoveredPayload {
@@ -165,7 +180,7 @@ export interface FarmPlugin {
   beforeApiHandler?: (
     request: Request,
     api: APIHandlerLifecyclePayload,
-    context: FarmPluginContext,
+    context: FarmRequestPluginContext,
   ) => Request | Promise<Request> | void | Promise<void>;
   afterApiHandler?: (
     response: Response,
@@ -189,12 +204,12 @@ export interface FarmPlugin {
   beforeRequest?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmPluginContext,
+    context: FarmRequestPluginContext,
   ) => void | Promise<void>;
   afterResponse?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmPluginContext,
+    context: FarmRequestPluginContext,
   ) => void | Promise<void>;
 
   // Transform hooks
@@ -232,6 +247,61 @@ export class PluginManager {
     };
   }
 
+  private createRequestHookContext(target: FarmRequest | Request): FarmRequestPluginContext {
+    const requestContext = this.context.requestContext;
+
+    return {
+      ...this.context,
+      req: {
+        set(key, value, options) {
+          requestContext.set(target, key, value, options);
+        },
+        get(key) {
+          return requestContext.get(target, key);
+        },
+        has(key) {
+          return requestContext.has(target, key);
+        },
+        delete(key) {
+          return requestContext.delete(target, key);
+        },
+        clear() {
+          requestContext.clear(target);
+        },
+        snapshot(options) {
+          return requestContext.getAll(target, options);
+        },
+      },
+    };
+  }
+
+  private copyRequestStore(source: FarmRequest | Request, target: FarmRequest | Request): void {
+    const requestContext = this.context.requestContext;
+    const values = requestContext.getAll(source);
+    const exposed = requestContext.getAll(source, { exposedOnly: true });
+
+    for (const [key, value] of values) {
+      requestContext.set(target, key, value, {
+        exposeToPage: exposed.has(key),
+      });
+    }
+  }
+
+  private getHookContext(hookName: keyof FarmPlugin, args: any[]): FarmPluginContext {
+    if (
+      hookName === "beforeRequest" ||
+      hookName === "afterResponse" ||
+      hookName === "beforeApiHandler"
+    ) {
+      const target = args[0];
+      if (target && typeof target === "object") {
+        return this.createRequestHookContext(target);
+      }
+    }
+
+    return this.context;
+  }
+
   addPlugin(plugin: FarmPlugin) {
     this.plugins.push(plugin);
   }
@@ -259,7 +329,8 @@ export class PluginManager {
     for (const plugin of plugins) {
       const hook = plugin[hookName];
       if (typeof hook === "function") {
-        const result = await (hook as any).apply(plugin, [...args, this.context]);
+        const hookContext = this.getHookContext(hookName, args);
+        const result = await (hook as any).apply(plugin, [...args, hookContext]);
         if (result !== undefined) {
           return result;
         }
@@ -278,8 +349,20 @@ export class PluginManager {
     for (const plugin of plugins) {
       const hook = plugin[hookName];
       if (typeof hook === "function") {
-        const result = await (hook as any).apply(plugin, [value, ...args, this.context]);
+        const hookArgs = [value, ...args];
+        const hookContext = this.getHookContext(hookName, hookArgs);
+        const result = await (hook as any).apply(plugin, [...hookArgs, hookContext]);
         if (result !== undefined) {
+          if (
+            hookName === "beforeApiHandler" &&
+            result !== value &&
+            value &&
+            result &&
+            typeof value === "object" &&
+            typeof result === "object"
+          ) {
+            this.copyRequestStore(value as FarmRequest | Request, result as FarmRequest | Request);
+          }
           value = result;
         }
       }
@@ -315,7 +398,8 @@ export class PluginManager {
             }
           }
 
-          await (hook as any).apply(plugin, [...args, this.context]);
+          const hookContext = this.getHookContext(hookName, args);
+          await (hook as any).apply(plugin, [...args, hookContext]);
 
           // Check again after plugin execution (only for beforeRequest)
           if (hookName === "beforeRequest") {
@@ -332,7 +416,8 @@ export class PluginManager {
       for (const plugin of plugins) {
         const hook = plugin[hookName];
         if (typeof hook === "function") {
-          promises.push((hook as any).apply(plugin, [...args, this.context]));
+          const hookContext = this.getHookContext(hookName, args);
+          promises.push((hook as any).apply(plugin, [...args, hookContext]));
         }
       }
       await Promise.all(promises);

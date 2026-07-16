@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PluginManager, definePlugin } from "../plugin";
-import { getRequestContextSnapshot } from "../request-context";
+import { getRequestContext, getRequestContextSnapshot } from "../request-context";
 import type { PageProps } from "../types";
 
 function createManager() {
@@ -50,8 +50,9 @@ describe("plugin lifecycle hooks", () => {
           seen.push("after-render");
           return html + "<!--after-render-->";
         },
-        beforeApiHandler(request) {
+        beforeApiHandler(request, _api, context) {
           seen.push("before-api");
+          context.req.set("api.phase", "before");
           const headers = new Headers(request.headers);
           headers.set("x-hook", "before");
           return new Request(request, { headers });
@@ -143,6 +144,8 @@ describe("plugin lifecycle hooks", () => {
       routePath: "/api/health",
     });
     expect(modifiedRequest.headers.get("x-hook")).toBe("before");
+    expect(getRequestContext(request, "api.phase")).toBe("before");
+    expect(getRequestContext(modifiedRequest, "api.phase")).toBe("before");
 
     const response = new Response("ok", { status: 200 });
     const modifiedResponse = await manager.runHookSerial("afterApiHandler", response, {
@@ -187,6 +190,48 @@ describe("plugin lifecycle hooks", () => {
     expect(seen).toContain("after-api");
     expect(seen).toContain("before-nitro");
     expect(seen).toContain("shutdown:test");
+  });
+
+  it("keeps ctx.req data across transformed API requests", async () => {
+    const manager = createManager();
+    const observed: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "api-request-writer",
+        beforeApiHandler(request, _api, context) {
+          context.req.set("traceId", "trace-123", { exposeToPage: true });
+          const headers = new Headers(request.headers);
+          headers.set("x-first-plugin", "yes");
+          return new Request(request, { headers });
+        },
+      }),
+    );
+    manager.addPlugin(
+      definePlugin({
+        name: "api-request-reader",
+        beforeApiHandler(request, _api, context) {
+          observed.push(context.req.get<string>("traceId") || "missing");
+          const headers = new Headers(request.headers);
+          headers.set("x-second-plugin", "yes");
+          return new Request(request, { headers });
+        },
+      }),
+    );
+
+    const request = new Request("http://localhost/api/health");
+    const result = await manager.runHookSerial("beforeApiHandler", request, {
+      pathname: "/api/health",
+      method: "GET",
+    });
+
+    expect(observed).toEqual(["trace-123"]);
+    expect(result.headers.get("x-first-plugin")).toBe("yes");
+    expect(result.headers.get("x-second-plugin")).toBe("yes");
+    expect(getRequestContext(result, "traceId")).toBe("trace-123");
+    expect(getRequestContextSnapshot(result, { exposedOnly: true }).get("traceId")).toBe(
+      "trace-123",
+    );
   });
 
   it("keeps enforce ordering for lifecycle hooks", async () => {
@@ -259,16 +304,17 @@ describe("plugin lifecycle hooks", () => {
     expect(second).toHaveBeenCalledTimes(0);
   });
 
-  it("allows plugins to set and read request context with explicit page exposure", async () => {
+  it("provides a bound ctx.req store while preserving the legacy requestContext alias", async () => {
     const manager = createManager();
     const observed: Array<string | undefined> = [];
+    let legacyTraceId: string | undefined;
 
     manager.addPlugin(
       definePlugin({
         name: "setter",
-        beforeRequest(req, _res, context) {
-          context.requestContext.set(req, "traceId", "trace-123", { exposeToPage: true });
-          context.requestContext.set(req, "internalToken", "secret-token");
+        beforeRequest(_req, _res, context) {
+          context.req.set("traceId", "trace-123", { exposeToPage: true });
+          context.req.set("internalToken", "secret-token");
         },
       }),
     );
@@ -277,11 +323,15 @@ describe("plugin lifecycle hooks", () => {
       definePlugin({
         name: "reader",
         beforeRequest(req, _res, context) {
-          observed.push(context.requestContext.get(req, "traceId"));
-          observed.push(context.requestContext.get(req, "internalToken"));
-          const exposed = context.requestContext.getAll(req, { exposedOnly: true });
-          observed.push(exposed.get("traceId"));
-          observed.push(exposed.get("internalToken"));
+          observed.push(context.req.get<string>("traceId"));
+          observed.push(context.req.get<string>("internalToken"));
+          const exposed = context.req.snapshot({ exposedOnly: true });
+          observed.push(exposed.get("traceId") as string | undefined);
+          observed.push(exposed.get("internalToken") as string | undefined);
+          legacyTraceId = context.requestContext.get(req, "traceId");
+        },
+        afterResponse(_req, _res, context) {
+          observed.push(context.req.get<string>("traceId"));
         },
       }),
     );
@@ -289,8 +339,10 @@ describe("plugin lifecycle hooks", () => {
     const req: any = {};
     const res: any = { writableEnded: false };
     await manager.runHookParallel("beforeRequest", req, res);
+    await manager.runHookParallel("afterResponse", req, res);
 
-    expect(observed).toEqual(["trace-123", "secret-token", "trace-123", undefined]);
+    expect(observed).toEqual(["trace-123", "secret-token", "trace-123", undefined, "trace-123"]);
+    expect(legacyTraceId).toBe("trace-123");
 
     const exposedFromStore = getRequestContextSnapshot(req, { exposedOnly: true });
     expect(exposedFromStore.get("traceId")).toBe("trace-123");

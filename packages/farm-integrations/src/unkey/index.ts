@@ -560,7 +560,7 @@ async function readJsonBody<T>(request: Request): Promise<T> {
 }
 
 function ensureInternalServerCall(context: FarmIntegrationHandlerContext): Response | undefined {
-  if (context.requestContext.get(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY) === true) {
+  if (context.req.get(FARM_INTEGRATION_INTERNAL_DISPATCH_CONTEXT_KEY) === true) {
     return undefined;
   }
 
@@ -608,19 +608,19 @@ async function verifyProtectedRequest(
 
     if (result.valid) {
       const contextKey = options.contextKey ?? "unkey";
-      context.requestContext.set(contextKey, result, {
+      context.req.set(contextKey, result, {
         exposeToPage: options.exposeToPage,
       });
-      context.requestContext.set("apiKey", result, {
+      context.req.set("apiKey", result, {
         exposeToPage: options.exposeToPage,
       });
       if (result.keyId) {
-        context.requestContext.set("apiKeyId", result.keyId, {
+        context.req.set("apiKeyId", result.keyId, {
           exposeToPage: options.exposeToPage,
         });
       }
       if (result.identity?.externalId) {
-        context.requestContext.set("apiKeyOwnerId", result.identity.externalId, {
+        context.req.set("apiKeyOwnerId", result.identity.externalId, {
           exposeToPage: options.exposeToPage,
         });
       }

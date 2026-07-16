@@ -578,7 +578,7 @@ integrationRoute.get("/api/acme/admin", {
   middleware: [
     {
       handler(_request, ctx) {
-        ctx.requestContext.set("startedAt", Date.now());
+        ctx.req.set("startedAt", Date.now());
       },
     },
   ],
@@ -624,7 +624,7 @@ export const authGate = defineIntegration({
     {
       matcher: "/dashboard/[section]",
       handler(_request, ctx) {
-        if (!ctx.requestContext.get("user.id")) {
+        if (!ctx.req.get("user.id")) {
           return new Response("Unauthorized", {
             status: 401,
           });
@@ -657,11 +657,12 @@ Route handlers, route middleware, and route hooks receive `ctx` with these field
 | `data` | Small sanitized metadata from `createIntegrations({ data })` and per-call data. |
 | `integration` | Category, type, slot alias, and original `instance`. |
 | `route` | Route kind, path, and methods. |
-| `requestContext` | Request-scoped key/value store shared with plugins and hooks. |
+| `req` | Request-scoped key/value store shared with plugins and hooks. |
 | `config` | Resolved Farm config. |
 | `isDev` / `isProd` | Runtime mode flags. |
 
-`ctx.requestContext.set(key, value, { exposeToPage: true })` can expose values to page props. Avoid exposing secrets.
+`ctx.req.set(key, value, { exposeToPage: true })` can expose values to page props. Avoid exposing secrets.
+`ctx.requestContext` remains as a deprecated compatibility alias for existing integrations.
 
 ## Storage schema
 

@@ -115,10 +115,10 @@ function createDocsContextDemoPlugin(
       const userFromHeader = Array.isArray(headerUser) ? headerUser[0] : headerUser;
       const requestId = randomUUID();
       const user = userFromHeader || defaultUser;
-      context.requestContext.set(req, "demo.requestId", requestId, { exposeToPage: true });
-      context.requestContext.set(req, "demo.path", pathname, { exposeToPage: true });
-      context.requestContext.set(req, "demo.user", user, { exposeToPage: true });
-      context.requestContext.set(req, "internal.startTs", Date.now());
+      context.req.set("demo.requestId", requestId, { exposeToPage: true });
+      context.req.set("demo.path", pathname, { exposeToPage: true });
+      context.req.set("demo.user", user, { exposeToPage: true });
+      context.req.set("internal.startTs", Date.now());
       options.onBeforeRequest?.({ pathname, user, requestId });
 
       if (log) {
@@ -129,8 +129,8 @@ function createDocsContextDemoPlugin(
     },
     afterResponse(req, res, context) {
       const pathname = req.url ? req.url.split("?")[0] : "/";
-      const user = context.requestContext.get<string>(req, "demo.user") || defaultUser;
-      const requestId = context.requestContext.get<string>(req, "demo.requestId") || "unknown";
+      const user = context.req.get<string>("demo.user") || defaultUser;
+      const requestId = context.req.get<string>("demo.requestId") || "unknown";
       const statusCode = res.statusCode || 200;
       options.onAfterResponse?.({ pathname, user, requestId, statusCode });
       if (log) {

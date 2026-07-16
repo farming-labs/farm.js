@@ -387,7 +387,7 @@ import { definePlugin } from "@farmjs/core";
 export const plugin = definePlugin({
   name: "request-context-demo",
   beforeRequest(req, _res, context) {
-    context.requestContext.set(req, "demo.path", req.url, {
+    context.req.set("demo.path", req.url, {
       exposeToPage: true,
     });
   },

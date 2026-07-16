@@ -22,7 +22,7 @@ export const requestIdPlugin = definePlugin({
     const header = req.headers["x-request-id"];
     const requestId = Array.isArray(header) ? header[0] : header || randomUUID();
 
-    ctx.requestContext.set(req, "request.id", requestId, {
+    ctx.req.set("request.id", requestId, {
       exposeToPage: true,
     });
   },
@@ -109,7 +109,9 @@ Keep config transforms predictable. If two plugins edit the same field, ordering
 ```ts
 export const apiTracePlugin = definePlugin({
   name: "api-trace",
-  beforeApiHandler(request, api) {
+  beforeApiHandler(request, api, ctx) {
+    ctx.req.set("api.traceId", crypto.randomUUID());
+
     const headers = new Headers(request.headers);
     headers.set("x-farm-route", api.routePath || api.pathname);
 
@@ -128,6 +130,8 @@ export const apiTracePlugin = definePlugin({
   },
 });
 ```
+
+`ctx.req` stays attached when a plugin returns a transformed `Request`, so later plugins and the API handler can read the same request data.
 
 ## Transform HTML
 
@@ -216,12 +220,12 @@ Only explicitly exposed request context values appear on page props.
 ```ts
 export const tracePlugin = definePlugin({
   name: "trace",
-  beforeRequest(req, _res, ctx) {
-    ctx.requestContext.set(req, "traceId", "trace_123", {
+  beforeRequest(_req, _res, ctx) {
+    ctx.req.set("traceId", "trace_123", {
       exposeToPage: true,
     });
 
-    ctx.requestContext.set(req, "secret", "do-not-expose");
+    ctx.req.set("secret", "do-not-expose");
   },
 });
 ```

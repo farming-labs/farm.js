@@ -231,8 +231,8 @@ describe("integrations runtime", () => {
     manager.addPlugin({
       name: "seed-request-context",
       enforce: "pre",
-      beforeRequest(req, _res, context) {
-        context.requestContext.set(req, "seed", "shared-value");
+      beforeRequest(_req, _res, context) {
+        context.req.set("seed", "shared-value");
       },
     });
     manager.addPlugins(
@@ -260,16 +260,17 @@ describe("integrations runtime", () => {
                 expect(context.integration.slot).toBe("auth");
                 expect(context.integration.type).toBe("better-auth");
                 expect(context.route.kind).toBe("route");
-                expect(context.requestContext.get("seed")).toBe("shared-value");
+                expect(context.req).toBe(context.requestContext);
+                expect(context.req.get("seed")).toBe("shared-value");
 
-                context.requestContext.set("handled", "yes");
+                context.req.set("handled", "yes");
 
                 return Response.json(
                   {
                     provider: context.params.provider,
                     auth: context.params.auth,
-                    handled: context.requestContext.get("handled"),
-                    seeded: context.requestContext.get("seed"),
+                    handled: context.req.get("handled"),
+                    seeded: context.req.get("seed"),
                   },
                   { status: 201 },
                 );
@@ -758,20 +759,19 @@ describe("integrations runtime", () => {
               middleware: [
                 {
                   handler(_request, context) {
-                    context.requestContext.set("route-middleware-order", ["first"]);
+                    context.req.set("route-middleware-order", ["first"]);
                   },
                 },
                 {
                   handler(_request, context) {
-                    const order =
-                      context.requestContext.get<string[]>("route-middleware-order") || [];
-                    context.requestContext.set("route-middleware-order", [...order, "second"]);
+                    const order = context.req.get<string[]>("route-middleware-order") || [];
+                    context.req.set("route-middleware-order", [...order, "second"]);
                   },
                 },
               ],
               handler(_request, context) {
                 return Response.json({
-                  middleware: context.requestContext.get("route-middleware-order"),
+                  middleware: context.req.get("route-middleware-order"),
                 });
               },
             },
@@ -941,7 +941,7 @@ describe("integrations runtime", () => {
                 before: [
                   (_request, context) => {
                     expect(context.response).toBeUndefined();
-                    context.requestContext.set("hook-order", ["before"]);
+                    context.req.set("hook-order", ["before"]);
                   },
                 ],
                 after: [
@@ -963,7 +963,7 @@ describe("integrations runtime", () => {
                 ],
                 handler(_request, context) {
                   handlerSpy();
-                  const order = context.requestContext.get<string[]>("hook-order") || [];
+                  const order = context.req.get<string[]>("hook-order") || [];
                   return Response.json({
                     order: [...order, "handler"],
                     after: false,
@@ -1001,10 +1001,10 @@ describe("integrations runtime", () => {
         integrationRoute.get("/api/local-demo/blocked", {
           before: [
             (_request, context) => {
-              context.requestContext.set("blocked", true);
+              context.req.set("blocked", true);
               return Response.json(
                 {
-                  blocked: context.requestContext.get("blocked"),
+                  blocked: context.req.get("blocked"),
                 },
                 {
                   status: 403,

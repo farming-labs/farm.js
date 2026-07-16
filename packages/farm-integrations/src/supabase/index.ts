@@ -735,7 +735,7 @@ function renderCheckEmailPage(
 }
 
 function createSupabaseHandler(
-  context: Pick<FarmIntegrationHandlerContext, "request" | "requestContext">,
+  context: Pick<FarmIntegrationHandlerContext, "request" | "req">,
   env: ResolvedSupabaseEnv,
 ) {
   const setCookies: string[] = [];
@@ -753,7 +753,7 @@ function createSupabaseHandler(
         for (const cookie of cookiesToSet) {
           setCookies.push(serializeCookie(cookie.name, cookie.value, cookie.options));
         }
-        context.requestContext.set("supabase:set-cookies", [...setCookies]);
+        context.req.set("supabase:set-cookies", [...setCookies]);
       },
     },
   });

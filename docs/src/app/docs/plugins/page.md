@@ -93,7 +93,7 @@ export default defineFarmConfig({
 
 Farm orders plugins as `pre`, normal, then `post`. Use `pre` when another plugin must see your request context or config changes. Use `post` when you want to observe final output.
 
-## Request context
+## Request data
 
 Plugins can share request-scoped values with other plugins, integrations, and pages.
 
@@ -103,17 +103,19 @@ import { randomUUID } from "node:crypto";
 
 export const tracePlugin = definePlugin({
   name: "trace",
-  beforeRequest(req, _res, ctx) {
-    ctx.requestContext.set(req, "traceId", randomUUID(), {
+  beforeRequest(_req, _res, ctx) {
+    ctx.req.set("traceId", randomUUID(), {
       exposeToPage: true,
     });
 
-    ctx.requestContext.set(req, "internalToken", "secret");
+    ctx.req.set("internalToken", "secret");
   },
 });
 ```
 
 Only values marked with `exposeToPage: true` are available to page props through `props.context?.data`.
+The store is already bound to the current request, so `ctx.req` never needs the raw request passed again.
+Existing plugins can keep using `ctx.requestContext` during migration, but it is deprecated.
 
 ## Plugin or integration
 

@@ -33,6 +33,8 @@ function createContext(
   path: string,
   instance: unknown,
 ): FarmIntegrationHandlerContext {
+  const req = createRequestContextStore();
+
   return {
     request,
     requestId: "req_test",
@@ -53,7 +55,8 @@ function createContext(
       path,
       methods: [method],
     },
-    requestContext: createRequestContextStore(),
+    req,
+    requestContext: req,
     config: {} as FarmIntegrationHandlerContext["config"],
     isDev: true,
     isProd: false,

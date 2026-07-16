@@ -307,8 +307,8 @@ export function resend<const TTemplates extends EmailTemplates>(
           }
 
           const [templateId, configuredTemplate] = resolved;
-          context.requestContext.set("email.templateId", templateId);
-          context.requestContext.set("email.data", body.data);
+          context.req.set("email.templateId", templateId);
+          context.req.set("email.data", body.data);
 
           const subject = await resolveTemplateString(configuredTemplate.subject, body.data);
           const previewText = await resolveTemplateString(
@@ -428,9 +428,9 @@ export function resend<const TTemplates extends EmailTemplates>(
           }
 
           const [templateId, configuredTemplate] = resolved;
-          context.requestContext.set("email.templateId", templateId);
-          context.requestContext.set("email.data", body.data);
-          context.requestContext.set("email.when", when);
+          context.req.set("email.templateId", templateId);
+          context.req.set("email.data", body.data);
+          context.req.set("email.when", when);
 
           const subject = await resolveTemplateString(configuredTemplate.subject, body.data);
           const previewText = await resolveTemplateString(
@@ -536,8 +536,8 @@ export function resend<const TTemplates extends EmailTemplates>(
           }
 
           const [templateId, configuredTemplate] = resolved;
-          context.requestContext.set("email.templateId", templateId);
-          context.requestContext.set("email.data", body.data);
+          context.req.set("email.templateId", templateId);
+          context.req.set("email.data", body.data);
 
           const subject = await resolveTemplateString(configuredTemplate.subject, body.data);
           const previewText = await resolveTemplateString(

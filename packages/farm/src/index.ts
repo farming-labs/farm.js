@@ -130,6 +130,8 @@ export type { ReadonlyHeaders, ReadonlyRequestCookies, RequestCookie } from "./h
 export type {
   FarmPlugin,
   FarmPluginContext,
+  FarmRequestPluginContext,
+  FarmRequestStore,
   RouteDiscoveredPayload,
   RoutesGeneratedPayload,
   MiddlewareDiscoveredPayload,
