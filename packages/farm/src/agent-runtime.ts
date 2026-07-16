@@ -22,6 +22,7 @@ const HOP_BY_HOP_HEADERS = [
 export interface FarmAgentRuntimeInstance {
   readonly provider: string;
   readonly routePrefix: string;
+  readonly routePrefixes: readonly string[];
   getOrigin(): string | undefined;
 }
 
@@ -43,11 +44,13 @@ export interface FarmAgentRuntimeStartContext {
 export interface FarmAgentRuntimeBuildContext extends BundleResultPayload {
   readonly provider: string;
   readonly routePrefix: string;
+  readonly routePrefixes: readonly string[];
 }
 
 export interface FarmAgentRuntimeIntegrationOptions {
   provider: string;
   routePrefix: string;
+  additionalRoutePrefixes?: readonly string[];
   origin?: string;
   originEnv?: string | readonly string[];
   webSockets?: boolean;
@@ -85,6 +88,10 @@ export function createAgentRuntimeIntegration(
 ): FarmIntegration {
   const provider = normalizeProviderName(options.provider);
   const routePrefix = normalizeAgentRoutePrefix(options.routePrefix);
+  const routePrefixes = [
+    routePrefix,
+    ...(options.additionalRoutePrefixes || []).map(normalizeAgentRoutePrefix),
+  ].filter((prefix, index, values) => values.indexOf(prefix) === index);
   const originEnv = normalizeOriginEnv(options.originEnv);
   const state: RuntimeState = {
     origin: resolveConfiguredOrigin(options.origin, originEnv),
@@ -94,6 +101,7 @@ export function createAgentRuntimeIntegration(
     ...options.instance,
     provider,
     routePrefix,
+    routePrefixes,
     getOrigin: () => state.origin ?? resolveConfiguredOrigin(options.origin, originEnv),
   };
 
@@ -109,11 +117,13 @@ export function createAgentRuntimeIntegration(
         return config;
       }
 
-      applyAgentRuntimeViteProxy(config, {
-        origin,
-        routePrefix,
-        webSockets: options.webSockets,
-      });
+      for (const prefix of routePrefixes) {
+        applyAgentRuntimeViteProxy(config, {
+          origin,
+          routePrefix: prefix,
+          webSockets: options.webSockets,
+        });
+      }
       return config;
     },
     async afterBundle(result) {
@@ -125,6 +135,7 @@ export function createAgentRuntimeIntegration(
         ...result,
         provider,
         routePrefix,
+        routePrefixes,
       });
     },
   };
@@ -152,27 +163,25 @@ export function createAgentRuntimeIntegration(
         state.origin = undefined;
       });
     },
-    routes: [
-      {
-        path: `${routePrefix}/[...farmAgentRuntimePath]`,
-        methods: AGENT_RUNTIME_METHODS,
-        rawBody: true,
-        async handler(request) {
-          const origin = runtimeInstance.getOrigin();
-          if (!origin) {
-            return Response.json(
-              {
-                error: "Agent runtime unavailable",
-                provider,
-              },
-              { status: 503 },
-            );
-          }
+    routes: routePrefixes.map((prefix) => ({
+      path: `${prefix}/[...farmAgentRuntimePath]`,
+      methods: AGENT_RUNTIME_METHODS,
+      rawBody: true,
+      async handler(request) {
+        const origin = runtimeInstance.getOrigin();
+        if (!origin) {
+          return Response.json(
+            {
+              error: "Agent runtime unavailable",
+              provider,
+            },
+            { status: 503 },
+          );
+        }
 
-          return proxyAgentRuntimeRequest(request, origin);
-        },
+        return proxyAgentRuntimeRequest(request, origin);
       },
-    ],
+    })),
     plugins: [runtimePlugin, ...(options.plugins || [])],
   });
 }

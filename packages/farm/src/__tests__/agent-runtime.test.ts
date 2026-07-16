@@ -33,6 +33,7 @@ describe("agent runtime integration", () => {
     const integration = createAgentRuntimeIntegration({
       provider: "test-agent",
       routePrefix: "/agents",
+      additionalRoutePrefixes: ["/.well-known/agent"],
       webSockets: true,
       async startDev() {
         return managed;
@@ -65,11 +66,24 @@ describe("agent runtime integration", () => {
     });
 
     expect(integration.category).toBe("agent");
-    expect(integration.routes?.[0]).toMatchObject({
-      path: "/agents/[...farmAgentRuntimePath]",
-      rawBody: true,
-    });
+    expect(integration.routes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: "/agents/[...farmAgentRuntimePath]",
+          rawBody: true,
+        }),
+        expect.objectContaining({
+          path: "/.well-known/agent/[...farmAgentRuntimePath]",
+          rawBody: true,
+        }),
+      ]),
+    );
     expect(config.vite?.server.proxy["/agents"]).toEqual({
+      target: managed.origin,
+      changeOrigin: true,
+      ws: true,
+    });
+    expect(config.vite?.server.proxy["/.well-known/agent"]).toEqual({
       target: managed.origin,
       changeOrigin: true,
       ws: true,
