@@ -1,12 +1,12 @@
 ---
 title: "Examples"
-description: "Use the examples folder as executable docs for routing, RSC, docs, markdown, auth, billing, email, jobs, and API keys."
+description: "Use the examples folder as executable docs for routing, RSC, agents, docs, markdown, auth, billing, email, jobs, and API keys."
 section: "Reference"
 ---
 
 # Examples
 
-Use the examples folder as executable docs for routing, RSC, docs, markdown, auth, billing, email, jobs, and API keys.
+Use the examples folder as executable docs for routing, RSC, agents, docs, markdown, auth, billing, email, jobs, and API keys.
 
 ## Example apps
 
@@ -21,6 +21,8 @@ Use the examples folder as executable docs for routing, RSC, docs, markdown, aut
 | examples/better-auth-integration | Better Auth routes with local SQLite. |
 | examples/jobs-trigger | Trigger.dev jobs runtime. |
 | examples/jobs-inngest | Inngest jobs runtime. |
+| examples/eve-agent | Eve instructions, same-origin chat UI, managed development, and Vercel composition. |
+| examples/cf-agent | Cloudflare Agent state, callable RPC, Wrangler development, and combined Worker deployment. |
 
 ## Run one example
 
@@ -42,6 +44,8 @@ pnpm --dir examples/basic dev
 | Stripe | Products, checkout redirect, portal redirect, session/status reads, and webhook handling. |
 | Better Auth | Sign-up, sign-in, session read, logout, and protected routes. |
 | Jobs | Trigger, batch trigger, schedule, status, and cancel calls. |
+| Eve agent | Farm page rendering, `/eve/v1/health`, streaming messages, and Vercel output. |
+| Cloudflare agent | Farm page rendering, WebSocket connection, synchronized state, callable RPC, and Wrangler dry-run deployment. |
 | Cron workflows | Lightweight `defineCron` task discovered from `src/jobs`. |
 | Markdown | `.md` mirrors for public pages and cache headers. |
 

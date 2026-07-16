@@ -188,6 +188,14 @@ const sidebar = [
         ],
       },
       {
+        label: "Agents",
+        icon: "sparkles",
+        children: [
+          { label: "Eve", slug: "integrations/eve", icon: "sparkles" },
+          { label: "Cloudflare Agents", slug: "integrations/cf-agent", icon: "cloud" },
+        ],
+      },
+      {
         label: "API Keys",
         icon: "key",
         children: [{ label: "Unkey", slug: "integrations/unkey", icon: "brand-unkey" }],
