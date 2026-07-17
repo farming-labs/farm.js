@@ -5,6 +5,7 @@ import {
   Blocks,
   BookOpen,
   BookOpenText,
+  Bot,
   Braces,
   CloudCog,
   CreditCard,
@@ -366,6 +367,78 @@ const routeCodeTabs = [
             <p>{data.description}</p>
         </main>
     );
+}`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const agentRuntimeCodeTabs = [
+  {
+    id: "eve",
+    label: "Eve / farm.config.ts",
+    language: "ts",
+    highlightLines: [5, 8],
+    code: `import { eve } from "@farmjs/eve";
+
+export default defineConfig({
+    integrations: {
+        agent: eve(),
+    },
+    deploy: {
+        target: "vercel",
+    },
+});`,
+  },
+  {
+    id: "cloudflare",
+    label: "Cloudflare / farm.config.ts",
+    language: "ts",
+    highlightLines: [5, 8, 9],
+    code: `import { cfAgent } from "@farmjs/cf-agent";
+
+export default defineConfig({
+    integrations: {
+        agent: cfAgent(),
+    },
+    deploy: {
+        target: "cloudflare",
+        preset: "cloudflare-module",
+    },
+});`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const agentClientCodeTabs = [
+  {
+    id: "eve",
+    label: "Eve / chat.tsx",
+    language: "tsx",
+    highlightLines: [2, 5, 7],
+    code: `"use client";
+import { useEveAgent } from "eve/react";
+
+export function Chat() {
+    const agent = useEveAgent();
+    const send = () => agent.send({ message: "Ship it" });
+    return <button onClick={send}>Send</button>;
+}`,
+  },
+  {
+    id: "cloudflare",
+    label: "Cloudflare / counter.tsx",
+    language: "tsx",
+    highlightLines: [2, 6, 10, 12],
+    code: `"use client";
+import { useAgent } from "agents/react";
+import type { CounterAgent, CounterState } from "./agent";
+
+export function Counter() {
+    const agent = useAgent<CounterAgent, CounterState>({
+        agent: "CounterAgent",
+        name: "shared",
+    });
+    const increment = () => agent.stub.increment();
+
+    return <button onClick={increment}>{agent.state?.count ?? 0}</button>;
 }`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
@@ -1128,6 +1201,28 @@ function AdvancedRoutesVisual() {
   );
 }
 
+function AgentRuntimeVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      compact
+      id="farm-agent-runtime-code"
+      tabs={agentRuntimeCodeTabs}
+      tabsLabel="Farm agent runtime examples"
+    />
+  );
+}
+
+function AgentClientVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      compact
+      id="farm-agent-client-code"
+      tabs={agentClientCodeTabs}
+      tabsLabel="Farm agent client examples"
+    />
+  );
+}
+
 function FoundationGrid() {
   return (
     <section data-foundation-grid className="farm-full-rule grid w-full lg:grid-cols-2">
@@ -1189,6 +1284,26 @@ function FoundationGrid() {
         title="Configure the whole route in one place"
       >
         <AdvancedRoutesVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Choose Eve or Cloudflare Agents. Farm starts the runtime in development, owns its same-origin routes, and composes supported production output."
+        className="border-t border-white/12"
+        icon={Bot}
+        index="02.7"
+        label="Agent runtimes"
+        title="Run agents beside the app"
+      >
+        <AgentRuntimeVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Use useEveAgent for durable conversations or useAgent for typed WebSocket state and RPC. Farm does not add a duplicate client layer."
+        className="border-t border-white/12 lg:border-l"
+        icon={Network}
+        index="02.8"
+        label="Native clients"
+        title="Keep the provider-native SDK"
+      >
+        <AgentClientVisual />
       </FeatureCell>
     </section>
   );
