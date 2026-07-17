@@ -1286,11 +1286,56 @@ function FoundationGrid() {
       >
         <AdvancedRoutesVisual />
       </FeatureCell>
+    </section>
+  );
+}
+
+function AgentSectionIntro() {
+  return (
+    <section id="agents" className="farm-wide-rule grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="flex items-start border-b border-white/12 p-6 text-white/36 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
+        <IndexedLabel icon={Bot} index="03" label="Agent systems" />
+      </div>
+
+      <div className="grid min-w-0 items-center gap-8 bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_auto] lg:min-h-[300px] lg:gap-10 lg:px-12">
+        <div className="max-w-xl">
+          <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+            Bring the agent runtime you already use
+          </h2>
+          <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+            Run Eve on Vercel or Cloudflare Agents on Workers. Farm joins each runtime to your app
+            in development and production while its native SDK stays intact.
+          </p>
+        </div>
+
+        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center md:flex-col lg:flex-row">
+          <ButtonLink
+            href="/docs/integrations/eve"
+            icon={<Workflow aria-hidden className="size-4" strokeWidth={1.5} />}
+            variant="secondary"
+          >
+            Eve guide
+          </ButtonLink>
+          <ButtonLink
+            href="/docs/integrations/cf-agent"
+            icon={<CloudCog aria-hidden className="size-4" strokeWidth={1.5} />}
+            variant="secondary"
+          >
+            Cloudflare guide
+          </ButtonLink>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgentFeatureGrid() {
+  return (
+    <section data-agent-grid className="farm-full-rule grid w-full lg:grid-cols-2">
       <FeatureCell
         body="Choose Eve or Cloudflare Agents. Farm starts the runtime in development, owns its same-origin routes, and composes supported production output."
-        className="border-t border-white/12"
         icon={Bot}
-        index="02.7"
+        index="03.1"
         label="Agent runtimes"
         title="Run agents beside the app"
       >
@@ -1298,9 +1343,9 @@ function FoundationGrid() {
       </FeatureCell>
       <FeatureCell
         body="Use useEveAgent for durable conversations or useAgent for typed WebSocket state and RPC. Farm does not add a duplicate client layer."
-        className="border-t border-white/12 lg:border-l"
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
         icon={Network}
-        index="02.8"
+        index="03.2"
         label="Native clients"
         title="Keep the provider-native SDK"
       >
@@ -1546,6 +1591,8 @@ export default function HomePage(_props: PageProps) {
             <DeveloperExperienceGrid />
             <IntegrationsSection />
             <FoundationGrid />
+            <AgentSectionIntro />
+            <AgentFeatureGrid />
             <FinalCta />
           </main>
           <Footer />
