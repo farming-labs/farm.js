@@ -35,6 +35,7 @@
   "dependencies": {
     "@farmjs/core": "workspace:*",
     "commander": "^11.1.0",
+    "croner": "9.1.0",
     "picocolors": "^1.0.0"
   },
   "devDependencies": {

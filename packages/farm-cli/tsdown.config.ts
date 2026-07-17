@@ -10,7 +10,7 @@ export default defineConfig({
   // This package currently does not publish a `types` entry.
   dts: false,
   clean: true,
-  external: ["@farmjs/core", "commander"],
+  external: ["@farmjs/core", "commander", "croner"],
   splitting: false,
   sourcemap: true,
 });
