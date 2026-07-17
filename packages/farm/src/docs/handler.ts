@@ -1450,28 +1450,22 @@ function renderPixelPageNav(
   const next = orderedPages[activeIndex + 1];
   if (!previous && !next) return "";
 
-  const renderDescription = (item: FarmDocsPage) =>
-    item.description
-      ? `<span class="fd-page-nav-description">${escapeHtml(item.description)}</span>`
-      : '<span class="fd-page-nav-description fd-page-nav-description-empty" aria-hidden="true">&nbsp;</span>';
+  const renderChevron = (direction: "prev" | "next") =>
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${direction === "prev" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"}" /></svg>`;
   const renderCard = (item: FarmDocsPage, direction: "prev" | "next") =>
     `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
-  <span class="fd-page-nav-label">${direction === "prev" ? '<span aria-hidden="true">&larr;</span>Previous' : 'Next<span aria-hidden="true">&rarr;</span>'}</span>
-  <span class="fd-page-nav-title">${escapeHtml(item.title)}</span>
-  ${renderDescription(item)}
+  <span class="fd-page-nav-title fd-page-nav-title-${direction}">${direction === "prev" ? `${renderChevron(direction)}${escapeHtml(item.title)}` : `${escapeHtml(item.title)}${renderChevron(direction)}`}</span>
+  <span class="fd-page-nav-description">${direction === "prev" ? "Previous Page" : "Next Page"}</span>
 </a>`;
 
-  const style = previous && next ? "" : ' style="grid-template-columns: 1fr;"';
-  return `<nav class="not-prose fd-page-nav" aria-label="Page navigation"${style}>
+  return `<nav class="not-prose fd-page-nav" aria-label="Page navigation">
   ${previous ? renderCard(previous, "prev") : ""}
   ${next ? renderCard(next, "next") : ""}
 </nav>`;
 }
 
 function titleizePathSegment(value: string): string {
-  return value
-    .replace(/[-_]+/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+  return value.replace(/[-_]+/g, " ").replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function isBreadcrumbEnabled(docs: FarmDocsResolvedConfig): boolean {
@@ -1676,7 +1670,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .prose li { margin: 6px 0; }
     .prose code:not(pre code) { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; overflow-wrap: break-word; word-break: break-word; }
     .sh-code { --sh-class: #e5c07b; --sh-identifier: #c8ccd4; --sh-string: #98c379; --sh-keyword: #c678dd; --sh-comment: #5c6370; --sh-property: #e06c75; --sh-sign: #c8ccd4; --sh-space: inherit; }
-    .code-block { --fd-code-header-bg: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, var(--color-fd-background, #000)); --fd-code-body-bg: color-mix(in srgb, var(--color-fd-foreground, #fff) 8%, var(--color-fd-background, #000)); position: relative; margin: 20px 0; overflow: hidden; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono); }
+    .code-block { --fd-code-header-bg: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, var(--color-fd-background, #000)); --fd-code-body-bg: color-mix(in srgb, var(--color-fd-foreground, #fff) 8%, var(--color-fd-background, #000)); position: relative; width: 100%; min-width: 0; max-width: 100%; margin: 20px 0; overflow: hidden; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)); font-family: var(--fd-docs-font-mono); }
     #nd-docs-layout figure.shiki.code-block { box-shadow: 3px 3px 0 0 var(--color-fd-border, hsl(0 0% 15%)) !important; }
     .code-block-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; min-height: 30px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--fd-code-header-bg); background-image: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); padding: 4px 8px 4px 10px; }
     .code-block-title { overflow: hidden; color: color-mix(in srgb, var(--color-fd-foreground, #fff) 50%, transparent); font-size: 10px; line-height: 1.2; text-overflow: ellipsis; text-transform: lowercase; white-space: nowrap; }
@@ -1701,14 +1695,14 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1.5rem; }
-    .fd-page-nav-card { display: flex; min-width: 0; min-height: 8.75rem; flex-direction: column; justify-content: flex-start; gap: 0.375rem; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 0 !important; background: transparent; padding: 1rem; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease; }
-    .fd-page-nav-card:hover { border-color: color-mix(in srgb, var(--color-fd-foreground, #fff) 22%, transparent); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); }
+    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; border-top: 0; padding-top: 0; }
+    .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #nd-docs-layout .fd-page-nav-card { display: flex; min-width: 0; min-height: 95px; flex-direction: column; justify-content: flex-start; gap: 8px; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 8px !important; background: transparent; padding: 16px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease; }
+    .fd-page-nav-card:hover { border-color: var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-muted, hsl(0 0% 10%)); }
     .fd-page-nav-next { align-items: flex-end; text-align: right; }
-    .fd-page-nav-label { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
-    .fd-page-nav-title { display: -webkit-box; overflow: hidden; min-height: calc(1.4em * 2); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 600; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description { display: -webkit-box; overflow: hidden; min-height: calc(1.5em * 2); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description-empty { visibility: hidden; }
+    .fd-page-nav-title { display: inline-flex; max-width: 100%; min-height: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 1rem; font-weight: 500; line-height: 1.65; overflow-wrap: anywhere; }
+    .fd-page-nav-title svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+    .fd-page-nav-description { display: block; max-width: 100%; min-height: 0; overflow: hidden; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 1rem; font-weight: 400; line-height: 1.65; text-overflow: ellipsis; white-space: nowrap; }
     .fd-below-title-block { display: flex; flex-direction: column; align-items: flex-start; gap: 0.625rem; margin: 0 0 1.25rem; }
     .fd-page-actions { display: flex; width: 100%; align-items: center; gap: 0.5rem; }
     .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
@@ -1744,7 +1738,12 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
       #nd-docs-layout .fd-toc { display: none !important; }
       .prose h1 { font-size: 32px; line-height: 1.16; letter-spacing: 0; }
       .prose h2 { margin-top: 34px; padding-top: 22px; font-size: 23px; }
-      #nd-docs-layout figure.shiki.code-block pre, .code-block pre { padding: 16px 14px !important; font-size: 12.5px; }
+      .code-block { margin: 16px 0; box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)); }
+      #nd-docs-layout figure.shiki.code-block { box-shadow: 2px 2px 0 0 var(--color-fd-border, hsl(0 0% 15%)) !important; }
+      .code-block-header { min-height: 26px; padding: 2px 6px 2px 8px; }
+      .code-copy-floating { top: 6px; right: 6px; }
+      #nd-docs-layout figure.shiki.code-block pre, .code-block pre { padding: 12px 11px !important; font-size: 12px; line-height: 1.5; }
+      .sh__line { min-height: 1.5em; }
       .fd-page-nav { grid-template-columns: 1fr !important; }
       .fd-page-nav-next { align-items: flex-start; text-align: left; }
       .fd-page-footer { align-items: flex-start; flex-direction: column; }
