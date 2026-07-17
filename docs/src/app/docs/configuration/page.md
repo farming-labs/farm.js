@@ -37,21 +37,40 @@ export default defineConfig({
 
 ### Docs config
 
-Use `defineDocs` for docs-specific navigation, search, theme, and metadata in a separate `docs.config.ts`:
+Configure the docs runtime directly in `farm.config.ts`:
 
 ```ts
-import { defineDocs } from "@farming-labs/docs";
+import { defineConfig } from "@farmjs/core";
 
-export default defineDocs({
-  entry: "docs",
-  docsPath: "/docs",
-  nav: {
-    title: "Farm.js Docs",
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    metadata: {
+      description: "Product guides and API reference.",
+    },
+    nav: {
+      title: "Acme Docs",
+    },
+    search: {
+      provider: "simple",
+      enabled: true,
+    },
+    pageActions: {
+      copyMarkdown: {
+        enabled: true,
+      },
+    },
+    llmsTxt: true,
+    sitemap: true,
+    robots: true,
   },
 });
 ```
 
-`defineConfig` configures the Farm application. `defineDocs` configures the docs experience mounted by that application.
+This single property enables human-readable pages, markdown mirrors, search metadata, and
+agent-readable docs routes. A separate `docs.config.*` or `docs.json` file is optional and intended
+only for large serializable configurations; inline values always take priority. See
+[Docs Engine](/docs/docs-engine) for content layout, generated routes, and API overrides.
 
 ## Important options
 
@@ -178,8 +197,8 @@ src/
 Add optional files only when the app needs them:
 
 ```txt
-docs.config.ts
-docs.json
+docs.config.ts              # Optional split for a large docs configuration
+docs.json                   # Optional serializable docs configuration
 src/app/api/**/route.ts
 src/app/**/middleware.ts
 src/lib/integrations.ts

@@ -197,6 +197,12 @@ export default defineConfig({
 
   docs: {
     entry: '/docs',
+    metadata: {
+      description: 'Farm.js example documentation',
+    },
+    nav: {
+      title: 'Farm Docs',
+    },
   },
 
   md: {

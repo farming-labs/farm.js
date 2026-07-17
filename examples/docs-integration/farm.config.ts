@@ -7,5 +7,23 @@ export default defineConfig({
   },
   docs: {
     entry: '/docs',
+    metadata: {
+      description: 'Farm docs integration example',
+    },
+    nav: {
+      title: 'Farm Docs',
+    },
+    search: {
+      provider: 'simple',
+      enabled: true,
+    },
+    pageActions: {
+      copyMarkdown: {
+        enabled: true,
+      },
+    },
+    llmsTxt: true,
+    sitemap: true,
+    robots: true,
   },
 });

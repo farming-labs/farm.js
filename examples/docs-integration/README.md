@@ -11,9 +11,32 @@ import { defineConfig } from '@farmjs/core';
 export default defineConfig({
   docs: {
     entry: '/docs',
+    metadata: {
+      description: 'Farm docs integration example',
+    },
+    nav: {
+      title: 'Farm Docs',
+    },
+    search: {
+      provider: 'simple',
+      enabled: true,
+    },
+    pageActions: {
+      copyMarkdown: {
+        enabled: true,
+      },
+    },
+    llmsTxt: true,
+    sitemap: true,
+    robots: true,
   },
 });
 ```
+
+Place markdown in `src/app/docs`. The folder structure becomes the docs URL structure, so
+`src/app/docs/getting-started/page.md` is served at `/docs/getting-started` and
+`/docs/getting-started.md`. A separate `docs.config.*` or `docs.json` file is supported for large
+serializable configurations but is not required.
 
 You only need app route wrappers when you want to override the default handler:
 

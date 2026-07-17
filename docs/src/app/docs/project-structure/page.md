@@ -27,14 +27,14 @@ my-app/
 
 ## Common folders
 
-| Path | Purpose |
-| --- | --- |
-| src/app | Pages, nested layouts, API routes, route boundaries, middleware. |
-| src/lib | Shared server and client utilities. |
-| src/components | Reusable UI and client components. |
-| layers | Optional local Farm layers consumed through `extends`. |
-| src/farm-routes.d.ts | Generated typed route union for Link. |
-| farm.config.ts | Framework config, integrations, docs, storage, deployment. |
+| Path                 | Purpose                                                          |
+| -------------------- | ---------------------------------------------------------------- |
+| src/app              | Pages, nested layouts, API routes, route boundaries, middleware. |
+| src/lib              | Shared server and client utilities.                              |
+| src/components       | Reusable UI and client components.                               |
+| layers               | Optional local Farm layers consumed through `extends`.           |
+| src/farm-routes.d.ts | Generated typed route union for Link.                            |
+| farm.config.ts       | Framework config, integrations, docs, storage, deployment.       |
 
 ## Optional files stay optional
 
@@ -42,16 +42,16 @@ Use vite.config.ts only when you need custom Vite behavior. Use platform files o
 
 ## Route files
 
-| File | Used for |
-| --- | --- |
-| `page.tsx` | The route UI. |
-| `page.md` / `page.mdx` | Markdown-first static app pages. |
-| `layout.tsx` | Shared shell for every child segment. |
-| `loading.tsx` | Pending UI for async route work. |
-| `error.tsx` | Segment-level error UI. |
-| `not-found.tsx` | Segment-level 404 UI. |
-| `middleware.ts` | Request behavior before the route renders. |
-| `route.ts` | API handlers for the current URL segment. |
+| File                   | Used for                                   |
+| ---------------------- | ------------------------------------------ |
+| `page.tsx`             | The route UI.                              |
+| `page.md` / `page.mdx` | Markdown-first static app pages.           |
+| `layout.tsx`           | Shared shell for every child segment.      |
+| `loading.tsx`          | Pending UI for async route work.           |
+| `error.tsx`            | Segment-level error UI.                    |
+| `not-found.tsx`        | Segment-level 404 UI.                      |
+| `middleware.ts`        | Request behavior before the route renders. |
+| `route.ts`             | API handlers for the current URL segment.  |
 
 ## Recommended app layout
 
@@ -99,9 +99,9 @@ Generated route types make `Link` stricter, and generated API types make `api.he
 
 ## When to add root files
 
-| File | Add it when |
-| --- | --- |
-| `vite.config.ts` | You need Vite plugins, aliases, or server settings Farm does not infer. |
-| `vercel.json` | You need platform behavior outside Farm's deploy output. |
-| `tailwind.config.ts` | Your Tailwind version or design system requires an explicit config. |
-| `docs.config.ts` | You enable docs and want navigation, icons, theme, or page actions. |
+| File                 | Add it when                                                                                                 |
+| -------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `vite.config.ts`     | You need Vite plugins, aliases, or server settings Farm does not infer.                                     |
+| `vercel.json`        | You need platform behavior outside Farm's deploy output.                                                    |
+| `tailwind.config.ts` | Your Tailwind version or design system requires an explicit config.                                         |
+| `docs.config.ts`     | A large docs configuration is easier to maintain outside the canonical `docs` property in `farm.config.ts`. |
