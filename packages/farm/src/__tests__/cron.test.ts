@@ -213,4 +213,13 @@ describe("Farm cron", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ deleted: 3 });
   });
+
+  it("fails closed when a production cron route has no secret", async () => {
+    delete process.env.CRON_SECRET;
+    process.env.NODE_ENV = "production";
+    const handler = cronRoute(async () => Response.json({ deleted: 3 }));
+
+    const response = await handler(new Request("https://example.com/api/cleanup"));
+    expect(response.status).toBe(401);
+  });
 });

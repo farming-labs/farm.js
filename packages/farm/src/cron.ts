@@ -38,6 +38,8 @@ export interface FarmCronRouteOptions {
   secretEnv?: string;
   /** Inline token, primarily useful in tests. Environment variables are preferred. */
   secret?: string;
+  /** Allow a production route without a secret. Defaults to false. */
+  allowUnsecured?: boolean;
 }
 
 export const DEFAULT_FARM_CRON_SECRET_ENV = "CRON_SECRET";
@@ -205,7 +207,9 @@ export function isCronRequestAuthorized(
 ): boolean {
   const secretEnv = options.secretEnv || DEFAULT_FARM_CRON_SECRET_ENV;
   const secret = options.secret || readEnvironmentValue(secretEnv);
-  if (!secret) return true;
+  if (!secret) {
+    return options.allowUnsecured === true || readEnvironmentValue("NODE_ENV") !== "production";
+  }
 
   const authorization = request.headers.get("authorization") || "";
   const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
