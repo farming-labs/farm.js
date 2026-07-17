@@ -29,7 +29,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import auth0IconUrl from "simple-icons/icons/auth0.svg?url";
 import betterAuthIconUrl from "simple-icons/icons/betterauth.svg?url";
 import clerkIconUrl from "simple-icons/icons/clerk.svg?url";
@@ -72,14 +72,12 @@ const navItems = [
   { index: "04", label: "Resources", href: "/docs", icon: FileText },
 ] as const;
 
-const ecosystemItems = [
-  { label: "React 19", brand: reactIconUrl },
-  { label: "Vite", brand: viteIconUrl },
-  { label: "Nitro", brand: nitroIconUrl },
-  { label: "Prisma", brand: prismaIconUrl },
-  { label: "Better Auth", brand: betterAuthIconUrl },
-  { label: "Stripe", brand: stripeIconUrl },
-] as const;
+type ProductStackItem = {
+  label: string;
+  href: string;
+  brand?: string;
+  icon?: LucideIcon;
+};
 
 const integrationDirectoryItems = [
   {
@@ -188,6 +186,23 @@ const integrationDirectoryItems = [
     icon: KeyRound,
   },
 ] as const;
+
+const ecosystemItems = [
+  { label: "React 19", href: "/docs/getting-started", brand: reactIconUrl },
+  { label: "Vite", href: "/docs/getting-started", brand: viteIconUrl },
+  { label: "Nitro", href: "/docs/deployment", brand: nitroIconUrl },
+  ...integrationDirectoryItems,
+  { label: "Eve", href: "/docs/integrations/eve", brand: vercelIconUrl },
+  {
+    label: "Cloudflare Agents",
+    href: "/docs/integrations/cf-agent",
+    brand: cloudflareIconUrl,
+  },
+  { label: "Vercel", href: "/docs/deployment", brand: vercelIconUrl },
+  { label: "Cloudflare", href: "/docs/deployment", brand: cloudflareIconUrl },
+  { label: "Netlify", href: "/docs/deployment", brand: netlifyIconUrl },
+  { label: "Docker", href: "/docs/deployment", brand: dockerIconUrl },
+] satisfies readonly ProductStackItem[];
 
 type DeploymentTile = {
   row: number;
@@ -709,6 +724,38 @@ function Hero() {
   );
 }
 
+function ProductStackTile({
+  item,
+  itemIndex,
+  duplicate,
+}: {
+  item: ProductStackItem;
+  itemIndex: number;
+  duplicate: boolean;
+}) {
+  const Icon = item.icon;
+  const className = cx(
+    "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 focus-visible:z-10 focus-visible:bg-white/[0.07] focus-visible:text-white focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/36 sm:w-44 sm:text-[11px]",
+    itemIndex % 2 === 0 && "bg-white/[0.045]",
+  );
+
+  return (
+    <a
+      aria-hidden={duplicate ? true : undefined}
+      className={className}
+      href={item.href}
+      tabIndex={duplicate ? -1 : undefined}
+    >
+      {item.brand ? (
+        <BrandIcon className="size-[18px] shrink-0 opacity-72" src={item.brand} />
+      ) : Icon ? (
+        <Icon aria-hidden className="size-[18px] shrink-0 opacity-72" strokeWidth={1.5} />
+      ) : null}
+      <span className="whitespace-nowrap">{item.label}</span>
+    </a>
+  );
+}
+
 function EcosystemStrip() {
   return (
     <section className="farm-full-rule w-full">
@@ -717,12 +764,14 @@ function EcosystemStrip() {
           <IndexedLabel icon={Layers3} index="01" label="Product stack" />
         </div>
         <div
-          aria-label="Product stack logos. Focus to pause animation."
-          className="farm-logo-viewport min-w-0 overflow-hidden focus-visible:outline focus-visible:outline-1 focus-visible:-outline-offset-1 focus-visible:outline-white/28"
+          aria-label="Supported product integrations and deployment targets. Hover or focus an item to pause animation."
+          className="farm-logo-viewport min-w-0 overflow-hidden focus-within:outline focus-within:outline-1 focus-within:-outline-offset-1 focus-within:outline-white/28"
           role="region"
-          tabIndex={0}
         >
-          <div className="farm-logo-rail flex h-full w-max">
+          <div
+            className="farm-logo-rail flex h-full w-max"
+            style={{ "--farm-logo-duration": `${ecosystemItems.length * 4}s` } as CSSProperties}
+          >
             {([0, 1] as const).map((copyIndex) => (
               <div
                 key={copyIndex}
@@ -730,16 +779,12 @@ function EcosystemStrip() {
                 className="farm-logo-rail-copy flex h-full shrink-0"
               >
                 {ecosystemItems.map((item, itemIndex) => (
-                  <div
+                  <ProductStackTile
                     key={`${copyIndex}-${item.label}`}
-                    className={cx(
-                      "flex h-16 w-40 shrink-0 items-center justify-center gap-3 border-r border-white/12 bg-black px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/48 transition-colors duration-150 hover:bg-white/[0.07] hover:text-white/82 sm:w-44 sm:text-[11px]",
-                      itemIndex % 2 === 0 && "bg-white/[0.045]",
-                    )}
-                  >
-                    <BrandIcon className="size-[18px] shrink-0 opacity-72" src={item.brand} />
-                    <span className="whitespace-nowrap">{item.label}</span>
-                  </div>
+                    duplicate={copyIndex === 1}
+                    item={item}
+                    itemIndex={itemIndex}
+                  />
                 ))}
               </div>
             ))}

@@ -705,11 +705,11 @@
 }
 
 .farm-logo-rail {
-  animation: farm-logo-rail 24s linear infinite;
+  animation: farm-logo-rail var(--farm-logo-duration, 24s) linear infinite;
   will-change: transform;
 }
 
-.farm-logo-viewport:focus .farm-logo-rail {
+.farm-logo-viewport:focus-within .farm-logo-rail {
   animation-play-state: paused;
 }
 
@@ -727,6 +727,17 @@
   .farm-logo-rail {
     animation: none;
     transform: none;
+  }
+
+  .farm-logo-viewport {
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
+  .farm-logo-viewport::-webkit-scrollbar {
+    display: none;
   }
 
   .farm-logo-rail-copy[aria-hidden="true"] {
