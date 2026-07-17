@@ -426,18 +426,16 @@ export function Chat() {
     id: "cloudflare",
     label: "Cloudflare / counter.tsx",
     language: "tsx",
-    highlightLines: [2, 6, 10, 12],
+    highlightLines: [2, 5, 9, 10],
     code: `"use client";
 import { useAgent } from "agents/react";
 import type { CounterAgent, CounterState } from "./agent";
-
 export function Counter() {
     const agent = useAgent<CounterAgent, CounterState>({
         agent: "CounterAgent",
         name: "shared",
     });
     const increment = () => agent.stub.increment();
-
     return <button onClick={increment}>{agent.state?.count ?? 0}</button>;
 }`,
   },
