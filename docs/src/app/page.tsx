@@ -1290,6 +1290,87 @@ function FoundationGrid() {
   );
 }
 
+function AgentRuntimeIllustration() {
+  return (
+    <figure className="relative mx-auto h-[248px] w-full max-w-[28rem] overflow-hidden md:mx-0 md:h-[280px]">
+      <figcaption className="sr-only">
+        Farm connects the application origin to Eve on Vercel and Cloudflare Agents on Workers.
+      </figcaption>
+
+      <div
+        aria-hidden
+        className="absolute inset-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(to right, rgb(255 255 255 / 0.09) 1px, transparent 1px), linear-gradient(to bottom, rgb(255 255 255 / 0.09) 1px, transparent 1px)",
+          backgroundSize: "20% 20%",
+          maskImage: "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+          WebkitMaskImage:
+            "linear-gradient(to right, transparent, black 10%, black 90%, transparent)",
+        }}
+      />
+
+      <div className="relative z-10 grid h-full grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] items-center px-2 sm:px-4">
+        <div className="border border-white/16 bg-black p-3 sm:p-4">
+          <div className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/72">
+            <Route aria-hidden className="size-3.5" strokeWidth={1.5} />
+            Farm app
+          </div>
+          <div className="mt-3 border-t border-white/12 pt-3">
+            <span className="block font-mono text-[8px] font-normal uppercase tracking-normal text-white/34 sm:text-[9px]">
+              Same origin
+            </span>
+            <code className="mt-1 block font-mono text-xs text-white/86">/</code>
+          </div>
+        </div>
+
+        <div aria-hidden className="relative h-[184px]">
+          <span className="absolute left-0 top-1/2 h-px w-1/2 bg-white/22" />
+          <span className="absolute bottom-1/4 left-1/2 top-1/4 w-px bg-white/22" />
+          <span className="absolute left-1/2 right-0 top-1/4 h-px bg-white/22" />
+          <span className="absolute bottom-1/4 left-1/2 right-0 h-px bg-white/22" />
+          <span className="absolute left-1/2 top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 bg-white" />
+          <span className="absolute right-0 top-1/4 size-1 -translate-y-1/2 bg-white/52" />
+          <span className="absolute bottom-1/4 right-0 size-1 translate-y-1/2 bg-white/52" />
+        </div>
+
+        <div className="grid h-[184px] grid-rows-2 gap-3">
+          <div className="border border-white/16 bg-black p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/76 sm:text-[10px]">
+                <Workflow aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+                Eve
+              </span>
+              <BrandIcon className="size-3.5 opacity-52" src={vercelIconUrl} />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+              <code className="font-mono text-[9px] text-white/76">/eve/*</code>
+              <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/32">
+                Vercel
+              </span>
+            </div>
+          </div>
+
+          <div className="border border-white/16 bg-black p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/76 sm:text-[10px]">
+                <BrandIcon className="size-3.5 shrink-0 opacity-72" src={cloudflareIconUrl} />
+                <span className="truncate">Cloudflare Agents</span>
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/10 pt-2">
+              <code className="font-mono text-[9px] text-white/76">/agents/*</code>
+              <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/32">
+                Workers
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  );
+}
+
 function AgentSectionIntro() {
   return (
     <section id="agents" className="farm-wide-rule grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]">
@@ -1297,32 +1378,37 @@ function AgentSectionIntro() {
         <IndexedLabel icon={Bot} index="03" label="Agent systems" />
       </div>
 
-      <div className="grid min-w-0 items-center gap-8 bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_auto] lg:min-h-[300px] lg:gap-10 lg:px-12">
-        <div className="max-w-xl">
-          <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
-            Bring the agent runtime you already use
-          </h2>
-          <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-            Run Eve on Vercel or Cloudflare Agents on Workers. Farm joins each runtime to your app
-            in development and production while its native SDK stays intact.
-          </p>
+      <div className="relative grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_20rem] lg:min-h-[420px] lg:gap-10 lg:px-12 xl:h-[420px] xl:grid-cols-[minmax(0,1fr)_28rem]">
+        <div className="relative z-10 flex min-w-0 items-center">
+          <div className="min-w-0 max-w-lg">
+            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+              Bring the agent runtime you already use
+            </h2>
+            <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+              Run Eve on Vercel or Cloudflare Agents on Workers. Farm joins each runtime to your app
+              in development and production while its native SDK stays intact.
+            </p>
+            <div className="mt-8 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+              <ButtonLink
+                href="/docs/integrations/eve"
+                icon={<Workflow aria-hidden className="size-4" strokeWidth={1.5} />}
+                variant="secondary"
+              >
+                Eve guide
+              </ButtonLink>
+              <ButtonLink
+                href="/docs/integrations/cf-agent"
+                icon={<CloudCog aria-hidden className="size-4" strokeWidth={1.5} />}
+                variant="secondary"
+              >
+                Cloudflare guide
+              </ButtonLink>
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center md:flex-col lg:flex-row">
-          <ButtonLink
-            href="/docs/integrations/eve"
-            icon={<Workflow aria-hidden className="size-4" strokeWidth={1.5} />}
-            variant="secondary"
-          >
-            Eve guide
-          </ButtonLink>
-          <ButtonLink
-            href="/docs/integrations/cf-agent"
-            icon={<CloudCog aria-hidden className="size-4" strokeWidth={1.5} />}
-            variant="secondary"
-          >
-            Cloudflare guide
-          </ButtonLink>
+        <div className="relative z-10 flex items-center justify-center md:justify-end">
+          <AgentRuntimeIllustration />
         </div>
       </div>
     </section>
