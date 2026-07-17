@@ -22,6 +22,12 @@ import {
   prepareFarmWorkflowsForNitro,
   type PreparedFarmWorkflows,
 } from "../workflows";
+import {
+  applyFarmCronVercelCrons,
+  createFarmCronCloudflareTriggers,
+  mergeScheduledTasks,
+  prepareFarmCronForNitro,
+} from "../cron";
 import { routeRulesToNitroRouteRules } from "../route-rules";
 import { getFarmAppDirectories } from "../layers";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
@@ -2536,6 +2542,7 @@ async function buildNitroUniversal(
   const fs = await import("fs/promises");
 
   const isVercel = preset === "vercel" || preset === "vercel-edge";
+  const isCloudflareWorker = preset === "cloudflare-module";
   const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const ssrOutputDir = path.join(root, distDir, "ssr");
 
@@ -2544,9 +2551,21 @@ async function buildNitroUniversal(
   logger.info(`📦 Preset: ${preset}`);
 
   const farmWorkflows = await prepareFarmWorkflowsForNitro(config);
+  const farmCron = await prepareFarmCronForNitro(config);
   if (farmWorkflows.workflows.length > 0) {
     logger.info(`⏱️  Found ${farmWorkflows.workflows.length} Farm workflow task(s)`);
   }
+  if (farmCron.jobs.length > 0) {
+    logger.info(`⏱️  Configured ${farmCron.jobs.length} Farm cron route(s)`);
+  }
+  if (preset === "cloudflare-pages" && farmCron.jobs.length > 0) {
+    logger.warn(
+      "Cloudflare Pages does not install Cron Triggers. Use the cloudflare-module preset or an external scheduler with .farm/cron-manifest.json.",
+    );
+  }
+
+  const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
+  const cloudflareCronTriggers = createFarmCronCloudflareTriggers(farmCron.jobs);
 
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });
@@ -2599,10 +2618,24 @@ export default defineEventHandler((event) => handler.fetch(event.req, {
       },
     ],
     experimental: {
-      tasks: farmWorkflows.workflows.length > 0,
+      tasks: farmWorkflows.workflows.length > 0 || farmCron.jobs.length > 0,
     },
-    tasks: farmWorkflows.tasks,
-    scheduledTasks: farmWorkflows.scheduledTasks,
+    tasks: {
+      ...farmWorkflows.tasks,
+      ...farmCron.tasks,
+    },
+    scheduledTasks: isVercel ? farmWorkflows.scheduledTasks : scheduledTasks,
+    ...(isCloudflareWorker && cloudflareCronTriggers.length > 0
+      ? {
+          cloudflare: {
+            wrangler: {
+              triggers: {
+                crons: cloudflareCronTriggers,
+              },
+            },
+          },
+        }
+      : {}),
     // Use serverHandlers to define our workflow handler first, then the catch-all handler.
     handlers: [
       ...(farmWorkflows.handlerPath
@@ -2746,7 +2779,14 @@ async function postProcessVercelOutput(
     },
   ];
 
-  const vercelConfigWithCrons = applyFarmWorkflowVercelCrons(vercelConfig, farmWorkflows.workflows);
+  const vercelConfigWithWorkflowCrons = applyFarmWorkflowVercelCrons(
+    vercelConfig,
+    farmWorkflows.workflows,
+  );
+  const vercelConfigWithCrons = applyFarmCronVercelCrons(
+    vercelConfigWithWorkflowCrons,
+    config.cron.jobs,
+  );
 
   await fs.writeFile(configPath, JSON.stringify(vercelConfigWithCrons, null, 2));
   await copyFarmDocsContentForVercel(config, root, nitroFuncDir, fs);

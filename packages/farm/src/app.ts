@@ -5,6 +5,7 @@ import type { FarmMdxResolvedConfig } from "./app-markdown";
 import { resolveMdxConfig } from "./app-markdown";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig, type FarmWorkflowsResolvedConfig } from "./workflows";
+import { resolveCronConfig, type FarmCronResolvedConfig } from "./cron";
 import { resolveAppPath, fileExists, logger } from "./utils";
 import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
@@ -21,6 +22,7 @@ type NormalizedFarmConfig = Required<FarmConfig> & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
+  cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
 };
 
@@ -100,6 +102,7 @@ export class FarmApp {
       storage: config.storage || {},
       integrations: config.integrations || {},
       migrations: config.migrations || { commands: [] },
+      cron: resolveCronConfig(config.cron),
       workflows: resolveWorkflowsConfig(config.workflows),
       middleware: config.middleware || {},
       routeRules: normalizeRouteRules(config.routeRules),

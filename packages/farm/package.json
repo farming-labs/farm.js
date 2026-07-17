@@ -69,6 +69,9 @@
       "workflows": [
         "./dist/workflows.d.ts"
       ],
+      "cron": [
+        "./dist/cron.d.ts"
+      ],
       "server-fn": [
         "./dist/server-fn.d.ts"
       ],
@@ -195,6 +198,11 @@
       "types": "./dist/workflows.d.ts",
       "import": "./dist/workflows.mjs",
       "require": "./dist/workflows.cjs"
+    },
+    "./cron": {
+      "types": "./dist/cron.d.ts",
+      "import": "./dist/cron.mjs",
+      "require": "./dist/cron.cjs"
     },
     "./server-fn": {
       "types": "./dist/server-fn.d.ts",

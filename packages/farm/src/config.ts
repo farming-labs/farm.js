@@ -13,11 +13,13 @@ import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmPlugin } from "./plugin";
 import type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+import type { FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { UserConfig as ViteUserConfig } from "vite";
 import { resolveIntegrationPlugins } from "./integrations";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig } from "./workflows";
+import { resolveCronConfig } from "./cron";
 import { resolveEnv, setEnv } from "./env";
 import {
   resolveMdxConfig,
@@ -64,6 +66,7 @@ export type {
   ResolvedFarmMigrationsConfig,
 } from "./types";
 export type { FarmWorkflowsResolvedConfig, FarmWorkflowsUserConfig } from "./workflows";
+export type { FarmCronJobConfig, FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 export type {
   FarmRouteRule,
   FarmRouteRuleCors,
@@ -183,6 +186,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
   migrations?: FarmMigrationsUserConfig;
+  /** Map portable cron schedules to ordinary GET API routes. */
+  cron?: FarmCronUserConfig | FarmCronResolvedConfig | false;
   workflows?: FarmWorkflowsUserConfig | boolean;
   preset?: BaseFarmConfig["preset"];
   deploy?: FarmDeployConfig;
@@ -247,6 +252,7 @@ export interface ResolvedFarmConfig extends Required<
     | "md"
     | "mdx"
     | "migrations"
+    | "cron"
     | "workflows"
     | "env"
     | "serverActions"
@@ -261,6 +267,7 @@ export interface ResolvedFarmConfig extends Required<
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
   migrations: ResolvedFarmMigrationsConfig;
+  cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
   env: ResolvedFarmEnv;
   serverActions: ResolvedFarmServerActionsConfig;
@@ -682,6 +689,7 @@ export async function resolveConfig(
     md,
     mdx,
     migrations: resolveMigrationsConfig(userConfig.migrations),
+    cron: resolveCronConfig(userConfig.cron),
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     observability: userConfig.observability ?? false,
     storage: userConfig.storage || {},
