@@ -1375,17 +1375,19 @@ function AgentSectionIntro() {
               Run Eve on Vercel or Cloudflare Agents on Workers. Farm joins each runtime to your app
               in development and production while its native SDK stays intact.
             </p>
-            <div className="mt-8 flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+            <div className="mt-7 flex flex-wrap items-center gap-2">
               <ButtonLink
                 href="/docs/integrations/eve"
-                icon={<BrandIcon className="size-4 opacity-80" src={vercelIconUrl} />}
+                icon={<BrandIcon className="size-3.5 opacity-70" src={vercelIconUrl} />}
+                size="compact"
                 variant="secondary"
               >
                 Eve guide
               </ButtonLink>
               <ButtonLink
                 href="/docs/integrations/cf-agent"
-                icon={<BrandIcon className="size-4 opacity-80" src={cloudflareIconUrl} />}
+                icon={<BrandIcon className="size-3.5 opacity-70" src={cloudflareIconUrl} />}
+                size="compact"
                 variant="secondary"
               >
                 Cloudflare guide
