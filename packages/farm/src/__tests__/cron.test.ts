@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   applyFarmCronVercelCrons,
   cronRoute,
+  createFarmCronCloudflareConfig,
   createFarmCronCloudflareTriggers,
   FARM_CRON_MANIFEST,
   mergeScheduledTasks,
@@ -15,6 +16,7 @@ import {
 } from "../cron";
 
 const originalEnv = { ...process.env };
+const originalRuntimeEnv = (globalThis as any).__env__;
 
 afterEach(() => {
   for (const key of Object.keys(process.env)) {
@@ -24,6 +26,8 @@ afterEach(() => {
     if (value === undefined) delete process.env[key];
     else process.env[key] = value;
   }
+  if (originalRuntimeEnv === undefined) delete (globalThis as any).__env__;
+  else (globalThis as any).__env__ = originalRuntimeEnv;
 });
 
 describe("Farm cron", () => {
@@ -196,6 +200,14 @@ describe("Farm cron", () => {
       { path: "/api/digest", schedule: "0 2 * * *" },
     ]);
     expect(createFarmCronCloudflareTriggers(jobs)).toEqual(["0 2 * * *", "0 3 * * *"]);
+    expect(createFarmCronCloudflareConfig(jobs)).toEqual({
+      deployConfig: true,
+      wrangler: {
+        triggers: {
+          crons: ["0 2 * * *", "0 3 * * *"],
+        },
+      },
+    });
   });
 
   it("protects cron routes with CRON_SECRET when it is configured", async () => {
@@ -221,5 +233,26 @@ describe("Farm cron", () => {
 
     const response = await handler(new Request("https://example.com/api/cleanup"));
     expect(response.status).toBe(401);
+  });
+
+  it("authorizes Worker requests from runtime bindings and fails closed without one", async () => {
+    delete process.env.CRON_SECRET;
+    delete process.env.NODE_ENV;
+    (globalThis as any).__env__ = { CRON_SECRET: "worker-secret" };
+    const handler = cronRoute(async () => Response.json({ deleted: 3 }));
+
+    const unauthorized = await handler(new Request("https://example.com/api/cleanup"));
+    expect(unauthorized.status).toBe(401);
+
+    const authorized = await handler(
+      new Request("https://example.com/api/cleanup", {
+        headers: { authorization: "Bearer worker-secret" },
+      }),
+    );
+    expect(authorized.status).toBe(200);
+
+    (globalThis as any).__env__ = {};
+    const missingSecret = await handler(new Request("https://example.com/api/cleanup"));
+    expect(missingSecret.status).toBe(401);
   });
 });

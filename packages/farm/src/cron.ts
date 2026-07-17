@@ -42,6 +42,15 @@ export interface FarmCronRouteOptions {
   allowUnsecured?: boolean;
 }
 
+export interface FarmCronCloudflareConfig {
+  deployConfig: true;
+  wrangler: {
+    triggers: {
+      crons: string[];
+    };
+  };
+}
+
 export const DEFAULT_FARM_CRON_SECRET_ENV = "CRON_SECRET";
 export const FARM_CRON_MANIFEST = "cron-manifest.json";
 
@@ -178,6 +187,20 @@ export function createFarmCronCloudflareTriggers(jobs: FarmCronJob[]): string[] 
   return [...new Set(jobs.flatMap((job) => job.schedule))];
 }
 
+export function createFarmCronCloudflareConfig(
+  jobs: FarmCronJob[],
+): FarmCronCloudflareConfig | undefined {
+  const crons = createFarmCronCloudflareTriggers(jobs);
+  if (crons.length === 0) return undefined;
+
+  return {
+    deployConfig: true,
+    wrangler: {
+      triggers: { crons },
+    },
+  };
+}
+
 export function mergeScheduledTasks(
   ...maps: Array<Record<string, string | string[]> | undefined>
 ): Record<string, string | string[]> {
@@ -208,7 +231,10 @@ export function isCronRequestAuthorized(
   const secretEnv = options.secretEnv || DEFAULT_FARM_CRON_SECRET_ENV;
   const secret = options.secret || readEnvironmentValue(secretEnv);
   if (!secret) {
-    return options.allowUnsecured === true || readEnvironmentValue("NODE_ENV") !== "production";
+    return (
+      options.allowUnsecured === true ||
+      (!getFarmRuntimeBindings() && readEnvironmentValue("NODE_ENV") !== "production")
+    );
   }
 
   const authorization = request.headers.get("authorization") || "";
@@ -416,7 +442,16 @@ export default defineTask({
 }
 
 function readEnvironmentValue(name: string): string | undefined {
+  const runtimeValue = getFarmRuntimeBindings()?.[name];
+  if (typeof runtimeValue === "string") return runtimeValue;
   return typeof process !== "undefined" ? process.env?.[name] : undefined;
+}
+
+function getFarmRuntimeBindings(): Record<string, unknown> | undefined {
+  const runtimeBindings = (globalThis as typeof globalThis & {
+    __env__?: Record<string, unknown>;
+  }).__env__;
+  return runtimeBindings && typeof runtimeBindings === "object" ? runtimeBindings : undefined;
 }
 
 function safeFileName(value: string): string {

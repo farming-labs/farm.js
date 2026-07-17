@@ -24,7 +24,7 @@ import {
 } from "../workflows";
 import {
   applyFarmCronVercelCrons,
-  createFarmCronCloudflareTriggers,
+  createFarmCronCloudflareConfig,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
 } from "../cron";
@@ -2565,7 +2565,7 @@ async function buildNitroUniversal(
   }
 
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
-  const cloudflareCronTriggers = createFarmCronCloudflareTriggers(farmCron.jobs);
+  const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
 
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });
@@ -2625,15 +2625,9 @@ export default defineEventHandler((event) => handler.fetch(event.req, {
       ...farmCron.tasks,
     },
     scheduledTasks: isVercel ? farmWorkflows.scheduledTasks : scheduledTasks,
-    ...(isCloudflareWorker && cloudflareCronTriggers.length > 0
+    ...(isCloudflareWorker && cloudflareCronConfig
       ? {
-          cloudflare: {
-            wrangler: {
-              triggers: {
-                crons: cloudflareCronTriggers,
-              },
-            },
-          },
+          cloudflare: cloudflareCronConfig,
         }
       : {}),
     // Use serverHandlers to define our workflow handler first, then the catch-all handler.

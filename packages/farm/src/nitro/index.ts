@@ -8,7 +8,7 @@ import { createNitroSSRHandler } from "./ssr-handler";
 import path from "path";
 import { prepareFarmWorkflowsForNitro } from "../workflows";
 import {
-  createFarmCronCloudflareTriggers,
+  createFarmCronCloudflareConfig,
   mergeScheduledTasks,
   prepareFarmCronForNitro,
 } from "../cron";
@@ -64,7 +64,7 @@ export async function createNitroConfig(
     distDir,
   });
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
-  const cloudflareCronTriggers = createFarmCronCloudflareTriggers(farmCron.jobs);
+  const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
 
   // Create a runtime registry file to store route managers
   // This will be populated at runtime through Nitro hooks
@@ -592,15 +592,9 @@ export default defineEventHandler(async (event: H3Event) => {
       ...farmCron.tasks,
     },
     scheduledTasks,
-    ...(preset === "cloudflare-module" && cloudflareCronTriggers.length > 0
+    ...(preset === "cloudflare-module" && cloudflareCronConfig
       ? {
-          cloudflare: {
-            wrangler: {
-              triggers: {
-                crons: cloudflareCronTriggers,
-              },
-            },
-          },
+          cloudflare: cloudflareCronConfig,
         }
       : {}),
     handlers: [
