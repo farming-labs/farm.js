@@ -298,7 +298,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
     expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
-    expect(html).toContain('class="fd-page-nav-description');
+    expect(html).toContain('class="fd-page-nav-title fd-page-nav-title-next"');
+    expect(html).toContain('<span class="fd-page-nav-description">Next Page</span>');
+    expect(html).not.toContain('class="fd-page-nav-label"');
     expect(html).toContain('href="/docs/guide"');
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');

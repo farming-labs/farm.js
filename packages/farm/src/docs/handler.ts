@@ -1450,19 +1450,15 @@ function renderPixelPageNav(
   const next = orderedPages[activeIndex + 1];
   if (!previous && !next) return "";
 
-  const renderDescription = (item: FarmDocsPage) =>
-    item.description
-      ? `<span class="fd-page-nav-description">${escapeHtml(item.description)}</span>`
-      : '<span class="fd-page-nav-description fd-page-nav-description-empty" aria-hidden="true">&nbsp;</span>';
+  const renderChevron = (direction: "prev" | "next") =>
+    `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="${direction === "prev" ? "15 18 9 12 15 6" : "9 18 15 12 9 6"}" /></svg>`;
   const renderCard = (item: FarmDocsPage, direction: "prev" | "next") =>
     `<a class="fd-page-nav-card fd-page-nav-${direction}" href="${escapeAttribute(item.href)}">
-  <span class="fd-page-nav-label">${direction === "prev" ? '<span aria-hidden="true">&larr;</span>Previous' : 'Next<span aria-hidden="true">&rarr;</span>'}</span>
-  <span class="fd-page-nav-title">${escapeHtml(item.title)}</span>
-  ${renderDescription(item)}
+  <span class="fd-page-nav-title fd-page-nav-title-${direction}">${direction === "prev" ? `${renderChevron(direction)}${escapeHtml(item.title)}` : `${escapeHtml(item.title)}${renderChevron(direction)}`}</span>
+  <span class="fd-page-nav-description">${direction === "prev" ? "Previous Page" : "Next Page"}</span>
 </a>`;
 
-  const style = previous && next ? "" : ' style="grid-template-columns: 1fr;"';
-  return `<nav class="not-prose fd-page-nav" aria-label="Page navigation"${style}>
+  return `<nav class="not-prose fd-page-nav" aria-label="Page navigation">
   ${previous ? renderCard(previous, "prev") : ""}
   ${next ? renderCard(next, "next") : ""}
 </nav>`;
@@ -1699,14 +1695,14 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 2rem; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding-top: 1.5rem; }
-    .fd-page-nav-card { display: flex; min-width: 0; min-height: 8.75rem; flex-direction: column; justify-content: flex-start; gap: 0.375rem; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 0 !important; background: transparent; padding: 1rem; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease; }
-    .fd-page-nav-card:hover { border-color: color-mix(in srgb, var(--color-fd-foreground, #fff) 22%, transparent); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); }
+    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; border-top: 0; padding-top: 0; }
+    .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #nd-docs-layout .fd-page-nav-card { display: flex; min-width: 0; min-height: 95px; flex-direction: column; justify-content: flex-start; gap: 8px; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 8px !important; background: transparent; padding: 16px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease; }
+    .fd-page-nav-card:hover { border-color: var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-muted, hsl(0 0% 10%)); }
     .fd-page-nav-next { align-items: flex-end; text-align: right; }
-    .fd-page-nav-label { display: inline-flex; align-items: center; gap: 0.25rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 0.75rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
-    .fd-page-nav-title { display: -webkit-box; overflow: hidden; min-height: calc(1.4em * 2); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 600; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description { display: -webkit-box; overflow: hidden; min-height: calc(1.5em * 2); color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
-    .fd-page-nav-description-empty { visibility: hidden; }
+    .fd-page-nav-title { display: inline-flex; max-width: 100%; min-height: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 1rem; font-weight: 500; line-height: 1.65; overflow-wrap: anywhere; }
+    .fd-page-nav-title svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+    .fd-page-nav-description { display: block; max-width: 100%; min-height: 0; overflow: hidden; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 1rem; font-weight: 400; line-height: 1.65; text-overflow: ellipsis; white-space: nowrap; }
     .fd-below-title-block { display: flex; flex-direction: column; align-items: flex-start; gap: 0.625rem; margin: 0 0 1.25rem; }
     .fd-page-actions { display: flex; width: 100%; align-items: center; gap: 0.5rem; }
     .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
