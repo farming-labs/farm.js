@@ -35,7 +35,7 @@ const commands: readonly CommandOption[] = [
   {
     label: "Agent",
     command:
-      "Use Farm.js to build this production-ready React product app. Read the project docs first, then follow its App Router, typed APIs, server functions, middleware, integrations, environment boundaries, data loading, and deployment conventions. Preserve existing patterns, validate external input, keep secrets server-only, add focused tests, and run type checks plus a production build before finishing.",
+      "Use Farm.js to build this production-ready React product app. First read the current Farm.js skill at https://farmjs.dev/api/docs/skill.md and use its linked docs as the source of truth. Follow its App Router, typed APIs, server functions, middleware, framework Cron, integrations, environment boundaries, data loading, and deployment conventions. Preserve existing patterns, validate external input, keep secrets server-only, add focused tests, and run type checks plus a production build before finishing.",
     icon: Bot,
     kind: "agent",
   },

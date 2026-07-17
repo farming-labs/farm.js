@@ -1,6 +1,6 @@
 ---
 name: farmjs
-description: Use when building, debugging, documenting, or integrating Farm.js apps and packages. Covers Farm.js routing, config, typed API clients, integrations such as Stripe/auth/email/jobs, storage, plugins, examples, and verification commands.
+description: Use when building, debugging, documenting, or integrating Farm.js apps and packages. Covers Farm.js routing, config, typed API clients, framework Cron, integrations such as Stripe/auth/email/jobs, storage, deployment, plugins, examples, and verification commands.
 metadata:
   short-description: Build and debug Farm.js apps and integrations
 ---
@@ -79,6 +79,7 @@ Common config fields:
 - `experimental.serverComponents`: enables server component behavior
 - `integrations`: provider integrations object
 - `storage.mounts`: named storage instances
+- `cron`: named portable UTC schedules mapped to GET API routes
 - `plugins`: Farm plugins
 - `redirects()`, `headers()`, `rewrites()`: route behavior
 - `vite`: underlying Vite config
@@ -377,6 +378,36 @@ await appStore.setItem("settings", { theme: "light" });
 
 Known helpers include memory, local, sqlite, postgres, mysql, redis, mongodb, s3, upstash, vercelKV, pglite, and libsql.
 
+## Cron Spec
+
+Framework Cron maps portable five-field UTC schedules to ordinary GET API routes. Keep timing in `farm.config.ts` and business logic in the route:
+
+```ts
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  cron: {
+    dailyCleanup: {
+      schedule: "0 2 * * *",
+      path: "/api/maintenance/cleanup",
+    },
+  },
+});
+```
+
+```ts
+import { cronRoute } from "@farmjs/core/cron";
+
+export const GET = cronRoute(async () => {
+  await deleteExpiredSessions();
+  return Response.json({ ok: true });
+});
+```
+
+Use `farm cron list`, `farm cron run dailyCleanup`, or the opt-in local scheduler `farm dev --cron`. `cronRoute()` verifies `CRON_SECRET` when configured and fails closed in production when it is missing.
+
+Builds always emit `.farm/cron-manifest.json`. Vercel compiles entries to Build Output API crons, Cloudflare Workers using `cloudflare-module` get Wrangler triggers, and Node/Bun/Deno targets use Nitro scheduling. Treat delivery as at least once: make handlers idempotent and use uniqueness keys or distributed locks where overlap matters. Use the Jobs integration for durable retries, steps, queues, status, or long-running work. The older `defineCron()` API is compatibility-only; new apps use config plus a route.
+
 ## Plugin Spec
 
 Use `definePlugin` for custom behavior:
@@ -447,6 +478,7 @@ Expected with dummy keys: homepage returns `200`; `/billing/products` reaches St
 - Do not put server SDKs or secrets in `"use client"` modules.
 - Keep `AppIntegrations` exported from integration setup so `integrationClients<AppIntegrations>()` can infer types.
 - For Supabase/custom route APIs, method calls may be nested, for example `.login.post(...)`, not `.login(...)`.
+- Cron is not a durable workflow engine; protect production routes with `CRON_SECRET` and design handlers for repeated or overlapping delivery.
 - In monorepos with pnpm and Prisma, generated clients can be stale or shared; run `prisma generate` immediately before builds.
 - Run `pnpm format` before `pnpm lint` if `oxfmt --check` fails.
 - Existing lint warnings may be present; treat nonzero exit codes as failures.
