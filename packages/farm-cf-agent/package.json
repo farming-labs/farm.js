@@ -1,0 +1,58 @@
+{
+  "name": "@farmjs/cf-agent",
+  "version": "0.0.1",
+  "description": "First-class Cloudflare Agents integration for Farm.js",
+  "keywords": [
+    "agents",
+    "cloudflare",
+    "durable-objects",
+    "farmjs"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-cf-agent"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farmjs/core": "workspace:*",
+    "jsonc-parser": "^3.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "agents": "0.17.4",
+    "tsup": "^8.5.1",
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.1",
+    "wrangler": "4.111.0"
+  },
+  "peerDependencies": {
+    "agents": ">=0.17.4 <1",
+    "wrangler": ">=4.111.0 <5"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

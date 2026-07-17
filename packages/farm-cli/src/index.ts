@@ -8,7 +8,11 @@ export {
   type FarmIntegrationProvider,
 } from "./add-integration";
 export { buildFarm } from "./build";
-export { deployFarm } from "./deploy";
+export {
+  deployFarm,
+  resolveCloudflareAgentDeployPlan,
+  type CloudflareAgentDeployPlan,
+} from "./deploy";
 export {
   createPreviewTunnelPlan,
   parsePreviewPublicUrl,

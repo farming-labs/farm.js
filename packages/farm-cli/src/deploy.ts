@@ -1,5 +1,5 @@
-import { execSync } from "child_process";
-import { existsSync } from "fs";
+import { execFileSync, execSync } from "child_process";
+import { existsSync, readFileSync } from "fs";
 import path from "path";
 import {
   getPresetForDeployTarget,
@@ -18,6 +18,11 @@ export interface DeployFarmOptions {
   cloudflare?: boolean;
   netlify?: boolean;
   prod?: boolean;
+}
+
+export interface CloudflareAgentDeployPlan {
+  configPath: string;
+  environment?: string;
 }
 
 /**
@@ -48,7 +53,9 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
 
   const deployConfig = resolveDeployConfig(userConfig || {}, {
     target: platform,
-    preset: cliTarget ? getPresetForDeployTarget(platform) : undefined,
+    preset: cliTarget
+      ? userConfig?.deploy?.preset || userConfig?.preset || getPresetForDeployTarget(platform)
+      : undefined,
   });
   const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
 
@@ -284,30 +291,116 @@ async function deployVercel(root: string, outputDir: string, prod?: boolean) {
   }
 }
 
-/**
- * Deploy to Cloudflare Pages using Wrangler CLI
- */
+/** Deploy to a composed Worker or fall back to Cloudflare Pages. */
 async function deployCloudflare(root: string, outputDir: string, projectName?: string) {
-  logger.info("🚀 Deploying to Cloudflare Pages...");
+  const agentPlan = resolveCloudflareAgentDeployPlan(root);
+  if (agentPlan) {
+    logger.info("🚀 Deploying Farm and Cloudflare Agents as one Worker...");
+    assertWranglerInstalled(root);
 
-  // Check if Wrangler CLI is installed
-  try {
-    execSync("wrangler --version", { stdio: "ignore" });
-  } catch {
-    logger.error("❌ Wrangler CLI is not installed.");
-    logger.info("💡 Install it with: npm i -g wrangler");
-    process.exit(1);
+    try {
+      execFileSync(
+        "wrangler",
+        [
+          "deploy",
+          "--config",
+          agentPlan.configPath,
+          ...(agentPlan.environment ? ["--env", agentPlan.environment] : []),
+        ],
+        {
+          stdio: "inherit",
+          cwd: root,
+        },
+      );
+      logger.success("✅ Deployed Farm and Cloudflare Agents successfully!");
+    } catch (error: any) {
+      logger.error(`❌ Failed to deploy to Cloudflare: ${error.message}`);
+      process.exit(1);
+    }
+    return;
   }
 
+  logger.info("🚀 Deploying to Cloudflare Pages...");
+
+  assertWranglerInstalled(root);
+
   try {
-    process.chdir(outputDir);
-    const projectFlag = ` --project-name=${projectName || "farm-app"}`;
-    execSync(`wrangler pages deploy .${projectFlag}`, { stdio: "inherit" });
+    execFileSync(
+      "wrangler",
+      ["pages", "deploy", ".", `--project-name=${projectName || "farm-app"}`],
+      {
+        stdio: "inherit",
+        cwd: outputDir,
+      },
+    );
     logger.success("✅ Deployed to Cloudflare Pages successfully!");
   } catch (error: any) {
     logger.error(`❌ Failed to deploy to Cloudflare: ${error.message}`);
     process.exit(1);
   }
+}
+
+/** Read the trusted Workers deployment handoff emitted by @farmjs/cf-agent. */
+export function resolveCloudflareAgentDeployPlan(
+  root: string,
+): CloudflareAgentDeployPlan | undefined {
+  const projectRoot = path.resolve(root);
+  const metadataPath = path.join(projectRoot, ".farm", "cf-agent", "deploy.json");
+  if (!existsSync(metadataPath)) return undefined;
+
+  let metadata: unknown;
+  try {
+    metadata = JSON.parse(readFileSync(metadataPath, "utf8"));
+  } catch {
+    throw new Error(`Invalid Cloudflare Agents deployment metadata at ${metadataPath}.`);
+  }
+
+  if (
+    !isRecord(metadata) ||
+    metadata.version !== 1 ||
+    metadata.provider !== "cloudflare-agents" ||
+    typeof metadata.config !== "string" ||
+    !metadata.config.trim()
+  ) {
+    throw new Error(`Invalid Cloudflare Agents deployment metadata at ${metadataPath}.`);
+  }
+
+  const configPath = path.resolve(projectRoot, metadata.config);
+  const relativeConfigPath = path.relative(projectRoot, configPath);
+  if (
+    relativeConfigPath === ".." ||
+    relativeConfigPath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativeConfigPath)
+  ) {
+    throw new Error("Cloudflare Agents deployment config must stay inside the Farm project root.");
+  }
+  if (!existsSync(configPath)) {
+    throw new Error(`Cloudflare Agents deployment config was not found at ${configPath}.`);
+  }
+
+  const environment = metadata.environment;
+  if (environment !== undefined && (typeof environment !== "string" || !environment.trim())) {
+    throw new Error("Cloudflare Agents deployment environment must be a non-empty string.");
+  }
+
+  return {
+    configPath,
+    ...(typeof environment === "string" ? { environment: environment.trim() } : {}),
+  };
+}
+
+function assertWranglerInstalled(root: string): void {
+  try {
+    execFileSync("wrangler", ["--version"], { stdio: "ignore", cwd: root });
+  } catch {
+    logger.error("❌ Wrangler CLI is not installed.");
+    logger.info("💡 Install it in this project with: npm i -D wrangler");
+    process.exit(1);
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 /**

@@ -461,6 +461,15 @@ describe("resolveDeployConfig", () => {
     });
   });
 
+  it("recognizes the Cloudflare module preset used by agent Workers", () => {
+    const deploy = resolveDeployConfig({ preset: "cloudflare-module" });
+
+    expect(deploy).toMatchObject({
+      target: "cloudflare",
+      preset: "cloudflare-module",
+    });
+  });
+
   it("respects explicit deploy output aliases", () => {
     const deploy = resolveDeployConfig({
       deploy: {

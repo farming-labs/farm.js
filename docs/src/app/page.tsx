@@ -5,6 +5,7 @@ import {
   Blocks,
   BookOpen,
   BookOpenText,
+  Bot,
   Braces,
   CloudCog,
   CreditCard,
@@ -61,7 +62,7 @@ import { FlickeringGrid } from "../components/ui/flickering-grid";
 export const metadata = {
   title: "Farm.js - The React framework for product apps",
   description:
-    "Farm.js brings app routing, typed APIs, middleware, integrations, docs, migrations, and production deployment into one React framework.",
+    "Farm.js brings app routing, typed APIs, middleware, integrations, agent runtimes, docs, migrations, and production deployment into one React framework.",
 };
 
 const navItems = [
@@ -366,6 +367,79 @@ const routeCodeTabs = [
             <p>{data.description}</p>
         </main>
     );
+}`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const agentRuntimeCodeTabs = [
+  {
+    id: "eve",
+    label: "Eve / farm.config.ts",
+    language: "ts",
+    highlightLines: [5, 8],
+    code: `import { eve } from "@farmjs/eve";
+
+export default defineConfig({
+    integrations: {
+        agent: eve(),
+    },
+    deploy: {
+        target: "vercel",
+    },
+});`,
+  },
+  {
+    id: "cloudflare",
+    label: "Cloudflare / farm.config.ts",
+    language: "ts",
+    highlightLines: [5, 8, 9],
+    code: `import { cfAgent } from "@farmjs/cf-agent";
+
+export default defineConfig({
+    integrations: {
+        agent: cfAgent(),
+    },
+    deploy: {
+        target: "cloudflare",
+        preset: "cloudflare-module",
+    },
+});`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
+
+const agentClientCodeTabs = [
+  {
+    id: "eve",
+    label: "Eve / chat.ts",
+    language: "ts",
+    highlightLines: [2, 5, 7, 8],
+    code: `"use client";
+import { useEveAgent } from "eve/react";
+
+export function useChat() {
+    const agent = useEveAgent();
+    return {
+        messages: agent.data.messages,
+        send: agent.send,
+    };
+}`,
+  },
+  {
+    id: "cloudflare",
+    label: "Cloudflare / counter.ts",
+    language: "ts",
+    highlightLines: [2, 5, 6, 7],
+    code: `"use client";
+import { useAgent } from "agents/react";
+
+export function useCounter() {
+    return useAgent<
+        CounterAgent,
+        CounterState
+    >({
+        agent: "CounterAgent",
+        name: "shared",
+    });
 }`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
@@ -888,7 +962,7 @@ function DeveloperExperienceGrid() {
         <TypedApiVisual />
       </FeatureCell>
       <FeatureCell
-        body="Bring in auth, billing, email, jobs, storage, and docs through one integration system."
+        body="Bring in auth, billing, email, jobs, storage, docs, and agent runtimes through one integration system."
         className="border-t border-white/12"
         icon={Plug}
         index="01.3"
@@ -1128,6 +1202,28 @@ function AdvancedRoutesVisual() {
   );
 }
 
+function AgentRuntimeVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      compact
+      id="farm-agent-runtime-code"
+      tabs={agentRuntimeCodeTabs}
+      tabsLabel="Farm agent runtime examples"
+    />
+  );
+}
+
+function AgentClientVisual() {
+  return (
+    <FoundationCodeTabsVisual
+      compact
+      id="farm-agent-client-code"
+      tabs={agentClientCodeTabs}
+      tabsLabel="Farm agent client examples"
+    />
+  );
+}
+
 function FoundationGrid() {
   return (
     <section data-foundation-grid className="farm-full-rule grid w-full lg:grid-cols-2">
@@ -1194,6 +1290,136 @@ function FoundationGrid() {
   );
 }
 
+function AgentRuntimeIllustration() {
+  return (
+    <figure className="farm-feature-spotlight farm-agent-spotlight relative mx-auto h-[248px] w-full max-w-[28rem] overflow-hidden md:mx-0 md:h-[280px]">
+      <figcaption className="sr-only">
+        Farm connects the application origin to Eve on Vercel and Cloudflare Agents on Workers.
+      </figcaption>
+
+      <div className="relative z-10 grid h-full grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] items-center px-2 sm:px-4">
+        <div className="border border-white/10 bg-black/80 p-3 sm:p-4">
+          <div className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/72">
+            <Route aria-hidden className="size-3.5" strokeWidth={1.5} />
+            Farm app
+          </div>
+          <div className="mt-3 border-t border-white/8 pt-3">
+            <span className="block font-mono text-[8px] font-normal uppercase tracking-normal text-white/34 sm:text-[9px]">
+              Same origin
+            </span>
+            <code className="mt-1 block font-mono text-xs text-white/86">/</code>
+          </div>
+        </div>
+
+        <div aria-hidden className="relative h-[184px]">
+          <span className="absolute left-0 top-1/2 h-px w-1/2 bg-white/22" />
+          <span className="absolute bottom-1/4 left-1/2 top-1/4 w-px bg-white/22" />
+          <span className="absolute left-1/2 right-0 top-1/4 h-px bg-white/22" />
+          <span className="absolute bottom-1/4 left-1/2 right-0 h-px bg-white/22" />
+          <span className="absolute left-1/2 top-1/2 size-1 -translate-x-1/2 -translate-y-1/2 bg-white" />
+          <span className="absolute right-0 top-1/4 size-1 -translate-y-1/2 bg-white/52" />
+          <span className="absolute bottom-1/4 right-0 size-1 translate-y-1/2 bg-white/52" />
+        </div>
+
+        <div className="grid h-[184px] grid-rows-2 gap-3">
+          <div className="border border-white/10 bg-black/80 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/76 sm:text-[10px]">
+                <Workflow aria-hidden className="size-3.5 shrink-0" strokeWidth={1.5} />
+                Eve
+              </span>
+              <BrandIcon className="size-3.5 opacity-52" src={vercelIconUrl} />
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/8 pt-2">
+              <code className="font-mono text-[9px] text-white/76">/eve/*</code>
+              <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/32">
+                Vercel
+              </span>
+            </div>
+          </div>
+
+          <div className="border border-white/10 bg-black/80 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2 font-mono text-[9px] font-normal uppercase tracking-normal text-white/76 sm:text-[10px]">
+                <BrandIcon className="size-3.5 shrink-0 opacity-72" src={cloudflareIconUrl} />
+                <span className="truncate">Cloudflare Agents</span>
+              </span>
+            </div>
+            <div className="mt-2 flex items-center justify-between gap-2 border-t border-white/8 pt-2">
+              <code className="font-mono text-[9px] text-white/76">/agents/*</code>
+              <span className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/32">
+                Workers
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </figure>
+  );
+}
+
+function AgentSectionIntro() {
+  return (
+    <section id="agents" className="farm-wide-rule grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]">
+      <div className="flex items-start border-b border-white/12 p-6 text-white/36 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
+        <IndexedLabel icon={Bot} index="03" label="Agent systems" />
+      </div>
+
+      <div className="relative grid min-w-0 items-center gap-8 overflow-hidden bg-black px-6 py-10 sm:px-10 sm:py-12 md:grid-cols-[minmax(0,1fr)_20rem] lg:min-h-[420px] lg:gap-10 lg:px-12 xl:h-[420px] xl:grid-cols-[minmax(0,1fr)_28rem]">
+        <div className="relative z-10 flex min-w-0 items-center">
+          <div className="min-w-0 max-w-lg">
+            <h2 className="text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl">
+              Bring the agent runtime you already use
+            </h2>
+            <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
+              Run Eve on Vercel or Cloudflare Agents on Workers. Farm joins each runtime to your app
+              in development and production while its native SDK stays intact.
+            </p>
+            <div className="mt-8 flex items-center">
+              <ButtonLink
+                href="/docs/integrations#agent-runtimes"
+                icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
+              >
+                Explore Agent Integrations
+              </ButtonLink>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-10 flex items-center justify-center md:justify-end">
+          <AgentRuntimeIllustration />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function AgentFeatureGrid() {
+  return (
+    <section data-agent-grid className="farm-full-rule grid w-full lg:grid-cols-2">
+      <FeatureCell
+        body="Choose Eve or Cloudflare Agents. Farm starts the runtime in development, owns its same-origin routes, and composes supported production output."
+        icon={Bot}
+        index="03.1"
+        label="Agent runtimes"
+        title="Run agents beside the app"
+      >
+        <AgentRuntimeVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Use useEveAgent for durable conversations or useAgent for typed WebSocket state and RPC. Farm does not add a duplicate client layer."
+        className="border-t border-white/12 lg:border-l lg:border-t-0"
+        icon={Network}
+        index="03.2"
+        label="Native clients"
+        title="Keep the provider-native SDK"
+      >
+        <AgentClientVisual />
+      </FeatureCell>
+    </section>
+  );
+}
+
 function IntegrationsSection() {
   return (
     <section
@@ -1211,8 +1437,8 @@ function IntegrationsSection() {
               Bring the tools you already use
             </h2>
             <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-              Choose built-in integrations for auth, billing, email, jobs, storage, API keys, and
-              UI, or connect your own.
+              Choose built-in integrations for auth, billing, email, jobs, storage, agents, API
+              keys, and UI, or connect your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">
               <ButtonLink
@@ -1289,7 +1515,8 @@ function FinalCta() {
           One framework. The whole product.
         </h2>
         <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
-          Build routing, APIs, integrations, docs, and deployment together in one React framework.
+          Build routing, APIs, integrations, agents, docs, and deployment together in one React
+          framework.
         </p>
       </div>
       <div className="farm-top-rule flex items-center justify-center bg-white/[0.035] p-4">
@@ -1429,6 +1656,8 @@ export default function HomePage(_props: PageProps) {
             <DeveloperExperienceGrid />
             <IntegrationsSection />
             <FoundationGrid />
+            <AgentSectionIntro />
+            <AgentFeatureGrid />
             <FinalCta />
           </main>
           <Footer />

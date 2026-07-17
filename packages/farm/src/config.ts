@@ -314,7 +314,9 @@ export function getPresetForDeployTarget(
 export function getDeployTargetForPreset(preset?: string): FarmDeployTarget | undefined {
   if (!preset) return undefined;
   if (preset === "vercel" || preset === "vercel-edge") return "vercel";
-  if (preset === "cloudflare" || preset === "cloudflare-pages") return "cloudflare";
+  if (preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module") {
+    return "cloudflare";
+  }
   if (preset === "netlify" || preset === "netlify-edge") return "netlify";
   if (preset === "node-server") return "node";
   return undefined;

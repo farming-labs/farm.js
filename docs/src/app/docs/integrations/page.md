@@ -1,6 +1,6 @@
 ---
 title: "Integrations"
-description: "Register services once, get owned routes, typed callers, providers, middleware, storage access, lifecycle hooks, and validation."
+description: "Register services once, get owned routes, typed callers, agent runtimes, providers, middleware, storage access, lifecycle hooks, and validation."
 section: "Integrations"
 ---
 
@@ -202,6 +202,30 @@ export async function loadMessage() {
 
 On the server, Farm first tries to dispatch to the registered integration runtime directly. If no runtime is available, it falls back to `fetch` with forwarded request headers.
 
+## Agent runtimes
+
+Agent integrations connect a provider runtime to the Farm lifecycle without replacing that provider's SDK. Farm starts the runtime beside the app in development, owns its same-origin route prefixes, and composes supported production output. The client still uses the provider-native hooks and typed RPC APIs.
+
+```ts
+import { defineConfig } from "@farmjs/core";
+import { eve } from "@farmjs/eve";
+
+export default defineConfig({
+  integrations: {
+    agent: eve(),
+  },
+});
+```
+
+`agent` is a conventional namespace, not a reserved key. Agent runtime routes do not generate `api` or `apiClient` callers because streaming and WebSocket protocols are handled by the provider SDK.
+
+| Runtime | Farm manages | Application uses |
+| --- | --- | --- |
+| [Eve](/docs/integrations/eve) | Eve development process, `/eve` and workflow routes, Vercel build composition. | `agent/` files and `useEveAgent()`. |
+| [Cloudflare Agents](/docs/integrations/cf-agent) | Wrangler development process, `/agents` WebSocket proxy, combined Worker output and deployment metadata. | Agent classes, Durable Object bindings, `useAgent()`, and callable RPC. |
+
+Same-origin routing is not an authorization boundary. Authenticate agent HTTP and WebSocket requests in application middleware or provider routing hooks, and authorize every sensitive tool or callable method on the server.
+
 ## Shared data
 
 `createIntegrations({ data })` adds small per-call metadata to integration requests. It is useful for tenant IDs, locale, analytics context, or feature flags.
@@ -238,6 +262,7 @@ The route reads that value from `ctx.data`. Browser-provided data is client cont
 | Auth | Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase expose routes, providers, session helpers, and auth middleware. |
 | Messaging | Resend sends transactional mail, previews templates, and receives provider webhooks. |
 | Workflows | Trigger.dev and Inngest expose trigger, schedule, batch, status, and cancel APIs. |
+| Agents | Eve and Cloudflare Agents run beside Farm in development and compose with supported deployment targets. |
 | API Keys | Unkey can create, verify, revoke, update, and delete customer or service keys. |
 | Interface | UI registry entries scaffold shadcn-style integration screens when `--ui` is enabled. |
 | Storage | ORM storage gives schema-backed integrations a provider-neutral `ctx.args.db`. |

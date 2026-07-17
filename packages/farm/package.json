@@ -96,6 +96,9 @@
       "testing": [
         "./dist/testing.d.ts"
       ],
+      "agent-runtime": [
+        "./dist/agent-runtime.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -307,6 +310,11 @@
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.mjs",
       "require": "./dist/testing.cjs"
+    },
+    "./agent-runtime": {
+      "types": "./dist/agent-runtime.d.ts",
+      "import": "./dist/agent-runtime.mjs",
+      "require": "./dist/agent-runtime.cjs"
     }
   },
   "scripts": {
