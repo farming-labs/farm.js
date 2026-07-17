@@ -76,6 +76,24 @@ describe("Farm cron", () => {
 
     expect(() =>
       resolveCronConfig({
+        sundayAlias: {
+          schedule: "0 2 * * 7",
+          path: "/api/sunday",
+        },
+      }),
+    ).toThrow("invalid day of week field");
+
+    expect(() =>
+      resolveCronConfig({
+        conflictingDays: {
+          schedule: "0 2 1 * 1",
+          path: "/api/conflicting-days",
+        },
+      }),
+    ).toThrow("cannot constrain both day-of-month and day-of-week");
+
+    expect(() =>
+      resolveCronConfig({
         external: {
           schedule: "0 2 * * *",
           path: "https://example.com/cleanup",

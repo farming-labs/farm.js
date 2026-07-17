@@ -48,7 +48,7 @@ const CRON_FIELD_RANGES = [
   [0, 23, "hour"],
   [1, 31, "day of month"],
   [1, 12, "month"],
-  [0, 7, "day of week"],
+  [0, 6, "day of week"],
 ] as const;
 
 export function resolveCronConfig(
@@ -282,6 +282,11 @@ function normalizeCronExpression(name: string, value: unknown): string {
     const [minimum, maximum, label] = CRON_FIELD_RANGES[index];
     validateCronField(name, expression, field, minimum, maximum, label);
   });
+  if (fields[2] !== "*" && fields[4] !== "*") {
+    throw new TypeError(
+      `Farm cron ${JSON.stringify(name)} schedule ${JSON.stringify(expression)} cannot constrain both day-of-month and day-of-week.`,
+    );
+  }
   return expression;
 }
 
