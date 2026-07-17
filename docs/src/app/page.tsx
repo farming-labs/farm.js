@@ -410,33 +410,36 @@ export default defineConfig({
 const agentClientCodeTabs = [
   {
     id: "eve",
-    label: "Eve / chat.tsx",
-    language: "tsx",
-    highlightLines: [2, 5, 7],
+    label: "Eve / chat.ts",
+    language: "ts",
+    highlightLines: [2, 5, 7, 8],
     code: `"use client";
 import { useEveAgent } from "eve/react";
 
-export function Chat() {
+export function useChat() {
     const agent = useEveAgent();
-    const send = () => agent.send({ message: "Ship it" });
-    return <button onClick={send}>Send</button>;
+    return {
+        messages: agent.data.messages,
+        send: agent.send,
+    };
 }`,
   },
   {
     id: "cloudflare",
-    label: "Cloudflare / counter.tsx",
-    language: "tsx",
-    highlightLines: [2, 5, 9, 10],
+    label: "Cloudflare / counter.ts",
+    language: "ts",
+    highlightLines: [2, 5, 6, 7],
     code: `"use client";
 import { useAgent } from "agents/react";
-import type { CounterAgent, CounterState } from "./agent";
-export function Counter() {
-    const agent = useAgent<CounterAgent, CounterState>({
+
+export function useCounter() {
+    return useAgent<
+        CounterAgent,
+        CounterState
+    >({
         agent: "CounterAgent",
         name: "shared",
     });
-    const increment = () => agent.stub.increment();
-    return <button onClick={increment}>{agent.state?.count ?? 0}</button>;
 }`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
