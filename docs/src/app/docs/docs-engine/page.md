@@ -18,13 +18,43 @@ import { defineConfig } from "@farmjs/core";
 export default defineConfig({
   docs: {
     entry: "/docs",
+    metadata: {
+      description: "Product guides and API reference.",
+    },
+    nav: {
+      title: "Acme Docs",
+    },
   },
 });
 ```
 
+Farm uses `src/app/docs` for content when `entry` is `/docs`. Add markdown pages using the normal
+app directory structure:
+
+```txt
+src/app/docs/
+  page.md
+  getting-started/
+    page.md
+  api-reference/
+    page.md
+```
+
+Use frontmatter for page metadata:
+
+```md
+---
+title: "Getting Started"
+description: "Install Farm and create your first application."
+---
+
+# Getting Started
+```
+
 ## Automatic docs routes
 
-When docs.entry is enabled, Farm can serve the docs entry and /api/docs machine endpoints automatically. Route wrappers are only needed when you want to override the default behavior.
+When `docs.entry` is enabled, Farm serves the docs entry and `/api/docs` machine endpoints
+automatically. Route wrappers are only needed when you want to override the default behavior.
 
 - /docs
 - /docs/getting-started
@@ -33,36 +63,52 @@ When docs.entry is enabled, Farm can serve the docs entry and /api/docs machine 
 - /api/docs?format=sitemap-xml
 - /api/docs/agent/spec
 
-## Config discovery
+## Configure the docs experience
 
-Farm scans docs.config.ts, docs.config.js, docs.config.mjs, docs.config.cjs, and docs.json by default. Inline config in farm.config.ts can override discovered values.
+Keep docs configuration alongside the rest of the application in `farm.config.ts`:
 
-## docs.config.ts shape
-
-**docs.config.ts**
+**farm.config.ts**
 
 ```ts
-import { defineDocs } from "@farming-labs/docs";
-import { pixelBorder } from "@farming-labs/theme/pixel-border";
+import { defineConfig } from "@farmjs/core";
 
-export default defineDocs({
-  entry: "docs",
-  docsPath: "/docs",
-  nav: {
-    title: "Farm.js Docs",
-  },
-  search: {
-    provider: "simple",
-    enabled: true,
-  },
-  pageActions: {
-    copyMarkdown: {
-      enabled: true,
+export default defineConfig({
+  docs: {
+    entry: "/docs",
+    nav: {
+      title: "Acme Docs",
+      url: "/",
     },
+    search: {
+      provider: "simple",
+      enabled: true,
+      maxResults: 10,
+    },
+    pageActions: {
+      copyMarkdown: {
+        enabled: true,
+      },
+    },
+    llmsTxt: {
+      enabled: true,
+      siteTitle: "Acme Docs",
+    },
+    sitemap: true,
+    robots: true,
   },
-  theme: pixelBorder(),
 });
 ```
+
+The `docs` object controls the public path, metadata, navigation, search, page actions, agent output,
+theme, icons, reading time, last-updated display, sitemap, and robots output. `defineDocs` is not
+required for a Farm application.
+
+### Optional external config
+
+Large documentation sites may move the serializable docs options into `docs.config.ts`,
+`docs.config.js`, `docs.config.mjs`, `docs.config.cjs`, or `docs.json`. Farm discovers those files
+automatically. Values declared in `farm.config.ts` take priority, so applications can still override
+the entry or any shared setting.
 
 ## Agent-readable output
 
@@ -98,9 +144,20 @@ fall back to the source file timestamp and copied production docs fall back to t
 
 When `docs.entry` is enabled in `farm.config.ts`, Farm can mount docs pages and docs API routes automatically. Add explicit route wrappers only when the app wants to override default rendering, authentication, or response behavior.
 
+```ts
+// src/app/api/docs/route.ts
+import { createDocsAPI } from "@farmjs/core/docs";
+
+export const { GET, POST } = createDocsAPI();
+```
+
+Add the same exports to `src/app/api/docs/[...docs]/route.ts` when the override should also own
+path-style machine routes. Most applications do not need either wrapper.
+
 ## Production notes
 
 - Keep docs content in markdown so human pages and agent-readable pages stay in sync.
-- Use `docs.config.ts` for navigation, page actions, icons, theme, and metadata.
+- Keep the canonical docs configuration in the `docs` property of `farm.config.ts`.
+- Use an external docs config only when a large navigation or theme definition is easier to maintain separately.
 - Keep generated docs routes public unless product docs require auth.
 - Verify docs build output before publishing package docs.
