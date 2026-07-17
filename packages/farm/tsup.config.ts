@@ -28,6 +28,7 @@ export default defineConfig({
     "app-markdown": "src/app-markdown.ts",
     observability: "src/observability.ts",
     workflows: "src/workflows.ts",
+    cron: "src/cron.ts",
     "server-fn": "src/server-fn.ts",
     "server-fn-client": "src/server-fn-client.ts",
     "server-query": "src/server-query.ts",

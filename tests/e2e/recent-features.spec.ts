@@ -171,7 +171,7 @@ test.describe("Recent feature integration", () => {
     expect(await page.evaluate(() => (window as any).__FARM_VIEW_TRANSITIONS__)).toBe(1);
   });
 
-  test("serves dynamic metadata images and executable workflows", async ({ request }) => {
+  test("serves dynamic metadata images and framework cron routes", async ({ request }) => {
     const metadata = await request.get("/feature-lab/metadata/7");
     expect(metadata.status()).toBe(200);
     const metadataHtml = await metadata.text();
@@ -185,26 +185,14 @@ test.describe("Recent feature integration", () => {
     expect(image.headers()["content-type"]).toContain("image/svg+xml");
     expect(await image.text()).toContain("Feature product 7");
 
-    const workflows = await request.get("/api/_farm/workflows");
-    expect(workflows.status()).toBe(200);
-    expect(await workflows.json()).toEqual({
-      workflows: [
-        {
-          id: "daily-cleanup",
-          description: "Example scheduled cleanup task.",
-          schedule: ["0 2 * * *"],
-          timezone: null,
-          path: "/api/_farm/workflows/daily-cleanup",
-        },
-      ],
+    const run = await request.get("/api/maintenance/cleanup", {
+      headers: { "x-farm-cron-name": "dailyCleanup" },
     });
-
-    const run = await request.get("/api/_farm/workflows/daily-cleanup");
     expect(run.status()).toBe(200);
     expect(await run.json()).toEqual({
-      id: "daily-cleanup",
       ok: true,
-      result: { deleted: 0 },
+      deleted: 0,
+      cron: "dailyCleanup",
     });
   });
 

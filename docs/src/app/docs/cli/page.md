@@ -21,6 +21,9 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 | farm migrate tanstack --write | Apply a deterministic TanStack Router file-route migration. |
 | farm migrate | Run one-shot schema or provider migration commands. |
 | farm add integration stripe --ui | Add integration wiring and optional UI. |
+| farm cron list | List configured UTC schedules and target routes. |
+| farm cron run dailyCleanup | Invoke one cron route on a running app. |
+| farm dev --cron | Start the dev server with the opt-in in-memory cron scheduler. |
 
 ## Provider names
 
@@ -129,6 +132,20 @@ farm build
 ```
 
 `farm build` respects `deploy.target`, `output`, and provider-specific output options from `farm.config.ts`.
+
+## Cron commands
+
+```bash
+farm cron list
+farm cron list --json
+farm cron run dailyCleanup
+farm cron run dailyCleanup --url http://localhost:4319
+farm dev --cron
+```
+
+`farm cron run` reads the named schedule from `farm.config.ts`, sends GET to its configured route, and forwards `CRON_SECRET` as bearer authorization. `farm dev --cron` runs the same routes on their UTC schedules in memory, prevents overlap inside the local process, and stops with the dev server.
+
+See [Cron](/docs/cron) for configuration, production adapters, security, and reliability semantics.
 
 ## Production notes
 

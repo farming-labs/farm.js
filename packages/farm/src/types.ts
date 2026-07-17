@@ -8,6 +8,7 @@ import type { FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
 import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmWorkflowsUserConfig } from "./workflows";
+import type { FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { FarmRouteRules } from "./route-rules";
 import type { FarmServerActionsConfig } from "./server-action-security";
@@ -103,6 +104,8 @@ export interface FarmConfig {
   storage?: FarmStorageUserConfig;
   integrations?: FarmIntegrationsUserConfig;
   migrations?: FarmMigrationsUserConfig;
+  /** Map portable cron schedules to ordinary GET API routes. */
+  cron?: FarmCronUserConfig | FarmCronResolvedConfig | false;
   workflows?: FarmWorkflowsUserConfig | boolean;
   env?: FarmEnvConfig<any, any> | ResolvedFarmEnv;
   middleware?: FarmMiddlewareConfig;

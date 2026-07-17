@@ -8,6 +8,8 @@ section: "Runtime"
 
 Build deployable output with Farm's deploy config and Nitro presets. Farm owns route discovery, framework conventions, and app bundling; Nitro owns the final server output shape.
 
+Scheduled routes are configured through framework [Cron](/docs/cron). Vercel builds receive native Build Output API cron entries, Cloudflare Worker builds receive Wrangler triggers, and other adapters can consume `.farm/cron-manifest.json`.
+
 ## Target-based deploy config
 
 **farm.config.ts**

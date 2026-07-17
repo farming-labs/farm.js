@@ -12,7 +12,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 
 | Example | Shows |
 | --- | --- |
-| examples/basic | Core routing, layouts, deployment config, markdown mirrors, PPR, cron workflows. |
+| examples/basic | Core routing, layouts, deployment config, markdown mirrors, PPR, and framework Cron. |
 | examples/deployment-presets | Vercel, Cloudflare Pages, Netlify, self-hosted Node, and direct Nitro preset deployment output. |
 | examples/ssr-ssg-demo | SSR, SSG, ISR, API routes, middleware. |
 | examples/docs-integration | Docs runtime and /api/docs machine routes. |
@@ -46,7 +46,7 @@ pnpm --dir examples/basic dev
 | Jobs | Trigger, batch trigger, schedule, status, and cancel calls. |
 | Eve agent | Farm page rendering, `/eve/v1/health`, streaming messages, and Vercel output. |
 | Cloudflare agent | Farm page rendering, WebSocket connection, synchronized state, callable RPC, and Wrangler dry-run deployment. |
-| Cron workflows | Lightweight `defineCron` task discovered from `src/jobs`. |
+| Cron | A schedule in `farm.config.ts` mapped to a protected API route. |
 | Markdown | `.md` mirrors for public pages and cache headers. |
 
 ## Example-driven development

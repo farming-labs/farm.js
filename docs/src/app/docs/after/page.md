@@ -91,4 +91,4 @@ Do authentication, authorization, validation, and the primary database write bef
 
 Make callbacks idempotent when they call external services. A deployment runtime may stop unexpectedly, and `after()` does not add durable storage, retries, or exactly-once delivery.
 
-Use [Cron and Workflows](/docs/workflows) for critical or long-running work that needs retries, scheduling, visibility, or recovery. Use `after()` for bounded request follow-up work where low latency matters more than durable execution.
+Use [Cron](/docs/cron) for periodic route invocation. Use the [Jobs Integration](/docs/integrations/jobs) for durable retries, long-running work, queues, visibility, or recovery. Use `after()` for bounded request follow-up work where low latency matters more than durable execution.

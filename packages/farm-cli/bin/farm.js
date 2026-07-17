@@ -22,15 +22,26 @@ program
   .description("Start development server")
   .option("-p, --port <port>", "Port to run the server on", "3000")
   .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("--cron", "Run configured cron routes in-process during development")
   .action(async (options) => {
     try {
-      const { startDevServer } = require("../dist/index.js");
-      await startDevServer(
+      const { startDevServer, startFarmCronScheduler } = require("../dist/index.js");
+      const server = await startDevServer(
         {
           root: options.root,
         },
         parseInt(options.port),
       );
+      if (options.cron) {
+        const address = server.httpServer?.address();
+        const port = typeof address === "object" && address ? address.port : parseInt(options.port);
+        const scheduler = await startFarmCronScheduler({
+          root: options.root,
+          url: `http://localhost:${port}`,
+        });
+        server.__farmCronScheduler = scheduler;
+        server.httpServer?.once("close", () => scheduler.stop());
+      }
     } catch (error) {
       console.error("Failed to start development server:", error);
       process.exit(1);
@@ -139,6 +150,69 @@ program
       });
     } catch (error) {
       console.error("Failed to run migrations:", error);
+      process.exit(1);
+    }
+  });
+
+const cronCommand = program
+  .command("cron")
+  .description("Inspect and manually run framework-native cron routes");
+
+cronCommand
+  .command("list")
+  .description("List cron routes configured in farm.config")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (options) => {
+    try {
+      const { formatFarmCronJobs, listFarmCronJobs } = require("../dist/index.js");
+      const jobs = await listFarmCronJobs({
+        root: options.root,
+        configPath: options.config,
+      });
+      console.log(options.json ? JSON.stringify(jobs, null, 2) : formatFarmCronJobs(jobs));
+    } catch (error) {
+      console.error("Failed to list cron routes:", error);
+      process.exit(1);
+    }
+  });
+
+cronCommand
+  .command("run <name>")
+  .description("Invoke one configured cron route on a running Farm app")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-p, --port <port>", "Port of the running local app", "3000")
+  .option("--host <host>", "Host of the running local app", "localhost")
+  .option("--url <url>", "Base URL of a running Farm app")
+  .option("--secret <secret>", "Bearer secret (defaults to CRON_SECRET)")
+  .option("--json", "Print the complete invocation result as JSON")
+  .action(async (name, options) => {
+    try {
+      const { runFarmCronJob } = require("../dist/index.js");
+      const result = await runFarmCronJob(name, {
+        root: options.root,
+        configPath: options.config,
+        port: options.port,
+        host: options.host,
+        url: options.url,
+        secret: options.secret,
+      });
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(
+          `Cron ${result.job.name} completed with ${result.status} in ${result.durationMs}ms.`,
+        );
+        if (result.body !== null && result.body !== undefined && result.body !== "") {
+          console.log(
+            typeof result.body === "string" ? result.body : JSON.stringify(result.body, null, 2),
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Failed to run cron route:", error);
       process.exit(1);
     }
   });
