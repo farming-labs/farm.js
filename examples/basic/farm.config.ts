@@ -36,6 +36,13 @@ export default defineConfig({
         : {}),
     },
   },
+  cron: {
+    dailyCleanup: {
+      schedule: '0 2 * * *',
+      path: '/api/maintenance/cleanup',
+      description: 'Delete expired sessions every night.',
+    },
+  },
   experimental: {
     // Route-level loading.tsx/error.tsx in this example rely on streamed server rendering.
     serverComponents: true,

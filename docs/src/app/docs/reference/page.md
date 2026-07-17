@@ -21,6 +21,7 @@ A compact map of the main package exports and where to learn more.
 | @farmjs/core/storage | Storage clients and mount helpers. |
 | @farmjs/core/cache | Data cache, revalidation, cache keys. |
 | @farmjs/core/after | Post-response server work with `after()`. |
+| @farmjs/core/cron | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
 | @farmjs/integrations | Auth, billing, email, jobs, AI, API keys, provider clients. |
 
 ## Recommended reading path
@@ -36,7 +37,8 @@ A compact map of the main package exports and where to learn more.
 | Package | Exports |
 | --- | --- |
 | `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`. |
-| `@farmjs/core/workflows` | `defineCron`, `defineWorkflow`, `defineTask` for lightweight scheduled and manually-triggered server workflows. |
+| `@farmjs/core/cron` | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers. |
+| `@farmjs/core/workflows` | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
 | `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
 | `@farmjs/core/navigation` | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`. |
 | `@farmjs/core/headers` | `headers`, `cookies`. |
@@ -58,3 +60,4 @@ A compact map of the main package exports and where to learn more.
 - Integrations are provider or feature packages that can own routes, callers, schemas, providers, config, and lifecycle.
 - Plugins are framework-level hooks for request, render, build, and runtime behavior.
 - Storage is the shared place to pass key/value stores and runtime database clients.
+- Cron maps a UTC schedule to an app-owned GET API route; it does not add durable workflow state.

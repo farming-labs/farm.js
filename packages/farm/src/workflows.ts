@@ -97,6 +97,9 @@ export function defineTask<const TPayload = unknown, TResult = unknown>(
   return defineWorkflow(definition);
 }
 
+/**
+ * @deprecated Configure `cron` in `farm.config.ts` and point it at an API route.
+ */
 export function defineCron<const TPayload = unknown, TResult = unknown>(
   definition: FarmCronDefinition<TPayload, TResult>,
 ): FarmCronDefinition<TPayload, TResult> {

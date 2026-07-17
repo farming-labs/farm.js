@@ -13,6 +13,7 @@ export type RoutePath =
   | "/docs/cache-ppr"
   | "/docs/cli"
   | "/docs/configuration"
+  | "/docs/cron"
   | "/docs/deployment"
   | "/docs/docs-engine"
   | "/docs/environment-functions"
@@ -56,8 +57,7 @@ export type RoutePath =
   | "/docs/server-queries"
   | "/docs/server-rendering"
   | "/docs/storage"
-  | "/docs/testing"
-  | "/docs/workflows";
+  | "/docs/testing";
 export type RoutePattern =
   | "/"
   | "/docs"
@@ -68,6 +68,7 @@ export type RoutePattern =
   | "/docs/cache-ppr"
   | "/docs/cli"
   | "/docs/configuration"
+  | "/docs/cron"
   | "/docs/deployment"
   | "/docs/docs-engine"
   | "/docs/environment-functions"
@@ -111,8 +112,7 @@ export type RoutePattern =
   | "/docs/server-queries"
   | "/docs/server-rendering"
   | "/docs/storage"
-  | "/docs/testing"
-  | "/docs/workflows";
+  | "/docs/testing";
 declare module "@farmjs/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;

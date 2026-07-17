@@ -62,6 +62,7 @@ export default defineDocs({
 | integrations  | Registering built-in or custom integrations.                                      |
 | storage       | Providing storage clients and mounts for framework and integration code.          |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
+| cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
 | docs          | Serving the built-in docs runtime and docs API.                                   |
 | md            | Exposing markdown mirrors like /pricing.md.                                       |
 | mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
@@ -183,6 +184,23 @@ src/app/api/**/route.ts
 src/app/**/middleware.ts
 src/lib/integrations.ts
 ```
+
+## Cron in config
+
+Cron entries keep timing policy in `farm.config.ts` while application work stays in an ordinary API route.
+
+```ts
+export default defineConfig({
+  cron: {
+    dailyCleanup: {
+      schedule: "0 2 * * *",
+      path: "/api/maintenance/cleanup",
+    },
+  },
+});
+```
+
+See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deployment behavior, and reliability boundaries.
 
 ## Integrations in config
 
