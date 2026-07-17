@@ -62,7 +62,7 @@ import { FlickeringGrid } from "../components/ui/flickering-grid";
 export const metadata = {
   title: "Farm.js - The React framework for product apps",
   description:
-    "Farm.js brings app routing, typed APIs, middleware, integrations, docs, migrations, and production deployment into one React framework.",
+    "Farm.js brings app routing, typed APIs, middleware, integrations, agent runtimes, docs, migrations, and production deployment into one React framework.",
 };
 
 const navItems = [
@@ -961,7 +961,7 @@ function DeveloperExperienceGrid() {
         <TypedApiVisual />
       </FeatureCell>
       <FeatureCell
-        body="Bring in auth, billing, email, jobs, storage, and docs through one integration system."
+        body="Bring in auth, billing, email, jobs, storage, docs, and agent runtimes through one integration system."
         className="border-t border-white/12"
         icon={Plug}
         index="01.3"
@@ -1326,8 +1326,8 @@ function IntegrationsSection() {
               Bring the tools you already use
             </h2>
             <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-              Choose built-in integrations for auth, billing, email, jobs, storage, API keys, and
-              UI, or connect your own.
+              Choose built-in integrations for auth, billing, email, jobs, storage, agents, API
+              keys, and UI, or connect your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">
               <ButtonLink
@@ -1404,7 +1404,8 @@ function FinalCta() {
           One framework. The whole product.
         </h2>
         <p className="mx-auto mt-2 max-w-2xl text-balance text-sm leading-6 text-white/48 sm:text-base">
-          Build routing, APIs, integrations, docs, and deployment together in one React framework.
+          Build routing, APIs, integrations, agents, docs, and deployment together in one React
+          framework.
         </p>
       </div>
       <div className="farm-top-rule flex items-center justify-center bg-white/[0.035] p-4">
