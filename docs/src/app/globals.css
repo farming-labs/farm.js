@@ -243,6 +243,29 @@
     transform: translate3d(6px, -2px, 0);
   }
 
+  .farm-agent-spotlight {
+    background-image: radial-gradient(
+      ellipse 92% 72% at 52% 48%,
+      rgb(255 255 255 / 0.055),
+      rgb(255 255 255 / 0.018) 48%,
+      transparent 80%
+    );
+  }
+
+  .farm-agent-spotlight::before {
+    inset: 12% 2% 22%;
+    filter: blur(64px);
+    opacity: 0.7;
+    transform: none;
+  }
+
+  .farm-agent-spotlight::after {
+    inset: 20% 10% 18% 34%;
+    filter: blur(48px);
+    opacity: 0.52;
+    transform: none;
+  }
+
   .farm-integration-visual {
     isolation: isolate;
   }
