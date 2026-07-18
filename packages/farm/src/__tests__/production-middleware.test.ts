@@ -42,12 +42,45 @@ describe("production middleware runtime", () => {
       );
       expect(html).toContain("server context: dashboard-user / /dashboard/settings");
       expect(html).not.toContain("never-serialize-this-session-secret");
+      const dashboardImageHref = html.match(
+        /property="og:image" content="(\/dashboard\/opengraph-image\?v=[a-f0-9]{16})"/,
+      )?.[1];
+      expect(dashboardImageHref).toBeTruthy();
+      expect(html).toContain('<meta property="og:image:width" content="2">');
+      expect(html).toContain('<meta property="og:image:height" content="1">');
+      expect(html).toContain('<meta property="og:image:alt" content="Dashboard preview">');
       expect((globalThis as any).__farmMiddlewareEvents.map((event: any) => event.type)).toEqual([
         "middleware.start",
         "middleware.complete",
         "middleware.start",
         "middleware.complete",
       ]);
+
+      const staticImageResponse = await serverModule.default.fetch(
+        new Request(`https://example.test${dashboardImageHref}`),
+      );
+      expect(staticImageResponse.status).toBe(200);
+      expect(staticImageResponse.headers.get("content-type")).toBe("image/png");
+      expect(staticImageResponse.headers.get("cache-control")).toBe(
+        "public, max-age=31536000, immutable",
+      );
+      expect(staticImageResponse.headers.get("x-content-type-options")).toBe("nosniff");
+      const staticImageEtag = staticImageResponse.headers.get("etag");
+      expect(staticImageEtag).toMatch(/^"[a-f0-9]{16}"$/);
+      expect((await staticImageResponse.arrayBuffer()).byteLength).toBeGreaterThan(0);
+
+      const staticImageHeadResponse = await serverModule.default.fetch(
+        new Request(`https://example.test${dashboardImageHref}`, { method: "HEAD" }),
+      );
+      expect(staticImageHeadResponse.status).toBe(200);
+      expect((await staticImageHeadResponse.arrayBuffer()).byteLength).toBe(0);
+
+      const staticImageCachedResponse = await serverModule.default.fetch(
+        new Request(`https://example.test${dashboardImageHref}`, {
+          headers: { "if-none-match": staticImageEtag! },
+        }),
+      );
+      expect(staticImageCachedResponse.status).toBe(304);
 
       (globalThis as any).__farmMiddlewareEvents = [];
       const configResponse = await serverModule.default.fetch(
@@ -90,18 +123,41 @@ describe("production middleware runtime", () => {
       const userHtml = await userResponse.text();
       expect(userResponse.status).toBe(200);
       expect(userHtml).toContain("user settings: 42 / 42 / 42");
+      expect(userHtml).toContain(
+        '<meta property="og:image" content="/users/42/opengraph-image">',
+      );
+      expect(userHtml).toContain('<meta property="og:image:alt" content="User preview">');
       expect((globalThis as any).__farmMiddlewareEvents[0]).toMatchObject({
         route: "/users/[id]",
         pathname: "/users/42/settings",
       });
 
+      const dynamicImageResponse = await serverModule.default.fetch(
+        new Request("https://example.test/users/42/opengraph-image"),
+      );
+      expect(dynamicImageResponse.status).toBe(200);
+      expect(dynamicImageResponse.headers.get("content-type")).toBe("image/svg+xml");
+      await expect(dynamicImageResponse.text()).resolves.toContain("User 42");
+
       const programmaticResponse = await serverModule.default.fetch(
         new Request("https://example.test/programmatic/42"),
       );
       expect(programmaticResponse.status).toBe(200);
-      await expect(programmaticResponse.text()).resolves.toContain(
-        "production programmatic route: 42",
+      const programmaticHtml = await programmaticResponse.text();
+      expect(programmaticHtml).toContain("production programmatic route: 42");
+      expect(programmaticHtml).toMatch(
+        /property="og:image" content="\/opengraph-image\?v=[a-f0-9]{16}"/,
       );
+
+      const explicitResponse = await serverModule.default.fetch(
+        new Request("https://example.test/dashboard/explicit"),
+      );
+      const explicitHtml = await explicitResponse.text();
+      expect(explicitResponse.status).toBe(200);
+      expect(explicitHtml).toContain(
+        '<meta property="og:image" content="https://cdn.example.test/explicit.png">',
+      );
+      expect(explicitHtml).not.toMatch(/\/dashboard\/opengraph-image\?v=/);
 
       const programmaticApiResponse = await serverModule.default.fetch(
         new Request("https://example.test/api/programmatic/42"),
