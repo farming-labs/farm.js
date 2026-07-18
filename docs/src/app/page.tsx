@@ -272,7 +272,7 @@ const integrationCodeTabs = [
     id: "integrations",
     label: "src/lib/integrations.ts",
     language: "ts",
-    highlightLines: [5, 6, 7],
+    highlightLines: [5, 6, 7, 8, 9],
     code: `import { betterAuth, resend, stripe } from "@farmjs/integrations";
 import { auth } from "./auth";
 import { emailTemplates } from "./email";
