@@ -11,6 +11,7 @@ export async function createMiddlewareProductionFixture(): Promise<string> {
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
 
   await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "app", "dashboard", "explicit"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "users", "[id]", "settings"), {
     recursive: true,
   });
@@ -58,6 +59,28 @@ export default {
   );
   await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
   await fs.writeFile(
+    path.join(root, "src", "app", "opengraph-image.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+      "base64",
+    ),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "opengraph-image.alt.txt"),
+    "Application preview",
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "opengraph-image.png"),
+    Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADUlEQVR42mNk+M/wHwAF/gL+X5WvWQAAAABJRU5ErkJggg==",
+      "base64",
+    ),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "opengraph-image.alt.txt"),
+    "Dashboard preview",
+  );
+  await fs.writeFile(
     path.join(root, "src", "farm.routes.tsx"),
     `
 import { createRoute, defineRoutes } from "@farmjs/core/routes";
@@ -97,6 +120,23 @@ export default function DashboardPage(props: any) {
     \`production middleware: \${configArea} / \${configPath} / \${fileArea} / \${props.path}\`,
     React.createElement(DashboardIdentity)
   );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "explicit", "page.tsx"),
+    `
+import React from "react";
+
+export const metadata = {
+  title: "Explicit image",
+  openGraph: {
+    images: ["https://cdn.example.test/explicit.png"],
+  },
+};
+
+export default function ExplicitImagePage() {
+  return React.createElement("main", null, "explicit image page");
 }
 `.trim(),
   );
@@ -179,6 +219,24 @@ export default function UserSettingsPage(props: any) {
     "main",
     null,
     \`user settings: \${props.middleware?.data.get("file.userId") || "missing"} / \${context.get("file.userId") || "missing-context"} / \${props.params.id}\`
+  );
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "users", "[id]", "opengraph-image.tsx"),
+    `
+import React from "react";
+
+export const size = { width: 1200, height: 630 };
+export const alt = "User preview";
+export const contentType = "image/svg+xml";
+
+export default function UserImage({ params }: { params: { id: string } }) {
+  return React.createElement(
+    "svg",
+    { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 1200 630" },
+    React.createElement("text", null, \`User \${params.id}\`),
   );
 }
 `.trim(),

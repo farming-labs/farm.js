@@ -1,6 +1,9 @@
 // @vitest-environment node
 
 import React from "react";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ServerRenderer } from "../server/renderer";
 import type { FarmConfig, FarmRequest, FarmResponse, LoadingProps, ErrorProps } from "../types";
@@ -16,9 +19,15 @@ const routeModulePath = "/test/src/app/dashboard/page.tsx";
 const loadingModulePath = "/test/src/app/dashboard/loading.tsx";
 const errorModulePath = "/test/src/app/dashboard/error.tsx";
 const ogImageModulePath = "/test/src/app/dashboard/opengraph-image.tsx";
+const temporaryDirectories: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
+  await Promise.all(
+    temporaryDirectories.splice(0).map((directory) =>
+      rm(directory, { recursive: true, force: true }),
+    ),
+  );
 });
 
 describe("file route loading.tsx and error.tsx", () => {
@@ -168,6 +177,61 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain("OG /dashboard");
   });
 
+  it("renders and serves a fingerprinted static metadata image", async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), "farm-render-static-image-"));
+    temporaryDirectories.push(directory);
+    const imagePath = path.join(directory, "opengraph-image.png");
+    const imageBytes = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADUlEQVR42mNk+M/wHwAF/gL+X5WvWQAAAABJRU5ErkJggg==",
+      "base64",
+    );
+    await writeFile(imagePath, imageBytes);
+
+    const staticInfo = {
+      extension: "png" as const,
+      contentType: "image/png",
+      width: 2,
+      height: 1,
+      alt: "Static dashboard preview",
+      hash: "0123456789abcdef",
+      byteLength: imageBytes.byteLength,
+    };
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Dashboard ready");
+          },
+        },
+      },
+      { opengraphImage: true, staticImage: { modulePath: imagePath, staticInfo } },
+    );
+
+    const pageResponse = createMockResponse();
+    await renderer.renderPage(createMockRequest("/dashboard"), pageResponse);
+    expect(pageResponse.body).toContain(
+      '<meta property="og:image" content="/dashboard/opengraph-image?v=0123456789abcdef">',
+    );
+    expect(pageResponse.body).toContain('<meta property="og:image:width" content="2">');
+    expect(pageResponse.body).toContain(
+      '<meta property="og:image:alt" content="Static dashboard preview">',
+    );
+
+    const imageResponse = createMockResponse();
+    await renderer.renderPage(
+      createMockRequest("/dashboard/opengraph-image?v=0123456789abcdef"),
+      imageResponse,
+    );
+    expect(imageResponse.statusCode).toBe(200);
+    expect(imageResponse.headers.get("content-type")).toBe("image/png");
+    expect(imageResponse.headers.get("content-length")).toBe(imageBytes.byteLength);
+    expect(imageResponse.headers.get("cache-control")).toBe(
+      "public, max-age=31536000, immutable",
+    );
+    expect(imageResponse.headers.get("etag")).toBe('"0123456789abcdef"');
+    expect(imageResponse.body.length).toBeGreaterThan(0);
+  });
+
   it("streams deferred route data and serializes it for hydration", async () => {
     const reviews = createDeferred<string[]>();
     const response = createMockResponse();
@@ -235,12 +299,20 @@ function DeferredReviews({ reviews }: { reviews: Promise<string[]> }) {
   );
 }
 
-function createRenderer(modules: Record<string, any>, options: { opengraphImage?: boolean } = {}) {
+function createRenderer(
+  modules: Record<string, any>,
+  options: {
+    opengraphImage?: boolean;
+    staticImage?: { modulePath: string; staticInfo: any };
+  } = {},
+) {
   const metadataImageEntry = {
     pattern: "/dashboard",
-    modulePath: ogImageModulePath,
+    modulePath: options.staticImage?.modulePath || ogImageModulePath,
     kind: "opengraph",
     fileName: "opengraph-image",
+    sourceType: options.staticImage ? "static" : "module",
+    staticInfo: options.staticImage?.staticInfo,
     route: {
       segments: [
         {
@@ -301,7 +373,9 @@ function createRenderer(modules: Record<string, any>, options: { opengraphImage?
       };
     },
     resolveMetadataImagePath() {
-      return "/dashboard/opengraph-image";
+      return options.staticImage
+        ? `/dashboard/opengraph-image?v=${options.staticImage.staticInfo.hash}`
+        : "/dashboard/opengraph-image";
     },
     async loadRouteModule(modulePath: string) {
       const mod = modules[modulePath];

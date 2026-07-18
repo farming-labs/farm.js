@@ -171,7 +171,29 @@ test.describe("Recent feature integration", () => {
     expect(await page.evaluate(() => (window as any).__FARM_VIEW_TRANSITIONS__)).toBe(1);
   });
 
-  test("serves dynamic metadata images and framework cron routes", async ({ request }) => {
+  test("serves static and dynamic metadata images and framework cron routes", async ({
+    request,
+  }) => {
+    const staticMetadata = await request.get("/feature-lab/static-metadata");
+    expect(staticMetadata.status()).toBe(200);
+    const staticMetadataHtml = await staticMetadata.text();
+    const staticImageHref = staticMetadataHtml.match(
+      /property="og:image" content="(\/feature-lab\/static-metadata\/opengraph-image\?v=[a-f0-9]{16})"/,
+    )?.[1];
+    expect(staticImageHref).toBeTruthy();
+    expect(staticMetadataHtml).toContain('<meta property="og:image:width" content="1200">');
+    expect(staticMetadataHtml).toContain('<meta property="og:image:height" content="630">');
+    expect(staticMetadataHtml).toContain(
+      '<meta property="og:image:alt" content="Farm.js static metadata image preview">',
+    );
+
+    const staticImage = await request.get(staticImageHref!);
+    expect(staticImage.status()).toBe(200);
+    expect(staticImage.headers()["content-type"]).toBe("image/png");
+    expect(staticImage.headers()["cache-control"]).toBe(
+      "public, max-age=31536000, immutable",
+    );
+
     const metadata = await request.get("/feature-lab/metadata/7");
     expect(metadata.status()).toBe(200);
     const metadataHtml = await metadata.text();

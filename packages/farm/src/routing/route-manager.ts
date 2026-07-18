@@ -39,6 +39,11 @@ import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
 import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
+import {
+  inspectStaticMetadataImage,
+  isStaticMetadataImageFile,
+  type StaticMetadataImageInfo,
+} from "../static-metadata-image";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -51,6 +56,8 @@ interface RouteEntry {
 interface MetadataImageEntry extends RouteEntry {
   kind: MetadataImageKind;
   fileName: "opengraph-image" | "twitter-image";
+  sourceType: "module" | "static";
+  staticInfo?: StaticMetadataImageInfo;
 }
 
 interface RedirectEntry {
@@ -284,7 +291,8 @@ export class RouteManager {
 
   resolveMetadataImagePath(image: MetadataImageEntry, params: Record<string, string> = {}): string {
     const pagePath = routeSegmentsToPath(image.route.segments, params);
-    return pagePath === "/" ? `/${image.fileName}` : `${pagePath}/${image.fileName}`;
+    const imagePath = pagePath === "/" ? `/${image.fileName}` : `${pagePath}/${image.fileName}`;
+    return image.staticInfo ? `${imagePath}?v=${image.staticInfo.hash}` : imagePath;
   }
 
   /**
@@ -436,7 +444,7 @@ export class RouteManager {
     const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
     const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
     const metadataImageFiles = await safeGlobFiles(
-      "**/{opengraph-image,twitter-image}.{ts,tsx,js,jsx}",
+      "**/{opengraph-image,twitter-image}.{ts,tsx,js,jsx,png,jpg,jpeg,gif,webp}",
       appDir,
     );
 
@@ -467,7 +475,7 @@ export class RouteManager {
     }
 
     for (const file of metadataImageFiles) {
-      const fileBase = path.basename(file).replace(/\.(tsx?|jsx?)$/, "");
+      const fileBase = path.basename(file, path.extname(file));
       const kind: MetadataImageKind = fileBase === "twitter-image" ? "twitter" : "opengraph";
       const fileName = kind === "twitter" ? "twitter-image" : "opengraph-image";
       const route = parseRoutePath(file);
@@ -475,12 +483,16 @@ export class RouteManager {
       const pattern = this.createRoutePattern(route);
       const key = `${kind}:${pattern}`;
       const existing = this.metadataImages.get(key);
+      const sourceType = isStaticMetadataImageFile(file) ? "static" : "module";
 
       if (existing?.sourceRoot === source.root) {
         throw new Error(
-          `Duplicate ${fileName} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
+          `Duplicate ${fileName} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}. Keep only one static image or module per route segment.`,
         );
       }
+
+      const staticInfo =
+        sourceType === "static" ? await inspectStaticMetadataImage(modulePath) : undefined;
 
       this.metadataImages.set(key, {
         route,
@@ -488,6 +500,8 @@ export class RouteManager {
         pattern,
         kind,
         fileName,
+        sourceType,
+        staticInfo,
         source: "file",
         sourceRoot: source.root,
       });

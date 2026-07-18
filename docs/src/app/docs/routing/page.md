@@ -476,7 +476,38 @@ export default function ProductPage() {
 }
 ```
 
-Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment to create a metadata image endpoint. Farm automatically adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
+### Static metadata images
+
+Place `opengraph-image.png` next to a page or layout segment for a zero-code, route-local social image. Farm supports `.png`, `.jpg`, `.jpeg`, `.gif`, and `.webp` files.
+
+```txt
+src/app/
+  opengraph-image.png
+  products/
+    opengraph-image.png
+    [id]/
+      page.tsx
+```
+
+The root image is the application fallback. `/products/opengraph-image.png` applies to product pages and their descendants, while unrelated routes continue using the root image. Farm automatically reads the image dimensions and content type.
+
+Add accessible preview text with an optional sidecar file:
+
+**src/app/products/opengraph-image.alt.txt**
+
+```txt
+Acme product catalog preview
+```
+
+Farm serves the file through the extensionless `/products/opengraph-image` endpoint and adds a content fingerprint to the URL emitted in page metadata. Fingerprinted requests receive immutable caching, while direct unversioned requests revalidate with an `ETag`.
+
+Use `twitter-image.png` when X/Twitter needs a different image. Otherwise, social platforms can use the Open Graph image. An explicit `metadata.openGraph.images` or `metadata.twitter.images` value always wins over a matching file.
+
+Static images inside a dynamic segment are shared by every concrete route. Use a generated image when the preview must depend on route params.
+
+### Generated metadata images
+
+Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Farm automatically adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
 
 **src/app/products/[id]/opengraph-image.tsx**
 
@@ -500,6 +531,8 @@ export default function ProductOpenGraphImage({ params }: PageProps) {
 ```
 
 For `/products/42`, this file is served at `/products/42/opengraph-image` and Farm emits `og:image`, `og:image:width`, `og:image:height`, and `og:image:alt` tags. The default return value can be a React SVG element, a string, bytes, or a `Response`.
+
+Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, prefer a 1200 by 630 PNG or JPEG unless the image must be generated dynamically.
 
 ## File Route States
 

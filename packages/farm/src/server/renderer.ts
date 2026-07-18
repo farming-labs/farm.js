@@ -38,6 +38,7 @@ import {
 import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
 import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
+import type { StaticMetadataImageInfo } from "../static-metadata-image";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -1055,6 +1056,16 @@ export class ServerRenderer {
       href,
     };
 
+    if (match.image.sourceType === "static" && match.image.staticInfo) {
+      return {
+        ...reference,
+        width: match.image.staticInfo.width,
+        height: match.image.staticInfo.height,
+        alt: match.image.staticInfo.alt,
+        contentType: match.image.staticInfo.contentType,
+      };
+    }
+
     try {
       const imageModule = await this.routeManager.loadRouteModule(match.image.modulePath);
       const size = (imageModule as any).size;
@@ -1083,9 +1094,25 @@ export class ServerRenderer {
       pagePath: string;
       params: Record<string, string>;
       searchParamsObject: Record<string, string | string[] | undefined>;
-      image: { modulePath: string; kind: MetadataImageKind };
+      image: {
+        modulePath: string;
+        kind: MetadataImageKind;
+        sourceType?: "module" | "static";
+        staticInfo?: StaticMetadataImageInfo;
+      };
     },
   ): Promise<void> {
+    if (options.image.sourceType === "static") {
+      if (!options.image.staticInfo) {
+        throw new Error(`Static metadata image ${options.image.modulePath} is missing file info`);
+      }
+      await this.writeStaticMetadataImageResponse(req, res, {
+        modulePath: options.image.modulePath,
+        staticInfo: options.image.staticInfo,
+      });
+      return;
+    }
+
     const imageModule = await this.routeManager.loadRouteModule(options.image.modulePath);
     if (!imageModule.default) {
       throw new Error(
@@ -1152,6 +1179,50 @@ export class ServerRenderer {
       return;
     }
     res.write(body);
+    res.end();
+  }
+
+  private async writeStaticMetadataImageResponse(
+    req: FarmRequest,
+    res: FarmResponse,
+    image: { modulePath: string; staticInfo: StaticMetadataImageInfo },
+  ): Promise<void> {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      res.statusCode = 405;
+      res.setHeader("Allow", "GET, HEAD");
+      res.end();
+      return;
+    }
+
+    const etag = `"${image.staticInfo.hash}"`;
+    const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const isVersioned = requestUrl.searchParams.get("v") === image.staticInfo.hash;
+
+    res.setHeader("Content-Type", image.staticInfo.contentType);
+    res.setHeader("Content-Length", image.staticInfo.byteLength);
+    res.setHeader("ETag", etag);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader(
+      "Cache-Control",
+      isVersioned
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=0, must-revalidate",
+    );
+
+    if (req.headers["if-none-match"] === etag) {
+      res.statusCode = 304;
+      res.end();
+      return;
+    }
+
+    res.statusCode = res.statusCode || 200;
+    if (method === "HEAD") {
+      res.end();
+      return;
+    }
+
+    res.write(await fs.promises.readFile(image.modulePath));
     res.end();
   }
 
