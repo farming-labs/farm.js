@@ -267,15 +267,36 @@ if (error) throw error;
 data?.users[0]?.name;
 //   ^? string | undefined`;
 
-const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
-import { auth, billing, jobs } from "./src/lib/integrations";
+const integrationCodeTabs = [
+  {
+    id: "integrations",
+    label: "src/lib/integrations.ts",
+    language: "ts",
+    highlightLines: [5, 6, 7, 8, 9],
+    code: `import { betterAuth, resend, stripe } from "@farmjs/integrations";
+import { auth } from "./auth";
+import { emailTemplates } from "./email";
+export const integrations = {
+    auth: betterAuth({ instance: auth }), // Better Auth
+    billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }), // Stripe
+    email: resend({ // Resend
+        apiKey: process.env.RESEND_API_KEY,
+        templates: emailTemplates,
+    }),
+} as const;`,
+  },
+  {
+    id: "config",
+    label: "farm.config.ts",
+    language: "ts",
+    highlightLines: [4],
+    code: `import { defineConfig } from "@farmjs/core";
+import { integrations } from "./src/lib/integrations";
 export default defineConfig({
-    extends: ["./layers/commerce"],
-    integrations: { auth, billing, jobs },
-    routeRules: { "/store/**": { swr: 300 } },
-    serverActions: { bodySizeLimit: "1mb" },
-    deploy: { target: "vercel" },
-});`;
+    integrations,
+});`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
 const docsConfigCode = `import { defineConfig } from "@farmjs/core";
 export default defineConfig({
@@ -288,7 +309,6 @@ export default defineConfig({
 });`;
 
 const typedApiHighlightLines = [1, 7, 8] as const;
-const integrationHighlightLines = [5] as const;
 const docsHighlightLines = [3, 4] as const;
 
 const layersConfigTabs = [
@@ -891,12 +911,12 @@ function TypedApiVisual() {
 function IntegrationVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <HighlightedCode
+      <HighlightedCodeTabs
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
-        code={integrationConfigCode}
-        highlightLines={integrationHighlightLines}
-        label="farm.config.ts"
-        language="ts"
+        compact
+        id="product-integration-examples"
+        tabs={integrationCodeTabs}
+        tabsLabel="Integration files"
       />
     </div>
   );
