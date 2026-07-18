@@ -103,6 +103,18 @@ The `docs` object controls the public path, metadata, navigation, search, page a
 theme, icons, reading time, last-updated display, sitemap, and robots output. `defineDocs` is not
 required for a Farm application.
 
+### Built-in search
+
+Farm follows the Fumadocs search pattern without requiring application-owned UI. The sidebar search
+control and `Cmd+S` / `Ctrl+S` shortcut open one accessible dialog with keyboard navigation. The
+dialog queries `/api/docs?query=<term>`, so `provider`, `maxResults`, and custom provider behavior
+come from the same `docs.search` config used by the docs API.
+
+Use `search: true` for the built-in simple provider, or configure `provider: "simple"`,
+`"algolia"`, `"typesense"`, `"mcp"`, or `"custom"`. Search result content is rendered as text, and
+provider credentials remain on the server. Setting `search: false` or `search.enabled: false`
+disables both the endpoint capability and the interface.
+
 ### Optional external config
 
 Large documentation sites may move the serializable docs options into `docs.config.ts`,
