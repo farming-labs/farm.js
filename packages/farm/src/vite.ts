@@ -443,11 +443,15 @@ export function farmPlugin(
         const normalized = file.replace(/\\/g, "/");
         return (
           appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
-          /\/(?:page|layout|loading|error|opengraph-image|twitter-image|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$/.test(
+          /\/(?:page|layout|loading|error|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
             normalized,
           )
         );
       };
+      const isStaticMetadataImageFile = (file: string) =>
+        /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
+          file.replace(/\\/g, "/"),
+        );
       const isTypeAffectingFile = (file: string, event: string) =>
         isPageFile(file) ||
         isApiRouteFile(file) ||
@@ -470,7 +474,7 @@ export function farmPlugin(
         server.watcher.on(ev as "add", (file: string) => {
           if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
           if (
-            ev !== "change" &&
+            (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
               isProgrammaticRouteFile(file) ||
               (isProgrammaticRouteSourceFile(file) &&

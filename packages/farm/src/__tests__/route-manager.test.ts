@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
@@ -21,6 +24,15 @@ vi.mock("../utils", async () => {
 describe("RouteManager", () => {
   let routeManager: RouteManager;
   let mockConfig: Required<FarmConfig>;
+  const temporaryDirectories: string[] = [];
+
+  afterEach(async () => {
+    await Promise.all(
+      temporaryDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { recursive: true, force: true })),
+    );
+  });
 
   beforeEach(() => {
     mockConfig = {
@@ -240,6 +252,56 @@ describe("RouteManager", () => {
       expect(twitter?.image.pattern).toBe("/blog/[slug]");
       expect(routeManager.resolveMetadataImagePath(twitter!.image, twitter!.params)).toBe(
         "/blog/farm/twitter-image",
+      );
+    });
+
+    it("discovers static images and fingerprints their public route", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "farm-static-route-"));
+      temporaryDirectories.push(root);
+      const appDirectory = path.join(root, "src", "app");
+      await mkdir(path.join(appDirectory, "about"), { recursive: true });
+      await writeFile(
+        path.join(appDirectory, "about", "opengraph-image.png"),
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADUlEQVR42mNk+M/wHwAF/gL+X5WvWQAAAABJRU5ErkJggg==",
+          "base64",
+        ),
+      );
+
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["about/page.tsx"];
+        if (pattern.includes("opengraph-image")) return ["about/opengraph-image.png"];
+        return [];
+      });
+
+      const manager = new RouteManager({ ...mockConfig, root });
+      await manager.discoverRoutes();
+
+      const match = manager.getMatchingMetadataImage("/about", "opengraph");
+      expect(match?.image.sourceType).toBe("static");
+      expect(match?.image.staticInfo).toMatchObject({
+        contentType: "image/png",
+        width: 2,
+        height: 1,
+      });
+      expect(manager.resolveMetadataImagePath(match!.image)).toMatch(
+        /^\/about\/opengraph-image\?v=[a-f0-9]{16}$/,
+      );
+    });
+
+    it("rejects a static image and module in the same route segment", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["about/page.tsx"];
+        if (pattern.includes("opengraph-image")) {
+          return ["about/opengraph-image.tsx", "about/opengraph-image.png"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        'Duplicate opengraph-image route "/about"',
       );
     });
   });
