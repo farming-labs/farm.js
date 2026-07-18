@@ -269,25 +269,25 @@ data?.users[0]?.name;
 
 const integrationCodeTabs = [
   {
-    id: "providers",
-    label: "Providers",
+    id: "integrations",
+    label: "src/lib/integrations.ts",
     language: "ts",
-    highlightLines: [5, 6, 7, 8],
-    code: `import { betterAuth, jobs, stripe, trigger } from "@farmjs/integrations";
+    highlightLines: [5, 6, 7],
+    code: `import { betterAuth, resend, stripe } from "@farmjs/integrations";
 import { auth } from "./auth";
-import { tasks } from "./jobs";
+import { emailTemplates } from "./email";
 export const integrations = {
     auth: betterAuth({ instance: auth }), // Better Auth
     billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }), // Stripe
-    jobs: jobs({ // Trigger.dev
-        runtime: trigger({ apiKey: process.env.TRIGGER_SECRET_KEY }),
-        tasks,
+    email: resend({ // Resend
+        apiKey: process.env.RESEND_API_KEY,
+        templates: emailTemplates,
     }),
 } as const;`,
   },
   {
-    id: "register",
-    label: "Register",
+    id: "config",
+    label: "farm.config.ts",
     language: "ts",
     highlightLines: [4],
     code: `import { defineConfig } from "@farmjs/core";
@@ -916,7 +916,7 @@ function IntegrationVisual() {
         compact
         id="product-integration-examples"
         tabs={integrationCodeTabs}
-        tabsLabel="Product integration examples"
+        tabsLabel="Integration files"
       />
     </div>
   );
