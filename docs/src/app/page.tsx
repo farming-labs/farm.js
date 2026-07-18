@@ -252,7 +252,7 @@ const footerGroups = [
     title: "Product",
     icon: Layers3,
     brand: null,
-    action: ["Explore integrations", "/docs/integrations"],
+    action: ["Integrations", "/docs/integrations"],
     links: [
       ["Integrations", "/docs/integrations"],
       ["API client", "/docs/api-client"],
@@ -1207,7 +1207,7 @@ function DeploymentVisual() {
             <div
               key={`${tile.row}_${tile.col}`}
               className={cx(
-                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-[3px] border border-white/[0.08] transition-[background-color,border-color] duration-150",
+                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150",
                 tile.brand
                   ? "bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075]"
                   : "bg-white/[0.012]",
@@ -1233,6 +1233,14 @@ function DeploymentVisual() {
               )}
             </div>
           ))}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 z-10 w-[22%] bg-gradient-to-l from-black via-black/60 to-transparent"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[22%] bg-gradient-to-t from-black via-black/60 to-transparent"
+          />
         </div>
       </a>
     </FoundationCanvas>
@@ -1459,7 +1467,7 @@ function AgentSectionIntro() {
                 href="/docs/integrations#agent-runtimes"
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
-                Explore Agent Integrations
+                Agent Integrations
               </ButtonLink>
             </div>
           </div>
@@ -1524,7 +1532,7 @@ function IntegrationsSection() {
                 href="/docs/integrations"
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
-                Explore Integrations
+                Integrations
               </ButtonLink>
             </div>
           </div>
@@ -1579,6 +1587,14 @@ function IntegrationsSection() {
                 </a>
               );
             })}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-y-0 right-0 z-20 w-[22%] bg-gradient-to-l from-black via-black/60 to-transparent"
+            />
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-20 h-[18%] bg-gradient-to-t from-black via-black/60 to-transparent"
+            />
           </div>
         </div>
       </div>
