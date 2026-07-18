@@ -268,7 +268,7 @@ const config = {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
   nav: {
-    title: "Farm.js Docs",
+    title: "Farm.js",
     url: "/",
   },
   search: {

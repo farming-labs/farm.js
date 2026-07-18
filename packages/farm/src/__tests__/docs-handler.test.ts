@@ -208,8 +208,23 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("farmDocsNavigating");
     expect(html).toContain("farmDocsRuntimeId");
     expect(html).toContain('class="mobile-topbar"');
-    expect(html).toContain('data-sidebar-toggle');
-    expect(html).toContain('data-sidebar-backdrop');
+    expect(html).toContain("data-sidebar-toggle");
+    expect(html).toContain("data-sidebar-backdrop");
+    expect(html).toContain('class="fd-docs-search-trigger"');
+    expect(html).toContain("data-docs-search-trigger");
+    expect(html).toContain('aria-keyshortcuts="Meta+S Control+S"');
+    expect(html).toContain('id="farm-docs-search-dialog"');
+    expect(html).toContain("data-docs-search-input");
+    expect(html).toContain('aria-label="Search documentation"');
+    expect(html).toContain('role="listbox"');
+    expect(html).toContain("window.__farmDocsSearchRuntime");
+    expect(html).toContain('event.key.toLowerCase()==="s"');
+    expect(html).toContain('fetch("/api/docs?query="+encodeURIComponent(query)');
+    expect(html).toContain("descriptionElement.textContent=description");
+    expect(html).toContain('document.getElementById(id)?.scrollIntoView({block:"start"})');
+    expect(html).toContain(
+      "sidebar.scrollTop+=activeRect.top-sidebarRect.top-(sidebar.clientHeight-activeRect.height)/2",
+    );
     expect(html).toContain("initMobileSidebar");
     expect(html).toContain("closeMobileSidebar");
     expect(html).toContain('data-farm-docs-sidebar="open"');
@@ -226,7 +241,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
     expect(html).toContain('url("/assets/GeistMono-Variable-BNLlm6Cd.woff2") format("woff2")');
-    expect(html).toContain("--font-geist-mono: \"Geist Mono\"");
+    expect(html).toContain('--font-geist-mono: "Geist Mono"');
     expect(html).toContain('<link rel="preload" href="/assets/GeistMono-Variable-BNLlm6Cd.woff2"');
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
@@ -257,19 +272,27 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain(
       '.sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }',
     );
-    expect(html).toContain(".sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }");
+    expect(html).toContain(
+      ".sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }",
+    );
     expect(html).toContain(
       '.sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 0; bottom: 0;',
     );
     expect(html).toContain(
       ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
     );
-    expect(html).toContain(".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap));");
-    expect(html).toContain(".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap));");
+    expect(html).toContain(
+      ".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap));",
+    );
+    expect(html).toContain(
+      ".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap)); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap));",
+    );
     expect(html).toContain(
       ".sidebar-subgroup-content a[data-active]::after { left: var(--fd-sidebar-sub-guide-x);",
     );
-    expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);");
+    expect(html).toContain(
+      "--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);",
+    );
     expect(html).toContain(
       '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after',
     );
@@ -292,7 +315,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).not.toContain('class="page-kicker"');
     expect(html).not.toContain("DOCUMENTATION / OVERVIEW");
     expect(html).toContain("article#nd-page .fd-breadcrumb");
-    expect(html).toContain("article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);");
+    expect(html).toContain(
+      "article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);",
+    );
     expect(html).toContain("--fd-docs-font-mono: var(--font-geist-mono");
     expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
@@ -305,6 +330,30 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("hides the search interface and shortcut when docs search is disabled", async () => {
+    const { root, docs } = await createDocsFixture();
+
+    for (const search of [false, { provider: "simple" as const, enabled: false }]) {
+      const handler = createFarmDocsHandler(
+        {
+          ...docs,
+          config: {
+            ...docs.config,
+            search,
+          },
+        },
+        { root, srcDir: "src" },
+      );
+      const response = await handler(new Request("http://farm.test/docs"));
+      const html = await response?.text();
+
+      expect(html).not.toContain("data-docs-search-trigger");
+      expect(html).not.toContain('id="farm-docs-search-root"');
+      expect(html).not.toContain("window.__farmDocsSearchRuntime");
+      expect(html).not.toContain('aria-keyshortcuts="Meta+S Control+S"');
+    }
   });
 
   it("uses generated metadata instead of deployment file timestamps", async () => {

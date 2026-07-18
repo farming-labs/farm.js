@@ -343,6 +343,12 @@ function getDocsTitle(docs: FarmDocsResolvedConfig): string {
     : "Documentation";
 }
 
+function isDocsSearchEnabled(docs: FarmDocsResolvedConfig): boolean {
+  const search = docs.config.search;
+  if (search === false) return false;
+  return !(search && typeof search === "object" && search.enabled === false);
+}
+
 function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
   return docs.config.metadata?.description;
 }
@@ -1501,6 +1507,32 @@ function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedC
 </nav>`;
 }
 
+function renderDocsSearchTrigger(): string {
+  return `<button class="fd-docs-search-trigger" type="button" data-docs-search-trigger aria-label="Search documentation" aria-haspopup="dialog" aria-controls="farm-docs-search-dialog" aria-expanded="false" aria-keyshortcuts="Meta+S Control+S">
+  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+  <span class="fd-docs-search-trigger-label">Search</span>
+  <kbd><span data-docs-search-modifier>⌘</span>S</kbd>
+</button>`;
+}
+
+function renderDocsSearchDialog(docs: FarmDocsResolvedConfig): string {
+  const title = `Search ${getDocsTitle(docs)}`;
+  return `<div id="farm-docs-search-root" class="fd-docs-search-root" data-docs-search-root hidden>
+  <div class="fd-docs-search-overlay" data-docs-search-close aria-hidden="true"></div>
+  <section id="farm-docs-search-dialog" class="fd-docs-search-dialog" data-docs-search-dialog role="dialog" aria-modal="true" aria-labelledby="farm-docs-search-title" tabindex="-1">
+    <h2 id="farm-docs-search-title" class="fd-docs-search-visually-hidden">${escapeHtml(title)}</h2>
+    <div class="fd-docs-search-header">
+      <svg class="fd-docs-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+      <input type="search" data-docs-search-input role="combobox" aria-label="Search documentation" aria-autocomplete="list" aria-controls="farm-docs-search-results" aria-expanded="true" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search documentation" />
+      <button class="fd-docs-search-close" type="button" data-docs-search-close aria-label="Close search">ESC</button>
+    </div>
+    <div id="farm-docs-search-results" class="fd-docs-search-results" data-docs-search-results role="listbox" aria-label="Search results" hidden></div>
+    <div class="fd-docs-search-status" data-docs-search-status role="status">Search the documentation</div>
+    <div class="fd-docs-search-visually-hidden" data-docs-search-live aria-live="polite"></div>
+  </section>
+</div>`;
+}
+
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
   return `<div class="toc-track">
@@ -1518,15 +1550,211 @@ ${items
 
 function renderDocsRuntimeScript(docs: FarmDocsResolvedConfig): string {
   const docsEntry = JSON.stringify(normalizeEntry(docs.entry));
-  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};let closeMobileSidebar=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)active.scrollIntoView({block:"center"})};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initMobileSidebar=()=>{const layout=document.getElementById("nd-docs-layout");const sidebar=getSidebar();const toggle=document.querySelector("[data-sidebar-toggle]");const backdrop=document.querySelector("[data-sidebar-backdrop]");if(!layout||!sidebar||!(toggle instanceof HTMLButtonElement))return;const setOpen=(open)=>{layout.dataset.sidebarOpen=open?"true":"false";document.documentElement.dataset.farmDocsSidebar=open?"open":"closed";toggle.setAttribute("aria-expanded",open?"true":"false");toggle.setAttribute("aria-label",open?"Close menu":"Open menu")};const toggleOpen=()=>setOpen(layout.dataset.sidebarOpen!=="true");closeMobileSidebar=()=>setOpen(false);toggle.addEventListener("click",(event)=>{event.preventDefault();toggleOpen()});backdrop?.addEventListener("click",()=>closeMobileSidebar());document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeMobileSidebar()});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(target)closeMobileSidebar()});closeMobileSidebar()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const getPageKey=(root)=>{const article=root.getElementById("nd-page");if(!article)return"";return article.querySelector("h1")?.textContent?.trim()||article.textContent?.replace(/\\s+/g," ").trim().slice(0,160)||""};const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;const nextKey=getPageKey(nextDoc);const importedArticle=document.importNode(nextArticle,true);currentArticle.replaceWith(importedArticle);const renderedArticle=document.getElementById("nd-page");if(!renderedArticle||renderedArticle===currentArticle||(nextKey&&getPageKey(document)!==nextKey))return false;const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();closeMobileSidebar();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{cache:"no-store",headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll)window.scrollTo({top:0,left:0});return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initMobileSidebar();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
+  return `<script>(()=>{if(window.__farmDocsRuntime)return;window.__farmDocsRuntime=true;document.documentElement.dataset.farmDocsRuntime="true";document.documentElement.dataset.farmDocsRuntimeId=Math.random().toString(36).slice(2);const docsEntry=${docsEntry};let cleanupToc=()=>{};let closeMobileSidebar=()=>{};const normalizePath=(path)=>path.length>1?path.replace(/\\/+$/,""):path;const isDocsPath=(path)=>{const next=normalizePath(path);const entry=normalizePath(docsEntry);if(next.endsWith(".md"))return false;if(entry==="/")return true;return next===entry||next.startsWith(entry+"/")};const initToc=()=>{cleanupToc();const toc=document.getElementById("nd-toc");if(!toc){cleanupToc=()=>{};return}const links=Array.from(toc.querySelectorAll("[data-toc-item]"));const thumb=toc.querySelector("[data-toc-thumb]");const pairs=links.map((link)=>{let id=link.hash.slice(1);try{id=decodeURIComponent(id)}catch{}return{link,heading:document.getElementById(id)}}).filter((item)=>item.heading);const setActive=(active)=>{for(const {link} of pairs)link.dataset.active=link===active.link?"true":"false";if(!thumb)return;const styles=getComputedStyle(active.link);const top=active.link.offsetTop+parseFloat(styles.paddingTop||"0");const bottom=active.link.offsetTop+active.link.clientHeight-parseFloat(styles.paddingBottom||"0");thumb.style.clipPath="polygon(0 "+top+"px,100% "+top+"px,100% "+bottom+"px,0 "+bottom+"px)"};const update=()=>{if(pairs.length===0)return;const offset=Math.min(window.innerHeight*0.3,160);let active=pairs[0];for(const pair of pairs){if(pair.heading.getBoundingClientRect().top<=offset)active=pair;else break}setActive(active)};let frame=0;const schedule=()=>{if(frame)return;frame=requestAnimationFrame(()=>{frame=0;update()})};const onHashChange=()=>setTimeout(schedule,0);window.addEventListener("scroll",schedule,{passive:true});window.addEventListener("resize",schedule);window.addEventListener("hashchange",onHashChange);cleanupToc=()=>{window.removeEventListener("scroll",schedule);window.removeEventListener("resize",schedule);window.removeEventListener("hashchange",onHashChange);if(frame)cancelAnimationFrame(frame);frame=0};update()};const getSidebar=()=>document.getElementById("nd-sidebar");const ensureActiveVisible=()=>{const sidebar=getSidebar();if(!sidebar)return;const active=sidebar.querySelector('a[data-active="true"]');if(!(active instanceof HTMLElement))return;const activeRect=active.getBoundingClientRect();const sidebarRect=sidebar.getBoundingClientRect();if(activeRect.top<sidebarRect.top||activeRect.bottom>sidebarRect.bottom)sidebar.scrollTop+=activeRect.top-sidebarRect.top-(sidebar.clientHeight-activeRect.height)/2};const setSidebarActive=(path)=>{const sidebar=getSidebar();if(!sidebar)return;const current=normalizePath(path);for(const link of Array.from(sidebar.querySelectorAll("a[href]"))){try{link.dataset.active=normalizePath(new URL(link.href,location.href).pathname)===current?"true":"false"}catch{}}ensureActiveVisible()};const initMobileSidebar=()=>{const layout=document.getElementById("nd-docs-layout");const sidebar=getSidebar();const toggle=document.querySelector("[data-sidebar-toggle]");const backdrop=document.querySelector("[data-sidebar-backdrop]");if(!layout||!sidebar||!(toggle instanceof HTMLButtonElement))return;const setOpen=(open)=>{layout.dataset.sidebarOpen=open?"true":"false";document.documentElement.dataset.farmDocsSidebar=open?"open":"closed";toggle.setAttribute("aria-expanded",open?"true":"false");toggle.setAttribute("aria-label",open?"Close menu":"Open menu")};const toggleOpen=()=>setOpen(layout.dataset.sidebarOpen!=="true");closeMobileSidebar=()=>setOpen(false);toggle.addEventListener("click",(event)=>{event.preventDefault();toggleOpen()});backdrop?.addEventListener("click",()=>closeMobileSidebar());document.addEventListener("keydown",(event)=>{if(event.key==="Escape")closeMobileSidebar()});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(target)closeMobileSidebar()});closeMobileSidebar()};const initSidebarScroll=()=>{const sidebar=getSidebar();if(!sidebar)return;const key="farmdocs:sidebar-scroll:"+location.origin;const getStorage=()=>{try{return window.sessionStorage}catch{return null}};const readSaved=()=>{try{const raw=getStorage()?.getItem(key);if(!raw)return null;const parsed=JSON.parse(raw);return parsed&&typeof parsed==="object"?parsed:null}catch{return null}};const save=(path=location.pathname)=>{try{getStorage()?.setItem(key,JSON.stringify({path,scrollTop:sidebar.scrollTop}))}catch{}};const saved=readSaved();if(saved?.path===location.pathname&&Number.isFinite(Number(saved.scrollTop)))sidebar.scrollTop=Number(saved.scrollTop);ensureActiveVisible();save();sidebar.addEventListener("scroll",()=>save(),{passive:true});sidebar.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target)return;try{save(new URL(target.href,location.href).pathname)}catch{save()}});window.addEventListener("beforeunload",()=>save())};let navigateController=null;const getPageKey=(root)=>{const article=root.getElementById("nd-page");if(!article)return"";return article.querySelector("h1")?.textContent?.trim()||article.textContent?.replace(/\\s+/g," ").trim().slice(0,160)||""};const swapDocsPage=(html,url)=>{const nextDoc=new DOMParser().parseFromString(html,"text/html");const nextArticle=nextDoc.getElementById("nd-page");const currentArticle=document.getElementById("nd-page");if(!nextArticle||!currentArticle)return false;const nextKey=getPageKey(nextDoc);const importedArticle=document.importNode(nextArticle,true);currentArticle.replaceWith(importedArticle);const renderedArticle=document.getElementById("nd-page");if(!renderedArticle||renderedArticle===currentArticle||(nextKey&&getPageKey(document)!==nextKey))return false;const nextToc=nextDoc.getElementById("nd-toc");const currentToc=document.getElementById("nd-toc");if(nextToc&&currentToc)currentToc.replaceWith(document.importNode(nextToc,true));if(nextDoc.title)document.title=nextDoc.title;const nextDescription=nextDoc.querySelector('meta[name="description"]');const currentDescription=document.querySelector('meta[name="description"]');if(nextDescription&&currentDescription)currentDescription.setAttribute("content",nextDescription.getAttribute("content")||"");setSidebarActive(url.pathname);initToc();closeMobileSidebar();return true};const navigateDocs=async(url,{replace=false,scroll=true}={})=>{if(!isDocsPath(url.pathname))return false;if(navigateController)navigateController.abort();const controller=new AbortController();navigateController=controller;document.documentElement.dataset.farmDocsNavigating="true";try{const response=await fetch(url.href,{cache:"no-store",headers:{accept:"text/html","x-farm-docs-navigate":"1"},signal:controller.signal});if(!response.ok||!((response.headers.get("content-type")||"").includes("text/html")))return false;const html=await response.text();if(!swapDocsPage(html,url))return false;if(replace)history.replaceState({farmDocs:true},"",url.href);else history.pushState({farmDocs:true},"",url.href);if(scroll){if(url.hash){let id=url.hash.slice(1);try{id=decodeURIComponent(id)}catch{}document.getElementById(id)?.scrollIntoView({block:"start"})}else window.scrollTo({top:0,left:0})}return true}catch(error){if(error?.name==="AbortError")return true;return false}finally{if(navigateController===controller){delete document.documentElement.dataset.farmDocsNavigating;navigateController=null}}};const initClientNavigation=()=>{document.addEventListener("click",(event)=>{if(event.defaultPrevented||event.button!==0||event.metaKey||event.ctrlKey||event.shiftKey||event.altKey)return;const target=event.target instanceof Element?event.target.closest("a[href]"):null;if(!target||target.target||target.hasAttribute("download"))return;let url;try{url=new URL(target.href,location.href)}catch{return}if(url.origin!==location.origin||!isDocsPath(url.pathname))return;if(normalizePath(url.pathname)===normalizePath(location.pathname)&&url.hash)return;event.preventDefault();navigateDocs(url).then((handled)=>{if(!handled)location.href=url.href})});window.addEventListener("popstate",()=>{navigateDocs(new URL(location.href),{replace:true,scroll:false}).then((handled)=>{if(!handled)location.reload()})})};const init=()=>{initToc();initMobileSidebar();initSidebarScroll();initClientNavigation()};if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",init,{once:true});else init()})();</script>`;
 }
 
 function renderDocsPageActionsRuntimeScript(): string {
   return `<script>(()=>{if(window.__farmDocsPageActionsRuntime)return;window.__farmDocsPageActionsRuntime=true;const readArticleText=()=>{const article=document.getElementById("nd-page");if(!article)return"";const clone=article.cloneNode(true);if(!(clone instanceof HTMLElement))return article.innerText||"";clone.querySelectorAll("[data-page-actions],.fd-page-footer,.fd-page-nav").forEach((node)=>node.remove());return clone.innerText||""};const withTitle=(content,format,includeTitle)=>{if(!includeTitle)return content;const title=document.querySelector("#nd-page h1")?.textContent?.trim()||document.title.trim();if(!title)return content;const trimmed=content.trimStart();if(trimmed.startsWith(title)||trimmed.startsWith("# "+title))return content;return format==="markdown"?"# "+title+"\\n\\n"+content:title+"\\n\\n"+content};const writeClipboard=async(text)=>{if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return}catch{}}const textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","");textarea.style.position="fixed";textarea.style.opacity="0";textarea.style.pointerEvents="none";document.body.appendChild(textarea);textarea.select();document.execCommand("copy");textarea.remove()};const markCopied=(button)=>{const label=button.querySelector("[data-page-action-label]");button.dataset.copied="true";button.setAttribute("aria-label",button.dataset.copiedLabel||"Copied!");button.title=button.dataset.copiedLabel||"Copied!";if(label)label.textContent=button.dataset.copiedLabel||"Copied!";const previous=Number(button.dataset.copyTimeout||0);if(previous)clearTimeout(previous);button.dataset.copyTimeout=String(setTimeout(()=>{button.dataset.copied="false";button.setAttribute("aria-label",button.dataset.copyLabel||"Copy page");button.title=button.dataset.copyLabel||"Copy page";if(label)label.textContent=button.dataset.copyLabel||"Copy page";button.dataset.copyTimeout="0"},4500))};document.addEventListener("click",async(event)=>{const target=event.target instanceof Element?event.target.closest('[data-page-action="copy-markdown"]'):null;if(!(target instanceof HTMLButtonElement))return;event.preventDefault();const format=target.dataset.copyMarkdownFormat==="text"?"text":"markdown";const includeTitle=target.dataset.copyMarkdownIncludeTitle==="true";let content="";target.disabled=true;try{if(format==="markdown"&&target.dataset.markdownUrl){try{const response=await fetch(target.dataset.markdownUrl,{headers:{Accept:"text/markdown"}});if(response.ok)content=await response.text()}catch{}}if(!content)content=readArticleText();content=withTitle(content,format,includeTitle);if(content.trim()){await writeClipboard(content);markCopied(target)}}finally{target.disabled=false}})})();</script>`;
 }
 
+function renderDocsSearchRuntimeScript(): string {
+  return `<script>(()=>{
+  if(window.__farmDocsSearchRuntime)return;
+  window.__farmDocsSearchRuntime=true;
+  const root=document.querySelector("[data-docs-search-root]");
+  if(!(root instanceof HTMLElement))return;
+  const dialog=root.querySelector("[data-docs-search-dialog]");
+  const input=root.querySelector("[data-docs-search-input]");
+  const results=root.querySelector("[data-docs-search-results]");
+  const status=root.querySelector("[data-docs-search-status]");
+  const live=root.querySelector("[data-docs-search-live]");
+  const layout=document.getElementById("nd-docs-layout");
+  if(!(dialog instanceof HTMLElement)||!(input instanceof HTMLInputElement)||!(results instanceof HTMLElement)||!(status instanceof HTMLElement)||!(live instanceof HTMLElement))return;
+
+  let previousFocus=null;
+  let debounceTimer=0;
+  let searchController=null;
+  let activeIndex=-1;
+  let resultLinks=[];
+
+  const getTriggers=()=>Array.from(document.querySelectorAll("[data-docs-search-trigger]")).filter((item)=>item instanceof HTMLButtonElement);
+  const setExpanded=(expanded)=>{for(const trigger of getTriggers())trigger.setAttribute("aria-expanded",expanded?"true":"false")};
+  const setStatus=(message,state)=>{
+    status.textContent=message;
+    status.hidden=false;
+    results.hidden=true;
+    results.replaceChildren();
+    resultLinks=[];
+    activeIndex=-1;
+    input.removeAttribute("aria-activedescendant");
+    root.dataset.searchState=state;
+    live.textContent=message;
+  };
+  const setActive=(index)=>{
+    if(resultLinks.length===0)return;
+    activeIndex=(index+resultLinks.length)%resultLinks.length;
+    for(let itemIndex=0;itemIndex<resultLinks.length;itemIndex++){
+      const link=resultLinks[itemIndex];
+      const selected=itemIndex===activeIndex;
+      link.dataset.active=selected?"true":"false";
+      link.setAttribute("aria-selected",selected?"true":"false");
+    }
+    const active=resultLinks[activeIndex];
+    input.setAttribute("aria-activedescendant",active.id);
+    active.scrollIntoView({block:"nearest"});
+  };
+  const resolveResultHref=(value)=>{
+    if(typeof value!=="string"||!value)return null;
+    try{
+      const url=new URL(value,location.href);
+      if(url.protocol!=="http:"&&url.protocol!=="https:")return null;
+      return url.origin===location.origin?url.pathname+url.search+url.hash:url.href;
+    }catch{return null}
+  };
+  const renderResults=(items)=>{
+    const fragment=document.createDocumentFragment();
+    const links=[];
+    for(const item of items){
+      if(!item||typeof item!=="object")continue;
+      const href=resolveResultHref(typeof item.url==="string"?item.url:item.href);
+      if(!href)continue;
+      const title=typeof item.title==="string"&&item.title.trim()?item.title.trim():typeof item.content==="string"&&item.content.trim()?item.content.trim():"Documentation";
+      const section=typeof item.section==="string"&&item.section.trim()&&item.section.trim()!==title?item.section.trim():"";
+      const description=typeof item.description==="string"?item.description.trim():"";
+      const link=document.createElement("a");
+      link.id="farm-docs-search-result-"+links.length;
+      link.className="fd-docs-search-result";
+      link.href=href;
+      link.setAttribute("role","option");
+      link.setAttribute("aria-selected","false");
+      link.dataset.active="false";
+      const marker=document.createElement("span");
+      marker.className="fd-docs-search-result-marker";
+      marker.setAttribute("aria-hidden","true");
+      marker.textContent=item.type==="heading"?"#":"↗";
+      const content=document.createElement("span");
+      content.className="fd-docs-search-result-content";
+      const heading=document.createElement("span");
+      heading.className="fd-docs-search-result-heading";
+      const titleElement=document.createElement("span");
+      titleElement.className="fd-docs-search-result-title";
+      titleElement.textContent=title;
+      heading.append(titleElement);
+      if(section){
+        const sectionElement=document.createElement("span");
+        sectionElement.className="fd-docs-search-result-section";
+        sectionElement.textContent=section;
+        heading.append(sectionElement);
+      }
+      content.append(heading);
+      if(description){
+        const descriptionElement=document.createElement("span");
+        descriptionElement.className="fd-docs-search-result-description";
+        descriptionElement.textContent=description;
+        content.append(descriptionElement);
+      }
+      link.append(marker,content);
+      const index=links.length;
+      link.addEventListener("pointerenter",()=>setActive(index));
+      links.push(link);
+      fragment.append(link);
+    }
+    if(links.length===0){setStatus("No results found","empty");return}
+    status.hidden=true;
+    results.hidden=false;
+    results.replaceChildren(fragment);
+    resultLinks=links;
+    root.dataset.searchState="results";
+    live.textContent=links.length+" result"+(links.length===1?"":"s")+" found";
+    setActive(0);
+  };
+  const runSearch=async()=>{
+    const query=input.value.trim();
+    if(!query){
+      searchController?.abort();
+      setStatus("Search the documentation","idle");
+      return;
+    }
+    searchController?.abort();
+    const controller=new AbortController();
+    searchController=controller;
+    setStatus("Searching...","loading");
+    try{
+      const response=await fetch("/api/docs?query="+encodeURIComponent(query),{headers:{Accept:"application/json"},signal:controller.signal});
+      if(!response.ok)throw new Error("Search request failed");
+      const payload=await response.json();
+      if(controller.signal.aborted||input.value.trim()!==query)return;
+      renderResults(Array.isArray(payload?.results)?payload.results:[]);
+    }catch(error){
+      if(error?.name!=="AbortError")setStatus("Search is unavailable. Try again.","error");
+    }finally{
+      if(searchController===controller)searchController=null;
+    }
+  };
+  const openSearch=()=>{
+    if(!root.hidden)return;
+    previousFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    root.hidden=false;
+    root.dataset.open="true";
+    document.documentElement.dataset.farmDocsSearch="open";
+    if(layout)layout.inert=true;
+    setExpanded(true);
+    requestAnimationFrame(()=>{input.focus();input.select()});
+  };
+  const closeSearch=(restoreFocus=true)=>{
+    if(root.hidden)return;
+    searchController?.abort();
+    clearTimeout(debounceTimer);
+    delete root.dataset.open;
+    root.hidden=true;
+    delete document.documentElement.dataset.farmDocsSearch;
+    if(layout)layout.inert=false;
+    setExpanded(false);
+    if(restoreFocus)previousFocus?.focus();
+  };
+
+  const isMac=/Mac|iPhone|iPad|iPod/.test(navigator.platform||navigator.userAgent);
+  for(const key of document.querySelectorAll("[data-docs-search-modifier]"))key.textContent=isMac?"⌘":"Ctrl+";
+  document.addEventListener("click",(event)=>{
+    const target=event.target instanceof Element?event.target:null;
+    if(!target)return;
+    const trigger=target.closest("[data-docs-search-trigger]");
+    if(trigger){event.preventDefault();openSearch();return}
+    if(target.closest("[data-docs-search-close]")){event.preventDefault();closeSearch();return}
+    if(target.closest("[data-docs-search-results] a[href]"))closeSearch(false);
+  });
+  input.addEventListener("input",()=>{
+    searchController?.abort();
+    clearTimeout(debounceTimer);
+    debounceTimer=window.setTimeout(runSearch,140);
+  });
+  document.addEventListener("keydown",(event)=>{
+    const shortcut=(event.metaKey||event.ctrlKey)&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==="s";
+    if(shortcut){event.preventDefault();root.hidden?openSearch():closeSearch();return}
+    if(root.hidden)return;
+    if(event.key==="Escape"){event.preventDefault();closeSearch();return}
+    if(event.key==="ArrowDown"||event.key==="ArrowUp"){
+      if(resultLinks.length===0||event.isComposing)return;
+      event.preventDefault();
+      setActive(activeIndex+(event.key==="ArrowDown"?1:-1));
+      return;
+    }
+    if(event.key==="Enter"&&!event.isComposing&&activeIndex>=0){event.preventDefault();resultLinks[activeIndex]?.click();return}
+    if(event.key==="Tab"){
+      const focusable=Array.from(dialog.querySelectorAll("input,button,a[href]")).filter((item)=>item instanceof HTMLElement&&!item.hasAttribute("disabled"));
+      if(focusable.length===0)return;
+      const first=focusable[0];
+      const last=focusable[focusable.length-1];
+      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
+      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
+    }
+  });
+})();</script>`;
+}
+
 function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
   return `${renderDocsRuntimeScript(docs)}
+${isDocsSearchEnabled(docs) ? renderDocsSearchRuntimeScript() : ""}
 ${renderDocsPageActionsRuntimeScript()}`;
 }
 
@@ -1766,6 +1994,7 @@ function renderPixelDocsHtml(
   const description = page.description || docs.config.metadata?.description || "";
   const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
   const themeName = getThemeName(docs);
+  const searchEnabled = isDocsSearchEnabled(docs);
 
   return `<!DOCTYPE html>
 <html class="dark" lang="en" data-docs-theme="${escapeAttribute(themeName)}">
@@ -1794,6 +2023,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     <aside id="nd-sidebar">
       <div class="sidebar-brand">
         <a href="/">${escapeHtml(navTitle)}</a>
+        ${searchEnabled ? renderDocsSearchTrigger() : ""}
         <span>/ docs</span>
       </div>
       ${renderPixelNavItems(pages, page.href, docs)}
@@ -1819,6 +2049,7 @@ ${renderMarkdownHtmlWithTitleMeta(page, docs)}
       </div>
     </nav>
   </div>
+  ${searchEnabled ? renderDocsSearchDialog(docs) : ""}
   ${renderDocsRuntimeScripts(docs)}
 </body>
 </html>`;
