@@ -214,6 +214,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-docs-search-trigger"');
     expect(html).toContain('data-search-full=""');
     expect(html).toContain('aria-keyshortcuts="Meta+K Control+K"');
+    expect(html).toContain("<kbd><span>⌘</span><span>K</span></kbd>");
     expect(html).toContain('id="farm-docs-search-root"');
     expect(html).toContain("data-farm-docs-search-root");
     expect(html).toContain('data-api="/api/docs"');

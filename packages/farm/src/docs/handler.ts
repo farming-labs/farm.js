@@ -1507,7 +1507,7 @@ function renderDocsSearchTrigger(): string {
   return `<button class="fd-docs-search-trigger" type="button" data-search-full="" aria-label="Search documentation" aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K">
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
   <span class="fd-docs-search-trigger-label">Search</span>
-  <kbd>⌘K</kbd>
+  <kbd><span>⌘</span><span>K</span></kbd>
 </button>`;
 }
 
