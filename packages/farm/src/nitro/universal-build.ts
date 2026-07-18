@@ -43,6 +43,22 @@ type UniversalPageRoute = {
   modulePath: string;
   source?: string;
 };
+type UniversalMetadataImageRoute = {
+  pattern: string;
+  kind: "opengraph" | "twitter";
+  fileName: "opengraph-image" | "twitter-image";
+  sourceType: "module" | "static";
+  modulePath?: string;
+  staticInfo?: {
+    contentType: string;
+    width: number;
+    height: number;
+    alt?: string;
+    hash: string;
+    byteLength: number;
+  };
+  data?: string;
+};
 type UniversalMiddlewareRoute = {
   path: string;
   filePath: string;
@@ -1230,6 +1246,32 @@ async function buildSSRInMemory(
     });
   }
 
+  const metadataImageRoutes: UniversalMetadataImageRoute[] = [];
+  for (const entry of routeManager.getMetadataImages().values()) {
+    if (entry.sourceType === "static") {
+      if (!entry.staticInfo) {
+        throw new Error(`Static metadata image ${entry.modulePath} is missing file info`);
+      }
+      metadataImageRoutes.push({
+        pattern: entry.pattern,
+        kind: entry.kind,
+        fileName: entry.fileName,
+        sourceType: "static",
+        staticInfo: entry.staticInfo,
+        data: (await fs.readFile(entry.modulePath)).toString("base64"),
+      });
+      continue;
+    }
+
+    metadataImageRoutes.push({
+      pattern: entry.pattern,
+      kind: entry.kind,
+      fileName: entry.fileName,
+      sourceType: "module",
+      modulePath: entry.modulePath,
+    });
+  }
+
   // Generate API route manifest
   const apiRoutes: Array<{ path: string; filePath: string; methods: string[] }> = [];
   for (const [routePath, route] of apiRouteManager.getRoutes()) {
@@ -1335,6 +1377,7 @@ async function buildSSRInMemory(
     apiRoutes,
     pageRoutes,
     layoutRoutes,
+    metadataImageRoutes,
     middlewareRoutes,
     redirectRoutes,
     notFoundPath,
@@ -1492,6 +1535,7 @@ function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
+  metadataImageRoutes: UniversalMetadataImageRoute[],
   middlewareRoutes: UniversalMiddlewareRoute[],
   redirectRoutes: ProgrammaticRedirectRoute[],
   notFoundPath: string | null,
@@ -1559,6 +1603,27 @@ function generateVirtualEntryCode(
   }`);
   });
 
+  const metadataImageImports: string[] = [];
+  const metadataImageRegistrations: string[] = [];
+
+  metadataImageRoutes.forEach((image, index) => {
+    if (image.sourceType === "module") {
+      const varName = `metadataImageRoute${index}`;
+      metadataImageImports.push(`import * as ${varName} from "${image.modulePath}";`);
+      metadataImageRegistrations.push(`
+  {
+    pattern: ${JSON.stringify(image.pattern)},
+    kind: ${JSON.stringify(image.kind)},
+    fileName: ${JSON.stringify(image.fileName)},
+    sourceType: "module",
+    module: ${varName},
+  }`);
+      return;
+    }
+
+    metadataImageRegistrations.push(`  ${JSON.stringify(image)}`);
+  });
+
   // Generate imports for all app middleware files
   const middlewareImports: string[] = [];
   const middlewareRegistrations: string[] = [];
@@ -1582,6 +1647,7 @@ function generateVirtualEntryCode(
       : "";
   const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
   const navigationHelpersImport = `import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "farm/navigation";`;
+  const metadataHelpersImport = `import { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "farm/metadata";`;
   const afterHelpersImport = `import { _runWithAfterRequest } from "farm/after";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
   const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
@@ -1659,11 +1725,13 @@ async function handleAPIRequest(request) {
 ${apiImports.join("\n")}
 ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
+${metadataImageImports.join("\n")}
 ${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${cacheHelpersImport}
 ${navigationHelpersImport}
+${metadataHelpersImport}
 ${afterHelpersImport}
 ${observabilityHelpersImport}
 ${middlewareRuntimeImport}
@@ -1757,6 +1825,10 @@ const pageRoutes = [${pageRegistrations.join(",")}
 const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
 
+// Metadata image routes bundled at build time
+const metadataImageRoutes = [${metadataImageRegistrations.join(",")}
+];
+
 // Redirect routes bundled at build time
 const redirectRoutes = ${JSON.stringify(redirectRoutes, null, 2)};
 
@@ -1803,6 +1875,162 @@ function matchRuntimePathPattern(pattern, pathname) {
   }
 
   return pathIndex === pathnameSegments.length ? params : null;
+}
+
+function getMatchingMetadataImage(pathname, kind) {
+  const pathSegments = splitRuntimePath(pathname);
+  let bestMatch = null;
+
+  for (const image of metadataImageRoutes) {
+    if (image.kind !== kind) continue;
+    const patternDepth = splitRuntimePath(image.pattern).length;
+    if (patternDepth > pathSegments.length) continue;
+
+    const pagePath = patternDepth === 0
+      ? "/"
+      : "/" + pathSegments.slice(0, patternDepth).join("/");
+    const params = matchRuntimePathPattern(image.pattern, pagePath);
+    if (params === null) continue;
+
+    if (!bestMatch || patternDepth > bestMatch.depth) {
+      bestMatch = { image, params, pagePath, depth: patternDepth };
+    }
+  }
+
+  return bestMatch;
+}
+
+function matchMetadataImageRequest(pathname) {
+  const normalizedPath = normalizeRuntimePath(pathname);
+  let kind;
+  let fileName;
+
+  if (normalizedPath === "/opengraph-image" || normalizedPath.endsWith("/opengraph-image")) {
+    kind = "opengraph";
+    fileName = "opengraph-image";
+  } else if (normalizedPath === "/twitter-image" || normalizedPath.endsWith("/twitter-image")) {
+    kind = "twitter";
+    fileName = "twitter-image";
+  } else {
+    return null;
+  }
+
+  const pagePath = normalizedPath.slice(0, -fileName.length - 1) || "/";
+  for (const image of metadataImageRoutes) {
+    if (image.kind !== kind) continue;
+    const params = matchRuntimePathPattern(image.pattern, pagePath);
+    if (params !== null) return { image, params, pagePath };
+  }
+
+  return null;
+}
+
+function createMetadataImageReference(match) {
+  const image = match.image;
+  const metadata = image.sourceType === "static" ? image.staticInfo : image.module;
+  const basePath = match.pagePath === "/" ? "" : match.pagePath;
+  const version = image.sourceType === "static" ? "?v=" + image.staticInfo.hash : "";
+
+  return {
+    kind: image.kind,
+    href: basePath + "/" + image.fileName + version,
+    width: metadata?.width ?? metadata?.size?.width,
+    height: metadata?.height ?? metadata?.size?.height,
+    alt: metadata?.alt,
+    contentType: metadata?.contentType,
+  };
+}
+
+function decodeMetadataImage(data) {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
+}
+
+async function handleMetadataImageRequest(request) {
+  const url = new URL(request.url);
+  const match = matchMetadataImageRequest(url.pathname);
+  if (!match) return null;
+
+  const method = request.method.toUpperCase();
+  if (method !== "GET" && method !== "HEAD") {
+    return new Response(null, { status: 405, headers: { Allow: "GET, HEAD" } });
+  }
+
+  const image = match.image;
+  if (image.sourceType === "static") {
+    const etag = '"' + image.staticInfo.hash + '"';
+    const isVersioned = url.searchParams.get("v") === image.staticInfo.hash;
+    const headers = new Headers({
+      "Content-Type": image.staticInfo.contentType,
+      "Content-Length": String(image.staticInfo.byteLength),
+      "Cache-Control": isVersioned
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=0, must-revalidate",
+      "ETag": etag,
+      "X-Content-Type-Options": "nosniff",
+    });
+
+    if (request.headers.get("if-none-match") === etag) {
+      return new Response(null, { status: 304, headers });
+    }
+
+    if (!image.bytes) image.bytes = decodeMetadataImage(image.data);
+    return new Response(method === "HEAD" ? null : image.bytes, { status: 200, headers });
+  }
+
+  try {
+    const imageModule = image.module;
+    if (!imageModule?.default) {
+      throw new Error("Metadata image module does not export a default component or handler");
+    }
+
+    const searchParams = Object.fromEntries(url.searchParams.entries());
+    const props = {
+      params: match.params,
+      searchParams: Promise.resolve(searchParams),
+      path: match.pagePath,
+    };
+    const value = typeof imageModule.default === "function"
+      ? await imageModule.default(props)
+      : imageModule.default;
+
+    if (value instanceof Response) {
+      return method === "HEAD"
+        ? new Response(null, { status: value.status, headers: value.headers })
+        : value;
+    }
+
+    let body;
+    if (typeof value === "string" || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+      body = value;
+    } else {
+      const React = await import("react");
+      if (!React.isValidElement(value)) {
+        throw new Error("Metadata image must return a Response, string, bytes, or React element");
+      }
+      const { renderToStaticMarkup } = await import("react-dom/server");
+      body = renderToStaticMarkup(value);
+    }
+
+    return new Response(method === "HEAD" ? null : body, {
+      status: 200,
+      headers: {
+        "Content-Type": imageModule.contentType || "image/svg+xml; charset=utf-8",
+        "Cache-Control": "public, max-age=0, must-revalidate",
+        "X-Content-Type-Options": "nosniff",
+      },
+    });
+  } catch (error) {
+    console.error("Metadata image render failed:", error);
+    return new Response("Internal Server Error", {
+      status: 500,
+      headers: { "Content-Type": "text/plain; charset=utf-8" },
+    });
+  }
 }
 
 function interpolateRedirectDestination(destination, params) {
@@ -2047,6 +2275,11 @@ async function handleFarmRequest(request) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
 
+  const metadataImageResponse = await handleMetadataImageRequest(request.clone());
+  if (metadataImageResponse) {
+    return applyProductionMiddlewareHeaders(metadataImageResponse, middlewareHeaders);
+  }
+
   // Preserve the explicit JSON 404 for /api/* misses.
   if (pathname.startsWith("/api/")) {
     if (farmDocsAPIHandler) {
@@ -2196,29 +2429,24 @@ async function handleFarmRequest(request) {
         let mergedMetadata = {};
         for (const layout of applicableLayouts) {
           if (layout.module.metadata) {
-            mergedMetadata = { ...mergedMetadata, ...layout.module.metadata };
+            mergedMetadata = mergeMetadata(mergedMetadata, layout.module.metadata);
           }
         }
-        mergedMetadata = { ...mergedMetadata, ...pageMetadata };
-        
-        // Build page title and meta tags from merged metadata
-        const title = mergedMetadata.title || "Farm.js App";
-        const description = mergedMetadata.description || "";
-        
-        let metaTags = "";
-        if (description) {
-          metaTags += \`\\n  <meta name="description" content="\${description.replace(/"/g, '&quot;')}">\`;
+        mergedMetadata = mergeMetadata(mergedMetadata, pageMetadata);
+
+        for (const kind of ["opengraph", "twitter"]) {
+          const imageMatch = getMatchingMetadataImage(pathname, kind);
+          if (imageMatch) {
+            mergedMetadata = addMetadataImageReference(
+              mergedMetadata,
+              createMetadataImageReference(imageMatch),
+            );
+          }
         }
-        if (mergedMetadata.keywords) {
-          const keywords = Array.isArray(mergedMetadata.keywords) ? mergedMetadata.keywords.join(", ") : mergedMetadata.keywords;
-          metaTags += \`\\n  <meta name="keywords" content="\${keywords.replace(/"/g, '&quot;')}">\`;
-        }
-        if (mergedMetadata.openGraph) {
-          const og = mergedMetadata.openGraph;
-          if (og.title) metaTags += \`\\n  <meta property="og:title" content="\${og.title.replace(/"/g, '&quot;')}">\`;
-          if (og.description) metaTags += \`\\n  <meta property="og:description" content="\${og.description.replace(/"/g, '&quot;')}">\`;
-          if (og.image) metaTags += \`\\n  <meta property="og:image" content="\${og.image}">\`;
-        }
+
+        const renderedMetadata = renderMetadataHead(mergedMetadata);
+        const title = renderedMetadata.title;
+        const metaTags = renderedMetadata.tags;
         
         // Check if the layout already rendered a full HTML document
         const trimmedHtml = html.trim();
@@ -2232,10 +2460,14 @@ async function handleFarmRequest(request) {
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
             // Inject title if not present and we have one
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
+              let nextHeadContent = headContent;
               if (!headContent.includes('<title>') && title !== "Farm.js App") {
-                return \`<head\${attrs}>\${headContent}\\n  <title>\${title}</title>\\n</head>\`;
+                nextHeadContent += "\\n  <title>" + title + "</title>";
               }
-              return match;
+              if (metaTags) nextHeadContent += metaTags;
+              return nextHeadContent === headContent
+                ? match
+                : "<head" + attrs + ">" + nextHeadContent + "\\n</head>";
             })
             // Inject client script before closing body tag
             .replace(/<\\/body>/i, '  <script type="module" src="/farm-client.js"></script>\\n</body>');
