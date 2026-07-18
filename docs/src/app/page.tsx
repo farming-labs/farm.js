@@ -267,15 +267,36 @@ if (error) throw error;
 data?.users[0]?.name;
 //   ^? string | undefined`;
 
-const integrationConfigCode = `import { defineConfig } from "@farmjs/core";
-import { auth, billing, jobs } from "./src/lib/integrations";
+const integrationCodeTabs = [
+  {
+    id: "providers",
+    label: "Providers",
+    language: "ts",
+    highlightLines: [5, 6, 7, 8],
+    code: `import { betterAuth, jobs, stripe, trigger } from "@farmjs/integrations";
+import { auth } from "./auth";
+import { tasks } from "./jobs";
+export const integrations = {
+    auth: betterAuth({ instance: auth }), // Better Auth
+    billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }), // Stripe
+    jobs: jobs({ // Trigger.dev
+        runtime: trigger({ apiKey: process.env.TRIGGER_SECRET_KEY }),
+        tasks,
+    }),
+} as const;`,
+  },
+  {
+    id: "register",
+    label: "Register",
+    language: "ts",
+    highlightLines: [4],
+    code: `import { defineConfig } from "@farmjs/core";
+import { integrations } from "./src/lib/integrations";
 export default defineConfig({
-    extends: ["./layers/commerce"],
-    integrations: { auth, billing, jobs },
-    routeRules: { "/store/**": { swr: 300 } },
-    serverActions: { bodySizeLimit: "1mb" },
-    deploy: { target: "vercel" },
-});`;
+    integrations,
+});`,
+  },
+] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
 const docsConfigCode = `import { defineConfig } from "@farmjs/core";
 export default defineConfig({
@@ -288,7 +309,6 @@ export default defineConfig({
 });`;
 
 const typedApiHighlightLines = [1, 7, 8] as const;
-const integrationHighlightLines = [5] as const;
 const docsHighlightLines = [3, 4] as const;
 
 const layersConfigTabs = [
@@ -891,12 +911,12 @@ function TypedApiVisual() {
 function IntegrationVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <HighlightedCode
+      <HighlightedCodeTabs
         className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col"
-        code={integrationConfigCode}
-        highlightLines={integrationHighlightLines}
-        label="farm.config.ts"
-        language="ts"
+        compact
+        id="product-integration-examples"
+        tabs={integrationCodeTabs}
+        tabsLabel="Product integration examples"
       />
     </div>
   );
