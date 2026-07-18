@@ -105,10 +105,14 @@ required for a Farm application.
 
 ### Built-in search
 
-Farm follows the Fumadocs search pattern without requiring application-owned UI. The sidebar search
-control and `Cmd+S` / `Ctrl+S` shortcut open one accessible dialog with keyboard navigation. The
-dialog queries `/api/docs?query=<term>`, so `provider`, `maxResults`, and custom provider behavior
-come from the same `docs.search` config used by the docs API.
+Farm uses the existing `DocsCommandSearch` React component from `@farming-labs/theme`, the same Omni
+search used by the Next.js docs adapter. Farm provides its HTML mount and server endpoint; the shared
+component owns the dialog, fuzzy ranking, filters, recent searches, loading and empty states, result
+highlights, and keyboard navigation. The sidebar control and `Cmd+K` / `Ctrl+K` shortcut open it.
+
+The component queries `/api/docs?query=<term>`. That endpoint returns the standard docs search result
+array, so `provider`, `maxResults`, and custom provider behavior come from the same `docs.search`
+config instead of a second client-side search implementation.
 
 Use `search: true` for the built-in simple provider, or configure `provider: "simple"`,
 `"algolia"`, `"typesense"`, `"mcp"`, or `"custom"`. Search result content is rendered as text, and

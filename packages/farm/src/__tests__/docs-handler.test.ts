@@ -211,16 +211,17 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("data-sidebar-toggle");
     expect(html).toContain("data-sidebar-backdrop");
     expect(html).toContain('class="fd-docs-search-trigger"');
-    expect(html).toContain("data-docs-search-trigger");
-    expect(html).toContain('aria-keyshortcuts="Meta+S Control+S"');
-    expect(html).toContain('id="farm-docs-search-dialog"');
-    expect(html).toContain("data-docs-search-input");
+    expect(html).toContain('data-search-full=""');
+    expect(html).toContain('aria-keyshortcuts="Meta+K Control+K"');
+    expect(html).toContain('id="farm-docs-search-root"');
+    expect(html).toContain("data-farm-docs-search-root");
+    expect(html).toContain('data-api="/api/docs"');
     expect(html).toContain('aria-label="Search documentation"');
-    expect(html).toContain('role="listbox"');
-    expect(html).toContain("window.__farmDocsSearchRuntime");
-    expect(html).toContain('event.key.toLowerCase()==="s"');
-    expect(html).toContain('fetch("/api/docs?query="+encodeURIComponent(query)');
-    expect(html).toContain("descriptionElement.textContent=description");
+    expect(html).toContain('<script type="module" src="/farm-client.js"></script>');
+    expect(html).not.toContain('id="farm-docs-search-dialog"');
+    expect(html).not.toContain("window.__farmDocsSearchRuntime");
+    expect(html).toContain("window.__farmDocsHashRuntime");
+    expect(html).toContain('window.addEventListener("load",schedule,{once:true})');
     expect(html).toContain('document.getElementById(id)?.scrollIntoView({block:"start"})');
     expect(html).toContain(
       "sidebar.scrollTop+=activeRect.top-sidebarRect.top-(sidebar.clientHeight-activeRect.height)/2",
@@ -349,10 +350,10 @@ describe("createFarmDocsHandler", () => {
       const response = await handler(new Request("http://farm.test/docs"));
       const html = await response?.text();
 
-      expect(html).not.toContain("data-docs-search-trigger");
+      expect(html).not.toContain('data-search-full=""');
       expect(html).not.toContain('id="farm-docs-search-root"');
-      expect(html).not.toContain("window.__farmDocsSearchRuntime");
-      expect(html).not.toContain('aria-keyshortcuts="Meta+S Control+S"');
+      expect(html).not.toContain('aria-keyshortcuts="Meta+K Control+K"');
+      expect(html).not.toContain('<script type="module" src="/farm-client.js"></script>');
     }
   });
 
@@ -611,11 +612,11 @@ describe("createDocsAPI", () => {
 
     const searchResponse = await handlers.GET(new Request("http://farm.test/api/docs?query=guide"));
     await expect(searchResponse.json()).resolves.toEqual(
-      expect.objectContaining({
-        query: "guide",
-        results: expect.arrayContaining([expect.objectContaining({ title: "Guide" })]),
-      }),
+      expect.arrayContaining([expect.objectContaining({ title: "Guide" })]),
     );
+
+    const emptySearchResponse = await handlers.GET(new Request("http://farm.test/api/docs"));
+    await expect(emptySearchResponse.json()).resolves.toEqual([]);
 
     const pathMarkdownResponse = await handlers.GET(
       new Request("http://farm.test/api/docs/guide.md"),

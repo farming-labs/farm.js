@@ -24,11 +24,13 @@ import {
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
 import { resolveFarmDocsPageLastModified } from "./last-modified";
+import { isFarmDocsSearchEnabled } from "./search-client";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
   root: string;
   srcDir?: string;
+  clientEntry?: string;
 }
 
 export interface FarmDocsPage {
@@ -341,12 +343,6 @@ function getDocsTitle(docs: FarmDocsResolvedConfig): string {
   return typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
     ? String((docs.config.nav as { title?: unknown }).title || "Documentation")
     : "Documentation";
-}
-
-function isDocsSearchEnabled(docs: FarmDocsResolvedConfig): boolean {
-  const search = docs.config.search;
-  if (search === false) return false;
-  return !(search && typeof search === "object" && search.enabled === false);
 }
 
 function getDocsDescription(docs: FarmDocsResolvedConfig): string | undefined {
@@ -1508,29 +1504,16 @@ function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedC
 }
 
 function renderDocsSearchTrigger(): string {
-  return `<button class="fd-docs-search-trigger" type="button" data-docs-search-trigger aria-label="Search documentation" aria-haspopup="dialog" aria-controls="farm-docs-search-dialog" aria-expanded="false" aria-keyshortcuts="Meta+S Control+S">
+  return `<button class="fd-docs-search-trigger" type="button" data-search-full="" aria-label="Search documentation" aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K">
   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
   <span class="fd-docs-search-trigger-label">Search</span>
-  <kbd><span data-docs-search-modifier>⌘</span>S</kbd>
+  <kbd>⌘K</kbd>
 </button>`;
 }
 
-function renderDocsSearchDialog(docs: FarmDocsResolvedConfig): string {
-  const title = `Search ${getDocsTitle(docs)}`;
-  return `<div id="farm-docs-search-root" class="fd-docs-search-root" data-docs-search-root hidden>
-  <div class="fd-docs-search-overlay" data-docs-search-close aria-hidden="true"></div>
-  <section id="farm-docs-search-dialog" class="fd-docs-search-dialog" data-docs-search-dialog role="dialog" aria-modal="true" aria-labelledby="farm-docs-search-title" tabindex="-1">
-    <h2 id="farm-docs-search-title" class="fd-docs-search-visually-hidden">${escapeHtml(title)}</h2>
-    <div class="fd-docs-search-header">
-      <svg class="fd-docs-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
-      <input type="search" data-docs-search-input role="combobox" aria-label="Search documentation" aria-autocomplete="list" aria-controls="farm-docs-search-results" aria-expanded="true" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Search documentation" />
-      <button class="fd-docs-search-close" type="button" data-docs-search-close aria-label="Close search">ESC</button>
-    </div>
-    <div id="farm-docs-search-results" class="fd-docs-search-results" data-docs-search-results role="listbox" aria-label="Search results" hidden></div>
-    <div class="fd-docs-search-status" data-docs-search-status role="status">Search the documentation</div>
-    <div class="fd-docs-search-visually-hidden" data-docs-search-live aria-live="polite"></div>
-  </section>
-</div>`;
+function renderDocsSearchMount(clientEntry: string): string {
+  return `<div id="farm-docs-search-root" data-farm-docs-search-root data-api="/api/docs"></div>
+  <script type="module" src="${escapeAttribute(clientEntry)}"></script>`;
 }
 
 function renderPixelToc(items: TocItem[]): string {
@@ -1557,204 +1540,13 @@ function renderDocsPageActionsRuntimeScript(): string {
   return `<script>(()=>{if(window.__farmDocsPageActionsRuntime)return;window.__farmDocsPageActionsRuntime=true;const readArticleText=()=>{const article=document.getElementById("nd-page");if(!article)return"";const clone=article.cloneNode(true);if(!(clone instanceof HTMLElement))return article.innerText||"";clone.querySelectorAll("[data-page-actions],.fd-page-footer,.fd-page-nav").forEach((node)=>node.remove());return clone.innerText||""};const withTitle=(content,format,includeTitle)=>{if(!includeTitle)return content;const title=document.querySelector("#nd-page h1")?.textContent?.trim()||document.title.trim();if(!title)return content;const trimmed=content.trimStart();if(trimmed.startsWith(title)||trimmed.startsWith("# "+title))return content;return format==="markdown"?"# "+title+"\\n\\n"+content:title+"\\n\\n"+content};const writeClipboard=async(text)=>{if(navigator.clipboard?.writeText){try{await navigator.clipboard.writeText(text);return}catch{}}const textarea=document.createElement("textarea");textarea.value=text;textarea.setAttribute("readonly","");textarea.style.position="fixed";textarea.style.opacity="0";textarea.style.pointerEvents="none";document.body.appendChild(textarea);textarea.select();document.execCommand("copy");textarea.remove()};const markCopied=(button)=>{const label=button.querySelector("[data-page-action-label]");button.dataset.copied="true";button.setAttribute("aria-label",button.dataset.copiedLabel||"Copied!");button.title=button.dataset.copiedLabel||"Copied!";if(label)label.textContent=button.dataset.copiedLabel||"Copied!";const previous=Number(button.dataset.copyTimeout||0);if(previous)clearTimeout(previous);button.dataset.copyTimeout=String(setTimeout(()=>{button.dataset.copied="false";button.setAttribute("aria-label",button.dataset.copyLabel||"Copy page");button.title=button.dataset.copyLabel||"Copy page";if(label)label.textContent=button.dataset.copyLabel||"Copy page";button.dataset.copyTimeout="0"},4500))};document.addEventListener("click",async(event)=>{const target=event.target instanceof Element?event.target.closest('[data-page-action="copy-markdown"]'):null;if(!(target instanceof HTMLButtonElement))return;event.preventDefault();const format=target.dataset.copyMarkdownFormat==="text"?"text":"markdown";const includeTitle=target.dataset.copyMarkdownIncludeTitle==="true";let content="";target.disabled=true;try{if(format==="markdown"&&target.dataset.markdownUrl){try{const response=await fetch(target.dataset.markdownUrl,{headers:{Accept:"text/markdown"}});if(response.ok)content=await response.text()}catch{}}if(!content)content=readArticleText();content=withTitle(content,format,includeTitle);if(content.trim()){await writeClipboard(content);markCopied(target)}}finally{target.disabled=false}})})();</script>`;
 }
 
-function renderDocsSearchRuntimeScript(): string {
-  return `<script>(()=>{
-  if(window.__farmDocsSearchRuntime)return;
-  window.__farmDocsSearchRuntime=true;
-  const root=document.querySelector("[data-docs-search-root]");
-  if(!(root instanceof HTMLElement))return;
-  const dialog=root.querySelector("[data-docs-search-dialog]");
-  const input=root.querySelector("[data-docs-search-input]");
-  const results=root.querySelector("[data-docs-search-results]");
-  const status=root.querySelector("[data-docs-search-status]");
-  const live=root.querySelector("[data-docs-search-live]");
-  const layout=document.getElementById("nd-docs-layout");
-  if(!(dialog instanceof HTMLElement)||!(input instanceof HTMLInputElement)||!(results instanceof HTMLElement)||!(status instanceof HTMLElement)||!(live instanceof HTMLElement))return;
-
-  let previousFocus=null;
-  let debounceTimer=0;
-  let searchController=null;
-  let activeIndex=-1;
-  let resultLinks=[];
-
-  const getTriggers=()=>Array.from(document.querySelectorAll("[data-docs-search-trigger]")).filter((item)=>item instanceof HTMLButtonElement);
-  const setExpanded=(expanded)=>{for(const trigger of getTriggers())trigger.setAttribute("aria-expanded",expanded?"true":"false")};
-  const setStatus=(message,state)=>{
-    status.textContent=message;
-    status.hidden=false;
-    results.hidden=true;
-    results.replaceChildren();
-    resultLinks=[];
-    activeIndex=-1;
-    input.removeAttribute("aria-activedescendant");
-    root.dataset.searchState=state;
-    live.textContent=message;
-  };
-  const setActive=(index)=>{
-    if(resultLinks.length===0)return;
-    activeIndex=(index+resultLinks.length)%resultLinks.length;
-    for(let itemIndex=0;itemIndex<resultLinks.length;itemIndex++){
-      const link=resultLinks[itemIndex];
-      const selected=itemIndex===activeIndex;
-      link.dataset.active=selected?"true":"false";
-      link.setAttribute("aria-selected",selected?"true":"false");
-    }
-    const active=resultLinks[activeIndex];
-    input.setAttribute("aria-activedescendant",active.id);
-    active.scrollIntoView({block:"nearest"});
-  };
-  const resolveResultHref=(value)=>{
-    if(typeof value!=="string"||!value)return null;
-    try{
-      const url=new URL(value,location.href);
-      if(url.protocol!=="http:"&&url.protocol!=="https:")return null;
-      return url.origin===location.origin?url.pathname+url.search+url.hash:url.href;
-    }catch{return null}
-  };
-  const renderResults=(items)=>{
-    const fragment=document.createDocumentFragment();
-    const links=[];
-    for(const item of items){
-      if(!item||typeof item!=="object")continue;
-      const href=resolveResultHref(typeof item.url==="string"?item.url:item.href);
-      if(!href)continue;
-      const title=typeof item.title==="string"&&item.title.trim()?item.title.trim():typeof item.content==="string"&&item.content.trim()?item.content.trim():"Documentation";
-      const section=typeof item.section==="string"&&item.section.trim()&&item.section.trim()!==title?item.section.trim():"";
-      const description=typeof item.description==="string"?item.description.trim():"";
-      const link=document.createElement("a");
-      link.id="farm-docs-search-result-"+links.length;
-      link.className="fd-docs-search-result";
-      link.href=href;
-      link.setAttribute("role","option");
-      link.setAttribute("aria-selected","false");
-      link.dataset.active="false";
-      const marker=document.createElement("span");
-      marker.className="fd-docs-search-result-marker";
-      marker.setAttribute("aria-hidden","true");
-      marker.textContent=item.type==="heading"?"#":"↗";
-      const content=document.createElement("span");
-      content.className="fd-docs-search-result-content";
-      const heading=document.createElement("span");
-      heading.className="fd-docs-search-result-heading";
-      const titleElement=document.createElement("span");
-      titleElement.className="fd-docs-search-result-title";
-      titleElement.textContent=title;
-      heading.append(titleElement);
-      if(section){
-        const sectionElement=document.createElement("span");
-        sectionElement.className="fd-docs-search-result-section";
-        sectionElement.textContent=section;
-        heading.append(sectionElement);
-      }
-      content.append(heading);
-      if(description){
-        const descriptionElement=document.createElement("span");
-        descriptionElement.className="fd-docs-search-result-description";
-        descriptionElement.textContent=description;
-        content.append(descriptionElement);
-      }
-      link.append(marker,content);
-      const index=links.length;
-      link.addEventListener("pointerenter",()=>setActive(index));
-      links.push(link);
-      fragment.append(link);
-    }
-    if(links.length===0){setStatus("No results found","empty");return}
-    status.hidden=true;
-    results.hidden=false;
-    results.replaceChildren(fragment);
-    resultLinks=links;
-    root.dataset.searchState="results";
-    live.textContent=links.length+" result"+(links.length===1?"":"s")+" found";
-    setActive(0);
-  };
-  const runSearch=async()=>{
-    const query=input.value.trim();
-    if(!query){
-      searchController?.abort();
-      setStatus("Search the documentation","idle");
-      return;
-    }
-    searchController?.abort();
-    const controller=new AbortController();
-    searchController=controller;
-    setStatus("Searching...","loading");
-    try{
-      const response=await fetch("/api/docs?query="+encodeURIComponent(query),{headers:{Accept:"application/json"},signal:controller.signal});
-      if(!response.ok)throw new Error("Search request failed");
-      const payload=await response.json();
-      if(controller.signal.aborted||input.value.trim()!==query)return;
-      renderResults(Array.isArray(payload?.results)?payload.results:[]);
-    }catch(error){
-      if(error?.name!=="AbortError")setStatus("Search is unavailable. Try again.","error");
-    }finally{
-      if(searchController===controller)searchController=null;
-    }
-  };
-  const openSearch=()=>{
-    if(!root.hidden)return;
-    previousFocus=document.activeElement instanceof HTMLElement?document.activeElement:null;
-    root.hidden=false;
-    root.dataset.open="true";
-    document.documentElement.dataset.farmDocsSearch="open";
-    if(layout)layout.inert=true;
-    setExpanded(true);
-    requestAnimationFrame(()=>{input.focus();input.select()});
-  };
-  const closeSearch=(restoreFocus=true)=>{
-    if(root.hidden)return;
-    searchController?.abort();
-    clearTimeout(debounceTimer);
-    delete root.dataset.open;
-    root.hidden=true;
-    delete document.documentElement.dataset.farmDocsSearch;
-    if(layout)layout.inert=false;
-    setExpanded(false);
-    if(restoreFocus)previousFocus?.focus();
-  };
-
-  const isMac=/Mac|iPhone|iPad|iPod/.test(navigator.platform||navigator.userAgent);
-  for(const key of document.querySelectorAll("[data-docs-search-modifier]"))key.textContent=isMac?"⌘":"Ctrl+";
-  document.addEventListener("click",(event)=>{
-    const target=event.target instanceof Element?event.target:null;
-    if(!target)return;
-    const trigger=target.closest("[data-docs-search-trigger]");
-    if(trigger){event.preventDefault();openSearch();return}
-    if(target.closest("[data-docs-search-close]")){event.preventDefault();closeSearch();return}
-    if(target.closest("[data-docs-search-results] a[href]"))closeSearch(false);
-  });
-  input.addEventListener("input",()=>{
-    searchController?.abort();
-    clearTimeout(debounceTimer);
-    debounceTimer=window.setTimeout(runSearch,140);
-  });
-  document.addEventListener("keydown",(event)=>{
-    const shortcut=(event.metaKey||event.ctrlKey)&&!event.altKey&&!event.shiftKey&&event.key.toLowerCase()==="s";
-    if(shortcut){event.preventDefault();root.hidden?openSearch():closeSearch();return}
-    if(root.hidden)return;
-    if(event.key==="Escape"){event.preventDefault();closeSearch();return}
-    if(event.key==="ArrowDown"||event.key==="ArrowUp"){
-      if(resultLinks.length===0||event.isComposing)return;
-      event.preventDefault();
-      setActive(activeIndex+(event.key==="ArrowDown"?1:-1));
-      return;
-    }
-    if(event.key==="Enter"&&!event.isComposing&&activeIndex>=0){event.preventDefault();resultLinks[activeIndex]?.click();return}
-    if(event.key==="Tab"){
-      const focusable=Array.from(dialog.querySelectorAll("input,button,a[href]")).filter((item)=>item instanceof HTMLElement&&!item.hasAttribute("disabled"));
-      if(focusable.length===0)return;
-      const first=focusable[0];
-      const last=focusable[focusable.length-1];
-      if(event.shiftKey&&document.activeElement===first){event.preventDefault();last.focus()}
-      else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first.focus()}
-    }
-  });
-})();</script>`;
+function renderDocsHashRuntimeScript(): string {
+  return `<script>(()=>{if(window.__farmDocsHashRuntime)return;window.__farmDocsHashRuntime=true;const scrollToHash=()=>{if(!location.hash)return;let id=location.hash.slice(1);try{id=decodeURIComponent(id)}catch{}document.getElementById(id)?.scrollIntoView({block:"start"})};const schedule=()=>requestAnimationFrame(()=>requestAnimationFrame(scrollToHash));if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",schedule,{once:true});else schedule();window.addEventListener("load",schedule,{once:true});window.addEventListener("hashchange",schedule)})();</script>`;
 }
 
 function renderDocsRuntimeScripts(docs: FarmDocsResolvedConfig): string {
   return `${renderDocsRuntimeScript(docs)}
-${isDocsSearchEnabled(docs) ? renderDocsSearchRuntimeScript() : ""}
+${renderDocsHashRuntimeScript()}
 ${renderDocsPageActionsRuntimeScript()}`;
 }
 
@@ -1986,6 +1778,7 @@ function renderPixelDocsHtml(
   pages: FarmDocsPage[],
   docs: FarmDocsResolvedConfig,
   themeCss: string,
+  clientEntry: string,
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -1994,7 +1787,7 @@ function renderPixelDocsHtml(
   const description = page.description || docs.config.metadata?.description || "";
   const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
   const themeName = getThemeName(docs);
-  const searchEnabled = isDocsSearchEnabled(docs);
+  const searchEnabled = isFarmDocsSearchEnabled(docs);
 
   return `<!DOCTYPE html>
 <html class="dark" lang="en" data-docs-theme="${escapeAttribute(themeName)}">
@@ -2049,7 +1842,7 @@ ${renderMarkdownHtmlWithTitleMeta(page, docs)}
       </div>
     </nav>
   </div>
-  ${searchEnabled ? renderDocsSearchDialog(docs) : ""}
+  ${searchEnabled ? renderDocsSearchMount(clientEntry) : ""}
   ${renderDocsRuntimeScripts(docs)}
 </body>
 </html>`;
@@ -2095,6 +1888,7 @@ export function createFarmDocsHandler(
         discoverFarmDocsPages(contentDir, docs),
         docs,
         resolvePixelBorderThemeCss(options),
+        options.clientEntry || "/farm-client.js",
       ),
       {
         status: 200,

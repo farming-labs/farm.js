@@ -21,6 +21,11 @@ import {
   getFarmDocsRouteTypeEntries,
   isFarmDocsAPIRequest,
 } from "./docs";
+import {
+  generateFarmDocsSearchClientRuntime,
+  isFarmDocsSearchEnabled,
+  resolveFarmDocsSearchClientModule,
+} from "./docs/search-client";
 import { createMarkdownMirrorResponse } from "./markdown";
 import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
 import { sendWebResponse } from "./server/response";
@@ -587,6 +592,7 @@ export function farmPlugin(
       const farmDocsHandler = createFarmDocsHandler(farmConfig.docs, {
         root: farmConfig.root,
         srcDir: farmConfig.srcDir,
+        clientEntry: "/@farm/client.js",
       });
       const farmDocsAPIHandler = farmConfig.docs?.enabled
         ? createFarmDocsAPIHandler({
@@ -1398,6 +1404,10 @@ export function farmPlugin(
             ...getIntegrationDocumentNavigationMatchers(integrations),
             ...getFarmDocsDocumentNavigationMatchers(resolvedConfig?.docs),
           ],
+          isFarmDocsSearchEnabled(resolvedConfig?.docs),
+          resolveFarmDocsSearchClientModule(
+            resolvedConfig?.root || server?.config.root || process.cwd(),
+          ),
         );
       }
 
@@ -2164,6 +2174,8 @@ function parseRouteModuleSchema(
 function generateClientCode(
   integrationProviders: Array<{ name: string; type: string; props?: Record<string, unknown> }> = [],
   documentNavigationMatchers: string[] = [],
+  docsSearchEnabled = false,
+  docsSearchModuleId = "@farming-labs/theme",
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -2181,6 +2193,7 @@ import {
   isFarmDeploymentMismatchResponse,
 } from '@farmjs/core/deployment'
 ${providerImportBlock}
+${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
 // Uses manifest-based chunk loading - NO HTML fetching!
@@ -2979,6 +2992,11 @@ async function renderPage(pageData) {
 spaRouter.setNavigationHandler(renderPage);
 
 async function hydrate() {
+  if (isFarmDocsSearchPage()) {
+    await mountFarmDocsSearch();
+    return;
+  }
+
   const rootContainer = document.getElementById('root')
   
   if (!rootContainer) {
