@@ -1,4 +1,4 @@
-# 🚜 Farm.js
+# Farm.js
 
 A modern React meta-framework built on Vite with Next.js-like semantics, featuring React Server Components, Server Actions, and blazing-fast development experience.
 
