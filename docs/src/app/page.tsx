@@ -1207,7 +1207,7 @@ function DeploymentVisual() {
             <div
               key={`${tile.row}_${tile.col}`}
               className={cx(
-                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-[3px] border border-white/[0.08] transition-[background-color,border-color] duration-150",
+                "group/tile absolute flex size-[20%] items-center justify-center overflow-hidden rounded-none border border-white/[0.08] transition-[background-color,border-color] duration-150",
                 tile.brand
                   ? "bg-white/[0.055] group-hover/deployment:border-white/[0.14] group-hover/deployment:bg-white/[0.075]"
                   : "bg-white/[0.012]",
