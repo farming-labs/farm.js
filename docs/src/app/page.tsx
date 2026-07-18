@@ -1233,6 +1233,14 @@ function DeploymentVisual() {
               )}
             </div>
           ))}
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 z-10 w-[22%] bg-gradient-to-l from-black via-black/60 to-transparent"
+          />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-[22%] bg-gradient-to-t from-black via-black/60 to-transparent"
+          />
         </div>
       </a>
     </FoundationCanvas>
