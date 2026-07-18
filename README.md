@@ -1,9 +1,17 @@
-# Farm.js
+<p align="center">
+  <a href="https://farmjs.dev">
+    <img src="./.github/assets/farmjs-lockup.svg" alt="Farm.js" width="420" />
+  </a>
+</p>
 
-A modern React meta-framework built on Vite with Next.js-like semantics, featuring React Server Components, Server Actions, and blazing-fast development experience.
+<p align="center">
+  A modern React meta-framework built on Vite with Next.js-like semantics, featuring React Server Components, Server Actions, and a blazing-fast development experience.
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT license" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-Ready-blue.svg" alt="TypeScript ready" /></a>
+</p>
 
 ## ✨ Features
 
