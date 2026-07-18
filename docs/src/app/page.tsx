@@ -8,14 +8,11 @@ import {
   Bot,
   Braces,
   CloudCog,
-  CreditCard,
   Database,
   ExternalLink,
   FileText,
   FolderTree,
-  Gauge,
   GitFork,
-  KeyRound,
   Layers3,
   Menu,
   Network,
@@ -23,7 +20,6 @@ import {
   Rocket,
   Route,
   Settings2,
-  ShieldCheck,
   Terminal,
   Workflow,
   X,
@@ -49,6 +45,14 @@ import stripeIconUrl from "simple-icons/icons/stripe.svg?url";
 import supabaseIconUrl from "simple-icons/icons/supabase.svg?url";
 import vercelIconUrl from "simple-icons/icons/vercel.svg?url";
 import viteIconUrl from "simple-icons/icons/vite.svg?url";
+import authJsIconUrl from "../assets/brands/authjs.svg?url";
+import autumnIconUrl from "../assets/brands/autumn.svg?url";
+import eveIconUrl from "../assets/brands/eve.svg?url";
+import inngestIconUrl from "../assets/brands/inngest.svg?url";
+import polarIconUrl from "../assets/brands/polar.svg?url";
+import triggerIconUrl from "../assets/brands/trigger.svg?url";
+import unkeyIconUrl from "../assets/brands/unkey.svg?url";
+import workosIconUrl from "../assets/brands/workos.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
@@ -77,6 +81,7 @@ type ProductStackItem = {
   href: string;
   brand?: string;
   icon?: LucideIcon;
+  wordmark?: boolean;
 };
 
 const integrationDirectoryItems = [
@@ -92,7 +97,7 @@ const integrationDirectoryItems = [
     col: 3,
     label: "Auth.js",
     href: "/docs/integrations/auth/authjs",
-    icon: ShieldCheck,
+    brand: authJsIconUrl,
   },
   {
     row: 1,
@@ -113,7 +118,7 @@ const integrationDirectoryItems = [
     col: 4,
     label: "WorkOS",
     href: "/docs/integrations/auth/workos",
-    icon: Blocks,
+    brand: workosIconUrl,
   },
   {
     row: 2,
@@ -127,14 +132,14 @@ const integrationDirectoryItems = [
     col: 3,
     label: "Autumn",
     href: "/docs/integrations/autumn",
-    icon: Gauge,
+    brand: autumnIconUrl,
   },
   {
     row: 3,
     col: 0,
     label: "Polar",
     href: "/docs/integrations/polar",
-    icon: CreditCard,
+    brand: polarIconUrl,
   },
   {
     row: 3,
@@ -162,14 +167,14 @@ const integrationDirectoryItems = [
     col: 3,
     label: "Inngest",
     href: "/docs/integrations/inngest",
-    icon: Network,
+    brand: inngestIconUrl,
   },
   {
     row: 5,
     col: 0,
     label: "Trigger.dev",
     href: "/docs/integrations/trigger",
-    icon: Workflow,
+    brand: triggerIconUrl,
   },
   {
     row: 5,
@@ -183,7 +188,7 @@ const integrationDirectoryItems = [
     col: 4,
     label: "Unkey",
     href: "/docs/integrations/unkey",
-    icon: KeyRound,
+    brand: unkeyIconUrl,
   },
 ] as const;
 
@@ -192,7 +197,12 @@ const ecosystemItems = [
   { label: "Vite", href: "/docs/getting-started", brand: viteIconUrl },
   { label: "Nitro", href: "/docs/deployment", brand: nitroIconUrl },
   ...integrationDirectoryItems,
-  { label: "Eve", href: "/docs/integrations/eve", brand: vercelIconUrl },
+  {
+    label: "eve",
+    href: "/docs/integrations/eve",
+    brand: eveIconUrl,
+    wordmark: true,
+  },
   {
     label: "Cloudflare Agents",
     href: "/docs/integrations/cf-agent",
@@ -761,17 +771,21 @@ function ProductStackTile({
 
   return (
     <a
+      aria-label={item.wordmark ? item.label : undefined}
       aria-hidden={duplicate ? true : undefined}
       className={className}
       href={item.href}
       tabIndex={duplicate ? -1 : undefined}
     >
       {item.brand ? (
-        <BrandIcon className="size-[18px] shrink-0 opacity-72" src={item.brand} />
+        <BrandIcon
+          className={cx("shrink-0 opacity-72", item.wordmark ? "h-[11px] w-[35px]" : "size-[18px]")}
+          src={item.brand}
+        />
       ) : Icon ? (
         <Icon aria-hidden className="size-[18px] shrink-0 opacity-72" strokeWidth={1.5} />
       ) : null}
-      <span className="whitespace-nowrap">{item.label}</span>
+      {item.wordmark ? null : <span className="whitespace-nowrap">{item.label}</span>}
     </a>
   );
 }
