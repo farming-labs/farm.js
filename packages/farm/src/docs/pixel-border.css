@@ -524,6 +524,14 @@ code:not(pre code) {
     display: none !important;
   }
 
+  .omni-overlay {
+    z-index: 100;
+  }
+
+  .omni-content {
+    z-index: 101;
+  }
+
   .sidebar-backdrop {
     position: fixed;
     inset: 0;
@@ -621,5 +629,13 @@ code:not(pre code) {
 
   .mobile-topbar-actions .fd-docs-search-trigger kbd {
     display: none;
+  }
+}
+
+@media (max-width: 639px) {
+  .omni-content {
+    --omni-content-top: calc(var(--fd-mobile-nav-height, 56px) + 12px);
+    top: var(--omni-content-top);
+    max-height: calc(100dvh - var(--omni-content-top) - 12px);
   }
 }

@@ -232,14 +232,14 @@ describe("createFarmDocsHandler", () => {
       htmlText.indexOf("</header>", htmlText.indexOf('<header class="mobile-topbar"')),
     );
     expect(topbar).toContain('data-search-full=""');
-    expect(topbar.indexOf('data-search-full=""')).toBeLessThan(
-      topbar.indexOf('href="/llms.txt"'),
-    );
+    expect(topbar.indexOf('data-search-full=""')).toBeLessThan(topbar.indexOf('href="/llms.txt"'));
     expect(mobileTopbar.indexOf('data-search-full=""')).toBeLessThan(
       mobileTopbar.indexOf('href="/llms.txt"'),
     );
     expect(sidebarBrand).not.toContain('data-search-full=""');
     expect(html).toContain("--fd-nav-height: 38px");
+    expect(html).toContain("--omni-content-top: calc(var(--fd-mobile-nav-height, 56px) + 12px)");
+    expect(html).toContain("max-height: calc(100dvh - var(--omni-content-top) - 12px)");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
