@@ -191,6 +191,7 @@ describe("createFarmDocsHandler", () => {
     expect(response?.status).toBe(200);
     expect(response?.headers.get("content-type")).toContain("text/html");
     const html = await response?.text();
+    const htmlText = html || "";
     expect(html).toContain('data-docs-theme="farm-docs"');
     expect(html).toContain('id="nd-docs-layout"');
     expect(html).toContain('id="nd-toc"');
@@ -218,6 +219,27 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('data-api="/api/docs"');
     expect(html).toContain('aria-label="Search documentation"');
     expect(html).toContain('<script type="module" src="/farm-client.js"></script>');
+    const topbar = htmlText.slice(
+      htmlText.indexOf('<header class="topbar">'),
+      htmlText.indexOf("</header>", htmlText.indexOf('<header class="topbar">')),
+    );
+    const sidebarBrand = htmlText.slice(
+      htmlText.indexOf('<div class="sidebar-brand">'),
+      htmlText.indexOf("</div>", htmlText.indexOf('<div class="sidebar-brand">')),
+    );
+    const mobileTopbar = htmlText.slice(
+      htmlText.indexOf('<header class="mobile-topbar"'),
+      htmlText.indexOf("</header>", htmlText.indexOf('<header class="mobile-topbar"')),
+    );
+    expect(topbar).toContain('data-search-full=""');
+    expect(topbar.indexOf('data-search-full=""')).toBeLessThan(
+      topbar.indexOf('href="/llms.txt"'),
+    );
+    expect(mobileTopbar.indexOf('data-search-full=""')).toBeLessThan(
+      mobileTopbar.indexOf('href="/llms.txt"'),
+    );
+    expect(sidebarBrand).not.toContain('data-search-full=""');
+    expect(html).toContain("--fd-nav-height: 38px");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");

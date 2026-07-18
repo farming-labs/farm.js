@@ -14,7 +14,7 @@
   --color-fd-accent-foreground: oklch(0.985 0.001 106.423);
   --color-fd-border: hsl(0 0% 15%);
   --color-fd-ring: hsl(0 0% 30%);
-  --fd-nav-height: 56px;
+  --fd-nav-height: 38px;
   --fd-banner-height: 0px;
   --fd-tocnav-height: 0px;
   --scrollbar-thumb: var(--color-fd-border);
@@ -82,7 +82,12 @@ code:not(pre code) {
   width: 100%;
 }
 
-.topbar a:last-child {
+.topbar-actions,
+.mobile-topbar-actions {
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  align-items: stretch;
   margin-left: auto;
 }
 
@@ -141,7 +146,6 @@ code:not(pre code) {
 }
 
 .mobile-topbar-link {
-  margin-left: auto;
   border-left: 1px solid var(--color-fd-border);
   padding: 0 14px;
 }
@@ -235,6 +239,25 @@ code:not(pre code) {
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1;
+}
+
+.topbar-actions .fd-docs-search-trigger,
+.mobile-topbar-actions .fd-docs-search-trigger {
+  width: auto;
+  min-width: 54px;
+  height: 100%;
+  flex: 0 0 auto;
+  border: 0;
+  border-left: 1px solid var(--color-fd-border);
+  background: transparent;
+  padding: 0 12px;
+}
+
+.topbar-actions .fd-docs-search-trigger:hover,
+.topbar-actions .fd-docs-search-trigger:focus-visible,
+.mobile-topbar-actions .fd-docs-search-trigger:hover,
+.mobile-topbar-actions .fd-docs-search-trigger:focus-visible {
+  background: color-mix(in srgb, var(--color-fd-foreground) 6%, transparent);
 }
 
 .fd-toc {
@@ -589,5 +612,14 @@ code:not(pre code) {
   .fd-page-nav-next {
     align-items: flex-start;
     text-align: left;
+  }
+
+  .mobile-topbar-actions .fd-docs-search-trigger {
+    min-width: 44px;
+    padding: 0 14px;
+  }
+
+  .mobile-topbar-actions .fd-docs-search-trigger kbd {
+    display: none;
   }
 }

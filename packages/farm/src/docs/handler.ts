@@ -1596,27 +1596,28 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
   return `
     @font-face { font-family: "Geist Sans"; src: local("Geist Sans"), url("${GEIST_SANS_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
     @font-face { font-family: "Geist Mono"; src: local("Geist Mono"), url("${GEIST_MONO_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    :root { color-scheme: dark; --font-geist-sans: "Geist Sans"; --font-geist-mono: "Geist Mono"; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 56px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 0px; --fd-sidebar-nested-icon-gap: 0px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
+    :root { color-scheme: dark; --font-geist-sans: "Geist Sans"; --font-geist-mono: "Geist Mono"; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 38px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 0px; --fd-sidebar-nested-icon-gap: 0px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
     * { box-sizing: border-box; }
-    html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: 76px; }
+    html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: calc(var(--fd-nav-height, 38px) + 24px); }
     html[data-farm-docs-sidebar="open"], html[data-farm-docs-sidebar="open"] body { overflow: hidden; }
     body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
     ::selection { background: var(--color-fd-foreground, #fff); color: var(--color-fd-background, #000); }
     a { color: inherit; }
-    #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template: "sidebar header header" var(--fd-nav-height, 56px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
-    #nd-docs-layout.grid { grid-template: "sidebar header header" var(--fd-nav-height, 56px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; }
+    #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template: "sidebar header header" var(--fd-nav-height, 38px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
+    #nd-docs-layout.grid { grid-template: "sidebar header header" var(--fd-nav-height, 38px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; }
     #nd-docs-layout, #nd-docs-layout * { border-radius: 0 !important; }
-    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 56px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 0 0 28px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 38px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 0 0 22px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
-    .topbar a:last-child { display: inline-flex; height: 100%; align-items: center; margin-left: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 28px; }
+    .topbar-actions, .mobile-topbar-actions { display: flex; height: 100%; min-width: 0; align-items: stretch; margin-left: auto; }
+    .topbar-llms-link { display: inline-flex; height: 100%; align-items: center; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 22px; }
     .mobile-topbar { display: none; }
     .sidebar-backdrop { display: none; }
     .fd-mobile-nav-btn { display: inline-flex; width: var(--fd-mobile-nav-height, 56px); height: 100%; flex: 0 0 var(--fd-mobile-nav-height, 56px); align-items: center; justify-content: center; border: 0; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); cursor: pointer; padding: 0; appearance: none; }
     .fd-mobile-nav-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     .mobile-topbar-brand, .mobile-topbar-link { display: inline-flex; height: 100%; min-width: 0; align-items: center; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-decoration: none; text-transform: uppercase; }
     .mobile-topbar-brand { padding: 0 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .mobile-topbar-link { margin-left: auto; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 14px; }
+    .mobile-topbar-link { border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 14px; }
     #nd-docs-layout .fd-toc { position: sticky; top: var(--fd-docs-row-1); grid-area: toc; display: flex; width: var(--fd-toc-width); height: calc(var(--fd-docs-height) - var(--fd-docs-row-1)); max-height: calc(100vh - var(--fd-docs-row-1)); flex-direction: column; align-self: start; overflow: hidden; padding: 48px 16px 8px 0; }
     #nd-docs-layout .fd-toc-inner { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
     #nd-docs-layout .fd-toc-title { display: inline-flex; align-items: center; gap: 0.375rem; margin: 0 0 1rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-sans); font-size: 0.875rem; font-weight: 500; line-height: 1.4; }
@@ -1634,10 +1635,10 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     #nd-docs-layout .toc-link[data-active="true"] { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)); }
     #nd-docs-layout .toc-link:hover { color: var(--color-fd-accent-foreground, oklch(0.985 0.001 106.423)); }
     #nd-docs-layout .toc-empty { margin: 0; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 0.875rem; line-height: 1.5; }
-    aside#nd-sidebar { position: sticky; top: 0; grid-area: sidebar; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 18px var(--fd-sidebar-edge); }
+    aside#nd-sidebar { position: sticky; top: 0; grid-area: sidebar; height: 100vh; overflow: auto; isolation: isolate; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background-color: var(--color-fd-background, hsl(0 0% 2%)); background-image: linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), linear-gradient(var(--color-fd-border, hsl(0 0% 15%)), var(--color-fd-border, hsl(0 0% 15%))), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px), repeating-linear-gradient(-45deg, color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 2%, transparent), color-mix(in srgb, var(--color-fd-foreground, #fff) 7%, transparent) 1px, transparent 1px, transparent 6px); background-size: 1px 100%, 1px 100%, var(--fd-pixel-rail-width) 100%, var(--fd-pixel-rail-width) 100%; background-position: var(--fd-pixel-rail-width) 0, calc(100% - var(--fd-pixel-rail-width)) 0, left top, right top; background-repeat: repeat-y; padding: 0 var(--fd-sidebar-edge) 18px; }
     aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
     aside#nd-sidebar > * { position: relative; z-index: 1; }
-    .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; margin: -2px calc(-1 * var(--fd-sidebar-edge)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 var(--fd-sidebar-edge); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+    .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--fd-nav-height, 38px); margin: 0 calc(-1 * var(--fd-sidebar-edge)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 var(--fd-sidebar-edge); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .sidebar-brand a { text-decoration: none; }
     .sidebar-scroll { margin: 0 calc(-1 * var(--fd-sidebar-edge)); overflow: visible; }
     .sidebar-tree { margin-top: 0 !important; }
@@ -1752,7 +1753,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
       aside#nd-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 90; width: min(342px, calc(100vw - 42px)); height: 100dvh; max-height: none; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 0; transform: translate3d(-100%, 0, 0); transition: transform 180ms ease; will-change: transform; }
       #nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar { transform: translate3d(0, 0, 0); }
       aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
-      .sidebar-brand { min-height: 38px; margin-top: -2px; }
+      .sidebar-brand { min-height: 38px; margin-top: 0; }
       main { padding: 34px 20px 64px; }
       article#nd-page { width: 100%; margin: 0; }
       #nd-docs-layout .fd-toc { display: none !important; }
@@ -1810,20 +1811,25 @@ ${renderFarmDocsBridgeCss(docs)}</style>
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
       </button>
       <a class="mobile-topbar-brand" href="/">Farm.js</a>
-      <a class="mobile-topbar-link" href="/llms.txt">llms.txt</a>
+      <div class="mobile-topbar-actions">
+        ${searchEnabled ? renderDocsSearchTrigger() : ""}
+        <a class="mobile-topbar-link" href="/llms.txt">llms.txt</a>
+      </div>
     </header>
     <div class="sidebar-backdrop" data-sidebar-backdrop></div>
     <aside id="nd-sidebar">
       <div class="sidebar-brand">
         <a href="/">${escapeHtml(navTitle)}</a>
-        ${searchEnabled ? renderDocsSearchTrigger() : ""}
         <span>/ docs</span>
       </div>
       ${renderPixelNavItems(pages, page.href, docs)}
     </aside>
     <header class="topbar">
       <a href="/">Farm.js</a>
-      <a href="/llms.txt">llms.txt</a>
+      <div class="topbar-actions">
+        ${searchEnabled ? renderDocsSearchTrigger() : ""}
+        <a class="topbar-llms-link" href="/llms.txt">llms.txt</a>
+      </div>
     </header>
     <main>
       <article id="nd-page" class="prose">
