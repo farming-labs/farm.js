@@ -252,7 +252,7 @@ const footerGroups = [
     title: "Product",
     icon: Layers3,
     brand: null,
-    action: ["Explore integrations", "/docs/integrations"],
+    action: ["Integrations", "/docs/integrations"],
     links: [
       ["Integrations", "/docs/integrations"],
       ["API client", "/docs/api-client"],
@@ -1459,7 +1459,7 @@ function AgentSectionIntro() {
                 href="/docs/integrations#agent-runtimes"
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
-                Explore Agent Integrations
+                Agent Integrations
               </ButtonLink>
             </div>
           </div>
@@ -1524,7 +1524,7 @@ function IntegrationsSection() {
                 href="/docs/integrations"
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
-                Explore Integrations
+                Integrations
               </ButtonLink>
             </div>
           </div>
