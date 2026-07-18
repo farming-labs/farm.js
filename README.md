@@ -397,6 +397,6 @@ Farm.js is inspired by:
 
 **[Documentation](https://farm.js.dev)** • **[Examples](./examples)** • **[Contributing](CONTRIBUTING.md)**
 
-Made with ❤️ by <a href="https://www.farming-labs.dev"><img src="./.github/assets/farming-labs-mark.svg" alt="" height="18" align="center" />&nbsp;Farming Labs</a>
+Made with ❤️ by <a href="https://www.farming-labs.dev"><img src="./.github/assets/farming-labs-mark.svg" alt="" height="18" align="center" />&nbsp;Farming Labs</a> team
 
 </div>
