@@ -103,6 +103,22 @@ The `docs` object controls the public path, metadata, navigation, search, page a
 theme, icons, reading time, last-updated display, sitemap, and robots output. `defineDocs` is not
 required for a Farm application.
 
+### Built-in search
+
+Farm uses the existing `DocsCommandSearch` React component from `@farming-labs/theme`, the same Omni
+search used by the Next.js docs adapter. Farm provides its HTML mount and server endpoint; the shared
+component owns the dialog, fuzzy ranking, filters, recent searches, loading and empty states, result
+highlights, and keyboard navigation. The sidebar control and `Cmd+K` / `Ctrl+K` shortcut open it.
+
+The component queries `/api/docs?query=<term>`. That endpoint returns the standard docs search result
+array, so `provider`, `maxResults`, and custom provider behavior come from the same `docs.search`
+config instead of a second client-side search implementation.
+
+Use `search: true` for the built-in simple provider, or configure `provider: "simple"`,
+`"algolia"`, `"typesense"`, `"mcp"`, or `"custom"`. Search result content is rendered as text, and
+provider credentials remain on the server. Setting `search: false` or `search.enabled: false`
+disables both the endpoint capability and the interface.
+
 ### Optional external config
 
 Large documentation sites may move the serializable docs options into `docs.config.ts`,

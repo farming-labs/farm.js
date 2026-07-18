@@ -601,10 +601,8 @@ async function handleDocsAPIGet(request: Request, context: FarmDocsAPIContext): 
   }
 
   const query = url.searchParams.get("query") || url.searchParams.get("q") || "";
-  return json({
-    query,
-    results: await searchDocs(context, request, query),
-  });
+  if (!query.trim()) return json([]);
+  return json(await searchDocs(context, request, query));
 }
 
 export function createDocsAPI(

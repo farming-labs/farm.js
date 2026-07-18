@@ -72,6 +72,12 @@ agent-readable docs routes. A separate `docs.config.*` or `docs.json` file is op
 only for large serializable configurations; inline values always take priority. See
 [Docs Engine](/docs/docs-engine) for content layout, generated routes, and API overrides.
 
+The same `search` option configures the search provider and the docs interface. When it is enabled,
+Farm mounts the shared Omni React search from `@farming-labs/theme`. The sidebar control and
+`Cmd+K` on macOS or `Ctrl+K` elsewhere open the same search interface used by the other Farming Labs
+framework adapters. Set `search: false` or `search.enabled: false` to remove the control, client
+mount, and shortcut together.
+
 ## Important options
 
 | Option        | Use it for                                                                        |

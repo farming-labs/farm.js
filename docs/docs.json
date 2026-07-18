@@ -18,7 +18,7 @@
     "description": "Farm.js framework documentation powered by @farming-labs/docs."
   },
   "nav": {
-    "title": "Farm.js Docs"
+    "title": "Farm.js"
   },
   "search": {
     "provider": "simple",

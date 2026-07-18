@@ -35,6 +35,11 @@ import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
+import {
+  generateFarmDocsSearchClientRuntime,
+  isFarmDocsSearchEnabled,
+  resolveFarmDocsSearchClientModule,
+} from "../docs/search-client";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -422,7 +427,14 @@ async function buildClient(
   await fs.mkdir(clientEntryRoot, { recursive: true });
   const clientEntryDir = await fs.mkdtemp(path.join(clientEntryRoot, "client-entry-"));
   const clientEntryPath = path.join(clientEntryDir, "farm-client-entry.tsx");
-  const clientHydrationCode = generateClientHydrationEntry(clientPages, layoutRoutes, root, srcDir);
+  const clientHydrationCode = generateClientHydrationEntry(
+    clientPages,
+    layoutRoutes,
+    root,
+    srcDir,
+    isFarmDocsSearchEnabled(config.docs),
+    resolveFarmDocsSearchClientModule(root),
+  );
 
   // Write the client entry to a temporary file
   await fs.writeFile(clientEntryPath, clientHydrationCode);
@@ -616,6 +628,8 @@ function generateClientHydrationEntry(
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   root: string,
   srcDir: string,
+  docsSearchEnabled: boolean,
+  docsSearchModuleId: string,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
 
@@ -647,8 +661,10 @@ ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { installChunkErrorRecovery } from "@farmjs/core/client";
+${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 installChunkErrorRecovery();
+mountFarmDocsSearch();
 
 // SPA Router for server-rendered pages (HTML swap)
 const spaRouter = {
@@ -828,6 +844,7 @@ import { createRoot, hydrateRoot } from "react-dom/client";
 import { installChunkErrorRecovery } from "@farmjs/core/client";
 
 ${imports.join("\n")}
+${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 installChunkErrorRecovery();
 
@@ -1192,7 +1209,11 @@ document.addEventListener("click", function(e) {
 });
 
 // Initial hydration
-hydrate();
+if (isFarmDocsSearchPage()) {
+  mountFarmDocsSearch();
+} else {
+  hydrate();
+}
 `.trim();
 }
 
@@ -1804,7 +1825,7 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
 };
 const farmDocsHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)} })`
+      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, clientEntry: "/farm-client.js" })`
       : "null"
   };
 const farmDocsAPIHandler = ${
