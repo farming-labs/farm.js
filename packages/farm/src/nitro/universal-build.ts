@@ -2468,6 +2468,7 @@ async function handleFarmRequest(request) {
         const renderedMetadata = renderMetadataHead(mergedMetadata);
         const title = renderedMetadata.title;
         const metaTags = renderedMetadata.tags;
+        const hasFavicon = renderedMetadata.hasFavicon;
         
         // Check if the layout already rendered a full HTML document
         const trimmedHtml = html.trim();
@@ -2504,7 +2505,7 @@ async function handleFarmRequest(request) {
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
+  \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>\${title}</title>\${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
 </head>
