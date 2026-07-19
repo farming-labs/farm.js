@@ -28,7 +28,7 @@ export default function FeatureLabClient() {
 
   useBlocker({
     when: dirty,
-    message: 'Leave the recent features lab?',
+    message: 'Leave the framework feature lab?',
   });
 
   useEffect(() => {
