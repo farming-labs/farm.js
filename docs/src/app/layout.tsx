@@ -8,6 +8,9 @@ export const metadata = {
   title: "farmjs.dev - React framework for integrated apps",
   description:
     "Farm.js is an easy and fast React framework that blends app foundations and external services into one flow so teams can ship products faster.",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
+  },
 };
 
 const fontFaceCss = `
@@ -45,7 +48,6 @@ const fontFaceCss = `
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <>
-      <link rel="icon" href="/favicon.svg" type="image/svg+xml" sizes="any" />
       <link rel="preload" href={geistSansUrl} as="font" type="font/woff2" crossOrigin="anonymous" />
       <link rel="preload" href={geistMonoUrl} as="font" type="font/woff2" crossOrigin="anonymous" />
       <link

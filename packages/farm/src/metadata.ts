@@ -14,6 +14,7 @@ export interface FarmMetadataImageReference {
 export interface RenderedMetadataHead {
   title: string;
   tags: string;
+  hasFavicon: boolean;
 }
 
 type MetadataRecord = Metadata & Record<string, any>;
@@ -107,7 +108,7 @@ export function renderMetadataHead(metadata: MetadataRecord | undefined): Render
     }
   }
 
-  appendIcons(tags, (resolvedMetadata as any).icons, metadataBase);
+  const hasFavicon = appendIcons(tags, (resolvedMetadata as any).icons, metadataBase);
 
   if ((resolvedMetadata as any).manifest) {
     appendLink(
@@ -123,6 +124,7 @@ export function renderMetadataHead(metadata: MetadataRecord | undefined): Render
   return {
     title: escapeText(title),
     tags: tags.length > 0 ? `\n  ${tags.join("\n  ")}` : "",
+    hasFavicon,
   };
 }
 
@@ -147,7 +149,10 @@ function appendOpenGraph(tags: string[], openGraph: Metadata["openGraph"], metad
   appendMetaProperty(tags, "og:type", openGraph.type);
   appendMetaProperty(tags, "og:locale", (openGraph as any).locale);
 
-  const images = normalizeMetadataImages(openGraph.images ?? (openGraph as any).image, metadataBase);
+  const images = normalizeMetadataImages(
+    openGraph.images ?? (openGraph as any).image,
+    metadataBase,
+  );
   for (const image of images) {
     appendMetaProperty(tags, "og:image", image.url);
     appendMetaProperty(tags, "og:image:width", image.width);
@@ -172,19 +177,23 @@ function appendTwitter(tags: string[], twitter: Metadata["twitter"], metadataBas
   }
 }
 
-function appendIcons(tags: string[], icons: unknown, metadataBase?: string) {
-  if (!icons) return;
+function appendIcons(tags: string[], icons: unknown, metadataBase?: string): boolean {
+  if (!icons) return false;
 
   if (typeof icons === "string") {
+    const initialTagCount = tags.length;
     appendLink(tags, "icon", resolveMetadataUrl(icons, metadataBase));
-    return;
+    return tags.length > initialTagCount;
   }
 
-  if (!isRecord(icons)) return;
+  if (!isRecord(icons)) return false;
 
+  const initialTagCount = tags.length;
   appendIconList(tags, "icon", icons.icon, metadataBase);
   appendIconList(tags, "shortcut icon", icons.shortcut, metadataBase);
+  const hasFavicon = tags.length > initialTagCount;
   appendIconList(tags, "apple-touch-icon", icons.apple, metadataBase);
+  return hasFavicon;
 }
 
 function appendIconList(tags: string[], rel: string, value: unknown, metadataBase?: string) {

@@ -1205,9 +1205,7 @@ export class ServerRenderer {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader(
       "Cache-Control",
-      isVersioned
-        ? "public, max-age=31536000, immutable"
-        : "public, max-age=0, must-revalidate",
+      isVersioned ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate",
     );
 
     if (req.headers["if-none-match"] === etag) {
@@ -1399,7 +1397,11 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
           ? createPreHydrationClickQueueScript()
           : "";
 
-      const { title, tags: metaTags } = renderMetadataHead((req as any).__FARM_METADATA__);
+      const {
+        title,
+        tags: metaTags,
+        hasFavicon,
+      } = renderMetadataHead((req as any).__FARM_METADATA__);
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
@@ -1420,7 +1422,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
-  <link rel="icon" href="data:,">
+  ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>${title}</title>${metaTags}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
