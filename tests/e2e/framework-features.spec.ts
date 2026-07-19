@@ -6,17 +6,17 @@ async function readFeatureState(request: APIRequestContext) {
   return response.json() as Promise<{ mainCalls: number; afterCalls: number }>;
 }
 
-test.describe("Recent feature integration", () => {
+test.describe("Framework feature integration", () => {
   test("composes layers, route rules, redirects, and programmatic routes", async ({ request }) => {
     const lab = await request.get("/feature-lab");
     expect(lab.status()).toBe(200);
     expect(lab.headers()["x-farm-feature-lab"]).toBe("active");
-    expect(await lab.text()).toContain("Recent features lab");
+    expect(await lab.text()).toContain("Framework feature lab");
 
     const layer = await request.get("/feature-lab/layer");
     expect(layer.status()).toBe(200);
     expect(layer.headers()["x-farm-feature-lab"]).toBe("active");
-    expect(layer.headers()["x-farm-layer"]).toBe("recent-features");
+    expect(layer.headers()["x-farm-layer"]).toBe("framework-features");
     expect(await layer.text()).toContain("Layer route is active");
 
     const routeRuleRedirect = await request.get("/feature-lab/route-rule-redirect", {
@@ -190,9 +190,7 @@ test.describe("Recent feature integration", () => {
     const staticImage = await request.get(staticImageHref!);
     expect(staticImage.status()).toBe(200);
     expect(staticImage.headers()["content-type"]).toBe("image/png");
-    expect(staticImage.headers()["cache-control"]).toBe(
-      "public, max-age=31536000, immutable",
-    );
+    expect(staticImage.headers()["cache-control"]).toBe("public, max-age=31536000, immutable");
 
     const metadata = await request.get("/feature-lab/metadata/7");
     expect(metadata.status()).toBe(200);

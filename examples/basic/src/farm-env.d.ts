@@ -2,7 +2,7 @@
  * Auto-generated env types from Farm layers and farm.config.
  * Regenerated on dev start, build, and farm generate.
  */
-import type FarmConfig0 from "../layers/recent-features/farm.config";
+import type FarmConfig0 from "../layers/framework-features/farm.config";
 import type FarmConfig1 from "../farm.config";
 import type { InferEnv } from "@farmjs/core/env";
 

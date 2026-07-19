@@ -20,7 +20,7 @@ const myCustomPlugin: FarmPlugin = {
 };
 
 export default defineConfig({
-  extends: ['./layers/recent-features'],
+  extends: ['./layers/framework-features'],
   srcDir: 'src',
   outDir: 'dist',
   basePath: '/',
