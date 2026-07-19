@@ -40,6 +40,13 @@ import {
   isFarmDocsSearchEnabled,
   resolveFarmDocsSearchClientModule,
 } from "../docs/search-client";
+import {
+  createFarmRouteRuntimeManifest,
+  validateFarmRouteRuntimeDeployment,
+  writeFarmRouteRuntimeManifest,
+} from "../route-runtime-manifest";
+import type { FarmRouteRuntimeManifest } from "../route-runtime";
+import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -266,6 +273,7 @@ export async function buildUniversal(
     preset?: string;
     root?: string;
     pluginManager?: PluginManager;
+    routeRuntimeManifest?: FarmRouteRuntimeManifest;
   } = {},
 ): Promise<void> {
   const root = options.root || config.root || process.cwd();
@@ -278,6 +286,19 @@ export async function buildUniversal(
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
 
   try {
+    const routeRuntimeManifest =
+      options.routeRuntimeManifest ||
+      (await createFarmRouteRuntimeManifest({
+        config,
+        routeManager,
+        apiRouteManager,
+        root,
+      }));
+    const runtimeValidation = validateFarmRouteRuntimeDeployment(routeRuntimeManifest, preset);
+    for (const warning of runtimeValidation.warnings) {
+      logger.warn(warning);
+    }
+
     // Get page routes first (needed for both client and SSR builds)
     const pageRoutes: UniversalPageRoute[] = [];
     for (const [pattern, entry] of routeManager.getRoutes()) {
@@ -354,8 +375,15 @@ export async function buildUniversal(
       ssrBundle,
       ssrEntryFile,
       clientOutputDir,
+      routeRuntimeManifest,
       lifecyclePluginManager,
     );
+
+    const runtimeManifestPath = await writeFarmRouteRuntimeManifest(
+      path.join(root, distDir),
+      routeRuntimeManifest,
+    );
+    logger.info(`📋 Route runtime manifest: ${path.relative(root, runtimeManifestPath)}`);
 
     logger.success("✅ Build completed successfully!");
     logger.info(`📁 Output directory: ${deployOutputDir}`);
@@ -2790,6 +2818,7 @@ async function buildNitroUniversal(
   ssrBundle: OutputBundle,
   ssrEntryFile: string,
   clientOutputDir: string,
+  routeRuntimeManifest: FarmRouteRuntimeManifest,
   pluginManager?: PluginManager,
 ) {
   const fs = await import("fs/promises");
@@ -2954,7 +2983,7 @@ export default defineEventHandler((event) => handler.fetch(event.req, {
   // Post-process for Vercel Build Output API v3
   // Move server/ to functions/__nitro.func/ and update config.json
   if (isVercel) {
-    await postProcessVercelOutput(root, outputDir, fs, config, farmWorkflows);
+    await postProcessVercelOutput(root, outputDir, fs, config, farmWorkflows, routeRuntimeManifest);
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
@@ -2970,6 +2999,7 @@ async function postProcessVercelOutput(
   fs: typeof import("fs/promises"),
   config: ResolvedFarmConfig,
   farmWorkflows: PreparedFarmWorkflows,
+  routeRuntimeManifest: FarmRouteRuntimeManifest,
 ) {
   const serverDir = path.join(outputDir, "server");
   const functionsDir = path.join(outputDir, "functions");
@@ -2998,10 +3028,20 @@ async function postProcessVercelOutput(
     // public might not exist
   }
 
+  // Add runtime assets before cloning route-specific functions.
+  await copyFarmDocsContentForVercel(config, root, nitroFuncDir, fs);
+  await copyPrismaClientForVercel(root, nitroFuncDir, fs);
+
   // Update config.json routes to point to the function
   const configPath = path.join(outputDir, "config.json");
   const configContent = await fs.readFile(configPath, "utf-8");
   const vercelConfig = JSON.parse(configContent);
+
+  const runtimeRoutes = await createFarmVercelRouteRuntimeFunctions(
+    outputDir,
+    routeRuntimeManifest,
+    fs,
+  );
 
   // Update routes to use the correct function path
   vercelConfig.routes = [
@@ -3009,6 +3049,7 @@ async function postProcessVercelOutput(
     {
       handle: "filesystem",
     },
+    ...runtimeRoutes,
     // API routes
     {
       src: "/api/(.*)",
@@ -3036,8 +3077,6 @@ async function postProcessVercelOutput(
   );
 
   await fs.writeFile(configPath, JSON.stringify(vercelConfigWithCrons, null, 2));
-  await copyFarmDocsContentForVercel(config, root, nitroFuncDir, fs);
-  await copyPrismaClientForVercel(root, nitroFuncDir, fs);
 
   logger.info("✅ Post-processed Vercel output for Build Output API v3");
 }
