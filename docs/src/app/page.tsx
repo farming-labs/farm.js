@@ -618,13 +618,16 @@ function ButtonLink({
 function AnnouncementBar() {
   return (
     <a
-      className="farm-announcement flex h-5 items-center justify-center border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal text-white/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
+      aria-label="Farm.js is open source and in beta. View on GitHub."
+      className="farm-announcement flex h-5 items-center justify-center gap-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
       href="https://github.com/Kinfe123/farm.js"
     >
-      <GitFork aria-hidden className="mr-2 size-3 text-white/48" strokeWidth={1.5} />
-      <span className="mr-3 hidden text-white/30 sm:inline">Open source / MIT</span>
-      Farm.js beta is building in public
-      <ExternalLink aria-hidden className="ml-2 size-3 text-white" strokeWidth={1.5} />
+      <GithubIcon className="size-3 opacity-55" />
+      <span className="text-white/52">Open source</span>
+      <span aria-hidden className="text-white/24">
+        /
+      </span>
+      <span className="text-white/76">Farm.js is in beta</span>
     </a>
   );
 }
