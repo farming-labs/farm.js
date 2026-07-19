@@ -345,6 +345,11 @@ describe("resolveConfig", () => {
           "/": { prerender: true },
           "blog/**": { swr: 3600 },
           "/admin/**": { render: "dynamic" },
+          "/reports/**": {
+            runtime: "edge",
+            regions: ["iad1", "fra1"],
+            maxDuration: 30,
+          },
           "/api/**": {
             cors: { origin: "https://app.example", methods: ["GET", "POST"] },
           },
@@ -359,6 +364,11 @@ describe("resolveConfig", () => {
       "/": { prerender: true },
       "/blog/**": { swr: 3600 },
       "/admin/**": { render: "dynamic" },
+      "/reports/**": {
+        runtime: "edge",
+        regions: ["iad1", "fra1"],
+        maxDuration: 30,
+      },
       "/api/**": {
         cors: { origin: "https://app.example", methods: ["GET", "POST"] },
       },
@@ -393,6 +403,7 @@ describe("resolveConfig", () => {
       "/": { prerender: true },
       "/blog/**": { swr: 3600 },
       "/admin/**": { prerender: false },
+      "/reports/**": {},
       "/old": { redirect: "/new" },
       "/api/**": {
         cors: true,

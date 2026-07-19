@@ -13,6 +13,7 @@ import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { FarmRouteRules } from "./route-rules";
 import type { FarmServerActionsConfig } from "./server-action-security";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
+import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
 
 export type NitroPreset =
   | "node-server"
@@ -312,6 +313,12 @@ export type ErrorBoundary = ComponentType<ErrorProps>;
  */
 export interface RouteModule {
   default?: Page;
+  /** Execution runtime for this route. Layout values are inherited unless overridden. */
+  runtime?: FarmRouteRuntime;
+  /** Provider-specific execution regions, or "auto" to clear an inherited value. */
+  regions?: FarmRouteRegions;
+  /** Maximum execution time in seconds, or "auto" to use the provider default. */
+  maxDuration?: FarmRouteMaxDuration;
   /**
    * Mark this page for Static Site Generation (SSG)
    * When true, the page will be pre-rendered at build time
@@ -349,6 +356,9 @@ export interface RouteModule {
 
 export interface LayoutModule {
   default: Layout;
+  runtime?: FarmRouteRuntime;
+  regions?: FarmRouteRegions;
+  maxDuration?: FarmRouteMaxDuration;
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: { params: Record<string, string> }) => Promise<Metadata> | Metadata;
 }

@@ -1,4 +1,6 @@
 import type { HeaderConfig, RedirectConfig } from "./config";
+import type { FarmRouteRuntimeConfig } from "./route-runtime";
+import { normalizeFarmRouteRuntimeConfig } from "./route-runtime";
 
 export type FarmRouteRuleRenderMode = "static" | "dynamic";
 
@@ -18,7 +20,7 @@ export type FarmRouteRuleCors =
       headers?: string | readonly string[];
     };
 
-export interface FarmRouteRule {
+export interface FarmRouteRule extends FarmRouteRuntimeConfig {
   prerender?: boolean;
   render?: FarmRouteRuleRenderMode;
   ssr?: boolean;
@@ -37,7 +39,11 @@ export function normalizeRouteRules(routeRules: FarmRouteRules | undefined): Far
   const normalized: FarmRouteRules = {};
   for (const [source, rule] of Object.entries(routeRules)) {
     if (!source || !rule) continue;
-    normalized[normalizeRuleSource(source)] = { ...rule };
+    const normalizedSource = normalizeRuleSource(source);
+    normalized[normalizedSource] = {
+      ...rule,
+      ...normalizeFarmRouteRuntimeConfig(rule, `Route rule "${normalizedSource}"`),
+    };
   }
   return normalized;
 }
@@ -48,14 +54,12 @@ export function routeRulesToRedirects(routeRules: FarmRouteRules): RedirectConfi
       Boolean(entry[1].redirect),
     )
     .map(([source, rule]) => {
-      const redirect =
-        typeof rule.redirect === "string" ? { to: rule.redirect } : rule.redirect;
+      const redirect = typeof rule.redirect === "string" ? { to: rule.redirect } : rule.redirect;
       return {
         source,
         destination: redirect.to,
         permanent: redirect.permanent,
-        statusCode:
-          redirect.statusCode ?? (redirect.permanent === true ? 308 : undefined),
+        statusCode: redirect.statusCode ?? (redirect.permanent === true ? 308 : undefined),
       };
     });
 }
@@ -109,6 +113,9 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
     }
 
     delete nitroRule.render;
+    delete nitroRule.runtime;
+    delete nitroRule.regions;
+    delete nitroRule.maxDuration;
     nitroRules[source] = nitroRule;
   }
 

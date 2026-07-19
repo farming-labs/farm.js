@@ -7,6 +7,7 @@ import {
   type RouteDataCacheKey,
 } from "./cache";
 import { getFarmRouteContext } from "./route-context";
+import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type {
   FarmAppContext,
   LayoutProps,
@@ -184,7 +185,7 @@ export interface ProgrammaticPageRoute<
     | ProgrammaticRouteDataHooks<TParams, TSearch, any, any, any>
     | undefined,
   TContext = ProgrammaticRouteContext,
-> {
+> extends FarmRouteRuntimeConfig {
   kind: "page";
   path: string;
   component: ComponentType<any>;
@@ -203,7 +204,7 @@ export interface ProgrammaticPageRoute<
   generateMetadata?: RouteModule["generateMetadata"];
 }
 
-export interface ProgrammaticLayoutRoute {
+export interface ProgrammaticLayoutRoute extends FarmRouteRuntimeConfig {
   kind: "layout";
   path: string;
   component: ComponentType<LayoutProps>;
@@ -213,9 +214,9 @@ export interface ProgrammaticLayoutRoute {
 
 export type ProgrammaticApiRouteOptions = Partial<Record<ProgrammaticRouteMethod, any>> & {
   render?: ProgrammaticRouteRenderMode;
-};
+} & FarmRouteRuntimeConfig;
 
-export interface ProgrammaticApiRoute {
+export interface ProgrammaticApiRoute extends FarmRouteRuntimeConfig {
   kind: "api";
   path: string;
   methods: Partial<Record<ProgrammaticRouteMethod, any>>;
@@ -445,11 +446,14 @@ export const routesBuilder: ProgrammaticRouteBuilder = {
     }) as ProgrammaticLayoutRoute;
   },
   api(path, options) {
-    const { render, ...methods } = options;
+    const { render, runtime, regions, maxDuration, ...methods } = options;
     return normalizeProgrammaticRoute({
       kind: "api",
       path,
       render,
+      runtime,
+      regions,
+      maxDuration,
       methods: normalizeApiMethods(methods),
     }) as ProgrammaticApiRoute;
   },
@@ -821,6 +825,7 @@ export function parseProgrammaticRoutePath(
 export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRoute): RouteModule {
   const mod: RouteModule = {
     default: createProgrammaticPageComponent(route),
+    ...normalizeFarmRouteRuntimeConfig(route, `Route "${route.path}"`),
   };
 
   if (route.params || route.search || route.guard || route.data) {
@@ -878,6 +883,7 @@ export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRou
 export function createLayoutModuleFromProgrammaticLayout(route: ProgrammaticLayoutRoute) {
   return {
     default: route.component,
+    ...normalizeFarmRouteRuntimeConfig(route, `Layout "${route.path}"`),
     metadata: route.metadata,
     generateMetadata: route.generateMetadata,
   };
@@ -1173,6 +1179,7 @@ function normalizeProgrammaticRoute(
   if (route.kind === "api") {
     return {
       ...route,
+      ...normalizeFarmRouteRuntimeConfig(route, `API route "${route.path}"`),
       path: normalizeRoutePath(route.path),
       methods: normalizeApiMethods(route.methods),
     };
@@ -1180,6 +1187,10 @@ function normalizeProgrammaticRoute(
 
   return {
     ...route,
+    ...normalizeFarmRouteRuntimeConfig(
+      route,
+      `${route.kind === "layout" ? "Layout" : "Route"} "${route.path}"`,
+    ),
     path: normalizeRoutePath(route.path),
   };
 }

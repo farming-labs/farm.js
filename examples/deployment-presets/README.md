@@ -2,6 +2,8 @@
 
 This example shows how one `farm.config.ts` can build deployable output for Vercel, Cloudflare Pages, and Netlify. Those are Farm's first-class deploy shortcuts, and the same config can pass any Nitro preset through with `deploy.preset`.
 
+The `/reports` page and `/api/reports` handler also demonstrate file-based `runtime`, `regions`, and `maxDuration` exports. A Vercel build emits separately configured Node functions for their two policies and records every resolved route in `.farm/route-runtime-manifest.json`.
+
 ## Build targets
 
 ```bash

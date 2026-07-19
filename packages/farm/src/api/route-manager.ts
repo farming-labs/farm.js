@@ -8,8 +8,13 @@ import {
   type ProgrammaticApiRoute,
 } from "../routes";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
+import {
+  getFarmRouteRuntimeConfig,
+  normalizeFarmRouteRuntimeConfig,
+  type FarmRouteRuntimeConfig,
+} from "../route-runtime";
 
-export interface APIRoute {
+export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
   filePath: string;
   methods: string[];
@@ -137,11 +142,16 @@ export class APIRouteManager {
       }
 
       if (availableMethods.length > 0) {
+        const runtimeConfig = normalizeFarmRouteRuntimeConfig(
+          getFarmRouteRuntimeConfig(routeModule),
+          `API route "${routePath}"`,
+        );
         this.routes.set(routePath, {
           path: routePath,
           filePath,
           methods: availableMethods,
           endpoints,
+          ...runtimeConfig,
         });
       }
     } catch (error) {
@@ -235,7 +245,13 @@ export class APIRouteManager {
     return await import(/* @vite-ignore */ fileUrl);
   }
 
-  private addEndpoint(routePath: string, filePath: string, method: string, endpoint: any): void {
+  private addEndpoint(
+    routePath: string,
+    filePath: string,
+    method: string,
+    endpoint: any,
+    runtimeConfig: FarmRouteRuntimeConfig = {},
+  ): void {
     const normalizedMethod = method.toUpperCase();
     const existingRoute = this.routes.get(routePath);
 
@@ -244,6 +260,7 @@ export class APIRouteManager {
         existingRoute.methods.push(normalizedMethod);
       }
       existingRoute.endpoints[normalizedMethod] = endpoint;
+      Object.assign(existingRoute, runtimeConfig);
       return;
     }
 
@@ -252,14 +269,16 @@ export class APIRouteManager {
       filePath,
       methods: [normalizedMethod],
       endpoints: { [normalizedMethod]: endpoint },
+      ...runtimeConfig,
     });
   }
 
   private addProgrammaticApiRoute(filePath: string, route: ProgrammaticApiRoute): void {
     const modulePath = createProgrammaticRouteModuleId(filePath, "api", route.path);
+    const runtimeConfig = normalizeFarmRouteRuntimeConfig(route, `API route "${route.path}"`);
     for (const [method, endpoint] of Object.entries(route.methods)) {
       if (endpoint) {
-        this.addEndpoint(route.path, modulePath, method, endpoint);
+        this.addEndpoint(route.path, modulePath, method, endpoint, runtimeConfig);
       }
     }
   }
