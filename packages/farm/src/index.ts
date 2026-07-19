@@ -37,6 +37,7 @@ export * from "./query";
 export * from "./middleware";
 export * from "./router";
 export * from "./route-rules";
+export * from "./route-runtime";
 export {
   createLayoutModuleFromProgrammaticLayout,
   createRoute,

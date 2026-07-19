@@ -44,6 +44,14 @@ import {
   isStaticMetadataImageFile,
   type StaticMetadataImageInfo,
 } from "../static-metadata-image";
+import {
+  getFarmRouteRuntimeConfig,
+  mergeFarmRouteRuntimeConfigs,
+  normalizeFarmRouteRuntimeConfig,
+  resolveFarmRouteRuleRuntimeConfig,
+  resolveFarmRouteRuntimeConfig,
+  type ResolvedFarmRouteRuntimeConfig,
+} from "../route-runtime";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -159,6 +167,39 @@ export class RouteManager {
    */
   getLayouts(): Map<string, RouteEntry> {
     return new Map(this.layouts);
+  }
+
+  /** Resolve route rules, inherited layouts, and the page export in precedence order. */
+  async resolveRouteRuntimeConfig(pattern: string): Promise<ResolvedFarmRouteRuntimeConfig> {
+    const routeEntry = this.routes.get(pattern);
+    if (!routeEntry) {
+      throw new Error(`Cannot resolve runtime configuration for unknown route "${pattern}"`);
+    }
+
+    const inherited = resolveFarmRouteRuleRuntimeConfig(pattern, this.config.routeRules);
+    const layouts = this.findMatchingLayouts(pattern);
+    const layoutConfigs = [];
+
+    for (const layout of layouts) {
+      const layoutModule = await this.loadLayoutModule(layout.modulePath);
+      layoutConfigs.push(
+        normalizeFarmRouteRuntimeConfig(
+          getFarmRouteRuntimeConfig(layoutModule),
+          `Layout "${layout.pattern}"`,
+        ),
+      );
+    }
+
+    const routeModule = await this.loadRouteModule(routeEntry.modulePath);
+    const routeConfig = normalizeFarmRouteRuntimeConfig(
+      getFarmRouteRuntimeConfig(routeModule),
+      `Route "${pattern}"`,
+    );
+
+    return resolveFarmRouteRuntimeConfig(
+      mergeFarmRouteRuntimeConfigs(inherited, ...layoutConfigs, routeConfig),
+      `Route "${pattern}"`,
+    );
   }
 
   /**
