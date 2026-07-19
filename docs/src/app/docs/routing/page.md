@@ -476,6 +476,36 @@ export default function ProductPage() {
 }
 ```
 
+### Favicons
+
+Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.
+
+**src/app/layout.tsx**
+
+```tsx
+import type { Metadata } from "@farmjs/core";
+
+export const metadata: Metadata = {
+  icons: "/favicon.svg",
+};
+```
+
+Use the object form when you need multiple browser icons or an Apple touch icon:
+
+```tsx
+import type { Metadata } from "@farmjs/core";
+
+export const metadata: Metadata = {
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
+    shortcut: "/favicon.ico",
+    apple: [{ url: "/apple-touch-icon.png", type: "image/png", sizes: "180x180" }],
+  },
+};
+```
+
+Root layout metadata applies the favicon to every route. Nested layouts and pages can override individual icon entries through their own metadata. Do not render a `<link rel="icon">` element from the layout component; declaring `metadata.icons` lets Farm place the tags in the document head in both development and production.
+
 ### Static metadata images
 
 Place `opengraph-image.png` next to a page or layout segment for a zero-code, route-local social image. Farm supports `.png`, `.jpg`, `.jpeg`, `.gif`, and `.webp` files.
