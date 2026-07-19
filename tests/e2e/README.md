@@ -6,15 +6,15 @@ Run the complete browser suite with:
 pnpm test:e2e
 ```
 
-Run the recent-feature integration lab, including the required framework build, with:
+Run the framework feature integration suite, including the required framework build, with:
 
 ```sh
-pnpm test:e2e:recent
+pnpm test:e2e:framework
 ```
 
-## Recent feature coverage
+## Framework feature coverage
 
-`recent-features.spec.ts` runs the features together in `examples/basic` and verifies:
+`framework-features.spec.ts` runs the features together in `examples/basic` and verifies:
 
 - Farm layers, route rules, redirects, programmatic routes, static paths, and generated route types
 - typed params/search, request context, guards, route data lifecycle, caching, and invalidation

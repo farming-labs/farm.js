@@ -4,7 +4,7 @@ export default {
   routeRules: {
     '/feature-lab/layer': {
       headers: {
-        'x-farm-layer': 'recent-features',
+        'x-farm-layer': 'framework-features',
       },
     },
   },
