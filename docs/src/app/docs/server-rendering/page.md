@@ -8,14 +8,16 @@ section: "Core"
 
 Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports and config.
 
+Rendering controls decide when HTML is produced. [Route Runtime](/docs/route-runtime) separately decides where a dynamic page or API handler executes and how deployment limits are applied.
+
 ## Rendering options
 
-| Mode | How to opt in | Best for |
-| --- | --- | --- |
-| Dynamic | Default for request-bound pages | Dashboards and personalized UI. |
-| Static | dynamic = force-static or use static directive | Marketing pages and stable docs. |
-| ISR | revalidate = seconds | Content that can refresh on a schedule. |
-| PPR | experimental_ppr = true | Static shells with dynamic holes. |
+| Mode    | How to opt in                                  | Best for                                |
+| ------- | ---------------------------------------------- | --------------------------------------- |
+| Dynamic | Default for request-bound pages                | Dashboards and personalized UI.         |
+| Static  | dynamic = force-static or use static directive | Marketing pages and stable docs.        |
+| ISR     | revalidate = seconds                           | Content that can refresh on a schedule. |
+| PPR     | experimental_ppr = true                        | Static shells with dynamic holes.       |
 
 ## Route-level config
 
@@ -117,9 +119,9 @@ export default function DashboardPage() {
 
 ## Choosing a mode
 
-| Need | Use |
-| --- | --- |
-| User-specific data on every request | `dynamic = "force-dynamic"` |
-| Stable docs, marketing, or policy page | `dynamic = "force-static"` |
-| Stable page with scheduled refresh | `revalidate = 60` |
-| Static shell plus dynamic holes | `experimental_ppr = true` with Suspense |
+| Need                                   | Use                                     |
+| -------------------------------------- | --------------------------------------- |
+| User-specific data on every request    | `dynamic = "force-dynamic"`             |
+| Stable docs, marketing, or policy page | `dynamic = "force-static"`              |
+| Stable page with scheduled refresh     | `revalidate = 60`                       |
+| Static shell plus dynamic holes        | `experimental_ppr = true` with Suspense |

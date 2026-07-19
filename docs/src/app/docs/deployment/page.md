@@ -10,6 +10,8 @@ Build deployable output with Farm's deploy config and Nitro presets. Farm owns r
 
 Scheduled routes are configured through framework [Cron](/docs/cron). Vercel builds receive native Build Output API cron entries, Cloudflare Worker builds receive Wrangler triggers, and other adapters can consume `.farm/cron-manifest.json`.
 
+Dynamic pages and APIs can select their execution runtime, regions, and duration with file exports, layout defaults, programmatic routes, or route rules. See [Route Runtime](/docs/route-runtime) for precedence, provider support, and generated deployment output.
+
 ## Target-based deploy config
 
 **farm.config.ts**
