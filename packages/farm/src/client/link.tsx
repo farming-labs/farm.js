@@ -9,6 +9,11 @@ import {
   type FarmRouterPathParams,
 } from "../router";
 import type { FarmViewTransitionMode } from "./spa-router";
+import {
+  isFarmLocaleChangeHref,
+  localizeActiveFarmHref,
+} from "../i18n/client-runtime";
+import type { FarmI18nLocale } from "../i18n/types";
 
 /**
  * Prefetch strategy (TanStack Router–style):
@@ -158,6 +163,8 @@ export type LinkProps<TRoute extends string = DefaultRouteHref> = Omit<
     scroll?: boolean;
     /** Wrap this SPA navigation in a browser View Transition when supported. */
     viewTransition?: FarmViewTransitionMode;
+    /** Preserve the active locale by default, or navigate using this locale. */
+    locale?: FarmI18nLocale;
   };
 
 function isModifierEvent(e: React.MouseEvent): boolean {
@@ -221,6 +228,7 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
     replace = false,
     scroll = true,
     viewTransition = false,
+    locale,
     onClick,
     target,
     onMouseEnter,
@@ -237,11 +245,12 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
   const hasPrefetched = useRef(false);
 
   const { intent, viewport, render } = normalizePrefetch(prefetch);
-  const resolvedHref = resolveLinkHref(href, params, {
+  const baseHref = resolveLinkHref(href, params, {
     query,
     hash,
     trailingSlash,
   });
+  const resolvedHref = localizeActiveFarmHref(baseHref, locale);
   const isExternal = isExternalUrl(resolvedHref);
 
   const doPrefetch = useCallback(() => {
@@ -374,6 +383,10 @@ function LinkInner<TRoute extends string = DefaultRouteHref>(
 
       if (typeof window !== "undefined") {
         event.preventDefault();
+        if (isFarmLocaleChangeHref(resolvedHref)) {
+          window.location.assign(resolvedHref);
+          return;
+        }
         const router = getRouter();
         if (router) {
           router.navigate(resolvedHref, { replace, scroll, viewTransition });

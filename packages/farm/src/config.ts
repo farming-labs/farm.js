@@ -54,6 +54,11 @@ import {
   type FarmImageConfig,
   type ResolvedFarmImageConfig,
 } from "./image-config";
+import { resolveFarmI18nConfig } from "./i18n/config";
+import type {
+  FarmI18nUserConfig,
+  ResolvedFarmI18nConfig,
+} from "./i18n/types";
 
 export type {
   FarmDocsConfigInput,
@@ -101,6 +106,14 @@ export type {
   FarmImageRemotePattern,
   ResolvedFarmImageConfig,
 } from "./image-config";
+export type {
+  FarmI18nCookieConfig,
+  FarmI18nDetectionSignal,
+  FarmI18nDirection,
+  FarmI18nRouting,
+  FarmI18nUserConfig,
+  ResolvedFarmI18nConfig,
+} from "./i18n/types";
 
 export interface RedirectConfig {
   source: string;
@@ -125,11 +138,8 @@ export interface RewriteConfig {
 /** @deprecated Use FarmImageConfig. */
 export type ImageConfig = FarmImageConfig;
 
-export interface I18nConfig {
-  locales: string[];
-  defaultLocale: string;
-  localeDetection?: boolean;
-}
+/** @deprecated Use FarmI18nUserConfig. */
+export type I18nConfig = FarmI18nUserConfig;
 
 export interface OpenAPIConfig {
   enabled?: boolean;
@@ -221,7 +231,7 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   images?: ImageConfig;
   publicDir?: string;
 
-  i18n?: I18nConfig;
+  i18n?: FarmI18nUserConfig | false;
   openapi?: OpenAPIConfig;
 
   middleware?: FarmMiddlewareConfig;
@@ -275,6 +285,7 @@ export interface ResolvedFarmConfig extends Required<
     | "serverActions"
     | "devtools"
     | "images"
+    | "i18n"
   >
 > {
   extends: readonly FarmLayerEntry[];
@@ -292,6 +303,7 @@ export interface ResolvedFarmConfig extends Required<
   serverActions: ResolvedFarmServerActionsConfig;
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
+  i18n: ResolvedFarmI18nConfig;
 }
 
 export type FarmLayerConfig = Omit<
@@ -730,7 +742,7 @@ export async function resolveConfig(
     routeRules,
     images: resolveFarmImageConfig(userConfig.images),
     publicDir: userConfig.publicDir || "public",
-    i18n: userConfig.i18n,
+    i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode }),
     openapi: {
       enabled: false,
       route: "/docs/reference",

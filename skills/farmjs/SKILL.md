@@ -1,6 +1,6 @@
 ---
 name: farmjs
-description: Use when building, debugging, documenting, or integrating Farm.js apps and packages. Covers Farm.js routing, config, typed API clients, framework Cron, integrations such as Stripe/auth/email/jobs, storage, deployment, plugins, examples, and verification commands.
+description: Use when building, debugging, documenting, or integrating Farm.js apps and packages. Covers Farm.js routing, config, internationalization, typed API clients, framework Cron, integrations such as Stripe/auth/email/jobs, storage, deployment, plugins, examples, and verification commands.
 metadata:
   short-description: Build and debug Farm.js apps and integrations
 ---
@@ -79,6 +79,7 @@ Common config fields:
 - `experimental.serverComponents`: enables server component behavior
 - `integrations`: provider integrations object
 - `storage.mounts`: named storage instances
+- `i18n`: locale routes, detection signals, typed ICU catalogs, formatting, and RTL
 - `cron`: named portable UTC schedules mapped to GET API routes
 - `plugins`: Farm plugins
 - `redirects()`, `headers()`, `rewrites()`: route behavior
@@ -117,6 +118,51 @@ export default function RootLayout({ children }: LayoutProps) {
   );
 }
 ```
+
+## Internationalization Spec
+
+Configure i18n directly in `farm.config.ts`; do not add a second i18n config file:
+
+```ts
+export default defineConfig({
+  i18n: {
+    locales: ["en", "fr", "ar"],
+    defaultLocale: "en",
+    fallbackLocale: "en",
+    routing: "prefix-except-default",
+    strict: true,
+  },
+});
+```
+
+Put nested JSON catalogs at `src/messages/<locale>.json`. Farm generates
+`src/farm-i18n.d.ts`, so message keys and ICU variables are checked by TypeScript.
+
+Server modules import from `@farmjs/core/i18n/server`:
+
+```ts
+import { getLocale, t } from "@farmjs/core/i18n/server";
+
+const locale = getLocale();
+const label = t("cart.items", { count: 3 });
+```
+
+Client components import from `@farmjs/core/i18n/client`:
+
+```tsx
+"use client";
+
+import { useLocale, useTranslations } from "@farmjs/core/i18n/client";
+
+const { locale, locales, setLocale } = useLocale();
+const t = useTranslations();
+```
+
+Explicit locale URLs win over the locale cookie and weighted `Accept-Language`. Farm preserves the
+active locale in `Link`, redirects, middleware matching, page-data navigation, cache keys, metadata
+image URLs, and generated `lang`, `dir`, and `hreflang` markup. API routes stay available at their
+normal `/api/**` paths and can call the same server APIs. Read
+`docs/src/app/docs/internationalization/page.md` and `examples/i18n` before changing this feature.
 
 ## Typed API Client Spec
 

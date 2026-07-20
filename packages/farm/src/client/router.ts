@@ -6,6 +6,8 @@ import {
   type FarmNavigationBlockerContext,
   type FarmNavigationState,
 } from "./spa-router";
+import { getFarmI18nClientState } from "../i18n/client-runtime";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
 
 interface RouterState {
   pathname: string;
@@ -197,10 +199,12 @@ function readRouterState(basePath: string, routeMatcher: FarmRouter | null): Rou
 
   const url = new URL(window.location.href);
   const pathname = normalizeClientPathname(url.pathname, basePath);
+  const i18n = getFarmI18nClientState();
+  const routePathname = i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
   return {
     pathname,
     searchParams: url.searchParams,
-    params: routeMatcher?.match(pathname)?.params || {},
+    params: routeMatcher?.match(routePathname)?.params || {},
     pageState: readPageState(),
   };
 }

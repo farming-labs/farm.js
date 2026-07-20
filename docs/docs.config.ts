@@ -78,6 +78,8 @@ const icons = {
   key: '<circle cx="7.5" cy="14.5" r="3.5"></circle><path d="M10 12 21 3"></path><path d="m16 8 2 2"></path><path d="m19 5 2 2"></path>',
   layout:
     '<rect x="3" y="3" width="18" height="18" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path>',
+  languages:
+    '<path d="m5 8 6 6"></path><path d="m4 14 6-6 2-3"></path><path d="M2 5h12"></path><path d="M7 2h1"></path><path d="m22 22-5-10-5 10"></path><path d="M14 18h6"></path>',
   lock: '<rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="m3 7 9 6 9-6"></path>',
   monitor:
@@ -117,6 +119,7 @@ const sidebar = [
     icon: "box",
     children: [
       { label: "Routing", slug: "routing", icon: "route" },
+      { label: "Internationalization", slug: "internationalization", icon: "languages" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
       { label: "Images", slug: "images", icon: "image" },

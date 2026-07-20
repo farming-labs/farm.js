@@ -1,6 +1,7 @@
 import {
   APITypeGenerator,
   generateEnvTypes,
+  generateFarmI18nTypes,
   getFarmDocsRouteTypeEntries,
   getIntegrationSchemas,
   generateRouteTypes,
@@ -98,8 +99,15 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
   );
   await mkdir(path.dirname(apiTypesPath), { recursive: true });
   await writeFile(apiTypesPath, apiGenerator.generateAPIRouter(apiRoutes), "utf8");
+  if (resolvedConfig.i18n.enabled) {
+    await generateFarmI18nTypes({
+      root: resolvedConfig.root,
+      srcDir: resolvedConfig.srcDir,
+      config: resolvedConfig.i18n,
+    });
+  }
   logger.success(
-    `Generated route, API, and env types (${apiRoutes.length} API route${apiRoutes.length === 1 ? "" : "s"}).`,
+    `Generated route, API, env${resolvedConfig.i18n.enabled ? ", and i18n" : ""} types (${apiRoutes.length} API route${apiRoutes.length === 1 ? "" : "s"}).`,
   );
 
   const schemas = getIntegrationSchemas(resolvedConfig.integrations);

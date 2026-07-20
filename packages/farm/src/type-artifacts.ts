@@ -4,7 +4,11 @@ import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
 import { generateRouteTypes, type GenerateRouteTypesOptions } from "./routing/generate-route-types";
 import { generateEnvTypes } from "./env-types";
 import { generateFarmImageTypes } from "./image-types";
+import { generateFarmI18nTypes } from "./i18n/type-generator";
+import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
+
+export { generateFarmI18nTypes };
 
 export interface GenerateFarmTypeArtifactsOptions {
   root: string;
@@ -16,10 +20,13 @@ export interface GenerateFarmTypeArtifactsOptions {
   apiTypesOutFile?: string;
   envTypesOutFile?: string;
   imageTypesOutFile?: string;
+  i18nTypesOutFile?: string;
+  i18nConfig?: ResolvedFarmI18nConfig;
   routes?: boolean;
   api?: boolean;
   env?: boolean;
   images?: boolean;
+  i18n?: boolean;
 }
 
 export interface GenerateFarmTypeArtifactsResult {
@@ -27,6 +34,7 @@ export interface GenerateFarmTypeArtifactsResult {
   apiTypesPath?: string;
   envTypesPath?: string;
   imageTypesPath?: string;
+  i18nTypesPath?: string;
   apiRoutes: APIRouteInfo[];
 }
 
@@ -39,6 +47,7 @@ export async function generateFarmTypeArtifacts(
   const shouldGenerateApi = options.api !== false;
   const shouldGenerateEnv = options.env !== false;
   const shouldGenerateImages = options.images !== false;
+  const shouldGenerateI18n = options.i18n !== false && options.i18nConfig?.enabled;
   const sourceRoots = getFarmSourceRoots({ root, srcDir, layers: options.layers });
   const appDirs = getFarmAppDirectories({ root, srcDir, layers: options.layers });
 
@@ -93,6 +102,15 @@ export async function generateFarmTypeArtifacts(
       root,
       srcDir,
       outFile: options.imageTypesOutFile,
+    });
+  }
+
+  if (shouldGenerateI18n && options.i18nConfig) {
+    result.i18nTypesPath = await generateFarmI18nTypes({
+      root,
+      srcDir,
+      config: options.i18nConfig,
+      outFile: options.i18nTypesOutFile,
     });
   }
 

@@ -39,6 +39,14 @@ import { resolveFarmRouteContext, withFarmRouteContext } from "../route-context"
 import { prepareDeferredData, snapshotDeferredData, type DeferredRecord } from "../deferred";
 import { createFarmDeploymentCookie, FARM_DEPLOYMENT_ID_HEADER } from "../deployment";
 import type { StaticMetadataImageInfo } from "../static-metadata-image";
+import {
+  _runWithFarmI18nRequest,
+  getFarmI18nClientSnapshot,
+  type FarmI18nClientSnapshot,
+  type FarmI18nRuntime,
+} from "../i18n/server";
+import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
+import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -81,6 +89,44 @@ function escapeHtmlAttribute(value: string): string {
     .replace(/"/g, "&quot;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
+}
+
+function appendResponseHeader(res: FarmResponse, name: string, value: string): void {
+  const current = res.getHeader(name);
+  if (current === undefined) {
+    res.setHeader(name, value);
+  } else if (Array.isArray(current)) {
+    res.setHeader(name, [...current.map(String), value]);
+  } else {
+    res.setHeader(name, [String(current), value]);
+  }
+}
+
+function appendResponseVary(res: FarmResponse, value: string): void {
+  const current = res.getHeader("Vary");
+  const values = new Set(
+    (Array.isArray(current) ? current.join(",") : String(current || ""))
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean),
+  );
+  values.add(value);
+  res.setHeader("Vary", Array.from(values).join(", "));
+}
+
+function renderI18nAlternateLinks(requestPath: string, snapshot: FarmI18nClientSnapshot): string {
+  if (snapshot.routing === "none") return "";
+  const url = new URL(requestPath, "http://farm.local");
+  const links = snapshot.locales.map((locale) => {
+    const href = localizeFarmPathname(url.pathname, locale, snapshot);
+    return `<link rel="alternate" hreflang="${escapeHtmlAttribute(locale)}" href="${escapeHtmlAttribute(href)}">`;
+  });
+  links.push(
+    `<link rel="alternate" hreflang="x-default" href="${escapeHtmlAttribute(
+      localizeFarmPathname(url.pathname, snapshot.defaultLocale, snapshot),
+    )}">`,
+  );
+  return links.join("");
 }
 
 function findPPRDynamicChunkIndex(chunk: string): number {
@@ -277,11 +323,25 @@ export class ServerRenderer {
   private routeManager: RouteManager;
   private ssgManifest: SSGPage[] = [];
   private dataCache = getFarmDataCache();
+  private i18nRuntime?: FarmI18nRuntime;
 
-  constructor(config: Required<FarmConfig>, routeManager: RouteManager) {
+  constructor(
+    config: Required<FarmConfig>,
+    routeManager: RouteManager,
+    i18nRuntime?: FarmI18nRuntime,
+  ) {
     this.config = config;
     this.routeManager = routeManager;
+    this.i18nRuntime = i18nRuntime;
     this.loadSSGManifest();
+  }
+
+  async runWithRequestContext<T>(request: Request, fn: () => T | Promise<T>): Promise<T> {
+    return _runWithCurrentRequest(request, () =>
+      this.i18nRuntime?.config.enabled
+        ? _runWithFarmI18nRequest(this.i18nRuntime, request, fn, { redirect: false })
+        : fn(),
+    );
   }
 
   async resolveRouteContext(input: {
@@ -511,7 +571,11 @@ export class ServerRenderer {
       if (page.revalidate) {
         res.setHeader("Cache-Control", `s-maxage=${page.revalidate}, stale-while-revalidate`);
       }
-      res.write(cached.value.document ? cached.value.html : this.createFullHTML(cached.value.html));
+      res.write(
+        cached.value.document
+          ? cached.value.html
+          : this.createFullHTML(cached.value.html, false, page.urlPath),
+      );
       res.end();
       return true;
     }
@@ -549,6 +613,33 @@ export class ServerRenderer {
   }
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
+    const request = createWebRequestFromFarmRequest(req);
+    const runtime = this.i18nRuntime;
+
+    if (runtime?.config.enabled) {
+      const resolution = runtime.resolveRequest(request);
+      const varyHeaders = getFarmLocaleVaryHeaders(runtime.config, resolution);
+      for (const header of varyHeaders) appendResponseVary(res, header);
+      if (resolution.persist) {
+        appendResponseHeader(
+          res,
+          "Set-Cookie",
+          createFarmLocaleCookie(resolution.locale, runtime.config),
+        );
+      }
+      if (resolution.redirect && (request.method === "GET" || request.method === "HEAD")) {
+        res.statusCode = 307;
+        res.setHeader("Location", resolution.redirect);
+        if (varyHeaders.length > 0) res.setHeader("Cache-Control", "private, no-store");
+        res.end();
+        return;
+      }
+    }
+
+    return this.runWithRequestContext(request, () => this.renderPageInContext(req, res));
+  }
+
+  private async renderPageInContext(req: FarmRequest, res: FarmResponse): Promise<void> {
     const renderStartTime = Date.now();
     let pathname = "/";
     let params: Record<string, string> = {};
@@ -920,15 +1011,20 @@ export class ServerRenderer {
     } catch (error) {
       if (isFarmRedirectError(error)) {
         const redirect = getFarmRedirectError(error)!;
+        const snapshot = getFarmI18nClientSnapshot();
+        const redirectUrl =
+          snapshot && redirect.url.startsWith("/") && !redirect.url.startsWith("//")
+            ? localizeFarmHref(redirect.url, snapshot.locale, snapshot)
+            : redirect.url;
         emitFarmEvent({
           type: "route.redirect",
           from: pathname,
-          to: redirect.url,
+          to: redirectUrl,
           status: redirect.status,
         });
         if (!res.headersSent && !(res as any).writableEnded) {
           res.statusCode = redirect.status;
-          res.setHeader("Location", redirect.url);
+          res.setHeader("Location", redirectUrl);
           res.end();
         } else if (!(res as any).writableEnded) {
           res.end();
@@ -1050,7 +1146,9 @@ export class ServerRenderer {
     const match = this.routeManager.getMatchingMetadataImage(pathname, kind);
     if (!match) return null;
 
-    const href = this.routeManager.resolveMetadataImagePath(match.image, match.params);
+    const rawHref = this.routeManager.resolveMetadataImagePath(match.image, match.params);
+    const snapshot = getFarmI18nClientSnapshot();
+    const href = snapshot ? localizeFarmHref(rawHref, snapshot.locale, snapshot) : rawHref;
     const reference: FarmMetadataImageReference = {
       kind,
       href,
@@ -1288,7 +1386,7 @@ export class ServerRenderer {
       );
       res.statusCode = 500;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.write(this.createFullHTML(html));
+      res.write(this.createFullHTML(html, false, options.pathname));
       res.end();
       return true;
     } catch (renderError) {
@@ -1391,6 +1489,7 @@ window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
       )};
 window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
+${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
 </script>`;
       const hydrationClickQueueScript =
         isClientComponent || (req as any).__FARM_SHOULD_HYDRATE__ === true
@@ -1402,6 +1501,10 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
         tags: metaTags,
         hasFavicon,
       } = renderMetadataHead((req as any).__FARM_METADATA__);
+      const i18nSnapshot = getFarmI18nClientSnapshot();
+      const i18nAlternateTags = i18nSnapshot
+        ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
+        : "";
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
@@ -1417,13 +1520,15 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
             console.log(`[FARM STREAM] onShellReady at ${shellReadyMs}ms`);
           }
           const shell = `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
+            i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
+          }>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
-  <title>${title}</title>${metaTags}
+  <title>${title}</title>${metaTags}${i18nAlternateTags}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
   ${propsScript}
@@ -1595,7 +1700,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
           const ReactDOMServer = await import("react-dom/server");
           const content = ReactDOMServer.renderToString(element);
 
-          const html = this.createFullHTML(content);
+          const html = this.createFullHTML(content, false, pathname);
           res.setHeader("Content-Type", "text/html; charset=utf-8");
           res.write(html);
           res.end();
@@ -1621,7 +1726,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
       </div>
     `;
 
-    const html = this.createFullHTML(defaultContent);
+    const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.write(html);
     res.end();
@@ -1640,33 +1745,42 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
     const isDev = process.env.NODE_ENV === "development";
     const errorMessage = isDev ? error.stack || error.message : "Internal Server Error";
 
-    const html = this.createFullHTML(`
-      <h1>500 - Internal Server Error</h1>
-      ${isDev ? `<pre>${errorMessage}</pre>` : ""}
-    `);
+    const html = this.createFullHTML(
+      `
+        <h1>500 - Internal Server Error</h1>
+        ${isDev ? `<pre>${errorMessage}</pre>` : ""}
+      `,
+      false,
+      req.url || "/",
+    );
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.write(html);
     res.end();
   }
 
-  private createFullHTML(content: string, isClientComponent = false): string {
+  private createFullHTML(content: string, isClientComponent = false, requestPath = "/"): string {
+    const i18nSnapshot = getFarmI18nClientSnapshot();
     const clientScript = isClientComponent
       ? `  <script type="module" src="/@farm/client.js"></script>`
       : "";
     const integrationManifestScript = `<script>
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(this.getDeploymentId())};
 window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
+${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};` : ""}
 </script>`;
+    const alternateLinks = i18nSnapshot ? renderI18nAlternateLinks(requestPath, i18nSnapshot) : "";
 
     return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
+      i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
+    }>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
   <link rel="icon" href="data:,">
-  <title>Farm.js App</title>
+  <title>Farm.js App</title>${alternateLinks}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
   ${integrationManifestScript}

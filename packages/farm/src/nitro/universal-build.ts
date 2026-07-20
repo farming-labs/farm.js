@@ -47,6 +47,8 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
+import { readFarmI18nCatalogs } from "../i18n/catalog";
+import type { FarmI18nCatalogs } from "../i18n/types";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -496,6 +498,7 @@ async function buildClient(
     srcDir,
     isFarmDocsSearchEnabled(config.docs),
     resolveFarmDocsSearchClientModule(root),
+    config.i18n,
   );
 
   // Write the client entry to a temporary file
@@ -596,6 +599,9 @@ async function buildClient(
             if (id === "@farmjs/core") {
               return { id: "\0farm-client-exports", external: false };
             }
+            if (id === "@farmjs/core/i18n/server") {
+              return { id: "\0farm-i18n-client-bridge", external: false };
+            }
             // Block server-only imports completely
             if (
               id === "@farmjs/core/server" ||
@@ -636,6 +642,9 @@ async function buildClient(
             if (id === "\0empty-api-route") {
               // Stub for API routes - only used in type context, provide empty exports
               return "export const GET = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export default {};";
+            }
+            if (id === "\0farm-i18n-client-bridge") {
+              return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farmjs/core/i18n/client";';
             }
             if (id === "\0farm-client-exports") {
               // Only export client-safe parts (no type exports - they're erased at compile time)
@@ -693,6 +702,18 @@ function generateClientHydrationEntry(
   srcDir: string,
   docsSearchEnabled: boolean,
   docsSearchModuleId?: string,
+  i18nConfig: ResolvedFarmConfig["i18n"] = {
+    enabled: false,
+    locales: ["en"],
+    defaultLocale: "en",
+    messages: "",
+    routing: "none",
+    detection: [],
+    fallbackLocale: "en",
+    strict: false,
+    cookie: { name: "farm_locale", maxAge: 0, path: "/", sameSite: "lax", secure: false },
+    direction: {},
+  },
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
 
@@ -714,6 +735,40 @@ function generateClientHydrationEntry(
   });
 
   const layoutImports = layoutImportStatements.join("\n");
+  const i18nRoutingConfig = {
+    locales: i18nConfig.locales,
+    defaultLocale: i18nConfig.defaultLocale,
+    routing: i18nConfig.routing,
+  };
+  const i18nClientRuntime = i18nConfig.enabled
+    ? `
+import { stripFarmLocaleFromPathname } from "@farmjs/core/i18n";
+import { _setFarmI18nClientSnapshot } from "@farmjs/core/i18n/client";
+
+const farmI18nConfig = ${JSON.stringify(i18nRoutingConfig)};
+if (window.__FARM_I18N__) {
+  _setFarmI18nClientSnapshot(window.__FARM_I18N__);
+}
+
+function getFarmRoutePathname(pathname) {
+  return stripFarmLocaleFromPathname(pathname, farmI18nConfig);
+}
+
+function isFarmLocaleDocumentChange(doc) {
+  const currentLocale = window.__FARM_I18N__?.locale || document.documentElement.lang;
+  const nextLocale = doc.documentElement?.lang;
+  return Boolean(currentLocale && nextLocale && currentLocale !== nextLocale);
+}
+`
+    : `
+function getFarmRoutePathname(pathname) {
+  return pathname;
+}
+
+function isFarmLocaleDocumentChange() {
+  return false;
+}
+`;
 
   if (clientPages.length === 0) {
     // No client pages - just basic runtime with CSS and SPA navigation
@@ -724,6 +779,7 @@ ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { installChunkErrorRecovery } from "@farmjs/core/client";
+${i18nClientRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 installChunkErrorRecovery();
@@ -767,6 +823,7 @@ const spaRouter = {
   swapContent: function(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
+    if (isFarmLocaleDocumentChange(doc)) return false;
     
     // Update title
     const newTitle = doc.querySelector("title");
@@ -905,6 +962,7 @@ ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { installChunkErrorRecovery } from "@farmjs/core/client";
+${i18nClientRuntime}
 
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
@@ -924,7 +982,7 @@ ${layoutRegistrations.join(",\n")}
 // Get applicable layouts for a pathname (sorted by depth, root first)
 function getApplicableLayouts(pathname) {
   const applicable = [];
-  const normalizedPath = pathname.replace(/\\/$/, '') || '/';
+  const normalizedPath = getFarmRoutePathname(pathname).replace(/\\/$/, '') || '/';
   
   for (const layout of layoutRoutes) {
     if (layout.pattern === '/' || 
@@ -962,6 +1020,7 @@ function wrapWithLayouts(pageElement, pathname, params) {
 
 // Match pathname to client route
 function matchRoute(pathname) {
+  pathname = getFarmRoutePathname(pathname);
   for (const route of clientRoutes) {
     // Convert pattern to regex
     let regexPattern = route.pattern;
@@ -1110,6 +1169,7 @@ const spaRouter = {
   swapContent: function(html, targetPath) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
+    if (isFarmLocaleDocumentChange(doc)) return false;
     
     // Update title
     const newTitle = doc.querySelector("title");
@@ -1366,6 +1426,9 @@ async function buildSSRInMemory(
     });
   }
   const redirectRoutes = routeManager.getRedirects();
+  const i18nCatalogs = config.i18n.enabled
+    ? (await readFarmI18nCatalogs(config.i18n)).catalogs
+    : {};
 
   // Discover layout files by scanning the source directory
   const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
@@ -1470,6 +1533,7 @@ async function buildSSRInMemory(
     config,
     configModulePath,
     preset,
+    i18nCatalogs,
   );
 
   // Find a temporary file path for the virtual entry
@@ -1634,6 +1698,7 @@ function generateVirtualEntryCode(
   config: ResolvedFarmConfig,
   configModulePath: string | null,
   preset: string,
+  i18nCatalogs: FarmI18nCatalogs,
 ): string {
   // Generate imports for all API routes
   const apiImports: string[] = [];
@@ -1745,6 +1810,10 @@ function generateVirtualEntryCode(
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
   const pluginRuntimeImport = `import { PluginManager } from "farm/plugin";`;
   const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
+  const i18nRoutingImport = `import { createFarmLocaleCookie, getFarmLocaleVaryHeaders, localizeFarmHref, localizeFarmPathname, stripFarmLocaleFromPathname } from "farm/i18n";`;
+  const i18nServerImport = config.i18n.enabled
+    ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "farm/i18n/server";`
+    : "";
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "farm/docs";`
     : "";
@@ -1852,6 +1921,8 @@ ${afterHelpersImport}
 ${observabilityHelpersImport}
 ${pluginRuntimeImport}
 ${middlewareRuntimeImport}
+${i18nRoutingImport}
+${i18nServerImport}
 ${docsHandlerImport}
 ${docsRuntimeImport}
 ${markdownHandlerImport}
@@ -1924,6 +1995,13 @@ const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringif
     config.observability ?? false,
   )};
 configureFarmObservability(farmObservabilityConfig);
+const farmI18nConfig = ${JSON.stringify(config.i18n)};
+const farmI18nRuntime = ${
+    config.i18n.enabled
+      ? `createFarmI18nRuntime(farmI18nConfig, ${JSON.stringify(i18nCatalogs)})`
+      : "null"
+  };
+${config.i18n.enabled ? "_setDefaultFarmI18nRuntime(farmI18nRuntime);" : ""}
 const farmDocsBundledContentDir = ${
     config.docs?.enabled
       ? `(() => {
@@ -1990,6 +2068,95 @@ const metadataImageRoutes = [${metadataImageRegistrations.join(",")}
 
 // Redirect routes bundled at build time
 const redirectRoutes = ${JSON.stringify(redirectRoutes, null, 2)};
+
+function getFarmI18nSnapshot() {
+  return ${config.i18n.enabled ? "getFarmI18nClientSnapshot()" : "undefined"};
+}
+
+function getFarmRoutePathname(pathname) {
+  return farmI18nRuntime
+    ? stripFarmLocaleFromPathname(pathname, farmI18nConfig)
+    : pathname;
+}
+
+function serializeFarmInlineValue(value) {
+  return JSON.stringify(value)
+    .replace(/</g, "\\\\u003c")
+    .replace(/\\u2028/g, "\\\\u2028")
+    .replace(/\\u2029/g, "\\\\u2029");
+}
+
+function escapeFarmHtmlAttribute(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderFarmI18nAlternateLinks(requestPath, snapshot) {
+  if (!snapshot || snapshot.routing === "none") return "";
+  const url = new URL(requestPath, "http://farm.local");
+  const routePathname = stripFarmLocaleFromPathname(url.pathname, snapshot);
+  const links = snapshot.locales.map(function(locale) {
+    const href = localizeFarmPathname(routePathname, locale, snapshot);
+    return '<link rel="alternate" hreflang="' + escapeFarmHtmlAttribute(locale) +
+      '" href="' + escapeFarmHtmlAttribute(href) + '">';
+  });
+  links.push(
+    '<link rel="alternate" hreflang="x-default" href="' +
+      escapeFarmHtmlAttribute(
+        localizeFarmPathname(routePathname, snapshot.defaultLocale, snapshot)
+      ) +
+      '">'
+  );
+  return links.join("");
+}
+
+function applyFarmI18nDocument(html, requestPath, snapshot) {
+  if (!snapshot) return html;
+  const locale = escapeFarmHtmlAttribute(snapshot.locale);
+  const direction = escapeFarmHtmlAttribute(snapshot.direction);
+  let nextHtml = html.replace(/<html([^>]*)>/i, function(_match, attributes) {
+    const cleaned = attributes.replace(
+      /\\s+(?:lang|dir)=(?:"[^"]*"|'[^']*'|[^\\s>]+)/gi,
+      ""
+    );
+    return '<html' + cleaned + ' lang="' + locale + '" dir="' + direction + '">';
+  });
+  const runtimeMarkup =
+    renderFarmI18nAlternateLinks(requestPath, snapshot) +
+    '<script>window.__FARM_I18N__ = ' + serializeFarmInlineValue(snapshot) + ';</script>';
+  nextHtml = nextHtml.replace(/<head([^>]*)>/i, '<head$1>' + runtimeMarkup);
+  return nextHtml;
+}
+
+function appendFarmVary(headers, value) {
+  const existing = headers.get("Vary");
+  const values = new Set(
+    (existing ? existing.split(",") : []).map(function(entry) { return entry.trim(); }).filter(Boolean)
+  );
+  values.add(value);
+  headers.set("Vary", Array.from(values).join(", "));
+}
+
+function applyFarmI18nResponse(response, resolution) {
+  if (!farmI18nRuntime || !resolution) return response;
+  const headers = new Headers(response.headers);
+  if (resolution.persist) {
+    headers.append("Set-Cookie", createFarmLocaleCookie(resolution.locale, farmI18nConfig));
+  }
+  const varyHeaders = getFarmLocaleVaryHeaders(farmI18nConfig, resolution);
+  for (const header of varyHeaders) appendFarmVary(headers, header);
+  if (varyHeaders.length > 0) {
+    headers.set("Cache-Control", "private, no-store");
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
 
 function normalizeRuntimePath(pathname) {
   if (!pathname || pathname === "/") return "/";
@@ -2084,15 +2251,16 @@ function matchMetadataImageRequest(pathname) {
   return null;
 }
 
-function createMetadataImageReference(match) {
+function createMetadataImageReference(match, locale) {
   const image = match.image;
   const metadata = image.sourceType === "static" ? image.staticInfo : image.module;
   const basePath = match.pagePath === "/" ? "" : match.pagePath;
   const version = image.sourceType === "static" ? "?v=" + image.staticInfo.hash : "";
+  const href = basePath + "/" + image.fileName + version;
 
   return {
     kind: image.kind,
-    href: basePath + "/" + image.fileName + version,
+    href: locale ? localizeFarmHref(href, locale, farmI18nConfig) : href,
     width: metadata?.width ?? metadata?.size?.width,
     height: metadata?.height ?? metadata?.size?.height,
     alt: metadata?.alt,
@@ -2109,9 +2277,9 @@ function decodeMetadataImage(data) {
   return bytes;
 }
 
-async function handleMetadataImageRequest(request) {
+async function handleMetadataImageRequest(request, routePathname) {
   const url = new URL(request.url);
-  const match = matchMetadataImageRequest(url.pathname);
+  const match = matchMetadataImageRequest(routePathname || url.pathname);
   if (!match) return null;
 
   const method = request.method.toUpperCase();
@@ -2204,12 +2372,16 @@ function interpolateRedirectDestination(destination, params) {
   return result;
 }
 
-function matchRedirectRoute(pathname) {
+function matchRedirectRoute(pathname, locale) {
   for (const redirect of redirectRoutes) {
     const params = matchRuntimePathPattern(redirect.source, pathname);
     if (!params) continue;
+    const destination = interpolateRedirectDestination(redirect.destination, params);
     return {
-      destination: interpolateRedirectDestination(redirect.destination, params),
+      destination:
+        locale && destination.startsWith("/") && !destination.startsWith("//")
+          ? localizeFarmHref(destination, locale, farmI18nConfig)
+          : destination,
       statusCode: redirect.statusCode || (redirect.permanent ? 308 : 307),
     };
   }
@@ -2223,6 +2395,7 @@ const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
 const farmMiddlewareRunner = createProductionMiddlewareRunner({
   config: farmUserConfig?.middleware,
   modules: fileMiddlewareModules,
+  i18n: farmI18nConfig,
 });
 
 ${apiHandlerCode}
@@ -2278,6 +2451,7 @@ function matchPageRoute(pathname) {
 function getFarmPluginRequestOptions(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
+  const routePathname = getFarmRoutePathname(pathname);
   const route = { pathname };
   const isDocsAPIRequest = ${config.docs?.enabled ? "isFarmDocsAPIRequest(pathname)" : "false"};
   const integrationMatch = matchIntegrationRoute(configuredIntegrations, {
@@ -2314,7 +2488,7 @@ function getFarmPluginRequestOptions(request) {
     }
   }
 
-  const metadataImageMatch = matchMetadataImageRequest(pathname);
+  const metadataImageMatch = matchMetadataImageRequest(routePathname);
   if (metadataImageMatch) {
     return {
       kind: "asset",
@@ -2326,7 +2500,7 @@ function getFarmPluginRequestOptions(request) {
     };
   }
 
-  const pageMatch = matchPageRoute(pathname);
+  const pageMatch = matchPageRoute(routePathname);
   if (pageMatch) {
     return {
       kind: "page",
@@ -2407,8 +2581,13 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   return undefined;
 }
 
-function getPPRShellCacheKey(url) {
-  return createFarmCacheKey(["ppr", normalizeRevalidatePath(url.pathname), url.search]);
+function getPPRShellCacheKey(url, locale) {
+  return createFarmCacheKey([
+    "ppr",
+    locale || "",
+    normalizeRevalidatePath(url.pathname),
+    url.search,
+  ]);
 }
 
 function getPPRHeaders(status, config) {
@@ -2441,8 +2620,36 @@ function getCachedPPRShell(cacheKey) {
  * Main request handler - created at runtime with bundled routes
  */
 async function handleFarmRequest(request) {
+  ${
+    config.i18n.enabled
+      ? `return _runWithFarmI18nRequest(
+    farmI18nRuntime,
+    request,
+    async function(farmLocaleResolution) {
+      if (
+        farmLocaleResolution.redirect &&
+        (request.method === "GET" || request.method === "HEAD")
+      ) {
+        return applyFarmI18nResponse(
+          new Response(null, {
+            status: 307,
+            headers: { Location: farmLocaleResolution.redirect },
+          }),
+          farmLocaleResolution
+        );
+      }
+      const response = await handleFarmRequestInContext(request, farmLocaleResolution);
+      return applyFarmI18nResponse(response, farmLocaleResolution);
+    }
+  );`
+      : "return handleFarmRequestInContext(request, null);"
+  }
+}
+
+async function handleFarmRequestInContext(request, farmLocaleResolution) {
   let url = new URL(request.url);
   let pathname = url.pathname;
+  let routePathname = getFarmRoutePathname(pathname);
   const requestStartTime = Date.now();
 
   if (farmImageHandler) {
@@ -2468,7 +2675,7 @@ async function handleFarmRequest(request) {
     request: request.clone(),
     config: farmMdxConfig,
     resolveSource: (targetPathname) => {
-      const match = matchPageRoute(targetPathname);
+      const match = matchPageRoute(getFarmRoutePathname(targetPathname));
       return match?.route?.markdownSource || null;
     },
   });
@@ -2480,7 +2687,8 @@ async function handleFarmRequest(request) {
     const markdownResponse = await createMarkdownMirrorResponse({
       request: request.clone(),
       config: farmMarkdownConfig,
-      routeExists: (targetPathname) => Boolean(matchPageRoute(targetPathname)),
+      routeExists: (targetPathname) =>
+        Boolean(matchPageRoute(getFarmRoutePathname(targetPathname))),
       renderPage: (targetRequest) => handleFarmRequest(targetRequest),
     });
     if (markdownResponse) {
@@ -2498,8 +2706,9 @@ async function handleFarmRequest(request) {
   const middlewareHeaders = middlewareResult.headers;
   url = new URL(request.url);
   pathname = url.pathname;
+  routePathname = getFarmRoutePathname(pathname);
 
-  const redirectMatch = matchRedirectRoute(pathname);
+  const redirectMatch = matchRedirectRoute(routePathname, farmLocaleResolution?.locale);
   if (redirectMatch) {
     return applyProductionMiddlewareHeaders(new Response(
       "Redirecting to " + redirectMatch.destination,
@@ -2515,7 +2724,10 @@ async function handleFarmRequest(request) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
 
-  const metadataImageResponse = await handleMetadataImageRequest(request.clone());
+  const metadataImageResponse = await handleMetadataImageRequest(
+    request.clone(),
+    routePathname
+  );
   if (metadataImageResponse) {
     return applyProductionMiddlewareHeaders(metadataImageResponse, middlewareHeaders);
   }
@@ -2537,7 +2749,7 @@ async function handleFarmRequest(request) {
 
   // Handle page routes (SSR)
   emitFarmEvent({ type: "render.start", route: pathname, pathname });
-  const matchedRoute = matchPageRoute(pathname);
+  const matchedRoute = matchPageRoute(routePathname);
   if (matchedRoute) {
     const { route, params } = matchedRoute;
     emitFarmEvent({ type: "route.matched", pathname, route: route.pattern, params });
@@ -2548,7 +2760,9 @@ async function handleFarmRequest(request) {
         ? getPPRShellBypassReason(request, middlewareData, middlewareContext)
         : undefined;
       const pprCanCache = pprConfig.enabled && !pprBypassReason;
-      const pprCacheKey = pprCanCache ? getPPRShellCacheKey(url) : null;
+      const pprCacheKey = pprCanCache
+        ? getPPRShellCacheKey(url, farmLocaleResolution?.locale)
+        : null;
       if (pprConfig.enabled && pprBypassReason) {
         emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
         emitFarmEvent({ type: "cache.bypass", route: pathname, reason: pprBypassReason });
@@ -2583,7 +2797,7 @@ async function handleFarmRequest(request) {
       const pageMetadata = route.module.metadata || {};
       
       // Get applicable layouts for this page
-      const applicableLayouts = getApplicableLayouts(pathname);
+      const applicableLayouts = getApplicableLayouts(routePathname);
       
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
@@ -2675,11 +2889,11 @@ async function handleFarmRequest(request) {
         mergedMetadata = mergeMetadata(mergedMetadata, pageMetadata);
 
         for (const kind of ["opengraph", "twitter"]) {
-          const imageMatch = getMatchingMetadataImage(pathname, kind);
+          const imageMatch = getMatchingMetadataImage(routePathname, kind);
           if (imageMatch) {
             mergedMetadata = addMetadataImageReference(
               mergedMetadata,
-              createMetadataImageReference(imageMatch),
+              createMetadataImageReference(imageMatch, farmLocaleResolution?.locale),
             );
           }
         }
@@ -2734,6 +2948,7 @@ async function handleFarmRequest(request) {
 </body>
 </html>\`;
         }
+        fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot());
         
         // Include client CSS and hydration script
         // Add caching headers for edge caching (Vercel, Cloudflare, etc.)
@@ -2794,10 +3009,20 @@ async function handleFarmRequest(request) {
     } catch (error) {
       if (isFarmRedirectError(error)) {
         const redirect = getFarmRedirectError(error);
+        const redirectUrl =
+          farmLocaleResolution?.locale &&
+          redirect.url.startsWith("/") &&
+          !redirect.url.startsWith("//")
+            ? localizeFarmHref(
+                redirect.url,
+                farmLocaleResolution.locale,
+                farmI18nConfig
+              )
+            : redirect.url;
         emitFarmEvent({
           type: "route.redirect",
           from: pathname,
-          to: redirect.url,
+          to: redirectUrl,
           status: redirect.status,
         });
         emitFarmEvent({
@@ -2810,7 +3035,7 @@ async function handleFarmRequest(request) {
         return applyProductionMiddlewareHeaders(new Response(null, {
           status: redirect.status,
           headers: {
-            Location: redirect.url,
+            Location: redirectUrl,
           },
         }), middlewareHeaders);
       }
@@ -2965,6 +3190,7 @@ async function handleFarmRequest(request) {
 </body>
 </html>\`;
     }
+    fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot());
     
     emitFarmEvent({
       type: "render.complete",
@@ -2995,7 +3221,7 @@ async function handleFarmPluginRequest(request, runtimeOptions) {
   const pathname = runtimeOptions.route?.pathname || new URL(request.url).pathname;
   const routePattern = runtimeOptions.route?.pattern || null;
   const params = runtimeOptions.route?.params || {};
-  const layouts = getApplicableLayouts(pathname);
+  const layouts = getApplicableLayouts(getFarmRoutePathname(pathname));
 
   await farmPluginRuntime.runHookParallel("beforeRouteMatch", {
     pathname,

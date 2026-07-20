@@ -11,6 +11,8 @@ import type {
 } from "./types";
 import { emitFarmEvent } from "../observability";
 import { normalizeMiddlewareModule } from "./module";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
+import type { ResolvedFarmI18nConfig } from "../i18n/types";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -21,6 +23,7 @@ export interface ProductionMiddlewareModuleEntry {
 export interface ProductionMiddlewareRunnerOptions {
   config?: FarmMiddlewareConfig | null;
   modules?: ProductionMiddlewareModuleEntry[];
+  i18n?: ResolvedFarmI18nConfig;
 }
 
 export interface ProductionMiddlewareResult {
@@ -603,7 +606,9 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
     let contextState = createWebMiddlewareContext(request);
     let ctx = contextState.ctx;
     let currentRequest = contextState.getRequest();
-    const initialPathname = ctx.pathname;
+    const initialPathname = options.i18n?.enabled
+      ? stripFarmLocaleFromPathname(ctx.pathname, options.i18n)
+      : ctx.pathname;
     let parentData: MiddlewareContext["parent"] | undefined;
 
     if (globalConfig) {

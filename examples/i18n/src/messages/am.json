@@ -1,0 +1,18 @@
+{
+  "home": {
+    "eyebrow": "የFarm.js ቋንቋ ድጋፍ",
+    "title": "አንድ መተግበሪያ፣ ለሁሉም ቋንቋ",
+    "description": "የቋንቋ መንገዶች፣ የሰርቨር ምልክቶች፣ የተተየቡ ICU መልዕክቶች እና የደንበኛ አሰሳ በአንድ የፍሬምወርክ ቅንብር ይሰራሉ።",
+    "current": "የአሁኑ ቋንቋ፦ {locale}",
+    "localeLabel": "ቋንቋ",
+    "numberLabel": "ቁጥር",
+    "messageLabel": "መልዕክት",
+    "visits": "{count, plural, =0 {እስካሁን ጉብኝት የለም} one {ዛሬ # ጉብኝት} other {ዛሬ # ጉብኝቶች}}"
+  },
+  "locale": {
+    "switch": "ቋንቋ ቀይር",
+    "english": "እንግሊዝኛ",
+    "amharic": "አማርኛ",
+    "arabic": "ዓረብኛ"
+  }
+}
