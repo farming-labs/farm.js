@@ -665,9 +665,9 @@ export function createClientPluginManager(
   return new FarmClientPluginManager(registrations, options);
 }
 
-export function defineClientPlugin<TState = undefined>(
-  plugin: FarmClientPlugin<TState>,
-): FarmClientPlugin<TState> {
+export function defineClientPlugin<TState = undefined, TOptions = unknown>(
+  plugin: FarmClientPlugin<TState, TOptions>,
+): FarmClientPlugin<TState, TOptions> {
   return plugin;
 }
 
