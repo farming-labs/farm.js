@@ -12,6 +12,140 @@ function createManager() {
 }
 
 describe("plugin lifecycle hooks", () => {
+  it("runs the structured plugin groups with private setup state", async () => {
+    const manager = createManager();
+    const seen: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "structured-lifecycle",
+        setup() {
+          seen.push("setup");
+          return { prefix: "structured" };
+        },
+        runtime: {
+          start({ state }) {
+            seen.push(`${state.prefix}:start`);
+          },
+          close({ state, reason }) {
+            seen.push(`${state.prefix}:close:${reason}`);
+          },
+        },
+        router: {
+          discovered(route, { state }) {
+            seen.push(`${state.prefix}:route:${route.kind}`);
+          },
+          generated(routes, { state }) {
+            seen.push(`${state.prefix}:routes:${routes.pageCount}`);
+          },
+          before(route, { state }) {
+            seen.push(`${state.prefix}:before-match:${route.pathname}`);
+          },
+          after(result, { state }) {
+            seen.push(`${state.prefix}:after-match:${result.matched}`);
+          },
+        },
+        render: {
+          before(render, { state }) {
+            seen.push(`${state.prefix}:before-render:${render.pathname}`);
+          },
+          html(html, _render, { state }) {
+            return `${html}<!--${state.prefix}-->`;
+          },
+        },
+        build: {
+          before(bundle, { state }) {
+            seen.push(`${state.prefix}:before-build:${bundle.preset}`);
+          },
+          configure(config, { state }) {
+            return { ...config, marker: state.prefix };
+          },
+          after(result, { state }) {
+            seen.push(`${state.prefix}:after-build:${result.success}`);
+          },
+        },
+        dev: {
+          update(update, { state }) {
+            seen.push(`${state.prefix}:hmr:${update.file}`);
+          },
+        },
+      }),
+    );
+
+    await manager.setupPlugins();
+    await manager.runHookParallel("ready");
+    await manager.runHookParallel("apiRouteDiscovered", {
+      path: "/api/health",
+      filePath: "/tmp/api/health/route.ts",
+      methods: ["GET"],
+    });
+    await manager.runHookParallel("routesGenerated", {
+      routes: [],
+      pageCount: 1,
+      layoutCount: 0,
+    });
+    await manager.runHookParallel("beforeRouteMatch", {
+      pathname: "/health",
+      method: "GET",
+    });
+    await manager.runHookParallel("afterRouteMatch", {
+      pathname: "/health",
+      matched: true,
+      routePattern: "/health",
+      params: {},
+      layoutPatterns: [],
+    });
+    await manager.runHookParallel("beforeRender", {
+      pathname: "/health",
+      method: "GET",
+      routePattern: "/health",
+      params: {},
+    });
+
+    const html = await manager.runHookSerial("afterRender", "<main>ok</main>", {
+      pathname: "/health",
+      method: "GET",
+      routePattern: "/health",
+      params: {},
+    });
+    expect(html).toBe("<main>ok</main><!--structured-->");
+
+    await manager.runHookParallel("beforeBundle", {
+      root: "/tmp/app",
+      preset: "node-server",
+      universal: true,
+      distDir: ".farm",
+    });
+    const buildConfig = await manager.runHookSerial("beforeNitroBuild", {});
+    expect(buildConfig.marker).toBe("structured");
+    await manager.runHookParallel("afterBundle", {
+      root: "/tmp/app",
+      preset: "node-server",
+      universal: true,
+      distDir: ".farm",
+      success: true,
+    });
+    await manager.runHookParallel("hmrUpdate", {
+      file: "src/app/page.tsx",
+      modules: ["page"],
+    });
+    await manager.runHookParallel("shutdown", { reason: "test" });
+
+    expect(seen).toEqual([
+      "setup",
+      "structured:start",
+      "structured:route:api",
+      "structured:routes:1",
+      "structured:before-match:/health",
+      "structured:after-match:true",
+      "structured:before-render:/health",
+      "structured:before-build:node-server",
+      "structured:after-build:true",
+      "structured:hmr:src/app/page.tsx",
+      "structured:close:test",
+    ]);
+  });
+
   it("supports extended lifecycle hooks end-to-end", async () => {
     const manager = createManager();
     const seen: string[] = [];

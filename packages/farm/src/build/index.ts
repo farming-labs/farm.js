@@ -43,6 +43,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
 
   try {
     await pluginManager.runHookParallel("init");
+    await pluginManager.setupPlugins();
     await pluginManager.runHookParallel("beforeBundle", {
       root,
       preset,

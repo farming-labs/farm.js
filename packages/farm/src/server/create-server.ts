@@ -264,7 +264,8 @@ export async function createServer(config: FarmConfig = {}) {
     (server as any).__farmPluginManager = pluginManager;
 
     // Update plugin manager with vite server
-    pluginManager.updateContext({ viteServer: server });
+    pluginManager.updateContext({ config: finalConfig, viteServer: server });
+    await pluginManager.setupPlugins();
     await pluginManager.runHookParallel("devServerCreated", server);
 
     // Run configResolved hooks
