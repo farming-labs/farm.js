@@ -89,6 +89,61 @@ export default defineConfig({
 
 Use a factory when consumers need options. Return `definePlugin()` directly so inference is preserved.
 
+## Choose the plugin's scope
+
+Start local, then package the plugin when more than one application needs the same framework behavior.
+
+| Scope | Use it for |
+| --- | --- |
+| Local plugin | One application's route policy, diagnostics, or temporary framework experiment. |
+| Published plugin | Reusable tracing, security, rendering, build, or development behavior. |
+| Layer plugin | Organization defaults shipped together with shared config and integrations. |
+| Integration plugin | Low-level framework behavior required internally by one product integration. |
+
+A published plugin should expose an options factory and keep its setup state private:
+
+**packages/farm-plugin-security/src/index.ts**
+
+```ts
+import { definePlugin } from "@farmjs/core";
+
+export interface SecurityPluginOptions {
+  frameAncestors?: string;
+}
+
+export function securityPlugin(options: SecurityPluginOptions = {}) {
+  return definePlugin({
+    name: "acme:security",
+    version: "1.0.0",
+
+    setup() {
+      return {
+        frameAncestors: options.frameAncestors ?? "'none'",
+      };
+    },
+
+    runtime: {
+      after({ response, state }) {
+        const headers = new Headers(response.headers);
+        headers.set("x-content-type-options", "nosniff");
+        headers.set(
+          "content-security-policy",
+          `frame-ancestors ${state.frameAncestors}`,
+        );
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      },
+    },
+  });
+}
+```
+
+Keep the public surface small: export the factory, its options, and any intentionally shared types. Consumers should not need to understand the plugin's internal state or lifecycle wiring.
+
 ## Transform config
 
 `configure` runs before Farm resolves config. Return only when the plugin needs to replace the current value.
