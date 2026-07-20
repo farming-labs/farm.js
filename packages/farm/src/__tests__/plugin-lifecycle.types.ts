@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { definePlugin, type FarmPlugin } from "../plugin";
+import { definePlugin, type FarmPlugin, type FarmPluginRuntimeSession } from "../plugin";
 
 const inferredPlugin = definePlugin({
   name: "typed-runtime",
@@ -32,3 +32,5 @@ const inferredPlugin = definePlugin({
 expectTypeOf(inferredPlugin).toMatchTypeOf<
   FarmPlugin<{ tracer: { start(pathname: string): { id: string } } }, { trace: { id: string } }>
 >();
+
+expectTypeOf<FarmPluginRuntimeSession["response"]>().toEqualTypeOf<Response | undefined>();
