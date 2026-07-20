@@ -159,7 +159,7 @@ describe("farm devtools", () => {
     expect(snapshot.features.openapi).toBe(true);
   });
 
-  it("renders the sharp, navigable devtools dashboard shell", async () => {
+  it("renders the sharp, navigable devtools inspector", async () => {
     const snapshot = await createFarmDevtoolsSnapshot({
       root: "/repo/app",
       srcDir: "src",
@@ -191,13 +191,15 @@ describe("farm devtools", () => {
     const html = renderFarmDevtoolsHtml(snapshot);
 
     expect(html).toContain("<title>Farm Devtools - app</title>");
-    expect(html).toContain("Everything Farm sees.");
     expect(html).toContain("/__farm/devtools.json");
+    expect(html).toContain('data-inspector="overview"');
     expect(html).toContain('data-view-panel="overview"');
     expect(html).toContain('data-view-panel="runtime"');
+    expect(html).toContain('data-view-panel="raw"');
+    expect(html).toContain('data-detail-trigger="routes"');
     expect(html).toContain("border-radius: 0 !important");
     expect(html).toContain("<code>/about</code>");
     expect(html).toContain("src/app/about/page.tsx");
-    expect(html).toContain("No API routes discovered");
+    expect(html).toContain("No api routes found");
   });
 });

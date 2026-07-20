@@ -79,40 +79,12 @@ function renderRuntime(runtime: FarmDevtoolsRuntime | undefined): string {
   }</span>`;
 }
 
-function renderMetric(label: string, value: number | string, detail: string): string {
-  return `<div class="metric">
-    <span class="metric-label">${escapeHtml(label)}</span>
-    <strong>${escapeHtml(value)}</strong>
-    <span class="metric-detail">${escapeHtml(detail)}</span>
-  </div>`;
-}
-
 function renderEmpty(title: string, detail: string): string {
   return `<div class="empty-state">
     ${icon("activity")}
     <strong>${escapeHtml(title)}</strong>
     <span>${escapeHtml(detail)}</span>
   </div>`;
-}
-
-function renderSectionHeader(
-  index: string,
-  title: string,
-  description: string,
-  sectionIcon: IconName,
-  actions = "",
-): string {
-  return `<header class="section-header">
-    <div class="section-heading">
-      <span class="section-index">${escapeHtml(index)}</span>
-      ${icon(sectionIcon)}
-      <div>
-        <h2>${escapeHtml(title)}</h2>
-        <p>${escapeHtml(description)}</p>
-      </div>
-    </div>
-    ${actions}
-  </header>`;
 }
 
 function renderFilter(id: string, placeholder: string): string {
@@ -122,62 +94,6 @@ function renderFilter(id: string, placeholder: string): string {
     <input type="search" placeholder="${escapeAttribute(placeholder)}" data-filter="${escapeAttribute(id)}" autocomplete="off">
     <kbd>/</kbd>
   </label>`;
-}
-
-function renderRouteTable(snapshot: FarmDevtoolsSnapshot): string {
-  if (snapshot.routes.length === 0) {
-    return renderEmpty("No routes discovered", `Add a page under ${snapshot.project.srcDir}/app.`);
-  }
-
-  return `<div class="table-scroll">
-    <table>
-      <thead><tr><th>Kind</th><th>Pattern</th><th>Runtime</th><th>Source</th></tr></thead>
-      <tbody data-filter-rows="routes">
-        ${snapshot.routes
-          .map(
-            (route) => `<tr data-search-value="${escapeAttribute(
-              `${route.kind} ${route.pattern} ${route.filePath} ${route.runtime?.runtime || ""}`,
-            )}">
-              <td>${renderBadge(route.kind, route.kind)}</td>
-              <td><code>${escapeHtml(route.pattern)}</code></td>
-              <td>${renderRuntime(route.runtime)}</td>
-              <td class="file-cell">${escapeHtml(route.filePath)}</td>
-            </tr>`,
-          )
-          .join("")}
-      </tbody>
-    </table>
-    <div class="filtered-empty" data-filter-empty="routes" hidden>No routes match this filter.</div>
-  </div>`;
-}
-
-function renderApiTable(snapshot: FarmDevtoolsSnapshot): string {
-  if (snapshot.apiRoutes.length === 0) {
-    return renderEmpty("No API routes discovered", "Add a route.ts file under src/app/api.");
-  }
-
-  return `<div class="table-scroll">
-    <table>
-      <thead><tr><th>Path</th><th>Methods</th><th>Runtime</th><th>Source</th></tr></thead>
-      <tbody data-filter-rows="api">
-        ${snapshot.apiRoutes
-          .map(
-            (route) => `<tr data-search-value="${escapeAttribute(
-              `${route.path} ${route.methods.join(" ")} ${route.filePath} ${route.runtime.runtime}`,
-            )}">
-              <td><code>${escapeHtml(route.path)}</code></td>
-              <td><span class="method-list">${route.methods
-                .map((method) => renderBadge(method, "method"))
-                .join("")}</span></td>
-              <td>${renderRuntime(route.runtime)}</td>
-              <td class="file-cell">${escapeHtml(route.filePath)}</td>
-            </tr>`,
-          )
-          .join("")}
-      </tbody>
-    </table>
-    <div class="filtered-empty" data-filter-empty="api" hidden>No API routes match this filter.</div>
-  </div>`;
 }
 
 function renderDiagnostics(diagnostics: FarmDevtoolsDiagnostic[]): string {
@@ -393,6 +309,426 @@ function renderLayers(snapshot: FarmDevtoolsSnapshot): string {
     .join("")}</div>`;
 }
 
+type InspectorEntry = {
+  id: string;
+  label: string;
+  description: string;
+  icon: IconName;
+  value?: string | number;
+  searchValue?: string;
+  detailMeta?: string;
+  content: string;
+};
+
+function renderPropertyList(entries: Array<[label: string, value: string]>): string {
+  return `<dl class="property-list">${entries
+    .map(
+      ([label, value]) =>
+        `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`,
+    )
+    .join("")}</dl>`;
+}
+
+function renderDetailIntro(
+  label: string,
+  title: string,
+  description: string,
+  detailIcon: IconName,
+): string {
+  return `<div class="detail-intro">
+    <span class="detail-icon">${icon(detailIcon)}</span>
+    <div><span class="mini-label">${escapeHtml(label)}</span><h2>${escapeHtml(
+      title,
+    )}</h2><p>${escapeHtml(description)}</p></div>
+  </div>`;
+}
+
+function renderInspector(
+  scope: string,
+  title: string,
+  entries: InspectorEntry[],
+  filterPlaceholder?: string,
+): string {
+  if (entries.length === 0) {
+    return `<div class="single-pane">
+      <header class="pane-header"><strong>${escapeHtml(title)}</strong><span>0 items</span></header>
+      ${renderEmpty(`No ${title.toLowerCase()} found`, "Farm has no runtime data for this surface yet.")}
+    </div>`;
+  }
+
+  return `<div class="split-view" data-inspector="${escapeAttribute(scope)}">
+    <section class="pane pane-list">
+      <header class="pane-header"><strong>${escapeHtml(title)}</strong><span>${entries.length} ${
+        entries.length === 1 ? "item" : "items"
+      }</span></header>
+      ${
+        filterPlaceholder
+          ? `<div class="pane-tools">${renderFilter(scope, filterPlaceholder)}</div>`
+          : ""
+      }
+      <div class="pane-scroll inspector-list" data-filter-rows="${escapeAttribute(scope)}">
+        ${entries
+          .map(
+            (entry, index) => `<button type="button" class="inspector-row" data-detail-trigger="${escapeAttribute(
+              scope,
+            )}" data-detail-id="${escapeAttribute(entry.id)}" data-search-value="${escapeAttribute(
+              entry.searchValue || `${entry.label} ${entry.description}`,
+            )}" aria-selected="${index === 0 ? "true" : "false"}">
+              <span class="inspector-row-icon">${icon(entry.icon)}</span>
+              <span class="inspector-row-copy"><strong>${escapeHtml(
+                entry.label,
+              )}</strong><small>${escapeHtml(entry.description)}</small></span>
+              ${entry.value === undefined ? "" : `<span class="inspector-row-value">${escapeHtml(entry.value)}</span>`}
+            </button>`,
+          )
+          .join("")}
+        <div class="filtered-empty" data-filter-empty="${escapeAttribute(
+          scope,
+        )}" hidden>No items match this filter.</div>
+      </div>
+    </section>
+    <section class="pane pane-detail">
+      ${entries
+        .map(
+          (entry, index) => `<article class="detail-panel" data-detail-panel="${escapeAttribute(
+            scope,
+          )}" data-detail-id="${escapeAttribute(entry.id)}"${index === 0 ? "" : " hidden"}>
+            <header class="pane-header"><strong>${escapeHtml(entry.label)}</strong><span>${escapeHtml(
+              entry.detailMeta || entry.description,
+            )}</span></header>
+            <div class="detail-scroll">${entry.content}</div>
+          </article>`,
+        )
+        .join("")}
+    </section>
+  </div>`;
+}
+
+function renderJson(value: unknown): string {
+  return `<pre class="json-viewer"><code>${escapeHtml(JSON.stringify(value, null, 2))}</code></pre>`;
+}
+
+function renderOverviewInspector(
+  snapshot: FarmDevtoolsSnapshot,
+  healthLabel: string,
+  generatedTime: string,
+): string {
+  const scheduledCount = snapshot.counts.cronJobs + snapshot.counts.workflows;
+  return renderInspector("overview", "Project", [
+    {
+      id: "diagnostics",
+      label: "Diagnostics",
+      description: "Actionable framework checks",
+      icon: "shield",
+      value: snapshot.counts.diagnostics,
+      detailMeta: healthLabel,
+      content: `${renderDetailIntro(
+        "Project health",
+        healthLabel,
+        snapshot.diagnostics.length
+          ? "Farm found configuration details that deserve attention before production."
+          : "Routes and configured systems are internally consistent.",
+        "shield",
+      )}<div class="detail-section">${renderDiagnostics(snapshot.diagnostics)}</div>`,
+    },
+    {
+      id: "project",
+      label: snapshot.project.name,
+      description: snapshot.project.root,
+      icon: "app",
+      value: snapshot.project.srcDir,
+      detailMeta: "Active project",
+      content: `${renderDetailIntro(
+        "Active project",
+        snapshot.project.name,
+        "The application currently resolved by the Farm development server.",
+        "app",
+      )}${renderPropertyList([
+        ["Root", `<code>${escapeHtml(snapshot.project.root)}</code>`],
+        ["Source directory", `<code>${escapeHtml(snapshot.project.srcDir)}</code>`],
+        ["Base path", `<code>${escapeHtml(snapshot.project.basePath)}</code>`],
+        ["Deployment ID", `<code>${escapeHtml(snapshot.project.deploymentId)}</code>`],
+        ["Snapshot", `<span class="mono">${escapeHtml(generatedTime)}</span>`],
+      ])}`,
+    },
+    {
+      id: "routes",
+      label: "Route surface",
+      description: "Pages, boundaries, and typed endpoints",
+      icon: "route",
+      value: snapshot.counts.pages + snapshot.counts.apiRoutes,
+      detailMeta: `${snapshot.counts.pages} pages / ${snapshot.counts.apiRoutes} API`,
+      content: `${renderDetailIntro(
+        "Application routing",
+        `${snapshot.counts.pages + snapshot.counts.apiRoutes} registered routes`,
+        "Farm resolves page boundaries and server endpoints from the same application tree.",
+        "route",
+      )}${renderPropertyList([
+        ["Pages", `<strong>${snapshot.counts.pages}</strong>`],
+        ["Layouts", `<strong>${snapshot.counts.layouts}</strong>`],
+        ["Loading boundaries", `<strong>${snapshot.counts.loadingBoundaries}</strong>`],
+        ["Error boundaries", `<strong>${snapshot.counts.errorBoundaries}</strong>`],
+        ["API routes", `<strong>${snapshot.counts.apiRoutes}</strong>`],
+      ])}`,
+    },
+    {
+      id: "systems",
+      label: "Connected systems",
+      description: "Integrations, storage, and request layers",
+      icon: "blocks",
+      value: snapshot.counts.integrations,
+      detailMeta: "Configured surfaces",
+      content: `${renderDetailIntro(
+        "System map",
+        "Application services",
+        "Product integrations and framework services visible to the running application.",
+        "blocks",
+      )}<div class="detail-section">${renderSystemRows(snapshot)}</div>`,
+    },
+    {
+      id: "deployment",
+      label: "Runtime",
+      description: `${snapshot.deployment.target} / ${snapshot.deployment.preset}`,
+      icon: "runtime",
+      value: scheduledCount,
+      detailMeta: "Deployment controls",
+      content: `${renderDetailIntro(
+        "Deployment runtime",
+        snapshot.deployment.target,
+        "The resolved deployment adapter, output contract, and enabled framework surfaces.",
+        "runtime",
+      )}${renderPropertyList([
+        ["Target", `<code>${escapeHtml(snapshot.deployment.target)}</code>`],
+        ["Nitro preset", `<code>${escapeHtml(snapshot.deployment.preset)}</code>`],
+        [
+          "Output",
+          `<code>${escapeHtml(snapshot.deployment.outputDir || "Framework default")}</code>`,
+        ],
+        ["Scheduled work", `<strong>${scheduledCount}</strong>`],
+      ])}<div class="detail-section">${renderFeatureMatrix(snapshot)}</div>`,
+    },
+  ]);
+}
+
+function renderRoutesInspector(snapshot: FarmDevtoolsSnapshot): string {
+  return renderInspector(
+    "routes",
+    "Routes",
+    snapshot.routes.map((route, index) => ({
+      id: `route-${index}`,
+      label: route.pattern,
+      description: route.filePath,
+      icon: "route",
+      value: route.kind,
+      searchValue: `${route.kind} ${route.pattern} ${route.filePath} ${
+        route.runtime?.runtime || "inherited"
+      }`,
+      detailMeta: route.kind,
+      content: `${renderDetailIntro(
+        `${route.kind} route`,
+        route.pattern,
+        route.filePath,
+        "route",
+      )}${renderPropertyList([
+        ["Kind", renderBadge(route.kind, route.kind)],
+        ["Pattern", `<code>${escapeHtml(route.pattern)}</code>`],
+        ["Runtime", renderRuntime(route.runtime)],
+        ["Source", `<code>${escapeHtml(route.filePath)}</code>`],
+      ])}`,
+    })),
+    "Filter routes or files",
+  );
+}
+
+function renderApiInspector(snapshot: FarmDevtoolsSnapshot): string {
+  return renderInspector(
+    "api",
+    "API routes",
+    snapshot.apiRoutes.map((route, index) => ({
+      id: `api-${index}`,
+      label: route.path,
+      description: route.filePath,
+      icon: "api",
+      value: route.methods.length,
+      searchValue: `${route.path} ${route.methods.join(" ")} ${route.filePath} ${
+        route.runtime.runtime
+      }`,
+      detailMeta: route.methods.join(" / "),
+      content: `${renderDetailIntro(
+        "Server endpoint",
+        route.path,
+        route.filePath,
+        "api",
+      )}${renderPropertyList([
+        [
+          "Methods",
+          `<span class="method-list">${route.methods
+            .map((method) => renderBadge(method, "method"))
+            .join("")}</span>`,
+        ],
+        ["Runtime", renderRuntime(route.runtime)],
+        ["Source", `<code>${escapeHtml(route.filePath)}</code>`],
+      ])}`,
+    })),
+    "Filter endpoints or methods",
+  );
+}
+
+function renderSystemsInspector(snapshot: FarmDevtoolsSnapshot): string {
+  return renderInspector("systems", "Systems", [
+    {
+      id: "integrations",
+      label: "Integrations",
+      description: "Configured product adapters",
+      icon: "blocks",
+      value: snapshot.integrations.length,
+      content: renderIntegrations(snapshot),
+    },
+    {
+      id: "middleware",
+      label: "Middleware",
+      description: "Request layers and source modules",
+      icon: "shield",
+      value: snapshot.middleware.length,
+      content: renderMiddleware(snapshot),
+    },
+    {
+      id: "storage",
+      label: "Storage mounts",
+      description: "Root driver and named namespaces",
+      icon: "database",
+      value: snapshot.storage.length,
+      content: renderStorage(snapshot),
+    },
+    {
+      id: "docs",
+      label: "Documentation",
+      description: snapshot.docs.entry || "No docs route",
+      icon: "book",
+      value: snapshot.docs.enabled ? "on" : "off",
+      content: `${renderDetailIntro(
+        "Documentation",
+        snapshot.docs.enabled ? "Docs enabled" : "Docs disabled",
+        "Farm can serve application documentation from the same development runtime.",
+        "book",
+      )}${renderPropertyList([
+        ["State", renderBadge(snapshot.docs.enabled ? "enabled" : "disabled")],
+        ["Entry", `<code>${escapeHtml(snapshot.docs.entry || "Not configured")}</code>`],
+      ])}`,
+    },
+  ]);
+}
+
+function renderRuntimeInspector(snapshot: FarmDevtoolsSnapshot): string {
+  return renderInspector("runtime", "Runtime", [
+    {
+      id: "deployment",
+      label: "Deployment",
+      description: `${snapshot.deployment.target} / ${snapshot.deployment.preset}`,
+      icon: "runtime",
+      content: `${renderDetailIntro(
+        "Deployment target",
+        snapshot.deployment.target,
+        "Resolved platform adapter and build output for this application.",
+        "runtime",
+      )}${renderPropertyList([
+        ["Target", `<code>${escapeHtml(snapshot.deployment.target)}</code>`],
+        ["Nitro preset", `<code>${escapeHtml(snapshot.deployment.preset)}</code>`],
+        [
+          "Output directory",
+          `<code>${escapeHtml(snapshot.deployment.outputDir || "Framework default")}</code>`,
+        ],
+      ])}`,
+    },
+    {
+      id: "cron",
+      label: "Cron routes",
+      description: "Portable scheduled API routes",
+      icon: "clock",
+      value: snapshot.cron.length,
+      content: renderCron(snapshot),
+    },
+    {
+      id: "workflows",
+      label: "Workflows",
+      description: "Discovered workflow modules",
+      icon: "activity",
+      value: snapshot.workflows.length,
+      content: renderWorkflows(snapshot),
+    },
+    {
+      id: "features",
+      label: "Framework features",
+      description: "Resolved configuration switches",
+      icon: "blocks",
+      content: renderFeatureMatrix(snapshot),
+    },
+    {
+      id: "environment",
+      label: "Environment",
+      description: "Validated key names only",
+      icon: "shield",
+      value: snapshot.environment.server.length + snapshot.environment.public.length,
+      content: renderEnvironment(snapshot),
+    },
+    {
+      id: "layers",
+      label: "Layers",
+      description: "Extended source roots",
+      icon: "layers",
+      value: snapshot.layers.length,
+      content: renderLayers(snapshot),
+    },
+  ]);
+}
+
+function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
+  return renderInspector("raw", "Raw snapshot", [
+    {
+      id: "snapshot",
+      label: "Snapshot",
+      description: "Complete serialized runtime state",
+      icon: "terminal",
+      content: renderJson(snapshot),
+    },
+    {
+      id: "routes",
+      label: "Routes",
+      description: "Pages and route boundaries",
+      icon: "route",
+      value: snapshot.routes.length,
+      content: renderJson(snapshot.routes),
+    },
+    {
+      id: "api",
+      label: "API",
+      description: "Typed server endpoints",
+      icon: "api",
+      value: snapshot.apiRoutes.length,
+      content: renderJson(snapshot.apiRoutes),
+    },
+    {
+      id: "systems",
+      label: "Systems",
+      description: "Integrations, middleware, and storage",
+      icon: "blocks",
+      content: renderJson({
+        integrations: snapshot.integrations,
+        middleware: snapshot.middleware,
+        storage: snapshot.storage,
+      }),
+    },
+    {
+      id: "diagnostics",
+      label: "Diagnostics",
+      description: "Framework health findings",
+      icon: "shield",
+      value: snapshot.diagnostics.length,
+      content: renderJson(snapshot.diagnostics),
+    },
+  ]);
+}
+
 function renderNavigationItem(
   view: string,
   label: string,
@@ -475,30 +811,48 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .workspace { min-height: 0; flex: 1 1 auto; }
     .eyebrow { display: block; color: var(--muted); font-size: 9px; font-weight: 400; text-transform: uppercase; }
     .content { height: 100%; min-width: 0; }
-    .view { height: 100%; min-width: 0; overflow-y: auto; }
-    .view-heading { display: flex; min-height: 66px; align-items: center; justify-content: space-between; gap: 24px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
-    .view-heading > div { min-width: 0; }
-    .view-heading h1 { margin: 4px 0 0; font-size: 14px; font-weight: 540; line-height: 1.2; letter-spacing: 0; }
-    .view-heading p { margin: 4px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
-    .health-block { display: flex; min-width: 148px; align-items: center; gap: 10px; padding: 9px 11px; border-left: 1px solid var(--line); background: var(--surface); }
-    .health-block .status-dot { width: 6px; height: 6px; }
-    .health-block span { display: block; color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
-    .health-block strong { display: block; margin-top: 2px; font-size: 13px; font-weight: 520; }
-    .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
-    .metric { min-width: 0; padding: 12px 14px; border-right: 1px solid var(--line); background: var(--background); }
-    .metric:last-child { border-right: 0; }
-    .metric-label, .metric-detail { display: block; overflow: hidden; color: var(--muted); font-size: 9px; font-weight: 400; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-    .metric strong { display: block; margin: 8px 0 5px; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
-    .section { border-bottom: 1px solid var(--line); }
-    .section-header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
-    .section-heading { display: flex; min-width: 0; align-items: center; gap: 11px; }
-    .section-heading > .icon { color: var(--muted-strong); }
-    .section-index { color: var(--muted); font-size: 10px; }
-    .section-heading h2 { margin: 0; font-size: 12px; font-weight: 540; }
-    .section-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
-    .two-column { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr); }
-    .two-column > section + section { border-left: 1px solid var(--line); }
-    .diagnostics { min-width: 0; }
+    .view { height: 100%; min-width: 0; overflow: hidden; }
+    .split-view { display: grid; height: 100%; min-height: 0; grid-template-columns: clamp(230px, 28%, 300px) minmax(0, 1fr); }
+    .pane { min-width: 0; min-height: 0; overflow: hidden; background: var(--background); }
+    .pane-list { display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+    .pane-detail { position: relative; }
+    .pane-header { display: flex; min-height: 38px; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .pane-header strong { overflow: hidden; font-size: 11px; font-weight: 520; text-overflow: ellipsis; white-space: nowrap; }
+    .pane-header span { overflow: hidden; color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .pane-tools { border-bottom: 1px solid var(--line); }
+    .pane-tools .filter-control { width: 100%; min-height: 36px; border: 0; }
+    .pane-scroll, .detail-scroll { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+    .pane-scroll { flex: 1 1 auto; }
+    .inspector-list { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+    .inspector-row { position: relative; display: grid; width: 100%; min-height: 54px; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 9px; padding: 8px 11px; border: 0; border-bottom: 1px solid var(--line-soft); background: transparent; color: var(--muted); text-align: left; transition: background-color 120ms ease-out, color 120ms ease-out; }
+    .inspector-row::before { position: absolute; inset: 0 auto 0 0; width: 1px; background: transparent; content: ""; }
+    .inspector-row:hover, .inspector-row:focus-visible { background: rgb(255 255 255 / 0.035); color: var(--foreground); outline: none; }
+    .inspector-row[aria-selected="true"] { background: rgb(255 255 255 / 0.075); color: #fff; }
+    .inspector-row[aria-selected="true"]::before { background: #fff; }
+    .inspector-row-icon { display: grid; color: var(--muted-strong); place-items: center; }
+    .inspector-row-icon .icon { width: 14px; height: 14px; }
+    .inspector-row-copy { min-width: 0; }
+    .inspector-row-copy strong, .inspector-row-copy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .inspector-row-copy strong { color: inherit; font-size: 11px; font-weight: 520; }
+    .inspector-row-copy small { margin-top: 3px; color: var(--muted); font-family: var(--font-mono); font-size: 9px; }
+    .inspector-row-value { color: var(--muted-strong); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
+    .detail-panel { display: flex; height: 100%; min-height: 0; flex-direction: column; }
+    .detail-scroll { flex: 1 1 auto; }
+    .detail-intro { display: grid; min-height: 132px; grid-template-columns: 34px minmax(0, 1fr); align-items: start; gap: 14px; padding: 22px; border-bottom: 1px solid var(--line); }
+    .detail-icon { display: grid; width: 32px; height: 32px; border: 1px solid var(--line); color: var(--muted-strong); place-items: center; }
+    .detail-icon .icon { width: 15px; height: 15px; }
+    .detail-intro .mini-label { margin: 1px 0 8px; }
+    .detail-intro h2 { margin: 0; overflow-wrap: anywhere; font-size: 20px; font-weight: 530; line-height: 1.2; }
+    .detail-intro p { max-width: 680px; margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+    .detail-section { border-top: 1px solid var(--line); }
+    .detail-intro + .detail-section { border-top: 0; }
+    .property-list { margin: 0; }
+    .property-list > div { display: grid; min-height: 48px; grid-template-columns: minmax(120px, 0.32fr) minmax(0, 1fr); align-items: center; gap: 18px; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); }
+    .property-list dt { color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
+    .property-list dd { min-width: 0; margin: 0; overflow-wrap: anywhere; color: var(--muted-strong); font-size: 11px; }
+    .property-list dd > code { color: var(--foreground); font-size: 10px; }
+    .single-pane { height: 100%; min-height: 0; }
+    .json-viewer { min-height: 100%; margin: 0; padding: 16px; overflow: auto; background: #000; color: var(--muted-strong); font-family: var(--font-mono); font-size: 10px; line-height: 1.65; tab-size: 2; white-space: pre-wrap; word-break: break-word; }
     .diagnostic { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: start; gap: 12px; min-height: 88px; padding: 16px 18px; border-bottom: 1px solid var(--line-soft); }
     .diagnostic:last-child { border-bottom: 0; }
     .diagnostic-mark { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--line); color: var(--muted-strong); }
@@ -507,7 +861,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .diagnostic p { margin: 5px 0 0; color: var(--muted-strong); font-size: 11px; line-height: 1.5; }
     .diagnostic small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.5; }
     .diagnostic-warning { box-shadow: inset 1px 0 var(--line-strong); }
-    .systems-list { min-width: 0; }
     .system-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; min-height: 64px; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); }
     .system-row:last-child { border-bottom: 0; }
     .system-icon { display: grid; width: 28px; height: 28px; place-items: center; color: var(--muted-strong); }
@@ -547,12 +900,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .empty-state strong { color: var(--muted-strong); font-size: 12px; font-weight: 520; }
     .empty-state span { max-width: 420px; font-size: 10px; line-height: 1.5; }
     .filtered-empty { padding: 24px; color: var(--muted); font-family: var(--font-mono); font-size: 10px; text-align: center; }
-    .runtime-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
-    .runtime-fact { min-height: 82px; padding: 15px 18px; border-right: 1px solid var(--line); }
-    .runtime-fact:last-child { border-right: 0; }
-    .runtime-fact span, .runtime-fact strong { display: block; }
-    .runtime-fact span { color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
-    .runtime-fact strong { margin-top: 14px; overflow: hidden; font-size: 14px; font-weight: 520; text-overflow: ellipsis; white-space: nowrap; }
     .feature-matrix > div { display: flex; min-height: 45px; align-items: center; justify-content: space-between; gap: 16px; padding: 9px 16px; border-bottom: 1px solid var(--line-soft); }
     .feature-matrix > div:last-child { border-bottom: 0; }
     .feature-matrix span:first-child { font-size: 11px; }
@@ -572,11 +919,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     @keyframes status-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
     @media (max-width: 1100px) {
       .topbar-status { display: none; }
-      .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-      .metric:nth-child(3) { border-right: 0; }
-      .metric:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
-      .two-column { grid-template-columns: 1fr; }
-      .two-column > section + section { border-top: 1px solid var(--line); border-left: 0; }
     }
     @media (max-width: 840px) {
       .stage { display: block; padding: 0; }
@@ -587,21 +929,14 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       .tabbar { order: 3; width: 100%; flex-basis: 100%; border-top: 1px solid var(--line); }
       .topbar-meta { height: 40px; }
       .nav-item { min-height: 39px; }
-      .view-heading { min-height: 62px; }
-      .health-block { display: none; }
-      .section-header { align-items: flex-start; flex-direction: column; }
+      .split-view { grid-template-columns: 1fr; grid-template-rows: minmax(150px, 34%) minmax(0, 1fr); }
+      .pane-list { border-right: 0; border-bottom: 1px solid var(--line); }
       .filter-control { width: 100%; }
-      .runtime-grid { grid-template-columns: 1fr; }
-      .runtime-fact { border-right: 0; border-bottom: 1px solid var(--line); }
-      .runtime-fact:last-child { border-bottom: 0; }
     }
     @media (max-width: 560px) {
-      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .metric, .metric:nth-child(3) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-      .metric:nth-child(2n) { border-right: 0; }
-      .metric:nth-last-child(-n+2) { border-bottom: 0; }
-      .view-heading p { display: none; }
-      .section-heading p { display: none; }
+      .detail-intro { min-height: 112px; padding: 16px; }
+      .detail-intro h2 { font-size: 17px; }
+      .property-list > div { grid-template-columns: minmax(98px, 0.38fr) minmax(0, 1fr); gap: 12px; padding-inline: 12px; }
       .environment-grid { grid-template-columns: 1fr; }
       .environment-grid > div + div { border-top: 1px solid var(--line); border-left: 0; }
       .statusbar span:last-child { display: none; }
@@ -621,7 +956,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
         </a>
         <nav class="tabbar" aria-label="Devtools views">
           ${renderNavigationItem("overview", "Overview", "overview")}
-          ${renderNavigationItem("routes", "Routes", "route", snapshot.counts.pages)}
+          ${renderNavigationItem("routes", "Routes", "route", snapshot.routes.length)}
           ${renderNavigationItem("api", "API", "api", snapshot.counts.apiRoutes)}
           ${renderNavigationItem("systems", "Systems", "blocks", snapshot.counts.integrations)}
           ${renderNavigationItem(
@@ -630,6 +965,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
             "runtime",
             snapshot.counts.cronJobs + snapshot.counts.workflows,
           )}
+          ${renderNavigationItem("raw", "Raw", "terminal")}
         </nav>
         <div class="topbar-meta">
           <div class="topbar-status"><span class="status-dot status-dot-${snapshot.health}"></span>${escapeHtml(
@@ -653,156 +989,24 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       </header>
       <div class="workspace">
         <main class="content">
-          <section class="view" data-view-panel="overview">
-            <header class="view-heading">
-              <div><span class="eyebrow">00 / Project runtime</span><h1>Everything Farm sees.</h1><p>Routes, integrations, middleware, storage, schedules, and deployment settings resolved from the running application.</p></div>
-              <div class="health-block"><span class="status-dot status-dot-${snapshot.health}"></span><div><span>System status</span><strong>${escapeHtml(
-                healthLabel,
-              )}</strong></div></div>
-            </header>
-            <div class="metrics">
-              ${renderMetric("Pages", snapshot.counts.pages, `${snapshot.counts.layouts} layouts`)}
-              ${renderMetric("API routes", snapshot.counts.apiRoutes, "Typed endpoints")}
-              ${renderMetric("Middleware", snapshot.counts.middleware, "Request layers")}
-              ${renderMetric("Integrations", snapshot.counts.integrations, "Product systems")}
-              ${renderMetric(
-                "Scheduled",
-                snapshot.counts.cronJobs + snapshot.counts.workflows,
-                "Cron + workflows",
-              )}
-              ${renderMetric("Checks", snapshot.counts.diagnostics, healthLabel)}
-            </div>
-            <div class="two-column">
-              <section class="section diagnostics">
-                ${renderSectionHeader("01", "Diagnostics", "Actionable framework checks", "shield")}
-                ${renderDiagnostics(snapshot.diagnostics)}
-              </section>
-              <section class="section systems-list">
-                ${renderSectionHeader("02", "System map", "Configured application surfaces", "blocks")}
-                ${renderSystemRows(snapshot)}
-              </section>
-            </div>
-          </section>
-
-          <section class="view" data-view-panel="routes" hidden>
-            <header class="view-heading"><div><span class="eyebrow">01 / Route tree</span><h1>Application routes.</h1><p>Pages, layouts, loading boundaries, error boundaries, source files, and effective execution controls.</p></div></header>
-            <section class="section">
-              ${renderSectionHeader(
-                "01",
-                "Discovered routes",
-                `${snapshot.routes.length} route modules`,
-                "route",
-                renderFilter("routes", "Filter routes or files"),
-              )}
-              ${renderRouteTable(snapshot)}
-            </section>
-          </section>
-
-          <section class="view" data-view-panel="api" hidden>
-            <header class="view-heading"><div><span class="eyebrow">02 / API surface</span><h1>Server endpoints.</h1><p>Registered methods, generated paths, source modules, and effective deployment runtime per API route.</p></div></header>
-            <section class="section">
-              ${renderSectionHeader(
-                "01",
-                "API routes",
-                `${snapshot.apiRoutes.length} registered endpoints`,
-                "api",
-                renderFilter("api", "Filter API routes or methods"),
-              )}
-              ${renderApiTable(snapshot)}
-            </section>
-          </section>
-
-          <section class="view" data-view-panel="systems" hidden>
-            <header class="view-heading"><div><span class="eyebrow">03 / Connected systems</span><h1>Product integrations.</h1><p>Provider adapters, server routes, request middleware, React providers, schemas, and storage visible to Farm.</p></div></header>
-            <section class="section">
-              ${renderSectionHeader(
-                "01",
-                "Integration registry",
-                `${snapshot.integrations.length} configured adapters`,
-                "blocks",
-              )}
-              ${renderIntegrations(snapshot)}
-            </section>
-            <div class="two-column">
-              <section class="section">
-                ${renderSectionHeader(
-                  "02",
-                  "Middleware",
-                  `${snapshot.middleware.length} request layers`,
-                  "shield",
-                )}
-                ${renderMiddleware(snapshot)}
-              </section>
-              <section class="section">
-                ${renderSectionHeader(
-                  "03",
-                  "Storage mounts",
-                  `${snapshot.storage.length} available namespaces`,
-                  "database",
-                )}
-                ${renderStorage(snapshot)}
-              </section>
-            </div>
-          </section>
-
-          <section class="view" data-view-panel="runtime" hidden>
-            <header class="view-heading"><div><span class="eyebrow">04 / Deployment runtime</span><h1>Execution controls.</h1><p>Deployment target, schedules, workflow endpoints, layers, environment contracts, and framework feature switches.</p></div></header>
-            <div class="runtime-grid">
-              <div class="runtime-fact"><span>Target</span><strong>${escapeHtml(
-                snapshot.deployment.target,
-              )}</strong></div>
-              <div class="runtime-fact"><span>Nitro preset</span><strong>${escapeHtml(
-                snapshot.deployment.preset,
-              )}</strong></div>
-              <div class="runtime-fact"><span>Output</span><strong>${escapeHtml(
-                snapshot.deployment.outputDir || "Framework default",
-              )}</strong></div>
-            </div>
-            <div class="two-column">
-              <section class="section">
-                ${renderSectionHeader(
-                  "01",
-                  "Cron routes",
-                  `${snapshot.cron.length} configured schedules`,
-                  "clock",
-                )}
-                ${renderCron(snapshot)}
-              </section>
-              <section class="section">
-                ${renderSectionHeader(
-                  "02",
-                  "Workflows",
-                  `${snapshot.workflows.length} discovered modules`,
-                  "activity",
-                )}
-                ${renderWorkflows(snapshot)}
-              </section>
-            </div>
-            <div class="two-column">
-              <section class="section">
-                ${renderSectionHeader("03", "Framework features", "Resolved config flags", "runtime")}
-                ${renderFeatureMatrix(snapshot)}
-              </section>
-              <section class="section">
-                ${renderSectionHeader(
-                  "04",
-                  "Environment contract",
-                  "Names only; values are never exposed",
-                  "shield",
-                )}
-                ${renderEnvironment(snapshot)}
-              </section>
-            </div>
-            <section class="section">
-              ${renderSectionHeader(
-                "05",
-                "Layers",
-                `${snapshot.layers.length} extended source roots`,
-                "layers",
-              )}
-              ${renderLayers(snapshot)}
-            </section>
-          </section>
+          <section class="view" data-view-panel="overview">${renderOverviewInspector(
+            snapshot,
+            healthLabel,
+            generatedTime,
+          )}</section>
+          <section class="view" data-view-panel="routes" hidden>${renderRoutesInspector(
+            snapshot,
+          )}</section>
+          <section class="view" data-view-panel="api" hidden>${renderApiInspector(
+            snapshot,
+          )}</section>
+          <section class="view" data-view-panel="systems" hidden>${renderSystemsInspector(
+            snapshot,
+          )}</section>
+          <section class="view" data-view-panel="runtime" hidden>${renderRuntimeInspector(
+            snapshot,
+          )}</section>
+          <section class="view" data-view-panel="raw" hidden>${renderRawInspector(snapshot)}</section>
         </main>
       </div>
       <footer class="statusbar"><span>${icon("terminal")}Local development only</span><span>Snapshot ${escapeHtml(
@@ -812,7 +1016,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
   </div>
   <script>
     (() => {
-      const validViews = new Set(["overview", "routes", "api", "systems", "runtime"]);
+      const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw"]);
       const triggers = Array.from(document.querySelectorAll("[data-view-trigger]"));
       const panels = Array.from(document.querySelectorAll("[data-view-panel]"));
       const selectView = (view, updateHash = true) => {
@@ -825,15 +1029,26 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
         });
         if (updateHash) {
           history.replaceState(null, "", nextView === "overview" ? location.pathname : "#" + nextView);
-          window.scrollTo({
-            top: 0,
-            behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-          });
+          const activePanel = panels.find((panel) => panel.dataset.viewPanel === nextView);
+          if (activePanel) activePanel.scrollTop = 0;
         }
       };
       triggers.forEach((trigger) => trigger.addEventListener("click", () => selectView(trigger.dataset.viewTrigger)));
       window.addEventListener("hashchange", () => selectView(location.hash.slice(1), false));
       selectView(location.hash.slice(1), false);
+
+      document.querySelectorAll("[data-detail-trigger]").forEach((trigger) => {
+        trigger.addEventListener("click", () => {
+          const scope = trigger.dataset.detailTrigger;
+          const id = trigger.dataset.detailId;
+          document.querySelectorAll('[data-detail-trigger="' + scope + '"]').forEach((row) => {
+            row.setAttribute("aria-selected", String(row.dataset.detailId === id));
+          });
+          document.querySelectorAll('[data-detail-panel="' + scope + '"]').forEach((panel) => {
+            panel.hidden = panel.dataset.detailId !== id;
+          });
+        });
+      });
 
       document.querySelectorAll("[data-filter]").forEach((input) => {
         input.addEventListener("input", () => {
@@ -846,6 +1061,8 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
             row.hidden = !matches;
             if (matches) visible += 1;
           });
+          const selected = rows.find((row) => row.getAttribute("aria-selected") === "true");
+          if (selected?.hidden) rows.find((row) => !row.hidden)?.click();
           const empty = document.querySelector('[data-filter-empty="' + id + '"]');
           if (empty) empty.hidden = visible !== 0;
         });
