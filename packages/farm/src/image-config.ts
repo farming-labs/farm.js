@@ -110,7 +110,9 @@ export function resolveFarmImageConfig(
     provider: config?.provider ?? "auto",
     path,
     domains: Object.freeze([
-      ...new Set((config?.domains ?? []).map((domain) => domain.trim().toLowerCase())),
+      ...new Set(
+        (config?.domains ?? []).map((domain) => domain.trim().toLowerCase()).filter(Boolean),
+      ),
     ]),
     remotePatterns: Object.freeze(
       (config?.remotePatterns ?? []).map((pattern) => normalizeRemotePattern(pattern)),

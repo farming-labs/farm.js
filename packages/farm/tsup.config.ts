@@ -42,6 +42,8 @@ export default defineConfig({
     testing: "src/testing.ts",
     "agent-runtime": "src/agent-runtime.ts",
     image: "src/image.tsx",
+    "image/server": "src/image-server.ts",
+    "image/sharp": "src/image-sharp.ts",
   },
   format: ["cjs", "esm"],
   dts: true,

@@ -105,6 +105,12 @@
       "image": [
         "./dist/image.d.ts"
       ],
+      "image/server": [
+        "./dist/image/server.d.ts"
+      ],
+      "image/sharp": [
+        "./dist/image/sharp.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -331,6 +337,16 @@
       "types": "./dist/image.d.ts",
       "import": "./dist/image.mjs",
       "require": "./dist/image.cjs"
+    },
+    "./image/server": {
+      "types": "./dist/image/server.d.ts",
+      "import": "./dist/image/server.mjs",
+      "require": "./dist/image/server.cjs"
+    },
+    "./image/sharp": {
+      "types": "./dist/image/sharp.d.ts",
+      "import": "./dist/image/sharp.mjs",
+      "require": "./dist/image/sharp.cjs"
     }
   },
   "scripts": {
