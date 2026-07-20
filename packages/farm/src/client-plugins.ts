@@ -1,11 +1,32 @@
-// Client-side plugins export (for future client-side plugin support)
+export {
+  createClientPluginManager,
+  defineClientPlugin,
+  FarmClientPluginManager,
+} from "./client/plugin";
 export type {
-  FarmPlugin,
-  FarmPluginContext,
-  FarmRequestPluginContext,
-  FarmRequestStore,
-} from "./plugin";
-export { definePlugin } from "./plugin";
-
-// Note: Currently Farm.js plugins are primarily server-side.
-// This export is reserved for future client-side plugin functionality.
+  FarmClientHydrationCompleteEvent,
+  FarmClientHydrationEvent,
+  FarmClientHydrationMode,
+  FarmClientHydrationSession,
+  FarmClientLocation,
+  FarmClientNavigationAction,
+  FarmClientNavigationErrorEvent,
+  FarmClientNavigationEvent,
+  FarmClientNavigationLoadedEvent,
+  FarmClientNavigationResolvedEvent,
+  FarmClientNavigationSession,
+  FarmClientPerformanceEvent,
+  FarmClientPlugin,
+  FarmClientPluginCloseEvent,
+  FarmClientPluginDefinition,
+  FarmClientPluginEnforce,
+  FarmClientPluginErrorEvent,
+  FarmClientPluginErrorPhase,
+  FarmClientPluginFactory,
+  FarmClientPluginManagerOptions,
+  FarmClientPluginMetadata,
+  FarmClientPluginRegistration,
+  FarmClientPluginRouter,
+  FarmClientPluginSetupEvent,
+  FarmClientPluginStateEvent,
+} from "./client/plugin";
