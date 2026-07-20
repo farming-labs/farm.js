@@ -1746,7 +1746,7 @@ function generateVirtualEntryCode(
   const pluginRuntimeImport = `import { PluginManager } from "farm/plugin";`;
   const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
-    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
+    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "farm/docs";`
     : "";
   const docsRuntimeImport = config.docs?.enabled
     ? `import { existsSync as farmDocsExistsSync } from "node:fs";
@@ -2246,6 +2246,80 @@ function matchPageRoute(pathname) {
     }
   }
   return null;
+}
+
+function getFarmPluginRequestOptions(request) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  const route = { pathname };
+  const isDocsAPIRequest = ${config.docs?.enabled ? "isFarmDocsAPIRequest(pathname)" : "false"};
+  const integrationMatch = matchIntegrationRoute(configuredIntegrations, {
+    pathname,
+    method: request.method,
+  });
+
+  if (integrationMatch) {
+    return {
+      kind: "integration",
+      route: {
+        ...route,
+        pattern: integrationMatch.route.path,
+        params: integrationMatch.params,
+      },
+    };
+  }
+
+  const docsPath = normalizeRuntimePath(farmDocsResolvedConfig?.entry || "/docs");
+  if (
+    isDocsAPIRequest ||
+    (farmDocsHandler && (pathname === docsPath || pathname.startsWith(docsPath + "/")))
+  ) {
+    return { kind: "docs", route: { ...route, pattern: docsPath } };
+  }
+
+  for (const apiRoute of apiRoutes) {
+    const params = matchRuntimePathPattern(apiRoute.path, pathname);
+    if (params !== null) {
+      return {
+        kind: "api",
+        route: { ...route, pattern: apiRoute.path, params },
+      };
+    }
+  }
+
+  const metadataImageMatch = matchMetadataImageRequest(pathname);
+  if (metadataImageMatch) {
+    return {
+      kind: "asset",
+      route: {
+        ...route,
+        pattern: metadataImageMatch.image.pattern,
+        params: metadataImageMatch.params,
+      },
+    };
+  }
+
+  const pageMatch = matchPageRoute(pathname);
+  if (pageMatch) {
+    return {
+      kind: "page",
+      route: {
+        ...route,
+        pattern: pageMatch.route.pattern,
+        params: pageMatch.params,
+      },
+    };
+  }
+
+  if (pathname.startsWith("/api/")) {
+    return { kind: "api", route };
+  }
+
+  if (request.method === "GET" || request.method === "HEAD") {
+    return { kind: "page", route };
+  }
+
+  return { kind: "request", route };
 }
 
 /**
@@ -2888,9 +2962,10 @@ async function handleFarmRequest(request) {
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
+  const runtimeOptions = getFarmPluginRequestOptions(request);
   const runRequest = () => farmPluginRuntime
     ? farmPluginRuntime.runRuntimeRequest(request, handleFarmRequest, {
-        kind: "request",
+        ...runtimeOptions,
         waitUntil: typeof context?.waitUntil === "function"
           ? context.waitUntil.bind(context)
           : undefined,
