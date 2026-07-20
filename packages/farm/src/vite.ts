@@ -61,6 +61,7 @@ import {
 } from "./deployment";
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
+import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -377,6 +378,21 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      let imageHandler: FarmImageHandler | null = null;
+      if (farmConfig.images.provider !== "none") {
+        const { createNodeImageUrlValidator, createSharpImageTransformer } = await import(
+          "./image-sharp"
+        );
+        imageHandler = createFarmImageHandler(farmConfig.images, {
+          transform: createSharpImageTransformer(),
+          validateRemoteUrl: createNodeImageUrlValidator(farmConfig.images),
+          onError(error) {
+            logger.error(
+              `Image optimization failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        });
+      }
       const sourceRoots = getFarmSourceRoots(farmConfig);
       server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
       const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
@@ -689,6 +705,16 @@ export function farmPlugin(
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
         const requestPathname = new URL(fullUrl).pathname;
         const currentConfig = farmApp?.getConfig() ?? options;
+
+        if (imageHandler && requestPathname === farmConfig.images.path) {
+          const imageResponse = await imageHandler(
+            createRequestFromNodeRequest(req, new URL(fullUrl)),
+          );
+          if (imageResponse) {
+            await sendWebResponse(res, imageResponse);
+            return;
+          }
+        }
 
         const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
         if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
@@ -1495,7 +1521,12 @@ export const manifest = getManifest();
       }
     },
 
-    transform(code, id, transformOptions) {
+    async transform(code, id, transformOptions) {
+      if (typeof imageImports.transform === "function") {
+        const imageModule = await imageImports.transform.call(this, code, id, transformOptions);
+        if (imageModule) return imageModule;
+      }
+
       let transformedCode = code;
       let transformed = false;
 

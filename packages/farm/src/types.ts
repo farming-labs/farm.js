@@ -14,6 +14,7 @@ import type { FarmRouteRules } from "./route-rules";
 import type { FarmServerActionsConfig } from "./server-action-security";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
+import type { FarmImageConfig } from "./image-config";
 
 export type NitroPreset =
   | "node-server"
@@ -113,6 +114,7 @@ export interface FarmConfig {
   routeRules?: FarmRouteRules;
   context?: FarmContextFactory<any>;
   serverActions?: FarmServerActionsConfig;
+  images?: FarmImageConfig;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;

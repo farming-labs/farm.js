@@ -32,30 +32,46 @@ export function farmImageImportsPlugin(): Plugin {
       if (!id.startsWith(FARM_IMAGE_ID_PREFIX)) return null;
 
       const filePath = decodeURIComponent(id.slice(FARM_IMAGE_ID_PREFIX.length));
-      const bytes = await readFile(filePath);
-      const dimensions = imageSize(bytes);
-      if (!dimensions.width || !dimensions.height) {
-        throw new Error(`Could not determine image dimensions for ${filePath}`);
-      }
-
-      const blurDataURL = await createBlurDataURL(bytes);
       const assetRequest = `${filePath.replace(/\\/g, "/")}?url`;
-      return [
-        `import src from ${JSON.stringify(assetRequest)};`,
-        `const image = ${JSON.stringify({
-          width: dimensions.width,
-          height: dimensions.height,
-          ...(blurDataURL ? { blurDataURL } : {}),
-        })};`,
-        "image.src = src;",
-        "export const src = image.src;",
-        "export const width = image.width;",
-        "export const height = image.height;",
-        "export const blurDataURL = image.blurDataURL;",
-        "export default image;",
-      ].join("\n");
+      return createStaticImageModule(filePath, `import src from ${JSON.stringify(assetRequest)};`);
+    },
+
+    async transform(code, id) {
+      const filePath = id.split("?", 1)[0];
+      if (id.includes("?") || !STATIC_IMAGE_RE.test(filePath)) return null;
+
+      const defaultExport = code.match(/^\s*export\s+default\s+(.+?);?\s*$/s)?.[1];
+      if (!defaultExport) return null;
+      return createStaticImageModule(filePath, `const src = ${defaultExport};`);
     },
   };
+}
+
+async function createStaticImageModule(
+  filePath: string,
+  sourceDeclaration: string,
+): Promise<string> {
+  const bytes = await readFile(filePath);
+  const dimensions = imageSize(bytes);
+  if (!dimensions.width || !dimensions.height) {
+    throw new Error(`Could not determine image dimensions for ${filePath}`);
+  }
+
+  const blurDataURL = await createBlurDataURL(bytes);
+  return [
+    sourceDeclaration,
+    `const image = ${JSON.stringify({
+      width: dimensions.width,
+      height: dimensions.height,
+      ...(blurDataURL ? { blurDataURL } : {}),
+    })};`,
+    "image.src = src;",
+    "export { src };",
+    "export const width = image.width;",
+    "export const height = image.height;",
+    "export const blurDataURL = image.blurDataURL;",
+    "export default image;",
+  ].join("\n");
 }
 
 async function createBlurDataURL(bytes: Buffer): Promise<string | undefined> {

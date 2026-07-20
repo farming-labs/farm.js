@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -13,11 +14,45 @@ import {
 describe("production middleware runtime", () => {
   it("runs farm.config middleware and app middleware in a production build", async () => {
     const root = await createMiddlewareProductionFixture();
+    const originalFetch = globalThis.fetch;
 
     try {
       const userConfig = await loadConfig(root, undefined, "production");
       const config = await resolveConfig({ ...(userConfig || {}), root }, "production");
       await build(config, { root, preset: "vercel" });
+
+      const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");
+      const productAssetName = (await fs.readdir(staticAssetsDir)).find((file) =>
+        file.startsWith("product-"),
+      );
+      expect(productAssetName).toMatch(/\.png$/);
+      const productAsset = await fs.readFile(path.join(staticAssetsDir, productAssetName!));
+      await expect(
+        fs.access(
+          path.join(
+            root,
+            ".vercel",
+            "output",
+            "functions",
+            "__nitro.func",
+            "node_modules",
+            "sharp",
+            "package.json",
+          ),
+        ),
+      ).resolves.toBeUndefined();
+      globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (url.origin === "https://example.test" && url.pathname.endsWith(productAssetName!)) {
+          return new Response(productAsset, {
+            headers: {
+              "content-type": "image/png",
+              "content-length": String(productAsset.byteLength),
+            },
+          });
+        }
+        return originalFetch(input, init);
+      }) as typeof fetch;
 
       const entryPath = path.join(
         root,
@@ -42,6 +77,17 @@ describe("production middleware runtime", () => {
       );
       expect(html).toContain("server context: dashboard-user / /dashboard/settings");
       expect(html).not.toContain("never-serialize-this-session-secret");
+      const productImageTag = html.match(/<img[^>]*data-product-image=""[^>]*>/)?.[0];
+      expect(productImageTag).toContain('alt="Optimized product"');
+      expect(productImageTag).toContain('width="2"');
+      expect(productImageTag).toContain('height="1"');
+      expect(productImageTag).toContain("background-image:url(&quot;data:image/webp;base64");
+      const optimizedImageHref = productImageTag
+        ?.match(/src="([^"]+)"/)?.[1]
+        .replaceAll("&amp;", "&");
+      expect(optimizedImageHref).toContain("/media/image?");
+      expect(optimizedImageHref).toContain("q=60");
+      expect(optimizedImageHref).toContain(encodeURIComponent(`/assets/${productAssetName}`));
       const dashboardImageHref = html.match(
         /property="og:image" content="(\/dashboard\/opengraph-image\?v=[a-f0-9]{16})"/,
       )?.[1];
@@ -81,6 +127,16 @@ describe("production middleware runtime", () => {
         }),
       );
       expect(staticImageCachedResponse.status).toBe(304);
+
+      const optimizedImageResponse = await serverModule.default.fetch(
+        new Request(`https://example.test${optimizedImageHref}`, {
+          headers: { accept: "image/webp" },
+        }),
+      );
+      expect(optimizedImageResponse.status).toBe(200);
+      expect(optimizedImageResponse.headers.get("content-type")).toBe("image/webp");
+      expect(optimizedImageResponse.headers.get("vary")).toBe("Accept");
+      expect((await optimizedImageResponse.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
       (globalThis as any).__farmMiddlewareEvents = [];
       const configResponse = await serverModule.default.fetch(
@@ -123,9 +179,7 @@ describe("production middleware runtime", () => {
       const userHtml = await userResponse.text();
       expect(userResponse.status).toBe(200);
       expect(userHtml).toContain("user settings: 42 / 42 / 42");
-      expect(userHtml).toContain(
-        '<meta property="og:image" content="/users/42/opengraph-image">',
-      );
+      expect(userHtml).toContain('<meta property="og:image" content="/users/42/opengraph-image">');
       expect(userHtml).toContain('<meta property="og:image:alt" content="User preview">');
       expect((globalThis as any).__farmMiddlewareEvents[0]).toMatchObject({
         route: "/users/[id]",
@@ -165,6 +219,7 @@ describe("production middleware runtime", () => {
       expect(programmaticApiResponse.status).toBe(200);
       await expect(programmaticApiResponse.json()).resolves.toEqual({ id: "42" });
     } finally {
+      globalThis.fetch = originalFetch;
       delete (globalThis as any).__farmMiddlewareEvents;
       await cleanupMiddlewareProductionFixture(root);
     }
