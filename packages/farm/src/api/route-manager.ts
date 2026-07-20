@@ -13,6 +13,11 @@ import {
   normalizeFarmRouteRuntimeConfig,
   type FarmRouteRuntimeConfig,
 } from "../route-runtime";
+import { _runWithCurrentRequest } from "../server/request";
+import {
+  _runWithFarmI18nRequest,
+  type FarmI18nRuntime,
+} from "../i18n/server";
 
 export interface APIRoute extends FarmRouteRuntimeConfig {
   path: string;
@@ -31,6 +36,7 @@ export interface APIRouteMatch<T extends { path: string }> {
 
 export interface APIRouteManagerOptions {
   throwOnLoadError?: boolean;
+  i18n?: FarmI18nRuntime;
 }
 
 export const API_ROUTE_METHODS = [
@@ -48,6 +54,7 @@ export class APIRouteManager {
   private viteServer?: ViteDevServer;
   private appDirs: string[];
   private throwOnLoadError: boolean;
+  private i18n?: FarmI18nRuntime;
 
   constructor(
     appDir: string | readonly string[],
@@ -57,6 +64,7 @@ export class APIRouteManager {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
     this.throwOnLoadError = options.throwOnLoadError === true;
+    this.i18n = options.i18n;
   }
 
   /**
@@ -315,15 +323,26 @@ export class APIRouteManager {
         });
       }
 
-      try {
-        return await invokeAPIRouteEndpoint(endpoint, request, params);
-      } catch (error: any) {
-        console.error(`[API Error] ${pathname}:`, error);
-        return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
+      const invoke = async () => {
+        try {
+          return await invokeAPIRouteEndpoint(endpoint, request, params);
+        } catch (error: any) {
+          console.error(`[API Error] ${pathname}:`, error);
+          return new Response(
+            JSON.stringify({ error: error.message || "Internal Server Error" }),
+            {
+              status: 500,
+              headers: { "Content-Type": "application/json" },
+            },
+          );
+        }
+      };
+
+      return _runWithCurrentRequest(request, () =>
+        this.i18n?.config.enabled
+          ? _runWithFarmI18nRequest(this.i18n, request, invoke, { redirect: false })
+          : invoke(),
+      );
     };
   }
 

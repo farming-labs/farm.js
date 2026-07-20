@@ -71,6 +71,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
           ...getFarmDocsRouteTypeEntries(config.docs),
         ],
         suppressLintOnLink: config.suppressLintOnLink,
+        i18nConfig: config.i18n,
       });
     } catch {
       // Non-fatal; type generation is for DX only
@@ -82,6 +83,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
       projectModuleServer,
       {
         throwOnLoadError: true,
+        i18n: farmApp.getI18nRuntime(),
       },
     );
     await apiRouteManager.discoverRoutes();
@@ -212,7 +214,7 @@ async function buildClient(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmPlugin } = await import("../vite");
+  const { farmI18nClientBridgePlugin, farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -231,7 +233,11 @@ async function buildClient(
         input: path.join(root, srcDir, "app", "page.tsx"),
       },
     },
-    plugins: [farmPlugin(config, pluginManager), farmEnvironmentFunctionsPlugin()],
+    plugins: [
+      farmI18nClientBridgePlugin(),
+      farmPlugin(config, pluginManager),
+      farmEnvironmentFunctionsPlugin(),
+    ],
     mode: "production",
   });
 }
@@ -245,7 +251,7 @@ async function buildSSR(
   srcDir: string,
   outputDir: string,
 ) {
-  const { farmPlugin } = await import("../vite");
+  const { farmI18nClientBridgePlugin, farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
 
   const pluginManager = new PluginManager({
@@ -273,7 +279,11 @@ async function buildSSR(
       __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
       __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
     },
-    plugins: [farmPlugin(config, pluginManager), farmEnvironmentFunctionsPlugin()],
+    plugins: [
+      farmI18nClientBridgePlugin(),
+      farmPlugin(config, pluginManager),
+      farmEnvironmentFunctionsPlugin(),
+    ],
     mode: "production",
   });
 }

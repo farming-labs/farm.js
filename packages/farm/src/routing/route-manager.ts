@@ -52,6 +52,13 @@ import {
   resolveFarmRouteRuntimeConfig,
   type ResolvedFarmRouteRuntimeConfig,
 } from "../route-runtime";
+import {
+  localizeFarmHref,
+  localizeFarmPathname,
+  resolveFarmLocalePath,
+  stripFarmLocaleFromPathname,
+} from "../i18n/routing";
+import type { ResolvedFarmI18nConfig } from "../i18n/types";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -131,7 +138,8 @@ export class RouteManager {
     layouts: RouteEntry[];
   } {
     // Remove trailing slash except for root
-    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const routePathname = this.toRoutePathname(pathname);
+    const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     // Find matching page route
     let matchedRoute: RouteEntry | null = null;
     let params: Record<string, string> = {};
@@ -230,7 +238,10 @@ export class RouteManager {
     statusCode: number;
     params: Record<string, string>;
   } | null {
-    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const i18n = this.getI18nConfig();
+    const localeMatch = i18n ? resolveFarmLocalePath(pathname, i18n) : undefined;
+    const routePathname = localeMatch?.pathname || pathname;
+    const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
 
     for (const redirectEntry of this.redirects.values()) {
       const match = matchRoute(normalizedPath, redirectEntry.route.segments);
@@ -241,9 +252,9 @@ export class RouteManager {
 
       return {
         redirect: redirectEntry.definition,
-        destination: interpolateRedirectDestination(
-          redirectEntry.definition.destination,
-          match.params,
+        destination: this.localizeRedirectDestination(
+          interpolateRedirectDestination(redirectEntry.definition.destination, match.params),
+          localeMatch?.locale,
         ),
         statusCode,
         params: match.params,
@@ -257,14 +268,14 @@ export class RouteManager {
    * Return the nearest matching loading boundary for a pathname.
    */
   getMatchingLoading(pathname: string): RouteEntry | null {
-    return this.findNearestBoundary(pathname, this.loadings);
+    return this.findNearestBoundary(this.toRoutePathname(pathname), this.loadings);
   }
 
   /**
    * Return the nearest matching error boundary for a pathname.
    */
   getMatchingError(pathname: string): RouteEntry | null {
-    return this.findNearestBoundary(pathname, this.errors);
+    return this.findNearestBoundary(this.toRoutePathname(pathname), this.errors);
   }
 
   matchMetadataImage(pathname: string): {
@@ -272,7 +283,8 @@ export class RouteManager {
     params: Record<string, string>;
     pagePath: string;
   } | null {
-    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const routePathname = this.toRoutePathname(pathname);
+    const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const suffix = getMetadataImageSuffix(normalizedPath);
     if (!suffix) return null;
 
@@ -301,7 +313,8 @@ export class RouteManager {
     image: MetadataImageEntry;
     params: Record<string, string>;
   } | null {
-    const normalizedPath = pathname === "/" ? "/" : pathname.replace(/\/$/, "");
+    const routePathname = this.toRoutePathname(pathname);
+    const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
     const pathSegments = normalizedPath.split("/").filter(Boolean);
     let bestMatch: {
       image: MetadataImageEntry;
@@ -730,7 +743,54 @@ export class RouteManager {
       pattern: entry.pattern,
     }));
 
-    return collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath));
+    const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath));
+    const i18n = this.getI18nConfig();
+    if (!i18n) {
+      return result;
+    }
+
+    // A single static URL cannot safely vary by cookie or Accept-Language.
+    // Keep locale-without-prefix pages dynamic so caches never pin one language.
+    if (i18n.routing === "none") {
+      return {
+        ssg: [],
+        ssr: Array.from(
+          new Set([...result.ssr, ...result.ssg.map((page) => page.urlPath)]),
+        ),
+      };
+    }
+
+    return {
+      ssg: result.ssg.flatMap((page) =>
+        i18n.locales.map((locale) => ({
+          ...page,
+          urlPath: localizeFarmPathname(page.urlPath, locale, i18n),
+        })),
+      ),
+      ssr: result.ssr.flatMap((routePath) =>
+        i18n.locales.map((locale) => localizeFarmPathname(routePath, locale, i18n)),
+      ),
+    };
+  }
+
+  private toRoutePathname(pathname: string): string {
+    const i18n = this.getI18nConfig();
+    return i18n ? stripFarmLocaleFromPathname(pathname, i18n) : pathname;
+  }
+
+  private localizeRedirectDestination(destination: string, locale?: string): string {
+    if (!locale || !destination.startsWith("/") || destination.startsWith("//")) {
+      return destination;
+    }
+    const i18n = this.getI18nConfig();
+    return i18n ? localizeFarmHref(destination, locale, i18n) : destination;
+  }
+
+  private getI18nConfig(): ResolvedFarmI18nConfig | undefined {
+    const i18n = this.config.i18n;
+    return i18n && typeof i18n === "object" && "enabled" in i18n && i18n.enabled
+      ? i18n
+      : undefined;
   }
 
   /**

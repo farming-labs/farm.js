@@ -1,5 +1,6 @@
 import { emitFarmEvent } from "./observability";
 import { notifyFarmCacheInvalidation } from "./cache-invalidation";
+import { getActiveFarmI18nSnapshot } from "./i18n/bridge";
 
 export { applyFarmCacheInvalidations } from "./cache-invalidation";
 
@@ -303,9 +304,11 @@ export function unstable_cache<Args extends unknown[], Result>(
   options: FarmCacheOptions = {},
 ): (...args: Args) => Promise<Result> {
   return async (...args: Args): Promise<Result> => {
+    const locale = getActiveFarmI18nSnapshot()?.locale;
     const key = createFarmCacheKey([
       "unstable_cache",
       getFunctionCacheIdentity(fn),
+      locale ? ["locale", locale] : null,
       keyParts,
       args,
     ]);

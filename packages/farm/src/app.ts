@@ -22,8 +22,15 @@ import {
   resolveFarmDevtoolsConfig,
   type ResolvedFarmDevtoolsConfig,
 } from "./devtools-config";
+import { resolveFarmI18nConfig } from "./i18n/config";
+import {
+  createFarmI18nRuntime,
+  _setDefaultFarmI18nRuntime,
+  type FarmI18nRuntime,
+} from "./i18n/server";
+import type { ResolvedFarmI18nConfig } from "./i18n/types";
 
-type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images"> & {
+type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images" | "i18n"> & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
@@ -31,6 +38,7 @@ type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images"> & 
   workflows: FarmWorkflowsResolvedConfig;
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
+  i18n: ResolvedFarmI18nConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -53,14 +61,21 @@ export class FarmApp {
   private config: NormalizedFarmConfig;
   private routeManager: RouteManager;
   private serverRenderer: ServerRenderer;
+  private i18nRuntime: FarmI18nRuntime;
   private viteServer?: ViteDevServer;
 
   constructor(config: FarmConfig = {}, viteServer?: ViteDevServer) {
     this.config = this.normalizeConfig(config);
     configureFarmObservability(this.config.observability);
+    this.i18nRuntime = createFarmI18nRuntime(this.config.i18n);
+    _setDefaultFarmI18nRuntime(this.i18nRuntime);
     this.viteServer = viteServer;
     this.routeManager = new RouteManager(this.config, viteServer);
-    this.serverRenderer = new ServerRenderer(this.config, this.routeManager);
+    this.serverRenderer = new ServerRenderer(
+      this.config,
+      this.routeManager,
+      this.i18nRuntime,
+    );
   }
 
   async initialize(): Promise<void> {
@@ -70,6 +85,7 @@ export class FarmApp {
     }
 
     await initStorage(this.config.storage);
+    await this.i18nRuntime.initialize();
 
     // Verify app directory structure
     await this.verifyAppStructure();
@@ -88,6 +104,10 @@ export class FarmApp {
 
   getServerRenderer(): ServerRenderer {
     return this.serverRenderer;
+  }
+
+  getI18nRuntime(): FarmI18nRuntime {
+    return this.i18nRuntime;
   }
 
   getConfig(): NormalizedFarmConfig {
@@ -116,6 +136,12 @@ export class FarmApp {
       context: config.context || (() => undefined),
       serverActions: resolveServerActionsConfig(config.serverActions),
       images: resolveFarmImageConfig(config.images),
+      i18n: isResolvedI18nConfig(config.i18n)
+        ? config.i18n
+        : resolveFarmI18nConfig(config.i18n, {
+            root,
+            mode: process.env.NODE_ENV === "production" ? "production" : "development",
+          }),
       deploymentId: config.deploymentId || "development",
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),
@@ -175,6 +201,10 @@ export class FarmApp {
       );
     }
   }
+}
+
+function isResolvedI18nConfig(value: FarmConfig["i18n"]): value is ResolvedFarmI18nConfig {
+  return Boolean(value && typeof value === "object" && "enabled" in value);
 }
 
 export function createFarmApp(config?: FarmConfig, viteServer?: ViteDevServer): FarmApp {

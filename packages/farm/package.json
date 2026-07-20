@@ -111,6 +111,15 @@
       "image/sharp": [
         "./dist/image/sharp.d.ts"
       ],
+      "i18n": [
+        "./dist/i18n/index.d.ts"
+      ],
+      "i18n/server": [
+        "./dist/i18n/server.d.ts"
+      ],
+      "i18n/client": [
+        "./dist/i18n/client.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -347,6 +356,21 @@
       "types": "./dist/image/sharp.d.ts",
       "import": "./dist/image/sharp.mjs",
       "require": "./dist/image/sharp.cjs"
+    },
+    "./i18n": {
+      "types": "./dist/i18n/index.d.ts",
+      "import": "./dist/i18n/index.mjs",
+      "require": "./dist/i18n/index.cjs"
+    },
+    "./i18n/server": {
+      "types": "./dist/i18n/server.d.ts",
+      "import": "./dist/i18n/server.mjs",
+      "require": "./dist/i18n/server.cjs"
+    },
+    "./i18n/client": {
+      "types": "./dist/i18n/client.d.ts",
+      "import": "./dist/i18n/client.mjs",
+      "require": "./dist/i18n/client.cjs"
     }
   },
   "scripts": {
@@ -364,6 +388,7 @@
     "@farming-labs/docs": "^0.2.44",
     "@farming-labs/orm": "0.0.62",
     "@farming-labs/orm-runtime": "0.0.62",
+    "@formatjs/icu-messageformat-parser": "3.5.15",
     "@mdx-js/mdx": "^3.1.1",
     "@scalar/api-reference": "^1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
@@ -375,6 +400,7 @@
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.5",
     "image-size": "^2.0.2",
+    "intl-messageformat": "11.2.12",
     "marked": "^12.0.2",
     "nitro": "3.0.1-alpha.0",
     "pg": "^8.20.0",
