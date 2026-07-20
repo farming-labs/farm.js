@@ -2210,7 +2210,7 @@ function generateClientCode(
   integrationProviders: Array<{ name: string; type: string; props?: Record<string, unknown> }> = [],
   documentNavigationMatchers: string[] = [],
   docsSearchEnabled = false,
-  docsSearchModuleId = "@farming-labs/theme",
+  docsSearchModuleId?: string,
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider

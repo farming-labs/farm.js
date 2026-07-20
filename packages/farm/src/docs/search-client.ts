@@ -11,7 +11,7 @@ export function isFarmDocsSearchEnabled(docs: FarmDocsResolvedConfig | undefined
   return !(search && typeof search === "object" && search.enabled === false);
 }
 
-export function resolveFarmDocsSearchClientModule(root: string): string {
+export function resolveFarmDocsSearchClientModule(root: string): string | undefined {
   try {
     const requireFromApp = createRequire(path.join(path.resolve(root), "package.json"));
     const themeEntry = requireFromApp.resolve("@farming-labs/theme");
@@ -21,14 +21,14 @@ export function resolveFarmDocsSearchClientModule(root: string): string {
     // The public package entry remains a compatible fallback.
   }
 
-  return "@farming-labs/theme";
+  return undefined;
 }
 
 export function generateFarmDocsSearchClientRuntime(
   enabled: boolean,
-  moduleId = "@farming-labs/theme",
+  moduleId?: string,
 ): string {
-  if (!enabled) {
+  if (!enabled || !moduleId) {
     return `
 function isFarmDocsSearchPage() {
   return false;
