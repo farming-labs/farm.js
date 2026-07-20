@@ -524,6 +524,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       "#nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72;",
     );
+    expect(html).toContain("@media (max-width: 640px)");
+    expect(html).toContain(".code-block-header { min-height: 22px;");
+    expect(html).toContain("padding: 10px !important; font-size: 11px;");
     expect(html).toContain("text-transform: lowercase");
     expect(html).toContain('.code-copy[data-copied="true"] .code-copy-check { display: block; }');
     expect(html).not.toContain('<span class="code-block-title">bash</span>');

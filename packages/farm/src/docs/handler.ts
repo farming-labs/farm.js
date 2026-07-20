@@ -1769,6 +1769,15 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
       .fd-page-footer { align-items: flex-start; flex-direction: column; }
       .fd-page-footer .fd-last-updated-footer { margin-left: 0; }
     }
+    @media (max-width: 640px) {
+      .code-block-header { min-height: 22px; padding: 1px 4px 1px 7px; }
+      .code-block-title { font-size: 9px; }
+      .code-copy { width: 20px; height: 20px; }
+      .code-copy svg { width: 12px; height: 12px; }
+      .code-copy-floating { top: 5px; right: 5px; }
+      #nd-docs-layout figure.shiki.code-block pre, .code-block pre { padding: 10px !important; font-size: 11px; line-height: 1.55; }
+      .sh__line { min-height: 1.55em; }
+    }
 ${farmDocsPixelBorderCss}
   `;
 }
