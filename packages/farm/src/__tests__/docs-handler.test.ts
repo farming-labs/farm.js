@@ -214,6 +214,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-docs-search-trigger"');
     expect(html).toContain('data-search-full=""');
     expect(html).toContain('aria-keyshortcuts="Meta+K Control+K"');
+    expect(html).toContain('<span class="fd-docs-search-trigger-label">Search docs</span>');
     expect(html).toContain("<kbd><span>⌘</span><span>K</span></kbd>");
     expect(html).toContain('id="farm-docs-search-root"');
     expect(html).toContain("data-farm-docs-search-root");
@@ -239,8 +240,15 @@ describe("createFarmDocsHandler", () => {
     );
     expect(sidebarBrand).not.toContain('data-search-full=""');
     expect(html).toContain("--fd-nav-height: 38px");
-    expect(html).toContain("--omni-content-top: calc(var(--fd-mobile-nav-height, 56px) + 12px)");
-    expect(html).toContain("max-height: calc(100dvh - var(--omni-content-top) - 12px)");
+    expect(html).toContain(
+      "var(--fd-mobile-nav-height, 56px) + max(10px, env(safe-area-inset-top))",
+    );
+    expect(html).toContain("max(10px, env(safe-area-inset-bottom))");
+    expect(html).toContain(".topbar-actions .fd-docs-search-trigger-label");
+    expect(html).toContain("width: min(680px, calc(100vw - 32px))");
+    expect(html).toContain("width: calc(100vw - 20px)");
+    expect(html).toContain(".omni-footer-hints {");
+    expect(html).toContain("font-size: 16px");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
