@@ -1,33 +1,74 @@
 ---
 title: "Create a Plugin"
-description: "Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks."
+description: "Build a typed Farm plugin with private state, request context, Web Request transforms, and framework lifecycle hooks."
 section: "Extending"
 ---
 
 # Create a Plugin
 
-Build a plugin when the behavior belongs to the framework runtime instead of one product integration. Plugins are good for instrumentation, HTML transforms, request IDs, security headers, build adapters, custom route discovery reporting, and runtime debugging.
+Build a plugin when behavior belongs to the framework rather than one product integration. Good examples include request tracing, security policy, HTML transforms, route analysis, deployment adapters, development tooling, and global instrumentation.
 
-## Define a plugin
+## A complete runtime plugin
 
-**src/lib/request-id-plugin.ts**
+This plugin creates typed private state, derives typed context for every request, forwards a request ID to the handler, and adds the ID to the response.
+
+**src/plugins/request-tracing.ts**
 
 ```ts
 import { definePlugin } from "@farmjs/core";
 import { randomUUID } from "node:crypto";
 
-export const requestIdPlugin = definePlugin({
-  name: "request-id",
-  beforeRequest(req, _res, ctx) {
-    const header = req.headers["x-request-id"];
-    const requestId = Array.isArray(header) ? header[0] : header || randomUUID();
+type RequestTracingOptions = {
+  header?: string;
+};
 
-    ctx.req.set("request.id", requestId, {
-      exposeToPage: true,
-    });
-  },
-});
+export function requestTracingPlugin(options: RequestTracingOptions = {}) {
+  return definePlugin({
+    name: "acme:request-tracing",
+
+    setup() {
+      return {
+        header: options.header ?? "x-request-id",
+      };
+    },
+
+    runtime: {
+      context({ request, req, state }) {
+        const requestId = request.headers.get(state.header) ?? randomUUID();
+
+        req.set("requestId", requestId, { exposeToPage: true });
+        return { requestId };
+      },
+
+      before({ request, ctx, state }) {
+        const headers = new Headers(request.headers);
+        headers.set(state.header, ctx.requestId);
+        return new Request(request, { headers });
+      },
+
+      after({ response, ctx, state }) {
+        const headers = new Headers(response.headers);
+        headers.set(state.header, ctx.requestId);
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      },
+
+      error({ error, ctx }) {
+        console.error("Request failed", {
+          requestId: ctx.requestId,
+          error,
+        });
+      },
+    },
+  });
+}
 ```
+
+`state.header`, `ctx.requestId`, and their return types are inferred without manually supplying generics.
 
 ## Register it
 
@@ -35,57 +76,28 @@ export const requestIdPlugin = definePlugin({
 
 ```ts
 import { defineConfig } from "@farmjs/core";
-import { requestIdPlugin } from "./src/lib/request-id-plugin";
+import { requestTracingPlugin } from "./src/plugins/request-tracing";
 
 export default defineConfig({
-  plugins: [requestIdPlugin],
+  plugins: [
+    requestTracingPlugin({
+      header: "x-acme-request-id",
+    }),
+  ],
 });
 ```
 
-## Add options
-
-Make plugins factory functions when users should configure them.
-
-**src/lib/security-headers-plugin.ts**
-
-```ts
-import { definePlugin } from "@farmjs/core";
-
-type SecurityHeadersOptions = {
-  frameAncestors?: string;
-};
-
-export function securityHeadersPlugin(options: SecurityHeadersOptions = {}) {
-  return definePlugin({
-    name: "security-headers",
-    afterApiHandler(response) {
-      const headers = new Headers(response.headers);
-
-      headers.set("x-content-type-options", "nosniff");
-      headers.set("x-frame-options", "DENY");
-
-      if (options.frameAncestors) {
-        headers.set("content-security-policy", `frame-ancestors ${options.frameAncestors}`);
-      }
-
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers,
-      });
-    },
-  });
-}
-```
+Use a factory when consumers need options. Return `definePlugin()` directly so inference is preserved.
 
 ## Transform config
 
-Use `config` to modify config before it is resolved. Return the updated config.
+`configure` runs before Farm resolves config. Return only when the plugin needs to replace the current value.
 
 ```ts
 export const observabilityDefaults = definePlugin({
-  name: "observability-defaults",
-  config(config) {
+  name: "acme:observability-defaults",
+
+  configure(config) {
     return {
       ...config,
       observability: config.observability ?? {
@@ -94,166 +106,233 @@ export const observabilityDefaults = definePlugin({
       },
     };
   },
-  configResolved(config) {
-    console.log("Observability enabled:", Boolean(config.observability));
-  },
 });
 ```
 
-Keep config transforms predictable. If two plugins edit the same field, ordering matters.
+Keep config transforms deterministic. Use `enforce: "pre"` or `enforce: "post"` only when another plugin's output is part of your contract.
 
-## Transform API requests
+## Short-circuit a request
 
-`beforeApiHandler` can return a new `Request`. `afterApiHandler` can return a new `Response`.
+Return a `Response` from `runtime.before` to skip Farm's route handler. The response still passes through every `runtime.after` hook.
 
 ```ts
-export const apiTracePlugin = definePlugin({
-  name: "api-trace",
-  beforeApiHandler(request, api, ctx) {
-    ctx.req.set("api.traceId", crypto.randomUUID());
+export const maintenancePlugin = definePlugin({
+  name: "acme:maintenance",
 
-    const headers = new Headers(request.headers);
-    headers.set("x-farm-route", api.routePath || api.pathname);
+  runtime: {
+    before({ request }) {
+      const url = new URL(request.url);
 
-    return new Request(request, {
-      headers,
-    });
-  },
-  afterApiHandler(response) {
-    const headers = new Headers(response.headers);
-    headers.set("x-powered-by", "farm");
-
-    return new Response(response.body, {
-      status: response.status,
-      headers,
-    });
+      if (process.env.MAINTENANCE === "1" && !url.pathname.startsWith("/health")) {
+        return Response.json(
+          { error: "Service temporarily unavailable" },
+          { status: 503 },
+        );
+      }
+    },
   },
 });
 ```
 
-`ctx.req` stays attached when a plugin returns a transformed `Request`, so later plugins and the API handler can read the same request data.
+Authorization plugins may reject requests here, but handlers should still enforce resource-level permissions close to protected data.
 
-## Transform HTML
+## Background work and cancellation
 
-Use `afterRender` when you need route-aware HTML changes. Use `transformHTML` for a general HTML transform.
+Every runtime event includes the request `signal` and `waitUntil()`.
+
+```ts
+runtime: {
+  after({ request, response, durationMs, signal, waitUntil }) {
+    if (!signal.aborted) {
+      waitUntil(
+        metrics.write({
+          pathname: new URL(request.url).pathname,
+          status: response.status,
+          durationMs,
+        }),
+      );
+    }
+  },
+},
+```
+
+Do not use `waitUntil()` for work the response depends on. Await required writes in the hook itself.
+
+## Observe routes
+
+The router group handles discovery and page-route matching.
+
+```ts
+export const routeReportPlugin = definePlugin({
+  name: "acme:route-report",
+
+  setup() {
+    return { discovered: 0 };
+  },
+
+  router: {
+    discovered(route, { state }) {
+      state.discovered += 1;
+      if (route.kind === "page" || route.kind === "layout") {
+        console.log(route.kind, route.pattern);
+      } else {
+        console.log(route.kind, route.path);
+      }
+    },
+
+    generated(summary, { state }) {
+      console.log("Route entries", state.discovered);
+      console.log("Pages", summary.pageCount);
+    },
+
+    after(result) {
+      if (!result.matched) {
+        console.log("Page miss", result.pathname);
+      }
+    },
+  },
+});
+```
+
+`discovered` receives page, layout, middleware, and API route records. Narrow with `route.kind` before reading kind-specific fields.
+
+## Transform rendered HTML
+
+Use `render.before` for route-aware setup and `render.html` to return changed HTML.
 
 ```ts
 export const htmlMarkerPlugin = definePlugin({
-  name: "html-marker",
-  afterRender(html, render) {
-    if (render.pathname.startsWith("/docs")) {
-      return html.replace("</body>", '<meta name="docs-runtime" content="farm"></body>');
-    }
-  },
-});
-```
+  name: "acme:html-marker",
 
-## Observe routes and builds
-
-Plugins can gather metadata from route discovery and build hooks.
-
-```ts
-export const routeManifestPlugin = definePlugin({
-  name: "route-manifest",
-  routesGenerated(payload) {
-    console.log("Pages:", payload.pageCount);
-    console.log("Layouts:", payload.layoutCount);
-  },
-  apiRouteDiscovered(route) {
-    console.log("API route:", route.path, route.methods);
-  },
-  beforeBundle(bundle) {
-    console.log("Bundling for:", bundle.preset);
-  },
-  afterBundle(result) {
-    console.log("Bundle success:", result.success);
-  },
-});
-```
-
-## Handle HMR
-
-In development, `hmrUpdate` receives changed file and module IDs.
-
-```ts
-export const hmrDebugPlugin = definePlugin({
-  name: "hmr-debug",
-  hmrUpdate(update) {
-    console.log("Updated file:", update.file);
-    console.log("Modules:", update.modules);
-  },
-});
-```
-
-## Shutdown cleanup
-
-Use `shutdown` for long-lived resources.
-
-```ts
-export function intervalPlugin() {
-  let interval: ReturnType<typeof setInterval> | undefined;
-
-  return definePlugin({
-    name: "interval",
-    ready() {
-      interval = setInterval(() => {
-        console.log("tick");
-      }, 30_000);
-    },
-    shutdown(payload) {
-      if (interval) {
-        clearInterval(interval);
+  render: {
+    html(html, render) {
+      if (render.pathname.startsWith("/docs")) {
+        return html.replace(
+          "</head>",
+          '<meta name="docs-runtime" content="farm"></head>',
+        );
       }
-
-      console.log("shutdown reason:", payload.reason);
     },
-  });
-}
-```
-
-## Expose data to pages
-
-Only explicitly exposed request context values appear on page props.
-
-**src/lib/trace-plugin.ts**
-
-```ts
-export const tracePlugin = definePlugin({
-  name: "trace",
-  beforeRequest(_req, _res, ctx) {
-    ctx.req.set("traceId", "trace_123", {
-      exposeToPage: true,
-    });
-
-    ctx.req.set("secret", "do-not-expose");
   },
 });
 ```
 
-**src/app/dashboard/page.tsx**
+HTML transforms require Farm to buffer the rendered document before sending it. Keep streaming intact by using `render.before` when no HTML rewrite is required.
 
-```tsx
-import type { PageProps } from "@farmjs/core";
+## Extend builds
 
-export default function DashboardPage(props: PageProps) {
-  const traceId = props.context?.data.get("traceId");
+Build hooks receive the state returned by `setup`.
 
-  return <p>{traceId}</p>;
-}
+```ts
+export const deploymentReportPlugin = definePlugin({
+  name: "acme:deployment-report",
+
+  setup() {
+    return { startedAt: Date.now() };
+  },
+
+  build: {
+    before(bundle, { state }) {
+      console.log("Building", bundle.preset, state.startedAt);
+    },
+
+    configure(nitroConfig) {
+      return {
+        ...nitroConfig,
+        sourceMap: true,
+      };
+    },
+
+    after(result) {
+      console.log("Build complete", result.success);
+    },
+  },
+});
 ```
 
-## Hook behavior
+`setup` can run in a build manager and again in a deployed runtime. Keep it deterministic and avoid assuming it represents one global process forever.
 
-- `config`, `beforeApiHandler`, `afterApiHandler`, `afterRender`, `beforeNitroBuild`, `transformHTML`, and `transformPage` can return transformed values.
-- `beforeRequest` and `afterResponse` run sequentially because they work with mutable Node request and response objects.
-- `beforeRequest` can short-circuit by ending the response.
-- Other observational hooks can run in parallel.
-- `enforce: "pre"` runs before normal plugins. `enforce: "post"` runs after normal plugins.
+## Development hooks
+
+```ts
+export const devInspectorPlugin = definePlugin({
+  name: "acme:dev-inspector",
+
+  dev: {
+    server(vite) {
+      console.log("Dev server", vite.config.root);
+    },
+
+    update(update) {
+      console.log("Updated", update.file, update.modules);
+    },
+  },
+});
+```
+
+Development hooks are not bundled into the production request lifecycle.
+
+## Start and close resources
+
+Use `runtime.start` for runtime-only startup and `runtime.close` for best-effort cleanup.
+
+```ts
+export const queuePlugin = definePlugin({
+  name: "acme:queue",
+
+  setup() {
+    return { client: createQueueClient() };
+  },
+
+  runtime: {
+    async start({ state }) {
+      await state.client.connect();
+    },
+
+    async close({ state, reason }) {
+      await state.client.close();
+      console.log("Queue closed", reason);
+    },
+  },
+});
+```
+
+Farm starts the runtime lazily in production. Some serverless hosts do not expose a shutdown event, so correctness must not depend solely on `runtime.close`.
+
+## Context rules
+
+- `runtime.context` must return a plain object or nothing.
+- Farm merges context from all plugins before `runtime.before`.
+- Duplicate top-level context keys fail the request and name both owners.
+- `ctx` is server-only and read-only at the top level.
+- `req` is the shared mutable request store.
+- Only `req.set(key, value, { exposeToPage: true })` exposes data to page props.
+- Returning a new `Request` preserves both `ctx` and `req` for later hooks.
+
+## Legacy compatibility
+
+Flat hooks continue to work for existing plugins:
+
+| Legacy hook | Structured hook |
+| --- | --- |
+| `config` | `configure` |
+| `ready` / `shutdown` | `runtime.start` / `runtime.close` |
+| `beforeRequest` / `beforeApiHandler` | `runtime.before` |
+| `afterResponse` / `afterApiHandler` | `runtime.after` |
+| `routeDiscovered` / `routesGenerated` | `router.discovered` / `router.generated` |
+| `beforeRouteMatch` / `afterRouteMatch` | `router.before` / `router.after` |
+| `beforeRender` / `afterRender` | `render.before` / `render.html` |
+| `beforeBundle` / `beforeNitroBuild` / `afterBundle` | `build.before` / `build.configure` / `build.after` |
+| `devServerCreated` / `hmrUpdate` | `dev.server` / `dev.update` |
+
+Do not define both the legacy and structured form of the same phase in one plugin. Farm intentionally executes both for compatibility.
 
 ## Testing checklist
 
-- Test hook order when using `enforce`.
-- Test transformed requests, responses, HTML, or config values.
-- Test request context exposure with and without `exposeToPage`.
-- Test cleanup by running the `shutdown` hook.
-- Test that request hooks do not run unnecessary work after a response is already ended.
+- Verify `setup` state and `runtime.context` inference with a type test.
+- Test `pre`, normal, and `post` hook order.
+- Test transformed requests, responses, status codes, headers, and bodies.
+- Test a `runtime.before` short circuit and confirm `runtime.after` still runs.
+- Test context-key collisions and error-hook failures.
+- Test page HTML transforms separately from API responses.
+- Run the plugin against both the dev server and a production preset build.
