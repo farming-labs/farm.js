@@ -22,6 +22,11 @@ const myCustomPlugin: FarmPlugin = {
 const runtimeLifecyclePlugin = definePlugin({
   name: 'runtime-lifecycle-e2e',
 
+  client: {
+    source: './src/lib/runtime-lifecycle.client.ts',
+    public: { label: 'feature-lab' },
+  },
+
   setup() {
     return { header: 'x-farm-runtime-plugin' };
   },

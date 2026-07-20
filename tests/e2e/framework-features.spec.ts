@@ -129,6 +129,38 @@ test.describe("Framework feature integration", () => {
     await expect(page.getByTestId("client-runtime-boundary")).toHaveText("runtime:client");
   });
 
+  test("runs client plugins through hydration and SPA navigation", async ({ page }) => {
+    await page.goto("/feature-lab");
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).__FARM_CLIENT_PLUGIN_EVENTS__ || []),
+      )
+      .toEqual([
+        "setup:runtime-lifecycle-e2e:feature-lab:dev",
+        "hydration:before:hydrate",
+        "hydration:after:ready",
+      ]);
+    await expect(page.locator("html")).toHaveAttribute("data-farm-client-plugin", "feature-lab");
+
+    await page.getByTestId("view-transition-link").click();
+    await expect(page).toHaveURL(/\/store-e2e$/);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => (window as any).__FARM_CLIENT_PLUGIN_EVENTS__ || []),
+      )
+      .toEqual([
+        "setup:runtime-lifecycle-e2e:feature-lab:dev",
+        "hydration:before:hydrate",
+        "hydration:after:ready",
+        "navigation:before:/store-e2e",
+        "navigation:loaded:/store-e2e",
+        "navigation:resolved:/store-e2e",
+        "navigation:rendered:/store-e2e",
+      ]);
+  });
+
   test("canonicalizes typed search and exposes request route context", async ({ page }) => {
     await page.setExtraHTTPHeaders({ "x-farm-tenant": "acme", "x-request-id": "browser" });
     await page.goto("/feature-lab/products/44?tab=info&locale=am&toast=saved");
