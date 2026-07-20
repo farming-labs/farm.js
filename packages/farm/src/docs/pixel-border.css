@@ -14,7 +14,7 @@
   --color-fd-accent-foreground: oklch(0.985 0.001 106.423);
   --color-fd-border: hsl(0 0% 15%);
   --color-fd-ring: hsl(0 0% 30%);
-  --fd-nav-height: 38px;
+  --fd-nav-height: 44px;
   --fd-banner-height: 0px;
   --fd-tocnav-height: 0px;
   --scrollbar-thumb: var(--color-fd-border);
@@ -186,7 +186,7 @@ code:not(pre code) {
   font-size: 10px;
   letter-spacing: 0;
   line-height: 1;
-  text-transform: none;
+  text-transform: uppercase;
   transition:
     border-color 150ms ease,
     background-color 150ms ease,
@@ -216,10 +216,6 @@ code:not(pre code) {
   stroke-linecap: round;
   stroke-linejoin: round;
   stroke-width: 1.8;
-}
-
-.fd-docs-search-trigger-label {
-  display: none;
 }
 
 .fd-docs-search-trigger kbd {
@@ -634,23 +630,11 @@ code:not(pre code) {
 
 /* Docs command search */
 .topbar-actions .fd-docs-search-trigger {
-  width: 168px;
-  min-width: 168px;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 0 10px 0 12px;
-}
-
-.topbar-actions .fd-docs-search-trigger-label {
-  display: inline;
-  overflow: hidden;
-  flex: 1 1 auto;
-  color: currentColor;
-  font-family: var(--fd-docs-font-sans);
-  font-size: 11px;
-  text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  width: 80px;
+  min-width: 80px;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 10px;
 }
 
 .topbar-actions .fd-docs-search-trigger kbd {
@@ -659,7 +643,6 @@ code:not(pre code) {
   min-height: 19px;
   flex: 0 0 auto;
   gap: 4px;
-  margin-left: auto;
   border-color: color-mix(in srgb, var(--color-fd-foreground) 14%, transparent);
   background: color-mix(in srgb, var(--color-fd-foreground) 5%, transparent);
   padding: 0 5px;
@@ -725,8 +708,10 @@ code:not(pre code) {
   border-color: color-mix(in srgb, var(--color-fd-foreground) 14%, transparent);
   background: color-mix(in srgb, var(--color-fd-foreground) 4%, transparent);
   padding: 0 7px;
+  font-family: var(--fd-docs-font-mono);
   font-size: 9px;
   letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .omni-close-btn:hover,
@@ -907,7 +892,6 @@ code:not(pre code) {
     padding: 0;
   }
 
-  .mobile-topbar-actions .fd-docs-search-trigger-label,
   .mobile-topbar-actions .fd-docs-search-trigger kbd {
     display: none;
   }
@@ -941,12 +925,7 @@ code:not(pre code) {
     min-width: 44px;
     height: 36px;
     padding: 0;
-    font-size: 0;
-  }
-
-  .omni-close-btn::after {
-    content: "Close";
-    font-size: 10px;
+    font-size: 9px;
   }
 
   .omni-body {
