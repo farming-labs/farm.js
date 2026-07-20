@@ -95,7 +95,33 @@ mount, and shortcut together.
 | deploymentId  | Detecting stale browser requests during rolling deployments.                      |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
 | serverActions | Restricting trusted action origins and request body size.                         |
+| images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
 | openapi       | Publishing API reference docs.                                                    |
+
+## Images
+
+Farm optimizes local and allowlisted remote images through the same runtime on development and production deployments.
+
+```ts
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "images.example.com",
+        pathname: "/catalog/**",
+      },
+    ],
+    qualities: [75, 90],
+    formats: ["image/avif", "image/webp"],
+    maximumResponseBody: "10mb",
+  },
+});
+```
+
+Remote sources are denied by default. See [Images](/docs/images) for static imports, responsive layouts, provider selection, caching, and security behavior.
 
 ## Layers
 
