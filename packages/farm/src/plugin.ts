@@ -214,6 +214,14 @@ export interface FarmPluginRuntimeHooks<
   close?(event: FarmPluginRuntimeCloseEvent<TState>): MaybePromise<void>;
 }
 
+export interface FarmPluginRuntimeRequestOptions {
+  kind?: FarmPluginRuntimeKind;
+  route?: FarmPluginRouteRuntimePayload;
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+export type FarmPluginRuntimeRequestHandler = (request: Request) => MaybePromise<Response>;
+
 export type FarmPluginDiscoveredRoute =
   | RouteDiscoveredPayload
   | ({ kind: "middleware" } & MiddlewareDiscoveredPayload)
@@ -375,6 +383,9 @@ export class PluginManager {
   private initialized = false;
   private runtimeReady = false;
   private runtimeClosed = false;
+  private runtimeStartPromise?: Promise<void>;
+  private runtimeClosePromise?: Promise<void>;
+  private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
 
   constructor(context: Omit<FarmPluginContext, "requestContext">) {
     this.context = {
@@ -439,6 +450,106 @@ export class PluginManager {
       requestContext.set(target, key, value, {
         exposeToPage: exposed.has(key),
       });
+    }
+  }
+
+  private copyRuntimeRequestContext(source: Request, target: Request): void {
+    const runtimeContext = this.runtimeRequestContexts.get(source);
+    if (runtimeContext) {
+      this.runtimeRequestContexts.set(target, runtimeContext);
+    }
+  }
+
+  private createRuntimeBaseEvent(
+    plugin: FarmPlugin,
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ): FarmPluginRuntimeBaseEvent {
+    return {
+      ...this.createStateHookContext(plugin),
+      request,
+      req: this.createRequestHookContext(request).req,
+      kind: options.kind ?? "request",
+      route: options.route,
+      signal: request.signal,
+      waitUntil,
+    };
+  }
+
+  private async createRuntimeRequestContext(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const values: Record<string, unknown> = {};
+    const owners = new Map<string, string>();
+
+    for (const plugin of this.getSortedPlugins()) {
+      const createContext = plugin.runtime?.context;
+      if (!createContext) continue;
+
+      const result = await createContext(
+        this.createRuntimeBaseEvent(plugin, request, options, waitUntil),
+      );
+      if (result === undefined) continue;
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new TypeError(`Farm plugin "${plugin.name}" runtime.context must return an object`);
+      }
+
+      for (const [key, value] of Object.entries(result)) {
+        const owner = owners.get(key);
+        if (owner) {
+          throw new Error(
+            `Farm plugin context key "${key}" from "${plugin.name}" conflicts with "${owner}"`,
+          );
+        }
+        owners.set(key, plugin.name);
+        values[key] = value;
+      }
+    }
+
+    const runtimeContext = Object.freeze(values);
+    this.runtimeRequestContexts.set(request, runtimeContext);
+    return runtimeContext;
+  }
+
+  private async runRuntimeErrorHooks(
+    request: Request,
+    error: unknown,
+    ctx: Readonly<Record<string, unknown>>,
+    durationMs: number,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ): Promise<void> {
+    for (const plugin of this.getSortedPlugins()) {
+      const onError = plugin.runtime?.error;
+      if (!onError) continue;
+
+      try {
+        await onError({
+          ...this.createRuntimeBaseEvent(plugin, request, options, waitUntil),
+          ctx,
+          error,
+          durationMs,
+        });
+      } catch (hookError) {
+        console.error(`Farm plugin "${plugin.name}" runtime.error failed:`, hookError);
+      }
+    }
+
+    try {
+      await this.runHookParallel("onError", {
+        phase: "runtime",
+        error,
+        meta: {
+          kind: options.kind ?? "request",
+          pathname: new URL(request.url).pathname,
+          durationMs,
+        },
+      });
+    } catch (hookError) {
+      console.error("Farm plugin onError hook failed:", hookError);
     }
   }
 
@@ -634,6 +745,126 @@ export class PluginManager {
     this.setupComplete = true;
   }
 
+  async startRuntime(): Promise<void> {
+    if (this.runtimeReady) return;
+    if (this.runtimeStartPromise) return this.runtimeStartPromise;
+
+    this.runtimeStartPromise = (async () => {
+      if (!this.initialized) {
+        await this.runHookParallel("init");
+      }
+      await this.setupPlugins();
+      if (!this.runtimeReady) {
+        await this.runHookParallel("ready");
+      }
+    })();
+
+    try {
+      await this.runtimeStartPromise;
+    } catch (error) {
+      this.runtimeStartPromise = undefined;
+      throw error;
+    }
+  }
+
+  async closeRuntime(reason = "runtime-closed"): Promise<void> {
+    if (this.runtimeClosed) return;
+    if (this.runtimeClosePromise) return this.runtimeClosePromise;
+
+    this.runtimeClosePromise = this.runHookParallel("shutdown", { reason }).then(() => undefined);
+    try {
+      await this.runtimeClosePromise;
+    } catch (error) {
+      this.runtimeClosePromise = undefined;
+      throw error;
+    }
+  }
+
+  async runRuntimeRequest(
+    request: Request,
+    handler: FarmPluginRuntimeRequestHandler,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<Response> {
+    await this.startRuntime();
+
+    const startedAt = Date.now();
+    const waitUntil = options.waitUntil
+      ? (promise: Promise<unknown>) => options.waitUntil?.(Promise.resolve(promise))
+      : (promise: Promise<unknown>) => {
+          void Promise.resolve(promise).catch(() => {});
+        };
+    let activeRequest = request;
+    let runtimeContext: Readonly<Record<string, unknown>> = Object.freeze({});
+
+    try {
+      runtimeContext = await this.createRuntimeRequestContext(activeRequest, options, waitUntil);
+
+      let response: Response | undefined;
+      for (const plugin of this.getSortedPlugins()) {
+        const before = plugin.runtime?.before;
+        if (!before) continue;
+
+        const result = await before({
+          ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+          ctx: runtimeContext,
+        });
+
+        if (result instanceof Request) {
+          this.copyRequestStore(activeRequest, result);
+          this.copyRuntimeRequestContext(activeRequest, result);
+          activeRequest = result;
+          continue;
+        }
+        if (result instanceof Response) {
+          response = result;
+          break;
+        }
+        if (result !== undefined) {
+          throw new TypeError(
+            `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
+          );
+        }
+      }
+
+      response ??= await handler(activeRequest);
+      if (!(response instanceof Response)) {
+        throw new TypeError("Farm plugin runtime handlers must return a Response");
+      }
+
+      for (const plugin of this.getSortedPlugins()) {
+        const after = plugin.runtime?.after;
+        if (!after) continue;
+
+        const result = await after({
+          ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+          ctx: runtimeContext,
+          response,
+          durationMs: Date.now() - startedAt,
+        });
+        if (result !== undefined) {
+          if (!(result instanceof Response)) {
+            throw new TypeError(
+              `Farm plugin "${plugin.name}" runtime.after must return a Response or undefined`,
+            );
+          }
+          response = result;
+        }
+      }
+
+      return response;
+    } catch (error) {
+      await this.runRuntimeErrorHooks(
+        activeRequest,
+        error,
+        runtimeContext,
+        Date.now() - startedAt,
+        options,
+        waitUntil,
+      );
+      throw error;
+    }
+  }
+
   async runHook<K extends keyof FarmPlugin>(hookName: K, ...args: any[]): Promise<any> {
     const plugins = this.getSortedPlugins();
 
@@ -685,6 +916,8 @@ export class PluginManager {
 
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([
+      "ready",
+      "shutdown",
       "beforeRequest",
       "afterResponse",
       "beforeApiHandler",
