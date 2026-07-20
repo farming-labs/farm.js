@@ -94,6 +94,41 @@ program
   });
 
 program
+  .command("doctor")
+  .description("Inspect project configuration and the running Farm runtime")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("-p, --port <port>", "Port of a running local app")
+  .option("--host <host>", "Host of a running local app")
+  .option("--url <url>", "Base URL of a running Farm app")
+  .option("--offline", "Inspect project files without probing a running app")
+  .option("--timeout <ms>", "Live runtime probe timeout in milliseconds", "1200")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (options) => {
+    try {
+      const { formatFarmDoctorReport, runFarmDoctor } = require("../dist/index.js");
+      const timeoutMs = Number.parseInt(options.timeout, 10);
+      if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+        throw new Error("--timeout must be a positive number of milliseconds.");
+      }
+      const report = await runFarmDoctor({
+        root: options.root,
+        configPath: options.config,
+        port: options.port,
+        host: options.host,
+        url: options.url,
+        offline: options.offline,
+        timeoutMs,
+      });
+      console.log(options.json ? JSON.stringify(report, null, 2) : formatFarmDoctorReport(report));
+      if (report.health === "error") process.exitCode = 1;
+    } catch (error) {
+      console.error("Failed to inspect Farm app:", error);
+      process.exit(1);
+    }
+  });
+
+program
   .command("preview")
   .description("Create a public URL for a running local Farm app")
   .option("-r, --root <root>", "Root directory", process.cwd())
