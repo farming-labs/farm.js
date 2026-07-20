@@ -169,6 +169,36 @@ describe("Farm image optimizer", () => {
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
+  it("transforms the final validated redirect destination", async () => {
+    const validateRemoteUrl = vi.fn();
+    const transform = vi.fn();
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(Response.redirect("https://cdn.example.test/final.png", 302))
+      .mockResolvedValueOnce(new Response(PNG, { headers: { "content-type": "image/png" } }));
+    const handler = createFarmImageHandler(
+      resolveFarmImageConfig({
+        remotePatterns: [{ protocol: "https", hostname: "**.example.test", pathname: "/**" }],
+      }),
+      {
+        fetch: fetcher as typeof fetch,
+        transform: passthroughTransformer(transform),
+        validateRemoteUrl,
+      },
+    );
+
+    const response = await handler(
+      new Request(optimizerUrl("https://images.example.test/photo.png")),
+    );
+
+    expect(response?.status).toBe(200);
+    expect(validateRemoteUrl).toHaveBeenCalledTimes(2);
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(transform).toHaveBeenCalledWith(
+      expect.objectContaining({ sourceUrl: new URL("https://cdn.example.test/final.png") }),
+    );
+  });
+
   it("caps streamed bodies and rejects SVG content by signature", async () => {
     const oversizedHandler = createFarmImageHandler(
       resolveFarmImageConfig({ maximumResponseBody: 16 }),

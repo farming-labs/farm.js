@@ -103,7 +103,7 @@ export function createFarmImageHandler(
       let optimized = cache.get(cacheKey);
 
       if (!optimized) {
-        const sourceResponse = await fetchImageSource(
+        const fetchedSource = await fetchImageSource(
           sourceUrl,
           requestUrl.origin,
           config,
@@ -111,14 +111,17 @@ export function createFarmImageHandler(
           options.validateRemoteUrl,
           request.signal,
         );
-        const source = await readResponseWithLimit(sourceResponse, config.maximumResponseBody);
+        const source = await readResponseWithLimit(
+          fetchedSource.response,
+          config.maximumResponseBody,
+        );
         const sourceType = detectImageContentType(source);
         validateSourceType(sourceType, config);
         throwIfAborted(request.signal);
 
         const result = await options.transform({
           source,
-          sourceUrl,
+          sourceUrl: fetchedSource.url,
           sourceType,
           width,
           quality,
@@ -305,7 +308,7 @@ async function fetchImageSource(
   fetcher: typeof globalThis.fetch,
   validateRemoteUrl: CreateFarmImageHandlerOptions["validateRemoteUrl"],
   signal: AbortSignal,
-): Promise<Response> {
+): Promise<{ response: Response; url: URL }> {
   let currentUrl = initialUrl;
 
   for (let redirectCount = 0; ; redirectCount += 1) {
@@ -328,7 +331,7 @@ async function fetchImageSource(
           "Could not fetch source image",
         );
       }
-      return response;
+      return { response, url: currentUrl };
     }
 
     if (redirectCount >= config.maximumRedirects) {
