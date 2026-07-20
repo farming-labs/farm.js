@@ -88,6 +88,7 @@ mount, and shortcut together.
 | storage       | Providing storage clients and mounts for framework and integration code.          |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
 | cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
+| i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.    |
 | docs          | Serving the built-in docs runtime and docs API.                                   |
 | md            | Exposing markdown mirrors like /pricing.md.                                       |
 | mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |

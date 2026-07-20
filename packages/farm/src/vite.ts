@@ -71,10 +71,32 @@ import {
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
+import { getFarmI18nClientSnapshot } from "./i18n/server";
+import { localizeFarmPathname } from "./i18n/routing";
+import type { FarmI18nClientSnapshot } from "./i18n/types";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
+}
+
+const FARM_I18N_CLIENT_BRIDGE_ID = "\0farm-i18n-client-bridge";
+
+export function farmI18nClientBridgePlugin(): Plugin {
+  return {
+    name: "farm:i18n-client-bridge",
+    enforce: "pre",
+    resolveId(id, _importer, options) {
+      if (id === "@farmjs/core/i18n/server" && !options?.ssr) {
+        return FARM_I18N_CLIENT_BRIDGE_ID;
+      }
+      return null;
+    },
+    load(id) {
+      if (id !== FARM_I18N_CLIENT_BRIDGE_ID) return null;
+      return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farmjs/core/i18n/client";';
+    },
+  };
 }
 
 const FARM_CONFIG_FILENAMES = new Set([
@@ -95,6 +117,43 @@ const FARM_CONFIG_FILENAMES = new Set([
   "config.mjs",
   "config.cjs",
 ]);
+
+function serializeFarmInlineValue(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
+function escapeFarmHtmlAttribute(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function renderFarmI18nStaticHead(
+  requestPath: string,
+  snapshot: FarmI18nClientSnapshot | undefined,
+): string {
+  if (!snapshot) return "";
+  const runtime = `<script>window.__FARM_I18N__ = ${serializeFarmInlineValue(snapshot)};</script>`;
+  if (snapshot.routing === "none") return runtime;
+
+  const links = snapshot.locales.map(
+    (locale) =>
+      `<link rel="alternate" hreflang="${escapeFarmHtmlAttribute(locale)}" href="${escapeFarmHtmlAttribute(
+        localizeFarmPathname(requestPath, locale, snapshot),
+      )}">`,
+  );
+  links.push(
+    `<link rel="alternate" hreflang="x-default" href="${escapeFarmHtmlAttribute(
+      localizeFarmPathname(requestPath, snapshot.defaultLocale, snapshot),
+    )}">`,
+  );
+  return `${links.join("")}${runtime}`;
+}
 
 function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unknown> {
   const publicEnv = (config as any).env?.public;
@@ -444,9 +503,8 @@ export function farmPlugin(
       const farmConfig = farmApp.getConfig();
       let imageHandler: FarmImageHandler | null = null;
       if (farmConfig.images.provider !== "none") {
-        const { createNodeImageUrlValidator, createSharpImageTransformer } = await import(
-          "./image-sharp"
-        );
+        const { createNodeImageUrlValidator, createSharpImageTransformer } =
+          await import("./image-sharp");
         imageHandler = createFarmImageHandler(farmConfig.images, {
           transform: createSharpImageTransformer(),
           validateRemoteUrl: createNodeImageUrlValidator(farmConfig.images),
@@ -459,6 +517,13 @@ export function farmPlugin(
       }
       const sourceRoots = getFarmSourceRoots(farmConfig);
       server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
+      if (farmConfig.i18n.enabled) {
+        server.watcher.add(
+          farmConfig.i18n.messages.includes("{locale}")
+            ? path.dirname(farmConfig.i18n.messages)
+            : farmConfig.i18n.messages,
+        );
+      }
       const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
       const getExtraRouteTypes = () => [
         ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
@@ -475,11 +540,12 @@ export function farmPlugin(
             layers: farmConfig.layers,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
+            i18nConfig: farmConfig.i18n,
           });
           if (log) {
             logUpdate(
               "TYPE",
-              `${reason} - regenerated route, API, env, and image types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
+              `${reason} - regenerated route, API, env, image, and i18n types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
             );
           }
           if (openAPIManager) {
@@ -544,6 +610,11 @@ export function farmPlugin(
         /\/(?:opengraph-image|twitter-image)(?:\.(?:png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
           file.replace(/\\/g, "/"),
         );
+      const isI18nCatalogFile = (file: string) =>
+        farmConfig.i18n.enabled &&
+        file
+          .replace(/\\/g, "/")
+          .startsWith(farmConfig.i18n.messages.replace(/\\/g, "/").replace("{locale}", ""));
       const isTypeAffectingFile = (file: string, event: string) =>
         isPageFile(file) ||
         isApiRouteFile(file) ||
@@ -551,7 +622,8 @@ export function farmPlugin(
         layerConfigFiles.has(file.replace(/\\/g, "/")) ||
         isProgrammaticRouteFile(file) ||
         (isProgrammaticRouteSourceFile(file) &&
-          (event === "unlink" || fileContainsProgrammaticPageRoute(file)));
+          (event === "unlink" || fileContainsProgrammaticPageRoute(file))) ||
+        isI18nCatalogFile(file);
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
       let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
       const scheduleTypeArtifactGen = (file: string, event: string) => {
@@ -565,6 +637,13 @@ export function farmPlugin(
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
           if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
+          if (isI18nCatalogFile(file)) {
+            farmApp
+              ?.getI18nRuntime()
+              .reload()
+              .then(() => server.ws.send({ type: "full-reload", path: "*" }))
+              .catch((error) => logger.warn(`i18n catalog reload failed: ${error.message}`));
+          }
           if (
             (ev !== "change" || isStaticMetadataImageFile(file)) &&
             (isAppRuntimeFile(file) ||
@@ -614,7 +693,9 @@ export function farmPlugin(
         });
       }
 
-      apiRouteManager = new APIRouteManager(appDirs, server);
+      apiRouteManager = new APIRouteManager(appDirs, server, {
+        i18n: farmApp.getI18nRuntime(),
+      });
       await apiRouteManager.discoverRoutes();
       const discoveredWorkflows = await discoverFarmWorkflows(
         { ...farmConfig, workflows: workflowConfig },
@@ -642,7 +723,12 @@ export function farmPlugin(
         }
       }
 
-      middlewareManager = new MiddlewareManager(appDirs, server, farmConfig.middleware);
+      middlewareManager = new MiddlewareManager(
+        appDirs,
+        server,
+        farmConfig.middleware,
+        farmConfig.i18n,
+      );
       await middlewareManager.discover();
       if (pm) {
         for (const middleware of middlewareManager.getMiddlewares()) {
@@ -763,227 +849,175 @@ export function farmPlugin(
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
-      server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
-        const requestUrl = req.url || "/";
-        const requestMethod = req.method || "GET";
-        const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
-        const parsedRequestUrl = new URL(fullUrl);
-        const requestPathname = parsedRequestUrl.pathname;
-        const currentConfig = farmApp?.getConfig() ?? options;
+      server.middlewares.use(
+        _withAfterNodeMiddleware(async (req, res, next) => {
+          const requestUrl = req.url || "/";
+          const requestMethod = req.method || "GET";
+          const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
+          const parsedRequestUrl = new URL(fullUrl);
+          const requestPathname = parsedRequestUrl.pathname;
+          const currentConfig = farmApp?.getConfig() ?? options;
 
-        if (imageHandler && requestPathname === farmConfig.images.path) {
-          const imageResponse = await imageHandler(
-            createRequestFromNodeRequest(req, new URL(fullUrl)),
-          );
-          if (imageResponse) {
-            await sendWebResponse(res, imageResponse);
-            return;
+          if (imageHandler && requestPathname === farmConfig.images.path) {
+            const imageResponse = await imageHandler(
+              createRequestFromNodeRequest(req, new URL(fullUrl)),
+            );
+            if (imageResponse) {
+              await sendWebResponse(res, imageResponse);
+              return;
+            }
           }
-        }
 
-        const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
-        if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
-          res.statusCode = 200;
-          res.setHeader("Content-Type", "font/woff2");
-          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-          fs.createReadStream(farmDocsFontPath).pipe(res);
-          return;
-        }
-
-        if (
-          requestMethod === "GET" &&
-          (requestPathname === FARM_DEVTOOLS_PATH ||
-            requestPathname === `${FARM_DEVTOOLS_PATH}.json`)
-        ) {
-          if (!farmConfig.devtools.enabled) {
-            res.statusCode = 404;
-            res.setHeader("Content-Type", "text/plain; charset=utf-8");
-            res.setHeader("Cache-Control", "no-store");
-            res.end("Farm DevTools are disabled.");
+          const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
+          if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "font/woff2");
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+            fs.createReadStream(farmDocsFontPath).pipe(res);
             return;
           }
 
           if (
-            requestPathname === FARM_DEVTOOLS_PATH &&
-            parsedRequestUrl.searchParams.get("embedded") !== "1"
+            requestMethod === "GET" &&
+            (requestPathname === FARM_DEVTOOLS_PATH ||
+              requestPathname === `${FARM_DEVTOOLS_PATH}.json`)
           ) {
-            let launchUrl = new URL(farmConfig.basePath || "/", parsedRequestUrl.origin);
-            const referrer = req.headers.referer;
-            if (referrer) {
-              try {
-                const referrerUrl = new URL(referrer);
-                if (
-                  referrerUrl.origin === parsedRequestUrl.origin &&
-                  !referrerUrl.pathname.startsWith(FARM_DEVTOOLS_PATH)
-                ) {
-                  launchUrl = referrerUrl;
-                }
-              } catch {
-                // Ignore malformed referrers and return to the application root.
-              }
+            if (!farmConfig.devtools.enabled) {
+              res.statusCode = 404;
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.setHeader("Cache-Control", "no-store");
+              res.end("Farm DevTools are disabled.");
+              return;
             }
-            launchUrl.searchParams.set(FARM_DEVTOOLS_LAUNCH_PARAM, "1");
-            res.statusCode = 302;
-            res.setHeader("Location", `${launchUrl.pathname}${launchUrl.search}${launchUrl.hash}`);
+
+            if (
+              requestPathname === FARM_DEVTOOLS_PATH &&
+              parsedRequestUrl.searchParams.get("embedded") !== "1"
+            ) {
+              let launchUrl = new URL(farmConfig.basePath || "/", parsedRequestUrl.origin);
+              const referrer = req.headers.referer;
+              if (referrer) {
+                try {
+                  const referrerUrl = new URL(referrer);
+                  if (
+                    referrerUrl.origin === parsedRequestUrl.origin &&
+                    !referrerUrl.pathname.startsWith(FARM_DEVTOOLS_PATH)
+                  ) {
+                    launchUrl = referrerUrl;
+                  }
+                } catch {
+                  // Ignore malformed referrers and return to the application root.
+                }
+              }
+              launchUrl.searchParams.set(FARM_DEVTOOLS_LAUNCH_PARAM, "1");
+              res.statusCode = 302;
+              res.setHeader(
+                "Location",
+                `${launchUrl.pathname}${launchUrl.search}${launchUrl.hash}`,
+              );
+              res.setHeader("Cache-Control", "no-store");
+              res.setHeader("Vary", "Referer");
+              res.end();
+              return;
+            }
+
+            const snapshot = await createFarmDevtoolsSnapshot({
+              root: farmConfig.root,
+              srcDir: farmConfig.srcDir,
+              routeManager: farmApp.getRouteManager(),
+              apiRouteManager,
+              middlewareManager,
+              config: {
+                ...currentConfig,
+                openapi: options.openapi,
+              },
+              workflows: discoveredWorkflows,
+            });
+
+            res.statusCode = 200;
+            res.setHeader(
+              "Content-Type",
+              requestPathname.endsWith(".json")
+                ? "application/json; charset=utf-8"
+                : "text/html; charset=utf-8",
+            );
             res.setHeader("Cache-Control", "no-store");
-            res.setHeader("Vary", "Referer");
-            res.end();
+            res.end(
+              requestPathname.endsWith(".json")
+                ? JSON.stringify(snapshot, null, 2)
+                : renderFarmDevtoolsHtml(snapshot),
+            );
             return;
           }
 
-          const snapshot = await createFarmDevtoolsSnapshot({
-            root: farmConfig.root,
-            srcDir: farmConfig.srcDir,
-            routeManager: farmApp.getRouteManager(),
-            apiRouteManager,
-            middlewareManager,
-            config: {
-              ...currentConfig,
-              openapi: options.openapi,
-            },
-            workflows: discoveredWorkflows,
-          });
-
-          res.statusCode = 200;
-          res.setHeader(
-            "Content-Type",
-            requestPathname.endsWith(".json")
-              ? "application/json; charset=utf-8"
-              : "text/html; charset=utf-8",
-          );
-          res.setHeader("Cache-Control", "no-store");
-          res.end(
-            requestPathname.endsWith(".json")
-              ? JSON.stringify(snapshot, null, 2)
-              : renderFarmDevtoolsHtml(snapshot),
-          );
-          return;
-        }
-
-        // Handle OpenAPI docs route
-        if (openAPIManager && req.url === options.openapi?.route) {
-          const docsHandler = openAPIManager.getDocsRouteHandler();
-          return docsHandler(req, res);
-        }
-
-        const docsHeaders = new Headers();
-        for (const [key, value] of Object.entries(req.headers)) {
-          if (value) {
-            docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
+          // Handle OpenAPI docs route
+          if (openAPIManager && req.url === options.openapi?.route) {
+            const docsHandler = openAPIManager.getDocsRouteHandler();
+            return docsHandler(req, res);
           }
-        }
-        const docsResponse = await farmDocsHandler(
-          new Request(fullUrl, {
-            method: requestMethod,
-            headers: docsHeaders,
-          }),
-        );
-        if (docsResponse) {
-          await sendWebResponse(res, docsResponse);
-          return;
-        }
 
-        const markdownSourceResponse = await createFarmMarkdownSourceResponse({
-          request: new Request(fullUrl, {
-            method: requestMethod,
-            headers: docsHeaders,
-          }),
-          config: farmApp.getConfig().mdx,
-          resolveSource: async (pathname) => {
-            const match = farmApp.getRouteManager().matchRoute(pathname);
-            if (!match.route || !isFarmMarkdownPageFile(match.route.modulePath)) {
-              return null;
+          const docsHeaders = new Headers();
+          for (const [key, value] of Object.entries(req.headers)) {
+            if (value) {
+              docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
-            return {
-              source: await fs.promises.readFile(match.route.modulePath, "utf8"),
-              filePath: match.route.modulePath,
-            };
-          },
-        });
-        if (markdownSourceResponse) {
-          await sendWebResponse(res, markdownSourceResponse);
-          return;
-        }
-
-        const markdownResponse = await createMarkdownMirrorResponse({
-          request: new Request(fullUrl, {
-            method: requestMethod,
-            headers: docsHeaders,
-          }),
-          config: farmApp.getConfig().md,
-          routeExists: (pathname) => Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
-          renderPage: async (request) => fetch(request),
-        });
-        if (markdownResponse) {
-          await sendWebResponse(res, markdownResponse);
-          return;
-        }
-
-        if (
-          workflowHandler &&
-          (requestPathname === workflowConfig.route ||
-            requestPathname.startsWith(`${workflowConfig.route}/`))
-        ) {
-          let workflowBody: string | undefined;
-          if (requestMethod !== "GET" && requestMethod !== "HEAD") {
-            workflowBody = await new Promise<string>((resolve) => {
-              let data = "";
-              req.on("data", (chunk) => {
-                data += chunk;
-              });
-              req.on("end", () => {
-                resolve(data);
-              });
-            });
           }
-          const workflowResponse = await workflowHandler(
+          const docsResponse = await farmDocsHandler(
             new Request(fullUrl, {
               method: requestMethod,
               headers: docsHeaders,
-              body: workflowBody || undefined,
             }),
           );
-          if (workflowResponse) {
-            await sendWebResponse(res, workflowResponse);
+          if (docsResponse) {
+            await sendWebResponse(res, docsResponse);
             return;
           }
-        }
 
-        const configuredIntegrations = currentConfig.integrations;
-
-        const tryConfiguredIntegrationRoute = async () => {
-          const matchedRoute = matchIntegrationRoute(configuredIntegrations, {
-            pathname: requestPathname,
-            method: requestMethod,
+          const markdownSourceResponse = await createFarmMarkdownSourceResponse({
+            request: new Request(fullUrl, {
+              method: requestMethod,
+              headers: docsHeaders,
+            }),
+            config: farmApp.getConfig().mdx,
+            resolveSource: async (pathname) => {
+              const match = farmApp.getRouteManager().matchRoute(pathname);
+              if (!match.route || !isFarmMarkdownPageFile(match.route.modulePath)) {
+                return null;
+              }
+              return {
+                source: await fs.promises.readFile(match.route.modulePath, "utf8"),
+                filePath: match.route.modulePath,
+              };
+            },
           });
-
-          if (!matchedRoute) {
-            return false;
+          if (markdownSourceResponse) {
+            await sendWebResponse(res, markdownSourceResponse);
+            return;
           }
 
-          const startTime = Date.now();
+          const markdownResponse = await createMarkdownMirrorResponse({
+            request: new Request(fullUrl, {
+              method: requestMethod,
+              headers: docsHeaders,
+            }),
+            config: farmApp.getConfig().md,
+            routeExists: (pathname) =>
+              Boolean(farmApp.getRouteManager().matchRoute(pathname).route),
+            renderPage: async (request) => fetch(request),
+          });
+          if (markdownResponse) {
+            await sendWebResponse(res, markdownResponse);
+            return;
+          }
 
-          try {
-            if (pm) {
-              await pm.runHookParallel("beforeRequest", req, res);
-            }
-
-            if (res.writableEnded) {
-              const duration = Date.now() - startTime;
-              logResponse(requestMethod, requestUrl, res.statusCode || 200, duration, "API");
-              return true;
-            }
-
-            const headers = new Headers();
-            for (const [key, value] of Object.entries(req.headers)) {
-              if (value) {
-                headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-              }
-            }
-
-            let body: string | undefined;
-            if (req.method !== "GET" && req.method !== "HEAD") {
-              body = await new Promise<string>((resolve) => {
+          if (
+            workflowHandler &&
+            (requestPathname === workflowConfig.route ||
+              requestPathname.startsWith(`${workflowConfig.route}/`))
+          ) {
+            let workflowBody: string | undefined;
+            if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+              workflowBody = await new Promise<string>((resolve) => {
                 let data = "";
                 req.on("data", (chunk) => {
                   data += chunk;
@@ -993,515 +1027,620 @@ export function farmPlugin(
                 });
               });
             }
+            const workflowResponse = await workflowHandler(
+              new Request(fullUrl, {
+                method: requestMethod,
+                headers: docsHeaders,
+                body: workflowBody || undefined,
+              }),
+            );
+            if (workflowResponse) {
+              await sendWebResponse(res, workflowResponse);
+              return;
+            }
+          }
 
-            const integrationRequest = new Request(fullUrl, {
-              method: req.method,
-              headers,
-              body: body || undefined,
+          const configuredIntegrations = currentConfig.integrations;
+
+          const tryConfiguredIntegrationRoute = async () => {
+            const matchedRoute = matchIntegrationRoute(configuredIntegrations, {
+              pathname: requestPathname,
+              method: requestMethod,
             });
 
-            const dispatchIntegration = async (request: Request) => {
-              const result = await dispatchIntegrationRequest(
-                {
-                  integration: matchedRoute.integration,
-                  config: currentConfig,
-                  isDev: true,
-                  isProd: false,
-                },
-                request,
-              );
-              if (!result) {
-                throw new Error(`Matched integration route did not return a response`);
-              }
-              return result;
-            };
-            const response = pm
-              ? await pm.runRuntimeRequest(integrationRequest, dispatchIntegration, {
-                  kind: "integration",
-                  route: {
-                    pathname: requestPathname,
-                    pattern: matchedRoute.route.path,
-                  },
-                })
-              : await dispatchIntegration(integrationRequest);
-
-            if (!response) {
+            if (!matchedRoute) {
               return false;
             }
 
-            const duration = Date.now() - startTime;
-            logResponse(requestMethod, requestUrl, response.status, duration, "API");
+            const startTime = Date.now();
 
-            await sendWebResponse(res, response);
-            return true;
-          } catch (error) {
-            const duration = Date.now() - startTime;
-            logResponse(requestMethod, requestUrl, 500, duration, "API");
-            await emitPluginError("integration-handler", error, {
-              pathname: requestPathname,
-              routePath: requestUrl,
-              method: requestMethod,
-              integration: matchedRoute.key,
-            });
-            logger.error(`Integration route error: ${error}`);
-            if (!res.writableEnded) {
+            try {
+              if (pm) {
+                await pm.runHookParallel("beforeRequest", req, res);
+              }
+
+              if (res.writableEnded) {
+                const duration = Date.now() - startTime;
+                logResponse(requestMethod, requestUrl, res.statusCode || 200, duration, "API");
+                return true;
+              }
+
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(req.headers)) {
+                if (value) {
+                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                }
+              }
+
+              let body: string | undefined;
+              if (req.method !== "GET" && req.method !== "HEAD") {
+                body = await new Promise<string>((resolve) => {
+                  let data = "";
+                  req.on("data", (chunk) => {
+                    data += chunk;
+                  });
+                  req.on("end", () => {
+                    resolve(data);
+                  });
+                });
+              }
+
+              const integrationRequest = new Request(fullUrl, {
+                method: req.method,
+                headers,
+                body: body || undefined,
+              });
+
+              const dispatchIntegration = async (request: Request) => {
+                const result = await dispatchIntegrationRequest(
+                  {
+                    integration: matchedRoute.integration,
+                    config: currentConfig,
+                    isDev: true,
+                    isProd: false,
+                  },
+                  request,
+                );
+                if (!result) {
+                  throw new Error(`Matched integration route did not return a response`);
+                }
+                return result;
+              };
+              const response = pm
+                ? await pm.runRuntimeRequest(integrationRequest, dispatchIntegration, {
+                    kind: "integration",
+                    route: {
+                      pathname: requestPathname,
+                      pattern: matchedRoute.route.path,
+                    },
+                  })
+                : await dispatchIntegration(integrationRequest);
+
+              if (!response) {
+                return false;
+              }
+
+              const duration = Date.now() - startTime;
+              logResponse(requestMethod, requestUrl, response.status, duration, "API");
+
+              await sendWebResponse(res, response);
+              return true;
+            } catch (error) {
+              const duration = Date.now() - startTime;
+              logResponse(requestMethod, requestUrl, 500, duration, "API");
+              await emitPluginError("integration-handler", error, {
+                pathname: requestPathname,
+                routePath: requestUrl,
+                method: requestMethod,
+                integration: matchedRoute.key,
+              });
+              logger.error(`Integration route error: ${error}`);
+              if (!res.writableEnded) {
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Internal server error" }));
+              }
+              return true;
+            }
+          };
+
+          if (await tryConfiguredIntegrationRoute()) {
+            return;
+          }
+
+          const redirectMatch = farmApp.getRouteManager().matchRedirect(requestPathname);
+          if (redirectMatch) {
+            res.statusCode = redirectMatch.statusCode;
+            res.setHeader("Location", redirectMatch.destination);
+            res.end(`Redirecting to ${redirectMatch.destination}`);
+            return;
+          }
+
+          // Handle API routes first
+          const matchedApiRoute = apiRouteManager.matchRoute(requestPathname);
+          const hasMatchedApiRoute = Boolean(matchedApiRoute);
+          if (hasMatchedApiRoute || req.url?.startsWith("/api/")) {
+            const startTime = Date.now();
+            const method = req.method || "GET";
+            const urlPath = req.url || "/";
+            const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
+              .pathname;
+
+            try {
+              if (pm) {
+                await pm.runHookParallel("beforeRequest", req, res);
+              }
+
+              if (res.writableEnded) {
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, "API");
+                return;
+              }
+            } catch (error) {
+              await emitPluginError("before-request", error, { urlPath, method });
+              logger.error(`Request hook error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
               res.end(JSON.stringify({ error: "Internal server error" }));
+              return;
             }
-            return true;
+
+            const apiHandler = apiRouteManager.getHandler();
+            const hasExplicitAPIRoute =
+              hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
+            if (apiHandler && hasExplicitAPIRoute) {
+              // Log API request
+              // logRequest(method, urlPath, "API");
+
+              try {
+                // Convert Node.js request to Web Request
+                const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
+                const headers = new Headers();
+                for (const [key, value] of Object.entries(req.headers)) {
+                  if (value) {
+                    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                  }
+                }
+
+                // Get body for POST/PUT/PATCH
+                let body: string | undefined;
+                if (req.method !== "GET" && req.method !== "HEAD") {
+                  body = await new Promise<string>((resolve) => {
+                    let data = "";
+                    req.on("data", (chunk) => {
+                      data += chunk;
+                    });
+                    req.on("end", () => {
+                      resolve(data);
+                    });
+                  });
+                }
+
+                const request = new Request(url, {
+                  method: req.method,
+                  headers,
+                  body: body || undefined,
+                });
+
+                const apiLifecyclePayload = {
+                  pathname: new URL(url).pathname,
+                  method,
+                  routePath:
+                    apiRouteManager.matchRoute(new URL(url).pathname)?.route.path ||
+                    matchedApiRoute?.route.path ||
+                    urlPath,
+                };
+                const invokeAPIHandler = async (runtimeRequest: Request) => {
+                  const handledRequest: Request = pm
+                    ? await pm.runHookSerial(
+                        "beforeApiHandler",
+                        runtimeRequest,
+                        apiLifecyclePayload,
+                      )
+                    : runtimeRequest;
+
+                  const response = await apiHandler(handledRequest);
+                  return pm
+                    ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
+                    : response;
+                };
+                const handledResponse: Response = pm
+                  ? await pm.runRuntimeRequest(request, invokeAPIHandler, {
+                      kind: "api",
+                      route: {
+                        pathname: apiLifecyclePayload.pathname,
+                        pattern: apiLifecyclePayload.routePath,
+                      },
+                    })
+                  : await invokeAPIHandler(request);
+
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, handledResponse.status, duration, "API");
+
+                // Send response
+                await sendWebResponse(res, handledResponse);
+                return;
+              } catch (error) {
+                await emitPluginError("api-handler", error, { urlPath, method });
+                logger.error(`API route error: ${error}`);
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Internal server error" }));
+                return;
+              }
+            }
+
+            if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
+              try {
+                const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
+                const headers = new Headers();
+                for (const [key, value] of Object.entries(req.headers)) {
+                  if (value) {
+                    headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                  }
+                }
+
+                let body: string | undefined;
+                if (req.method !== "GET" && req.method !== "HEAD") {
+                  body = await new Promise<string>((resolve) => {
+                    let data = "";
+                    req.on("data", (chunk) => {
+                      data += chunk;
+                    });
+                    req.on("end", () => {
+                      resolve(data);
+                    });
+                  });
+                }
+
+                const request = new Request(url, {
+                  method: req.method,
+                  headers,
+                  body: body || undefined,
+                });
+
+                const apiLifecyclePayload = {
+                  pathname,
+                  method,
+                  routePath: urlPath,
+                };
+                const invokeDocsAPIHandler = async (runtimeRequest: Request) => {
+                  const handledRequest: Request = pm
+                    ? await pm.runHookSerial(
+                        "beforeApiHandler",
+                        runtimeRequest,
+                        apiLifecyclePayload,
+                      )
+                    : runtimeRequest;
+                  const response = await farmDocsAPIHandler(handledRequest);
+                  if (!response) {
+                    return new Response(null, { status: 404 });
+                  }
+                  return pm
+                    ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
+                    : response;
+                };
+                const docsResponse = pm
+                  ? await pm.runRuntimeRequest(request, invokeDocsAPIHandler, {
+                      kind: "docs",
+                      route: {
+                        pathname,
+                        pattern: apiLifecyclePayload.routePath,
+                      },
+                    })
+                  : await invokeDocsAPIHandler(request);
+                if (docsResponse) {
+                  const duration = Date.now() - startTime;
+                  logResponse(method, urlPath, docsResponse.status, duration, "API");
+                  await sendWebResponse(res, docsResponse);
+                  return;
+                }
+              } catch (error) {
+                await emitPluginError("docs-api-handler", error, { urlPath, method });
+                logger.error(`Docs API route error: ${error}`);
+                res.statusCode = 500;
+                res.setHeader("Content-Type", "application/json");
+                res.end(JSON.stringify({ error: "Internal server error" }));
+                return;
+              }
+            }
+
+            const duration = Date.now() - startTime;
+            logResponse(method, urlPath, 404, duration, "API");
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ error: "API route not found", pathname }));
+            return;
           }
-        };
 
-        if (await tryConfiguredIntegrationRoute()) {
-          return;
-        }
+          // Skip internal Vite requests
+          if (
+            req.url?.startsWith("/@") ||
+            req.url?.startsWith("/node_modules") ||
+            (requestPathname.includes(".") && !requestPathname.endsWith(".html"))
+          ) {
+            return next();
+          }
 
-        const redirectMatch = farmApp.getRouteManager().matchRedirect(requestPathname);
-        if (redirectMatch) {
-          res.statusCode = redirectMatch.statusCode;
-          res.setHeader("Location", redirectMatch.destination);
-          res.end(`Redirecting to ${redirectMatch.destination}`);
-          return;
-        }
+          // Handle SPA page-data requests for client-side navigation
+          if (req.url?.startsWith("/__farm/page-data")) {
+            const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
+            const targetPath = urlObj.searchParams.get("path") || "/";
 
-        // Handle API routes first
-        const matchedApiRoute = apiRouteManager.matchRoute(requestPathname);
-        const hasMatchedApiRoute = Boolean(matchedApiRoute);
-        if (hasMatchedApiRoute || req.url?.startsWith("/api/")) {
+            try {
+              const request = createRequestFromNodeRequest(req, urlObj);
+              const deploymentMismatch = getFarmDeploymentMismatch(
+                request,
+                farmConfig.deploymentId,
+              );
+              if (deploymentMismatch) {
+                await sendWebResponse(
+                  res,
+                  createFarmDeploymentMismatchResponse(deploymentMismatch),
+                );
+                return;
+              }
+
+              const targetRequestUrl = new URL(targetPath, request.url);
+              const targetRequest = new Request(targetRequestUrl, {
+                method: "GET",
+                headers: request.headers,
+              });
+              await farmApp.getServerRenderer().runWithRequestContext(targetRequest, async () => {
+                const routeManager = farmApp.getRouteManager();
+                if (pm) {
+                  await pm.runHookParallel("beforeRouteMatch", {
+                    pathname: targetPath,
+                    method: req.method || "GET",
+                  });
+                }
+                const match = routeManager.matchRoute(targetPath);
+                if (pm) {
+                  await pm.runHookParallel("afterRouteMatch", {
+                    pathname: targetPath,
+                    matched: !!match?.route,
+                    routePattern: match?.route?.pattern || null,
+                    params: match?.params || {},
+                    layoutPatterns: (match?.layouts || []).map((l) => l.pattern),
+                  });
+                }
+
+                if (!match) {
+                  res.statusCode = 404;
+                  res.setHeader("Content-Type", "application/json");
+                  res.end(JSON.stringify({ error: "Route not found" }));
+                  return;
+                }
+
+                const { route, params, layouts } = match;
+
+                // Check if route was found
+                if (!route) {
+                  res.statusCode = 404;
+                  res.setHeader("Content-Type", "application/json");
+                  res.end(JSON.stringify({ error: "Route not found" }));
+                  return;
+                }
+
+                // Load route module to get metadata
+                const routeModule = await routeManager.loadRouteModule(route.modulePath);
+
+                const moduleMetadata = getClientModuleMetadata(
+                  route.modulePath,
+                  server.config.root,
+                );
+                const isClientComponent = moduleMetadata.isClientComponent;
+                const shouldHydrate = moduleMetadata.shouldHydrate;
+
+                // Collect metadata from layouts and page
+                let mergedMetadata: Record<string, any> = {};
+                const layoutModules = await Promise.all(
+                  layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
+                );
+
+                for (const layoutModule of layoutModules) {
+                  if ((layoutModule as any).metadata) {
+                    mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
+                  }
+                }
+
+                if ((routeModule as any).metadata) {
+                  mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
+                }
+
+                // Build search params
+                const targetUrl = new URL(targetPath, "http://localhost");
+                const searchParams: Record<string, string> = {};
+                targetUrl.searchParams.forEach((value, key) => {
+                  searchParams[key] = value;
+                });
+                const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
+                  request,
+                  params,
+                  search: searchParams,
+                  path: targetUrl.pathname,
+                });
+                const routeProps = await parseRouteModuleProps(routeModule as RouteModuleLike, {
+                  props: withFarmRouteContext(
+                    {
+                      params,
+                      searchParams: Promise.resolve(searchParams),
+                      path: targetUrl.pathname,
+                    },
+                    routeContext,
+                  ),
+                  search: searchParams,
+                  routePath: route.pattern,
+                });
+
+                // Convert absolute paths to URL paths (relative to project root)
+                const projectRoot = server.config.root;
+                const toUrlPath = (absolutePath: string) => {
+                  if (absolutePath.startsWith(projectRoot)) {
+                    return absolutePath.slice(projectRoot.length);
+                  }
+                  return absolutePath;
+                };
+
+                // Return page data for SPA navigation
+                const pageData = {
+                  props: {
+                    params: routeProps.params,
+                    search: (routeProps as any).search,
+                    searchParams: (routeProps as any).search,
+                    ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
+                    ...((routeProps as any).__farmCanonicalPath
+                      ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
+                      : {}),
+                    ...((routeProps as any).__farmRoutePropsResolved
+                      ? { __farmRoutePropsResolved: true }
+                      : {}),
+                  },
+                  canonicalPath: (routeProps as any).__farmCanonicalPath,
+                  modulePath: toUrlPath(route.modulePath),
+                  isClientComponent,
+                  shouldHydrate,
+                  metadata: {
+                    title: mergedMetadata.title,
+                    description: mergedMetadata.description,
+                  },
+                  layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
+                  i18n: getFarmI18nClientSnapshot(),
+                };
+
+                await sendWebResponse(
+                  res,
+                  createDeferredDataResponse(
+                    pageData,
+                    {
+                      status: 200,
+                      headers: {
+                        "Cache-Control": "private, max-age=0",
+                        [FARM_DEPLOYMENT_ID_HEADER]: farmConfig.deploymentId,
+                      },
+                    },
+                    {
+                      onError(error, id) {
+                        logger.error(`Deferred route data ${id} failed: ${error}`);
+                      },
+                    },
+                  ),
+                );
+                return;
+              });
+              return;
+            } catch (error) {
+              await emitPluginError("page-data", error, {
+                path: targetPath,
+              });
+              console.error("[Farm.js] Page data error:", error);
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(
+                JSON.stringify({
+                  error: "Failed to load page data",
+                  message: error instanceof Error ? error.message : "Unknown error",
+                }),
+              );
+              return;
+            }
+          }
+
           const startTime = Date.now();
           const method = req.method || "GET";
           const urlPath = req.url || "/";
           const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
             .pathname;
+          const routeManager = farmApp.getRouteManager();
+          if (pm) {
+            await pm.runHookParallel("beforeRouteMatch", {
+              pathname,
+              method,
+            });
+          }
+          const routeMatch = routeManager.matchRoute(pathname);
+          if (pm) {
+            await pm.runHookParallel("afterRouteMatch", {
+              pathname,
+              matched: !!routeMatch?.route,
+              routePattern: routeMatch?.route?.pattern || null,
+              params: routeMatch?.params || {},
+              layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
+            });
+          }
+          const renderPayload = {
+            pathname,
+            method,
+            routePattern: routeMatch?.route?.pattern || null,
+            params: routeMatch?.params || {},
+          };
+          let runtimeSession: FarmPluginRuntimeSession | undefined;
+          if (pm) {
+            try {
+              runtimeSession = await pm.beginRuntimeRequest(
+                createRequestFromNodeRequest(req, new URL(fullUrl)),
+                {
+                  kind: "page",
+                  route: {
+                    pathname,
+                    pattern: renderPayload.routePattern,
+                    params: renderPayload.params,
+                  },
+                },
+              );
+              pm.copyRequestContext(runtimeSession.request, req);
+              applyWebRequestToNodeRequest(runtimeSession.request, req);
+
+              if (runtimeSession.response) {
+                const response = await pm.endRuntimeRequest(
+                  runtimeSession,
+                  runtimeSession.response,
+                );
+                await sendWebResponse(res, response);
+                return;
+              }
+            } catch (error) {
+              await emitPluginError("runtime-before", error, { pathname });
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "text/plain; charset=utf-8");
+              res.end("Internal Server Error");
+              return;
+            }
+          }
+
+          // logRequest(method, urlPath, "PAGE");
 
           try {
+            if (middlewareManager) {
+              const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
+              const handled = await farmApp
+                .getServerRenderer()
+                .runWithRequestContext(middlewareRequest, () =>
+                  middlewareManager!.execute(req, res),
+                );
+              if (handled) {
+                if (pm && runtimeSession) {
+                  pm.copyRequestContext(req, runtimeSession.request);
+                  await pm.endRuntimeRequest(
+                    runtimeSession,
+                    new Response(null, {
+                      status: res.statusCode || 200,
+                      headers: createHeadersFromNodeResponse(res),
+                    }),
+                  );
+                }
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+                return; // Middleware handled the response
+              }
+            }
+
+            // Run beforeRequest hooks
             if (pm) {
               await pm.runHookParallel("beforeRequest", req, res);
             }
 
             if (res.writableEnded) {
-              const duration = Date.now() - startTime;
-              logResponse(method, urlPath, res.statusCode || 200, duration, "API");
-              return;
-            }
-          } catch (error) {
-            await emitPluginError("before-request", error, { urlPath, method });
-            logger.error(`Request hook error: ${error}`);
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Internal server error" }));
-            return;
-          }
-
-          const apiHandler = apiRouteManager.getHandler();
-          const hasExplicitAPIRoute =
-            hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
-          if (apiHandler && hasExplicitAPIRoute) {
-            // Log API request
-            // logRequest(method, urlPath, "API");
-
-            try {
-              // Convert Node.js request to Web Request
-              const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
-              const headers = new Headers();
-              for (const [key, value] of Object.entries(req.headers)) {
-                if (value) {
-                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                }
-              }
-
-              // Get body for POST/PUT/PATCH
-              let body: string | undefined;
-              if (req.method !== "GET" && req.method !== "HEAD") {
-                body = await new Promise<string>((resolve) => {
-                  let data = "";
-                  req.on("data", (chunk) => {
-                    data += chunk;
-                  });
-                  req.on("end", () => {
-                    resolve(data);
-                  });
-                });
-              }
-
-              const request = new Request(url, {
-                method: req.method,
-                headers,
-                body: body || undefined,
-              });
-
-              const apiLifecyclePayload = {
-                pathname: new URL(url).pathname,
-                method,
-                routePath:
-                  apiRouteManager.matchRoute(new URL(url).pathname)?.route.path ||
-                  matchedApiRoute?.route.path ||
-                  urlPath,
-              };
-              const invokeAPIHandler = async (runtimeRequest: Request) => {
-                const handledRequest: Request = pm
-                  ? await pm.runHookSerial(
-                      "beforeApiHandler",
-                      runtimeRequest,
-                      apiLifecyclePayload,
-                    )
-                  : runtimeRequest;
-
-                const response = await apiHandler(handledRequest);
-                return pm
-                  ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
-                  : response;
-              };
-              const handledResponse: Response = pm
-                ? await pm.runRuntimeRequest(request, invokeAPIHandler, {
-                    kind: "api",
-                    route: {
-                      pathname: apiLifecyclePayload.pathname,
-                      pattern: apiLifecyclePayload.routePath,
-                    },
-                  })
-                : await invokeAPIHandler(request);
-
-              const duration = Date.now() - startTime;
-              logResponse(method, urlPath, handledResponse.status, duration, "API");
-
-              // Send response
-              await sendWebResponse(res, handledResponse);
-              return;
-            } catch (error) {
-              await emitPluginError("api-handler", error, { urlPath, method });
-              logger.error(`API route error: ${error}`);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Internal server error" }));
-              return;
-            }
-          }
-
-          if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
-            try {
-              const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
-              const headers = new Headers();
-              for (const [key, value] of Object.entries(req.headers)) {
-                if (value) {
-                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-                }
-              }
-
-              let body: string | undefined;
-              if (req.method !== "GET" && req.method !== "HEAD") {
-                body = await new Promise<string>((resolve) => {
-                  let data = "";
-                  req.on("data", (chunk) => {
-                    data += chunk;
-                  });
-                  req.on("end", () => {
-                    resolve(data);
-                  });
-                });
-              }
-
-              const request = new Request(url, {
-                method: req.method,
-                headers,
-                body: body || undefined,
-              });
-
-              const apiLifecyclePayload = {
-                pathname,
-                method,
-                routePath: urlPath,
-              };
-              const invokeDocsAPIHandler = async (runtimeRequest: Request) => {
-                const handledRequest: Request = pm
-                  ? await pm.runHookSerial(
-                      "beforeApiHandler",
-                      runtimeRequest,
-                      apiLifecyclePayload,
-                    )
-                  : runtimeRequest;
-                const response = await farmDocsAPIHandler(handledRequest);
-                if (!response) {
-                  return new Response(null, { status: 404 });
-                }
-                return pm
-                  ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
-                  : response;
-              };
-              const docsResponse = pm
-                ? await pm.runRuntimeRequest(request, invokeDocsAPIHandler, {
-                    kind: "docs",
-                    route: {
-                      pathname,
-                      pattern: apiLifecyclePayload.routePath,
-                    },
-                  })
-                : await invokeDocsAPIHandler(request);
-              if (docsResponse) {
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, docsResponse.status, duration, "API");
-                await sendWebResponse(res, docsResponse);
-                return;
-              }
-            } catch (error) {
-              await emitPluginError("docs-api-handler", error, { urlPath, method });
-              logger.error(`Docs API route error: ${error}`);
-              res.statusCode = 500;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Internal server error" }));
-              return;
-            }
-          }
-
-          const duration = Date.now() - startTime;
-          logResponse(method, urlPath, 404, duration, "API");
-          res.statusCode = 404;
-          res.setHeader("Content-Type", "application/json");
-          res.end(JSON.stringify({ error: "API route not found", pathname }));
-          return;
-        }
-
-        // Skip internal Vite requests
-        if (
-          req.url?.startsWith("/@") ||
-          req.url?.startsWith("/node_modules") ||
-          (requestPathname.includes(".") && !requestPathname.endsWith(".html"))
-        ) {
-          return next();
-        }
-
-        // Handle SPA page-data requests for client-side navigation
-        if (req.url?.startsWith("/__farm/page-data")) {
-          const urlObj = new URL(req.url, `http://${req.headers.host || "localhost:3000"}`);
-          const targetPath = urlObj.searchParams.get("path") || "/";
-
-          try {
-            const request = createRequestFromNodeRequest(req, urlObj);
-            const deploymentMismatch = getFarmDeploymentMismatch(request, farmConfig.deploymentId);
-            if (deploymentMismatch) {
-              await sendWebResponse(res, createFarmDeploymentMismatchResponse(deploymentMismatch));
-              return;
-            }
-
-            const routeManager = farmApp.getRouteManager();
-            if (pm) {
-              await pm.runHookParallel("beforeRouteMatch", {
-                pathname: targetPath,
-                method: req.method || "GET",
-              });
-            }
-            const match = routeManager.matchRoute(targetPath);
-            if (pm) {
-              await pm.runHookParallel("afterRouteMatch", {
-                pathname: targetPath,
-                matched: !!match?.route,
-                routePattern: match?.route?.pattern || null,
-                params: match?.params || {},
-                layoutPatterns: (match?.layouts || []).map((l) => l.pattern),
-              });
-            }
-
-            if (!match) {
-              res.statusCode = 404;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Route not found" }));
-              return;
-            }
-
-            const { route, params, layouts } = match;
-
-            // Check if route was found
-            if (!route) {
-              res.statusCode = 404;
-              res.setHeader("Content-Type", "application/json");
-              res.end(JSON.stringify({ error: "Route not found" }));
-              return;
-            }
-
-            // Load route module to get metadata
-            const routeModule = await routeManager.loadRouteModule(route.modulePath);
-
-            const moduleMetadata = getClientModuleMetadata(route.modulePath, server.config.root);
-            const isClientComponent = moduleMetadata.isClientComponent;
-            const shouldHydrate = moduleMetadata.shouldHydrate;
-
-            // Collect metadata from layouts and page
-            let mergedMetadata: Record<string, any> = {};
-            const layoutModules = await Promise.all(
-              layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
-            );
-
-            for (const layoutModule of layoutModules) {
-              if ((layoutModule as any).metadata) {
-                mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
-              }
-            }
-
-            if ((routeModule as any).metadata) {
-              mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
-            }
-
-            // Build search params
-            const targetUrl = new URL(targetPath, "http://localhost");
-            const searchParams: Record<string, string> = {};
-            targetUrl.searchParams.forEach((value, key) => {
-              searchParams[key] = value;
-            });
-            const routeContext = await resolveFarmRouteContext(farmApp.getConfig(), {
-              request,
-              params,
-              search: searchParams,
-              path: targetUrl.pathname,
-            });
-            const routeProps = await parseRouteModuleProps(routeModule as RouteModuleLike, {
-              props: withFarmRouteContext(
-                {
-                  params,
-                  searchParams: Promise.resolve(searchParams),
-                  path: targetUrl.pathname,
-                },
-                routeContext,
-              ),
-              search: searchParams,
-              routePath: route.pattern,
-            });
-
-            // Convert absolute paths to URL paths (relative to project root)
-            const projectRoot = server.config.root;
-            const toUrlPath = (absolutePath: string) => {
-              if (absolutePath.startsWith(projectRoot)) {
-                return absolutePath.slice(projectRoot.length);
-              }
-              return absolutePath;
-            };
-
-            // Return page data for SPA navigation
-            const pageData = {
-              props: {
-                params: routeProps.params,
-                search: (routeProps as any).search,
-                searchParams: (routeProps as any).search,
-                ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
-                ...((routeProps as any).__farmCanonicalPath
-                  ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
-                  : {}),
-                ...((routeProps as any).__farmRoutePropsResolved
-                  ? { __farmRoutePropsResolved: true }
-                  : {}),
-              },
-              canonicalPath: (routeProps as any).__farmCanonicalPath,
-              modulePath: toUrlPath(route.modulePath),
-              isClientComponent,
-              shouldHydrate,
-              metadata: {
-                title: mergedMetadata.title,
-                description: mergedMetadata.description,
-              },
-              layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
-            };
-
-            await sendWebResponse(
-              res,
-              createDeferredDataResponse(
-                pageData,
-                {
-                  status: 200,
-                  headers: {
-                    "Cache-Control": "private, max-age=0",
-                    [FARM_DEPLOYMENT_ID_HEADER]: farmConfig.deploymentId,
-                  },
-                },
-                {
-                  onError(error, id) {
-                    logger.error(`Deferred route data ${id} failed: ${error}`);
-                  },
-                },
-              ),
-            );
-            return;
-          } catch (error) {
-            await emitPluginError("page-data", error, {
-              path: targetPath,
-            });
-            console.error("[Farm.js] Page data error:", error);
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(
-              JSON.stringify({
-                error: "Failed to load page data",
-                message: error instanceof Error ? error.message : "Unknown error",
-              }),
-            );
-            return;
-          }
-        }
-
-        const startTime = Date.now();
-        const method = req.method || "GET";
-        const urlPath = req.url || "/";
-        const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
-          .pathname;
-        const routeManager = farmApp.getRouteManager();
-        if (pm) {
-          await pm.runHookParallel("beforeRouteMatch", {
-            pathname,
-            method,
-          });
-        }
-        const routeMatch = routeManager.matchRoute(pathname);
-        if (pm) {
-          await pm.runHookParallel("afterRouteMatch", {
-            pathname,
-            matched: !!routeMatch?.route,
-            routePattern: routeMatch?.route?.pattern || null,
-            params: routeMatch?.params || {},
-            layoutPatterns: (routeMatch?.layouts || []).map((l) => l.pattern),
-          });
-        }
-        const renderPayload = {
-          pathname,
-          method,
-          routePattern: routeMatch?.route?.pattern || null,
-          params: routeMatch?.params || {},
-        };
-        let runtimeSession: FarmPluginRuntimeSession | undefined;
-        if (pm) {
-          try {
-            runtimeSession = await pm.beginRuntimeRequest(
-              createRequestFromNodeRequest(req, new URL(fullUrl)),
-              {
-                kind: "page",
-                route: {
-                  pathname,
-                  pattern: renderPayload.routePattern,
-                  params: renderPayload.params,
-                },
-              },
-            );
-            pm.copyRequestContext(runtimeSession.request, req);
-            applyWebRequestToNodeRequest(runtimeSession.request, req);
-
-            if (runtimeSession.response) {
-              const response = await pm.endRuntimeRequest(runtimeSession, runtimeSession.response);
-              await sendWebResponse(res, response);
-              return;
-            }
-          } catch (error) {
-            await emitPluginError("runtime-before", error, { pathname });
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "text/plain; charset=utf-8");
-            res.end("Internal Server Error");
-            return;
-          }
-        }
-
-        // logRequest(method, urlPath, "PAGE");
-
-        try {
-          if (middlewareManager) {
-            const handled = await middlewareManager.execute(req, res);
-            if (handled) {
               if (pm && runtimeSession) {
                 pm.copyRequestContext(req, runtimeSession.request);
                 await pm.endRuntimeRequest(
@@ -1512,193 +1651,174 @@ export function farmPlugin(
                   }),
                 );
               }
+              // Log response if already ended
               const duration = Date.now() - startTime;
               logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-              return; // Middleware handled the response
+              return;
             }
-          }
 
-          // Run beforeRequest hooks
-          if (pm) {
-            await pm.runHookParallel("beforeRequest", req, res);
-          }
+            // Intercept res.end to call afterResponse hooks and log response before response is fully sent
+            const originalWrite = res.write.bind(res);
+            const originalEnd = res.end.bind(res);
+            let afterResponseCalled = false;
+            const htmlChunks: Buffer[] = [];
+            let didStreamHtml = false;
+            const bufferPluginResponse = Boolean(
+              runtimeSession &&
+              pm
+                ?.getPlugins()
+                .some(
+                  (plugin) =>
+                    plugin.runtime?.after ||
+                    plugin.render?.html ||
+                    plugin.afterRender ||
+                    plugin.transformHTML,
+                ),
+            );
 
-          if (res.writableEnded) {
-            if (pm && runtimeSession) {
-              pm.copyRequestContext(req, runtimeSession.request);
-              await pm.endRuntimeRequest(
-                runtimeSession,
-                new Response(null, {
-                  status: res.statusCode || 200,
-                  headers: createHeadersFromNodeResponse(res),
-                }),
-              );
-            }
-            // Log response if already ended
-            const duration = Date.now() - startTime;
-            logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-            return;
-          }
+            res.write = ((chunk: any, ...args: any[]) => {
+              const contentTypeHeader =
+                res.getHeader("content-type") || res.getHeader("Content-Type");
+              const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+              const isHtmlResponse = contentType.includes("text/html");
 
-          // Intercept res.end to call afterResponse hooks and log response before response is fully sent
-          const originalWrite = res.write.bind(res);
-          const originalEnd = res.end.bind(res);
-          let afterResponseCalled = false;
-          const htmlChunks: Buffer[] = [];
-          let didStreamHtml = false;
-          const bufferPluginResponse = Boolean(
-            runtimeSession &&
-              pm?.getPlugins().some(
-                (plugin) =>
-                  plugin.runtime?.after ||
-                  plugin.render?.html ||
-                  plugin.afterRender ||
-                  plugin.transformHTML,
-              ),
-          );
-
-          res.write = ((chunk: any, ...args: any[]) => {
-            const contentTypeHeader =
-              res.getHeader("content-type") || res.getHeader("Content-Type");
-            const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
-            const isHtmlResponse = contentType.includes("text/html");
-
-            if (isHtmlResponse && chunk !== undefined && chunk !== null) {
-              const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-              htmlChunks.push(bufferChunk);
-              didStreamHtml = true;
-              if (bufferPluginResponse) {
-                const callback = args.find((arg) => typeof arg === "function");
-                callback?.();
-                return true;
+              if (isHtmlResponse && chunk !== undefined && chunk !== null) {
+                const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+                htmlChunks.push(bufferChunk);
+                didStreamHtml = true;
+                if (bufferPluginResponse) {
+                  const callback = args.find((arg) => typeof arg === "function");
+                  callback?.();
+                  return true;
+                }
+                const writeResult = originalWrite(chunk, ...args);
+                if (typeof (res as any).flush === "function") {
+                  (res as any).flush();
+                }
+                return writeResult;
               }
-              const writeResult = originalWrite(chunk, ...args);
-              if (typeof (res as any).flush === "function") {
-                (res as any).flush();
-              }
-              return writeResult;
-            }
 
-            return originalWrite(chunk, ...args);
-          }) as any;
+              return originalWrite(chunk, ...args);
+            }) as any;
 
-          res.end = ((...args: any[]) => {
-            if (!afterResponseCalled && pm) {
-              afterResponseCalled = true;
-              const duration = Date.now() - startTime;
-              logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-              const originalEndArgs = [...args];
-              Promise.resolve()
-                .then(async () => {
-                  const contentTypeHeader =
-                    res.getHeader("content-type") || res.getHeader("Content-Type");
-                  const contentType =
-                    typeof contentTypeHeader === "string" ? contentTypeHeader : "";
-                  const isHtmlResponse = contentType.includes("text/html");
-                  if (isHtmlResponse) {
-                    const firstArg = args[0];
-                    if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
-                      const bufferChunk = Buffer.isBuffer(firstArg)
-                        ? firstArg
-                        : Buffer.from(firstArg, "utf-8");
-                      htmlChunks.push(bufferChunk);
+            res.end = ((...args: any[]) => {
+              if (!afterResponseCalled && pm) {
+                afterResponseCalled = true;
+                const duration = Date.now() - startTime;
+                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+                const originalEndArgs = [...args];
+                Promise.resolve()
+                  .then(async () => {
+                    const contentTypeHeader =
+                      res.getHeader("content-type") || res.getHeader("Content-Type");
+                    const contentType =
+                      typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+                    const isHtmlResponse = contentType.includes("text/html");
+                    if (isHtmlResponse) {
+                      const firstArg = args[0];
+                      if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
+                        const bufferChunk = Buffer.isBuffer(firstArg)
+                          ? firstArg
+                          : Buffer.from(firstArg, "utf-8");
+                        htmlChunks.push(bufferChunk);
+                      }
+
+                      const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
+                      let html = fullHtml;
+                      if (!didStreamHtml || bufferPluginResponse) {
+                        html = await pm.runHookSerial("transformHTML", html);
+                        html = await pm.runHookSerial("afterRender", html, renderPayload);
+                        const callback =
+                          typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+                            ? originalEndArgs[originalEndArgs.length - 1]
+                            : undefined;
+                        originalEndArgs.length = 0;
+                        originalEndArgs.push(html);
+                        if (callback) originalEndArgs.push(callback);
+                      } else {
+                        await pm.runHookSerial("transformHTML", fullHtml);
+                        await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+                      }
                     }
 
-                    const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
-                    let html = fullHtml;
-                    if (!didStreamHtml || bufferPluginResponse) {
-                      html = await pm.runHookSerial("transformHTML", html);
-                      html = await pm.runHookSerial("afterRender", html, renderPayload);
-                      const callback =
-                        typeof originalEndArgs[originalEndArgs.length - 1] === "function"
-                          ? originalEndArgs[originalEndArgs.length - 1]
-                          : undefined;
-                      originalEndArgs.length = 0;
-                      originalEndArgs.push(html);
-                      if (callback) originalEndArgs.push(callback);
-                    } else {
-                      await pm.runHookSerial("transformHTML", fullHtml);
-                      await pm.runHookSerial("afterRender", fullHtml, renderPayload);
-                    }
-                  }
-
-                  if (runtimeSession) {
-                    pm.copyRequestContext(req, runtimeSession.request);
-                    const status = res.statusCode || 200;
-                    const canHaveBody =
-                      method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
-                    const firstArg = originalEndArgs[0];
-                    const responseBody = canHaveBody
-                      ? isHtmlResponse
-                        ? didStreamHtml && !bufferPluginResponse
-                          ? Buffer.concat(htmlChunks)
+                    if (runtimeSession) {
+                      pm.copyRequestContext(req, runtimeSession.request);
+                      const status = res.statusCode || 200;
+                      const canHaveBody =
+                        method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
+                      const firstArg = originalEndArgs[0];
+                      const responseBody = canHaveBody
+                        ? isHtmlResponse
+                          ? didStreamHtml && !bufferPluginResponse
+                            ? Buffer.concat(htmlChunks)
+                            : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
+                              ? firstArg
+                              : undefined
                           : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
                             ? firstArg
                             : undefined
-                        : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
-                          ? firstArg
-                          : undefined
-                      : null;
-                    const runtimeResponse = await pm.endRuntimeRequest(
-                      runtimeSession,
-                      new Response(
-                        Buffer.isBuffer(responseBody)
-                          ? responseBody.toString("utf8")
-                          : responseBody,
-                        {
-                          status,
-                          headers: createHeadersFromNodeResponse(res),
-                        },
-                      ),
-                    );
-                    applyWebResponseToNodeResponse(runtimeResponse, res);
+                        : null;
+                      const runtimeResponse = await pm.endRuntimeRequest(
+                        runtimeSession,
+                        new Response(
+                          Buffer.isBuffer(responseBody)
+                            ? responseBody.toString("utf8")
+                            : responseBody,
+                          {
+                            status,
+                            headers: createHeadersFromNodeResponse(res),
+                          },
+                        ),
+                      );
+                      applyWebResponseToNodeResponse(runtimeResponse, res);
 
-                    if (!didStreamHtml || bufferPluginResponse) {
-                      const callback =
-                        typeof originalEndArgs[originalEndArgs.length - 1] === "function"
-                          ? originalEndArgs[originalEndArgs.length - 1]
+                      if (!didStreamHtml || bufferPluginResponse) {
+                        const callback =
+                          typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+                            ? originalEndArgs[originalEndArgs.length - 1]
+                            : undefined;
+                        const body = runtimeResponse.body
+                          ? Buffer.from(await runtimeResponse.arrayBuffer())
                           : undefined;
-                      const body = runtimeResponse.body
-                        ? Buffer.from(await runtimeResponse.arrayBuffer())
-                        : undefined;
-                      originalEndArgs.length = 0;
-                      if (body) originalEndArgs.push(body);
-                      if (callback) originalEndArgs.push(callback);
+                        originalEndArgs.length = 0;
+                        if (body) originalEndArgs.push(body);
+                        if (callback) originalEndArgs.push(callback);
+                      }
                     }
-                  }
-                })
-                .then(() => pm.runHookParallel("afterResponse", req, res))
-                .then(() => {
-                  originalEnd(...originalEndArgs);
-                })
-                .catch((err) => {
-                  emitPluginError("response-end", err, { pathname }).catch(() => {});
-                  console.error("Error in afterResponse hook:", err);
-                  originalEnd(...originalEndArgs);
-                });
-            } else {
-              originalEnd(...args);
+                  })
+                  .then(() => pm.runHookParallel("afterResponse", req, res))
+                  .then(() => {
+                    originalEnd(...originalEndArgs);
+                  })
+                  .catch((err) => {
+                    emitPluginError("response-end", err, { pathname }).catch(() => {});
+                    console.error("Error in afterResponse hook:", err);
+                    originalEnd(...originalEndArgs);
+                  });
+              } else {
+                originalEnd(...args);
+              }
+            }) as any;
+
+            // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
+
+            const renderer = farmApp.getServerRenderer();
+            if (pm) {
+              await pm.runHookParallel("beforeRender", renderPayload);
             }
-          }) as any;
-
-          // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
-
-          const renderer = farmApp.getServerRenderer();
-          if (pm) {
-            await pm.runHookParallel("beforeRender", renderPayload);
+            await renderer.renderPage(req as any, res as any);
+          } catch (error) {
+            // Log error response
+            const duration = Date.now() - startTime;
+            logResponse(method, urlPath, 500, duration, "PAGE");
+            if (pm && runtimeSession) {
+              await pm.failRuntimeRequest(runtimeSession, error);
+            }
+            await emitPluginError("render-page", error, { pathname });
+            next(error);
           }
-          await renderer.renderPage(req as any, res as any);
-        } catch (error) {
-          // Log error response
-          const duration = Date.now() - startTime;
-          logResponse(method, urlPath, 500, duration, "PAGE");
-          if (pm && runtimeSession) {
-            await pm.failRuntimeRequest(runtimeSession, error);
-          }
-          await emitPluginError("render-page", error, { pathname });
-          next(error);
-        }
-      }));
+        }),
+      );
     },
 
     async resolveId(id, importer, resolveOptions) {
@@ -1928,56 +2048,63 @@ if (import.meta.hot) {
         // Pre-render each SSG page
         for (const page of ssgPages) {
           try {
-            // Load the route module
-            const mod = await routeManager.loadRouteModule(page.filePath);
-            if (!mod?.default) continue;
+            const staticRequest = new Request(new URL(page.urlPath, "http://farm.static"));
+            await farmApp.getServerRenderer().runWithRequestContext(staticRequest, async () => {
+              // Load the route module
+              const mod = await routeManager.loadRouteModule(page.filePath);
+              if (!mod?.default) return;
 
-            // Find matching layouts
-            const { layouts } = routeManager.matchRoute(page.urlPath);
-            const layoutModules = await Promise.all(
-              layouts.map((l) => routeManager.loadLayoutModule(l.modulePath)),
-            );
-
-            // Render the page
-            const React = await import("react");
-            const { renderToString } = await import("react-dom/server");
-
-            const PageComponent = mod.default;
-            const pageProps = {
-              params: page.params,
-              searchParams: Promise.resolve({}),
-              path: page.urlPath,
-            };
-
-            let pageElement = React.createElement(
-              PageComponent as React.ComponentType<unknown>,
-              pageProps as React.Attributes,
-            );
-
-            // Wrap with layouts
-            for (let i = layoutModules.length - 1; i >= 0; i--) {
-              const layoutModule = layoutModules[i];
-              const LayoutComponent = layoutModule.default;
-              pageElement = React.createElement(
-                LayoutComponent as React.ComponentType<unknown>,
-                {
-                  children: pageElement,
-                  params: page.params,
-                } as React.Attributes,
+              // Find matching layouts
+              const { layouts } = routeManager.matchRoute(page.urlPath);
+              const layoutModules = await Promise.all(
+                layouts.map((l) => routeManager.loadLayoutModule(l.modulePath)),
               );
-            }
 
-            const html = renderToString(pageElement);
+              // Render the page
+              const React = await import("react");
+              const { renderToString } = await import("react-dom/server");
 
-            // Generate full HTML with proper structure
-            const fullHtml = `<!DOCTYPE html>
-<html>
+              const PageComponent = mod.default;
+              const pageProps = {
+                params: page.params,
+                searchParams: Promise.resolve({}),
+                path: page.urlPath,
+              };
+
+              let pageElement = React.createElement(
+                PageComponent as React.ComponentType<unknown>,
+                pageProps as React.Attributes,
+              );
+
+              // Wrap with layouts
+              for (let i = layoutModules.length - 1; i >= 0; i--) {
+                const layoutModule = layoutModules[i];
+                const LayoutComponent = layoutModule.default;
+                pageElement = React.createElement(
+                  LayoutComponent as React.ComponentType<unknown>,
+                  {
+                    children: pageElement,
+                    params: page.params,
+                  } as React.Attributes,
+                );
+              }
+
+              const html = renderToString(pageElement);
+
+              // Generate full HTML with proper structure
+              const i18nSnapshot = getFarmI18nClientSnapshot();
+              const i18nHead = renderFarmI18nStaticHead(page.urlPath, i18nSnapshot);
+              const fullHtml = `<!DOCTYPE html>
+<html lang="${escapeFarmHtmlAttribute(i18nSnapshot?.locale || "en")}"${
+                i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
+              }>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/assets/globals.css">
   ${page.revalidate ? `<meta name="x-farm-revalidate" content="${page.revalidate}">` : ""}
+  ${i18nHead}
 </head>
 <body>
   <div id="root">${html}</div>
@@ -1985,17 +2112,18 @@ if (import.meta.hot) {
 </body>
 </html>`;
 
-            // Write to output directory
-            const outputPath =
-              page.urlPath === "/"
-                ? path.join(clientDir, "index.html")
-                : path.join(clientDir, page.urlPath + ".html");
+              // Write to output directory
+              const outputPath =
+                page.urlPath === "/"
+                  ? path.join(clientDir, "index.html")
+                  : path.join(clientDir, page.urlPath + ".html");
 
-            fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-            fs.writeFileSync(outputPath, fullHtml);
+              fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+              fs.writeFileSync(outputPath, fullHtml);
 
-            const revalidateInfo = page.revalidate ? ` (revalidate: ${page.revalidate}s)` : "";
-            logger.success(`  ✓ ${page.urlPath}${revalidateInfo}`);
+              const revalidateInfo = page.revalidate ? ` (revalidate: ${page.revalidate}s)` : "";
+              logger.success(`  ✓ ${page.urlPath}${revalidateInfo}`);
+            });
           } catch (error) {
             logger.error(`  ✗ ${page.urlPath}: ${error}`);
           }
@@ -3752,6 +3880,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     plugins: [
       tailwindcss(),
       viteBrowserExternalPlugin,
+      farmI18nClientBridgePlugin(),
       farmPlugin(config),
       farmEnvironmentFunctionsPlugin(),
       farmBrandingPlugin,

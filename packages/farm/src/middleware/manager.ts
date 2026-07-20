@@ -21,6 +21,8 @@ import { normalizeMiddlewareModule } from "./module";
 import { logger } from "../utils";
 import { sendWebResponse } from "../server/response";
 import { emitFarmEvent } from "../observability";
+import { stripFarmLocaleFromPathname } from "../i18n/routing";
+import type { ResolvedFarmI18nConfig } from "../i18n/types";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -43,14 +45,17 @@ export class MiddlewareManager {
   private globalConfig?: MiddlewareConfig;
   private viteServer?: ViteDevServer;
   private appDirs: string[];
+  private i18n?: ResolvedFarmI18nConfig;
 
   constructor(
     appDir: string | readonly string[],
     viteServer?: ViteDevServer,
     config?: FarmMiddlewareConfig,
+    i18n?: ResolvedFarmI18nConfig,
   ) {
     this.appDirs = Array.isArray(appDir) ? [...appDir] : [appDir as string];
     this.viteServer = viteServer;
+    this.i18n = i18n;
     this.configure(config);
   }
 
@@ -200,6 +205,9 @@ export class MiddlewareManager {
   async execute(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
     const pathname = url.pathname;
+    const routePathname = this.i18n?.enabled
+      ? stripFarmLocaleFromPathname(pathname, this.i18n)
+      : pathname;
     const method = req.method || "GET";
     const startTime = Date.now();
 
@@ -207,7 +215,7 @@ export class MiddlewareManager {
     let ctx = createContext(req, res, this.viteServer);
 
     if (this.globalConfig) {
-      const globalMatch = this.matchesConfig(pathname, this.globalConfig, ctx);
+      const globalMatch = this.matchesConfig(routePathname, this.globalConfig, ctx);
       if (!globalMatch.matched) {
         return false;
       }
@@ -223,7 +231,7 @@ export class MiddlewareManager {
     }> = [
       ...this.configMiddleware.map((mw) => ({ mw, routeMatch: { matched: true } })),
       ...this.middleware
-        .map((mw) => ({ mw, routeMatch: this.matchRoutePath(pathname, mw.path) }))
+        .map((mw) => ({ mw, routeMatch: this.matchRoutePath(routePathname, mw.path) }))
         .filter((entry) => entry.routeMatch.matched),
     ];
 
@@ -253,7 +261,7 @@ export class MiddlewareManager {
       // Check matcher configuration
       const { mw, routeMatch } = entry;
       const configMatch = mw.config
-        ? this.matchesConfig(pathname, mw.config, ctx)
+        ? this.matchesConfig(routePathname, mw.config, ctx)
         : { matched: true };
       if (!configMatch.matched) {
         continue;

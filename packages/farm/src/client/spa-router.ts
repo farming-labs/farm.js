@@ -6,10 +6,9 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
-import type {
-  FarmClientNavigationSession,
-  FarmClientPluginManager,
-} from "./plugin";
+import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
+import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
+import type { FarmI18nClientSnapshot } from "../i18n/types";
 
 /**
  * Farm.js SPA Router
@@ -34,6 +33,7 @@ interface PageData {
     description?: string;
   };
   layoutModules?: string[];
+  i18n?: FarmI18nClientSnapshot;
 }
 
 export interface RouterOptions {
@@ -169,7 +169,10 @@ export class SPARouter {
     const search = url.search;
     const fullPath = pathname + search;
 
-    if (this.options.shouldUseDocumentNavigation(pathname)) {
+    if (
+      isFarmLocaleChangeHref(url.toString()) ||
+      this.options.shouldUseDocumentNavigation(pathname)
+    ) {
       if (replace) window.location.replace(url.toString());
       else window.location.assign(url.toString());
       return;
@@ -253,6 +256,7 @@ export class SPARouter {
    * Prefetch a URL
    */
   async prefetch(href: string): Promise<void> {
+    if (isFarmLocaleChangeHref(href)) return;
     const url = new URL(href, window.location.origin);
     const fullPath = url.pathname + url.search;
 
@@ -381,6 +385,8 @@ export class SPARouter {
       metaDesc.setAttribute("content", options.pageData.metadata.description);
     }
 
+    _hydrateFarmI18n(options.pageData.i18n);
+
     if (this.onNavigate) {
       await this.onNavigate(options.pageData);
     }
@@ -507,6 +513,8 @@ export class SPARouter {
       if (pageData.metadata?.title) {
         document.title = pageData.metadata.title;
       }
+
+      _hydrateFarmI18n(pageData.i18n);
 
       // Call the navigation handler to update React
       if (this.onNavigate) {

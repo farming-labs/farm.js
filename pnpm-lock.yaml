@@ -188,7 +188,7 @@ importers:
         version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.5.5
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -265,7 +265,7 @@ importers:
         version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -499,6 +499,34 @@ importers:
         specifier: ^8.0.0
         version: 8.1.5(@types/node@20.19.21)
 
+  examples/i18n:
+    dependencies:
+      '@farmjs/core':
+        specifier: workspace:*
+        version: link:../../packages/farm
+      react:
+        specifier: ^19.0.0
+        version: 19.2.4
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      '@farmjs/cli':
+        specifier: workspace:*
+        version: link:../../packages/farm-cli
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
+        version: 5.4.20(@types/node@20.19.21)
+
   examples/jobs-inngest:
     dependencies:
       '@farmjs/core':
@@ -602,7 +630,7 @@ importers:
         version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.5.5
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -940,7 +968,7 @@ importers:
         version: link:../../../packages/farm-integrations
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -1068,6 +1096,9 @@ importers:
       '@farming-labs/orm-runtime':
         specifier: 0.0.62
         version: 0.0.62(@mikro-orm/core@7.1.5)(@prisma/client@6.7.0)(@xata.io/client@0.30.1)(db0@0.3.4)(drizzle-orm@0.45.2)(kysely@0.28.17)(mongodb@6.21.0)(mongoose@8.24.1)(sequelize@6.37.8)(surrealdb@2.0.4)(typeorm@0.3.30)
+      '@formatjs/icu-messageformat-parser':
+        specifier: 3.5.15
+        version: 3.5.15
       '@mdx-js/mdx':
         specifier: ^3.1.1
         version: 3.1.1(supports-color@10.2.2)
@@ -1101,6 +1132,9 @@ importers:
       image-size:
         specifier: ^2.0.2
         version: 2.0.2
+      intl-messageformat:
+        specifier: 11.2.12
+        version: 11.2.12
       marked:
         specifier: ^12.0.2
         version: 12.0.2
@@ -2149,7 +2183,7 @@ packages:
       '@better-fetch/fetch': 1.1.21
       '@simplewebauthn/browser': 13.3.0
       '@simplewebauthn/server': 13.3.0
-      better-auth: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
+      better-auth: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
       better-call: 1.3.2(zod@4.3.6)
       nanostores: 1.2.0
       zod: 4.3.6
@@ -4298,6 +4332,20 @@ packages:
     transitivePeerDependencies:
       - '@vue/composition-api'
       - vue
+    dev: false
+
+  /@formatjs/fast-memoize@3.1.7:
+    resolution: {integrity: sha512-zXfhLpvA6T7+efdt9JLbBwZ00tT7NsBMDVnDu8rpHeNNv8KfRZAMo2gkG0k9lK/Nzc//3kJ9pImsfuJxk3KhUA==}
+    dev: false
+
+  /@formatjs/icu-messageformat-parser@3.5.15:
+    resolution: {integrity: sha512-5o4grXKotAB3JqQuisLApHG43g17N+paoRTa92Jiz35Zvfemq0cVf4EDvuxyHAzmsJji7igaEowicLO/VmfJ8Q==}
+    dependencies:
+      '@formatjs/icu-skeleton-parser': 2.1.11
+    dev: false
+
+  /@formatjs/icu-skeleton-parser@2.1.11:
+    resolution: {integrity: sha512-j8cUmOJzVgkHuS0QiQ6ga76UIoLOFSAMWhs7aZJztH3aAdCOAE6vpC8KVvFB4cU10ON0y2/5oOVmPJ43s2lTwA==}
     dev: false
 
   /@fumadocs/tailwind@0.0.5(tailwindcss@3.4.18):
@@ -11520,6 +11568,13 @@ packages:
 
   /inline-style-parser@0.2.7:
     resolution: {integrity: sha512-Nb2ctOyNR8DqQoR0OwRG95uNWIC0C1lCgf5Naz5H6Ji72KZ8OcFZLz2P5sNgwlyoJ8Yif11oMuYs5pBQa86csA==}
+    dev: false
+
+  /intl-messageformat@11.2.12:
+    resolution: {integrity: sha512-KW70Xxfcvy7vV3qODfvShWkFDPMqKDAa4N+hSyVBWGNtVhTUFYaqlD/l88DaYPKiVcPP4rPQ3qnH7i5K82Mg7g==}
+    dependencies:
+      '@formatjs/fast-memoize': 3.1.7
+      '@formatjs/icu-messageformat-parser': 3.5.15
     dev: false
 
   /ip-address@10.2.0:

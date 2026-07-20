@@ -1,6 +1,6 @@
 import { createServer as createViteServer, type ViteDevServer } from "vite";
 import type { FarmConfig } from "../types";
-import { farmPlugin } from "../vite";
+import { farmI18nClientBridgePlugin, farmPlugin } from "../vite";
 import { logger } from "../utils";
 import { loadConfig, resolveConfig } from "../config";
 import { PluginManager } from "../plugin";
@@ -203,6 +203,7 @@ export async function createServer(config: FarmConfig = {}) {
           plugins: [
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
             createDevDependencyStubsPlugin(),
+            farmI18nClientBridgePlugin(),
             farmPlugin(finalConfig, pluginManager),
             farmEnvironmentFunctionsPlugin(),
             createBrandingPlugin(),

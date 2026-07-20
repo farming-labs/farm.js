@@ -119,6 +119,64 @@ test("generates route and API types", async () => {
   }
 });
 
+test("generates typed i18n declarations", async () => {
+  const root = await createTempProject();
+
+  try {
+    await mkdir(path.join(root, "src", "app"), { recursive: true });
+    await mkdir(path.join(root, "src", "messages"), { recursive: true });
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `export default {
+  i18n: {
+    locales: ["en", "fr"],
+    defaultLocale: "en",
+    strict: true,
+  },
+};
+`,
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "app", "page.tsx"),
+      "export default function Home() { return null; }\n",
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "messages", "en.json"),
+      JSON.stringify({
+        home: {
+          welcome: "Welcome, {name}!",
+          items: "{count, plural, one {# item} other {# items}}",
+        },
+      }),
+      "utf8",
+    );
+    await writeFile(
+      path.join(root, "src", "messages", "fr.json"),
+      JSON.stringify({
+        home: {
+          welcome: "Bienvenue, {name} !",
+          items: "{count, plural, one {# article} other {# articles}}",
+        },
+      }),
+      "utf8",
+    );
+
+    await generateFarmArtifacts({ root });
+
+    const i18nTypes = await readFile(
+      path.join(root, "src", "farm-i18n.d.ts"),
+      "utf8",
+    );
+    assert.ok(i18nTypes.includes('"fr": true'));
+    assert.ok(i18nTypes.includes('"home.welcome": { "name": string }'));
+    assert.ok(i18nTypes.includes('"home.items": { "count": number }'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runs farm migrate through the CLI", async () => {
   const root = await createTempProject();
 

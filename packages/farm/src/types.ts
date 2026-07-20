@@ -17,6 +17,7 @@ import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from ".
 import type { FarmDevtoolsUserConfig } from "./devtools-config";
 import type { FarmImageConfig } from "./image-config";
 import type { FarmPlugin } from "./plugin";
+import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
 
 export type NitroPreset =
   | "node-server"
@@ -118,6 +119,7 @@ export interface FarmConfig {
   context?: FarmContextFactory<any>;
   serverActions?: FarmServerActionsConfig;
   images?: FarmImageConfig;
+  i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
