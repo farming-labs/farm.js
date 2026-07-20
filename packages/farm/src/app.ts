@@ -11,6 +11,7 @@ import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
 import { normalizeRouteRules } from "./route-rules";
 import { resolveServerActionsConfig } from "./server-action-security";
+import { resolveFarmImageConfig, type ResolvedFarmImageConfig } from "./image-config";
 import { getFarmAppDirectories, getFarmSourceRoots } from "./layers";
 import { RouteManager } from "./routing/route-manager";
 import { ServerRenderer } from "./server/renderer";
@@ -24,6 +25,7 @@ type NormalizedFarmConfig = Required<FarmConfig> & {
   mdx: FarmMdxResolvedConfig;
   cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
+  images: ResolvedFarmImageConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -108,6 +110,7 @@ export class FarmApp {
       routeRules: normalizeRouteRules(config.routeRules),
       context: config.context || (() => undefined),
       serverActions: resolveServerActionsConfig(config.serverActions),
+      images: resolveFarmImageConfig(config.images),
       deploymentId: config.deploymentId || "development",
       docs: isResolvedDocsConfig(config.docs) ? config.docs : defaultDocsConfig,
       md: resolveMarkdownConfig(config.md),

@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import sharp from "sharp";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 
@@ -23,6 +24,10 @@ export default {
   srcDir: "src",
   deploy: {
     target: "vercel",
+  },
+  images: {
+    path: "/media/image",
+    qualities: [60],
   },
   observability: {
     onEvent(event) {
@@ -58,6 +63,20 @@ export default {
 `.trim(),
   );
   await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+  const productImage = await sharp({
+    create: {
+      width: 2,
+      height: 1,
+      channels: 4,
+      background: { r: 49, g: 130, b: 83, alpha: 1 },
+    },
+  })
+    .png()
+    .toBuffer();
+  await fs.writeFile(
+    path.join(root, "src", "app", "dashboard", "settings", "product.png"),
+    productImage,
+  );
   await fs.writeFile(
     path.join(root, "src", "app", "opengraph-image.png"),
     Buffer.from(
@@ -106,7 +125,9 @@ export default defineRoutes(({ api }) => [
     path.join(root, "src", "app", "dashboard", "settings", "page.tsx"),
     `
 import React from "react";
+import Image from "@farmjs/core/image";
 import { DashboardIdentity } from "../dashboard-identity";
+import productImage from "./product.png";
 
 export default function DashboardPage(props: any) {
   const middlewareData = props.middleware?.data;
@@ -118,7 +139,13 @@ export default function DashboardPage(props: any) {
     "main",
     null,
     \`production middleware: \${configArea} / \${configPath} / \${fileArea} / \${props.path}\`,
-    React.createElement(DashboardIdentity)
+    React.createElement(DashboardIdentity),
+    React.createElement(Image, {
+      src: productImage,
+      alt: "Optimized product",
+      placeholder: "blur",
+      "data-product-image": "",
+    })
   );
 }
 `.trim(),

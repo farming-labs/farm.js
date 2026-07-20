@@ -59,9 +59,13 @@ import {
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
 } from "./deployment";
+import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
+import { farmImageImportsPlugin } from "./image-vite";
+import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
+  images?: FarmUserConfig["images"];
 }
 
 const FARM_CONFIG_FILENAMES = new Set([
@@ -132,6 +136,9 @@ function getEnvDefines(
 ): Record<string, string> {
   const defines: Record<string, string> = {
     __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
+    __FARM_IMAGE_CONFIG__: JSON.stringify(
+      getPublicFarmImageConfig(resolveFarmImageConfig(config.images)),
+    ),
   };
 
   if (configEnv?.isSsrBuild) {
@@ -281,6 +288,7 @@ export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
 ): Plugin {
+  const imageImports = farmImageImportsPlugin();
   let farmApp: FarmApp;
   let server: ViteDevServer;
   let hmrManager: HMRManager;
@@ -370,6 +378,21 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      let imageHandler: FarmImageHandler | null = null;
+      if (farmConfig.images.provider !== "none") {
+        const { createNodeImageUrlValidator, createSharpImageTransformer } = await import(
+          "./image-sharp"
+        );
+        imageHandler = createFarmImageHandler(farmConfig.images, {
+          transform: createSharpImageTransformer(),
+          validateRemoteUrl: createNodeImageUrlValidator(farmConfig.images),
+          onError(error) {
+            logger.error(
+              `Image optimization failed: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          },
+        });
+      }
       const sourceRoots = getFarmSourceRoots(farmConfig);
       server.watcher.add(sourceRoots.map((source) => path.join(source.root, source.srcDir)));
       const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
@@ -392,7 +415,7 @@ export function farmPlugin(
           if (log) {
             logUpdate(
               "TYPE",
-              `${reason} - regenerated route, API, and env types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
+              `${reason} - regenerated route, API, env, and image types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
             );
           }
           if (openAPIManager) {
@@ -682,6 +705,16 @@ export function farmPlugin(
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
         const requestPathname = new URL(fullUrl).pathname;
         const currentConfig = farmApp?.getConfig() ?? options;
+
+        if (imageHandler && requestPathname === farmConfig.images.path) {
+          const imageResponse = await imageHandler(
+            createRequestFromNodeRequest(req, new URL(fullUrl)),
+          );
+          if (imageResponse) {
+            await sendWebResponse(res, imageResponse);
+            return;
+          }
+        }
 
         const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
         if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
@@ -1370,7 +1403,12 @@ export function farmPlugin(
       }));
     },
 
-    resolveId(id) {
+    async resolveId(id, importer, resolveOptions) {
+      if (typeof imageImports.resolveId === "function") {
+        const imageId = await imageImports.resolveId.call(this, id, importer, resolveOptions);
+        if (imageId) return imageId;
+      }
+
       if (parseProgrammaticRouteModuleId(id)) {
         return id;
       }
@@ -1389,7 +1427,12 @@ export function farmPlugin(
       }
     },
 
-    load(id) {
+    async load(id) {
+      if (typeof imageImports.load === "function") {
+        const imageModule = await imageImports.load.call(this, id);
+        if (imageModule) return imageModule;
+      }
+
       if (parseProgrammaticRouteModuleId(id)) {
         return generateProgrammaticRouteModule(id, server?.config.root || options.root);
       }
@@ -1478,7 +1521,12 @@ export const manifest = getManifest();
       }
     },
 
-    transform(code, id, transformOptions) {
+    async transform(code, id, transformOptions) {
+      if (typeof imageImports.transform === "function") {
+        const imageModule = await imageImports.transform.call(this, code, id, transformOptions);
+        if (imageModule) return imageModule;
+      }
+
       let transformedCode = code;
       let transformed = false;
 

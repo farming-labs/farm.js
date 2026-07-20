@@ -129,7 +129,7 @@ Security-sensitive arrays such as `serverActions.allowedOrigins` are replaced ra
 
 ## Generated types
 
-Farm generates route, API, and environment types from the final resolved application graph. Layer routes appear in typed `Link` values, layer APIs appear in the generated API client, and layer environment schemas participate in `getEnv` autocomplete.
+Farm generates route, API, environment, and static image types from the final resolved application graph. Layer routes appear in typed `Link` values, layer APIs appear in the generated API client, layer environment schemas participate in `getEnv` autocomplete, and raster imports carry image dimensions.
 
 When a project overrides a layer API route, generated API types import the project implementation. Layer-owned routes that remain active keep type-only imports to their real package or directory files.
 

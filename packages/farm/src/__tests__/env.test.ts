@@ -86,6 +86,21 @@ describe("env", () => {
         server: { SECRET: "server-only" },
         public: { PUBLIC_APP_URL: "https://farm.test" },
       },
+      images: {
+        path: "/media/image",
+        qualities: [60, 80],
+        remotePatterns: [{ hostname: "images.example.test" }],
+        dangerouslyAllowLocalIP: true,
+      },
+    });
+
+    const publicImageConfig = JSON.stringify({
+      provider: "auto",
+      path: "/media/image",
+      deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
+      imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
+      qualities: [60, 80],
+      formats: ["image/webp"],
     });
 
     const browserConfig = (plugin.config as any)?.(
@@ -94,6 +109,7 @@ describe("env", () => {
     );
     expect(browserConfig.define).toEqual({
       __FARM_PUBLIC_ENV__: JSON.stringify({ PUBLIC_APP_URL: "https://farm.test" }),
+      __FARM_IMAGE_CONFIG__: publicImageConfig,
     });
 
     const ssrConfig = (plugin.config as any)?.(
@@ -102,6 +118,7 @@ describe("env", () => {
     );
     expect(ssrConfig.define).toEqual({
       __FARM_PUBLIC_ENV__: JSON.stringify({ PUBLIC_APP_URL: "https://farm.test" }),
+      __FARM_IMAGE_CONFIG__: publicImageConfig,
       __FARM_ENV__: JSON.stringify({
         server: { SECRET: "server-only" },
         public: { PUBLIC_APP_URL: "https://farm.test" },
