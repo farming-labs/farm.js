@@ -414,7 +414,7 @@ export class SPARouter {
       return;
     }
 
-    const transition = startViewTransition(() => callback());
+    const transition = startViewTransition.call(document, () => callback());
     const updateDone = transition?.updateCallbackDone || transition?.ready;
     if (updateDone && typeof updateDone.then === "function") {
       await updateDone;
