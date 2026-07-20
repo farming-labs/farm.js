@@ -41,6 +41,20 @@ describe("production middleware runtime", () => {
           ),
         ),
       ).resolves.toBeUndefined();
+      const nitroBundle = await fs.readFile(
+        path.join(
+          root,
+          ".vercel",
+          "output",
+          "functions",
+          "__nitro.func",
+          "chunks",
+          "nitro",
+          "nitro.mjs",
+        ),
+        "utf8",
+      );
+      expect(nitroBundle).not.toContain("@img/sharp-");
       globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
         const url = new URL(input instanceof Request ? input.url : String(input));
         if (url.origin === "https://example.test" && url.pathname.endsWith(productAssetName!)) {
