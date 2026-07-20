@@ -102,6 +102,9 @@
       "agent-runtime": [
         "./dist/agent-runtime.d.ts"
       ],
+      "image": [
+        "./dist/image.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -323,6 +326,11 @@
       "types": "./dist/agent-runtime.d.ts",
       "import": "./dist/agent-runtime.mjs",
       "require": "./dist/agent-runtime.cjs"
+    },
+    "./image": {
+      "types": "./dist/image.d.ts",
+      "import": "./dist/image.mjs",
+      "require": "./dist/image.cjs"
     }
   },
   "scripts": {
@@ -380,5 +388,8 @@
   "peerDependencies": {
     "react": "^18.2.0 || ^19.0.0",
     "react-dom": "^18.2.0 || ^19.0.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.5"
   }
 }

@@ -45,6 +45,11 @@ import {
 } from "./layers";
 import path from "path";
 import { normalizeFarmDeploymentId } from "./deployment";
+import {
+  resolveFarmImageConfig,
+  type FarmImageConfig,
+  type ResolvedFarmImageConfig,
+} from "./image-config";
 
 export type {
   FarmDocsConfigInput,
@@ -79,6 +84,14 @@ export type {
   ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
+export type {
+  FarmImageConfig,
+  FarmImageFormat,
+  FarmImageLocalPattern,
+  FarmImageProvider,
+  FarmImageRemotePattern,
+  ResolvedFarmImageConfig,
+} from "./image-config";
 
 export interface RedirectConfig {
   source: string;
@@ -100,13 +113,8 @@ export interface RewriteConfig {
   destination: string;
 }
 
-export interface ImageConfig {
-  domains?: string[];
-  deviceSizes?: number[];
-  imageSizes?: number[];
-  formats?: ("image/avif" | "image/webp")[];
-  minimumCacheTTL?: number;
-}
+/** @deprecated Use FarmImageConfig. */
+export type ImageConfig = FarmImageConfig;
 
 export interface I18nConfig {
   locales: string[];
@@ -256,6 +264,7 @@ export interface ResolvedFarmConfig extends Required<
     | "workflows"
     | "env"
     | "serverActions"
+    | "images"
   >
 > {
   extends: readonly FarmLayerEntry[];
@@ -271,6 +280,7 @@ export interface ResolvedFarmConfig extends Required<
   workflows: FarmWorkflowsResolvedConfig;
   env: ResolvedFarmEnv;
   serverActions: ResolvedFarmServerActionsConfig;
+  images: ResolvedFarmImageConfig;
 }
 
 export type FarmLayerConfig = Omit<
@@ -706,14 +716,7 @@ export async function resolveConfig(
     rewrites: () => rewrites,
     headers: () => [...headers, ...routeRuleHeaders],
     routeRules,
-    images: {
-      domains: [],
-      deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048, 3840],
-      imageSizes: [16, 32, 48, 64, 96, 128, 256, 384],
-      formats: ["image/webp"],
-      minimumCacheTTL: 60,
-      ...userConfig.images,
-    },
+    images: resolveFarmImageConfig(userConfig.images),
     publicDir: userConfig.publicDir || "public",
     i18n: userConfig.i18n,
     openapi: {

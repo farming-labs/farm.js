@@ -108,6 +108,14 @@ export * from "./server-query";
 export * from "./server-query-client";
 export * from "./server-action-security";
 export * from "./deployment";
+export type {
+  FarmImageConfig,
+  FarmImageFormat,
+  FarmImageLocalPattern,
+  FarmImageProvider,
+  FarmImageRemotePattern,
+  ResolvedFarmImageConfig,
+} from "./image-config";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";

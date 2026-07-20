@@ -59,9 +59,12 @@ import {
   FARM_DEPLOYMENT_ID_HEADER,
   getFarmDeploymentMismatch,
 } from "./deployment";
+import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
+import { farmImageImportsPlugin } from "./image-vite";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
+  images?: FarmUserConfig["images"];
 }
 
 const FARM_CONFIG_FILENAMES = new Set([
@@ -132,6 +135,9 @@ function getEnvDefines(
 ): Record<string, string> {
   const defines: Record<string, string> = {
     __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
+    __FARM_IMAGE_CONFIG__: JSON.stringify(
+      getPublicFarmImageConfig(resolveFarmImageConfig(config.images)),
+    ),
   };
 
   if (configEnv?.isSsrBuild) {
@@ -281,6 +287,7 @@ export function farmPlugin(
   options: FarmVitePluginOptions = {},
   initialPluginManager?: PluginManager,
 ): Plugin {
+  const imageImports = farmImageImportsPlugin();
   let farmApp: FarmApp;
   let server: ViteDevServer;
   let hmrManager: HMRManager;
@@ -1370,7 +1377,12 @@ export function farmPlugin(
       }));
     },
 
-    resolveId(id) {
+    async resolveId(id, importer, resolveOptions) {
+      if (typeof imageImports.resolveId === "function") {
+        const imageId = await imageImports.resolveId.call(this, id, importer, resolveOptions);
+        if (imageId) return imageId;
+      }
+
       if (parseProgrammaticRouteModuleId(id)) {
         return id;
       }
@@ -1389,7 +1401,12 @@ export function farmPlugin(
       }
     },
 
-    load(id) {
+    async load(id) {
+      if (typeof imageImports.load === "function") {
+        const imageModule = await imageImports.load.call(this, id);
+        if (imageModule) return imageModule;
+      }
+
       if (parseProgrammaticRouteModuleId(id)) {
         return generateProgrammaticRouteModule(id, server?.config.root || options.root);
       }
