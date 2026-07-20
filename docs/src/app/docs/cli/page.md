@@ -14,6 +14,8 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 | --- | --- |
 | farm dev | Start the dev server. |
 | farm build | Build the app for the configured target. |
+| farm doctor | Inspect a running app, or fall back to project configuration checks. |
+| farm doctor --offline | Check project files and config without probing a dev server. |
 | farm preview | Create a public URL for a running local app. |
 | farm generate | Generate route/API types and integration schema artifacts. |
 | farm migrate inspect | Detect supported framework migration sources. |
@@ -124,6 +126,24 @@ POST /api/auth/login -> 200 580ms
 The local `farm dev` terminal logs the matched page, API route, and middleware work. Client components hydrate through the same public URL; early button clicks are queued and replayed after hydration so slow dev-mode module loading does not lose the click.
 
 See [Instant Preview](/docs/preview) for webhook setup, custom gateway configuration, troubleshooting, and security notes.
+
+## Diagnose the app
+
+```bash
+farm doctor
+farm doctor --port 4319
+farm doctor --url http://localhost:4319
+farm doctor --offline
+farm doctor --json
+```
+
+`farm doctor` first probes the running app at `http://localhost:3000`. A live app provides the most accurate result because Farm can report its resolved routes, API methods, middleware, integrations, storage mounts, schedules, workflows, layers, and deployment runtime. When no app is running, the command falls back to config and filesystem checks.
+
+Pass `--port` or `--url` when the app runs somewhere else. An explicitly requested runtime that cannot be reached is reported as a warning before the project checks. Use `--offline` to skip the network probe entirely.
+
+The command exits with a non-zero status only when a check fails. Warnings keep a zero exit status, so CI can distinguish broken configuration from production-readiness advice. `--json` prints the complete report without terminal formatting.
+
+See [DevTools and Doctor](/docs/devtools) for the browser dashboard, diagnostics, JSON contract, and CI examples.
 
 ## Build
 
