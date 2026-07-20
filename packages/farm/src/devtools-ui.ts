@@ -481,7 +481,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .sidebar-foot span { display: block; color: var(--muted-strong); }
     .content { min-width: 0; }
     .view { min-width: 0; }
-    .view-heading { display: flex; min-height: 188px; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 32px clamp(22px, 4vw, 52px); border-bottom: 1px solid var(--line); background-image: linear-gradient(var(--line-soft) 1px, transparent 1px), linear-gradient(90deg, var(--line-soft) 1px, transparent 1px); background-size: 64px 64px; mask-image: linear-gradient(to bottom, #000 58%, transparent 100%); }
+    .view-heading { display: flex; min-height: 188px; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 32px clamp(22px, 4vw, 52px); border-bottom: 1px solid var(--line); background: var(--background); }
     .view-heading > div { max-width: 760px; }
     .view-heading h1 { margin: 10px 0 12px; font-size: clamp(32px, 4.2vw, 58px); font-weight: 540; line-height: 0.98; letter-spacing: 0; }
     .view-heading p { max-width: 660px; margin: 0; color: var(--muted-strong); font-size: 14px; line-height: 1.65; }
