@@ -12,6 +12,280 @@ function createManager() {
 }
 
 describe("plugin lifecycle hooks", () => {
+  it("runs the universal runtime pipeline with typed context and transforms", async () => {
+    const manager = createManager();
+    const seen: string[] = [];
+    const background: Promise<unknown>[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "runtime-pipeline",
+        setup() {
+          return { prefix: "trace" };
+        },
+        runtime: {
+          context({ request, state, req }) {
+            const traceId = `${state.prefix}:${new URL(request.url).pathname}`;
+            req.set("traceId", traceId);
+            return { traceId };
+          },
+          before({ request, ctx, req }) {
+            expect(req.get("traceId")).toBe(ctx.traceId);
+            const headers = new Headers(request.headers);
+            headers.set("x-trace-id", ctx.traceId);
+            seen.push(`before:${ctx.traceId}`);
+            return new Request(request, { headers });
+          },
+          after({ ctx, response, waitUntil }) {
+            seen.push(`after:${ctx.traceId}:${response.status}`);
+            waitUntil(Promise.resolve(ctx.traceId));
+            const headers = new Headers(response.headers);
+            headers.set("x-trace-id", ctx.traceId);
+            return new Response(response.body, {
+              status: response.status,
+              headers,
+            });
+          },
+        },
+      }),
+    );
+
+    const response = await manager.runRuntimeRequest(
+      new Request("http://localhost/products"),
+      (request) => {
+        expect(request.headers.get("x-trace-id")).toBe("trace:/products");
+        return new Response("ok", { status: 201 });
+      },
+      {
+        kind: "page",
+        waitUntil(promise) {
+          background.push(promise);
+        },
+      },
+    );
+
+    expect(response.status).toBe(201);
+    expect(response.headers.get("x-trace-id")).toBe("trace:/products");
+    expect(await response.text()).toBe("ok");
+    expect(seen).toEqual(["before:trace:/products", "after:trace:/products:201"]);
+    await expect(Promise.all(background)).resolves.toEqual(["trace:/products"]);
+  });
+
+  it("supports runtime short circuits and reports errors", async () => {
+    const manager = createManager();
+    const handler = vi.fn(() => new Response("handler"));
+    const errors: unknown[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "runtime-guard",
+        runtime: {
+          context({ request }) {
+            return { authorized: new URL(request.url).pathname !== "/private" };
+          },
+          before({ ctx }) {
+            if (!ctx.authorized) {
+              return new Response("Unauthorized", { status: 401 });
+            }
+          },
+          after({ response }) {
+            const headers = new Headers(response.headers);
+            headers.set("x-plugin", "runtime-guard");
+            return new Response(response.body, { status: response.status, headers });
+          },
+          error({ error }) {
+            errors.push(error);
+          },
+        },
+      }),
+    );
+
+    const shortCircuit = await manager.runRuntimeRequest(
+      new Request("http://localhost/private"),
+      handler,
+    );
+    expect(handler).not.toHaveBeenCalled();
+    expect(shortCircuit.status).toBe(401);
+    expect(shortCircuit.headers.get("x-plugin")).toBe("runtime-guard");
+
+    manager.addPlugin(
+      definePlugin({
+        name: "runtime-failure",
+        runtime: {
+          before() {
+            throw new Error("runtime failed");
+          },
+        },
+      }),
+    );
+
+    await expect(
+      manager.runRuntimeRequest(new Request("http://localhost/failure"), handler),
+    ).rejects.toThrow("runtime failed");
+    expect(errors).toHaveLength(1);
+  });
+
+  it("rejects conflicting runtime context keys", async () => {
+    const manager = createManager();
+
+    manager.addPlugins([
+      definePlugin({
+        name: "first-context",
+        runtime: {
+          context() {
+            return { locale: "en" };
+          },
+        },
+      }),
+      definePlugin({
+        name: "second-context",
+        runtime: {
+          context() {
+            return { locale: "fr" };
+          },
+        },
+      }),
+    ]);
+
+    await expect(
+      manager.runRuntimeRequest(new Request("http://localhost"), () => new Response("unreachable")),
+    ).rejects.toThrow('context key "locale"');
+  });
+
+  it("runs the structured plugin groups with private setup state", async () => {
+    const manager = createManager();
+    const seen: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "structured-lifecycle",
+        setup() {
+          seen.push("setup");
+          return { prefix: "structured" };
+        },
+        runtime: {
+          start({ state }) {
+            seen.push(`${state.prefix}:start`);
+          },
+          close({ state, reason }) {
+            seen.push(`${state.prefix}:close:${reason}`);
+          },
+        },
+        router: {
+          discovered(route, { state }) {
+            seen.push(`${state.prefix}:route:${route.kind}`);
+          },
+          generated(routes, { state }) {
+            seen.push(`${state.prefix}:routes:${routes.pageCount}`);
+          },
+          before(route, { state }) {
+            seen.push(`${state.prefix}:before-match:${route.pathname}`);
+          },
+          after(result, { state }) {
+            seen.push(`${state.prefix}:after-match:${result.matched}`);
+          },
+        },
+        render: {
+          before(render, { state }) {
+            seen.push(`${state.prefix}:before-render:${render.pathname}`);
+          },
+          html(html, _render, { state }) {
+            return `${html}<!--${state.prefix}-->`;
+          },
+        },
+        build: {
+          before(bundle, { state }) {
+            seen.push(`${state.prefix}:before-build:${bundle.preset}`);
+          },
+          configure(config, { state }) {
+            return { ...config, marker: state.prefix };
+          },
+          after(result, { state }) {
+            seen.push(`${state.prefix}:after-build:${result.success}`);
+          },
+        },
+        dev: {
+          update(update, { state }) {
+            seen.push(`${state.prefix}:hmr:${update.file}`);
+          },
+        },
+      }),
+    );
+
+    await manager.setupPlugins();
+    await manager.runHookParallel("ready");
+    await manager.runHookParallel("apiRouteDiscovered", {
+      path: "/api/health",
+      filePath: "/tmp/api/health/route.ts",
+      methods: ["GET"],
+    });
+    await manager.runHookParallel("routesGenerated", {
+      routes: [],
+      pageCount: 1,
+      layoutCount: 0,
+    });
+    await manager.runHookParallel("beforeRouteMatch", {
+      pathname: "/health",
+      method: "GET",
+    });
+    await manager.runHookParallel("afterRouteMatch", {
+      pathname: "/health",
+      matched: true,
+      routePattern: "/health",
+      params: {},
+      layoutPatterns: [],
+    });
+    await manager.runHookParallel("beforeRender", {
+      pathname: "/health",
+      method: "GET",
+      routePattern: "/health",
+      params: {},
+    });
+
+    const html = await manager.runHookSerial("afterRender", "<main>ok</main>", {
+      pathname: "/health",
+      method: "GET",
+      routePattern: "/health",
+      params: {},
+    });
+    expect(html).toBe("<main>ok</main><!--structured-->");
+
+    await manager.runHookParallel("beforeBundle", {
+      root: "/tmp/app",
+      preset: "node-server",
+      universal: true,
+      distDir: ".farm",
+    });
+    const buildConfig = await manager.runHookSerial("beforeNitroBuild", {});
+    expect(buildConfig.marker).toBe("structured");
+    await manager.runHookParallel("afterBundle", {
+      root: "/tmp/app",
+      preset: "node-server",
+      universal: true,
+      distDir: ".farm",
+      success: true,
+    });
+    await manager.runHookParallel("hmrUpdate", {
+      file: "src/app/page.tsx",
+      modules: ["page"],
+    });
+    await manager.runHookParallel("shutdown", { reason: "test" });
+
+    expect(seen).toEqual([
+      "setup",
+      "structured:start",
+      "structured:route:api",
+      "structured:routes:1",
+      "structured:before-match:/health",
+      "structured:after-match:true",
+      "structured:before-render:/health",
+      "structured:before-build:node-server",
+      "structured:after-build:true",
+      "structured:hmr:src/app/page.tsx",
+      "structured:close:test",
+    ]);
+  });
+
   it("supports extended lifecycle hooks end-to-end", async () => {
     const manager = createManager();
     const seen: string[] = [];

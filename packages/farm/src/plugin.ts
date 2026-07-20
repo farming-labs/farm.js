@@ -1,5 +1,6 @@
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
+import { getResolvedEnv, type ResolvedFarmEnv } from "./env";
 import {
   clearRequestContext,
   deleteRequestContext,
@@ -8,6 +9,8 @@ import {
   hasRequestContext,
   setRequestContext,
 } from "./request-context";
+
+type MaybePromise<T> = T | Promise<T>;
 
 export interface PluginRequestContext {
   set: (
@@ -130,82 +133,265 @@ export interface ShutdownPayload {
   reason: string;
 }
 
-export interface FarmPlugin {
+export type FarmPluginRuntimeKind =
+  | "request"
+  | "page"
+  | "api"
+  | "action"
+  | "integration"
+  | "docs"
+  | "asset"
+  | (string & {});
+
+export interface FarmPluginRouteRuntimePayload {
+  pathname: string;
+  pattern?: string | null;
+  params?: Record<string, string>;
+}
+
+export interface FarmPluginSetupContext extends FarmPluginContext {
+  env: ResolvedFarmEnv;
+}
+
+export interface FarmPluginStateContext<TState = unknown> extends FarmPluginContext {
+  state: TState;
+}
+
+export interface FarmPluginRuntimeBaseEvent<
+  TState = unknown,
+> extends FarmPluginStateContext<TState> {
+  request: Request;
+  /** Request-scoped values shared by plugin hooks. */
+  req: FarmRequestStore;
+  kind: FarmPluginRuntimeKind;
+  route?: FarmPluginRouteRuntimePayload;
+  signal: AbortSignal;
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+export type FarmPluginRuntimeContextEvent<TState = unknown> = FarmPluginRuntimeBaseEvent<TState>;
+
+export interface FarmPluginRuntimeBeforeEvent<
+  TState = unknown,
+  TRequestContext extends object = Record<string, unknown>,
+> extends FarmPluginRuntimeBaseEvent<TState> {
+  ctx: Readonly<TRequestContext>;
+}
+
+export interface FarmPluginRuntimeAfterEvent<
+  TState = unknown,
+  TRequestContext extends object = Record<string, unknown>,
+> extends FarmPluginRuntimeBeforeEvent<TState, TRequestContext> {
+  response: Response;
+  durationMs: number;
+}
+
+export interface FarmPluginRuntimeErrorEvent<
+  TState = unknown,
+  TRequestContext extends object = Record<string, unknown>,
+> extends FarmPluginRuntimeBeforeEvent<TState, TRequestContext> {
+  error: unknown;
+  durationMs: number;
+}
+
+export type FarmPluginRuntimeStartEvent<TState = unknown> = FarmPluginStateContext<TState>;
+
+export interface FarmPluginRuntimeCloseEvent<TState = unknown>
+  extends FarmPluginStateContext<TState>, ShutdownPayload {}
+
+export interface FarmPluginRuntimeHooks<
+  TState = unknown,
+  TRequestContext extends object = Record<string, unknown>,
+> {
+  start?(event: FarmPluginRuntimeStartEvent<TState>): MaybePromise<void>;
+  context?(event: FarmPluginRuntimeContextEvent<TState>): MaybePromise<TRequestContext>;
+  before?(
+    event: FarmPluginRuntimeBeforeEvent<TState, TRequestContext>,
+  ): MaybePromise<Request | Response | void>;
+  after?(
+    event: FarmPluginRuntimeAfterEvent<TState, TRequestContext>,
+  ): MaybePromise<Response | void>;
+  error?(event: FarmPluginRuntimeErrorEvent<TState, TRequestContext>): MaybePromise<void>;
+  close?(event: FarmPluginRuntimeCloseEvent<TState>): MaybePromise<void>;
+}
+
+export interface FarmPluginRuntimeRequestOptions {
+  kind?: FarmPluginRuntimeKind;
+  route?: FarmPluginRouteRuntimePayload;
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+export type FarmPluginRuntimeRequestHandler = (request: Request) => MaybePromise<Response>;
+
+export interface FarmPluginRuntimeSession {
+  request: Request;
+  response?: Response;
+  ctx: Readonly<Record<string, unknown>>;
+  startedAt: number;
+  options: FarmPluginRuntimeRequestOptions;
+  waitUntil(promise: Promise<unknown>): void;
+}
+
+export type FarmPluginDiscoveredRoute =
+  | RouteDiscoveredPayload
+  | ({ kind: "middleware" } & MiddlewareDiscoveredPayload)
+  | ({ kind: "api" } & APIRouteDiscoveredPayload);
+
+export interface FarmPluginRouterHooks<TState = unknown> {
+  discovered?(
+    route: FarmPluginDiscoveredRoute,
+    context: FarmPluginStateContext<TState>,
+  ): MaybePromise<void>;
+  generated?(
+    routes: RoutesGeneratedPayload,
+    context: FarmPluginStateContext<TState>,
+  ): MaybePromise<void>;
+  before?(route: RouteMatchPayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+  after?(
+    result: RouteMatchResultPayload,
+    context: FarmPluginStateContext<TState>,
+  ): MaybePromise<void>;
+}
+
+export interface FarmPluginRenderHooks<TState = unknown> {
+  before?(
+    render: RenderLifecyclePayload,
+    context: FarmPluginStateContext<TState>,
+  ): MaybePromise<void>;
+  html?(
+    html: string,
+    render: RenderLifecyclePayload,
+    context: FarmPluginStateContext<TState>,
+  ): MaybePromise<string | void>;
+}
+
+export interface FarmPluginBuildHooks<TState = unknown> {
+  before?(
+    bundle: BundleLifecyclePayload,
+    context: FarmPluginStateContext<TState>,
+  ): MaybePromise<void>;
+  configure?(buildConfig: any, context: FarmPluginStateContext<TState>): MaybePromise<any>;
+  after?(result: BundleResultPayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+}
+
+export interface FarmPluginDevHooks<TState = unknown> {
+  server?(viteServer: ViteDevServer, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+  update?(update: HMRUpdatePayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+}
+
+export interface FarmPlugin<
+  TState = any,
+  TRequestContext extends object = Record<string, unknown>,
+> {
   name: string;
   version?: string;
   enforce?: "pre" | "post";
 
+  /** Transform Farm config before it is resolved. */
+  configure?: (config: FarmConfig, context: FarmPluginContext) => MaybePromise<FarmConfig | void>;
+  /** Initialize private plugin state once for this plugin manager. */
+  setup?: (context: FarmPluginSetupContext) => MaybePromise<TState>;
+
+  runtime?: FarmPluginRuntimeHooks<TState, TRequestContext>;
+  router?: FarmPluginRouterHooks<TState>;
+  render?: FarmPluginRenderHooks<TState>;
+  build?: FarmPluginBuildHooks<TState>;
+  dev?: FarmPluginDevHooks<TState>;
+
+  /** @deprecated Use `setup` instead. */
   init?: (context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `runtime.start` instead. */
   ready?: (context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `dev.server` instead. */
   devServerCreated?: (
     viteServer: ViteDevServer,
     context: FarmPluginContext,
   ) => void | Promise<void>;
 
+  /** @deprecated Use `configure` instead. */
   config?: (config: FarmConfig, context: FarmPluginContext) => FarmConfig | Promise<FarmConfig>;
   configResolved?: (config: FarmConfig, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.before` instead. */
   buildStart?: (context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.after` instead. */
   buildEnd?: (context: FarmPluginContext) => void | Promise<void>;
 
+  /** @deprecated Use `router.discovered` instead. */
   routeDiscovered?: (
     route: RouteDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.generated` instead. */
   routesGenerated?: (
     routes: RoutesGeneratedPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.discovered` instead. */
   middlewareDiscovered?: (
     middleware: MiddlewareDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.discovered` instead. */
   apiRouteDiscovered?: (
     route: APIRouteDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.before` instead. */
   beforeRouteMatch?: (route: RouteMatchPayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `router.after` instead. */
   afterRouteMatch?: (
     result: RouteMatchResultPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `render.before` instead. */
   beforeRender?: (
     render: RenderLifecyclePayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `render.html` instead. */
   afterRender?: (
     html: string,
     render: RenderLifecyclePayload,
     context: FarmPluginContext,
   ) => string | Promise<string> | void | Promise<void>;
+  /** @deprecated Use `runtime.before` instead. */
   beforeApiHandler?: (
     request: Request,
     api: APIHandlerLifecyclePayload,
     context: FarmRequestPluginContext,
   ) => Request | Promise<Request> | void | Promise<void>;
+  /** @deprecated Use `runtime.after` instead. */
   afterApiHandler?: (
     response: Response,
     api: APIHandlerLifecyclePayload,
     context: FarmPluginContext,
   ) => Response | Promise<Response> | void | Promise<void>;
   onError?: (error: ErrorLifecyclePayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `dev.update` instead. */
   hmrUpdate?: (update: HMRUpdatePayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.before` instead. */
   beforeBundle?: (
     bundle: BundleLifecyclePayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `build.after` instead. */
   afterBundle?: (result: BundleResultPayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.configure` instead. */
   beforeNitroBuild?: (nitroConfig: any, context: FarmPluginContext) => any | Promise<any>;
   afterNitroBuild?: (
     payload: NitroBuildLifecyclePayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `runtime.close` instead. */
   shutdown?: (payload: ShutdownPayload, context: FarmPluginContext) => void | Promise<void>;
 
+  /** @deprecated Use the Web Request based `runtime.before` hook instead. */
   beforeRequest?: (
     req: FarmRequest,
     res: FarmResponse,
     context: FarmRequestPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use the Web Response based `runtime.after` hook instead. */
   afterResponse?: (
     req: FarmRequest,
     res: FarmResponse,
@@ -213,13 +399,24 @@ export interface FarmPlugin {
   ) => void | Promise<void>;
 
   // Transform hooks
+  /** @deprecated Use `render.html` instead. */
   transformHTML?: (html: string, context: FarmPluginContext) => string | Promise<string>;
+  /** @deprecated Use `render.before` or `render.html` instead. */
   transformPage?: (component: any, context: FarmPluginContext) => any | Promise<any>;
 }
 
 export class PluginManager {
   private plugins: FarmPlugin[] = [];
   private context: FarmPluginContext;
+  private pluginStates = new Map<FarmPlugin, unknown>();
+  private setupComplete = false;
+  private initialized = false;
+  private runtimeReady = false;
+  private runtimeClosed = false;
+  private runtimeStartPromise?: Promise<void>;
+  private runtimeClosePromise?: Promise<void>;
+  private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
+  private failedRuntimeSessions = new WeakSet<FarmPluginRuntimeSession>();
 
   constructor(context: Omit<FarmPluginContext, "requestContext">) {
     this.context = {
@@ -287,6 +484,247 @@ export class PluginManager {
     }
   }
 
+  private copyRuntimeRequestContext(source: Request, target: Request): void {
+    const runtimeContext = this.runtimeRequestContexts.get(source);
+    if (runtimeContext) {
+      this.runtimeRequestContexts.set(target, runtimeContext);
+    }
+  }
+
+  private createRuntimeBaseEvent(
+    plugin: FarmPlugin,
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ): FarmPluginRuntimeBaseEvent {
+    return {
+      ...this.createStateHookContext(plugin),
+      request,
+      req: this.createRequestHookContext(request).req,
+      kind: options.kind ?? "request",
+      route: options.route,
+      signal: request.signal,
+      waitUntil,
+    };
+  }
+
+  private async createRuntimeRequestContext(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ): Promise<Readonly<Record<string, unknown>>> {
+    const values: Record<string, unknown> = {};
+    const owners = new Map<string, string>();
+
+    for (const plugin of this.getSortedPlugins()) {
+      const createContext = plugin.runtime?.context;
+      if (!createContext) continue;
+
+      const result = await createContext(
+        this.createRuntimeBaseEvent(plugin, request, options, waitUntil),
+      );
+      if (result === undefined) continue;
+      if (!result || typeof result !== "object" || Array.isArray(result)) {
+        throw new TypeError(`Farm plugin "${plugin.name}" runtime.context must return an object`);
+      }
+
+      for (const [key, value] of Object.entries(result)) {
+        const owner = owners.get(key);
+        if (owner) {
+          throw new Error(
+            `Farm plugin context key "${key}" from "${plugin.name}" conflicts with "${owner}"`,
+          );
+        }
+        owners.set(key, plugin.name);
+        values[key] = value;
+      }
+    }
+
+    const runtimeContext = Object.freeze(values);
+    this.runtimeRequestContexts.set(request, runtimeContext);
+    return runtimeContext;
+  }
+
+  private async runRuntimeErrorHooks(
+    request: Request,
+    error: unknown,
+    ctx: Readonly<Record<string, unknown>>,
+    durationMs: number,
+    options: FarmPluginRuntimeRequestOptions,
+    waitUntil: (promise: Promise<unknown>) => void,
+  ): Promise<void> {
+    for (const plugin of this.getSortedPlugins()) {
+      const onError = plugin.runtime?.error;
+      if (!onError) continue;
+
+      try {
+        await onError({
+          ...this.createRuntimeBaseEvent(plugin, request, options, waitUntil),
+          ctx,
+          error,
+          durationMs,
+        });
+      } catch (hookError) {
+        console.error(`Farm plugin "${plugin.name}" runtime.error failed:`, hookError);
+      }
+    }
+
+    try {
+      await this.runHookParallel("onError", {
+        phase: "runtime",
+        error,
+        meta: {
+          kind: options.kind ?? "request",
+          pathname: new URL(request.url).pathname,
+          durationMs,
+        },
+      });
+    } catch (hookError) {
+      console.error("Farm plugin onError hook failed:", hookError);
+    }
+  }
+
+  private createStateHookContext(
+    plugin: FarmPlugin,
+    context: FarmPluginContext = this.context,
+  ): FarmPluginStateContext {
+    return {
+      ...context,
+      state: this.pluginStates.get(plugin),
+    };
+  }
+
+  private getPluginHooks(
+    plugin: FarmPlugin,
+    hookName: keyof FarmPlugin,
+  ): Array<(...args: any[]) => any> {
+    const hooks: Array<(...args: any[]) => any> = [];
+    const legacyHook = plugin[hookName];
+    if (typeof legacyHook === "function") {
+      hooks.push(legacyHook);
+    }
+
+    const withState = (context: FarmPluginContext) => this.createStateHookContext(plugin, context);
+
+    switch (hookName) {
+      case "config":
+        if (plugin.configure) {
+          hooks.push((config: FarmConfig, context: FarmPluginContext) =>
+            plugin.configure?.(config, context),
+          );
+        }
+        break;
+      case "ready":
+        if (plugin.runtime?.start) {
+          hooks.push((context: FarmPluginContext) => plugin.runtime?.start?.(withState(context)));
+        }
+        break;
+      case "shutdown":
+        if (plugin.runtime?.close) {
+          hooks.push((payload: ShutdownPayload, context: FarmPluginContext) =>
+            plugin.runtime?.close?.({
+              ...withState(context),
+              reason: payload.reason,
+            }),
+          );
+        }
+        break;
+      case "routeDiscovered":
+        if (plugin.router?.discovered) {
+          hooks.push((route: RouteDiscoveredPayload, context: FarmPluginContext) =>
+            plugin.router?.discovered?.(route, withState(context)),
+          );
+        }
+        break;
+      case "middlewareDiscovered":
+        if (plugin.router?.discovered) {
+          hooks.push((route: MiddlewareDiscoveredPayload, context: FarmPluginContext) =>
+            plugin.router?.discovered?.({ kind: "middleware", ...route }, withState(context)),
+          );
+        }
+        break;
+      case "apiRouteDiscovered":
+        if (plugin.router?.discovered) {
+          hooks.push((route: APIRouteDiscoveredPayload, context: FarmPluginContext) =>
+            plugin.router?.discovered?.({ kind: "api", ...route }, withState(context)),
+          );
+        }
+        break;
+      case "routesGenerated":
+        if (plugin.router?.generated) {
+          hooks.push((routes: RoutesGeneratedPayload, context: FarmPluginContext) =>
+            plugin.router?.generated?.(routes, withState(context)),
+          );
+        }
+        break;
+      case "beforeRouteMatch":
+        if (plugin.router?.before) {
+          hooks.push((route: RouteMatchPayload, context: FarmPluginContext) =>
+            plugin.router?.before?.(route, withState(context)),
+          );
+        }
+        break;
+      case "afterRouteMatch":
+        if (plugin.router?.after) {
+          hooks.push((result: RouteMatchResultPayload, context: FarmPluginContext) =>
+            plugin.router?.after?.(result, withState(context)),
+          );
+        }
+        break;
+      case "beforeRender":
+        if (plugin.render?.before) {
+          hooks.push((render: RenderLifecyclePayload, context: FarmPluginContext) =>
+            plugin.render?.before?.(render, withState(context)),
+          );
+        }
+        break;
+      case "afterRender":
+        if (plugin.render?.html) {
+          hooks.push((html: string, render: RenderLifecyclePayload, context: FarmPluginContext) =>
+            plugin.render?.html?.(html, render, withState(context)),
+          );
+        }
+        break;
+      case "beforeBundle":
+        if (plugin.build?.before) {
+          hooks.push((bundle: BundleLifecyclePayload, context: FarmPluginContext) =>
+            plugin.build?.before?.(bundle, withState(context)),
+          );
+        }
+        break;
+      case "beforeNitroBuild":
+        if (plugin.build?.configure) {
+          hooks.push((buildConfig: any, context: FarmPluginContext) =>
+            plugin.build?.configure?.(buildConfig, withState(context)),
+          );
+        }
+        break;
+      case "afterBundle":
+        if (plugin.build?.after) {
+          hooks.push((result: BundleResultPayload, context: FarmPluginContext) =>
+            plugin.build?.after?.(result, withState(context)),
+          );
+        }
+        break;
+      case "devServerCreated":
+        if (plugin.dev?.server) {
+          hooks.push((server: ViteDevServer, context: FarmPluginContext) =>
+            plugin.dev?.server?.(server, withState(context)),
+          );
+        }
+        break;
+      case "hmrUpdate":
+        if (plugin.dev?.update) {
+          hooks.push((update: HMRUpdatePayload, context: FarmPluginContext) =>
+            plugin.dev?.update?.(update, withState(context)),
+          );
+        }
+        break;
+    }
+
+    return hooks;
+  }
+
   private getHookContext(hookName: keyof FarmPlugin, args: any[]): FarmPluginContext {
     if (
       hookName === "beforeRequest" ||
@@ -323,12 +761,204 @@ export class PluginManager {
     return [...pre, ...normal, ...post];
   }
 
+  copyRequestContext(source: FarmRequest | Request, target: FarmRequest | Request): void {
+    this.copyRequestStore(source, target);
+    if (source instanceof Request && target instanceof Request) {
+      this.copyRuntimeRequestContext(source, target);
+    }
+  }
+
+  async setupPlugins(): Promise<void> {
+    if (this.setupComplete) return;
+
+    for (const plugin of this.getSortedPlugins()) {
+      if (!plugin.setup) continue;
+      const state = await plugin.setup({
+        ...this.context,
+        env: getResolvedEnv(),
+      });
+      this.pluginStates.set(plugin, state);
+    }
+
+    this.setupComplete = true;
+  }
+
+  async startRuntime(): Promise<void> {
+    if (this.runtimeReady) return;
+    if (this.runtimeStartPromise) return this.runtimeStartPromise;
+
+    this.runtimeStartPromise = (async () => {
+      if (!this.initialized) {
+        await this.runHookParallel("init");
+      }
+      await this.setupPlugins();
+      if (!this.runtimeReady) {
+        await this.runHookParallel("ready");
+      }
+    })();
+
+    try {
+      await this.runtimeStartPromise;
+    } catch (error) {
+      this.runtimeStartPromise = undefined;
+      throw error;
+    }
+  }
+
+  async closeRuntime(reason = "runtime-closed"): Promise<void> {
+    if (this.runtimeClosed) return;
+    if (this.runtimeClosePromise) return this.runtimeClosePromise;
+
+    this.runtimeClosePromise = this.runHookParallel("shutdown", { reason }).then(() => undefined);
+    try {
+      await this.runtimeClosePromise;
+    } catch (error) {
+      this.runtimeClosePromise = undefined;
+      throw error;
+    }
+  }
+
+  async beginRuntimeRequest(
+    request: Request,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<FarmPluginRuntimeSession> {
+    await this.startRuntime();
+
+    const startedAt = Date.now();
+    const waitUntil = options.waitUntil
+      ? (promise: Promise<unknown>) => options.waitUntil?.(Promise.resolve(promise))
+      : (promise: Promise<unknown>) => {
+          void Promise.resolve(promise).catch(() => {});
+        };
+    let activeRequest = request;
+    let runtimeContext: Readonly<Record<string, unknown>> = Object.freeze({});
+
+    try {
+      runtimeContext = await this.createRuntimeRequestContext(activeRequest, options, waitUntil);
+
+      let response: Response | undefined;
+      for (const plugin of this.getSortedPlugins()) {
+        const before = plugin.runtime?.before;
+        if (!before) continue;
+
+        const result = await before({
+          ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
+          ctx: runtimeContext,
+        });
+
+        if (result instanceof Request) {
+          this.copyRequestStore(activeRequest, result);
+          this.copyRuntimeRequestContext(activeRequest, result);
+          activeRequest = result;
+          continue;
+        }
+        if (result instanceof Response) {
+          response = result;
+          break;
+        }
+        if (result !== undefined) {
+          throw new TypeError(
+            `Farm plugin "${plugin.name}" runtime.before must return a Request, Response, or undefined`,
+          );
+        }
+      }
+
+      return {
+        request: activeRequest,
+        response,
+        ctx: runtimeContext,
+        startedAt,
+        options,
+        waitUntil,
+      };
+    } catch (error) {
+      await this.runRuntimeErrorHooks(
+        activeRequest,
+        error,
+        runtimeContext,
+        Date.now() - startedAt,
+        options,
+        waitUntil,
+      );
+      throw error;
+    }
+  }
+
+  async endRuntimeRequest(
+    session: FarmPluginRuntimeSession,
+    initialResponse: Response,
+  ): Promise<Response> {
+    let response = initialResponse;
+
+    try {
+      for (const plugin of this.getSortedPlugins()) {
+        const after = plugin.runtime?.after;
+        if (!after) continue;
+
+        const result = await after({
+          ...this.createRuntimeBaseEvent(
+            plugin,
+            session.request,
+            session.options,
+            session.waitUntil,
+          ),
+          ctx: session.ctx,
+          response,
+          durationMs: Date.now() - session.startedAt,
+        });
+        if (result !== undefined) {
+          if (!(result instanceof Response)) {
+            throw new TypeError(
+              `Farm plugin "${plugin.name}" runtime.after must return a Response or undefined`,
+            );
+          }
+          response = result;
+        }
+      }
+
+      return response;
+    } catch (error) {
+      await this.failRuntimeRequest(session, error);
+      throw error;
+    }
+  }
+
+  async failRuntimeRequest(session: FarmPluginRuntimeSession, error: unknown): Promise<void> {
+    if (this.failedRuntimeSessions.has(session)) return;
+    this.failedRuntimeSessions.add(session);
+    await this.runRuntimeErrorHooks(
+      session.request,
+      error,
+      session.ctx,
+      Date.now() - session.startedAt,
+      session.options,
+      session.waitUntil,
+    );
+  }
+
+  async runRuntimeRequest(
+    request: Request,
+    handler: FarmPluginRuntimeRequestHandler,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<Response> {
+    const session = await this.beginRuntimeRequest(request, options);
+    try {
+      const response = session.response ?? (await handler(session.request));
+      if (!(response instanceof Response)) {
+        throw new TypeError("Farm plugin runtime handlers must return a Response");
+      }
+      return await this.endRuntimeRequest(session, response);
+    } catch (error) {
+      await this.failRuntimeRequest(session, error);
+      throw error;
+    }
+  }
+
   async runHook<K extends keyof FarmPlugin>(hookName: K, ...args: any[]): Promise<any> {
     const plugins = this.getSortedPlugins();
 
     for (const plugin of plugins) {
-      const hook = plugin[hookName];
-      if (typeof hook === "function") {
+      for (const hook of this.getPluginHooks(plugin, hookName)) {
         const hookContext = this.getHookContext(hookName, args);
         const result = await (hook as any).apply(plugin, [...args, hookContext]);
         if (result !== undefined) {
@@ -347,8 +977,7 @@ export class PluginManager {
     let value = initialValue;
 
     for (const plugin of plugins) {
-      const hook = plugin[hookName];
-      if (typeof hook === "function") {
+      for (const hook of this.getPluginHooks(plugin, hookName)) {
         const hookArgs = [value, ...args];
         const hookContext = this.getHookContext(hookName, hookArgs);
         const result = await (hook as any).apply(plugin, [...hookArgs, hookContext]);
@@ -376,6 +1005,8 @@ export class PluginManager {
 
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([
+      "ready",
+      "shutdown",
       "beforeRequest",
       "afterResponse",
       "beforeApiHandler",
@@ -388,8 +1019,7 @@ export class PluginManager {
 
     if (sequentialHooks.has(hookName)) {
       for (const plugin of plugins) {
-        const hook = plugin[hookName];
-        if (typeof hook === "function") {
+        for (const hook of this.getPluginHooks(plugin, hookName)) {
           // Check if response is already sent (only for beforeRequest)
           if (hookName === "beforeRequest") {
             const res = args[1];
@@ -414,14 +1044,17 @@ export class PluginManager {
       // Run other hooks in parallel
       const promises: Promise<any>[] = [];
       for (const plugin of plugins) {
-        const hook = plugin[hookName];
-        if (typeof hook === "function") {
+        for (const hook of this.getPluginHooks(plugin, hookName)) {
           const hookContext = this.getHookContext(hookName, args);
           promises.push((hook as any).apply(plugin, [...args, hookContext]));
         }
       }
       await Promise.all(promises);
     }
+
+    if (hookName === "init") this.initialized = true;
+    if (hookName === "ready") this.runtimeReady = true;
+    if (hookName === "shutdown") this.runtimeClosed = true;
 
     return false;
   }
@@ -435,7 +1068,10 @@ export class PluginManager {
   }
 }
 
-export function definePlugin(plugin: FarmPlugin): FarmPlugin {
+export function definePlugin<
+  TState = undefined,
+  TRequestContext extends object = Record<string, never>,
+>(plugin: FarmPlugin<TState, TRequestContext>): FarmPlugin<TState, TRequestContext> {
   return plugin;
 }
 export { farmPlugin } from "./vite";

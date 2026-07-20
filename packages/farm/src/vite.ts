@@ -3,7 +3,7 @@ import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
 import { logger, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
-import type { PluginManager } from "./plugin";
+import type { FarmPluginRuntimeSession, PluginManager } from "./plugin";
 import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
@@ -120,6 +120,61 @@ function createRequestFromNodeRequest(
   return new Request(url.toString(), {
     method: req.method || "GET",
     headers,
+  });
+}
+
+function applyWebRequestToNodeRequest(
+  request: Request,
+  req: {
+    method?: string;
+    url?: string;
+    headers: Record<string, string | string[] | undefined>;
+  },
+): void {
+  const url = new URL(request.url);
+  req.method = request.method;
+  req.url = `${url.pathname}${url.search}`;
+
+  for (const key of Object.keys(req.headers)) {
+    delete req.headers[key];
+  }
+  request.headers.forEach((value, key) => {
+    req.headers[key] = value;
+  });
+}
+
+function createHeadersFromNodeResponse(res: {
+  getHeaders(): Record<string, string | number | string[] | undefined>;
+}): Headers {
+  const headers = new Headers();
+  for (const [key, value] of Object.entries(res.getHeaders())) {
+    if (Array.isArray(value)) {
+      for (const item of value) headers.append(key, item);
+    } else if (value !== undefined) {
+      headers.set(key, String(value));
+    }
+  }
+  return headers;
+}
+
+function applyWebResponseToNodeResponse(
+  response: Response,
+  res: {
+    statusCode: number;
+    headersSent: boolean;
+    getHeaderNames(): string[];
+    removeHeader(name: string): void;
+    setHeader(name: string, value: string): void;
+  },
+): void {
+  if (res.headersSent) return;
+
+  res.statusCode = response.status;
+  for (const name of res.getHeaderNames()) {
+    res.removeHeader(name);
+  }
+  response.headers.forEach((value, key) => {
+    res.setHeader(key, value);
   });
 }
 
@@ -944,15 +999,30 @@ export function farmPlugin(
               body: body || undefined,
             });
 
-            const response = await dispatchIntegrationRequest(
-              {
-                integration: matchedRoute.integration,
-                config: currentConfig,
-                isDev: true,
-                isProd: false,
-              },
-              integrationRequest,
-            );
+            const dispatchIntegration = async (request: Request) => {
+              const result = await dispatchIntegrationRequest(
+                {
+                  integration: matchedRoute.integration,
+                  config: currentConfig,
+                  isDev: true,
+                  isProd: false,
+                },
+                request,
+              );
+              if (!result) {
+                throw new Error(`Matched integration route did not return a response`);
+              }
+              return result;
+            };
+            const response = pm
+              ? await pm.runRuntimeRequest(integrationRequest, dispatchIntegration, {
+                  kind: "integration",
+                  route: {
+                    pathname: requestPathname,
+                    pattern: matchedRoute.route.path,
+                  },
+                })
+              : await dispatchIntegration(integrationRequest);
 
             if (!response) {
               return false;
@@ -995,7 +1065,8 @@ export function farmPlugin(
         }
 
         // Handle API routes first
-        const hasMatchedApiRoute = Boolean(apiRouteManager.matchRoute(requestPathname));
+        const matchedApiRoute = apiRouteManager.matchRoute(requestPathname);
+        const hasMatchedApiRoute = Boolean(matchedApiRoute);
         if (hasMatchedApiRoute || req.url?.startsWith("/api/")) {
           const startTime = Date.now();
           const method = req.method || "GET";
@@ -1062,17 +1133,34 @@ export function farmPlugin(
               const apiLifecyclePayload = {
                 pathname: new URL(url).pathname,
                 method,
-                routePath: urlPath,
+                routePath:
+                  apiRouteManager.matchRoute(new URL(url).pathname)?.route.path ||
+                  matchedApiRoute?.route.path ||
+                  urlPath,
               };
-              const handledRequest: Request = pm
-                ? await pm.runHookSerial("beforeApiHandler", request, apiLifecyclePayload)
-                : request;
+              const invokeAPIHandler = async (runtimeRequest: Request) => {
+                const handledRequest: Request = pm
+                  ? await pm.runHookSerial(
+                      "beforeApiHandler",
+                      runtimeRequest,
+                      apiLifecyclePayload,
+                    )
+                  : runtimeRequest;
 
-              // Call better-call handler
-              const response = await apiHandler(handledRequest);
+                const response = await apiHandler(handledRequest);
+                return pm
+                  ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
+                  : response;
+              };
               const handledResponse: Response = pm
-                ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
-                : response;
+                ? await pm.runRuntimeRequest(request, invokeAPIHandler, {
+                    kind: "api",
+                    route: {
+                      pathname: apiLifecyclePayload.pathname,
+                      pattern: apiLifecyclePayload.routePath,
+                    },
+                  })
+                : await invokeAPIHandler(request);
 
               const duration = Date.now() - startTime;
               logResponse(method, urlPath, handledResponse.status, duration, "API");
@@ -1124,18 +1212,35 @@ export function farmPlugin(
                 method,
                 routePath: urlPath,
               };
-              const handledRequest: Request = pm
-                ? await pm.runHookSerial("beforeApiHandler", request, apiLifecyclePayload)
-                : request;
-
-              const docsResponse = await farmDocsAPIHandler(handledRequest);
+              const invokeDocsAPIHandler = async (runtimeRequest: Request) => {
+                const handledRequest: Request = pm
+                  ? await pm.runHookSerial(
+                      "beforeApiHandler",
+                      runtimeRequest,
+                      apiLifecyclePayload,
+                    )
+                  : runtimeRequest;
+                const response = await farmDocsAPIHandler(handledRequest);
+                if (!response) {
+                  return new Response(null, { status: 404 });
+                }
+                return pm
+                  ? await pm.runHookSerial("afterApiHandler", response, apiLifecyclePayload)
+                  : response;
+              };
+              const docsResponse = pm
+                ? await pm.runRuntimeRequest(request, invokeDocsAPIHandler, {
+                    kind: "docs",
+                    route: {
+                      pathname,
+                      pattern: apiLifecyclePayload.routePath,
+                    },
+                  })
+                : await invokeDocsAPIHandler(request);
               if (docsResponse) {
-                const handledResponse: Response = pm
-                  ? await pm.runHookSerial("afterApiHandler", docsResponse, apiLifecyclePayload)
-                  : docsResponse;
                 const duration = Date.now() - startTime;
-                logResponse(method, urlPath, handledResponse.status, duration, "API");
-                await sendWebResponse(res, handledResponse);
+                logResponse(method, urlPath, docsResponse.status, duration, "API");
+                await sendWebResponse(res, docsResponse);
                 return;
               }
             } catch (error) {
@@ -1359,6 +1464,36 @@ export function farmPlugin(
           routePattern: routeMatch?.route?.pattern || null,
           params: routeMatch?.params || {},
         };
+        let runtimeSession: FarmPluginRuntimeSession | undefined;
+        if (pm) {
+          try {
+            runtimeSession = await pm.beginRuntimeRequest(
+              createRequestFromNodeRequest(req, new URL(fullUrl)),
+              {
+                kind: "page",
+                route: {
+                  pathname,
+                  pattern: renderPayload.routePattern,
+                  params: renderPayload.params,
+                },
+              },
+            );
+            pm.copyRequestContext(runtimeSession.request, req);
+            applyWebRequestToNodeRequest(runtimeSession.request, req);
+
+            if (runtimeSession.response) {
+              const response = await pm.endRuntimeRequest(runtimeSession, runtimeSession.response);
+              await sendWebResponse(res, response);
+              return;
+            }
+          } catch (error) {
+            await emitPluginError("runtime-before", error, { pathname });
+            res.statusCode = 500;
+            res.setHeader("Content-Type", "text/plain; charset=utf-8");
+            res.end("Internal Server Error");
+            return;
+          }
+        }
 
         // logRequest(method, urlPath, "PAGE");
 
@@ -1366,6 +1501,16 @@ export function farmPlugin(
           if (middlewareManager) {
             const handled = await middlewareManager.execute(req, res);
             if (handled) {
+              if (pm && runtimeSession) {
+                pm.copyRequestContext(req, runtimeSession.request);
+                await pm.endRuntimeRequest(
+                  runtimeSession,
+                  new Response(null, {
+                    status: res.statusCode || 200,
+                    headers: createHeadersFromNodeResponse(res),
+                  }),
+                );
+              }
               const duration = Date.now() - startTime;
               logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
               return; // Middleware handled the response
@@ -1378,6 +1523,16 @@ export function farmPlugin(
           }
 
           if (res.writableEnded) {
+            if (pm && runtimeSession) {
+              pm.copyRequestContext(req, runtimeSession.request);
+              await pm.endRuntimeRequest(
+                runtimeSession,
+                new Response(null, {
+                  status: res.statusCode || 200,
+                  headers: createHeadersFromNodeResponse(res),
+                }),
+              );
+            }
             // Log response if already ended
             const duration = Date.now() - startTime;
             logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
@@ -1390,6 +1545,16 @@ export function farmPlugin(
           let afterResponseCalled = false;
           const htmlChunks: Buffer[] = [];
           let didStreamHtml = false;
+          const bufferPluginResponse = Boolean(
+            runtimeSession &&
+              pm?.getPlugins().some(
+                (plugin) =>
+                  plugin.runtime?.after ||
+                  plugin.render?.html ||
+                  plugin.afterRender ||
+                  plugin.transformHTML,
+              ),
+          );
 
           res.write = ((chunk: any, ...args: any[]) => {
             const contentTypeHeader =
@@ -1401,6 +1566,11 @@ export function farmPlugin(
               const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
               htmlChunks.push(bufferChunk);
               didStreamHtml = true;
+              if (bufferPluginResponse) {
+                const callback = args.find((arg) => typeof arg === "function");
+                callback?.();
+                return true;
+              }
               const writeResult = originalWrite(chunk, ...args);
               if (typeof (res as any).flush === "function") {
                 (res as any).flush();
@@ -1435,7 +1605,7 @@ export function farmPlugin(
 
                     const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
                     let html = fullHtml;
-                    if (!didStreamHtml) {
+                    if (!didStreamHtml || bufferPluginResponse) {
                       html = await pm.runHookSerial("transformHTML", html);
                       html = await pm.runHookSerial("afterRender", html, renderPayload);
                       const callback =
@@ -1448,6 +1618,51 @@ export function farmPlugin(
                     } else {
                       await pm.runHookSerial("transformHTML", fullHtml);
                       await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+                    }
+                  }
+
+                  if (runtimeSession) {
+                    pm.copyRequestContext(req, runtimeSession.request);
+                    const status = res.statusCode || 200;
+                    const canHaveBody =
+                      method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
+                    const firstArg = originalEndArgs[0];
+                    const responseBody = canHaveBody
+                      ? isHtmlResponse
+                        ? didStreamHtml && !bufferPluginResponse
+                          ? Buffer.concat(htmlChunks)
+                          : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
+                            ? firstArg
+                            : undefined
+                        : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
+                          ? firstArg
+                          : undefined
+                      : null;
+                    const runtimeResponse = await pm.endRuntimeRequest(
+                      runtimeSession,
+                      new Response(
+                        Buffer.isBuffer(responseBody)
+                          ? responseBody.toString("utf8")
+                          : responseBody,
+                        {
+                          status,
+                          headers: createHeadersFromNodeResponse(res),
+                        },
+                      ),
+                    );
+                    applyWebResponseToNodeResponse(runtimeResponse, res);
+
+                    if (!didStreamHtml || bufferPluginResponse) {
+                      const callback =
+                        typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+                          ? originalEndArgs[originalEndArgs.length - 1]
+                          : undefined;
+                      const body = runtimeResponse.body
+                        ? Buffer.from(await runtimeResponse.arrayBuffer())
+                        : undefined;
+                      originalEndArgs.length = 0;
+                      if (body) originalEndArgs.push(body);
+                      if (callback) originalEndArgs.push(callback);
                     }
                   }
                 })
@@ -1476,6 +1691,9 @@ export function farmPlugin(
           // Log error response
           const duration = Date.now() - startTime;
           logResponse(method, urlPath, 500, duration, "PAGE");
+          if (pm && runtimeSession) {
+            await pm.failRuntimeRequest(runtimeSession, error);
+          }
           await emitPluginError("render-page", error, { pathname });
           next(error);
         }

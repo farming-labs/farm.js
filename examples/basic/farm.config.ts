@@ -1,4 +1,4 @@
-import { defineConfig, type FarmPlugin } from '@farmjs/core';
+import { defineConfig, definePlugin, type FarmPlugin } from '@farmjs/core';
 import { createLoggerPlugin, createEnvPlugin } from '@farmjs/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
@@ -18,6 +18,50 @@ const myCustomPlugin: FarmPlugin = {
     );
   },
 };
+
+const runtimeLifecyclePlugin = definePlugin({
+  name: 'runtime-lifecycle-e2e',
+
+  setup() {
+    return { header: 'x-farm-runtime-plugin' };
+  },
+
+  runtime: {
+    context({ request }) {
+      return { requestPath: new URL(request.url).pathname };
+    },
+
+    before({ ctx }) {
+      if (ctx.requestPath === '/feature-lab/runtime-short-circuit') {
+        return new Response('Stopped by the Farm plugin runtime', { status: 418 });
+      }
+    },
+
+    after({ state, ctx, kind, route, response }) {
+      const headers = new Headers(response.headers);
+      headers.set(state.header, ctx.requestPath);
+      headers.set('x-farm-runtime-kind', kind);
+      if (route?.pattern) {
+        headers.set('x-farm-runtime-pattern', route.pattern);
+      }
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    },
+  },
+
+  render: {
+    html(html, render) {
+      return html.replace(
+        '</body>',
+        `<!-- farm-plugin-render:${render.routePattern || render.pathname} --></body>`,
+      );
+    },
+  },
+});
 
 export default defineConfig({
   extends: ['./layers/framework-features'],
@@ -216,6 +260,7 @@ export default defineConfig({
 
   // Plugins
   plugins: [
+    runtimeLifecyclePlugin,
     createLoggerPlugin({}),
     createEnvPlugin({
         FARM_API_URL: 'https://api.example-to-something.com',

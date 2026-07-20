@@ -104,9 +104,7 @@ const NITRO_EXTERNAL_MODULES = new Set([
 ]);
 
 function isCloudflareImagePreset(preset: string): boolean {
-  return (
-    preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module"
-  );
+  return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
 }
 
 function resolveImageRuntime(
@@ -1449,11 +1447,13 @@ async function buildSSRInMemory(
     "onEvent" in config.observability;
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
+  const hasRuntimePlugins = (config.plugins || []).some((plugin) => Boolean(plugin.runtime));
   const configModulePath =
     hasConfiguredIntegrations ||
     hasObservabilityHandler ||
     hasMdxComponentConfig ||
-    hasMiddlewareConfig
+    hasMiddlewareConfig ||
+    hasRuntimePlugins
       ? await findFarmConfigPath(root)
       : null;
 
@@ -1743,9 +1743,10 @@ function generateVirtualEntryCode(
   const metadataHelpersImport = `import { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "farm/metadata";`;
   const afterHelpersImport = `import { _runWithAfterRequest } from "farm/after";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
+  const pluginRuntimeImport = `import { PluginManager } from "farm/plugin";`;
   const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
-    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
+    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "farm/docs";`
     : "";
   const docsRuntimeImport = config.docs?.enabled
     ? `import { existsSync as farmDocsExistsSync } from "node:fs";
@@ -1765,12 +1766,25 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const mdxComponentsImport = mdxComponentsPath
     ? `import * as FarmMdxComponentsModule from "${mdxComponentsPath.replace(/\\/g, "/")}";`
     : "";
-  const integrationImports = configModulePath
-    ? `
-import * as FarmUserConfigModule from "${configModulePath}";
-import { dispatchIntegrationRequest, matchIntegrationRoute } from "farm";
-`
-    : "";
+  const layerConfigPaths = (config.layers || [])
+    .map((layer) => layer.configFile)
+    .filter((configFile): configFile is string => Boolean(configFile))
+    .filter((configFile) => configFile !== configModulePath);
+  const layerConfigImports = layerConfigPaths
+    .map(
+      (configFile, index) =>
+        `import * as FarmLayerConfigModule${index} from "${configFile.replace(/\\/g, "/")}";`,
+    )
+    .join("\n");
+  const layerConfigValues = layerConfigPaths.map(
+    (_configFile, index) =>
+      `(FarmLayerConfigModule${index}.default || FarmLayerConfigModule${index})`,
+  );
+  const integrationImports = `
+${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
+${layerConfigImports}
+import { dispatchIntegrationRequest, matchIntegrationRoute, resolveIntegrationPlugins } from "farm";
+`;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
     imageRuntime === "none"
@@ -1836,6 +1850,7 @@ ${navigationHelpersImport}
 ${metadataHelpersImport}
 ${afterHelpersImport}
 ${observabilityHelpersImport}
+${pluginRuntimeImport}
 ${middlewareRuntimeImport}
 ${docsHandlerImport}
 ${docsRuntimeImport}
@@ -1852,8 +1867,34 @@ const CustomNotFoundComponent = ${notFoundPath ? "CustomNotFound.default || Cust
 const farmUserConfig = ${
     configModulePath ? "(FarmUserConfigModule.default || FarmUserConfigModule)" : "null"
   };
-const configuredIntegrations = farmUserConfig?.integrations || {};
-const integrationRuntimeConfig = farmUserConfig || {};
+const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
+const configuredIntegrations = Object.assign(
+  {},
+  ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
+);
+const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
+  integrations: configuredIntegrations,
+});
+const configuredPlugins = [
+  ...resolveIntegrationPlugins(configuredIntegrations),
+  ...farmRuntimeConfigs.flatMap((runtimeConfig) =>
+    Array.isArray(runtimeConfig.plugins) ? runtimeConfig.plugins : [],
+  ),
+];
+const farmPluginRuntime = configuredPlugins.length > 0
+  ? (() => {
+      const manager = new PluginManager({
+        config: farmUserConfig || {},
+        isDev: false,
+        isProd: true,
+      });
+      manager.addPlugins(configuredPlugins);
+      return manager;
+    })()
+  : null;
+const hasFarmPluginHTMLTransforms = configuredPlugins.some(
+  (plugin) => plugin.render?.html || plugin.afterRender || plugin.transformHTML,
+);
 const farmImageHandler = ${
     imageRuntime === "none"
       ? "null"
@@ -2232,6 +2273,80 @@ function matchPageRoute(pathname) {
     }
   }
   return null;
+}
+
+function getFarmPluginRequestOptions(request) {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+  const route = { pathname };
+  const isDocsAPIRequest = ${config.docs?.enabled ? "isFarmDocsAPIRequest(pathname)" : "false"};
+  const integrationMatch = matchIntegrationRoute(configuredIntegrations, {
+    pathname,
+    method: request.method,
+  });
+
+  if (integrationMatch) {
+    return {
+      kind: "integration",
+      route: {
+        ...route,
+        pattern: integrationMatch.route.path,
+        params: integrationMatch.params,
+      },
+    };
+  }
+
+  const docsPath = normalizeRuntimePath(farmDocsResolvedConfig?.entry || "/docs");
+  if (
+    isDocsAPIRequest ||
+    (farmDocsHandler && (pathname === docsPath || pathname.startsWith(docsPath + "/")))
+  ) {
+    return { kind: "docs", route: { ...route, pattern: docsPath } };
+  }
+
+  for (const apiRoute of apiRoutes) {
+    const params = matchRuntimePathPattern(apiRoute.path, pathname);
+    if (params !== null) {
+      return {
+        kind: "api",
+        route: { ...route, pattern: apiRoute.path, params },
+      };
+    }
+  }
+
+  const metadataImageMatch = matchMetadataImageRequest(pathname);
+  if (metadataImageMatch) {
+    return {
+      kind: "asset",
+      route: {
+        ...route,
+        pattern: metadataImageMatch.image.pattern,
+        params: metadataImageMatch.params,
+      },
+    };
+  }
+
+  const pageMatch = matchPageRoute(pathname);
+  if (pageMatch) {
+    return {
+      kind: "page",
+      route: {
+        ...route,
+        pattern: pageMatch.route.pattern,
+        params: pageMatch.params,
+      },
+    };
+  }
+
+  if (pathname.startsWith("/api/")) {
+    return { kind: "api", route };
+  }
+
+  if (request.method === "GET" || request.method === "HEAD") {
+    return { kind: "page", route };
+  }
+
+  return { kind: "request", route };
 }
 
 /**
@@ -2872,9 +2987,71 @@ async function handleFarmRequest(request) {
   }
 }
 
+async function handleFarmPluginRequest(request, runtimeOptions) {
+  if (!farmPluginRuntime || runtimeOptions.kind !== "page") {
+    return handleFarmRequest(request);
+  }
+
+  const pathname = runtimeOptions.route?.pathname || new URL(request.url).pathname;
+  const routePattern = runtimeOptions.route?.pattern || null;
+  const params = runtimeOptions.route?.params || {};
+  const layouts = getApplicableLayouts(pathname);
+
+  await farmPluginRuntime.runHookParallel("beforeRouteMatch", {
+    pathname,
+    method: request.method,
+  });
+  await farmPluginRuntime.runHookParallel("afterRouteMatch", {
+    pathname,
+    matched: Boolean(routePattern),
+    routePattern,
+    params,
+    layoutPatterns: layouts.map((layout) => layout.pattern),
+  });
+
+  const renderPayload = {
+    pathname,
+    method: request.method,
+    routePattern,
+    params,
+  };
+  await farmPluginRuntime.runHookParallel("beforeRender", renderPayload);
+
+  const response = await handleFarmRequest(request);
+  if (!hasFarmPluginHTMLTransforms || !response.headers.get("content-type")?.includes("text/html")) {
+    return response;
+  }
+
+  let html = await response.text();
+  html = await farmPluginRuntime.runHookSerial("transformHTML", html);
+  html = await farmPluginRuntime.runHookSerial("afterRender", html, renderPayload);
+
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(html, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
-  return _runWithAfterRequest(request, () => handleFarmRequest(request), context);
+  const runtimeOptions = getFarmPluginRequestOptions(request);
+  const runRequest = () => farmPluginRuntime
+    ? farmPluginRuntime.runRuntimeRequest(
+        request,
+        (runtimeRequest) => handleFarmPluginRequest(runtimeRequest, runtimeOptions),
+        {
+          ...runtimeOptions,
+          waitUntil: typeof context?.waitUntil === "function"
+            ? context.waitUntil.bind(context)
+            : undefined,
+        },
+      )
+    : handleFarmRequest(request);
+
+  return _runWithAfterRequest(request, runRequest, context);
 }
 export default { fetch };
   `.trim();
@@ -3199,10 +3376,7 @@ async function copySharpRuntime(
   const copiedPackages = new Map<string, string>();
   const targetNodeModules = path.join(nitroFuncDir, "node_modules");
 
-  async function copyPackage(
-    packageName: string,
-    parentRequire: NodeJS.Require,
-  ): Promise<void> {
+  async function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
     if (copiedPackages.has(packageName)) return;
 
     const packageJsonPath = resolvePackageJson(parentRequire, packageName);

@@ -500,10 +500,3 @@ export interface SSGCollectionResult {
   /** Routes that will be server-rendered on each request */
   ssr: string[];
 }
-
-export interface FarmPlugin {
-  name: string;
-  setup?: (config: FarmConfig) => void | Promise<void>;
-  buildStart?: () => void | Promise<void>;
-  buildEnd?: () => void | Promise<void>;
-}
