@@ -89,6 +89,57 @@ export default defineConfig({
 
 Use a factory when consumers need options. Return `definePlugin()` directly so inference is preserved.
 
+## Add browser behavior
+
+Add `client` when the same framework plugin needs hydration, navigation, browser error, performance, or cleanup hooks. Keep that code in a separate browser-safe module.
+
+```ts
+export function requestTracingPlugin(options: RequestTracingOptions = {}) {
+  return definePlugin({
+    name: "acme:request-tracing",
+
+    // Server lifecycle hooks stay here.
+    runtime: {
+      context() {},
+    },
+
+    // Farm imports only this module into the browser bundle.
+    client: {
+      source: "./src/plugins/request-tracing.client.ts",
+      public: {
+        header: options.header ?? "x-request-id",
+      },
+    },
+  });
+}
+```
+
+```ts
+import { defineClientPlugin } from "@farmjs/core/plugin/client";
+
+interface PublicOptions {
+  header: string;
+}
+
+export default function requestTracingClient(
+  options: Readonly<PublicOptions>,
+) {
+  return defineClientPlugin({
+    setup() {
+      return { header: options.header, navigations: 0 };
+    },
+    navigation: {
+      rendered({ state, to }) {
+        state.navigations += 1;
+        console.log(state.header, to.pathname);
+      },
+    },
+  });
+}
+```
+
+Farm generates the imports and runtime registration in both development and production. Do not put secrets in `client.public`; it is embedded in application JavaScript. Read [Client Plugins](/docs/plugins/client) for every hook, lifecycle order, cancellation behavior, and packaging rules.
+
 ## Choose the plugin's scope
 
 Start local, then package the plugin when more than one application needs the same framework behavior.
@@ -390,4 +441,5 @@ Do not define both the legacy and structured form of the same phase in one plugi
 - Test a `runtime.before` short circuit and confirm `runtime.after` still runs.
 - Test context-key collisions and error-hook failures.
 - Test page HTML transforms separately from API responses.
+- Test client hydration, navigation, cancellation, browser errors, and reverse-order cleanup when the plugin has a client module.
 - Run the plugin against both the dev server and a production preset build.

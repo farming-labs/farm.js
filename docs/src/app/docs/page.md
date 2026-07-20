@@ -76,8 +76,9 @@ Docs runtime, markdown mirrors, and OpenAPI.
 
 Plugin system and lifecycle hooks.
 
-- [Plugin Ecosystem](/docs/plugins): Use server plugins to extend config, request handling, routing, rendering, bundling, HMR, and lifecycle hooks.
+- [Plugin Ecosystem](/docs/plugins): Extend server and browser behavior across config, requests, routing, rendering, hydration, navigation, builds, and HMR.
 - [Create a Plugin](/docs/plugins/create-plugin): Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks.
+- [Client Plugins](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks through a browser-safe module.
 
 ### Reference
 

@@ -14,6 +14,7 @@ A compact map of the main package exports and where to learn more.
 | --- | --- |
 | @farmjs/core | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache. |
 | @farmjs/core/client | Link, router helpers, API client, integration client. |
+| @farmjs/core/plugin/client | Client plugin types, `defineClientPlugin`, and the browser lifecycle manager. |
 | @farmjs/core/navigation | Next-compatible redirect, notFound, and client navigation hooks. |
 | @farmjs/core/headers | Next-compatible request headers and cookies helpers. |
 | @farmjs/core/router | Lightweight route matching, href building, and active-route checks. |
@@ -40,6 +41,7 @@ A compact map of the main package exports and where to learn more.
 | `@farmjs/core/cron` | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers. |
 | `@farmjs/core/workflows` | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
 | `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
+| `@farmjs/core/plugin/client` | `defineClientPlugin`, `createClientPluginManager`, browser lifecycle types. |
 | `@farmjs/core/navigation` | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`. |
 | `@farmjs/core/headers` | `headers`, `cookies`. |
 | `@farmjs/core/router` | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`. |
@@ -58,6 +60,6 @@ A compact map of the main package exports and where to learn more.
 - API routes are app-owned HTTP handlers.
 - API clients are typed callers for app routes.
 - Integrations are provider or feature packages that can own routes, callers, schemas, providers, config, and lifecycle.
-- Plugins are framework-level hooks for request, render, build, and runtime behavior.
+- Plugins are framework-level hooks for server requests, rendering, builds, browser hydration, navigation, and runtime behavior.
 - Storage is the shared place to pass key/value stores and runtime database clients.
 - Cron maps a UTC schedule to an app-owned GET API route; it does not add durable workflow state.
