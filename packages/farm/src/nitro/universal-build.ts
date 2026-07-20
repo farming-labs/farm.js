@@ -1492,6 +1492,7 @@ async function buildSSRInMemory(
           // Externalize native modules and Node.js built-ins
           external: [
             "fsevents",
+            "sharp",
             "@prisma/client",
             "@prisma/client/default",
             "@prisma/client/default.js",
@@ -1519,6 +1520,7 @@ async function buildSSRInMemory(
         // These have native binaries that won't work in serverless environments
         external: [
           "fsevents",
+          "sharp",
           "esbuild",
           "lightningcss",
           "rollup",
