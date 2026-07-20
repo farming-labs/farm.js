@@ -16,13 +16,43 @@ Start the application:
 farm dev
 ```
 
-Then open:
+Press `Ctrl + Shift + .` on Windows or Linux, or `Command + Shift + .` on macOS. Farm opens DevTools over the current page, so the application stays visible behind the inspector. Press the shortcut again, press `Escape`, click outside the window, or use the close button to return to the app.
+
+You can also open the standalone dashboard directly:
 
 ```txt
 http://localhost:3000/__farm/devtools
 ```
 
 If the app uses another port, keep the same path on that origin. The dashboard is mounted by the development server; it is not added to production output.
+
+## Configure DevTools
+
+DevTools is enabled by default during `farm dev`. Disable the client launcher and both internal runtime routes in `farm.config.ts`:
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  devtools: {
+    enabled: false,
+  },
+});
+```
+
+To keep the dashboard available while turning off only the keyboard shortcut, use `shortcut: false`. You can also assign another shortcut with modifier names joined by `+`:
+
+```ts title="farm.config.ts"
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  devtools: {
+    shortcut: "mod+shift+d",
+  },
+});
+```
+
+`mod` maps to `Command` on macOS and `Ctrl` on Windows and Linux. Farm also accepts `ctrl`, `meta`, `alt`, and `shift` explicitly. DevTools remains development-only even when `enabled: true` is present in production configuration.
 
 ## What the dashboard shows
 
@@ -34,9 +64,7 @@ If the app uses another port, keep the same path on that origin. The dashboard i
 | Systems | Integration routes and middleware, React providers, schema models, request middleware, and storage mounts. |
 | Runtime | Deployment target, Nitro preset, output directory, cron routes, workflows, layers, feature flags, and environment key names. |
 
-Use the view navigation to move between surfaces. Routes and API endpoints can be filtered by path, method, or source file. Press `/` while one of those views is active to focus its filter.
-
-The **Copy JSON** action copies the current machine-readable snapshot. **JSON** opens that snapshot directly, and **App** returns to the application root.
+Use the view navigation to move between surfaces. Routes and API endpoints can be filtered by path, method, or source file. Press `/` while one of those views is active to focus its filter. The **Raw** view contains the complete machine-readable snapshot.
 
 ## Runtime JSON
 
@@ -99,7 +127,7 @@ SUMMARY  2 passed / 1 warning / 0 failed / 1 info
 DEVTOOLS http://localhost:3000/__farm/devtools
 ```
 
-When the dev server is not running, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manifest, checks the app router and root layout, resolves the deployment target, and inspects storage and cron configuration.
+When the dev server is not running, or when DevTools is disabled, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manifest, checks the app router and root layout, resolves the deployment target, and inspects storage and cron configuration.
 
 ## Target another server
 
