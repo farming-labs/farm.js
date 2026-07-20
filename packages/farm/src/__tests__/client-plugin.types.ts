@@ -30,3 +30,27 @@ const inferredPlugin = defineClientPlugin({
 expectTypeOf(inferredPlugin).toMatchTypeOf<
   FarmClientPlugin<{ tracker: { page(pathname: string): number } }>
 >();
+
+const optionsPlugin = defineClientPlugin<
+  { initialized: boolean },
+  { projectId: string; sampleRate: number }
+>({
+  setup({ options }) {
+    expectTypeOf(options.projectId).toEqualTypeOf<string>();
+    expectTypeOf(options.sampleRate).toEqualTypeOf<number>();
+    return { initialized: true };
+  },
+  navigation: {
+    rendered({ options, state }) {
+      expectTypeOf(options.projectId).toEqualTypeOf<string>();
+      expectTypeOf(state.initialized).toEqualTypeOf<boolean>();
+    },
+  },
+});
+
+expectTypeOf(optionsPlugin).toMatchTypeOf<
+  FarmClientPlugin<
+    { initialized: boolean },
+    { projectId: string; sampleRate: number }
+  >
+>();
