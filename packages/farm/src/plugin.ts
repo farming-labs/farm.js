@@ -1,5 +1,6 @@
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
+import { getResolvedEnv, type ResolvedFarmEnv } from "./env";
 import {
   clearRequestContext,
   deleteRequestContext,
@@ -149,7 +150,7 @@ export interface FarmPluginRouteRuntimePayload {
 }
 
 export interface FarmPluginSetupContext extends FarmPluginContext {
-  env: FarmConfig["env"];
+  env: ResolvedFarmEnv;
 }
 
 export interface FarmPluginStateContext<TState = unknown> extends FarmPluginContext {
@@ -221,6 +222,15 @@ export interface FarmPluginRuntimeRequestOptions {
 }
 
 export type FarmPluginRuntimeRequestHandler = (request: Request) => MaybePromise<Response>;
+
+export interface FarmPluginRuntimeSession {
+  request: Request;
+  response?: Response;
+  ctx: Readonly<Record<string, unknown>>;
+  startedAt: number;
+  options: FarmPluginRuntimeRequestOptions;
+  waitUntil(promise: Promise<unknown>): void;
+}
 
 export type FarmPluginDiscoveredRoute =
   | RouteDiscoveredPayload
@@ -386,6 +396,7 @@ export class PluginManager {
   private runtimeStartPromise?: Promise<void>;
   private runtimeClosePromise?: Promise<void>;
   private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
+  private failedRuntimeSessions = new WeakSet<FarmPluginRuntimeSession>();
 
   constructor(context: Omit<FarmPluginContext, "requestContext">) {
     this.context = {
@@ -730,6 +741,13 @@ export class PluginManager {
     return [...pre, ...normal, ...post];
   }
 
+  copyRequestContext(source: FarmRequest | Request, target: FarmRequest | Request): void {
+    this.copyRequestStore(source, target);
+    if (source instanceof Request && target instanceof Request) {
+      this.copyRuntimeRequestContext(source, target);
+    }
+  }
+
   async setupPlugins(): Promise<void> {
     if (this.setupComplete) return;
 
@@ -737,7 +755,7 @@ export class PluginManager {
       if (!plugin.setup) continue;
       const state = await plugin.setup({
         ...this.context,
-        env: this.context.config.env,
+        env: getResolvedEnv(),
       });
       this.pluginStates.set(plugin, state);
     }
@@ -780,11 +798,10 @@ export class PluginManager {
     }
   }
 
-  async runRuntimeRequest(
+  async beginRuntimeRequest(
     request: Request,
-    handler: FarmPluginRuntimeRequestHandler,
     options: FarmPluginRuntimeRequestOptions = {},
-  ): Promise<Response> {
+  ): Promise<FarmPluginRuntimeSession> {
     await this.startRuntime();
 
     const startedAt = Date.now();
@@ -826,20 +843,48 @@ export class PluginManager {
         }
       }
 
-      response ??= await handler(activeRequest);
-      if (!(response instanceof Response)) {
-        throw new TypeError("Farm plugin runtime handlers must return a Response");
-      }
+      return {
+        request: activeRequest,
+        response,
+        ctx: runtimeContext,
+        startedAt,
+        options,
+        waitUntil,
+      };
+    } catch (error) {
+      await this.runRuntimeErrorHooks(
+        activeRequest,
+        error,
+        runtimeContext,
+        Date.now() - startedAt,
+        options,
+        waitUntil,
+      );
+      throw error;
+    }
+  }
 
+  async endRuntimeRequest(
+    session: FarmPluginRuntimeSession,
+    initialResponse: Response,
+  ): Promise<Response> {
+    let response = initialResponse;
+
+    try {
       for (const plugin of this.getSortedPlugins()) {
         const after = plugin.runtime?.after;
         if (!after) continue;
 
         const result = await after({
-          ...this.createRuntimeBaseEvent(plugin, activeRequest, options, waitUntil),
-          ctx: runtimeContext,
+          ...this.createRuntimeBaseEvent(
+            plugin,
+            session.request,
+            session.options,
+            session.waitUntil,
+          ),
+          ctx: session.ctx,
           response,
-          durationMs: Date.now() - startedAt,
+          durationMs: Date.now() - session.startedAt,
         });
         if (result !== undefined) {
           if (!(result instanceof Response)) {
@@ -853,14 +898,38 @@ export class PluginManager {
 
       return response;
     } catch (error) {
-      await this.runRuntimeErrorHooks(
-        activeRequest,
-        error,
-        runtimeContext,
-        Date.now() - startedAt,
-        options,
-        waitUntil,
-      );
+      await this.failRuntimeRequest(session, error);
+      throw error;
+    }
+  }
+
+  async failRuntimeRequest(session: FarmPluginRuntimeSession, error: unknown): Promise<void> {
+    if (this.failedRuntimeSessions.has(session)) return;
+    this.failedRuntimeSessions.add(session);
+    await this.runRuntimeErrorHooks(
+      session.request,
+      error,
+      session.ctx,
+      Date.now() - session.startedAt,
+      session.options,
+      session.waitUntil,
+    );
+  }
+
+  async runRuntimeRequest(
+    request: Request,
+    handler: FarmPluginRuntimeRequestHandler,
+    options: FarmPluginRuntimeRequestOptions = {},
+  ): Promise<Response> {
+    const session = await this.beginRuntimeRequest(request, options);
+    try {
+      const response = session.response ?? (await handler(session.request));
+      if (!(response instanceof Response)) {
+        throw new TypeError("Farm plugin runtime handlers must return a Response");
+      }
+      return await this.endRuntimeRequest(session, response);
+    } catch (error) {
+      await this.failRuntimeRequest(session, error);
       throw error;
     }
   }
@@ -979,7 +1048,10 @@ export class PluginManager {
   }
 }
 
-export function definePlugin(plugin: FarmPlugin): FarmPlugin {
+export function definePlugin<
+  TState = undefined,
+  TRequestContext extends object = Record<string, never>,
+>(plugin: FarmPlugin<TState, TRequestContext>): FarmPlugin<TState, TRequestContext> {
   return plugin;
 }
 export { farmPlugin } from "./vite";

@@ -104,9 +104,7 @@ const NITRO_EXTERNAL_MODULES = new Set([
 ]);
 
 function isCloudflareImagePreset(preset: string): boolean {
-  return (
-    preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module"
-  );
+  return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
 }
 
 function resolveImageRuntime(
@@ -1449,11 +1447,13 @@ async function buildSSRInMemory(
     "onEvent" in config.observability;
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
+  const hasRuntimePlugins = (config.plugins || []).some((plugin) => Boolean(plugin.runtime));
   const configModulePath =
     hasConfiguredIntegrations ||
     hasObservabilityHandler ||
     hasMdxComponentConfig ||
-    hasMiddlewareConfig
+    hasMiddlewareConfig ||
+    hasRuntimePlugins
       ? await findFarmConfigPath(root)
       : null;
 
@@ -1743,6 +1743,7 @@ function generateVirtualEntryCode(
   const metadataHelpersImport = `import { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "farm/metadata";`;
   const afterHelpersImport = `import { _runWithAfterRequest } from "farm/after";`;
   const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
+  const pluginRuntimeImport = `import { PluginManager } from "farm/plugin";`;
   const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler } from "farm/docs";`
@@ -1836,6 +1837,7 @@ ${navigationHelpersImport}
 ${metadataHelpersImport}
 ${afterHelpersImport}
 ${observabilityHelpersImport}
+${pluginRuntimeImport}
 ${middlewareRuntimeImport}
 ${docsHandlerImport}
 ${docsRuntimeImport}
@@ -1854,6 +1856,18 @@ const farmUserConfig = ${
   };
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
+const configuredPlugins = Array.isArray(farmUserConfig?.plugins) ? farmUserConfig.plugins : [];
+const farmPluginRuntime = configuredPlugins.length > 0
+  ? (() => {
+      const manager = new PluginManager({
+        config: farmUserConfig || {},
+        isDev: false,
+        isProd: true,
+      });
+      manager.addPlugins(configuredPlugins);
+      return manager;
+    })()
+  : null;
 const farmImageHandler = ${
     imageRuntime === "none"
       ? "null"
@@ -2874,7 +2888,16 @@ async function handleFarmRequest(request) {
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
-  return _runWithAfterRequest(request, () => handleFarmRequest(request), context);
+  const runRequest = () => farmPluginRuntime
+    ? farmPluginRuntime.runRuntimeRequest(request, handleFarmRequest, {
+        kind: "request",
+        waitUntil: typeof context?.waitUntil === "function"
+          ? context.waitUntil.bind(context)
+          : undefined,
+      })
+    : handleFarmRequest(request);
+
+  return _runWithAfterRequest(request, runRequest, context);
 }
 export default { fetch };
   `.trim();
@@ -3199,10 +3222,7 @@ async function copySharpRuntime(
   const copiedPackages = new Map<string, string>();
   const targetNodeModules = path.join(nitroFuncDir, "node_modules");
 
-  async function copyPackage(
-    packageName: string,
-    parentRequire: NodeJS.Require,
-  ): Promise<void> {
+  async function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
     if (copiedPackages.has(packageName)) return;
 
     const packageJsonPath = resolvePackageJson(parentRequire, packageName);
