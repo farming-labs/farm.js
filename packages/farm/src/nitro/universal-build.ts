@@ -694,7 +694,7 @@ function generateClientHydrationEntry(
   root: string,
   srcDir: string,
   docsSearchEnabled: boolean,
-  docsSearchModuleId: string,
+  docsSearchModuleId?: string,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
 

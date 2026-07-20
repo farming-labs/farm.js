@@ -18,13 +18,18 @@ import { ServerRenderer } from "./server/renderer";
 import { findProgrammaticRouteFiles } from "./routes.server";
 import path from "path";
 import type { ViteDevServer } from "vite";
+import {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+} from "./devtools-config";
 
-type NormalizedFarmConfig = Required<FarmConfig> & {
+type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images"> & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
   cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
+  devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
 };
 
@@ -116,6 +121,10 @@ export class FarmApp {
       md: resolveMarkdownConfig(config.md),
       mdx: resolveMdxConfig(config.mdx),
       observability: config.observability ?? false,
+      devtools: resolveFarmDevtoolsConfig(
+        config.devtools,
+        process.env.NODE_ENV === "production" ? "production" : "development",
+      ),
       env: config.env || { server: {}, public: {} },
       suppressLintOnLink: config.suppressLintOnLink ?? false,
       experimental: {

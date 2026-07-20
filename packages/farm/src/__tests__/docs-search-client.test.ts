@@ -25,6 +25,14 @@ describe("Farm docs search client", () => {
     expect(runtime).not.toContain("DocsCommandSearch");
   });
 
+  it("omits docs search when the optional client module is unavailable", () => {
+    const runtime = generateFarmDocsSearchClientRuntime(true, undefined);
+
+    expect(runtime).not.toContain("@farming-labs/theme");
+    expect(runtime).not.toContain("DocsCommandSearch");
+    expect(runtime).toContain("return false");
+  });
+
   it("follows the docs search config", () => {
     const docs = {
       enabled: true,

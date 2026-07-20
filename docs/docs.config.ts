@@ -229,6 +229,7 @@ const sidebar = [
     children: [
       { label: "Cache and PPR", slug: "cache-ppr", icon: "zap" },
       { label: "Observability", slug: "observability", icon: "activity" },
+      { label: "DevTools", slug: "devtools", icon: "monitor" },
       { label: "Cron", slug: "cron", icon: "timer" },
       { label: "Instant Preview", slug: "preview", icon: "terminal" },
       { label: "Deployment", slug: "deployment", icon: "cloud" },

@@ -47,6 +47,14 @@ import {
   type FarmDiscoveredWorkflow,
 } from "./workflows";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
+import { createFarmDevtoolsSnapshot } from "./devtools";
+import { renderFarmDevtoolsHtml } from "./devtools-ui";
+import { generateFarmDevtoolsClientRuntime } from "./devtools-client";
+import {
+  FARM_DEVTOOLS_LAUNCH_PARAM,
+  FARM_DEVTOOLS_PATH,
+  resolveFarmDevtoolsConfig,
+} from "./devtools-config";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -703,7 +711,8 @@ export function farmPlugin(
         const requestUrl = req.url || "/";
         const requestMethod = req.method || "GET";
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
-        const requestPathname = new URL(fullUrl).pathname;
+        const parsedRequestUrl = new URL(fullUrl);
+        const requestPathname = parsedRequestUrl.pathname;
         const currentConfig = farmApp?.getConfig() ?? options;
 
         if (imageHandler && requestPathname === farmConfig.images.path) {
@@ -722,6 +731,76 @@ export function farmPlugin(
           res.setHeader("Content-Type", "font/woff2");
           res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
           fs.createReadStream(farmDocsFontPath).pipe(res);
+          return;
+        }
+
+        if (
+          requestMethod === "GET" &&
+          (requestPathname === FARM_DEVTOOLS_PATH ||
+            requestPathname === `${FARM_DEVTOOLS_PATH}.json`)
+        ) {
+          if (!farmConfig.devtools.enabled) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "text/plain; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.end("Farm DevTools are disabled.");
+            return;
+          }
+
+          if (
+            requestPathname === FARM_DEVTOOLS_PATH &&
+            parsedRequestUrl.searchParams.get("embedded") !== "1"
+          ) {
+            let launchUrl = new URL(farmConfig.basePath || "/", parsedRequestUrl.origin);
+            const referrer = req.headers.referer;
+            if (referrer) {
+              try {
+                const referrerUrl = new URL(referrer);
+                if (
+                  referrerUrl.origin === parsedRequestUrl.origin &&
+                  !referrerUrl.pathname.startsWith(FARM_DEVTOOLS_PATH)
+                ) {
+                  launchUrl = referrerUrl;
+                }
+              } catch {
+                // Ignore malformed referrers and return to the application root.
+              }
+            }
+            launchUrl.searchParams.set(FARM_DEVTOOLS_LAUNCH_PARAM, "1");
+            res.statusCode = 302;
+            res.setHeader("Location", `${launchUrl.pathname}${launchUrl.search}${launchUrl.hash}`);
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Vary", "Referer");
+            res.end();
+            return;
+          }
+
+          const snapshot = await createFarmDevtoolsSnapshot({
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            routeManager: farmApp.getRouteManager(),
+            apiRouteManager,
+            middlewareManager,
+            config: {
+              ...currentConfig,
+              openapi: options.openapi,
+            },
+            workflows: discoveredWorkflows,
+          });
+
+          res.statusCode = 200;
+          res.setHeader(
+            "Content-Type",
+            requestPathname.endsWith(".json")
+              ? "application/json; charset=utf-8"
+              : "text/html; charset=utf-8",
+          );
+          res.setHeader("Cache-Control", "no-store");
+          res.end(
+            requestPathname.endsWith(".json")
+              ? JSON.stringify(snapshot, null, 2)
+              : renderFarmDevtoolsHtml(snapshot),
+          );
           return;
         }
 
@@ -1451,6 +1530,7 @@ export function farmPlugin(
           resolveFarmDocsSearchClientModule(
             resolvedConfig?.root || server?.config.root || process.cwd(),
           ),
+          resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production"),
         );
       }
 
@@ -2223,7 +2303,8 @@ function generateClientCode(
   integrationProviders: Array<{ name: string; type: string; props?: Record<string, unknown> }> = [],
   documentNavigationMatchers: string[] = [],
   docsSearchEnabled = false,
-  docsSearchModuleId = "@farming-labs/theme",
+  docsSearchModuleId?: string,
+  devtools = resolveFarmDevtoolsConfig(false, "production"),
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -2242,6 +2323,7 @@ import {
 } from '@farmjs/core/deployment'
 ${providerImportBlock}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
+${generateFarmDevtoolsClientRuntime(devtools)}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
 // Uses manifest-based chunk loading - NO HTML fetching!

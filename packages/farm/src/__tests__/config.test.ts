@@ -158,6 +158,31 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it("enables DevTools by default only in development", async () => {
+    const development = await resolveConfig({}, "development");
+    const production = await resolveConfig({}, "production");
+
+    expect(development.devtools).toEqual({
+      enabled: true,
+      shortcut: "mod+shift+.",
+    });
+    expect(production.devtools).toEqual({
+      enabled: false,
+      shortcut: false,
+    });
+  });
+
+  it("resolves disabled and custom DevTools controls", async () => {
+    const disabled = await resolveConfig({ devtools: { enabled: false } }, "development");
+    const customized = await resolveConfig(
+      { devtools: { shortcut: "Mod + Shift + D" } },
+      "development",
+    );
+
+    expect(disabled.devtools).toEqual({ enabled: false, shortcut: false });
+    expect(customized.devtools).toEqual({ enabled: true, shortcut: "mod+shift+d" });
+  });
+
   it("resolves explicit and generated deployment IDs", async () => {
     delete process.env.FARM_DEPLOYMENT_ID;
     delete process.env.VERCEL_GIT_COMMIT_SHA;

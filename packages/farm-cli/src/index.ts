@@ -35,6 +35,14 @@ export {
 } from "./preview-gateway";
 export { generateFarmArtifacts } from "./generate";
 export {
+  formatFarmDoctorReport,
+  runFarmDoctor,
+  type FarmDoctorCheck,
+  type FarmDoctorCheckStatus,
+  type FarmDoctorOptions,
+  type FarmDoctorReport,
+} from "./doctor";
+export {
   formatFarmCronJobs,
   listFarmCronJobs,
   loadFarmCronConfig,

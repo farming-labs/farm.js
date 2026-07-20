@@ -46,6 +46,10 @@ import {
 import path from "path";
 import { normalizeFarmDeploymentId } from "./deployment";
 import {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+} from "./devtools-config";
+import {
   resolveFarmImageConfig,
   type FarmImageConfig,
   type ResolvedFarmImageConfig,
@@ -84,6 +88,11 @@ export type {
   ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
+export type {
+  FarmDevtoolsConfig,
+  FarmDevtoolsUserConfig,
+  ResolvedFarmDevtoolsConfig,
+} from "./devtools-config";
 export type {
   FarmImageConfig,
   FarmImageFormat,
@@ -264,6 +273,7 @@ export interface ResolvedFarmConfig extends Required<
     | "workflows"
     | "env"
     | "serverActions"
+    | "devtools"
     | "images"
   >
 > {
@@ -280,6 +290,7 @@ export interface ResolvedFarmConfig extends Required<
   workflows: FarmWorkflowsResolvedConfig;
   env: ResolvedFarmEnv;
   serverActions: ResolvedFarmServerActionsConfig;
+  devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
 }
 
@@ -702,6 +713,7 @@ export async function resolveConfig(
     cron: resolveCronConfig(userConfig.cron),
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     observability: userConfig.observability ?? false,
+    devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
