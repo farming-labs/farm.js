@@ -1545,8 +1545,15 @@ export function farmPlugin(
           let afterResponseCalled = false;
           const htmlChunks: Buffer[] = [];
           let didStreamHtml = false;
-          const bufferRuntimeResponse = Boolean(
-            runtimeSession && pm?.getPlugins().some((plugin) => plugin.runtime?.after),
+          const bufferPluginResponse = Boolean(
+            runtimeSession &&
+              pm?.getPlugins().some(
+                (plugin) =>
+                  plugin.runtime?.after ||
+                  plugin.render?.html ||
+                  plugin.afterRender ||
+                  plugin.transformHTML,
+              ),
           );
 
           res.write = ((chunk: any, ...args: any[]) => {
@@ -1559,7 +1566,7 @@ export function farmPlugin(
               const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
               htmlChunks.push(bufferChunk);
               didStreamHtml = true;
-              if (bufferRuntimeResponse) {
+              if (bufferPluginResponse) {
                 const callback = args.find((arg) => typeof arg === "function");
                 callback?.();
                 return true;
@@ -1598,7 +1605,7 @@ export function farmPlugin(
 
                     const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
                     let html = fullHtml;
-                    if (!didStreamHtml || bufferRuntimeResponse) {
+                    if (!didStreamHtml || bufferPluginResponse) {
                       html = await pm.runHookSerial("transformHTML", html);
                       html = await pm.runHookSerial("afterRender", html, renderPayload);
                       const callback =
@@ -1622,7 +1629,7 @@ export function farmPlugin(
                     const firstArg = originalEndArgs[0];
                     const responseBody = canHaveBody
                       ? isHtmlResponse
-                        ? didStreamHtml && !bufferRuntimeResponse
+                        ? didStreamHtml && !bufferPluginResponse
                           ? Buffer.concat(htmlChunks)
                           : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
                             ? firstArg
@@ -1645,7 +1652,7 @@ export function farmPlugin(
                     );
                     applyWebResponseToNodeResponse(runtimeResponse, res);
 
-                    if (!didStreamHtml || bufferRuntimeResponse) {
+                    if (!didStreamHtml || bufferPluginResponse) {
                       const callback =
                         typeof originalEndArgs[originalEndArgs.length - 1] === "function"
                           ? originalEndArgs[originalEndArgs.length - 1]

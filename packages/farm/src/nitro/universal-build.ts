@@ -1766,12 +1766,25 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const mdxComponentsImport = mdxComponentsPath
     ? `import * as FarmMdxComponentsModule from "${mdxComponentsPath.replace(/\\/g, "/")}";`
     : "";
-  const integrationImports = configModulePath
-    ? `
-import * as FarmUserConfigModule from "${configModulePath}";
-import { dispatchIntegrationRequest, matchIntegrationRoute } from "farm";
-`
-    : "";
+  const layerConfigPaths = (config.layers || [])
+    .map((layer) => layer.configFile)
+    .filter((configFile): configFile is string => Boolean(configFile))
+    .filter((configFile) => configFile !== configModulePath);
+  const layerConfigImports = layerConfigPaths
+    .map(
+      (configFile, index) =>
+        `import * as FarmLayerConfigModule${index} from "${configFile.replace(/\\/g, "/")}";`,
+    )
+    .join("\n");
+  const layerConfigValues = layerConfigPaths.map(
+    (_configFile, index) =>
+      `(FarmLayerConfigModule${index}.default || FarmLayerConfigModule${index})`,
+  );
+  const integrationImports = `
+${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
+${layerConfigImports}
+import { dispatchIntegrationRequest, matchIntegrationRoute, resolveIntegrationPlugins } from "farm";
+`;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
     imageRuntime === "none"
@@ -1854,9 +1867,20 @@ const CustomNotFoundComponent = ${notFoundPath ? "CustomNotFound.default || Cust
 const farmUserConfig = ${
     configModulePath ? "(FarmUserConfigModule.default || FarmUserConfigModule)" : "null"
   };
-const configuredIntegrations = farmUserConfig?.integrations || {};
-const integrationRuntimeConfig = farmUserConfig || {};
-const configuredPlugins = Array.isArray(farmUserConfig?.plugins) ? farmUserConfig.plugins : [];
+const farmRuntimeConfigs = [${[...layerConfigValues, "farmUserConfig"].join(", ")}].filter(Boolean);
+const configuredIntegrations = Object.assign(
+  {},
+  ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
+);
+const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
+  integrations: configuredIntegrations,
+});
+const configuredPlugins = [
+  ...resolveIntegrationPlugins(configuredIntegrations),
+  ...farmRuntimeConfigs.flatMap((runtimeConfig) =>
+    Array.isArray(runtimeConfig.plugins) ? runtimeConfig.plugins : [],
+  ),
+];
 const farmPluginRuntime = configuredPlugins.length > 0
   ? (() => {
       const manager = new PluginManager({
@@ -1868,6 +1892,9 @@ const farmPluginRuntime = configuredPlugins.length > 0
       return manager;
     })()
   : null;
+const hasFarmPluginHTMLTransforms = configuredPlugins.some(
+  (plugin) => plugin.render?.html || plugin.afterRender || plugin.transformHTML,
+);
 const farmImageHandler = ${
     imageRuntime === "none"
       ? "null"
@@ -2960,16 +2987,68 @@ async function handleFarmRequest(request) {
   }
 }
 
+async function handleFarmPluginRequest(request, runtimeOptions) {
+  if (!farmPluginRuntime || runtimeOptions.kind !== "page") {
+    return handleFarmRequest(request);
+  }
+
+  const pathname = runtimeOptions.route?.pathname || new URL(request.url).pathname;
+  const routePattern = runtimeOptions.route?.pattern || null;
+  const params = runtimeOptions.route?.params || {};
+  const layouts = getApplicableLayouts(pathname);
+
+  await farmPluginRuntime.runHookParallel("beforeRouteMatch", {
+    pathname,
+    method: request.method,
+  });
+  await farmPluginRuntime.runHookParallel("afterRouteMatch", {
+    pathname,
+    matched: Boolean(routePattern),
+    routePattern,
+    params,
+    layoutPatterns: layouts.map((layout) => layout.pattern),
+  });
+
+  const renderPayload = {
+    pathname,
+    method: request.method,
+    routePattern,
+    params,
+  };
+  await farmPluginRuntime.runHookParallel("beforeRender", renderPayload);
+
+  const response = await handleFarmRequest(request);
+  if (!hasFarmPluginHTMLTransforms || !response.headers.get("content-type")?.includes("text/html")) {
+    return response;
+  }
+
+  let html = await response.text();
+  html = await farmPluginRuntime.runHookSerial("transformHTML", html);
+  html = await farmPluginRuntime.runHookSerial("afterRender", html, renderPayload);
+
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  return new Response(html, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
   const runtimeOptions = getFarmPluginRequestOptions(request);
   const runRequest = () => farmPluginRuntime
-    ? farmPluginRuntime.runRuntimeRequest(request, handleFarmRequest, {
-        ...runtimeOptions,
-        waitUntil: typeof context?.waitUntil === "function"
-          ? context.waitUntil.bind(context)
-          : undefined,
-      })
+    ? farmPluginRuntime.runRuntimeRequest(
+        request,
+        (runtimeRequest) => handleFarmPluginRequest(runtimeRequest, runtimeOptions),
+        {
+          ...runtimeOptions,
+          waitUntil: typeof context?.waitUntil === "function"
+            ? context.waitUntil.bind(context)
+            : undefined,
+        },
+      )
     : handleFarmRequest(request);
 
   return _runWithAfterRequest(request, runRequest, context);
