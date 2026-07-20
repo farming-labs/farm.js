@@ -12,6 +12,16 @@ Run the framework feature integration suite, including the required framework bu
 pnpm test:e2e:framework
 ```
 
+Run the production internationalization suite with:
+
+```sh
+pnpm test:e2e:i18n
+```
+
+The i18n suite builds the framework and `examples/i18n`, starts the Nitro production server, and
+verifies locale signal precedence, canonical redirects, cache boundaries, localized API context,
+hydration, client locale switching, cookie persistence, and RTL rendering.
+
 ## Framework feature coverage
 
 `framework-features.spec.ts` runs the features together in `examples/basic` and verifies:
