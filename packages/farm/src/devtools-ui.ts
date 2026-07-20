@@ -437,8 +437,8 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       --font-mono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
     * { box-sizing: border-box; border-radius: 0 !important; }
-    html { min-width: 320px; scroll-behavior: smooth; background: var(--background); }
-    body { min-height: 100vh; margin: 0; overflow-x: hidden; background: var(--background); color: var(--foreground); font-family: var(--font-sans); font-size: 14px; letter-spacing: 0; text-rendering: optimizeLegibility; }
+    html { min-width: 320px; min-height: 100%; background: var(--background); }
+    body { min-height: 100vh; min-height: 100dvh; margin: 0; overflow: hidden; background: #030303; color: var(--foreground); font-family: var(--font-sans); font-size: 14px; letter-spacing: 0; text-rendering: optimizeLegibility; }
     button, input { color: inherit; font: inherit; letter-spacing: 0; }
     button, a { -webkit-tap-highlight-color: transparent; }
     button { cursor: pointer; }
@@ -447,60 +447,55 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     code, kbd, .badge, .mono, .mini-label, .metric-label, .metric-detail, .section-index, .diagnostic-code, th, .statusbar, .eyebrow { font-family: var(--font-mono); letter-spacing: 0; }
     .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
     .icon { width: 16px; height: 16px; flex: 0 0 auto; }
-    .frame { display: grid; grid-template-columns: minmax(16px, 1fr) minmax(0, 1440px) minmax(16px, 1fr); min-height: 100vh; }
-    .rail { border-inline: 1px solid var(--line); background-color: #000; background-image: repeating-linear-gradient(135deg, transparent 0, transparent 6px, rgb(255 255 255 / 0.065) 6px, rgb(255 255 255 / 0.065) 7px); }
-    .shell { min-width: 0; border-inline: 1px solid var(--line); background: var(--background); }
-    .topbar { position: sticky; top: 0; z-index: 30; display: flex; min-height: 52px; align-items: stretch; justify-content: space-between; border-bottom: 1px solid var(--line); background: rgb(0 0 0 / 0.94); backdrop-filter: blur(12px); }
-    .brand { display: flex; min-width: 224px; align-items: center; gap: 9px; padding: 0 16px; border-right: 1px solid var(--line); text-decoration: none; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; }
-    .brand-mark { display: grid; width: 20px; height: 20px; place-items: center; border: 1px solid var(--line-strong); color: #fff; font-family: var(--font-sans); font-size: 11px; font-weight: 650; }
+    .stage { display: grid; min-height: 100vh; min-height: 100dvh; place-items: center; padding: 20px; }
+    .shell { display: flex; width: min(1280px, 100%); height: min(780px, calc(100dvh - 40px)); min-height: 560px; min-width: 0; flex-direction: column; overflow: hidden; border: 1px solid var(--line-strong); background: var(--background); box-shadow: 0 24px 80px rgb(0 0 0 / 0.72); }
+    .topbar { z-index: 30; display: flex; min-height: 42px; flex: 0 0 auto; align-items: stretch; border-bottom: 1px solid var(--line); background: var(--background); }
+    .brand { display: flex; min-width: 170px; align-items: center; gap: 8px; padding: 0 12px; border-right: 1px solid var(--line); text-decoration: none; font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; white-space: nowrap; }
+    .brand-mark { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid var(--line-strong); color: #fff; font-family: var(--font-sans); font-size: 9px; font-weight: 650; }
     .brand-slash { color: #555; }
     .brand-product { color: var(--muted-strong); }
-    .topbar-status { display: flex; align-items: center; gap: 8px; padding: 0 16px; color: var(--muted-strong); font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; }
-    .status-dot { width: 6px; height: 6px; background: #fff; box-shadow: 0 0 0 4px rgb(255 255 255 / 0.07); }
+    .tabbar { display: flex; min-width: 0; flex: 1 1 auto; align-items: stretch; overflow-x: auto; scrollbar-width: none; }
+    .tabbar::-webkit-scrollbar { display: none; }
+    .nav-item { position: relative; display: flex; min-width: max-content; min-height: 41px; align-items: center; gap: 7px; padding: 0 11px; border: 0; background: transparent; color: var(--muted); font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; transition: background-color 140ms ease-out, color 140ms ease-out; }
+    .nav-item::after { position: absolute; right: 10px; bottom: -1px; left: 10px; height: 1px; background: transparent; content: ""; }
+    .nav-item:hover, .nav-item:focus-visible { background: rgb(255 255 255 / 0.035); color: var(--foreground); outline: none; }
+    .nav-item[aria-selected="true"] { color: #fff; }
+    .nav-item[aria-selected="true"]::after { background: #fff; }
+    .nav-item .icon { width: 13px; height: 13px; }
+    .nav-item small { color: #666; font-size: 9px; font-weight: 400; }
+    .topbar-meta { display: flex; flex: 0 0 auto; margin-left: auto; border-left: 1px solid var(--line); }
+    .topbar-status { display: flex; min-width: max-content; align-items: center; gap: 7px; padding: 0 11px; color: var(--muted-strong); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
+    .status-dot { width: 5px; height: 5px; background: #fff; box-shadow: 0 0 0 3px rgb(255 255 255 / 0.06); }
     .status-dot-attention { background: #909090; animation: status-pulse 1.8s ease-in-out infinite; }
     .status-dot-error { background: transparent; border: 1px solid #fff; }
-    .topbar-actions { display: flex; margin-left: auto; }
-    .action { display: inline-flex; min-height: 51px; align-items: center; justify-content: center; gap: 8px; padding: 0 13px; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted-strong); text-decoration: none; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; transition: background-color 140ms ease-out, color 140ms ease-out; }
+    .topbar-actions { display: flex; }
+    .action { display: inline-flex; width: 40px; min-height: 41px; align-items: center; justify-content: center; padding: 0; border: 0; border-left: 1px solid var(--line); background: transparent; color: var(--muted-strong); text-decoration: none; transition: background-color 140ms ease-out, color 140ms ease-out; }
     .action:hover, .action:focus-visible { background: #fff; color: #000; outline: none; }
     .action[data-copied="true"] { background: #fff; color: #000; }
-    .workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: calc(100vh - 84px); }
-    .sidebar { position: sticky; top: 52px; align-self: start; height: calc(100vh - 84px); display: flex; flex-direction: column; border-right: 1px solid var(--line); background: var(--surface); }
-    .project-meta { padding: 18px 16px; border-bottom: 1px solid var(--line); }
-    .eyebrow { display: block; margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 400; text-transform: uppercase; }
-    .project-meta strong { display: block; overflow: hidden; font-size: 14px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-    .project-meta code { display: block; margin-top: 5px; overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-    .sidebar-nav { display: flex; flex-direction: column; padding: 8px 0; }
-    .nav-item { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; width: 100%; min-height: 40px; align-items: center; gap: 10px; padding: 0 14px; border: 0; background: transparent; color: var(--muted); text-align: left; transition: background-color 140ms ease-out, color 140ms ease-out; }
-    .nav-item::before { position: absolute; inset: 0 auto 0 0; width: 1px; background: transparent; content: ""; }
-    .nav-item:hover, .nav-item:focus-visible { background: rgb(255 255 255 / 0.045); color: var(--foreground); outline: none; }
-    .nav-item[aria-selected="true"] { background: rgb(255 255 255 / 0.07); color: #fff; }
-    .nav-item[aria-selected="true"]::before { background: #fff; }
-    .nav-item span { font-size: 12px; }
-    .nav-item small { font-family: var(--font-mono); font-size: 10px; font-weight: 400; }
-    .sidebar-foot { margin-top: auto; padding: 14px 16px; border-top: 1px solid var(--line); color: var(--muted); font-family: var(--font-mono); font-size: 9px; line-height: 1.7; text-transform: uppercase; }
-    .sidebar-foot span { display: block; color: var(--muted-strong); }
-    .content { min-width: 0; }
-    .view { min-width: 0; }
-    .view-heading { display: flex; min-height: 188px; align-items: flex-end; justify-content: space-between; gap: 32px; padding: 32px clamp(22px, 4vw, 52px); border-bottom: 1px solid var(--line); background: var(--background); }
-    .view-heading > div { max-width: 760px; }
-    .view-heading h1 { margin: 10px 0 12px; font-size: clamp(32px, 4.2vw, 58px); font-weight: 540; line-height: 0.98; letter-spacing: 0; }
-    .view-heading p { max-width: 660px; margin: 0; color: var(--muted-strong); font-size: 14px; line-height: 1.65; }
-    .health-block { display: flex; min-width: 170px; align-items: center; gap: 12px; padding: 13px 14px; border: 1px solid var(--line-strong); background: #000; }
-    .health-block .status-dot { width: 8px; height: 8px; }
+    .workspace { min-height: 0; flex: 1 1 auto; }
+    .eyebrow { display: block; color: var(--muted); font-size: 9px; font-weight: 400; text-transform: uppercase; }
+    .content { height: 100%; min-width: 0; }
+    .view { height: 100%; min-width: 0; overflow-y: auto; }
+    .view-heading { display: flex; min-height: 66px; align-items: center; justify-content: space-between; gap: 24px; padding: 11px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+    .view-heading > div { min-width: 0; }
+    .view-heading h1 { margin: 4px 0 0; font-size: 14px; font-weight: 540; line-height: 1.2; letter-spacing: 0; }
+    .view-heading p { margin: 4px 0 0; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+    .health-block { display: flex; min-width: 148px; align-items: center; gap: 10px; padding: 9px 11px; border-left: 1px solid var(--line); background: var(--surface); }
+    .health-block .status-dot { width: 6px; height: 6px; }
     .health-block span { display: block; color: var(--muted); font-family: var(--font-mono); font-size: 9px; text-transform: uppercase; }
     .health-block strong { display: block; margin-top: 2px; font-size: 13px; font-weight: 520; }
     .metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border-bottom: 1px solid var(--line); }
-    .metric { min-width: 0; padding: 18px; border-right: 1px solid var(--line); background: var(--surface); }
+    .metric { min-width: 0; padding: 12px 14px; border-right: 1px solid var(--line); background: var(--background); }
     .metric:last-child { border-right: 0; }
     .metric-label, .metric-detail { display: block; overflow: hidden; color: var(--muted); font-size: 9px; font-weight: 400; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
-    .metric strong { display: block; margin: 14px 0 9px; font-size: 28px; font-weight: 500; font-variant-numeric: tabular-nums; }
+    .metric strong { display: block; margin: 8px 0 5px; font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; }
     .section { border-bottom: 1px solid var(--line); }
-    .section-header { display: flex; min-height: 68px; align-items: center; justify-content: space-between; gap: 20px; padding: 12px clamp(18px, 3vw, 32px); border-bottom: 1px solid var(--line); background: var(--surface); }
+    .section-header { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--surface); }
     .section-heading { display: flex; min-width: 0; align-items: center; gap: 11px; }
     .section-heading > .icon { color: var(--muted-strong); }
     .section-index { color: var(--muted); font-size: 10px; }
-    .section-heading h2 { margin: 0; font-size: 13px; font-weight: 540; }
-    .section-heading p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+    .section-heading h2 { margin: 0; font-size: 12px; font-weight: 540; }
+    .section-heading p { margin: 3px 0 0; color: var(--muted); font-size: 10px; }
     .two-column { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr); }
     .two-column > section + section { border-left: 1px solid var(--line); }
     .diagnostics { min-width: 0; }
@@ -511,7 +506,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .diagnostic strong { display: block; font-size: 12px; font-weight: 540; }
     .diagnostic p { margin: 5px 0 0; color: var(--muted-strong); font-size: 11px; line-height: 1.5; }
     .diagnostic small { display: block; margin-top: 6px; color: var(--muted); font-size: 10px; line-height: 1.5; }
-    .diagnostic-warning { background-image: repeating-linear-gradient(135deg, transparent 0, transparent 10px, rgb(255 255 255 / 0.02) 10px, rgb(255 255 255 / 0.02) 11px); }
+    .diagnostic-warning { box-shadow: inset 1px 0 var(--line-strong); }
     .systems-list { min-width: 0; }
     .system-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; min-height: 64px; align-items: center; gap: 10px; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); }
     .system-row:last-child { border-bottom: 0; }
@@ -572,10 +567,11 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .layer-list span { display: flex; align-items: center; gap: 8px; }
     .layer-list strong { font-size: 11px; font-weight: 520; }
     .layer-list code, .layer-list small { color: var(--muted); font-size: 9px; }
-    .statusbar { display: flex; min-height: 32px; align-items: center; justify-content: space-between; gap: 16px; padding: 0 12px; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 9px; text-transform: uppercase; }
+    .statusbar { display: flex; min-height: 29px; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 16px; padding: 0 10px; border-top: 1px solid var(--line); background: var(--surface); color: var(--muted); font-size: 9px; text-transform: uppercase; }
     .statusbar span { display: flex; align-items: center; gap: 7px; }
     @keyframes status-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 1; } }
     @media (max-width: 1100px) {
+      .topbar-status { display: none; }
       .metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .metric:nth-child(3) { border-right: 0; }
       .metric:nth-child(-n+3) { border-bottom: 1px solid var(--line); }
@@ -583,20 +579,15 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       .two-column > section + section { border-top: 1px solid var(--line); border-left: 0; }
     }
     @media (max-width: 840px) {
-      .frame { display: block; }
-      .rail { display: none; }
-      .shell { border: 0; }
-      .brand { min-width: auto; border-right: 0; }
-      .brand-product, .brand-slash, .topbar-status, .action span { display: none; }
-      .action { width: 46px; padding: 0; }
-      .workspace { display: block; }
-      .sidebar { position: sticky; top: 52px; z-index: 25; width: 100%; height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
-      .project-meta, .sidebar-foot { display: none; }
-      .sidebar-nav { flex-direction: row; overflow-x: auto; padding: 0; scrollbar-width: none; }
-      .nav-item { display: flex; width: auto; min-width: max-content; min-height: 44px; padding: 0 13px; border-right: 1px solid var(--line-soft); }
-      .nav-item::before { inset: auto 0 0; width: auto; height: 1px; }
-      .nav-item small { margin-left: 2px; }
-      .view-heading { min-height: 170px; padding: 28px 20px; }
+      .stage { display: block; padding: 0; }
+      .shell { width: 100%; height: 100dvh; min-height: 0; border: 0; }
+      .topbar { flex-wrap: wrap; }
+      .brand { min-width: auto; height: 40px; border-right: 0; }
+      .brand-product, .brand-slash { display: none; }
+      .tabbar { order: 3; width: 100%; flex-basis: 100%; border-top: 1px solid var(--line); }
+      .topbar-meta { height: 40px; }
+      .nav-item { min-height: 39px; }
+      .view-heading { min-height: 62px; }
       .health-block { display: none; }
       .section-header { align-items: flex-start; flex-direction: column; }
       .filter-control { width: 100%; }
@@ -609,8 +600,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       .metric, .metric:nth-child(3) { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
       .metric:nth-child(2n) { border-right: 0; }
       .metric:nth-last-child(-n+2) { border-bottom: 0; }
-      .view-heading h1 { font-size: 34px; }
-      .view-heading p { font-size: 12px; }
+      .view-heading p { display: none; }
       .section-heading p { display: none; }
       .environment-grid { grid-template-columns: 1fr; }
       .environment-grid > div + div { border-top: 1px solid var(--line); border-left: 0; }
@@ -623,52 +613,45 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
   </style>
 </head>
 <body>
-  <div class="frame">
-    <aside class="rail" aria-hidden="true"></aside>
+  <div class="stage">
     <div class="shell">
       <header class="topbar">
         <a class="brand" href="/__farm/devtools" aria-label="Farm.js Devtools overview">
           <span class="brand-mark">F</span><span>Farm.js</span><span class="brand-slash">/</span><span class="brand-product">Devtools</span>
         </a>
-        <div class="topbar-status"><span class="status-dot status-dot-${snapshot.health}"></span>${escapeHtml(
-          healthLabel,
-        )} / Local</div>
-        <nav class="topbar-actions" aria-label="Devtools actions">
-          <button type="button" class="action" data-copy-snapshot title="Copy runtime snapshot">${icon(
-            "copy",
-          )}<span data-copy-label>Copy JSON</span></button>
-          <button type="button" class="action" data-refresh title="Refresh snapshot">${icon(
-            "refresh",
-          )}<span>Refresh</span></button>
-          <a class="action" href="/__farm/devtools.json" target="_blank" rel="noreferrer" title="Open raw JSON snapshot">${icon(
-            "terminal",
-          )}<span>JSON</span></a>
-          <a class="action" href="/" title="Open application">${icon("app")}<span>App</span></a>
+        <nav class="tabbar" aria-label="Devtools views">
+          ${renderNavigationItem("overview", "Overview", "overview")}
+          ${renderNavigationItem("routes", "Routes", "route", snapshot.counts.pages)}
+          ${renderNavigationItem("api", "API", "api", snapshot.counts.apiRoutes)}
+          ${renderNavigationItem("systems", "Systems", "blocks", snapshot.counts.integrations)}
+          ${renderNavigationItem(
+            "runtime",
+            "Runtime",
+            "runtime",
+            snapshot.counts.cronJobs + snapshot.counts.workflows,
+          )}
         </nav>
+        <div class="topbar-meta">
+          <div class="topbar-status"><span class="status-dot status-dot-${snapshot.health}"></span>${escapeHtml(
+            healthLabel,
+          )} / ${escapeHtml(snapshot.project.name)}</div>
+          <nav class="topbar-actions" aria-label="Devtools actions">
+            <button type="button" class="action" data-copy-snapshot title="Copy runtime snapshot">${icon(
+              "copy",
+            )}<span class="sr-only" data-copy-label>Copy JSON</span></button>
+            <button type="button" class="action" data-refresh title="Refresh snapshot">${icon(
+              "refresh",
+            )}<span class="sr-only">Refresh</span></button>
+            <a class="action" href="/__farm/devtools.json" target="_blank" rel="noreferrer" title="Open raw JSON snapshot">${icon(
+              "terminal",
+            )}<span class="sr-only">JSON</span></a>
+            <a class="action" href="/" title="Open application">${icon(
+              "app",
+            )}<span class="sr-only">App</span></a>
+          </nav>
+        </div>
       </header>
       <div class="workspace">
-        <aside class="sidebar">
-          <div class="project-meta">
-            <span class="eyebrow">Active project</span>
-            <strong>${escapeHtml(snapshot.project.name)}</strong>
-            <code>${escapeHtml(snapshot.project.root)}</code>
-          </div>
-          <nav class="sidebar-nav" aria-label="Devtools views">
-            ${renderNavigationItem("overview", "Overview", "overview")}
-            ${renderNavigationItem("routes", "Routes", "route", snapshot.counts.pages)}
-            ${renderNavigationItem("api", "API", "api", snapshot.counts.apiRoutes)}
-            ${renderNavigationItem("systems", "Systems", "blocks", snapshot.counts.integrations)}
-            ${renderNavigationItem(
-              "runtime",
-              "Runtime",
-              "runtime",
-              snapshot.counts.cronJobs + snapshot.counts.workflows,
-            )}
-          </nav>
-          <div class="sidebar-foot"><span>${escapeHtml(snapshot.deployment.target)}</span>${escapeHtml(
-            snapshot.deployment.preset,
-          )}<br>${escapeHtml(snapshot.project.deploymentId)}</div>
-        </aside>
         <main class="content">
           <section class="view" data-view-panel="overview">
             <header class="view-heading">
@@ -826,7 +809,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
         generatedTime,
       )} / ${escapeHtml(snapshot.project.srcDir)}/app</span></footer>
     </div>
-    <aside class="rail" aria-hidden="true"></aside>
   </div>
   <script>
     (() => {
