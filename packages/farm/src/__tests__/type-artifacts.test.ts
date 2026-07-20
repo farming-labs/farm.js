@@ -45,14 +45,17 @@ describe("generateFarmTypeArtifacts", () => {
     const routeTypesPath = path.join(root, "src", "farm-routes.d.ts");
     const apiTypesPath = path.join(root, "src", "lib", "api.generated.ts");
     const envTypesPath = path.join(root, "src", "farm-env.d.ts");
+    const imageTypesPath = path.join(root, "src", "farm-images.d.ts");
 
     expect(result.routeTypesPath).toBe(routeTypesPath);
     expect(result.apiTypesPath).toBe(apiTypesPath);
     expect(result.envTypesPath).toBe(envTypesPath);
+    expect(result.imageTypesPath).toBe(imageTypesPath);
     expect(result.apiRoutes).toHaveLength(1);
     expect(existsSync(routeTypesPath)).toBe(true);
     expect(existsSync(apiTypesPath)).toBe(true);
     expect(existsSync(envTypesPath)).toBe(true);
+    expect(existsSync(imageTypesPath)).toBe(true);
     expect(readFileSync(routeTypesPath, "utf8")).toContain("`/users/${string}`");
     expect(readFileSync(routeTypesPath, "utf8")).toContain('"/users/[id]"');
     expect(readFileSync(routeTypesPath, "utf8")).toContain('"/docs/reference"');
@@ -62,6 +65,11 @@ describe("generateFarmTypeArtifacts", () => {
       'import type FarmConfig from "../farm.config"',
     );
     expect(readFileSync(envTypesPath, "utf8")).toContain('declare module "@farmjs/core/env"');
+    expect(readFileSync(imageTypesPath, "utf8")).toContain('declare module "*.png"');
+    expect(readFileSync(imageTypesPath, "utf8")).toContain(
+      'import("@farmjs/core/image").StaticImageData',
+    );
+    expect(readFileSync(imageTypesPath, "utf8")).toContain('declare module "*?url"');
   });
 
   it("generates one typed application from layer and project sources", async () => {

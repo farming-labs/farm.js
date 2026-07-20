@@ -415,7 +415,7 @@ export function farmPlugin(
           if (log) {
             logUpdate(
               "TYPE",
-              `${reason} - regenerated route, API, and env types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
+              `${reason} - regenerated route, API, env, and image types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
             );
           }
           if (openAPIManager) {

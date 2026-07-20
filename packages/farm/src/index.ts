@@ -102,6 +102,8 @@ export * from "./env";
 export * from "./env-types";
 export * from "./environment";
 export * from "./type-artifacts";
+export { createFarmImageTypeDeclarations, generateFarmImageTypes } from "./image-types";
+export type { GenerateFarmImageTypesOptions } from "./image-types";
 export * from "./server-fn";
 export * from "./server-fn-client";
 export * from "./server-query";

@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
 import { generateRouteTypes, type GenerateRouteTypesOptions } from "./routing/generate-route-types";
 import { generateEnvTypes } from "./env-types";
+import { generateFarmImageTypes } from "./image-types";
 import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
 
 export interface GenerateFarmTypeArtifactsOptions {
@@ -14,15 +15,18 @@ export interface GenerateFarmTypeArtifactsOptions {
   routeTypesOutFile?: string;
   apiTypesOutFile?: string;
   envTypesOutFile?: string;
+  imageTypesOutFile?: string;
   routes?: boolean;
   api?: boolean;
   env?: boolean;
+  images?: boolean;
 }
 
 export interface GenerateFarmTypeArtifactsResult {
   routeTypesPath?: string;
   apiTypesPath?: string;
   envTypesPath?: string;
+  imageTypesPath?: string;
   apiRoutes: APIRouteInfo[];
 }
 
@@ -34,6 +38,7 @@ export async function generateFarmTypeArtifacts(
   const shouldGenerateRoutes = options.routes !== false;
   const shouldGenerateApi = options.api !== false;
   const shouldGenerateEnv = options.env !== false;
+  const shouldGenerateImages = options.images !== false;
   const sourceRoots = getFarmSourceRoots({ root, srcDir, layers: options.layers });
   const appDirs = getFarmAppDirectories({ root, srcDir, layers: options.layers });
 
@@ -80,6 +85,14 @@ export async function generateFarmTypeArtifacts(
       layerConfigPaths: (options.layers ?? [])
         .map((layer) => layer.configFile)
         .filter((configFile): configFile is string => Boolean(configFile)),
+    });
+  }
+
+  if (shouldGenerateImages) {
+    result.imageTypesPath = generateFarmImageTypes({
+      root,
+      srcDir,
+      outFile: options.imageTypesOutFile,
     });
   }
 
