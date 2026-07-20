@@ -7,6 +7,8 @@ type IconName =
   | "blocks"
   | "book"
   | "clock"
+  | "chevron"
+  | "close"
   | "copy"
   | "database"
   | "external"
@@ -27,6 +29,8 @@ const ICON_PATHS: Record<IconName, string> = {
     '<rect width="7" height="7" x="3" y="3"/><rect width="7" height="7" x="14" y="3"/><rect width="7" height="7" x="14" y="14"/><rect width="7" height="7" x="3" y="14"/>',
   book: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
   clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  chevron: '<path d="m9 18 6-6-6-6"/>',
+  close: '<path d="M18 6 6 18M6 6l12 12"/>',
   copy: '<rect width="14" height="14" x="8" y="8"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
   database:
     '<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/>',
@@ -374,7 +378,6 @@ function renderInspector(
             )}" data-detail-id="${escapeAttribute(entry.id)}" data-search-value="${escapeAttribute(
               entry.searchValue || `${entry.label} ${entry.description}`,
             )}" aria-selected="${index === 0 ? "true" : "false"}">
-              <span class="inspector-row-icon">${icon(entry.icon)}</span>
               <span class="inspector-row-copy"><strong>${escapeHtml(
                 entry.label,
               )}</strong><small>${escapeHtml(entry.description)}</small></span>
@@ -732,11 +735,9 @@ function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
 function renderNavigationItem(
   view: string,
   label: string,
-  itemIcon: IconName,
-  count?: number,
 ): string {
   return `<button type="button" class="nav-item" data-view-trigger="${view}" aria-selected="false">
-    ${icon(itemIcon)}<span>${escapeHtml(label)}</span>${count === undefined ? "" : `<small>${count}</small>`}
+    <span>${escapeHtml(label)}</span>
   </button>`;
 }
 
@@ -772,7 +773,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       --font-sans: "Geist Sans", Geist, Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       --font-mono: "Geist Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     }
-    * { box-sizing: border-box; border-radius: 0 !important; }
+    * { box-sizing: border-box; }
     html { min-width: 320px; min-height: 100%; background: var(--background); }
     body { min-height: 100vh; min-height: 100dvh; margin: 0; overflow: hidden; background: #030303; color: var(--foreground); font-family: var(--font-sans); font-size: 14px; letter-spacing: 0; text-rendering: optimizeLegibility; }
     button, input { color: inherit; font: inherit; letter-spacing: 0; }
@@ -946,45 +947,431 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
     }
   </style>
+  <style data-assistant-ui-layout>
+    :root {
+      --background: #0a0a0a;
+      --surface: #0a0a0a;
+      --surface-raised: #111111;
+      --foreground: #ededed;
+      --muted: #929299;
+      --muted-strong: #b4b4ba;
+      --line: rgb(255 255 255 / 0.11);
+      --line-soft: rgb(255 255 255 / 0.075);
+      --line-strong: rgb(255 255 255 / 0.16);
+      --accent: #1c1c1e;
+    }
+    html, body { width: 100%; height: 100%; background: #080808; }
+    body { position: relative; min-height: 100dvh; overflow: hidden; font-size: 13px; }
+    .app-preview {
+      position: fixed;
+      inset: -4px;
+      overflow: hidden;
+      background: #090909;
+      pointer-events: none;
+      filter: blur(2.5px);
+      opacity: 0.7;
+      transform: scale(1.015);
+    }
+    .preview-sidebar {
+      position: absolute;
+      inset: 20px auto 20px 20px;
+      width: 196px;
+      padding: 18px;
+      border: 1px solid rgb(255 255 255 / 0.08);
+      background: #0c0c0c;
+    }
+    .preview-brand { display: block; width: 92px; height: 16px; margin-bottom: 34px; background: rgb(255 255 255 / 0.18); }
+    .preview-nav-line { display: block; width: 72%; height: 11px; margin-top: 20px; background: rgb(255 255 255 / 0.09); }
+    .preview-nav-line:nth-child(3) { width: 88%; }
+    .preview-nav-line:nth-child(4) { width: 62%; }
+    .preview-main { position: absolute; inset: 20px 20px 20px 232px; border: 1px solid rgb(255 255 255 / 0.07); background: #0a0a0a; }
+    .preview-topbar { display: flex; height: 52px; align-items: center; gap: 28px; padding: 0 24px; border-bottom: 1px solid rgb(255 255 255 / 0.08); }
+    .preview-topbar span { width: 62px; height: 10px; background: rgb(255 255 255 / 0.1); }
+    .preview-topbar span:nth-child(2) { width: 78px; }
+    .preview-content { padding: 44px 48px; }
+    .preview-kicker { width: 132px; height: 9px; background: rgb(255 255 255 / 0.11); }
+    .preview-title { width: min(470px, 60%); height: 30px; margin-top: 20px; background: rgb(255 255 255 / 0.16); }
+    .preview-copy { width: min(620px, 76%); height: 11px; margin-top: 18px; background: rgb(255 255 255 / 0.08); box-shadow: 0 22px rgb(255 255 255 / 0.06); }
+    .preview-rule { height: 1px; margin-top: 72px; background: rgb(255 255 255 / 0.08); }
+    .preview-columns { display: grid; margin-top: 24px; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid rgb(255 255 255 / 0.07); border-bottom: 1px solid rgb(255 255 255 / 0.07); }
+    .preview-columns span { height: 132px; border-right: 1px solid rgb(255 255 255 / 0.07); }
+    .preview-columns span:last-child { border-right: 0; }
+    }
+    .backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgb(0 0 0 / 0.42);
+      backdrop-filter: blur(3px);
+    }
+    .stage {
+      position: fixed;
+      inset: 0;
+      z-index: 2;
+      display: grid;
+      min-height: 0;
+      padding: 20px;
+      place-items: center;
+      pointer-events: none;
+    }
+    .shell {
+      width: min(960px, 92vw);
+      height: min(560px, 80dvh);
+      min-width: 0;
+      min-height: 0;
+      border: 1px solid var(--line-strong);
+      border-radius: 12px;
+      background: var(--background);
+      box-shadow: 0 24px 80px rgb(0 0 0 / 0.72), 0 4px 18px rgb(0 0 0 / 0.45);
+      pointer-events: auto;
+      animation: devtools-window-in 180ms cubic-bezier(0.175, 0.885, 0.32, 1.08);
+    }
+    .topbar {
+      min-height: 40px;
+      height: 40px;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: nowrap;
+      border-bottom-color: var(--line);
+      background: var(--background);
+    }
+    .brand { display: none; }
+    .tabbar {
+      height: 100%;
+      flex: 1 1 auto;
+      align-items: stretch;
+      order: initial;
+      width: auto;
+      flex-basis: auto;
+      padding-inline-start: 8px;
+      border-top: 0;
+    }
+    .nav-item {
+      min-height: 39px;
+      height: 39px;
+      gap: 0;
+      padding: 0 12px;
+      border-radius: 0;
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 500;
+      text-transform: none;
+    }
+    .nav-item::after {
+      right: 8px;
+      bottom: -1px;
+      left: 8px;
+      height: 2px;
+      border-radius: 999px;
+    }
+    .nav-item:hover, .nav-item:focus-visible { background: transparent; color: var(--foreground); }
+    .nav-item[aria-selected="true"] { color: var(--foreground); }
+    .topbar-meta {
+      height: 100%;
+      align-items: center;
+      gap: 8px;
+      margin-left: 0;
+      padding: 0 8px 0 4px;
+      border-left: 0;
+    }
+    .project-select {
+      display: inline-flex;
+      height: 28px;
+      min-width: 0;
+      align-items: center;
+      gap: 5px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted-strong);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .project-select .icon { width: 12px; height: 12px; transform: rotate(90deg); }
+    .topbar-status {
+      min-width: max-content;
+      gap: 6px;
+      padding: 0;
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 11px;
+      text-transform: none;
+    }
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border: 0;
+      border-radius: 999px;
+      background: #2dd4bf;
+      box-shadow: none;
+    }
+    .status-dot-attention { background: #f59e0b; animation: none; }
+    .status-dot-error { background: #ef4444; }
+    .close-action {
+      display: inline-flex;
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      color: var(--muted);
+      text-decoration: none;
+      transition: background-color 120ms ease-out, color 120ms ease-out;
+    }
+    .close-action:hover, .close-action:focus-visible { background: var(--accent); color: var(--foreground); outline: none; }
+    .close-action .icon { width: 14px; height: 14px; }
+    .workspace, .content, .view { min-height: 0; }
+    .split-view {
+      grid-template-columns: clamp(14rem, 28%, 18rem) minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .pane { background: var(--background); }
+    .pane-list { border-right: 1px solid var(--line); border-bottom: 0; }
+    .pane-header {
+      min-height: 32px;
+      height: 32px;
+      max-height: 32px;
+      flex: 0 0 32px;
+      padding: 0 12px;
+      border-bottom-color: var(--line);
+      background: var(--background);
+    }
+    .pane-header strong {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 400;
+      line-height: 1;
+    }
+    .pane-header span {
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 10px;
+      line-height: 1;
+    }
+    .pane-tools { border-bottom-color: var(--line); }
+    .pane-tools .filter-control { min-height: 32px; height: 32px; }
+    .filter-control {
+      min-height: 32px;
+      gap: 7px;
+      padding: 0 10px;
+      border-color: var(--line);
+      border-radius: 0;
+      background: var(--background);
+    }
+    .filter-control .icon { width: 13px; height: 13px; }
+    .filter-control input { font-family: var(--font-sans); font-size: 11px; }
+    .filter-control input::placeholder { color: var(--muted); }
+    .filter-control kbd {
+      padding: 1px 5px;
+      border-color: var(--line);
+      border-radius: 4px;
+      color: var(--muted);
+      font-size: 9px;
+    }
+    .inspector-row {
+      min-height: 44px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 6px 11px 6px 12px;
+      border: 0;
+      border-left: 2px solid transparent;
+      border-radius: 0;
+      color: var(--muted-strong);
+    }
+    .inspector-row::before { display: none; }
+    .inspector-row:hover, .inspector-row:focus-visible { background: rgb(255 255 255 / 0.035); color: var(--foreground); }
+    .inspector-row[aria-selected="true"] {
+      border-left-color: var(--foreground);
+      background: var(--accent);
+      color: var(--foreground);
+    }
+    .inspector-row-copy strong { font-size: 12px; font-weight: 500; }
+    .inspector-row-copy small {
+      margin-top: 2px;
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 10px;
+    }
+    .inspector-row-value {
+      padding: 2px 6px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgb(255 255 255 / 0.035);
+      color: var(--muted);
+      font-family: var(--font-sans);
+      font-size: 9px;
+      line-height: 1.2;
+      text-transform: none;
+    }
+    .detail-intro {
+      display: block;
+      min-height: 0;
+      padding: 12px;
+      border-bottom-color: var(--line-soft);
+    }
+    .detail-icon { display: none; }
+    .detail-intro .mini-label { margin: 0 0 8px; }
+    .detail-intro h2 { font-size: 13px; font-weight: 500; line-height: 1.3; }
+    .detail-intro p { margin-top: 6px; font-size: 11px; line-height: 1.5; }
+    .detail-section, .detail-intro + .detail-section { border-top-color: var(--line); }
+    .property-list > div {
+      min-height: 36px;
+      grid-template-columns: minmax(96px, 0.28fr) minmax(0, 1fr);
+      gap: 14px;
+      padding: 7px 12px;
+      border-bottom-color: var(--line-soft);
+    }
+    .property-list dt { font-family: var(--font-sans); font-size: 10px; text-transform: none; }
+    .property-list dd { color: var(--foreground); font-size: 11px; }
+    .property-list dd > code { font-size: 10px; }
+    .json-viewer {
+      padding: 12px;
+      background: var(--background);
+      color: var(--muted-strong);
+      font-size: 10px;
+      line-height: 1.55;
+    }
+    .diagnostic {
+      min-height: 68px;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      gap: 10px;
+      padding: 11px 12px;
+      border-bottom-color: var(--line-soft);
+    }
+    .diagnostic-mark { width: 22px; height: 22px; border: 0; }
+    .diagnostic-mark .icon { width: 13px; height: 13px; }
+    .diagnostic-code { margin-bottom: 3px; font-size: 9px; }
+    .diagnostic strong { font-size: 11px; font-weight: 500; }
+    .diagnostic p { margin-top: 3px; font-size: 10px; line-height: 1.45; }
+    .diagnostic small { margin-top: 4px; font-size: 9px; }
+    .diagnostic-warning { box-shadow: none; }
+    .system-row {
+      min-height: 48px;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      gap: 8px;
+      padding: 8px 12px;
+      border-bottom-color: var(--line-soft);
+    }
+    .system-icon { width: 20px; height: 20px; }
+    .system-icon .icon { width: 13px; height: 13px; }
+    .system-row strong { font-size: 11px; font-weight: 500; }
+    .system-row small { margin-top: 2px; font-size: 10px; }
+    .system-value { color: var(--muted); font-size: 10px; }
+    table { font-size: 11px; }
+    th {
+      height: 32px;
+      padding: 0 12px;
+      background: var(--background);
+      font-family: var(--font-sans);
+      font-size: 10px;
+      font-weight: 400;
+      text-transform: none;
+    }
+    td { min-height: 40px; padding: 9px 12px; font-size: 10px; }
+    td code, .file-cell { font-size: 9px; }
+    .badge {
+      min-height: 18px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgb(255 255 255 / 0.04);
+      font-family: var(--font-sans);
+      font-size: 9px;
+      text-transform: none;
+    }
+    .badge-error { background: var(--foreground); color: var(--background); }
+    .badge-warning, .badge-attention, .badge-edge { border-style: solid; }
+    .empty-state { min-height: 100%; padding: 24px; gap: 6px; }
+    .empty-state .icon { display: none; }
+    .empty-state strong { font-size: 12px; font-weight: 400; }
+    .empty-state span { font-size: 11px; }
+    .feature-matrix > div { min-height: 36px; padding: 7px 12px; border-bottom-color: var(--line-soft); }
+    .feature-matrix span:first-child { font-size: 11px; }
+    .environment-grid > div { min-height: 104px; padding: 12px; }
+    .mini-label { margin-bottom: 8px; font-family: var(--font-sans); font-size: 10px; text-transform: none; }
+    .key-list code { border-radius: 4px; font-size: 9px; }
+    .layer-list > div { min-height: 44px; padding: 8px 12px; border-bottom-color: var(--line-soft); }
+    .layer-list strong { font-size: 11px; font-weight: 500; }
+    .statusbar { display: none; }
+    @keyframes devtools-window-in {
+      from { opacity: 0; transform: scale(0.985) translateY(4px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    @media (max-width: 700px) {
+      .stage { display: grid; padding: 8px; }
+      .shell {
+        width: calc(100vw - 16px);
+        height: calc(100dvh - 16px);
+        min-height: 0;
+        border: 1px solid var(--line-strong);
+        border-radius: 10px;
+      }
+      .topbar { flex-wrap: nowrap; }
+      .tabbar {
+        order: initial;
+        width: auto;
+        flex-basis: auto;
+        border-top: 0;
+        padding-inline-start: 4px;
+      }
+      .topbar-meta { height: 40px; }
+      .nav-item { min-height: 39px; height: 39px; padding-inline: 9px; }
+      .split-view { grid-template-columns: 1fr; grid-template-rows: minmax(148px, 36%) minmax(0, 1fr); }
+      .pane-list { border-right: 0; border-bottom: 1px solid var(--line); }
+    }
+    @media (max-width: 560px) {
+      .project-select { display: none; }
+      .topbar-meta { gap: 4px; padding-left: 0; }
+      .status-label { display: none; }
+      .detail-intro { min-height: 0; padding: 12px; }
+      .detail-intro h2 { font-size: 13px; }
+      .property-list > div { grid-template-columns: minmax(82px, 0.34fr) minmax(0, 1fr); gap: 10px; padding-inline: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .shell { animation: none; }
+    }
+  </style>
 </head>
 <body>
+  <div class="app-preview" aria-hidden="true">
+    <aside class="preview-sidebar">
+      <span class="preview-brand"></span>
+      <span class="preview-nav-line"></span>
+      <span class="preview-nav-line"></span>
+      <span class="preview-nav-line"></span>
+      <span class="preview-nav-line"></span>
+    </aside>
+    <div class="preview-main">
+      <div class="preview-topbar"><span></span><span></span><span></span><span></span></div>
+      <div class="preview-content">
+        <div class="preview-kicker"></div>
+        <div class="preview-title"></div>
+        <div class="preview-copy"></div>
+        <div class="preview-rule"></div>
+        <div class="preview-columns"><span></span><span></span><span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="backdrop" aria-hidden="true"></div>
   <div class="stage">
-    <div class="shell">
+    <div class="shell" role="dialog" aria-label="Farm.js DevTools">
       <header class="topbar">
-        <a class="brand" href="/__farm/devtools" aria-label="Farm.js Devtools overview">
-          <span class="brand-mark">F</span><span>Farm.js</span><span class="brand-slash">/</span><span class="brand-product">Devtools</span>
-        </a>
         <nav class="tabbar" aria-label="Devtools views">
-          ${renderNavigationItem("overview", "Overview", "overview")}
-          ${renderNavigationItem("routes", "Routes", "route", snapshot.routes.length)}
-          ${renderNavigationItem("api", "API", "api", snapshot.counts.apiRoutes)}
-          ${renderNavigationItem("systems", "Systems", "blocks", snapshot.counts.integrations)}
-          ${renderNavigationItem(
-            "runtime",
-            "Runtime",
-            "runtime",
-            snapshot.counts.cronJobs + snapshot.counts.workflows,
-          )}
-          ${renderNavigationItem("raw", "Raw", "terminal")}
+          ${renderNavigationItem("overview", "Overview")}
+          ${renderNavigationItem("routes", "Routes")}
+          ${renderNavigationItem("api", "API")}
+          ${renderNavigationItem("systems", "Systems")}
+          ${renderNavigationItem("runtime", "Runtime")}
+          ${renderNavigationItem("raw", "Raw")}
         </nav>
         <div class="topbar-meta">
-          <div class="topbar-status"><span class="status-dot status-dot-${snapshot.health}"></span>${escapeHtml(
-            healthLabel,
-          )} / ${escapeHtml(snapshot.project.name)}</div>
-          <nav class="topbar-actions" aria-label="Devtools actions">
-            <button type="button" class="action" data-copy-snapshot title="Copy runtime snapshot">${icon(
-              "copy",
-            )}<span class="sr-only" data-copy-label>Copy JSON</span></button>
-            <button type="button" class="action" data-refresh title="Refresh snapshot">${icon(
-              "refresh",
-            )}<span class="sr-only">Refresh</span></button>
-            <a class="action" href="/__farm/devtools.json" target="_blank" rel="noreferrer" title="Open raw JSON snapshot">${icon(
-              "terminal",
-            )}<span class="sr-only">JSON</span></a>
-            <a class="action" href="/" title="Open application">${icon(
-              "app",
-            )}<span class="sr-only">App</span></a>
-          </nav>
+          <span class="project-select">${escapeHtml(snapshot.project.name)} ${icon(
+            "chevron",
+          )}</span>
+          <span class="topbar-status"><span class="status-dot"></span><span class="status-label">1 instance</span></span>
+          <a class="close-action" href="/" aria-label="Close DevTools" title="Close DevTools">${icon(
+            "close",
+          )}</a>
         </div>
       </header>
       <div class="workspace">
@@ -1009,9 +1396,6 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
           <section class="view" data-view-panel="raw" hidden>${renderRawInspector(snapshot)}</section>
         </main>
       </div>
-      <footer class="statusbar"><span>${icon("terminal")}Local development only</span><span>Snapshot ${escapeHtml(
-        generatedTime,
-      )} / ${escapeHtml(snapshot.project.srcDir)}/app</span></footer>
     </div>
   </div>
   <script>
