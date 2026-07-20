@@ -630,10 +630,9 @@ code:not(pre code) {
 
 /* Docs command search */
 .topbar-actions .fd-docs-search-trigger {
-  width: 80px;
-  min-width: 80px;
+  width: 56px;
+  min-width: 56px;
   justify-content: center;
-  gap: 7px;
   padding: 0 10px;
 }
 

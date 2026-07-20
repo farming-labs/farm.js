@@ -1503,9 +1503,9 @@ function renderPixelBreadcrumb(page: LoadedFarmDocsPage, docs: FarmDocsResolvedC
 </nav>`;
 }
 
-function renderDocsSearchTrigger(): string {
+function renderDocsSearchTrigger(showIcon = true): string {
   return `<button class="fd-docs-search-trigger" type="button" data-search-full="" aria-label="Search documentation" aria-haspopup="dialog" aria-keyshortcuts="Meta+K Control+K">
-  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+  ${showIcon ? '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>' : ""}
   <kbd><span>⌘</span><span>K</span></kbd>
 </button>`;
 }
@@ -1826,7 +1826,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     <header class="topbar">
       <a href="/">Farm.js</a>
       <div class="topbar-actions">
-        ${searchEnabled ? renderDocsSearchTrigger() : ""}
+        ${searchEnabled ? renderDocsSearchTrigger(false) : ""}
         <a class="topbar-llms-link" href="/llms.txt">llms.txt</a>
       </div>
     </header>

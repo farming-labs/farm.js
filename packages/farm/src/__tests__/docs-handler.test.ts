@@ -234,6 +234,8 @@ describe("createFarmDocsHandler", () => {
       htmlText.indexOf("</header>", htmlText.indexOf('<header class="mobile-topbar"')),
     );
     expect(topbar).toContain('data-search-full=""');
+    expect(topbar).not.toContain("<svg");
+    expect(mobileTopbar).toContain("<svg");
     expect(topbar.indexOf('data-search-full=""')).toBeLessThan(topbar.indexOf('href="/llms.txt"'));
     expect(mobileTopbar.indexOf('data-search-full=""')).toBeLessThan(
       mobileTopbar.indexOf('href="/llms.txt"'),
@@ -244,7 +246,7 @@ describe("createFarmDocsHandler", () => {
       "var(--fd-mobile-nav-height, 56px) + max(10px, env(safe-area-inset-top))",
     );
     expect(html).toContain("max(10px, env(safe-area-inset-bottom))");
-    expect(html).toContain("width: 80px");
+    expect(html).toContain("width: 56px");
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
     expect(html).toContain("width: min(680px, calc(100vw - 32px))");
     expect(html).toContain("width: calc(100vw - 20px)");
