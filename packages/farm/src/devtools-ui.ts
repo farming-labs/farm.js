@@ -741,14 +741,7 @@ function renderNavigationItem(
   </button>`;
 }
 
-export interface RenderFarmDevtoolsHtmlOptions {
-  embedded?: boolean;
-}
-
-export function renderFarmDevtoolsHtml(
-  snapshot: FarmDevtoolsSnapshot,
-  options: RenderFarmDevtoolsHtmlOptions = {},
-): string {
+export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
   const healthLabel =
     snapshot.health === "ready" ? "Ready" : snapshot.health === "error" ? "Error" : "Attention";
   const generatedTime = new Date(snapshot.generatedAt).toLocaleTimeString("en-US", {
@@ -759,7 +752,7 @@ export function renderFarmDevtoolsHtml(
   });
 
   return `<!doctype html>
-<html lang="en"${options.embedded ? ' class="devtools-embedded"' : ""}>
+<html lang="en" class="devtools-frame">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -969,47 +962,6 @@ export function renderFarmDevtoolsHtml(
     }
     html, body { width: 100%; height: 100%; background: #080808; }
     body { position: relative; min-height: 100dvh; overflow: hidden; font-size: 13px; }
-    .app-preview {
-      position: fixed;
-      inset: -4px;
-      overflow: hidden;
-      background: #090909;
-      pointer-events: none;
-      filter: blur(2.5px);
-      opacity: 0.7;
-      transform: scale(1.015);
-    }
-    .preview-sidebar {
-      position: absolute;
-      inset: 20px auto 20px 20px;
-      width: 196px;
-      padding: 18px;
-      border: 1px solid rgb(255 255 255 / 0.08);
-      background: #0c0c0c;
-    }
-    .preview-brand { display: block; width: 92px; height: 16px; margin-bottom: 34px; background: rgb(255 255 255 / 0.18); }
-    .preview-nav-line { display: block; width: 72%; height: 11px; margin-top: 20px; background: rgb(255 255 255 / 0.09); }
-    .preview-nav-line:nth-child(3) { width: 88%; }
-    .preview-nav-line:nth-child(4) { width: 62%; }
-    .preview-main { position: absolute; inset: 20px 20px 20px 232px; border: 1px solid rgb(255 255 255 / 0.07); background: #0a0a0a; }
-    .preview-topbar { display: flex; height: 52px; align-items: center; gap: 28px; padding: 0 24px; border-bottom: 1px solid rgb(255 255 255 / 0.08); }
-    .preview-topbar span { width: 62px; height: 10px; background: rgb(255 255 255 / 0.1); }
-    .preview-topbar span:nth-child(2) { width: 78px; }
-    .preview-content { padding: 44px 48px; }
-    .preview-kicker { width: 132px; height: 9px; background: rgb(255 255 255 / 0.11); }
-    .preview-title { width: min(470px, 60%); height: 30px; margin-top: 20px; background: rgb(255 255 255 / 0.16); }
-    .preview-copy { width: min(620px, 76%); height: 11px; margin-top: 18px; background: rgb(255 255 255 / 0.08); box-shadow: 0 22px rgb(255 255 255 / 0.06); }
-    .preview-rule { height: 1px; margin-top: 72px; background: rgb(255 255 255 / 0.08); }
-    .preview-columns { display: grid; margin-top: 24px; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid rgb(255 255 255 / 0.07); border-bottom: 1px solid rgb(255 255 255 / 0.07); }
-    .preview-columns span { height: 132px; border-right: 1px solid rgb(255 255 255 / 0.07); }
-    .preview-columns span:last-child { border-right: 0; }
-    }
-    .backdrop {
-      position: fixed;
-      inset: 0;
-      background: rgb(0 0 0 / 0.42);
-      backdrop-filter: blur(3px);
-    }
     .stage {
       position: fixed;
       inset: 0;
@@ -1303,17 +1255,17 @@ export function renderFarmDevtoolsHtml(
     .layer-list > div { min-height: 44px; padding: 8px 12px; border-bottom-color: var(--line-soft); }
     .layer-list strong { font-size: 11px; font-weight: 500; }
     .statusbar { display: none; }
-    html.devtools-embedded, html.devtools-embedded body { background: transparent; }
-    html.devtools-embedded .app-preview, html.devtools-embedded .backdrop { display: none; }
+    html.devtools-frame .stage { position: static; width: 100%; height: 100%; min-height: 100%; padding: 0; }
+    html.devtools-frame .shell { width: 100%; height: 100%; border-radius: 12px; box-shadow: none; animation: none; }
     @keyframes devtools-window-in {
       from { opacity: 0; transform: scale(0.985) translateY(4px); }
       to { opacity: 1; transform: scale(1) translateY(0); }
     }
     @media (max-width: 700px) {
-      .stage { display: grid; padding: 8px; }
+      .stage { display: grid; padding: 0; }
       .shell {
-        width: calc(100vw - 16px);
-        height: calc(100dvh - 16px);
+        width: 100%;
+        height: 100%;
         min-height: 0;
         border: 1px solid var(--line-strong);
         border-radius: 10px;
@@ -1333,6 +1285,7 @@ export function renderFarmDevtoolsHtml(
     }
     @media (max-width: 560px) {
       .project-select { display: none; }
+      .topbar-status { display: none; }
       .topbar-meta { gap: 4px; padding-left: 0; }
       .status-label { display: none; }
       .detail-intro { min-height: 0; padding: 12px; }
@@ -1345,26 +1298,6 @@ export function renderFarmDevtoolsHtml(
   </style>
 </head>
 <body>
-  <div class="app-preview" aria-hidden="true">
-    <aside class="preview-sidebar">
-      <span class="preview-brand"></span>
-      <span class="preview-nav-line"></span>
-      <span class="preview-nav-line"></span>
-      <span class="preview-nav-line"></span>
-      <span class="preview-nav-line"></span>
-    </aside>
-    <div class="preview-main">
-      <div class="preview-topbar"><span></span><span></span><span></span><span></span></div>
-      <div class="preview-content">
-        <div class="preview-kicker"></div>
-        <div class="preview-title"></div>
-        <div class="preview-copy"></div>
-        <div class="preview-rule"></div>
-        <div class="preview-columns"><span></span><span></span><span></span></div>
-      </div>
-    </div>
-  </div>
-  <div class="backdrop" aria-hidden="true"></div>
   <div class="stage">
     <div class="shell" role="dialog" aria-modal="true" aria-label="Farm.js DevTools">
       <header class="topbar">
@@ -1412,7 +1345,7 @@ export function renderFarmDevtoolsHtml(
   </div>
   <script>
     (() => {
-      const embedded = ${JSON.stringify(options.embedded === true)};
+      const embedded = window.parent !== window;
       const closeDevtools = () => {
         if (embedded && window.parent !== window) {
           window.parent.postMessage({ type: "farm:devtools:close" }, location.origin);
@@ -1421,9 +1354,6 @@ export function renderFarmDevtoolsHtml(
         location.assign("/");
       };
       document.querySelector("[data-close-devtools]")?.addEventListener("click", closeDevtools);
-      document.addEventListener("pointerdown", (event) => {
-        if (embedded && !event.target.closest?.(".shell")) closeDevtools();
-      });
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") {
           event.preventDefault();

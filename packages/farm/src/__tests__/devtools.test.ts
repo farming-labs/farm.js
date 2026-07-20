@@ -197,7 +197,9 @@ describe("farm devtools", () => {
     expect(html).toContain('data-view-panel="runtime"');
     expect(html).toContain('data-view-panel="raw"');
     expect(html).toContain('data-detail-trigger="routes"');
-    expect(html).toContain('class="app-preview"');
+    expect(html).toContain('<html lang="en" class="devtools-frame">');
+    expect(html).not.toContain('class="app-preview"');
+    expect(html).not.toContain('class="backdrop"');
     expect(html).toContain("width: min(960px, 92vw)");
     expect(html).toContain('role="dialog" aria-modal="true" aria-label="Farm.js DevTools"');
     expect(html).toContain("data-close-devtools");
@@ -205,9 +207,7 @@ describe("farm devtools", () => {
     expect(html).toContain("src/app/about/page.tsx");
     expect(html).toContain("No api routes found");
 
-    const embeddedHtml = renderFarmDevtoolsHtml(snapshot, { embedded: true });
-    expect(embeddedHtml).toContain('<html lang="en" class="devtools-embedded">');
-    expect(embeddedHtml).toContain("const embedded = true");
-    expect(embeddedHtml).toContain('type: "farm:devtools:close"');
+    expect(html).toContain("const embedded = window.parent !== window");
+    expect(html).toContain('type: "farm:devtools:close"');
   });
 });

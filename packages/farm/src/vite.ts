@@ -50,7 +50,11 @@ import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
 import { createFarmDevtoolsSnapshot } from "./devtools";
 import { renderFarmDevtoolsHtml } from "./devtools-ui";
 import { generateFarmDevtoolsClientRuntime } from "./devtools-client";
-import { resolveFarmDevtoolsConfig } from "./devtools-config";
+import {
+  FARM_DEVTOOLS_LAUNCH_PARAM,
+  FARM_DEVTOOLS_PATH,
+  resolveFarmDevtoolsConfig,
+} from "./devtools-config";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -684,7 +688,8 @@ export function farmPlugin(
         const requestUrl = req.url || "/";
         const requestMethod = req.method || "GET";
         const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
-        const requestPathname = new URL(fullUrl).pathname;
+        const parsedRequestUrl = new URL(fullUrl);
+        const requestPathname = parsedRequestUrl.pathname;
         const currentConfig = farmApp?.getConfig() ?? options;
 
         const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
@@ -698,13 +703,42 @@ export function farmPlugin(
 
         if (
           requestMethod === "GET" &&
-          (requestPathname === "/__farm/devtools" || requestPathname === "/__farm/devtools.json")
+          (requestPathname === FARM_DEVTOOLS_PATH ||
+            requestPathname === `${FARM_DEVTOOLS_PATH}.json`)
         ) {
           if (!farmConfig.devtools.enabled) {
             res.statusCode = 404;
             res.setHeader("Content-Type", "text/plain; charset=utf-8");
             res.setHeader("Cache-Control", "no-store");
             res.end("Farm DevTools are disabled.");
+            return;
+          }
+
+          if (
+            requestPathname === FARM_DEVTOOLS_PATH &&
+            parsedRequestUrl.searchParams.get("embedded") !== "1"
+          ) {
+            let launchUrl = new URL(farmConfig.basePath || "/", parsedRequestUrl.origin);
+            const referrer = req.headers.referer;
+            if (referrer) {
+              try {
+                const referrerUrl = new URL(referrer);
+                if (
+                  referrerUrl.origin === parsedRequestUrl.origin &&
+                  !referrerUrl.pathname.startsWith(FARM_DEVTOOLS_PATH)
+                ) {
+                  launchUrl = referrerUrl;
+                }
+              } catch {
+                // Ignore malformed referrers and return to the application root.
+              }
+            }
+            launchUrl.searchParams.set(FARM_DEVTOOLS_LAUNCH_PARAM, "1");
+            res.statusCode = 302;
+            res.setHeader("Location", `${launchUrl.pathname}${launchUrl.search}${launchUrl.hash}`);
+            res.setHeader("Cache-Control", "no-store");
+            res.setHeader("Vary", "Referer");
+            res.end();
             return;
           }
 
@@ -732,9 +766,7 @@ export function farmPlugin(
           res.end(
             requestPathname.endsWith(".json")
               ? JSON.stringify(snapshot, null, 2)
-              : renderFarmDevtoolsHtml(snapshot, {
-                  embedded: new URL(fullUrl).searchParams.get("embedded") === "1",
-                }),
+              : renderFarmDevtoolsHtml(snapshot),
           );
           return;
         }

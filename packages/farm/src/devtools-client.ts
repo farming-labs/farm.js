@@ -1,4 +1,8 @@
-import type { ResolvedFarmDevtoolsConfig } from "./devtools-config";
+import {
+  FARM_DEVTOOLS_LAUNCH_PARAM,
+  FARM_DEVTOOLS_PATH,
+  type ResolvedFarmDevtoolsConfig,
+} from "./devtools-config";
 
 type ParsedShortcut = {
   key: string;
@@ -59,26 +63,45 @@ export function generateFarmDevtoolsClientRuntime(
       position: fixed;
       inset: 0;
       z-index: 2147483646;
-      overflow: hidden;
+      display: grid;
+      place-items: center;
+      padding: 20px;
       background: rgb(0 0 0 / 0);
       backdrop-filter: blur(0);
       opacity: 0;
+      pointer-events: none;
       transition: background-color 150ms ease-out, backdrop-filter 150ms ease-out, opacity 150ms ease-out;
     }
     #__farm_devtools_overlay__[data-open="true"] {
-      background: rgb(0 0 0 / 0.36);
-      backdrop-filter: blur(3px);
+      background: rgb(0 0 0 / 0.12);
+      backdrop-filter: blur(1px);
       opacity: 1;
+      pointer-events: auto;
     }
     #__farm_devtools_overlay__ > iframe {
       display: block;
-      width: 100%;
-      height: 100%;
+      width: min(960px, calc(100vw - 40px));
+      height: min(560px, calc(100dvh - 40px));
       border: 0;
+      border-radius: 12px;
       background: transparent;
+      box-shadow: 0 24px 80px rgb(0 0 0 / 0.48), 0 4px 18px rgb(0 0 0 / 0.24);
+      transform: scale(0.985) translateY(4px);
+      transition: transform 150ms ease-out;
+    }
+    #__farm_devtools_overlay__[data-open="true"] > iframe {
+      transform: scale(1) translateY(0);
+    }
+    @media (max-width: 700px) {
+      #__farm_devtools_overlay__ { padding: 8px; }
+      #__farm_devtools_overlay__ > iframe {
+        width: calc(100vw - 16px);
+        height: calc(100dvh - 16px);
+        border-radius: 10px;
+      }
     }
     @media (prefers-reduced-motion: reduce) {
-      #__farm_devtools_overlay__ { transition: none; }
+      #__farm_devtools_overlay__, #__farm_devtools_overlay__ > iframe { transition: none; }
     }
   `;
 
@@ -87,6 +110,9 @@ export function generateFarmDevtoolsClientRuntime(
   const overlayId = "__farm_devtools_overlay__";
   const styleId = "__farm_devtools_overlay_styles__";
   const runtimeKey = "__FARM_DEVTOOLS_RUNTIME__";
+  const launchParam = ${JSON.stringify(FARM_DEVTOOLS_LAUNCH_PARAM)};
+  const devtoolsPath = ${JSON.stringify(FARM_DEVTOOLS_PATH)};
+  const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw"]);
   const shortcut = ${JSON.stringify(shortcut)};
   const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
   let returnFocus = null;
@@ -128,7 +154,7 @@ export function generateFarmDevtoolsClientRuntime(
     }, 160);
   };
 
-  const open = () => {
+  const open = (view = "overview") => {
     if (document.getElementById(overlayId)) return;
     ensureStyles();
     returnFocus = document.activeElement;
@@ -136,10 +162,14 @@ export function generateFarmDevtoolsClientRuntime(
     overlay.id = overlayId;
     overlay.setAttribute("aria-label", "Farm.js DevTools overlay");
     const frame = document.createElement("iframe");
-    frame.src = "/__farm/devtools?embedded=1";
+    const resolvedView = validViews.has(view) ? view : "overview";
+    frame.src = devtoolsPath + "?embedded=1" + (resolvedView === "overview" ? "" : "#" + resolvedView);
     frame.title = "Farm.js DevTools";
     frame.addEventListener("load", () => frame.contentWindow?.focus(), { once: true });
     overlay.appendChild(frame);
+    overlay.addEventListener("pointerdown", (event) => {
+      if (event.target === overlay) close();
+    });
     document.body.appendChild(overlay);
     requestAnimationFrame(() => {
       overlay.dataset.open = "true";
@@ -181,6 +211,30 @@ export function generateFarmDevtoolsClientRuntime(
     },
   };
   window.__FARM_DEVTOOLS__ = { open, close, toggle };
+
+  const launchUrl = new URL(location.href);
+  const launchRequest = launchUrl.searchParams.get(launchParam);
+  if (launchRequest !== null) {
+    const hashView = launchUrl.hash.slice(1);
+    const launchView = validViews.has(launchRequest)
+      ? launchRequest
+      : validViews.has(hashView)
+        ? hashView
+        : "overview";
+    launchUrl.searchParams.delete(launchParam);
+    if (validViews.has(hashView)) launchUrl.hash = "";
+    history.replaceState(
+      history.state,
+      "",
+      launchUrl.pathname + launchUrl.search + launchUrl.hash,
+    );
+    const launch = () => requestAnimationFrame(() => open(launchView));
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", launch, { once: true });
+    } else {
+      launch();
+    }
+  }
 })();
 `;
 }

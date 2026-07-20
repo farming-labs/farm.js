@@ -8,10 +8,15 @@ describe("Farm DevTools client runtime", () => {
       shortcut: "mod+shift+.",
     });
 
-    expect(runtime).toContain('frame.src = "/__farm/devtools?embedded=1"');
+    expect(runtime).toContain('const launchParam = "__farm_devtools"');
+    expect(runtime).toContain('const devtoolsPath = "/__farm/devtools"');
+    expect(runtime).toContain('frame.src = devtoolsPath + "?embedded=1"');
     expect(runtime).toContain(
       "window.__FARM_DEVTOOLS__ = { open, close, toggle }",
     );
+    expect(runtime).toContain("launchUrl.searchParams.delete(launchParam)");
+    expect(runtime).toContain("width: min(960px, calc(100vw - 40px))");
+    expect(runtime).toContain("background: rgb(0 0 0 / 0.12)");
     expect(runtime).toContain('"key":"."');
     expect(runtime).toContain('event.code === "Period"');
   });

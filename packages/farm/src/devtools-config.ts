@@ -1,4 +1,6 @@
 export const DEFAULT_FARM_DEVTOOLS_SHORTCUT = "mod+shift+.";
+export const FARM_DEVTOOLS_PATH = "/__farm/devtools";
+export const FARM_DEVTOOLS_LAUNCH_PARAM = "__farm_devtools";
 
 export interface FarmDevtoolsConfig {
   /** Enable the development-only DevTools UI and runtime endpoints. */
