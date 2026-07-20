@@ -147,12 +147,26 @@ describe("client component path resolution", () => {
       "const targetUrl = new URL(targetPath || window.location.href, window.location.origin);",
     );
     expect(source).toContain("resetReactRoot();");
-    expect(source).toContain(
-      ".then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })",
+  });
+
+  it("keeps the generated production router compatible with client navigation hooks", () => {
+    const source = fs.readFileSync(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf-8",
     );
-    expect(source).toContain(
-      ".then(function(html) { if (!spaRouter.swapContent(html, pathname + window.location.search)) window.location.reload(); })",
-    );
+
+    expect(source).toContain("getNavigationState: function()");
+    expect(source).toContain("subscribeNavigation: function(listener)");
+    expect(source).toContain("addBlocker: function(blocker)");
+    expect(source).toContain("registerScrollElement: function(key, element)");
+    expect(source).toContain("writePageState: function(action, state, href)");
+    expect(source).toContain("runViewTransition: async function(enabled, callback)");
+    expect(source).toContain('const href = element.getAttribute("href");');
+    expect(source).toContain("this.observers.set(element, observer);");
+    expect(source).toContain("createHistoryState(");
+    expect(source).toContain("currentPath: window.location.pathname + window.location.search");
+    expect(source).toContain('if (action !== "pop" && to === this.currentPath)');
+    expect(source).toContain("this.currentPath = to;");
   });
 
   it("uses a document swap when dev navigation enters the docs runtime", () => {

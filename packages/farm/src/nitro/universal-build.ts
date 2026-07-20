@@ -691,6 +691,176 @@ async function buildClient(
 /**
  * Generate client hydration entry that imports and hydrates client components
  */
+function generateUniversalRouterStateRuntime(): string {
+  return `
+const FARM_PAGE_STATE_KEY = "__farmPageState";
+const IDLE_NAVIGATION_STATE = {
+  state: "idle",
+  pending: false,
+  from: null,
+  to: null,
+  action: null,
+  startedAt: null,
+};
+
+function createNavigationLocation(url) {
+  return {
+    href: url.href,
+    pathname: url.pathname,
+    search: url.search,
+    hash: url.hash,
+  };
+}
+
+function scrollElementStorageKey(pathname, key) {
+  return "farm-scroll-" + pathname + ":" + key;
+}
+
+function createHistoryState(path, pageState, currentState) {
+  const base = currentState && typeof currentState === "object" ? { ...currentState } : {};
+  return {
+    ...base,
+    path,
+    [FARM_PAGE_STATE_KEY]: pageState,
+  };
+}
+`.trim();
+}
+
+function generateUniversalRouterStateProperties(): string {
+  return `
+  blockers: new Set(),
+  navigationListeners: new Set(),
+  navigationState: IDLE_NAVIGATION_STATE,
+  observers: new Map(),
+  scrollElements: new Map(),
+  currentPath: window.location.pathname + window.location.search,
+
+  getNavigationState: function() {
+    return this.navigationState;
+  },
+
+  subscribeNavigation: function(listener) {
+    this.navigationListeners.add(listener);
+    listener(this.navigationState);
+    return () => this.navigationListeners.delete(listener);
+  },
+
+  addBlocker: function(blocker) {
+    this.blockers.add(blocker);
+    return () => this.blockers.delete(blocker);
+  },
+
+  shouldBlockNavigation: async function(context) {
+    for (const blocker of this.blockers) {
+      if (await blocker(context)) return true;
+    }
+    return false;
+  },
+
+  startNavigation: function(from, to, action) {
+    this.setNavigationState({
+      state: "loading",
+      pending: true,
+      from,
+      to: createNavigationLocation(to),
+      action,
+      startedAt: Date.now(),
+    });
+  },
+
+  finishNavigation: function() {
+    this.setNavigationState(IDLE_NAVIGATION_STATE);
+  },
+
+  setNavigationState: function(state) {
+    this.navigationState = state;
+    for (const listener of this.navigationListeners) listener(state);
+  },
+
+  pushState: function(state, href) {
+    this.writePageState("push", state, href);
+  },
+
+  replaceState: function(state, href) {
+    this.writePageState("replace", state, href);
+  },
+
+  writePageState: function(action, state, href) {
+    const url = new URL(href || window.location.href, window.location.origin);
+    const nextState = createHistoryState(
+      url.pathname + url.search,
+      state,
+      window.history.state,
+    );
+    if (action === "replace") {
+      window.history.replaceState(nextState, "", url);
+    } else {
+      window.history.pushState(nextState, "", url);
+    }
+    window.dispatchEvent(new PopStateEvent("popstate", { state: nextState }));
+  },
+
+  registerScrollElement: function(key, element) {
+    this.scrollElements.set(key, element);
+    this.restoreScrollElement(window.location.pathname, key, element);
+    return () => {
+      if (this.scrollElements.get(key) === element) this.scrollElements.delete(key);
+    };
+  },
+
+  saveScrollPosition: function(pathname) {
+    try {
+      sessionStorage.setItem(
+        "farm-scroll-" + pathname,
+        JSON.stringify({ x: window.scrollX, y: window.scrollY }),
+      );
+      for (const [key, element] of this.scrollElements) {
+        sessionStorage.setItem(
+          scrollElementStorageKey(pathname, key),
+          JSON.stringify({ x: element.scrollLeft, y: element.scrollTop }),
+        );
+      }
+    } catch {}
+  },
+
+  restoreScrollPosition: function(pathname) {
+    try {
+      const saved = sessionStorage.getItem("farm-scroll-" + pathname);
+      if (saved) {
+        const position = JSON.parse(saved);
+        setTimeout(() => window.scrollTo(position.x, position.y), 0);
+      }
+      for (const [key, element] of this.scrollElements) {
+        this.restoreScrollElement(pathname, key, element);
+      }
+    } catch {}
+  },
+
+  restoreScrollElement: function(pathname, key, element) {
+    try {
+      const saved = sessionStorage.getItem(scrollElementStorageKey(pathname, key));
+      if (!saved) return;
+      const position = JSON.parse(saved);
+      setTimeout(() => {
+        element.scrollLeft = position.x;
+        element.scrollTop = position.y;
+      }, 0);
+    } catch {}
+  },
+
+  runViewTransition: async function(enabled, callback) {
+    const startViewTransition = document.startViewTransition;
+    if (!enabled || typeof startViewTransition !== "function") {
+      await callback();
+      return;
+    }
+    const transition = startViewTransition.call(document, () => callback());
+    await transition.finished;
+  },
+`.trim();
+}
+
 function generateClientHydrationEntry(
   clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }>,
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
@@ -741,8 +911,11 @@ ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 installChunkErrorRecovery();
 mountFarmDocsSearch();
 
+${generateUniversalRouterStateRuntime()}
+
 // SPA Router for server-rendered pages (HTML swap)
 const spaRouter = {
+${generateUniversalRouterStateProperties()}
   prefetchCache: new Map(),
   
   navigate: async function(href, options = {}) {
@@ -752,7 +925,19 @@ const spaRouter = {
       return;
     }
 
-    const action = options.action || "push";
+    const action = options.action || (options.replace ? "replace" : "push");
+    const to = url.pathname + url.search;
+    if (action !== "pop" && to === this.currentPath) {
+      if (url.hash) window.location.hash = url.hash;
+      return;
+    }
+    if (action === "pop" && to === this.currentPath) return;
+
+    const from = this.currentPath;
+    if (await this.shouldBlockNavigation({ from, to, action })) return;
+
+    this.saveScrollPosition(window.location.pathname);
+    this.startNavigation(from, url, action);
     let clientNavigation;
     try {
       clientNavigation = await farmClientRuntime.beginNavigation({
@@ -762,20 +947,36 @@ const spaRouter = {
       });
       const html = await this.fetchPage(url.pathname + url.search);
       await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
-      if (!this.swapContent(html)) {
-        throw new Error("Farm could not swap the target document");
-      }
-      if (action === "replace") {
-        window.history.replaceState({}, "", href);
-      } else if (action !== "pop") {
-        window.history.pushState({}, "", href);
-      }
+      await this.runViewTransition(options.viewTransition, async () => {
+        if (!this.swapContent(html)) {
+          throw new Error("Farm could not swap the target document");
+        }
+        const historyState = createHistoryState(
+          url.pathname + url.search,
+          options.state,
+          window.history.state,
+        );
+        if (action === "replace") {
+          window.history.replaceState(historyState, "", url);
+        } else if (action !== "pop") {
+          window.history.pushState(historyState, "", url);
+        }
+        if (options.scroll !== false) {
+          if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+          else window.scrollTo(0, 0);
+        } else {
+          this.restoreScrollPosition(url.pathname);
+        }
+      });
       await farmClientRuntime.resolveNavigation(clientNavigation);
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
+      this.currentPath = to;
+      this.finishNavigation();
     } catch (error) {
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
+      this.finishNavigation();
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
@@ -865,22 +1066,33 @@ const spaRouter = {
       .catch(function() {});
   },
   
-  observeForPrefetch: function(element, href) {
+  observeForPrefetch: function(element) {
     if (!("IntersectionObserver" in window)) return;
-    
+
+    const href = element.getAttribute("href");
+    if (!href) return;
+
     const observer = new IntersectionObserver(function(entries) {
       entries.forEach(function(entry) {
         if (entry.isIntersecting) {
           spaRouter.prefetch(href);
           observer.disconnect();
+          spaRouter.observers.delete(element);
         }
       });
     }, { rootMargin: "50px" });
-    
+
     observer.observe(element);
+    this.observers.set(element, observer);
   },
-  
-  unobserveForPrefetch: function() {}
+
+  unobserveForPrefetch: function(element) {
+    const observer = this.observers.get(element);
+    if (!observer) return;
+    observer.unobserve(element);
+    observer.disconnect();
+    this.observers.delete(element);
+  }
 };
 
 const farmClientRuntime = createClientPluginManager(
@@ -898,10 +1110,18 @@ void farmClientRuntime.start();
 // Expose router globally
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
+window.addEventListener("beforeunload", function(event) {
+  if (spaRouter.blockers.size > 0) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+  spaRouter.saveScrollPosition(window.location.pathname);
+});
+
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  void spaRouter.navigate(window.location.href, { action: "pop" });
+  void spaRouter.navigate(window.location.href, { action: "pop", scroll: false });
 });
 
 // Intercept link clicks
@@ -1037,6 +1257,8 @@ let reactRoot = null;
 let currentPathname = null;
 let isHydrated = false;
 
+${generateUniversalRouterStateRuntime()}
+
 function resetReactRoot() {
   if (!reactRoot) return;
   reactRoot.unmount();
@@ -1095,6 +1317,7 @@ async function hydrate() {
 
 // SPA Router
 const spaRouter = {
+${generateUniversalRouterStateProperties()}
   prefetchCache: new Map(),
   
   navigate: async function(href, options = {}) {
@@ -1103,10 +1326,22 @@ const spaRouter = {
       window.location.href = href;
       return;
     }
+
+    const action = options.action || (options.replace ? "replace" : "push");
+    const to = url.pathname + url.search;
+    if (action !== "pop" && to === this.currentPath) {
+      if (url.hash) window.location.hash = url.hash;
+      return;
+    }
+    if (action === "pop" && to === this.currentPath) return;
     
     const pathname = url.pathname;
     const matched = matchRoute(pathname);
-    const action = options.action || "push";
+    const from = this.currentPath;
+    if (await this.shouldBlockNavigation({ from, to, action })) return;
+
+    this.saveScrollPosition(window.location.pathname);
+    this.startNavigation(from, url, action);
     let clientNavigation;
 
     try {
@@ -1132,40 +1367,63 @@ const spaRouter = {
           params,
         });
 
-        if (action === "replace") {
-          window.history.replaceState({}, "", href);
-        } else if (action !== "pop") {
-          window.history.pushState({}, "", href);
-        }
-
-        const container = document.getElementById("root");
-        if (container) {
-          if (!reactRoot) {
-            reactRoot = createRoot(container);
+        await this.runViewTransition(options.viewTransition, async () => {
+          const historyState = createHistoryState(
+            url.pathname + url.search,
+            options.state,
+            window.history.state,
+          );
+          if (action === "replace") {
+            window.history.replaceState(historyState, "", url);
+          } else if (action !== "pop") {
+            window.history.pushState(historyState, "", url);
           }
-          reactRoot.render(wrappedElement);
-          currentPathname = pathname;
-        }
+
+          const container = document.getElementById("root");
+          if (container) {
+            if (!reactRoot) {
+              reactRoot = createRoot(container);
+            }
+            reactRoot.render(wrappedElement);
+            currentPathname = pathname;
+          }
+        });
       } else {
         const html = await this.fetchPage(url.pathname + url.search);
         await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
-        if (!this.swapContent(html, url.pathname + url.search)) {
-          throw new Error("Farm could not swap the target document");
-        }
-        if (action === "replace") {
-          window.history.replaceState({}, "", href);
-        } else if (action !== "pop") {
-          window.history.pushState({}, "", href);
-        }
-        currentPathname = pathname;
+        await this.runViewTransition(options.viewTransition, async () => {
+          if (!this.swapContent(html, url.pathname + url.search)) {
+            throw new Error("Farm could not swap the target document");
+          }
+          const historyState = createHistoryState(
+            url.pathname + url.search,
+            options.state,
+            window.history.state,
+          );
+          if (action === "replace") {
+            window.history.replaceState(historyState, "", url);
+          } else if (action !== "pop") {
+            window.history.pushState(historyState, "", url);
+          }
+          currentPathname = pathname;
+        });
       }
 
+      if (options.scroll !== false) {
+        if (url.hash) document.querySelector(url.hash)?.scrollIntoView();
+        else window.scrollTo(0, 0);
+      } else {
+        this.restoreScrollPosition(url.pathname);
+      }
       await farmClientRuntime.resolveNavigation(clientNavigation);
       void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
+      this.currentPath = to;
+      this.finishNavigation();
     } catch (error) {
       if (clientNavigation) {
         await farmClientRuntime.failNavigation(clientNavigation, error);
       }
+      this.finishNavigation();
       console.error("[Farm.js] Navigation error:", error);
       if (action === "pop") window.location.reload();
       else window.location.href = href;
@@ -1277,22 +1535,33 @@ const spaRouter = {
       .catch(function() {});
   },
   
-  observeForPrefetch: function(element, href) {
+  observeForPrefetch: function(element) {
     if (!("IntersectionObserver" in window)) return;
-    
+
+    const href = element.getAttribute("href");
+    if (!href) return;
+
     const observer = new IntersectionObserver(function(entries) {
       entries.forEach(function(entry) {
         if (entry.isIntersecting) {
           spaRouter.prefetch(href);
           observer.disconnect();
+          spaRouter.observers.delete(element);
         }
       });
     }, { rootMargin: "50px" });
-    
+
     observer.observe(element);
+    this.observers.set(element, observer);
   },
-  
-  unobserveForPrefetch: function() {}
+
+  unobserveForPrefetch: function(element) {
+    const observer = this.observers.get(element);
+    if (!observer) return;
+    observer.unobserve(element);
+    observer.disconnect();
+    this.observers.delete(element);
+  }
 };
 
 const farmClientRuntime = createClientPluginManager(
@@ -1310,10 +1579,18 @@ void farmClientRuntime.start();
 // Expose router globally
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
+window.addEventListener("beforeunload", function(event) {
+  if (spaRouter.blockers.size > 0) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+  spaRouter.saveScrollPosition(window.location.pathname);
+});
+
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  void spaRouter.navigate(window.location.href, { action: "pop" });
+  void spaRouter.navigate(window.location.href, { action: "pop", scroll: false });
 });
 
 // Intercept link clicks
