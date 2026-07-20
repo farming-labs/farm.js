@@ -45,6 +45,10 @@ import {
 } from "./layers";
 import path from "path";
 import { normalizeFarmDeploymentId } from "./deployment";
+import {
+  resolveFarmDevtoolsConfig,
+  type ResolvedFarmDevtoolsConfig,
+} from "./devtools-config";
 
 export type {
   FarmDocsConfigInput,
@@ -79,6 +83,11 @@ export type {
   ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
+export type {
+  FarmDevtoolsConfig,
+  FarmDevtoolsUserConfig,
+  ResolvedFarmDevtoolsConfig,
+} from "./devtools-config";
 
 export interface RedirectConfig {
   source: string;
@@ -256,6 +265,7 @@ export interface ResolvedFarmConfig extends Required<
     | "workflows"
     | "env"
     | "serverActions"
+    | "devtools"
   >
 > {
   extends: readonly FarmLayerEntry[];
@@ -271,6 +281,7 @@ export interface ResolvedFarmConfig extends Required<
   workflows: FarmWorkflowsResolvedConfig;
   env: ResolvedFarmEnv;
   serverActions: ResolvedFarmServerActionsConfig;
+  devtools: ResolvedFarmDevtoolsConfig;
 }
 
 export type FarmLayerConfig = Omit<
@@ -692,6 +703,7 @@ export async function resolveConfig(
     cron: resolveCronConfig(userConfig.cron),
     workflows: resolveWorkflowsConfig(userConfig.workflows),
     observability: userConfig.observability ?? false,
+    devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {

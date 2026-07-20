@@ -199,9 +199,15 @@ describe("farm devtools", () => {
     expect(html).toContain('data-detail-trigger="routes"');
     expect(html).toContain('class="app-preview"');
     expect(html).toContain("width: min(960px, 92vw)");
-    expect(html).toContain('role="dialog" aria-label="Farm.js DevTools"');
+    expect(html).toContain('role="dialog" aria-modal="true" aria-label="Farm.js DevTools"');
+    expect(html).toContain("data-close-devtools");
     expect(html).toContain("<code>/about</code>");
     expect(html).toContain("src/app/about/page.tsx");
     expect(html).toContain("No api routes found");
+
+    const embeddedHtml = renderFarmDevtoolsHtml(snapshot, { embedded: true });
+    expect(embeddedHtml).toContain('<html lang="en" class="devtools-embedded">');
+    expect(embeddedHtml).toContain("const embedded = true");
+    expect(embeddedHtml).toContain('type: "farm:devtools:close"');
   });
 });

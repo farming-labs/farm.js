@@ -96,6 +96,7 @@ export * from "./docs";
 export * from "./markdown";
 export * from "./app-markdown";
 export * from "./observability";
+export * from "./devtools-config";
 export * from "./workflows";
 export * from "./cron";
 export * from "./env";

@@ -741,7 +741,14 @@ function renderNavigationItem(
   </button>`;
 }
 
-export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
+export interface RenderFarmDevtoolsHtmlOptions {
+  embedded?: boolean;
+}
+
+export function renderFarmDevtoolsHtml(
+  snapshot: FarmDevtoolsSnapshot,
+  options: RenderFarmDevtoolsHtmlOptions = {},
+): string {
   const healthLabel =
     snapshot.health === "ready" ? "Ready" : snapshot.health === "error" ? "Error" : "Attention";
   const generatedTime = new Date(snapshot.generatedAt).toLocaleTimeString("en-US", {
@@ -752,7 +759,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
   });
 
   return `<!doctype html>
-<html lang="en">
+<html lang="en"${options.embedded ? ' class="devtools-embedded"' : ""}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1114,7 +1121,10 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
       flex: 0 0 auto;
       align-items: center;
       justify-content: center;
+      padding: 0;
+      border: 0;
       border-radius: 6px;
+      background: transparent;
       color: var(--muted);
       text-decoration: none;
       transition: background-color 120ms ease-out, color 120ms ease-out;
@@ -1293,6 +1303,8 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
     .layer-list > div { min-height: 44px; padding: 8px 12px; border-bottom-color: var(--line-soft); }
     .layer-list strong { font-size: 11px; font-weight: 500; }
     .statusbar { display: none; }
+    html.devtools-embedded, html.devtools-embedded body { background: transparent; }
+    html.devtools-embedded .app-preview, html.devtools-embedded .backdrop { display: none; }
     @keyframes devtools-window-in {
       from { opacity: 0; transform: scale(0.985) translateY(4px); }
       to { opacity: 1; transform: scale(1) translateY(0); }
@@ -1354,7 +1366,7 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
   </div>
   <div class="backdrop" aria-hidden="true"></div>
   <div class="stage">
-    <div class="shell" role="dialog" aria-label="Farm.js DevTools">
+    <div class="shell" role="dialog" aria-modal="true" aria-label="Farm.js DevTools">
       <header class="topbar">
         <nav class="tabbar" aria-label="Devtools views">
           ${renderNavigationItem("overview", "Overview")}
@@ -1369,9 +1381,9 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
             "chevron",
           )}</span>
           <span class="topbar-status"><span class="status-dot"></span><span class="status-label">1 instance</span></span>
-          <a class="close-action" href="/" aria-label="Close DevTools" title="Close DevTools">${icon(
+          <button class="close-action" type="button" data-close-devtools aria-label="Close DevTools" title="Close DevTools">${icon(
             "close",
-          )}</a>
+          )}</button>
         </div>
       </header>
       <div class="workspace">
@@ -1400,6 +1412,43 @@ export function renderFarmDevtoolsHtml(snapshot: FarmDevtoolsSnapshot): string {
   </div>
   <script>
     (() => {
+      const embedded = ${JSON.stringify(options.embedded === true)};
+      const closeDevtools = () => {
+        if (embedded && window.parent !== window) {
+          window.parent.postMessage({ type: "farm:devtools:close" }, location.origin);
+          return;
+        }
+        location.assign("/");
+      };
+      document.querySelector("[data-close-devtools]")?.addEventListener("click", closeDevtools);
+      document.addEventListener("pointerdown", (event) => {
+        if (embedded && !event.target.closest?.(".shell")) closeDevtools();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          closeDevtools();
+          return;
+        }
+        if (embedded && window.parent !== window) {
+          window.parent.postMessage(
+            {
+              type: "farm:devtools:keydown",
+              event: {
+                key: event.key,
+                code: event.code,
+                altKey: event.altKey,
+                ctrlKey: event.ctrlKey,
+                metaKey: event.metaKey,
+                shiftKey: event.shiftKey,
+                repeat: event.repeat,
+              },
+            },
+            location.origin,
+          );
+        }
+      });
+
       const validViews = new Set(["overview", "routes", "api", "systems", "runtime", "raw"]);
       const triggers = Array.from(document.querySelectorAll("[data-view-trigger]"));
       const panels = Array.from(document.querySelectorAll("[data-view-panel]"));

@@ -49,6 +49,8 @@ import {
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
 import { createFarmDevtoolsSnapshot } from "./devtools";
 import { renderFarmDevtoolsHtml } from "./devtools-ui";
+import { generateFarmDevtoolsClientRuntime } from "./devtools-client";
+import { resolveFarmDevtoolsConfig } from "./devtools-config";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -698,6 +700,14 @@ export function farmPlugin(
           requestMethod === "GET" &&
           (requestPathname === "/__farm/devtools" || requestPathname === "/__farm/devtools.json")
         ) {
+          if (!farmConfig.devtools.enabled) {
+            res.statusCode = 404;
+            res.setHeader("Content-Type", "text/plain; charset=utf-8");
+            res.setHeader("Cache-Control", "no-store");
+            res.end("Farm DevTools are disabled.");
+            return;
+          }
+
           const snapshot = await createFarmDevtoolsSnapshot({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
@@ -722,7 +732,9 @@ export function farmPlugin(
           res.end(
             requestPathname.endsWith(".json")
               ? JSON.stringify(snapshot, null, 2)
-              : renderFarmDevtoolsHtml(snapshot),
+              : renderFarmDevtoolsHtml(snapshot, {
+                  embedded: new URL(fullUrl).searchParams.get("embedded") === "1",
+                }),
           );
           return;
         }
@@ -1443,6 +1455,7 @@ export function farmPlugin(
           resolveFarmDocsSearchClientModule(
             resolvedConfig?.root || server?.config.root || process.cwd(),
           ),
+          resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production"),
         );
       }
 
@@ -2211,6 +2224,7 @@ function generateClientCode(
   documentNavigationMatchers: string[] = [],
   docsSearchEnabled = false,
   docsSearchModuleId?: string,
+  devtools = resolveFarmDevtoolsConfig(false, "production"),
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -2229,6 +2243,7 @@ import {
 } from '@farmjs/core/deployment'
 ${providerImportBlock}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
+${generateFarmDevtoolsClientRuntime(devtools)}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
 // Uses manifest-based chunk loading - NO HTML fetching!

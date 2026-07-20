@@ -14,6 +14,7 @@ import type { FarmRouteRules } from "./route-rules";
 import type { FarmServerActionsConfig } from "./server-action-security";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
+import type { FarmDevtoolsUserConfig } from "./devtools-config";
 
 export type NitroPreset =
   | "node-server"
@@ -119,6 +120,8 @@ export interface FarmConfig {
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
   observability?: FarmObservabilityUserConfig;
+  /** Development-only runtime inspector. Enabled by default during `farm dev`. */
+  devtools?: FarmDevtoolsUserConfig;
   /**
    * When true, Link href is not strictly typed (accepts any string).
    * Use when you want to skip route-type errors on Link or don't use generated route types.
