@@ -18,13 +18,13 @@ farm dev
 
 Press `Ctrl + Shift + .` on Windows or Linux, or `Command + Shift + .` on macOS. Farm opens DevTools over the current page, so the application stays visible behind the inspector. Press the shortcut again, press `Escape`, click outside the window, or use the close button to return to the app.
 
-You can also open the standalone dashboard directly:
+You can also use the DevTools launcher URL:
 
 ```txt
 http://localhost:3000/__farm/devtools
 ```
 
-If the app uses another port, keep the same path on that origin. The dashboard is mounted by the development server; it is not added to production output.
+If the app uses another port, keep the same path on that origin. The launcher returns to the application and opens the same modal instead of replacing the page. The inspector is mounted by the development server; it is not added to production output.
 
 ## Configure DevTools
 
