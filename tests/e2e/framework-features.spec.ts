@@ -11,16 +11,21 @@ test.describe("Framework feature integration", () => {
     const page = await request.get("/feature-lab");
     expect(page.status()).toBe(200);
     expect(page.headers()["x-farm-runtime-plugin"]).toBe("/feature-lab");
+    expect(page.headers()["x-farm-runtime-kind"]).toBe("page");
+    expect(page.headers()["x-farm-runtime-pattern"]).toBe("/feature-lab");
 
     const api = await request.get("/api/feature-lab/state");
     expect(api.status()).toBe(200);
     expect(api.headers()["x-farm-runtime-plugin"]).toBe("/api/feature-lab/state");
+    expect(api.headers()["x-farm-runtime-kind"]).toBe("api");
+    expect(api.headers()["x-farm-runtime-pattern"]).toBe("/api/feature-lab/state");
 
     const shortCircuit = await request.get("/feature-lab/runtime-short-circuit");
     expect(shortCircuit.status()).toBe(418);
     expect(shortCircuit.headers()["x-farm-runtime-plugin"]).toBe(
       "/feature-lab/runtime-short-circuit",
     );
+    expect(shortCircuit.headers()["x-farm-runtime-kind"]).toBe("page");
     expect(await shortCircuit.text()).toBe("Stopped by the Farm plugin runtime");
   });
 

@@ -37,9 +37,13 @@ const runtimeLifecyclePlugin = definePlugin({
       }
     },
 
-    after({ state, ctx, response }) {
+    after({ state, ctx, kind, route, response }) {
       const headers = new Headers(response.headers);
       headers.set(state.header, ctx.requestPath);
+      headers.set('x-farm-runtime-kind', kind);
+      if (route?.pattern) {
+        headers.set('x-farm-runtime-pattern', route.pattern);
+      }
 
       return new Response(response.body, {
         status: response.status,
