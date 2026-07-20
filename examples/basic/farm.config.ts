@@ -52,6 +52,15 @@ const runtimeLifecyclePlugin = definePlugin({
       });
     },
   },
+
+  render: {
+    html(html, render) {
+      return html.replace(
+        '</body>',
+        `<!-- farm-plugin-render:${render.routePattern || render.pathname} --></body>`,
+      );
+    },
+  },
 });
 
 export default defineConfig({

@@ -13,12 +13,15 @@ test.describe("Framework feature integration", () => {
     expect(page.headers()["x-farm-runtime-plugin"]).toBe("/feature-lab");
     expect(page.headers()["x-farm-runtime-kind"]).toBe("page");
     expect(page.headers()["x-farm-runtime-pattern"]).toBe("/feature-lab");
+    expect(page.headers()["x-farm-layer-plugin"]).toBe("framework-features");
+    expect(await page.text()).toContain("<!-- farm-plugin-render:/feature-lab -->");
 
     const api = await request.get("/api/feature-lab/state");
     expect(api.status()).toBe(200);
     expect(api.headers()["x-farm-runtime-plugin"]).toBe("/api/feature-lab/state");
     expect(api.headers()["x-farm-runtime-kind"]).toBe("api");
     expect(api.headers()["x-farm-runtime-pattern"]).toBe("/api/feature-lab/state");
+    expect(api.headers()["x-farm-layer-plugin"]).toBe("framework-features");
 
     const shortCircuit = await request.get("/feature-lab/runtime-short-circuit");
     expect(shortCircuit.status()).toBe(418);
