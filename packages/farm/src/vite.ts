@@ -47,7 +47,8 @@ import {
   type FarmDiscoveredWorkflow,
 } from "./workflows";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
-import { createFarmDevtoolsSnapshot, renderFarmDevtoolsHtml } from "./devtools";
+import { createFarmDevtoolsSnapshot } from "./devtools";
+import { renderFarmDevtoolsHtml } from "./devtools-ui";
 import * as fs from "fs";
 import * as path from "path";
 import type { FarmUserConfig } from "./config";
@@ -697,14 +698,17 @@ export function farmPlugin(
           requestMethod === "GET" &&
           (requestPathname === "/__farm/devtools" || requestPathname === "/__farm/devtools.json")
         ) {
-          const snapshot = createFarmDevtoolsSnapshot({
+          const snapshot = await createFarmDevtoolsSnapshot({
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             routeManager: farmApp.getRouteManager(),
             apiRouteManager,
             middlewareManager,
-            integrations: currentConfig.integrations,
-            docs: farmConfig.docs,
+            config: {
+              ...currentConfig,
+              openapi: options.openapi,
+            },
+            workflows: discoveredWorkflows,
           });
 
           res.statusCode = 200;
