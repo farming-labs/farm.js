@@ -289,7 +289,7 @@ export interface FarmPlugin<
 
   /** Transform Farm config before it is resolved. */
   configure?: (config: FarmConfig, context: FarmPluginContext) => MaybePromise<FarmConfig | void>;
-  /** Initialize private plugin state once for this Farm process. */
+  /** Initialize private plugin state once for this plugin manager. */
   setup?: (context: FarmPluginSetupContext) => MaybePromise<TState>;
 
   runtime?: FarmPluginRuntimeHooks<TState, TRequestContext>;
@@ -311,56 +311,72 @@ export interface FarmPlugin<
   /** @deprecated Use `configure` instead. */
   config?: (config: FarmConfig, context: FarmPluginContext) => FarmConfig | Promise<FarmConfig>;
   configResolved?: (config: FarmConfig, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.before` instead. */
   buildStart?: (context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.after` instead. */
   buildEnd?: (context: FarmPluginContext) => void | Promise<void>;
 
+  /** @deprecated Use `router.discovered` instead. */
   routeDiscovered?: (
     route: RouteDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.generated` instead. */
   routesGenerated?: (
     routes: RoutesGeneratedPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.discovered` instead. */
   middlewareDiscovered?: (
     middleware: MiddlewareDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.discovered` instead. */
   apiRouteDiscovered?: (
     route: APIRouteDiscoveredPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `router.before` instead. */
   beforeRouteMatch?: (route: RouteMatchPayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `router.after` instead. */
   afterRouteMatch?: (
     result: RouteMatchResultPayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `render.before` instead. */
   beforeRender?: (
     render: RenderLifecyclePayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `render.html` instead. */
   afterRender?: (
     html: string,
     render: RenderLifecyclePayload,
     context: FarmPluginContext,
   ) => string | Promise<string> | void | Promise<void>;
+  /** @deprecated Use `runtime.before` instead. */
   beforeApiHandler?: (
     request: Request,
     api: APIHandlerLifecyclePayload,
     context: FarmRequestPluginContext,
   ) => Request | Promise<Request> | void | Promise<void>;
+  /** @deprecated Use `runtime.after` instead. */
   afterApiHandler?: (
     response: Response,
     api: APIHandlerLifecyclePayload,
     context: FarmPluginContext,
   ) => Response | Promise<Response> | void | Promise<void>;
   onError?: (error: ErrorLifecyclePayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `dev.update` instead. */
   hmrUpdate?: (update: HMRUpdatePayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.before` instead. */
   beforeBundle?: (
     bundle: BundleLifecyclePayload,
     context: FarmPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use `build.after` instead. */
   afterBundle?: (result: BundleResultPayload, context: FarmPluginContext) => void | Promise<void>;
+  /** @deprecated Use `build.configure` instead. */
   beforeNitroBuild?: (nitroConfig: any, context: FarmPluginContext) => any | Promise<any>;
   afterNitroBuild?: (
     payload: NitroBuildLifecyclePayload,
@@ -369,11 +385,13 @@ export interface FarmPlugin<
   /** @deprecated Use `runtime.close` instead. */
   shutdown?: (payload: ShutdownPayload, context: FarmPluginContext) => void | Promise<void>;
 
+  /** @deprecated Use the Web Request based `runtime.before` hook instead. */
   beforeRequest?: (
     req: FarmRequest,
     res: FarmResponse,
     context: FarmRequestPluginContext,
   ) => void | Promise<void>;
+  /** @deprecated Use the Web Response based `runtime.after` hook instead. */
   afterResponse?: (
     req: FarmRequest,
     res: FarmResponse,
@@ -381,7 +399,9 @@ export interface FarmPlugin<
   ) => void | Promise<void>;
 
   // Transform hooks
+  /** @deprecated Use `render.html` instead. */
   transformHTML?: (html: string, context: FarmPluginContext) => string | Promise<string>;
+  /** @deprecated Use `render.before` or `render.html` instead. */
   transformPage?: (component: any, context: FarmPluginContext) => any | Promise<any>;
 }
 
