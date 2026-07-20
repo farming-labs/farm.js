@@ -3,7 +3,11 @@ import { resolveDeployOutputPath } from "../config";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
-import type { PluginManager } from "../plugin";
+import type { FarmPlugin, PluginManager } from "../plugin";
+import {
+  generateFarmClientPluginEntryCode,
+  type FarmClientPluginEntryCode,
+} from "../client-plugin-build";
 import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import os from "os";
@@ -496,6 +500,7 @@ async function buildClient(
     srcDir,
     isFarmDocsSearchEnabled(config.docs),
     resolveFarmDocsSearchClientModule(root),
+    config.plugins,
   );
 
   // Write the client entry to a temporary file
@@ -692,9 +697,14 @@ function generateClientHydrationEntry(
   root: string,
   srcDir: string,
   docsSearchEnabled: boolean,
-  docsSearchModuleId?: string,
+  docsSearchModuleId: string | undefined,
+  plugins: readonly FarmPlugin[] = [],
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
+  const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
+    plugins,
+    root,
+  );
 
   // Always import global CSS for Tailwind
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
@@ -724,6 +734,8 @@ ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { installChunkErrorRecovery } from "@farmjs/core/client";
+import { createClientPluginManager } from "@farmjs/core/plugin/client";
+${clientPluginEntry.imports}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 installChunkErrorRecovery();
@@ -733,23 +745,40 @@ mountFarmDocsSearch();
 const spaRouter = {
   prefetchCache: new Map(),
   
-  navigate: async function(href) {
+  navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) {
       window.location.href = href;
       return;
     }
 
+    const action = options.action || "push";
+    let clientNavigation;
     try {
+      clientNavigation = await farmClientRuntime.beginNavigation({
+        from: action === "pop" ? null : window.location.href,
+        to: url,
+        action,
+      });
       const html = await this.fetchPage(url.pathname + url.search);
+      await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
       if (!this.swapContent(html)) {
-        window.location.href = href;
-        return;
+        throw new Error("Farm could not swap the target document");
       }
-      window.history.pushState({}, "", href);
+      if (action === "replace") {
+        window.history.replaceState({}, "", href);
+      } else if (action !== "pop") {
+        window.history.pushState({}, "", href);
+      }
+      await farmClientRuntime.resolveNavigation(clientNavigation);
+      void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
     } catch (error) {
+      if (clientNavigation) {
+        await farmClientRuntime.failNavigation(clientNavigation, error);
+      }
       console.error("[Farm.js] Navigation error:", error);
-      window.location.href = href;
+      if (action === "pop") window.location.reload();
+      else window.location.href = href;
     }
   },
   
@@ -854,15 +883,25 @@ const spaRouter = {
   unobserveForPrefetch: function() {}
 };
 
+const farmClientRuntime = createClientPluginManager(
+  ${clientPluginEntry.registrations},
+  {
+    router: spaRouter,
+    isDev: false,
+    isProd: true,
+    deploymentId: window.__FARM_DEPLOYMENT_ID__,
+  },
+);
+window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
+void farmClientRuntime.start();
+
 // Expose router globally
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  spaRouter.fetchPage(window.location.pathname + window.location.search)
-    .then(function(html) { if (!spaRouter.swapContent(html)) window.location.reload(); })
-    .catch(function() { window.location.reload(); });
+  void spaRouter.navigate(window.location.href, { action: "pop" });
 });
 
 // Intercept link clicks
@@ -905,6 +944,8 @@ ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
 import { installChunkErrorRecovery } from "@farmjs/core/client";
+import { createClientPluginManager } from "@farmjs/core/plugin/client";
+${clientPluginEntry.imports}
 
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
@@ -1004,7 +1045,7 @@ function resetReactRoot() {
 }
 
 // Hydrate client components
-function hydrate() {
+async function hydrate() {
   const pathname = window.location.pathname;
   const matched = matchRoute(pathname);
   
@@ -1027,9 +1068,15 @@ function hydrate() {
   // Create page element and wrap with layouts
   const pageElement = React.createElement(Component, props);
   const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
-  
+
+  const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
+  const hydrationSession = await farmClientRuntime.beginHydration({
+    container,
+    mode: shouldHydrate ? "hydrate" : "render",
+  });
+
   try {
-    if (!isHydrated && container.innerHTML.trim()) {
+    if (shouldHydrate) {
       reactRoot = hydrateRoot(container, wrappedElement);
       isHydrated = true;
     } else {
@@ -1039,7 +1086,9 @@ function hydrate() {
       reactRoot.render(wrappedElement);
     }
     currentPathname = pathname;
+    await farmClientRuntime.completeHydration(hydrationSession);
   } catch (error) {
+    await farmClientRuntime.failHydration(hydrationSession, error);
     console.error("[Farm.js] Hydration error:", error);
   }
 }
@@ -1048,7 +1097,7 @@ function hydrate() {
 const spaRouter = {
   prefetchCache: new Map(),
   
-  navigate: async function(href) {
+  navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) {
       window.location.href = href;
@@ -1057,42 +1106,69 @@ const spaRouter = {
     
     const pathname = url.pathname;
     const matched = matchRoute(pathname);
-    
-    if (matched) {
-      // Client component - render with layout wrapper
-      window.history.pushState({}, "", href);
-      const Component = matched.route.Component;
-      const params = matched.params;
-      const searchParams = Object.fromEntries(url.searchParams);
-      const props = { params: params, searchParams: Promise.resolve(searchParams) };
-      
-      // Create page element and wrap with layouts
-      const pageElement = React.createElement(Component, props);
-      const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
-      
-      const container = document.getElementById("root");
-      if (container) {
-        if (!reactRoot) {
-          reactRoot = createRoot(container);
+    const action = options.action || "push";
+    let clientNavigation;
+
+    try {
+      clientNavigation = await farmClientRuntime.beginNavigation({
+        from: action === "pop" ? null : window.location.href,
+        to: url,
+        action,
+        route: matched
+          ? { pattern: matched.route.pattern, params: matched.params }
+          : undefined,
+      });
+
+      if (matched) {
+        const Component = matched.route.Component;
+        const params = matched.params;
+        const searchParams = Object.fromEntries(url.searchParams);
+        const props = { params: params, searchParams: Promise.resolve(searchParams) };
+        const pageElement = React.createElement(Component, props);
+        const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
+
+        await farmClientRuntime.markNavigationLoaded(clientNavigation, {
+          route: matched.route.pattern,
+          params,
+        });
+
+        if (action === "replace") {
+          window.history.replaceState({}, "", href);
+        } else if (action !== "pop") {
+          window.history.pushState({}, "", href);
         }
-        reactRoot.render(wrappedElement);
+
+        const container = document.getElementById("root");
+        if (container) {
+          if (!reactRoot) {
+            reactRoot = createRoot(container);
+          }
+          reactRoot.render(wrappedElement);
+          currentPathname = pathname;
+        }
+      } else {
+        const html = await this.fetchPage(url.pathname + url.search);
+        await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
+        if (!this.swapContent(html, url.pathname + url.search)) {
+          throw new Error("Farm could not swap the target document");
+        }
+        if (action === "replace") {
+          window.history.replaceState({}, "", href);
+        } else if (action !== "pop") {
+          window.history.pushState({}, "", href);
+        }
         currentPathname = pathname;
       }
-      return;
-    }
-    
-    // Server component - fetch HTML
-    try {
-      const html = await this.fetchPage(url.pathname + url.search);
-      if (!this.swapContent(html, url.pathname + url.search)) {
-        window.location.href = href;
-        return;
-      }
-      window.history.pushState({}, "", href);
-      currentPathname = pathname;
+
+      await farmClientRuntime.resolveNavigation(clientNavigation);
+      void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
     } catch (error) {
+      if (clientNavigation) {
+        await farmClientRuntime.failNavigation(clientNavigation, error);
+      }
       console.error("[Farm.js] Navigation error:", error);
-      window.location.href = href;
+      if (action === "pop") window.location.reload();
+      else window.location.href = href;
     }
   },
   
@@ -1219,36 +1295,25 @@ const spaRouter = {
   unobserveForPrefetch: function() {}
 };
 
+const farmClientRuntime = createClientPluginManager(
+  ${clientPluginEntry.registrations},
+  {
+    router: spaRouter,
+    isDev: false,
+    isProd: true,
+    deploymentId: window.__FARM_DEPLOYMENT_ID__,
+  },
+);
+window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
+void farmClientRuntime.start();
+
 // Expose router globally
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
 // Handle popstate (back/forward)
 window.addEventListener("popstate", function() {
   if (document.documentElement.dataset.farmDocsRuntime === "true") return;
-  const pathname = window.location.pathname;
-  const matched = matchRoute(pathname);
-  
-  if (matched) {
-    const Component = matched.route.Component;
-    const params = matched.params;
-    const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
-    const props = { params: params, searchParams: Promise.resolve(searchParams) };
-    const pageElement = React.createElement(Component, props);
-    const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
-    
-    const container = document.getElementById("root");
-    if (container) {
-      if (!reactRoot) {
-        reactRoot = createRoot(container);
-      }
-      reactRoot.render(wrappedElement);
-      currentPathname = pathname;
-    }
-  } else {
-    spaRouter.fetchPage(pathname + window.location.search)
-      .then(function(html) { if (!spaRouter.swapContent(html, pathname + window.location.search)) window.location.reload(); })
-      .catch(function() { window.location.reload(); });
-  }
+  void spaRouter.navigate(window.location.href, { action: "pop" });
 });
 
 // Intercept link clicks
@@ -1275,7 +1340,7 @@ document.addEventListener("click", function(e) {
 if (isFarmDocsSearchPage()) {
   mountFarmDocsSearch();
 } else {
-  hydrate();
+  void hydrate();
 }
 `.trim();
 }

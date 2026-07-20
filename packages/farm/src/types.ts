@@ -16,6 +16,7 @@ import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
 import type { FarmDevtoolsUserConfig } from "./devtools-config";
 import type { FarmImageConfig } from "./image-config";
+import type { FarmPlugin } from "./plugin";
 
 export type NitroPreset =
   | "node-server"
@@ -106,6 +107,7 @@ export interface FarmConfig {
   };
   storage?: FarmStorageUserConfig;
   integrations?: FarmIntegrationsUserConfig;
+  plugins?: FarmPlugin[];
   migrations?: FarmMigrationsUserConfig;
   /** Map portable cron schedules to ordinary GET API routes. */
   cron?: FarmCronUserConfig | FarmCronResolvedConfig | false;

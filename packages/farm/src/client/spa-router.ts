@@ -6,6 +6,10 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
+import type {
+  FarmClientNavigationSession,
+  FarmClientPluginManager,
+} from "./plugin";
 
 /**
  * Farm.js SPA Router
@@ -106,6 +110,14 @@ export class SPARouter {
   private options: Required<Omit<RouterOptions, "deploymentId">> &
     Pick<RouterOptions, "deploymentId">;
   private onNavigate?: (data: PageData) => Promise<void>;
+  private clientPlugins?: Pick<
+    FarmClientPluginManager,
+    | "beginNavigation"
+    | "markNavigationLoaded"
+    | "resolveNavigation"
+    | "scheduleNavigationRendered"
+    | "failNavigation"
+  >;
 
   constructor(options: RouterOptions = {}) {
     this.options = {
@@ -136,6 +148,13 @@ export class SPARouter {
    */
   setNavigationHandler(handler: (data: PageData) => Promise<void>) {
     this.onNavigate = handler;
+  }
+
+  /**
+   * Connect Farm's browser plugin lifecycle to SPA navigation.
+   */
+  setClientPluginManager(manager: FarmClientPluginManager) {
+    this.clientPlugins = manager;
   }
 
   /**
@@ -182,9 +201,19 @@ export class SPARouter {
       action: replace ? "replace" : "push",
     });
 
+    let clientNavigation: FarmClientNavigationSession | undefined;
     try {
+      clientNavigation = await this.clientPlugins?.beginNavigation({
+        from,
+        to: url,
+        action: replace ? "replace" : "push",
+      });
+
       // Fetch page data (from cache or server)
       const pageData = await this.fetchPageData(fullPath);
+      if (clientNavigation) {
+        await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
+      }
 
       if (pageData.isClientComponent === false) {
         this.finishNavigation();
@@ -204,8 +233,15 @@ export class SPARouter {
         }),
       );
 
+      if (clientNavigation) {
+        await this.clientPlugins?.resolveNavigation(clientNavigation);
+        void this.clientPlugins?.scheduleNavigationRendered(clientNavigation);
+      }
       this.finishNavigation();
     } catch (error) {
+      if (clientNavigation) {
+        await this.clientPlugins?.failNavigation(clientNavigation, error);
+      }
       this.finishNavigation();
       console.error("[Farm.js] Navigation error:", error);
       // Fall back to full page navigation
@@ -455,8 +491,17 @@ export class SPARouter {
       action: "pop",
     });
 
+    let clientNavigation: FarmClientNavigationSession | undefined;
     try {
+      clientNavigation = await this.clientPlugins?.beginNavigation({
+        from: null,
+        to: window.location.href,
+        action: "pop",
+      });
       const pageData = await this.fetchPageData(path);
+      if (clientNavigation) {
+        await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
+      }
 
       // Update document title
       if (pageData.metadata?.title) {
@@ -473,8 +518,15 @@ export class SPARouter {
         this.restoreScrollPosition(window.location.pathname);
       }
 
+      if (clientNavigation) {
+        await this.clientPlugins?.resolveNavigation(clientNavigation);
+        void this.clientPlugins?.scheduleNavigationRendered(clientNavigation);
+      }
       this.finishNavigation();
     } catch (error) {
+      if (clientNavigation) {
+        await this.clientPlugins?.failNavigation(clientNavigation, error);
+      }
       this.finishNavigation();
       console.error("[Farm.js] Popstate navigation error:", error);
       // Reload the page as fallback
