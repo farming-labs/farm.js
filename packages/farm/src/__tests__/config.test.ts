@@ -243,6 +243,39 @@ describe("resolveConfig", () => {
     });
   });
 
+  it("resolves image pipeline config", async () => {
+    const config = await resolveConfig(
+      {
+        images: {
+          provider: "node",
+          path: "/media/image",
+          qualities: [60, 80],
+          remotePatterns: [
+            {
+              protocol: "https",
+              hostname: "images.example.com",
+              pathname: "/catalog/**",
+            },
+          ],
+        },
+      },
+      "production",
+    );
+
+    expect(config.images).toMatchObject({
+      provider: "node",
+      path: "/media/image",
+      qualities: [60, 80],
+      remotePatterns: [
+        {
+          protocol: "https",
+          hostname: "images.example.com",
+          pathname: "/catalog/**",
+        },
+      ],
+    });
+  });
+
   it("resolves MDX app page config", async () => {
     const config = await resolveConfig(
       {

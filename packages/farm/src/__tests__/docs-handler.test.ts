@@ -214,6 +214,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-docs-search-trigger"');
     expect(html).toContain('data-search-full=""');
     expect(html).toContain('aria-keyshortcuts="Meta+K Control+K"');
+    expect(html).not.toContain("fd-docs-search-trigger-label");
     expect(html).toContain("<kbd><span>⌘</span><span>K</span></kbd>");
     expect(html).toContain('id="farm-docs-search-root"');
     expect(html).toContain("data-farm-docs-search-root");
@@ -233,14 +234,24 @@ describe("createFarmDocsHandler", () => {
       htmlText.indexOf("</header>", htmlText.indexOf('<header class="mobile-topbar"')),
     );
     expect(topbar).toContain('data-search-full=""');
+    expect(topbar).not.toContain("<svg");
+    expect(mobileTopbar).toContain("<svg");
     expect(topbar.indexOf('data-search-full=""')).toBeLessThan(topbar.indexOf('href="/llms.txt"'));
     expect(mobileTopbar.indexOf('data-search-full=""')).toBeLessThan(
       mobileTopbar.indexOf('href="/llms.txt"'),
     );
     expect(sidebarBrand).not.toContain('data-search-full=""');
-    expect(html).toContain("--fd-nav-height: 38px");
-    expect(html).toContain("--omni-content-top: calc(var(--fd-mobile-nav-height, 56px) + 12px)");
-    expect(html).toContain("max-height: calc(100dvh - var(--omni-content-top) - 12px)");
+    expect(html).toContain("--fd-nav-height: 44px");
+    expect(html).toContain(
+      "var(--fd-mobile-nav-height, 56px) + max(10px, env(safe-area-inset-top))",
+    );
+    expect(html).toContain("max(10px, env(safe-area-inset-bottom))");
+    expect(html).toContain("width: 56px");
+    expect(html).toContain("font-family: var(--fd-docs-font-mono)");
+    expect(html).toContain("width: min(680px, calc(100vw - 32px))");
+    expect(html).toContain("width: calc(100vw - 20px)");
+    expect(html).toContain(".omni-footer-hints {");
+    expect(html).toContain("font-size: 16px");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
@@ -513,6 +524,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       "#nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72;",
     );
+    expect(html).toContain("@media (max-width: 640px)");
+    expect(html).toContain(".code-block-header { min-height: 22px;");
+    expect(html).toContain("padding: 10px !important; font-size: 11px;");
     expect(html).toContain("text-transform: lowercase");
     expect(html).toContain('.code-copy[data-copied="true"] .code-copy-check { display: block; }');
     expect(html).not.toContain('<span class="code-block-title">bash</span>');

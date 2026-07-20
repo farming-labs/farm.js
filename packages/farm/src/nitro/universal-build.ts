@@ -100,7 +100,32 @@ const NITRO_EXTERNAL_MODULES = new Set([
   "vite",
   "nitro",
   "nitropack",
+  "sharp",
 ]);
+
+function isCloudflareImagePreset(preset: string): boolean {
+  return (
+    preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module"
+  );
+}
+
+function resolveImageRuntime(
+  config: ResolvedFarmConfig,
+  preset: string,
+): "none" | "node" | "cloudflare" {
+  if (config.images.provider === "none") return "none";
+  const cloudflarePreset = isCloudflareImagePreset(preset);
+  if (config.images.provider === "node" && cloudflarePreset) {
+    throw new Error('images.provider "node" cannot run in a Cloudflare deployment');
+  }
+  if (config.images.provider === "cloudflare" && !cloudflarePreset) {
+    throw new Error('images.provider "cloudflare" requires a Cloudflare deployment preset');
+  }
+  return config.images.provider === "cloudflare" ||
+    (config.images.provider === "auto" && cloudflarePreset)
+    ? "cloudflare"
+    : "node";
+}
 
 function isNitroRollupExternal(id: string): boolean {
   const normalizedId = id.replace(/\\/g, "/");
@@ -361,6 +386,7 @@ export async function buildUniversal(
     ]);
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile } = ssrResult;
+    await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
 
     // Step 3: Build with Nitro using virtual bundle
     logger.info(`🚀 Building server with Nitro (preset: ${preset})...`);
@@ -400,6 +426,16 @@ export async function buildUniversal(
     }
     logger.error(`❌ Build failed: ${error}`);
     throw error;
+  }
+}
+
+async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): Promise<void> {
+  const fs = await import("fs/promises");
+  for (const [fileName, output] of Object.entries(bundle)) {
+    if (output.type !== "asset") continue;
+    const filePath = path.join(outputDir, fileName);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, output.source);
   }
 }
 
@@ -499,6 +535,7 @@ async function buildClient(
       build: {
         outDir: outputDir,
         emptyOutDir: true,
+        assetsInlineLimit: 0,
         cssCodeSplit: false, // Bundle all CSS into one file
         rollupOptions: {
           input: {
@@ -1432,6 +1469,7 @@ async function buildSSRInMemory(
     notFoundPath,
     config,
     configModulePath,
+    preset,
   );
 
   // Find a temporary file path for the virtual entry
@@ -1445,6 +1483,8 @@ async function buildSSRInMemory(
         target: "esnext",
         ssr: true,
         write: false, // ⭐ Keep in memory
+        ssrEmitAssets: true,
+        assetsInlineLimit: 0,
         minify: false, // Skip minification for SSR (faster build, Nitro will minify)
         sourcemap: false, // Skip sourcemaps for faster SSR build
         rollupOptions: {
@@ -1452,6 +1492,7 @@ async function buildSSRInMemory(
           // Externalize native modules and Node.js built-ins
           external: [
             "fsevents",
+            "sharp",
             "@prisma/client",
             "@prisma/client/default",
             "@prisma/client/default.js",
@@ -1479,6 +1520,7 @@ async function buildSSRInMemory(
         // These have native binaries that won't work in serverless environments
         external: [
           "fsevents",
+          "sharp",
           "esbuild",
           "lightningcss",
           "rollup",
@@ -1504,6 +1546,7 @@ async function buildSSRInMemory(
         // Keep this list minimal for faster builds
         noExternal: [
           "@farmjs/core",
+          "@farmjs/core/image",
           "better-call",
           ...(preset === "cloudflare-module" ? [] : ["react", "react-dom", "react-dom/server"]),
         ],
@@ -1590,6 +1633,7 @@ function generateVirtualEntryCode(
   notFoundPath: string | null,
   config: ResolvedFarmConfig,
   configModulePath: string | null,
+  preset: string,
 ): string {
   // Generate imports for all API routes
   const apiImports: string[] = [];
@@ -1727,6 +1771,15 @@ import * as FarmUserConfigModule from "${configModulePath}";
 import { dispatchIntegrationRequest, matchIntegrationRoute } from "farm";
 `
     : "";
+  const imageRuntime = resolveImageRuntime(config, preset);
+  const imageRuntimeImport =
+    imageRuntime === "none"
+      ? ""
+      : `import { createCloudflareImageTransformer, createFarmImageHandler } from "farm/image-server";`;
+  const imageNodeRuntimeImport =
+    imageRuntime === "node"
+      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "farm/image-sharp";`
+      : "";
   const apiHandlerCode =
     apiRoutes.length > 0
       ? `
@@ -1790,6 +1843,8 @@ ${markdownHandlerImport}
 ${appMarkdownImport}
 ${mdxComponentsImport}
 ${integrationImports}
+${imageRuntimeImport}
+${imageNodeRuntimeImport}
 
 // Custom 404 page component (if provided)
 const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
@@ -1799,6 +1854,20 @@ const farmUserConfig = ${
   };
 const configuredIntegrations = farmUserConfig?.integrations || {};
 const integrationRuntimeConfig = farmUserConfig || {};
+const farmImageHandler = ${
+    imageRuntime === "none"
+      ? "null"
+      : imageRuntime === "cloudflare"
+        ? `createFarmImageHandler(${JSON.stringify(config.images)}, {
+  transform: createCloudflareImageTransformer(),
+  onError(error) { console.error("[Farm Image]", error); },
+})`
+        : `createFarmImageHandler(${JSON.stringify(config.images)}, {
+  transform: createSharpImageTransformer(),
+  validateRemoteUrl: createNodeImageUrlValidator(${JSON.stringify(config.images)}),
+  onError(error) { console.error("[Farm Image]", error); },
+})`
+  };
 const farmMarkdownConfig = ${JSON.stringify(config.md)};
 const farmMdxConfig = ${JSON.stringify({
     ...config.mdx,
@@ -2260,6 +2329,13 @@ async function handleFarmRequest(request) {
   let url = new URL(request.url);
   let pathname = url.pathname;
   const requestStartTime = Date.now();
+
+  if (farmImageHandler) {
+    const imageResponse = await farmImageHandler(request);
+    if (imageResponse) {
+      return imageResponse;
+    }
+  }
 
   const integrationResponse = await handleIntegrationRequest(request.clone());
   if (integrationResponse) {
@@ -2952,6 +3028,7 @@ export default defineEventHandler((event) => handler.fetch(event.req, {
         ".prisma/client",
         ".prisma/client/default",
         "better-sqlite3",
+        "sharp",
       ],
     },
     rollupConfig: {
@@ -2971,6 +3048,10 @@ export default defineEventHandler((event) => handler.fetch(event.req, {
   await nitro.copyPublicAssets(nitroInstance);
   await nitro.build(nitroInstance);
   await nitroInstance.close();
+
+  if (resolveImageRuntime(config, preset) === "node") {
+    await copySharpRuntime(config, root, path.join(outputDir, "server"), fs);
+  }
 
   if (pluginManager) {
     await pluginManager.runHookParallel("afterNitroBuild", {
@@ -3104,6 +3185,76 @@ async function copyFarmDocsContentForVercel(
   );
 
   logger.info(`📚 Bundled docs content for Vercel: ${path.relative(root, docsContentDir)}`);
+}
+
+async function copySharpRuntime(
+  config: ResolvedFarmConfig,
+  root: string,
+  nitroFuncDir: string,
+  fs: typeof import("fs/promises"),
+) {
+  if (config.images.provider === "none") return;
+
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  const copiedPackages = new Map<string, string>();
+  const targetNodeModules = path.join(nitroFuncDir, "node_modules");
+
+  async function copyPackage(
+    packageName: string,
+    parentRequire: NodeJS.Require,
+  ): Promise<void> {
+    if (copiedPackages.has(packageName)) return;
+
+    const packageJsonPath = resolvePackageJson(parentRequire, packageName);
+    if (!packageJsonPath) return;
+    const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+    const packageDir = path.dirname(packageJsonPath);
+    const targetDir = path.join(targetNodeModules, ...packageName.split("/"));
+    copiedPackages.set(packageName, String(packageJson.version || "*"));
+
+    await fs.mkdir(path.dirname(targetDir), { recursive: true });
+    await fs.cp(packageDir, targetDir, {
+      recursive: true,
+      force: true,
+      dereference: true,
+    });
+
+    const packageRequire = createRequire(packageJsonPath);
+    const dependencies = {
+      ...(packageJson.dependencies || {}),
+      ...(packageJson.optionalDependencies || {}),
+    };
+    for (const dependency of Object.keys(dependencies)) {
+      await copyPackage(dependency, packageRequire);
+    }
+  }
+
+  await copyPackage("sharp", projectRequire);
+  if (!copiedPackages.has("sharp")) {
+    throw new Error(
+      "Farm image optimization requires sharp. Reinstall dependencies without omitting optional packages.",
+    );
+  }
+
+  const functionPackagePath = path.join(nitroFuncDir, "package.json");
+  const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
+  functionPackage.dependencies = {
+    ...functionPackage.dependencies,
+    ...Object.fromEntries(copiedPackages),
+  };
+  await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
+  logger.info(`🖼️  Bundled Sharp image runtime (${copiedPackages.size} packages)`);
+}
+
+function resolvePackageJson(parentRequire: NodeJS.Require, packageName: string): string | null {
+  for (const request of [`${packageName}/package.json`, `${packageName}/package`]) {
+    try {
+      return parentRequire.resolve(request);
+    } catch {
+      // Try the next package metadata export.
+    }
+  }
+  return null;
 }
 
 async function copyPrismaClientForVercel(

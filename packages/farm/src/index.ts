@@ -103,12 +103,22 @@ export * from "./env";
 export * from "./env-types";
 export * from "./environment";
 export * from "./type-artifacts";
+export { createFarmImageTypeDeclarations, generateFarmImageTypes } from "./image-types";
+export type { GenerateFarmImageTypesOptions } from "./image-types";
 export * from "./server-fn";
 export * from "./server-fn-client";
 export * from "./server-query";
 export * from "./server-query-client";
 export * from "./server-action-security";
 export * from "./deployment";
+export type {
+  FarmImageConfig,
+  FarmImageFormat,
+  FarmImageLocalPattern,
+  FarmImageProvider,
+  FarmImageRemotePattern,
+  ResolvedFarmImageConfig,
+} from "./image-config";
 export { generateRouteTypes } from "./routing/generate-route-types";
 export type { GenerateRouteTypesOptions } from "./routing/generate-route-types";
 export * from "./build/index";
