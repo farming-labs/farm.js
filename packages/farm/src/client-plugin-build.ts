@@ -1,18 +1,12 @@
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import type {
-  FarmPlugin,
-  FarmPluginClientConfig,
-  FarmPluginClientReference,
-  FarmPluginClientSource,
-} from "./plugin";
+import type { FarmClientPlugin } from "./client/plugin";
+import type { FarmPlugin, FarmPluginClientConfig } from "./plugin";
 
 export interface ResolvedFarmClientPlugin {
   name: string;
   version?: string;
   enforce?: "pre" | "post";
-  source: string;
-  publicOptions?: unknown;
+  definition: FarmClientPlugin;
+  publicData?: unknown;
 }
 
 export interface FarmClientPluginEntryCode {
@@ -21,24 +15,36 @@ export interface FarmClientPluginEntryCode {
   plugins: ResolvedFarmClientPlugin[];
 }
 
+const CLIENT_KEYS = [
+  "public",
+  "setup",
+  "hydration",
+  "navigation",
+  "error",
+  "performance",
+  "close",
+] as const;
+const HYDRATION_KEYS = ["before", "after"] as const;
+const NAVIGATION_KEYS = ["before", "loaded", "resolved", "rendered", "error"] as const;
+
 export function resolveFarmClientPlugins(
   plugins: readonly FarmPlugin[] | undefined,
-  root: string,
+  _root?: string,
 ): ResolvedFarmClientPlugin[] {
   if (!plugins?.length) return [];
 
   return plugins.flatMap((plugin) => {
     if (!plugin.client) return [];
-    const reference = normalizeClientReference(plugin.client);
-    assertPublicOptions(reference.publicOptions, plugin.name);
+    assertClientLifecycle(plugin.client, plugin.name);
+    assertPublicData(plugin.client.public, plugin.name);
 
     return [
       {
         name: plugin.name,
         version: plugin.version,
         enforce: plugin.enforce,
-        source: resolveClientSource(reference.source, root, plugin.name),
-        publicOptions: reference.publicOptions,
+        definition: plugin.client,
+        publicData: plugin.client.public,
       },
     ];
   });
@@ -46,88 +52,161 @@ export function resolveFarmClientPlugins(
 
 export function generateFarmClientPluginEntryCode(
   plugins: readonly FarmPlugin[] | undefined,
-  root: string,
+  root?: string,
 ): FarmClientPluginEntryCode {
   const resolved = resolveFarmClientPlugins(plugins, root);
-  const imports = resolved
-    .map(
-      (plugin, index) => `import farmClientPlugin${index} from ${JSON.stringify(plugin.source)};`,
-    )
-    .join("\n");
   const registrations = `[
 ${resolved
   .map(
-    (plugin, index) => `  {
+    (plugin) => `  {
     name: ${JSON.stringify(plugin.name)},
     version: ${serializeOptionalString(plugin.version)},
     enforce: ${serializeOptionalString(plugin.enforce)},
-    definition: farmClientPlugin${index},
-    options: ${serializePublicOptions(plugin.publicOptions)},
+    definition: ${serializeClientLifecycle(plugin.definition, plugin.name)},
+    public: ${serializePublicData(plugin.publicData)},
   }`,
   )
   .join(",\n")}
 ]`;
 
-  return { imports, registrations, plugins: resolved };
+  return { imports: "", registrations, plugins: resolved };
 }
 
-function normalizeClientReference(reference: FarmPluginClientReference): {
-  source: FarmPluginClientSource;
-  publicOptions?: unknown;
-} {
-  if (typeof reference === "string" || isUrlLike(reference)) {
-    return { source: reference };
+function assertClientLifecycle(client: FarmPluginClientConfig, pluginName: string): void {
+  assertLifecycleObject(client, pluginName, "client", CLIENT_KEYS);
+  assertHook(client.setup, pluginName, "client.setup");
+  assertHook(client.error, pluginName, "client.error");
+  assertHook(client.performance, pluginName, "client.performance");
+  assertHook(client.close, pluginName, "client.close");
+
+  if (client.hydration !== undefined) {
+    assertLifecycleObject(client.hydration, pluginName, "client.hydration", HYDRATION_KEYS);
+    assertHook(client.hydration.before, pluginName, "client.hydration.before");
+    assertHook(client.hydration.after, pluginName, "client.hydration.after");
   }
 
-  const config = reference as FarmPluginClientConfig;
-  if (!config.source) {
-    throw new TypeError("Farm client plugin config requires a source");
-  }
-  return {
-    source: config.source,
-    publicOptions: config.public,
-  };
-}
-
-function resolveClientSource(source: FarmPluginClientSource, root: string, name: string): string {
-  if (isUrlLike(source)) {
-    if (source.protocol !== "file:") {
-      throw new TypeError(
-        `Client plugin "${name}" must use a file URL, project path, or package specifier`,
-      );
+  if (client.navigation !== undefined) {
+    assertLifecycleObject(client.navigation, pluginName, "client.navigation", NAVIGATION_KEYS);
+    for (const key of NAVIGATION_KEYS) {
+      assertHook(client.navigation[key], pluginName, `client.navigation.${key}`);
     }
-    return normalizePath(fileURLToPath(source));
   }
-
-  const value = source.trim();
-  if (!value) {
-    throw new TypeError(`Client plugin "${name}" has an empty source`);
-  }
-  if (value.startsWith("file:")) {
-    return normalizePath(fileURLToPath(new URL(value)));
-  }
-  if (value.startsWith("//")) {
-    throwInvalidClientSource(name);
-  }
-  if (value.startsWith(".")) {
-    return normalizePath(path.resolve(root, value));
-  }
-  if (path.isAbsolute(value)) {
-    return normalizePath(value);
-  }
-  if (/^[a-z][a-z\d+.-]*:/i.test(value)) {
-    throwInvalidClientSource(name);
-  }
-  return value;
 }
 
-function throwInvalidClientSource(name: string): never {
-  throw new TypeError(
-    `Client plugin "${name}" must use a file URL, project path, or package specifier`,
+function assertLifecycleObject(
+  value: unknown,
+  pluginName: string,
+  location: string,
+  allowedKeys: readonly string[],
+): asserts value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`Client plugin "${pluginName}" ${location} must be an object`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`Client plugin "${pluginName}" ${location} must be a plain object`);
+  }
+
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key === "symbol") {
+      throw new TypeError(`Client plugin "${pluginName}" ${location} cannot contain symbol keys`);
+    }
+    if (!allowedKeys.includes(key)) {
+      throw new TypeError(`Client plugin "${pluginName}" has an unknown ${location}.${key} option`);
+    }
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor?.enumerable) {
+      throw new TypeError(`Client plugin "${pluginName}" ${location}.${key} must be enumerable`);
+    }
+    if (!("value" in descriptor)) {
+      throw new TypeError(`Client plugin "${pluginName}" ${location}.${key} cannot be an accessor`);
+    }
+  }
+}
+
+function assertHook(value: unknown, pluginName: string, location: string): void {
+  if (value === undefined) return;
+  if (typeof value !== "function") {
+    throw new TypeError(`Client plugin "${pluginName}" ${location} must be a function`);
+  }
+  functionSource(value, pluginName, location);
+}
+
+function serializeClientLifecycle(definition: FarmClientPlugin, pluginName: string): string {
+  const fields: string[] = [];
+  pushHook(fields, "setup", definition.setup, pluginName, "client.setup", 2);
+  pushHookGroup(fields, "hydration", definition.hydration, HYDRATION_KEYS, pluginName, 2);
+  pushHookGroup(fields, "navigation", definition.navigation, NAVIGATION_KEYS, pluginName, 2);
+  pushHook(fields, "error", definition.error, pluginName, "client.error", 2);
+  pushHook(fields, "performance", definition.performance, pluginName, "client.performance", 2);
+  pushHook(fields, "close", definition.close, pluginName, "client.close", 2);
+
+  return fields.length ? `{\n${fields.join(",\n")}\n  }` : "{}";
+}
+
+function pushHookGroup(
+  fields: string[],
+  groupName: "hydration" | "navigation",
+  group: Record<string, unknown> | undefined,
+  keys: readonly string[],
+  pluginName: string,
+  indent: number,
+): void {
+  if (!group) return;
+  const hooks: string[] = [];
+  for (const key of keys) {
+    pushHook(hooks, key, group[key], pluginName, `client.${groupName}.${key}`, indent + 2);
+  }
+  fields.push(
+    `${" ".repeat(indent)}${JSON.stringify(groupName)}: {\n${hooks.join(",\n")}\n${" ".repeat(indent)}}`,
   );
 }
 
-function assertPublicOptions(value: unknown, pluginName: string): void {
+function pushHook(
+  fields: string[],
+  key: string,
+  hook: unknown,
+  pluginName: string,
+  location: string,
+  indent: number,
+): void {
+  if (hook === undefined) return;
+  fields.push(
+    `${" ".repeat(indent)}${JSON.stringify(key)}: ${functionSource(hook, pluginName, location)}`,
+  );
+}
+
+function functionSource(value: unknown, pluginName: string, location: string): string {
+  if (typeof value !== "function") {
+    throw new TypeError(`Client plugin "${pluginName}" ${location} must be a function`);
+  }
+
+  const source = Function.prototype.toString.call(value).trim();
+  if (!source || source.includes("[native code]")) {
+    throw new TypeError(
+      `Client plugin "${pluginName}" ${location} must be authored inline and cannot be native or bound`,
+    );
+  }
+
+  if (/^(?:async\s+)?function(?:\s*\*)?(?:\s+|\()/.test(source)) {
+    return `(${source})`;
+  }
+
+  const method = source.match(/^(async\s+)?(\*\s*)?[$A-Z_a-z][$\w]*\s*(\([\s\S]*)$/);
+  if (method) {
+    const asyncPrefix = method[1] ?? "";
+    const generator = method[2] ? "*" : "";
+    return `(${asyncPrefix}function${generator}${method[3]})`;
+  }
+
+  if (source.includes("=>")) return `(${source})`;
+
+  throw new TypeError(
+    `Client plugin "${pluginName}" ${location} must use a function, method, or arrow function`,
+  );
+}
+
+function assertPublicData(value: unknown, pluginName: string): void {
   if (value === undefined) return;
   const seen = new WeakSet<object>();
 
@@ -137,20 +216,20 @@ function assertPublicOptions(value: unknown, pluginName: string): void {
     }
     if (typeof current === "number") {
       if (Number.isFinite(current)) return;
-      throwPublicOptionError(pluginName, pathSegments, "must be a finite number");
+      throwPublicDataError(pluginName, pathSegments, "must be a finite number");
     }
     if (typeof current !== "object") {
-      throwPublicOptionError(pluginName, pathSegments, `cannot contain ${typeof current} values`);
+      throwPublicDataError(pluginName, pathSegments, `cannot contain ${typeof current} values`);
     }
     if (seen.has(current)) {
-      throwPublicOptionError(pluginName, pathSegments, "cannot contain circular references");
+      throwPublicDataError(pluginName, pathSegments, "cannot contain circular references");
     }
     seen.add(current);
 
     if (Array.isArray(current)) {
       for (let index = 0; index < current.length; index += 1) {
         if (!Object.prototype.hasOwnProperty.call(current, index)) {
-          throwPublicOptionError(
+          throwPublicDataError(
             pluginName,
             [...pathSegments, String(index)],
             "cannot contain sparse array slots",
@@ -159,10 +238,8 @@ function assertPublicOptions(value: unknown, pluginName: string): void {
         visit(current[index], [...pathSegments, String(index)]);
       }
       for (const key of Reflect.ownKeys(current)) {
-        if (key === "length" || (typeof key === "string" && isArrayIndex(key))) {
-          continue;
-        }
-        throwPublicOptionError(
+        if (key === "length" || (typeof key === "string" && isArrayIndex(key))) continue;
+        throwPublicDataError(
           pluginName,
           pathSegments,
           typeof key === "symbol"
@@ -176,26 +253,22 @@ function assertPublicOptions(value: unknown, pluginName: string): void {
 
     const prototype = Object.getPrototypeOf(current);
     if (prototype !== Object.prototype && prototype !== null) {
-      throwPublicOptionError(
-        pluginName,
-        pathSegments,
-        "must contain only plain objects and arrays",
-      );
+      throwPublicDataError(pluginName, pathSegments, "must contain only plain objects and arrays");
     }
     for (const key of Reflect.ownKeys(current)) {
       if (typeof key === "symbol") {
-        throwPublicOptionError(pluginName, pathSegments, "cannot contain symbol keys");
+        throwPublicDataError(pluginName, pathSegments, "cannot contain symbol keys");
       }
       const descriptor = Object.getOwnPropertyDescriptor(current, key);
       if (!descriptor?.enumerable) {
-        throwPublicOptionError(
+        throwPublicDataError(
           pluginName,
           [...pathSegments, key],
           "cannot contain non-enumerable properties",
         );
       }
       if (!("value" in descriptor)) {
-        throwPublicOptionError(
+        throwPublicDataError(
           pluginName,
           [...pathSegments, key],
           "cannot contain accessor properties",
@@ -209,16 +282,12 @@ function assertPublicOptions(value: unknown, pluginName: string): void {
   visit(value, []);
 }
 
-function throwPublicOptionError(
-  pluginName: string,
-  pathSegments: string[],
-  message: string,
-): never {
-  const location = pathSegments.length ? ` at public.${pathSegments.join(".")}` : "";
+function throwPublicDataError(pluginName: string, pathSegments: string[], message: string): never {
+  const location = pathSegments.length ? ` at client.public.${pathSegments.join(".")}` : "";
   throw new TypeError(`Client plugin "${pluginName}"${location} ${message}`);
 }
 
-function serializePublicOptions(value: unknown): string {
+function serializePublicData(value: unknown): string {
   if (value === undefined) return "undefined";
   return `JSON.parse(${JSON.stringify(JSON.stringify(value))})`;
 }
@@ -227,20 +296,7 @@ function serializeOptionalString(value: string | undefined): string {
   return value === undefined ? "undefined" : JSON.stringify(value);
 }
 
-function normalizePath(value: string): string {
-  return value.replace(/\\/g, "/");
-}
-
 function isArrayIndex(key: string): boolean {
   const value = Number(key);
   return Number.isInteger(value) && value >= 0 && value < 4_294_967_295 && String(value) === key;
-}
-
-function isUrlLike(value: unknown): value is URL {
-  return Boolean(
-    value &&
-    typeof value === "object" &&
-    typeof (value as URL).href === "string" &&
-    typeof (value as URL).protocol === "string",
-  );
 }

@@ -1,10 +1,4 @@
-import type { FarmPlugin } from "./plugin";
-
-export {
-  createClientPluginManager,
-  defineClientPlugin,
-  FarmClientPluginManager,
-} from "./client/plugin";
+export { createClientPluginManager, FarmClientPluginManager } from "./client/plugin";
 export type {
   FarmClientHydrationCompleteEvent,
   FarmClientHydrationEvent,
@@ -20,11 +14,9 @@ export type {
   FarmClientPerformanceEvent,
   FarmClientPlugin,
   FarmClientPluginCloseEvent,
-  FarmClientPluginDefinition,
   FarmClientPluginEnforce,
   FarmClientPluginErrorEvent,
   FarmClientPluginErrorPhase,
-  FarmClientPluginFactory,
   FarmClientPluginManagerOptions,
   FarmClientPluginMetadata,
   FarmClientPluginRegistration,
@@ -38,11 +30,3 @@ export type {
   FarmRequestPluginContext,
   FarmRequestStore,
 } from "./plugin";
-
-/** @deprecated Define framework plugins from `@farmjs/core` or `@farmjs/core/plugin`. */
-export function definePlugin<
-  TState = undefined,
-  TRequestContext extends object = Record<string, never>,
->(plugin: FarmPlugin<TState, TRequestContext>): FarmPlugin<TState, TRequestContext> {
-  return plugin;
-}
