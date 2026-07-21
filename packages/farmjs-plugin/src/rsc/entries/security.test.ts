@@ -59,6 +59,22 @@ describe("generated server action security", () => {
     expect(entry).not.toContain("throw p.returnValue?.data");
   });
 
+  it("emits the global stylesheet URL for every routes directory shape", () => {
+    const defaultEntry = generateClientEntry({ ...context, routesDir: undefined });
+    const customEntry = generateClientEntry({ ...context, routesDir: " routes " });
+    const rootEntry = generateClientEntry({ ...context, routesDir: "" });
+
+    expect(defaultEntry).toContain(
+      'const farmGlobalStylesheets = import.meta.glob("/src/app/globals.css", {',
+    );
+    expect(customEntry).toContain('import.meta.glob("/src/routes/globals.css", {');
+    expect(rootEntry).toContain('import.meta.glob("/src/globals.css", {');
+    expect(defaultEntry).toContain("eager: true");
+    expect(defaultEntry).toContain("import: 'default'");
+    expect(defaultEntry).toContain("query: '?url'");
+    expect(defaultEntry).toContain("export const farmGlobalStylesheet");
+  });
+
   it("uses the shared middleware runtime and server context during RSC rendering", () => {
     const entry = generateRscEntry(context);
 
