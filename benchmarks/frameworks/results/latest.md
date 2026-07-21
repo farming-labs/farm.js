@@ -1,13 +1,14 @@
 # Meta-framework benchmark
 
-Generated 2026-07-21T18:57:46.775Z at Farm commit 1d27e4c2a996.
+Generated 2026-07-21T19:38:58.969Z at Farm commit 0821ecfdc8c7.
 
-| Framework            | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 |     HTML |
-| -------------------- | -------------: | -------: | ------------: | --------------: | ----------------------------: | -------: |
-| Farm.js 0.0.3-beta.3 |          473ms |   5.57ms |         1.43s |           101ms |               0.91ms / 1.45ms |  7,528 B |
-| Next.js 16.2.10      |          1.51s |     33ms |         2.60s |           261ms |               4.44ms / 6.05ms | 30,842 B |
-| SvelteKit 2.70.1     |          832ms |   2.23ms |         1.78s |            66ms |               0.76ms / 1.60ms |  8,355 B |
-| Nuxt 4.5.0           |          2.42s |   3.63ms |         4.57s |           125ms |               1.29ms / 1.91ms |  8,527 B |
+| Framework               | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 |     HTML |
+| ----------------------- | -------------: | -------: | ------------: | --------------: | ----------------------------: | -------: |
+| Farm.js 0.0.3-beta.3    |          723ms |   5.50ms |         1.59s |            99ms |               0.93ms / 2.52ms |  7,528 B |
+| Next.js 16.2.10         |          2.17s |     34ms |         3.37s |           262ms |               4.58ms / 6.36ms | 30,842 B |
+| SvelteKit 2.70.1        |          1.07s |   2.36ms |         1.94s |            94ms |               0.79ms / 1.93ms |  8,355 B |
+| Nuxt 4.5.0              |          2.54s |   4.25ms |         5.13s |           123ms |               1.28ms / 3.96ms |  8,527 B |
+| TanStack Start 1.168.32 |          1.25s |   8.71ms |         742ms |            93ms |               1.49ms / 2.88ms |  9,285 B |
 
 Lower is better. Values are medians unless a percentile is named.
 
@@ -19,7 +20,7 @@ Lower is better. Values are medians unless a percentile is named.
 - Cache policy: Generated framework caches removed before dev and build; OS filesystem cache warm.
 - Machine: Apple M1, 16 GB, macOS 26.2.
 - Runtime: Node 24.14.0, pnpm 8.12.1.
-- Benchmark input SHA-256: 76d4a36d1331bee98fc116c7295c4fd6558fd17b4d403e5834ac163713c3e09d.
+- Benchmark input SHA-256: e7d11f64c58b03e0199f48d00428f668aee2f4b945c0efdc8fbc4eeaf2e539e9.
 - Farm source dirty: no.
 - Root lockfile dirty: no.
 - Workspace dirty: yes; the broader workspace state is recorded.
