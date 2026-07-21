@@ -19,24 +19,9 @@ export type {
   RouteOptionalParamValue,
   RouteParams,
 } from "./link";
-export {
-  useBlocker,
-  useNavigation,
-  usePageState,
-  useRouter,
-  useScrollRestoration,
-} from "./router";
-export type {
-  UseBlockerOptions,
-  UseBlockerReturn,
-  UseRouterOptions,
-} from "./router";
-export {
-  buildFarmRoutePath,
-  createFarmRouter,
-  isFarmRouteActive,
-  matchFarmRoute,
-} from "../router";
+export { useBlocker, useNavigation, usePageState, useRouter, useScrollRestoration } from "./router";
+export type { UseBlockerOptions, UseBlockerReturn, UseRouterOptions } from "./router";
+export { buildFarmRoutePath, createFarmRouter, isFarmRouteActive, matchFarmRoute } from "../router";
 export type {
   FarmRouter,
   FarmRouterActiveOptions,
@@ -70,11 +55,7 @@ export {
 } from "./spa-router";
 export { installChunkErrorRecovery, isChunkLoadError } from "./chunk-recovery";
 export type { FarmChunkRecoveryOptions } from "./chunk-recovery";
-export {
-  createClientPluginManager,
-  defineClientPlugin,
-  FarmClientPluginManager,
-} from "./plugin";
+export { createClientPluginManager, defineClientPlugin, FarmClientPluginManager } from "./plugin";
 export type {
   FarmClientHydrationCompleteEvent,
   FarmClientHydrationEvent,
@@ -91,9 +72,12 @@ export type {
   FarmClientPlugin,
   FarmClientPluginCloseEvent,
   FarmClientPluginDefinition,
+  FarmClientPluginEnforce,
   FarmClientPluginErrorEvent,
+  FarmClientPluginErrorPhase,
   FarmClientPluginFactory,
   FarmClientPluginManagerOptions,
+  FarmClientPluginMetadata,
   FarmClientPluginRegistration,
   FarmClientPluginRouter,
   FarmClientPluginSetupEvent,

@@ -143,12 +143,41 @@ describe("client plugin lifecycle", () => {
 
     await manager.start();
 
-    expect(received).toEqual([
-      publicOptions,
-      true,
-      publicOptions,
-      "analytics",
-      true,
+    expect(received).toEqual([publicOptions, true, publicOptions, "analytics", true]);
+  });
+
+  it("does not re-enter startup when setup reports an error", async () => {
+    const calls: string[] = [];
+    const failure = new Error("setup diagnostic");
+    let manager: ReturnType<typeof createManager>;
+
+    manager = createManager([
+      {
+        name: "reporter",
+        enforce: "pre",
+        definition: defineClientPlugin({
+          error({ error, phase }) {
+            calls.push(`${phase}:${error === failure}`);
+          },
+        }),
+      },
+      {
+        name: "diagnostic",
+        definition: defineClientPlugin({
+          async setup() {
+            calls.push("setup");
+            await manager.reportError(failure, "setup:diagnostic");
+          },
+        }),
+      },
+    ]);
+
+    await manager.start();
+
+    expect(calls).toEqual(["setup", "setup:diagnostic:true"]);
+    expect(manager.getPlugins()).toEqual([
+      { name: "reporter", version: undefined },
+      { name: "diagnostic", version: undefined },
     ]);
   });
 

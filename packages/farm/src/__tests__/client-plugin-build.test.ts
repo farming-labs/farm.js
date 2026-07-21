@@ -19,9 +19,7 @@ describe("client plugin build boundary", () => {
       }),
     ];
 
-    expect(
-      resolveFarmClientPlugins(plugins, root).map(({ source }) => source),
-    ).toEqual([
+    expect(resolveFarmClientPlugins(plugins, root).map(({ source }) => source)).toEqual([
       path.join(root, "src/plugins/local.client.ts"),
       "@acme/farm-plugin/client",
       "/workspace/layer/client.js",
@@ -43,10 +41,7 @@ describe("client plugin build boundary", () => {
       },
     });
 
-    const generated = generateFarmClientPluginEntryCode(
-      [plugin],
-      "/workspace/app",
-    );
+    const generated = generateFarmClientPluginEntryCode([plugin], "/workspace/app");
 
     expect(generated.imports).toContain(
       'import farmClientPlugin0 from "/workspace/app/src/plugins/analytics.client.ts";',
@@ -55,9 +50,7 @@ describe("client plugin build boundary", () => {
     expect(generated.registrations).toContain('version: "1.2.0"');
     expect(generated.registrations).toContain('enforce: "post"');
     expect(generated.registrations).toContain("storefront");
-    expect(generated.imports + generated.registrations).not.toContain(
-      serverSecret,
-    );
+    expect(generated.imports + generated.registrations).not.toContain(serverSecret);
     expect(generated.imports + generated.registrations).not.toContain("setup");
   });
 
@@ -75,9 +68,7 @@ describe("client plugin build boundary", () => {
         ],
         "/workspace/app",
       ),
-    ).toThrow(
-      'Client plugin "unsafe" at public.token cannot contain function values',
-    );
+    ).toThrow('Client plugin "unsafe" at public.token cannot contain function values');
 
     expect(() =>
       resolveFarmClientPlugins(
@@ -95,6 +86,52 @@ describe("client plugin build boundary", () => {
     ).toThrow("must contain only plain objects and arrays");
   });
 
+  it("rejects public options that JSON would silently reshape or omit", () => {
+    const withSymbol = { projectId: "storefront" } as Record<PropertyKey, unknown>;
+    withSymbol[Symbol("token")] = "secret";
+
+    expect(() =>
+      resolveFarmClientPlugins(
+        [
+          definePlugin({
+            name: "symbol-key",
+            client: { source: "./client.ts", public: withSymbol },
+          }),
+        ],
+        "/workspace/app",
+      ),
+    ).toThrow("cannot contain symbol keys");
+
+    const sparse = ["first", , "third"];
+    expect(() =>
+      resolveFarmClientPlugins(
+        [
+          definePlugin({
+            name: "sparse-array",
+            client: { source: "./client.ts", public: sparse },
+          }),
+        ],
+        "/workspace/app",
+      ),
+    ).toThrow("at public.1 cannot contain sparse array slots");
+
+    const withAccessor = Object.defineProperty({}, "token", {
+      enumerable: true,
+      get: () => "secret",
+    });
+    expect(() =>
+      resolveFarmClientPlugins(
+        [
+          definePlugin({
+            name: "accessor",
+            client: { source: "./client.ts", public: withAccessor },
+          }),
+        ],
+        "/workspace/app",
+      ),
+    ).toThrow("at public.token cannot contain accessor properties");
+  });
+
   it("rejects remote client modules", () => {
     expect(() =>
       resolveFarmClientPlugins(
@@ -107,5 +144,18 @@ describe("client plugin build boundary", () => {
         "/workspace/app",
       ),
     ).toThrow("must use a file URL, project path, or package specifier");
+
+    for (const source of [
+      "https://example.com/plugin.js",
+      "data:text/javascript,export default {}",
+      "//example.com/plugin.js",
+    ]) {
+      expect(() =>
+        resolveFarmClientPlugins(
+          [definePlugin({ name: "remote-string", client: source })],
+          "/workspace/app",
+        ),
+      ).toThrow("must use a file URL, project path, or package specifier");
+    }
   });
 });

@@ -187,9 +187,9 @@ The browser entry is an explicit security boundary, not a serialization of the s
 
 - Farm bundles only the module named by `client.source`.
 - Server `setup` state, runtime context, request data, and environment values are never copied into the client registration.
-- Only `client.public` crosses the boundary. Its value must contain JSON-safe scalars, arrays, and plain objects.
-- Farm rejects functions, symbols, bigint values, non-finite numbers, class instances, dates, `undefined`, and circular references instead of silently dropping them.
-- Remote HTTP modules are rejected. Use a local file, package export, absolute path, or file URL.
+- Only `client.public` crosses the boundary. Its value must contain JSON-safe scalars, dense arrays, and plain objects.
+- Farm rejects functions, symbols and symbol keys, bigint values, non-finite numbers, class instances, dates, `undefined`, accessors, hidden properties, sparse arrays, and circular references instead of silently reshaping or dropping them.
+- Remote and executable URL schemes are rejected for both string and `URL` inputs. Use a local file, package export, absolute path, or file URL.
 - Treat every public option as visible to anyone who can load the application JavaScript.
 
 Do not import Node-only modules, database clients, private environment helpers, or server-only plugin files from the client module.

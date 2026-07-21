@@ -48,9 +48,7 @@ export interface FarmClientHydrationSession {
 }
 
 export interface FarmClientHydrationEvent<TState = unknown, TOptions = unknown>
-  extends
-    FarmClientPluginStateEvent<TState, TOptions>,
-    FarmClientHydrationSession {}
+  extends FarmClientPluginStateEvent<TState, TOptions>, FarmClientHydrationSession {}
 
 export interface FarmClientHydrationCompleteEvent<
   TState = unknown,
@@ -74,9 +72,7 @@ export interface FarmClientNavigationSession {
 }
 
 export interface FarmClientNavigationEvent<TState = unknown, TOptions = unknown>
-  extends
-    FarmClientPluginStateEvent<TState, TOptions>,
-    FarmClientNavigationSession {}
+  extends FarmClientPluginStateEvent<TState, TOptions>, FarmClientNavigationSession {}
 
 export interface FarmClientNavigationLoadedEvent<
   TState = unknown,
@@ -138,39 +134,19 @@ export interface FarmClientPluginCloseEvent<
 export interface FarmClientPlugin<TState = unknown, TOptions = unknown> {
   setup?(event: FarmClientPluginSetupEvent<TOptions>): MaybePromise<TState>;
   hydration?: {
-    before?(
-      event: FarmClientHydrationEvent<TState, TOptions>,
-    ): MaybePromise<void>;
-    after?(
-      event: FarmClientHydrationCompleteEvent<TState, TOptions>,
-    ): MaybePromise<void>;
+    before?(event: FarmClientHydrationEvent<TState, TOptions>): MaybePromise<void>;
+    after?(event: FarmClientHydrationCompleteEvent<TState, TOptions>): MaybePromise<void>;
   };
   navigation?: {
-    before?(
-      event: FarmClientNavigationEvent<TState, TOptions>,
-    ): MaybePromise<void>;
-    loaded?(
-      event: FarmClientNavigationLoadedEvent<TState, TOptions>,
-    ): MaybePromise<void>;
-    resolved?(
-      event: FarmClientNavigationResolvedEvent<TState, TOptions>,
-    ): MaybePromise<void>;
-    rendered?(
-      event: FarmClientNavigationResolvedEvent<TState, TOptions>,
-    ): MaybePromise<void>;
-    error?(
-      event: FarmClientNavigationErrorEvent<TState, TOptions>,
-    ): MaybePromise<void>;
+    before?(event: FarmClientNavigationEvent<TState, TOptions>): MaybePromise<void>;
+    loaded?(event: FarmClientNavigationLoadedEvent<TState, TOptions>): MaybePromise<void>;
+    resolved?(event: FarmClientNavigationResolvedEvent<TState, TOptions>): MaybePromise<void>;
+    rendered?(event: FarmClientNavigationResolvedEvent<TState, TOptions>): MaybePromise<void>;
+    error?(event: FarmClientNavigationErrorEvent<TState, TOptions>): MaybePromise<void>;
   };
-  error?(
-    event: FarmClientPluginErrorEvent<TState, TOptions>,
-  ): MaybePromise<void>;
-  performance?(
-    event: FarmClientPerformanceEvent<TState, TOptions>,
-  ): MaybePromise<void>;
-  close?(
-    event: FarmClientPluginCloseEvent<TState, TOptions>,
-  ): MaybePromise<void>;
+  error?(event: FarmClientPluginErrorEvent<TState, TOptions>): MaybePromise<void>;
+  performance?(event: FarmClientPerformanceEvent<TState, TOptions>): MaybePromise<void>;
+  close?(event: FarmClientPluginCloseEvent<TState, TOptions>): MaybePromise<void>;
 }
 
 export type FarmClientPluginFactory<TOptions = unknown> = (
@@ -223,19 +199,17 @@ export class FarmClientPluginManager {
     session: FarmClientNavigationSession;
   };
   private navigationSequence = 0;
+  private starting = false;
   private started = false;
   private closed = false;
   private readonly reportedErrors = new WeakSet<object>();
 
   private readonly handleWindowError = (event: ErrorEvent) => {
-    const error =
-      event.error ?? new Error(event.message || "Unknown browser error");
+    const error = event.error ?? new Error(event.message || "Unknown browser error");
     void this.reportError(error, "window");
   };
 
-  private readonly handleUnhandledRejection = (
-    event: PromiseRejectionEvent,
-  ) => {
+  private readonly handleUnhandledRejection = (event: PromiseRejectionEvent) => {
     void this.reportError(event.reason, "unhandled-rejection");
   };
 
@@ -252,15 +226,14 @@ export class FarmClientPluginManager {
       ...options,
       isDev: options.isDev ?? false,
       isProd: options.isProd ?? !options.isDev,
-      window:
-        options.window ?? (typeof window !== "undefined" ? window : undefined),
+      window: options.window ?? (typeof window !== "undefined" ? window : undefined),
     };
   }
 
   start(): Promise<void> {
     if (this.startPromise) return this.startPromise;
 
-    this.startPromise = this.startInternal();
+    this.startPromise = Promise.resolve().then(() => this.startInternal());
     return this.startPromise;
   }
 
@@ -299,10 +272,7 @@ export class FarmClientPluginManager {
     );
   }
 
-  async failHydration(
-    session: FarmClientHydrationSession,
-    error: unknown,
-  ): Promise<void> {
+  async failHydration(session: FarmClientHydrationSession, error: unknown): Promise<void> {
     await this.reportError(error, "hydration", undefined, session.location);
   }
 
@@ -321,10 +291,7 @@ export class FarmClientPluginManager {
       from:
         input.from === null
           ? null
-          : toClientLocation(
-              input.from ?? this.getLocation().href,
-              this.getBaseUrl(),
-            ),
+          : toClientLocation(input.from ?? this.getLocation().href, this.getBaseUrl()),
       to: toClientLocation(input.to, this.getBaseUrl()),
       action: input.action,
       signal: controller.signal,
@@ -343,10 +310,7 @@ export class FarmClientPluginManager {
     return session;
   }
 
-  async markNavigationLoaded(
-    session: FarmClientNavigationSession,
-    data?: unknown,
-  ): Promise<void> {
+  async markNavigationLoaded(session: FarmClientNavigationSession, data?: unknown): Promise<void> {
     if (session.signal.aborted) return;
     await this.runHook("navigation.loaded", (instance) =>
       instance.plugin.navigation?.loaded?.({
@@ -369,16 +333,12 @@ export class FarmClientPluginManager {
     );
   }
 
-  scheduleNavigationRendered(
-    session: FarmClientNavigationSession,
-  ): Promise<void> {
+  scheduleNavigationRendered(session: FarmClientNavigationSession): Promise<void> {
     if (session.signal.aborted) return Promise.resolve();
     const clientWindow = this.options.window;
     const schedule = clientWindow?.requestAnimationFrame
       ? (callback: () => void) =>
-          clientWindow.requestAnimationFrame(() =>
-            clientWindow.requestAnimationFrame(callback),
-          )
+          clientWindow.requestAnimationFrame(() => clientWindow.requestAnimationFrame(callback))
       : (callback: () => void) => setTimeout(callback, 0);
 
     return new Promise((resolve) => {
@@ -403,10 +363,7 @@ export class FarmClientPluginManager {
     });
   }
 
-  async failNavigation(
-    session: FarmClientNavigationSession,
-    error: unknown,
-  ): Promise<void> {
+  async failNavigation(session: FarmClientNavigationSession, error: unknown): Promise<void> {
     if (!session.signal.aborted) {
       await this.runHook("navigation.error", (instance) =>
         instance.plugin.navigation?.error?.({
@@ -430,18 +387,17 @@ export class FarmClientPluginManager {
     navigation?: FarmClientNavigationSession,
     location = this.getLocation(),
   ): Promise<void> {
+    if (this.closed) return;
     if (isObject(error)) {
       if (this.reportedErrors.has(error)) return;
       this.reportedErrors.add(error);
     }
 
-    await this.start();
+    if (!this.started && !this.starting) await this.start();
     await this.runErrorHooks({ error, phase, navigation, location });
   }
 
-  close(
-    reason: FarmClientPluginCloseEvent["reason"] = "manual",
-  ): Promise<void> {
+  close(reason: FarmClientPluginCloseEvent["reason"] = "manual"): Promise<void> {
     if (this.closePromise) return this.closePromise;
     this.closePromise = this.closeInternal(reason);
     return this.closePromise;
@@ -456,43 +412,44 @@ export class FarmClientPluginManager {
 
   private async startInternal(): Promise<void> {
     if (this.started || this.closed) return;
+    this.starting = true;
 
-    for (const registration of this.registrations) {
-      try {
-        const definition =
-          typeof registration.definition === "function"
-            ? await registration.definition(
-                readonlyOptions(registration.options),
-              )
-            : registration.definition;
-        if (!definition || typeof definition !== "object") {
-          throw new TypeError(
-            `Client plugin "${registration.name}" did not return a plugin object`,
-          );
+    try {
+      for (const registration of this.registrations) {
+        try {
+          const definition =
+            typeof registration.definition === "function"
+              ? await registration.definition(readonlyOptions(registration.options))
+              : registration.definition;
+          if (!definition || typeof definition !== "object") {
+            throw new TypeError(
+              `Client plugin "${registration.name}" did not return a plugin object`,
+            );
+          }
+
+          const instance: FarmClientPluginInstance = {
+            registration,
+            plugin: definition,
+            state: undefined,
+          };
+          instance.state = await definition.setup?.(this.createSetupEvent(instance));
+          this.instances.push(instance);
+        } catch (error) {
+          this.logHookError(registration.name, "setup", error);
+          await this.runErrorHooks({
+            error,
+            phase: "setup",
+            location: this.getLocation(),
+          });
         }
-
-        const instance: FarmClientPluginInstance = {
-          registration,
-          plugin: definition,
-          state: undefined,
-        };
-        instance.state = await definition.setup?.(
-          this.createSetupEvent(instance),
-        );
-        this.instances.push(instance);
-      } catch (error) {
-        this.logHookError(registration.name, "setup", error);
-        await this.runErrorHooks({
-          error,
-          phase: "setup",
-          location: this.getLocation(),
-        });
       }
-    }
 
-    this.started = true;
-    this.installBrowserListeners();
-    this.installPerformanceObservers();
+      this.started = true;
+      this.installBrowserListeners();
+      this.installPerformanceObservers();
+    } finally {
+      this.starting = false;
+    }
   }
 
   private installBrowserListeners(): void {
@@ -501,10 +458,7 @@ export class FarmClientPluginManager {
 
     if (this.instances.some(({ plugin }) => plugin.error)) {
       clientWindow.addEventListener("error", this.handleWindowError);
-      clientWindow.addEventListener(
-        "unhandledrejection",
-        this.handleUnhandledRejection,
-      );
+      clientWindow.addEventListener("unhandledrejection", this.handleUnhandledRejection);
     }
     clientWindow.addEventListener("pagehide", this.handlePageHide, {
       once: true,
@@ -513,10 +467,7 @@ export class FarmClientPluginManager {
 
   private installPerformanceObservers(): void {
     if (!this.instances.some(({ plugin }) => plugin.performance)) return;
-    const Observer =
-      typeof PerformanceObserver !== "undefined"
-        ? PerformanceObserver
-        : undefined;
+    const Observer = typeof PerformanceObserver !== "undefined" ? PerformanceObserver : undefined;
     if (!Observer) return;
 
     const supported = new Set(Observer.supportedEntryTypes || []);
@@ -542,9 +493,7 @@ export class FarmClientPluginManager {
     }
   }
 
-  private async closeInternal(
-    reason: FarmClientPluginCloseEvent["reason"],
-  ): Promise<void> {
+  private async closeInternal(reason: FarmClientPluginCloseEvent["reason"]): Promise<void> {
     if (this.closed) return;
     if (this.startPromise) await this.startPromise;
     this.closed = true;
@@ -553,10 +502,7 @@ export class FarmClientPluginManager {
 
     const clientWindow = this.options.window;
     clientWindow?.removeEventListener("error", this.handleWindowError);
-    clientWindow?.removeEventListener(
-      "unhandledrejection",
-      this.handleUnhandledRejection,
-    );
+    clientWindow?.removeEventListener("unhandledrejection", this.handleUnhandledRejection);
     clientWindow?.removeEventListener("pagehide", this.handlePageHide);
     for (const observer of this.performanceObservers) observer.disconnect();
     this.performanceObservers.length = 0;
@@ -575,9 +521,7 @@ export class FarmClientPluginManager {
 
   private async runHook(
     hook: string,
-    invoke: (
-      instance: FarmClientPluginInstance,
-    ) => MaybePromise<void> | undefined,
+    invoke: (instance: FarmClientPluginInstance) => MaybePromise<void> | undefined,
   ): Promise<void> {
     for (const instance of this.instances) {
       try {
@@ -597,10 +541,7 @@ export class FarmClientPluginManager {
   }
 
   private async runErrorHooks(
-    event: Pick<
-      FarmClientPluginErrorEvent,
-      "error" | "phase" | "location" | "navigation"
-    >,
+    event: Pick<FarmClientPluginErrorEvent, "error" | "phase" | "location" | "navigation">,
     excluded?: FarmClientPluginInstance,
   ): Promise<void> {
     for (const instance of this.instances) {
@@ -632,9 +573,7 @@ export class FarmClientPluginManager {
     };
   }
 
-  private createStateEvent(
-    instance: FarmClientPluginInstance,
-  ): FarmClientPluginStateEvent {
+  private createStateEvent(instance: FarmClientPluginInstance): FarmClientPluginStateEvent {
     return {
       ...this.createSetupEvent(instance),
       state: instance.state,
@@ -651,10 +590,7 @@ export class FarmClientPluginManager {
   }
 
   private logHookError(name: string, hook: string, error: unknown): void {
-    console.error(
-      `[Farm.js] Client plugin "${name}" failed in ${hook}:`,
-      error,
-    );
+    console.error(`[Farm.js] Client plugin "${name}" failed in ${hook}:`, error);
   }
 }
 
@@ -720,7 +656,5 @@ function now(): number {
 }
 
 function isObject(value: unknown): value is object {
-  return (
-    (typeof value === "object" && value !== null) || typeof value === "function"
-  );
+  return (typeof value === "object" && value !== null) || typeof value === "function";
 }

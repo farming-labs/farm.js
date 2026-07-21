@@ -1,4 +1,8 @@
 import { expectTypeOf } from "vitest";
+import {
+  definePlugin as definePluginFromClientEntry,
+  type FarmClientPluginEnforce,
+} from "../client-plugins";
 import { defineClientPlugin, type FarmClientPlugin } from "../client/plugin";
 
 const inferredPlugin = defineClientPlugin({
@@ -49,8 +53,11 @@ const optionsPlugin = defineClientPlugin<
 });
 
 expectTypeOf(optionsPlugin).toMatchTypeOf<
-  FarmClientPlugin<
-    { initialized: boolean },
-    { projectId: string; sampleRate: number }
-  >
+  FarmClientPlugin<{ initialized: boolean }, { projectId: string; sampleRate: number }>
 >();
+
+const clientEntryPlugin = definePluginFromClientEntry({
+  name: "backward-compatible-client-entry",
+});
+expectTypeOf(clientEntryPlugin.name).toEqualTypeOf<string>();
+expectTypeOf<"pre">().toMatchTypeOf<FarmClientPluginEnforce>();
