@@ -1,0 +1,10 @@
+apps/*/node_modules/
+.benchmark.lock
+apps/farm/.farm/
+apps/farm/src/farm-*.d.ts
+apps/farm/src/lib/api.generated.ts
+apps/next/.next/
+apps/sveltekit/.svelte-kit/
+apps/sveltekit/build/
+apps/nuxt/.nuxt/
+apps/nuxt/.output/

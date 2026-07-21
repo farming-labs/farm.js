@@ -22,6 +22,7 @@
     "test:e2e:list": "playwright test --list",
     "docs:dev": "pnpm --filter @farmjs/core build && pnpm --filter farmjs-docs dev",
     "docs:build": "pnpm --filter @farmjs/core build && pnpm --filter farmjs-docs build",
+    "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "lint": "oxlint . && oxfmt --check .",
     "format": "oxlint --fix . && oxfmt .",
     "lint:fix": "oxlint --fix . && oxfmt .",

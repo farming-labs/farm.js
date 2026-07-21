@@ -55,6 +55,7 @@ import unkeyIconUrl from "../assets/brands/unkey.svg?url";
 import workosIconUrl from "../assets/brands/workos.svg?url";
 import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
+import { BenchmarkSection } from "../components/home/benchmark-section";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
 import { HighlightedCode, HighlightedCodeTabs } from "../components/home/highlighted-code";
 import type { HighlightedCodeTab } from "../components/home/highlighted-code";
@@ -62,6 +63,7 @@ import { InstallCommand } from "../components/home/install-command";
 import { FileTree } from "../components/ui/file-tree";
 import type { FileTreeNode } from "../components/ui/file-tree";
 import { FlickeringGrid } from "../components/ui/flickering-grid";
+import { farmBenchmark, formatBenchmarkDuration } from "../lib/framework-benchmark";
 
 export const metadata = {
   title: "Farm.js - The React framework for product apps",
@@ -887,8 +889,11 @@ function TerminalVisual() {
               </span>
               <span className="farm-terminal-output mt-1.5 block space-y-1.5">
                 <span className="block text-white">
-                  <span className="font-semibold text-white">Farm.js</span> v1.0.0 ready in{" "}
-                  <span className="text-white/88">84ms</span>
+                  <span className="font-semibold text-white">[bench]</span> first rendered page{" "}
+                  <span className="text-white/88">
+                    {formatBenchmarkDuration(farmBenchmark.metrics.devFirstPageMs.median)}
+                  </span>{" "}
+                  <span className="text-white/34">median</span>
                 </span>
                 <span className="block whitespace-nowrap text-white/58">
                   <span className="inline-block w-[4.5rem] text-white/82">➜ Local:</span>
@@ -954,14 +959,14 @@ function BuildVisual() {
             <span className="block h-5 whitespace-nowrap text-white sm:h-6">
               <span>$ </span>
               <span className="farm-build-command-text inline-block align-bottom">
-                farm build --preset vercel
+                farm build --preset node-server
               </span>
               <span aria-hidden className="farm-build-command-cursor inline-block" />
             </span>
             <span className="farm-build-output mt-2 block">
               <span className="block whitespace-nowrap">
                 <span className="text-white">[info]</span> 🚜 Building Farm.js application with
-                preset: vercel...
+                preset: node-server...
               </span>
               <span className="block whitespace-nowrap">
                 <span className="text-white">[info]</span> 🔍 Discovering routes and API
@@ -972,11 +977,14 @@ function BuildVisual() {
                 parallel...
               </span>
               <span className="block whitespace-nowrap">
-                <span className="text-white">[success]</span> ✅ Build completed in{" "}
-                <span className="font-semibold text-white">1.24s</span>
+                <span className="text-white">[bench]</span> Fixture build wall time{" "}
+                <span className="font-semibold text-white">
+                  {formatBenchmarkDuration(farmBenchmark.metrics.buildMs.median)}
+                </span>{" "}
+                <span className="text-white/34">median</span>
               </span>
               <span className="block whitespace-nowrap text-white/78">
-                <span className="text-white">[info]</span> 📁 Output directory: .vercel/output
+                <span className="text-white">[info]</span> 📁 Output directory: .farm/.output
               </span>
             </span>
           </code>
@@ -1752,6 +1760,7 @@ export default function HomePage(_props: PageProps) {
             <Hero />
             <EcosystemStrip />
             <DeveloperExperienceGrid />
+            <BenchmarkSection />
             <IntegrationsSection />
             <FoundationGrid />
             <AgentSectionIntro />
