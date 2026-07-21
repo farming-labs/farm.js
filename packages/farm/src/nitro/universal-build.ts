@@ -3695,10 +3695,29 @@ async function buildNitroUniversal(
 import { defineEventHandler } from 'h3'
 import handler from './${ssrEntryFile}'
 
+function mergeVaryHeaders(target, source) {
+  const values = new Set(
+    [target.get('Vary'), source]
+      .filter(Boolean)
+      .flatMap((value) => value.split(','))
+      .map((value) => value.trim())
+      .filter(Boolean),
+  )
+
+  if (values.size > 0) target.set('Vary', Array.from(values).join(', '))
+}
+
 // Export the wrapped handler for Nitro
-export default defineEventHandler((event) => handler.fetch(event.req, {
-  waitUntil: (promise) => event.waitUntil(promise),
-}))
+export default defineEventHandler(async (event) => {
+  const response = await handler.fetch(event.req, {
+    waitUntil: (promise) => event.waitUntil(promise),
+  })
+
+  // Nitro records asset compression negotiation on the event response. Merge
+  // Farm's cache signals there so H3 preserves both sets of Vary values.
+  mergeVaryHeaders(event.res.headers, response.headers.get('Vary'))
+  return response
+})
   `.trim();
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
