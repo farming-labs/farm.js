@@ -91,7 +91,7 @@ Use a factory when consumers need options. Return `definePlugin()` directly so i
 
 ## Add browser behavior
 
-Add `client` when the same framework plugin needs hydration, navigation, browser error, performance, or cleanup hooks. Keep that code in a separate browser-safe module.
+Add `client` when the same framework plugin needs hydration, navigation, browser error, performance, or cleanup hooks. Define those hooks in the same plugin object.
 
 ```ts
 export function requestTracingPlugin(options: RequestTracingOptions = {}) {
@@ -103,53 +103,38 @@ export function requestTracingPlugin(options: RequestTracingOptions = {}) {
       context() {},
     },
 
-    // Farm imports only this module into the browser bundle.
     client: {
-      source: "./src/plugins/request-tracing.client.ts",
       public: {
         header: options.header ?? "x-request-id",
       },
-    },
-  });
-}
-```
 
-```ts
-import { defineClientPlugin } from "@farmjs/core/plugin/client";
+      setup({ public: config }) {
+        return { header: config.header, navigations: 0 };
+      },
 
-interface PublicOptions {
-  header: string;
-}
-
-export default function requestTracingClient(
-  options: Readonly<PublicOptions>,
-) {
-  return defineClientPlugin({
-    setup() {
-      return { header: options.header, navigations: 0 };
-    },
-    navigation: {
-      rendered({ state, to }) {
-        state.navigations += 1;
-        console.log(state.header, to.pathname);
+      navigation: {
+        rendered({ state, to }) {
+          state.navigations += 1;
+          console.log(state.header, to.pathname);
+        },
       },
     },
   });
 }
 ```
 
-Farm generates the imports and runtime registration in both development and production. Do not put secrets in `client.public`; it is embedded in application JavaScript. Read [Client Plugins](/docs/plugins/client) for every hook, lifecycle order, cancellation behavior, and packaging rules.
+Farm extracts the client hooks and generates their runtime registration in development and production. Do not put secrets in `client.public`; it is embedded in application JavaScript. Client hooks cannot close over surrounding server values, so use event data, browser globals, dynamic imports inside a hook, and state returned by `client.setup`. Read [Client Plugins](/docs/plugins/client) for every hook, lifecycle order, cancellation behavior, and packaging rules.
 
 ## Choose the plugin's scope
 
 Start local, then package the plugin when more than one application needs the same framework behavior.
 
-| Scope | Use it for |
-| --- | --- |
-| Local plugin | One application's route policy, diagnostics, or temporary framework experiment. |
-| Published plugin | Reusable tracing, security, rendering, build, or development behavior. |
-| Layer plugin | Organization defaults shipped together with shared config and integrations. |
-| Integration plugin | Low-level framework behavior required internally by one product integration. |
+| Scope              | Use it for                                                                      |
+| ------------------ | ------------------------------------------------------------------------------- |
+| Local plugin       | One application's route policy, diagnostics, or temporary framework experiment. |
+| Published plugin   | Reusable tracing, security, rendering, build, or development behavior.          |
+| Layer plugin       | Organization defaults shipped together with shared config and integrations.     |
+| Integration plugin | Low-level framework behavior required internally by one product integration.    |
 
 A published plugin should expose an options factory and keep its setup state private:
 
@@ -177,10 +162,7 @@ export function securityPlugin(options: SecurityPluginOptions = {}) {
       after({ response, state }) {
         const headers = new Headers(response.headers);
         headers.set("x-content-type-options", "nosniff");
-        headers.set(
-          "content-security-policy",
-          `frame-ancestors ${state.frameAncestors}`,
-        );
+        headers.set("content-security-policy", `frame-ancestors ${state.frameAncestors}`);
 
         return new Response(response.body, {
           status: response.status,
@@ -230,10 +212,7 @@ export const maintenancePlugin = definePlugin({
       const url = new URL(request.url);
 
       if (process.env.MAINTENANCE === "1" && !url.pathname.startsWith("/health")) {
-        return Response.json(
-          { error: "Service temporarily unavailable" },
-          { status: 503 },
-        );
+        return Response.json({ error: "Service temporarily unavailable" }, { status: 503 });
       }
     },
   },
@@ -313,10 +292,7 @@ export const htmlMarkerPlugin = definePlugin({
   render: {
     html(html, render) {
       if (render.pathname.startsWith("/docs")) {
-        return html.replace(
-          "</head>",
-          '<meta name="docs-runtime" content="farm"></head>',
-        );
+        return html.replace("</head>", '<meta name="docs-runtime" content="farm"></head>');
       }
     },
   },
@@ -419,17 +395,17 @@ Farm starts the runtime lazily in production. Some serverless hosts do not expos
 
 Flat hooks continue to work for existing plugins:
 
-| Legacy hook | Structured hook |
-| --- | --- |
-| `config` | `configure` |
-| `ready` / `shutdown` | `runtime.start` / `runtime.close` |
-| `beforeRequest` / `beforeApiHandler` | `runtime.before` |
-| `afterResponse` / `afterApiHandler` | `runtime.after` |
-| `routeDiscovered` / `routesGenerated` | `router.discovered` / `router.generated` |
-| `beforeRouteMatch` / `afterRouteMatch` | `router.before` / `router.after` |
-| `beforeRender` / `afterRender` | `render.before` / `render.html` |
+| Legacy hook                                         | Structured hook                                    |
+| --------------------------------------------------- | -------------------------------------------------- |
+| `config`                                            | `configure`                                        |
+| `ready` / `shutdown`                                | `runtime.start` / `runtime.close`                  |
+| `beforeRequest` / `beforeApiHandler`                | `runtime.before`                                   |
+| `afterResponse` / `afterApiHandler`                 | `runtime.after`                                    |
+| `routeDiscovered` / `routesGenerated`               | `router.discovered` / `router.generated`           |
+| `beforeRouteMatch` / `afterRouteMatch`              | `router.before` / `router.after`                   |
+| `beforeRender` / `afterRender`                      | `render.before` / `render.html`                    |
 | `beforeBundle` / `beforeNitroBuild` / `afterBundle` | `build.before` / `build.configure` / `build.after` |
-| `devServerCreated` / `hmrUpdate` | `dev.server` / `dev.update` |
+| `devServerCreated` / `hmrUpdate`                    | `dev.server` / `dev.update`                        |
 
 Do not define both the legacy and structured form of the same phase in one plugin. Farm intentionally executes both for compatibility.
 

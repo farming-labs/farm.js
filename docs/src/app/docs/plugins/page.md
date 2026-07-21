@@ -14,12 +14,12 @@ Use an [integration](/docs/integrations) for a product or service such as authen
 
 A framework-focused plugin changes **how Farm operates**, rather than adding one application's business feature. It runs at stable framework boundaries and can be reused across unrelated applications.
 
-| Question | Usually choose |
-| --- | --- |
-| Does it observe or transform every request, response, route, render, or build? | Plugin |
-| Does it wrap a product and expose config, endpoints, storage, providers, or a typed client? | Integration |
-| Is it request policy owned by one application or route tree? | Middleware |
-| Is it a shared application foundation containing config, routes, integrations, and plugins? | Layer |
+| Question                                                                                    | Usually choose |
+| ------------------------------------------------------------------------------------------- | -------------- |
+| Does it observe or transform every request, response, route, render, or build?              | Plugin         |
+| Does it wrap a product and expose config, endpoints, storage, providers, or a typed client? | Integration    |
+| Is it request policy owned by one application or route tree?                                | Middleware     |
+| Is it a shared application foundation containing config, routes, integrations, and plugins? | Layer          |
 
 For example, request tracing is framework-focused because it should work for pages, APIs, actions, docs, and integrations without knowing their business logic. A Stripe checkout extension is product-focused because it owns Stripe config, webhook endpoints, and a typed API.
 
@@ -27,17 +27,17 @@ For example, request tracing is framework-focused because it should work for pag
 
 The lifecycle is intentionally broad enough for infrastructure and tooling without turning plugins into product modules.
 
-| Category | Example plugin |
-| --- | --- |
-| Observability | Create trace IDs, record latency, export spans, or report route failures. |
-| Security | Apply CSP and security headers, enforce request policy, or attach nonces. |
-| Traffic | Implement global redirects, rewrites, compression, maintenance mode, or response tagging. |
-| Routing | Generate route manifests, enforce route conventions, or report conflicting patterns. |
-| Rendering | Inject metadata, transform final HTML, or measure server rendering. |
-| Browser runtime | Observe hydration, navigation, errors, performance entries, and cleanup. |
-| Deployment | Configure Nitro output, add platform metadata, or validate runtime capabilities. |
-| Development | Add a route inspector, HMR diagnostics, performance reporting, or custom dev-server behavior. |
-| Organization tooling | Package shared logging, security, and build policy for every company application. |
+| Category             | Example plugin                                                                                |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| Observability        | Create trace IDs, record latency, export spans, or report route failures.                     |
+| Security             | Apply CSP and security headers, enforce request policy, or attach nonces.                     |
+| Traffic              | Implement global redirects, rewrites, compression, maintenance mode, or response tagging.     |
+| Routing              | Generate route manifests, enforce route conventions, or report conflicting patterns.          |
+| Rendering            | Inject metadata, transform final HTML, or measure server rendering.                           |
+| Browser runtime      | Observe hydration, navigation, errors, performance entries, and cleanup.                      |
+| Deployment           | Configure Nitro output, add platform metadata, or validate runtime capabilities.              |
+| Development          | Add a route inspector, HMR diagnostics, performance reporting, or custom dev-server behavior. |
+| Organization tooling | Package shared logging, security, and build policy for every company application.             |
 
 A plugin can cover several lifecycle phases, but focused plugins are easier to order, test, and reuse. Product endpoints and typed product callers should remain in an integration even when that integration contributes a plugin internally.
 
@@ -105,124 +105,138 @@ export const frameworkPlugin = definePlugin({
   },
 
   client: {
-    source: "./src/plugins/framework-plugin.client.ts",
     public: { release: "2026.07" },
+    setup({ public: config }) {
+      return { release: config.release };
+    },
+    navigation: {
+      rendered({ state, to }) {
+        console.log(state.release, to.pathname);
+      },
+    },
   },
 });
 ```
 
 Only define the groups your plugin needs.
 
-| Surface | Purpose |
-| --- | --- |
-| `configure` | Transform Farm config before resolution. |
-| `setup` | Create private, typed plugin state for one plugin manager. |
-| `runtime` | Wrap Web `Request` and `Response` handling. |
-| `router` | Observe route discovery, generation, and matching. |
-| `render` | Observe rendering or transform final HTML. |
-| `build` | Run around bundling and configure the Nitro build. |
-| `dev` | Access the Vite server and HMR updates. |
-| `client` | Attach a browser-safe lifecycle module with explicit public options. |
+| Surface     | Purpose                                                                        |
+| ----------- | ------------------------------------------------------------------------------ |
+| `configure` | Transform Farm config before resolution.                                       |
+| `setup`     | Create private, typed plugin state for one plugin manager.                     |
+| `runtime`   | Wrap Web `Request` and `Response` handling.                                    |
+| `router`    | Observe route discovery, generation, and matching.                             |
+| `render`    | Observe rendering or transform final HTML.                                     |
+| `build`     | Run around bundling and configure the Nitro build.                             |
+| `dev`       | Access the Vite server and HMR updates.                                        |
+| `client`    | Define browser setup, hydration, navigation, errors, performance, and cleanup. |
 
 ## Complete lifecycle reference
 
 ### Plugin definition
 
-| Property | Required | Behavior |
-| --- | --- | --- |
-| `name` | Yes | Stable plugin identity. Package authors should namespace it, such as `acme:security`. |
-| `version` | No | Optional plugin version metadata for package authors and tooling. |
-| `enforce` | No | Places the plugin in the `pre` or `post` ordering group. Omit it for normal order. |
-| `configure` | No | Receives Farm config before resolution and may return replacement config. |
-| `setup` | No | Runs once per plugin manager and returns private state inferred by every grouped hook. |
-| `runtime` | No | Handles portable Web `Request` and `Response` lifecycle work. |
-| `router` | No | Observes route discovery, route graph generation, and page matching. |
-| `render` | No | Observes page rendering and may transform final HTML. |
-| `build` | No | Observes bundling and may configure the Nitro build. |
-| `dev` | No | Accesses the Vite development server and HMR updates. |
-| `client` | No | Points to the browser module used for setup, hydration, navigation, errors, performance, and cleanup. |
+| Property    | Required | Behavior                                                                               |
+| ----------- | -------- | -------------------------------------------------------------------------------------- |
+| `name`      | Yes      | Stable plugin identity. Package authors should namespace it, such as `acme:security`.  |
+| `version`   | No       | Optional plugin version metadata for package authors and tooling.                      |
+| `enforce`   | No       | Places the plugin in the `pre` or `post` ordering group. Omit it for normal order.     |
+| `configure` | No       | Receives Farm config before resolution and may return replacement config.              |
+| `setup`     | No       | Runs once per plugin manager and returns private state inferred by every grouped hook. |
+| `runtime`   | No       | Handles portable Web `Request` and `Response` lifecycle work.                          |
+| `router`    | No       | Observes route discovery, route graph generation, and page matching.                   |
+| `render`    | No       | Observes page rendering and may transform final HTML.                                  |
+| `build`     | No       | Observes bundling and may configure the Nitro build.                                   |
+| `dev`       | No       | Accesses the Vite development server and HMR updates.                                  |
+| `client`    | No       | Defines the browser lifecycle and explicitly public client data.                       |
 
 Both hooks receive Farm's plugin context. `setup` additionally receives the resolved `env`. Its returned state is private to that plugin instance and is not serialized to the browser.
 
 ### Runtime hooks
 
-| Hook | Runs | May return |
-| --- | --- | --- |
-| `runtime.start` | Once when the runtime manager starts. | Nothing. |
-| `runtime.context` | At the start of every request. | A plain object merged into typed request `ctx`. |
-| `runtime.before` | Before Farm invokes the matched handler. | A replacement `Request`, a short-circuit `Response`, or nothing. |
-| `runtime.after` | After a handler or short circuit produces a response. | A replacement `Response` or nothing. |
-| `runtime.error` | When runtime context, before, handler, or after work throws. | Nothing. |
-| `runtime.close` | During best-effort runtime shutdown. | Nothing. |
+| Hook              | Runs                                                         | May return                                                       |
+| ----------------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `runtime.start`   | Once when the runtime manager starts.                        | Nothing.                                                         |
+| `runtime.context` | At the start of every request.                               | A plain object merged into typed request `ctx`.                  |
+| `runtime.before`  | Before Farm invokes the matched handler.                     | A replacement `Request`, a short-circuit `Response`, or nothing. |
+| `runtime.after`   | After a handler or short circuit produces a response.        | A replacement `Response` or nothing.                             |
+| `runtime.error`   | When runtime context, before, handler, or after work throws. | Nothing.                                                         |
+| `runtime.close`   | During best-effort runtime shutdown.                         | Nothing.                                                         |
 
 Runtime hooks apply to page, API, server-action, integration, docs, asset, and general requests. Use the event's `kind` and `route` values when behavior should apply only to part of the application.
 
 ### Runtime event values
 
-| Value | Available in | Meaning |
-| --- | --- | --- |
-| `request` | Context, before, after, error | Current Web `Request`, including transformations from earlier plugins. |
-| `response` | After | Current Web `Response`, including transformations from earlier plugins. |
-| `state` | Every grouped hook | Private value returned by this plugin's `setup`. |
-| `ctx` | Before, after, error | Read-only merge of all plugin request-context results. |
-| `req` | Context, before, after, error | Mutable request store shared with middleware and server rendering. |
-| `kind` | Runtime request hooks | Request category such as `page`, `api`, `action`, `integration`, or `docs`. |
-| `route` | Runtime request hooks | Matched pathname, route pattern, and params when Farm has them. |
-| `signal` | Runtime request hooks | Abort signal for cancelled or disconnected requests. |
-| `waitUntil()` | Runtime request hooks | Registers non-blocking work with hosts that support background tasks. |
-| `durationMs` | After, error | Elapsed request time at that lifecycle phase. |
+| Value         | Available in                  | Meaning                                                                     |
+| ------------- | ----------------------------- | --------------------------------------------------------------------------- |
+| `request`     | Context, before, after, error | Current Web `Request`, including transformations from earlier plugins.      |
+| `response`    | After                         | Current Web `Response`, including transformations from earlier plugins.     |
+| `state`       | Every grouped hook            | Private value returned by this plugin's `setup`.                            |
+| `ctx`         | Before, after, error          | Read-only merge of all plugin request-context results.                      |
+| `req`         | Context, before, after, error | Mutable request store shared with middleware and server rendering.          |
+| `kind`        | Runtime request hooks         | Request category such as `page`, `api`, `action`, `integration`, or `docs`. |
+| `route`       | Runtime request hooks         | Matched pathname, route pattern, and params when Farm has them.             |
+| `signal`      | Runtime request hooks         | Abort signal for cancelled or disconnected requests.                        |
+| `waitUntil()` | Runtime request hooks         | Registers non-blocking work with hosts that support background tasks.       |
+| `durationMs`  | After, error                  | Elapsed request time at that lifecycle phase.                               |
 
 ### Router hooks
 
-| Hook | Purpose |
-| --- | --- |
+| Hook                | Purpose                                                                   |
+| ------------------- | ------------------------------------------------------------------------- |
 | `router.discovered` | Observe each page, layout, middleware, or API route as Farm discovers it. |
-| `router.generated` | Inspect the completed page/layout route summary. |
-| `router.before` | Observe a pathname and method before page-route matching. |
-| `router.after` | Inspect the match result, params, route pattern, and layouts. |
+| `router.generated`  | Inspect the completed page/layout route summary.                          |
+| `router.before`     | Observe a pathname and method before page-route matching.                 |
+| `router.after`      | Inspect the match result, params, route pattern, and layouts.             |
 
 Router hooks are useful for diagnostics, conventions, manifests, and instrumentation. They should not silently replace application authorization or handler-level validation.
 
 ### Render hooks
 
-| Hook | Purpose | May return |
-| --- | --- | --- |
-| `render.before` | Observe the matched page before rendering starts. | Nothing. |
-| `render.html` | Inspect or transform the completed HTML document. | Replacement HTML or nothing. |
+| Hook            | Purpose                                           | May return                   |
+| --------------- | ------------------------------------------------- | ---------------------------- |
+| `render.before` | Observe the matched page before rendering starts. | Nothing.                     |
+| `render.html`   | Inspect or transform the completed HTML document. | Replacement HTML or nothing. |
 
 Adding `render.html` requires Farm to buffer the final document. Prefer `render.before` when observation is enough and preserving streaming matters.
 
 ### Build hooks
 
-| Hook | Purpose | May return |
-| --- | --- | --- |
-| `build.before` | Observe the root, preset, output paths, and universal-build mode before bundling. | Nothing. |
-| `build.configure` | Read or transform the Nitro build configuration. | Replacement build config or nothing. |
-| `build.after` | Observe build success and resolved output information. | Nothing. |
+| Hook              | Purpose                                                                           | May return                           |
+| ----------------- | --------------------------------------------------------------------------------- | ------------------------------------ |
+| `build.before`    | Observe the root, preset, output paths, and universal-build mode before bundling. | Nothing.                             |
+| `build.configure` | Read or transform the Nitro build configuration.                                  | Replacement build config or nothing. |
+| `build.after`     | Observe build success and resolved output information.                            | Nothing.                             |
 
 ### Development hooks
 
-| Hook | Purpose |
-| --- | --- |
-| `dev.server` | Access the created Vite development server. |
+| Hook         | Purpose                                                      |
+| ------------ | ------------------------------------------------------------ |
+| `dev.server` | Access the created Vite development server.                  |
 | `dev.update` | Observe changed files and invalidated module IDs during HMR. |
 
 Development hooks do not run as part of the deployed request lifecycle.
 
 ## Client lifecycle
 
-The optional `client` property keeps browser behavior under the same plugin identity and ordering as its server hooks. It points to a separate module so Farm can bundle browser code without serializing the server plugin, its setup state, or private environment values.
+The optional `client` property keeps browser behavior under the same plugin identity and ordering as its server hooks. Farm extracts the known lifecycle hooks into its generated browser runtime without copying the server plugin, server setup state, or private environment values.
 
 ```ts
 client: {
-  source: "./src/plugins/tracing.client.ts",
   public: {
     release: "2026.07",
+  },
+  setup({ public: config }) {
+    return { release: config.release };
+  },
+  navigation: {
+    rendered({ state, to }) {
+      console.log(state.release, to.pathname);
+    },
   },
 },
 ```
 
-The client module uses `defineClientPlugin()` from `@farmjs/core/plugin/client`. Farm runs setup once, surrounds initial hydration, emits navigation phases from the active router, isolates hook failures, aborts superseded navigation sessions, and closes plugins during page hide or HMR disposal.
+Farm runs `client.setup` once, surrounds initial hydration, emits navigation phases from the active router, isolates hook failures, aborts superseded navigation sessions, and closes plugins during page hide or HMR disposal.
 
 Only JSON-safe values in `client.public` enter the browser bundle. Server setup state, request context, and private environment values never cross this boundary. See [Client Plugins](/docs/plugins/client) for the complete interface and security model.
 
@@ -244,11 +258,11 @@ Runtime hooks use Web APIs, so the same plugin works in development and universa
 
 There are three different kinds of plugin data:
 
-| Value | Lifetime | Use |
-| --- | --- | --- |
-| `state` | Plugin manager | Clients, compiled matchers, loggers, or other resources returned by `setup`. |
-| `ctx` | One request | Typed values returned by `runtime.context`. |
-| `req` | One request | A shared key/value store for plugins, middleware, integrations, and optional page data. |
+| Value   | Lifetime       | Use                                                                                     |
+| ------- | -------------- | --------------------------------------------------------------------------------------- |
+| `state` | Plugin manager | Clients, compiled matchers, loggers, or other resources returned by `setup`.            |
+| `ctx`   | One request    | Typed values returned by `runtime.context`.                                             |
+| `req`   | One request    | A shared key/value store for plugins, middleware, integrations, and optional page data. |
 
 Farm merges all `runtime.context` results before running `runtime.before`. Context keys must be unique; Farm throws and names both plugins when two plugins return the same key.
 
@@ -283,11 +297,11 @@ Farm runs `pre` plugins first, normal plugins second, and `post` plugins last. H
 
 ## Plugin or integration
 
-| Choose | When |
-| --- | --- |
-| Integration | The extension represents a product or service and needs validated config, endpoints, typed callers, storage, or providers. |
-| Plugin | The extension changes framework requests, rendering, routing, builds, HMR, or global instrumentation. |
-| Both | A product integration also needs framework hooks. Keep the product API in the integration and expose its framework behavior through `plugins`. |
+| Choose      | When                                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| Integration | The extension represents a product or service and needs validated config, endpoints, typed callers, storage, or providers.                     |
+| Plugin      | The extension changes framework requests, rendering, routing, builds, HMR, or global instrumentation.                                          |
+| Both        | A product integration also needs framework hooks. Keep the product API in the integration and expose its framework behavior through `plugins`. |
 
 ## How the ecosystem composes
 
