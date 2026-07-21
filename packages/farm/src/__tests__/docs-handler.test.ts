@@ -361,6 +361,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-page-nav-title fd-page-nav-title-next"');
     expect(html).toContain('<span class="fd-page-nav-description">Next Page</span>');
     expect(html).not.toContain('class="fd-page-nav-label"');
+    expect(html).toContain("--color-fd-background: #000 !important;");
+    expect(html).toContain("min-height: 98px;");
+    expect(html).toContain("border-radius: 0 !important;");
+    expect(html).toContain("font-size: 0.875rem; font-weight: 500; line-height: 1.5;");
     expect(html).toContain('href="/docs/guide"');
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');

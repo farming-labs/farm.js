@@ -4,7 +4,7 @@
  */
 
 :root {
-  --color-fd-background: hsl(0 0% 2%);
+  --color-fd-background: #000;
   --color-fd-foreground: oklch(0.985 0.001 106.423);
   --color-fd-card: hsl(0 0% 4%);
   --color-fd-card-foreground: oklch(0.985 0.001 106.423);
@@ -23,6 +23,16 @@
   --radius: 0px;
   --font-geist-sans: "Geist Sans";
   --font-geist-mono: "Geist Mono";
+}
+
+.dark {
+  --color-fd-background: #000 !important;
+}
+
+html,
+body,
+#nd-docs-layout {
+  background-color: var(--color-fd-background) !important;
 }
 
 @font-face {
