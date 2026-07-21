@@ -250,6 +250,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
     expect(html).toContain("width: min(680px, calc(100vw - 32px))");
     expect(html).toContain("width: calc(100vw - 20px)");
+    expect(html).toContain(".omni-overlay {\n  position: fixed;");
+    expect(html).toContain(".omni-content {\n  --omni-content-top:");
     expect(html).toContain(".omni-footer-hints {");
     expect(html).toContain("font-size: 16px");
     expect(html).not.toContain('id="farm-docs-search-dialog"');

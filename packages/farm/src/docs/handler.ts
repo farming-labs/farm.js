@@ -24,6 +24,7 @@ import {
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
 import { resolveFarmDocsPageLastModified } from "./last-modified";
+import { farmDocsPixelBorderCss } from "./pixel-border-css";
 import { isFarmDocsSearchEnabled } from "./search-client";
 import type { FarmDocsResolvedConfig } from "./types";
 
@@ -53,30 +54,6 @@ const DOCS_FILE_EXTENSIONS = [".mdx", ".md"];
 const FARM_DOCS_FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
 
-function readFarmDocsPixelBorderCss(): string {
-  const candidates: Array<string | URL> = [];
-  try {
-    candidates.push(new URL("./pixel-border.css", import.meta.url));
-  } catch {
-    // CJS builds fall back to __dirname below.
-  }
-
-  if (typeof __dirname === "string") {
-    candidates.push(path.join(__dirname, "pixel-border.css"));
-  }
-
-  for (const candidate of candidates) {
-    try {
-      return readFileSync(candidate, "utf8");
-    } catch {
-      // Try the next source/dist layout.
-    }
-  }
-
-  return "";
-}
-
-const farmDocsPixelBorderCss = readFarmDocsPixelBorderCss();
 const GEIST_SANS_FONT_URL = "/assets/Geist-Variable-CrgPqtmy.woff2";
 const GEIST_MONO_FONT_URL = "/assets/GeistMono-Variable-BNLlm6Cd.woff2";
 

@@ -1,3 +1,4 @@
+export const farmDocsPixelBorderCss = String.raw`
 /* Farm docs pixel-border bridge.
  * This follows the local @farming-labs/docs pixel-border theme while covering
  * the frameworkless HTML emitted by the Farm docs runtime.
@@ -1023,3 +1024,4 @@ code:not(pre code) {
     animation: none;
   }
 }
+`;
