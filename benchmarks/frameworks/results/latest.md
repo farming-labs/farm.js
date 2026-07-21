@@ -1,14 +1,14 @@
 # Meta-framework benchmark
 
-Generated 2026-07-21T19:38:58.969Z at Farm commit 0821ecfdc8c7.
+Generated 2026-07-21T22:39:51.067Z at Farm commit 3fda11ded4ff.
 
 | Framework               | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 |     HTML |
 | ----------------------- | -------------: | -------: | ------------: | --------------: | ----------------------------: | -------: |
-| Farm.js 0.0.3-beta.3    |          723ms |   5.50ms |         1.59s |            99ms |               0.93ms / 2.52ms |  7,528 B |
-| Next.js 16.2.10         |          2.17s |     34ms |         3.37s |           262ms |               4.58ms / 6.36ms | 30,842 B |
-| SvelteKit 2.70.1        |          1.07s |   2.36ms |         1.94s |            94ms |               0.79ms / 1.93ms |  8,355 B |
-| Nuxt 4.5.0              |          2.54s |   4.25ms |         5.13s |           123ms |               1.28ms / 3.96ms |  8,527 B |
-| TanStack Start 1.168.32 |          1.25s |   8.71ms |         742ms |            93ms |               1.49ms / 2.88ms |  9,285 B |
+| Farm.js 0.0.3-beta.3    |          454ms |   5.08ms |         1.06s |            99ms |               0.80ms / 1.18ms |  7,528 B |
+| Next.js 16.2.10         |          1.37s |     31ms |         2.44s |           239ms |               3.99ms / 5.79ms | 30,842 B |
+| SvelteKit 2.70.1        |          781ms |   1.82ms |         1.64s |            63ms |               0.68ms / 1.12ms |  8,355 B |
+| Nuxt 4.5.0              |          2.28s |   2.89ms |         4.25s |           118ms |               1.11ms / 1.80ms |  8,527 B |
+| TanStack Start 1.168.32 |          798ms |   8.44ms |         652ms |            89ms |               1.12ms / 1.99ms |  9,285 B |
 
 Lower is better. Values are medians unless a percentile is named.
 
