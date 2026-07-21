@@ -61,23 +61,22 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
     const routeManager = farmApp.getRouteManager();
     const serverRenderer = farmApp.getServerRenderer();
 
-    try {
-      await generateFarmTypeArtifacts({
-        root,
-        srcDir,
-        layers: config.layers,
-        extraRoutes: [
-          ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),
-          ...getFarmDocsRouteTypeEntries(config.docs),
-        ],
-        suppressLintOnLink: config.suppressLintOnLink,
-        i18nConfig: config.i18n,
-      });
-    } catch {
-      // Non-fatal; type generation is for DX only
-    }
+    const typeArtifacts = generateFarmTypeArtifacts({
+      root,
+      srcDir,
+      layers: config.layers,
+      extraRoutes: [
+        ...(config.openapi?.enabled && config.openapi.route ? [config.openapi.route] : []),
+        ...getFarmDocsRouteTypeEntries(config.docs),
+      ],
+      suppressLintOnLink: config.suppressLintOnLink,
+      i18nConfig: config.i18n,
+    }).catch(() => {
+      // Non-fatal; type generation is for DX only.
+    });
 
-    // Discover API routes
+    // Type artifacts and API discovery scan independent inputs, so keep them
+    // off the critical path by running both after app initialization.
     const apiRouteManager = new APIRouteManager(
       getFarmAppDirectories(config),
       projectModuleServer,
@@ -86,7 +85,11 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
         i18n: farmApp.getI18nRuntime(),
       },
     );
-    await apiRouteManager.discoverRoutes();
+    const [, apiDiscovery] = await Promise.allSettled([
+      typeArtifacts,
+      apiRouteManager.discoverRoutes(),
+    ]);
+    if (apiDiscovery.status === "rejected") throw apiDiscovery.reason;
 
     // Use universal build pattern if enabled
     if (options.universal !== false) {

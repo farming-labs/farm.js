@@ -3,12 +3,14 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs/promises";
 import { createServer } from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
 import { definePlugin } from "../plugin";
+import { logger } from "../utils";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
@@ -60,14 +62,19 @@ async function getAvailablePort(): Promise<number> {
   return port;
 }
 
-async function waitForServer(url: string, processOutput: () => string, hasExited: () => boolean) {
+async function waitForServer(
+  url: string,
+  processOutput: () => string,
+  hasExited: () => boolean,
+  requestInit?: RequestInit,
+) {
   let lastError: unknown;
   for (let attempt = 0; attempt < 100; attempt++) {
     if (hasExited()) {
       throw new Error(`Production server exited before it was ready:\n${processOutput()}`);
     }
     try {
-      return await fetch(url);
+      return await fetch(url, requestInit);
     } catch (error) {
       lastError = error;
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -81,6 +88,8 @@ async function waitForServer(url: string, processOutput: () => string, hasExited
 async function runProductionRequest(
   serverDir: string,
   assertion: (response: Response) => Promise<void>,
+  pathname = "/",
+  requestInit?: RequestInit,
 ): Promise<void> {
   const port = await getAvailablePort();
   const output: string[] = [];
@@ -102,11 +111,16 @@ async function runProductionRequest(
 
   try {
     const response = await waitForServer(
-      `http://127.0.0.1:${port}/`,
+      `http://127.0.0.1:${port}${pathname}`,
       () => (spawnError ? `${spawnError.message}\n${output.join("")}` : output.join("")),
       () => spawnError !== undefined || productionServer.exitCode !== null,
+      requestInit,
     );
-    await assertion(response);
+    try {
+      await assertion(response);
+    } catch (error) {
+      throw new Error(`${String(error)}\nProduction output:\n${output.join("")}`);
+    }
   } finally {
     if (productionServer.exitCode === null) {
       productionServer.kill("SIGTERM");
@@ -196,6 +210,71 @@ describe("production prebuilt SSR output", () => {
     }
   }, 120_000);
 
+  it("supports an explicitly configured Rolldown adapter build", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "explicit-rolldown-test",
+          plugins: [
+            definePlugin({
+              name: "explicit-rolldown-test",
+              build: {
+                configure(nitroConfig) {
+                  return { ...nitroConfig, builder: "rolldown" };
+                },
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const serverPackage = JSON.parse(
+        await fs.readFile(path.join(root, ".farm", ".output", "server", "package.json"), "utf8"),
+      );
+      expect(serverPackage.imports?.["#farm-ssr-entry"]).toMatch(/^\.\/farm-ssr\//);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("honors NITRO_BUILDER=rollup", async () => {
+    const root = await createProductionFixture();
+    const previousBuilder = process.env.NITRO_BUILDER;
+    const info = vi.spyOn(logger, "info");
+    process.env.NITRO_BUILDER = "rollup";
+
+    try {
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "nitro-builder-rollup-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const serverPackage = JSON.parse(
+        await fs.readFile(path.join(root, ".farm", ".output", "server", "package.json"), "utf8"),
+      );
+      expect(serverPackage.imports?.["#farm-ssr-entry"]).toMatch(/^\.\/farm-ssr\//);
+      expect(info).not.toHaveBeenCalledWith(expect.stringContaining("Rolldown"));
+    } finally {
+      if (previousBuilder === undefined) delete process.env.NITRO_BUILDER;
+      else process.env.NITRO_BUILDER = previousBuilder;
+      info.mockRestore();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("preserves an explicit minify false build hook", async () => {
     const root = await createProductionFixture();
     let configureCalls = 0;
@@ -237,6 +316,70 @@ describe("production prebuilt SSR output", () => {
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("packages the Sharp runtime for standalone Node image optimization", async () => {
+    const root = await createProductionFixture();
+    const isolatedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-standalone-sharp-"));
+    const { default: sharp } = await import("sharp");
+    const png = await sharp({
+      create: {
+        width: 2,
+        height: 1,
+        channels: 4,
+        background: { r: 20, g: 100, b: 220, alpha: 1 },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    try {
+      await fs.mkdir(path.join(root, "public"), { recursive: true });
+      await fs.writeFile(path.join(root, "public", "product.png"), png);
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "node", formats: ["image/webp"] },
+          generateBuildId: () => "prebuilt-ssr-sharp-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const isolatedOutput = path.join(isolatedRoot, "output");
+      await fs.cp(path.join(root, ".farm", ".output"), isolatedOutput, { recursive: true });
+      await fs.rm(root, { recursive: true, force: true });
+
+      const serverDir = path.join(isolatedOutput, "server");
+      const serverPackage = JSON.parse(
+        await fs.readFile(path.join(serverDir, "package.json"), "utf8"),
+      );
+      expect(serverPackage.dependencies?.sharp).toBeTruthy();
+      await expect(
+        fs.access(path.join(serverDir, "node_modules", "sharp", "package.json")),
+      ).resolves.toBeUndefined();
+
+      const query = new URLSearchParams({ url: "/product.png", w: "16", q: "75" });
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          if (!response.ok) {
+            throw new Error(
+              `Image optimizer returned ${response.status}: ${await response.text()}`,
+            );
+          }
+          expect(response.status).toBe(200);
+          expect(response.headers.get("content-type")).toBe("image/webp");
+          expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+        },
+        `/_farm/image?${query}`,
+        { headers: { accept: "image/webp" } },
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(isolatedRoot, { recursive: true, force: true });
     }
   }, 120_000);
 
@@ -330,6 +473,58 @@ describe("production prebuilt SSR output", () => {
 
       expect(externalCalls).toBeGreaterThan(0);
       await expectNitroFallback(root);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("retains Nitro's bundle path when a build plugin configures replacements", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+export default function Page() {
+  return <main data-prebuilt-ssr="ready">{process.env.FARM_NITRO_REPLACE_TEST}</main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "prebuilt-ssr-test",
+          plugins: [
+            definePlugin({
+              name: "custom-replace-fallback-test",
+              build: {
+                configure(nitroConfig) {
+                  return {
+                    ...nitroConfig,
+                    replace: {
+                      ...nitroConfig.replace,
+                      "process.env.FARM_NITRO_REPLACE_TEST": JSON.stringify("nitro-replaced"),
+                    },
+                  };
+                },
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await expectNitroFallback(root);
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await expect(response.text()).resolves.toContain("nitro-replaced");
+        },
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

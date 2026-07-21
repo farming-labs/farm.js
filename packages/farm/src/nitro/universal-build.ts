@@ -12,9 +12,10 @@ import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import os from "os";
 import path from "path";
-import { existsSync, readFileSync } from "fs";
+import { constants as fsConstants, existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
+import { isDeepStrictEqual } from "node:util";
 import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
@@ -111,6 +112,68 @@ const NITRO_EXTERNAL_MODULES = new Set([
 ]);
 const FARM_SSR_PACKAGE_IMPORT = "#farm-ssr-entry";
 const FARM_SSR_OUTPUT_DIR = "farm-ssr";
+
+function cloneConfigValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value) as T;
+  if (value instanceof RegExp) return new RegExp(value.source, value.flags) as T;
+  if (value instanceof Date) return new Date(value) as T;
+
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    seen.set(value, clone);
+    for (const entry of value) clone.push(cloneConfigValue(entry, seen));
+    return clone as T;
+  }
+
+  const clone: Record<PropertyKey, unknown> = {};
+  seen.set(value, clone);
+  for (const key of Reflect.ownKeys(value)) {
+    clone[key] = cloneConfigValue((value as Record<PropertyKey, unknown>)[key], seen);
+  }
+  return clone as T;
+}
+
+function snapshotSSRRebundleOptions(config: NitroConfig) {
+  return cloneConfigValue({
+    alias: config.alias,
+    commonJS: config.commonJS,
+    entry: config.entry,
+    externals: config.externals,
+    exportConditions: config.exportConditions,
+    imports: config.imports,
+    inlineDynamicImports: config.inlineDynamicImports,
+    moduleSideEffects: config.moduleSideEffects,
+    noExternals: config.noExternals,
+    node: config.node,
+    nodeModulesDirs: config.nodeModulesDirs,
+    plugins: config.plugins,
+    replace: config.replace,
+    serverEntry: config.serverEntry,
+    typescript: config.typescript,
+    unenv: config.unenv,
+    virtual: config.virtual,
+    wasm: config.experimental?.wasm,
+    bundleRuntimeDependencies: config.experimental?.bundleRuntimeDependencies,
+  });
+}
+
+async function canUseRolldownBuilder(): Promise<boolean> {
+  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+  const isSupportedNode =
+    (major === 20 && minor >= 19) || major > 22 || (major === 22 && minor >= 12);
+  if (!isSupportedNode) {
+    return false;
+  }
+
+  try {
+    await import("rolldown");
+    return true;
+  } catch {
+    // Rolldown is optional so Node 18 and --no-optional installs retain Rollup.
+    return false;
+  }
+}
 
 function isCloudflareImagePreset(preset: string): boolean {
   return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
@@ -554,7 +617,16 @@ export async function buildUniversal(
       // Client build (to disk)
       buildClient(config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
       // SSR build (in memory)
-      buildSSRInMemory(config, root, srcDir, routeManager, apiRouteManager, serverRenderer, preset),
+      buildSSRInMemory(
+        config,
+        root,
+        routeManager,
+        apiRouteManager,
+        serverRenderer,
+        preset,
+        pageRoutes,
+        layoutRoutes,
+      ),
     ]);
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile } = ssrResult;
@@ -1868,11 +1940,12 @@ if (isFarmDocsSearchPage()) {
 async function buildSSRInMemory(
   config: ResolvedFarmConfig,
   root: string,
-  srcDir: string,
   routeManager: RouteManager,
   apiRouteManager: APIRouteManager,
   serverRenderer: ServerRenderer,
   preset: string,
+  collectedPageRoutes: readonly UniversalPageRoute[],
+  collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
 ): Promise<{ bundle: OutputBundle; entryFile: string }> {
   const { farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
@@ -1897,18 +1970,10 @@ async function buildSSRInMemory(
   let ssrBundle: OutputBundle;
   let ssrEntryFile: string;
 
-  // Generate route manifest from managers
-  // This captures route patterns and module paths
-  const pageRoutes: UniversalPageRoute[] = [];
-  for (const [pattern, entry] of routeManager.getRoutes()) {
-    pageRoutes.push({
-      pattern,
-      modulePath: entry.modulePath,
-      ...(isFarmMarkdownPageFile(entry.modulePath)
-        ? { source: await fs.readFile(entry.modulePath, "utf8") }
-        : {}),
-    });
-  }
+  // Reuse the route and layout manifests already collected for the parallel
+  // client build instead of rescanning the same project tree.
+  const pageRoutes = collectedPageRoutes.map((route) => ({ ...route }));
+  const layoutRoutes = collectedLayoutRoutes.map((route) => ({ ...route }));
 
   const metadataImageRoutes: UniversalMetadataImageRoute[] = [];
   for (const entry of routeManager.getMetadataImages().values()) {
@@ -1954,48 +2019,8 @@ async function buildSSRInMemory(
     ? (await readFarmI18nCatalogs(config.i18n)).catalogs
     : {};
 
-  // Discover layout files by scanning the source directory
-  const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
   const appDirs = getFarmAppDirectories(config);
-  const appDir = path.join(root, srcDir, "app");
   const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
-
-  async function findLayouts(dir: string, routePrefix: string = "/"): Promise<void> {
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?)$/)) {
-          layoutRoutes.push({
-            pattern: routePrefix,
-            modulePath: path.join(dir, entry.name),
-          });
-        } else if (
-          entry.isDirectory() &&
-          !entry.name.startsWith("_") &&
-          !entry.name.startsWith(".")
-        ) {
-          const subRoute = routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
-          await findLayouts(path.join(dir, entry.name), subRoute);
-        }
-      }
-    } catch {
-      // Directory doesn't exist or can't be read
-    }
-  }
-
-  await findLayouts(appDir);
-  const seenLayoutPatterns = new Set(layoutRoutes.map((layout) => layout.pattern));
-  for (const [pattern, entry] of routeManager.getLayouts()) {
-    if (seenLayoutPatterns.has(pattern)) {
-      continue;
-    }
-
-    seenLayoutPatterns.add(pattern);
-    layoutRoutes.push({
-      pattern,
-      modulePath: entry.modulePath,
-    });
-  }
 
   // Check for custom not-found page
   let notFoundPath: string | null = null;
@@ -4090,6 +4115,7 @@ export default defineEventHandler(async (event) => {
     minify: true,
     sourceMap: false, // Skip sourcemaps for faster build
   };
+  const initialSSRRebundleOptions = snapshotSSRRebundleOptions(nitroConfig);
 
   if (pluginManager) {
     nitroConfig = await pluginManager.runHookSerial("beforeNitroBuild", nitroConfig);
@@ -4110,13 +4136,21 @@ export default defineEventHandler(async (event) => {
     Object.keys(nitroConfig.hooks || {}).length > 0 ||
     (Array.isArray(nitroConfig.modules) ? nitroConfig.modules.some(Boolean) : nitroConfig.modules),
   );
+  const hasUnsupportedSSRRebundleOverrides = !isDeepStrictEqual(
+    initialSSRRebundleOptions,
+    snapshotSSRRebundleOptions(nitroConfig),
+  );
+  const requestedBuilder = nitroConfig.builder ?? process.env.NITRO_BUILDER;
   const canReusePrebuiltSSR =
     isPrebuiltSSRCandidate &&
     nitroConfig.preset === "node-server" &&
-    (nitroConfig.builder === undefined || nitroConfig.builder === "rollup") &&
+    (requestedBuilder === undefined ||
+      requestedBuilder === "rollup" ||
+      requestedBuilder === "rolldown") &&
     nitroConfig.sourceMap === false &&
     !hasUnsupportedEsbuildOverrides &&
     !hasLateBuildMutationConfig &&
+    !hasUnsupportedSSRRebundleOverrides &&
     nitroConfig.rollupConfig?.external === isNitroRollupExternal &&
     !hasRollupPlugins(nitroConfig.rollupConfig?.plugins) &&
     customRollupKeys.length === 0 &&
@@ -4126,6 +4160,11 @@ export default defineEventHandler(async (event) => {
         (handler) => path.resolve(handler?.handler || "") === nitroEntryPath,
       ),
     );
+  const selectRolldownBuilder =
+    canReusePrebuiltSSR && requestedBuilder === undefined && (await canUseRolldownBuilder());
+  if (selectRolldownBuilder) nitroConfig.builder = "rolldown";
+  const useRolldownBuilder =
+    canReusePrebuiltSSR && (nitroConfig.builder ?? process.env.NITRO_BUILDER) === "rolldown";
 
   const shouldMinify = nitroConfig.minify !== false;
   const configuredEsbuildOptions = nitroConfig.esbuild?.options || {};
@@ -4168,34 +4207,62 @@ export default defineEventHandler(async (event) => {
   const nitroInstance = await nitro.createNitro(nitroConfig);
   await nitro.prepare(nitroInstance);
   await nitro.copyPublicAssets(nitroInstance);
-  if (esbuildChunkMinifier) {
+  if (esbuildChunkMinifier || useRolldownBuilder) {
     // Register after Nitro and user hooks are prepared so the minifier is the
     // final renderChunk transform, matching Nitro's Terser ordering.
     nitroInstance.hooks.hook("rollup:before", (_nitro, rollupConfig) => {
-      rollupConfig.plugins ||= [];
-      rollupConfig.plugins.push(esbuildChunkMinifier);
+      if (useRolldownBuilder) {
+        // Nitro 3 alpha still emits transform options that this Rolldown API
+        // rejects. The generated native Node adapter contains neither JSX nor
+        // browser-global injections, so omit both without changing its output.
+        const rolldownConfig = rollupConfig as typeof rollupConfig & {
+          inject?: unknown;
+          jsx?: unknown;
+        };
+        delete rolldownConfig.inject;
+        delete rolldownConfig.jsx;
+      }
+      if (esbuildChunkMinifier) {
+        const configuredPlugins = rollupConfig.plugins;
+        rollupConfig.plugins = [
+          ...(Array.isArray(configuredPlugins)
+            ? configuredPlugins
+            : configuredPlugins
+              ? [configuredPlugins]
+              : []),
+          esbuildChunkMinifier,
+        ];
+      }
     });
   }
   await nitro.build(nitroInstance);
   await nitroInstance.close();
 
-  if (canReusePrebuiltSSR) {
-    await copyPrebuiltSSRBundle(
-      ssrBundle,
-      path.join(outputDir, "server", FARM_SSR_OUTPUT_DIR),
-      configuredEsbuildOptions,
-      effectiveMinify,
-      fs,
-    );
-  }
-
-  if (imageRuntime === "node") {
-    await copySharpRuntime(config, root, path.join(outputDir, "server"), fs);
-  }
+  const copyResults = await Promise.allSettled([
+    canReusePrebuiltSSR
+      ? copyPrebuiltSSRBundle(
+          ssrBundle,
+          path.join(outputDir, "server", FARM_SSR_OUTPUT_DIR),
+          configuredEsbuildOptions,
+          effectiveMinify,
+          fs,
+        )
+      : Promise.resolve(),
+    imageRuntime === "node"
+      ? copySharpRuntime(config, root, path.join(outputDir, "server"), fs)
+      : Promise.resolve(),
+  ]);
+  const failedCopy = copyResults.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failedCopy) throw failedCopy.reason;
 
   if (canReusePrebuiltSSR) {
     await registerPrebuiltSSRPackageImport(path.join(outputDir, "server"), ssrEntryFile, fs);
     logger.info("⚡ Reused Farm's prebuilt SSR bundle for the Node output");
+  }
+  if (useRolldownBuilder) {
+    logger.info("⚡ Built the Node adapter with Rolldown");
   }
 
   if (pluginManager) {
@@ -4412,11 +4479,22 @@ async function copySharpRuntime(
 
   const projectRequire = createRequire(path.join(root, "package.json"));
   const copiedPackages = new Map<string, string>();
+  const packageCopies = new Map<string, Promise<void>>();
   const targetNodeModules = path.join(nitroFuncDir, "node_modules");
 
-  async function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
-    if (copiedPackages.has(packageName)) return;
+  function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
+    const activeCopy = packageCopies.get(packageName);
+    if (activeCopy) return activeCopy;
 
+    const packageCopy = copyPackageOnce(packageName, parentRequire);
+    packageCopies.set(packageName, packageCopy);
+    return packageCopy;
+  }
+
+  async function copyPackageOnce(
+    packageName: string,
+    parentRequire: NodeJS.Require,
+  ): Promise<void> {
     const packageJsonPath = resolvePackageJson(parentRequire, packageName);
     if (!packageJsonPath) return;
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
@@ -4425,20 +4503,22 @@ async function copySharpRuntime(
     copiedPackages.set(packageName, String(packageJson.version || "*"));
 
     await fs.mkdir(path.dirname(targetDir), { recursive: true });
-    await fs.cp(packageDir, targetDir, {
-      recursive: true,
-      force: true,
-      dereference: true,
-    });
-
     const packageRequire = createRequire(packageJsonPath);
     const dependencies = {
       ...(packageJson.dependencies || {}),
       ...(packageJson.optionalDependencies || {}),
     };
-    for (const dependency of Object.keys(dependencies)) {
-      await copyPackage(dependency, packageRequire);
-    }
+    await Promise.all([
+      fs.cp(packageDir, targetDir, {
+        recursive: true,
+        force: true,
+        dereference: true,
+        // Reflinks make native runtime packaging nearly metadata-only on
+        // supporting filesystems and transparently fall back to byte copies.
+        mode: fsConstants.COPYFILE_FICLONE,
+      }),
+      ...Object.keys(dependencies).map((dependency) => copyPackage(dependency, packageRequire)),
+    ]);
   }
 
   await copyPackage("sharp", projectRequire);
@@ -4452,7 +4532,7 @@ async function copySharpRuntime(
   const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
   functionPackage.dependencies = {
     ...functionPackage.dependencies,
-    ...Object.fromEntries(copiedPackages),
+    ...Object.fromEntries([...copiedPackages].sort(([left], [right]) => left.localeCompare(right))),
   };
   await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
   logger.info(`🖼️  Bundled Sharp image runtime (${copiedPackages.size} packages)`);

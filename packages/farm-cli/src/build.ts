@@ -1,4 +1,10 @@
-import { loadConfig, resolveConfig, resolveDeployConfig, build, logger } from "@farmjs/core";
+import {
+  build,
+  loadConfig,
+  logger,
+  resolveConfig,
+  resolveDeployConfig,
+} from "@farmjs/core/internal/build-runtime";
 
 export interface BuildFarmOptions {
   root?: string;

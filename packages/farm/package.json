@@ -129,6 +129,9 @@
       "internal/client-runtime": [
         "./dist/internal/client-runtime.d.ts"
       ],
+      "internal/build-runtime": [
+        "./dist/internal/build-runtime.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -403,6 +406,11 @@
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",
       "require": "./dist/internal/client-runtime.cjs"
+    },
+    "./internal/build-runtime": {
+      "types": "./dist/internal/build-runtime.d.ts",
+      "import": "./dist/internal/build-runtime.mjs",
+      "require": "./dist/internal/build-runtime.cjs"
     }
   },
   "scripts": {
@@ -464,6 +472,7 @@
     "react-dom": "^18.2.0 || ^19.0.0"
   },
   "optionalDependencies": {
+    "rolldown": "1.2.0",
     "sharp": "^0.34.5"
   }
 }
