@@ -39,6 +39,9 @@
       "storage": [
         "./dist/storage.d.ts"
       ],
+      "integrations": [
+        "./dist/integrations.d.ts"
+      ],
       "cache": [
         "./dist/cache.d.ts"
       ],
@@ -120,9 +123,18 @@
       "i18n/client": [
         "./dist/i18n/client.d.ts"
       ],
+      "internal/production-runtime": [
+        "./dist/internal/production-runtime.d.ts"
+      ],
+      "internal/client-runtime": [
+        "./dist/internal/client-runtime.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
+      ],
+      "api/route-manager": [
+        "./dist/api/route-manager.d.ts"
       ],
       "client": [
         "./types/client.d.ts",
@@ -166,6 +178,11 @@
       "types": "./dist/storage.d.ts",
       "import": "./dist/storage.mjs",
       "require": "./dist/storage.cjs"
+    },
+    "./integrations": {
+      "types": "./dist/integrations.d.ts",
+      "import": "./dist/integrations.mjs",
+      "require": "./dist/integrations.cjs"
     },
     "./cache": {
       "types": "./dist/cache.d.ts",
@@ -322,6 +339,11 @@
       "import": "./dist/api.mjs",
       "require": "./dist/api.cjs"
     },
+    "./api/route-manager": {
+      "types": "./dist/api/route-manager.d.ts",
+      "import": "./dist/api/route-manager.mjs",
+      "require": "./dist/api/route-manager.cjs"
+    },
     "./router": {
       "types": "./dist/router.d.ts",
       "import": "./dist/router.mjs",
@@ -371,6 +393,16 @@
       "types": "./dist/i18n/client.d.ts",
       "import": "./dist/i18n/client.mjs",
       "require": "./dist/i18n/client.cjs"
+    },
+    "./internal/production-runtime": {
+      "types": "./dist/internal/production-runtime.d.ts",
+      "import": "./dist/internal/production-runtime.mjs",
+      "require": "./dist/internal/production-runtime.cjs"
+    },
+    "./internal/client-runtime": {
+      "types": "./dist/internal/client-runtime.d.ts",
+      "import": "./dist/internal/client-runtime.mjs",
+      "require": "./dist/internal/client-runtime.cjs"
     }
   },
   "scripts": {
