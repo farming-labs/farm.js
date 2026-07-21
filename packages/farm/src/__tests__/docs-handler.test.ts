@@ -17,6 +17,17 @@ import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
+import { farmDocsPixelBorderCss } from "../docs/pixel-border-css";
+
+describe("farmDocsPixelBorderCss", () => {
+  it("bundles the search dialog layout for production adapters", () => {
+    expect(farmDocsPixelBorderCss).toContain(".omni-overlay {\n  position: fixed;");
+    expect(farmDocsPixelBorderCss).toContain(
+      ".omni-content {\n  --omni-content-top: clamp(5rem, 16vh, 7rem);\n  position: fixed;",
+    );
+    expect(farmDocsPixelBorderCss).toContain(".omni-search-input {\n  width: 0;\n  flex: 1;");
+  });
+});
 
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
