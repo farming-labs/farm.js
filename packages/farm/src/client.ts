@@ -90,11 +90,7 @@ export {
   replaceState,
 } from "./client/spa-router";
 export { installChunkErrorRecovery, isChunkLoadError } from "./client/chunk-recovery";
-export {
-  createClientPluginManager,
-  defineClientPlugin,
-  FarmClientPluginManager,
-} from "./client/plugin";
+export { createClientPluginManager, FarmClientPluginManager } from "./client/plugin";
 export type {
   LinkProps,
   PrefetchBehavior,
@@ -124,11 +120,9 @@ export type {
   FarmClientPerformanceEvent,
   FarmClientPlugin,
   FarmClientPluginCloseEvent,
-  FarmClientPluginDefinition,
   FarmClientPluginEnforce,
   FarmClientPluginErrorEvent,
   FarmClientPluginErrorPhase,
-  FarmClientPluginFactory,
   FarmClientPluginManagerOptions,
   FarmClientPluginMetadata,
   FarmClientPluginRegistration,

@@ -4,7 +4,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createClientPluginManager,
-  defineClientPlugin,
+  type FarmClientPlugin,
   type FarmClientPluginRegistration,
   type FarmClientPluginRouter,
 } from "../client/plugin";
@@ -39,7 +39,7 @@ describe("client plugin lifecycle", () => {
     const registration = (name: string, enforce?: "pre" | "post") => ({
       name,
       enforce,
-      definition: defineClientPlugin({
+      definition: {
         setup() {
           calls.push(`${name}:setup`);
           return { name };
@@ -69,7 +69,7 @@ describe("client plugin lifecycle", () => {
         close({ state }) {
           calls.push(`${state.name}:close`);
         },
-      }),
+      } as FarmClientPlugin<{ name: string }>,
     });
 
     const manager = createManager([
@@ -123,27 +123,29 @@ describe("client plugin lifecycle", () => {
     ]);
   });
 
-  it("passes frozen public options to a client plugin factory", async () => {
+  it("passes frozen public data to the inline client lifecycle", async () => {
     const received: unknown[] = [];
-    const publicOptions = { projectId: "storefront" };
+    const publicData = { projectId: "storefront" };
     const manager = createManager([
       {
         name: "analytics",
-        options: publicOptions,
-        definition(options) {
-          received.push(options, Object.isFrozen(options));
-          return defineClientPlugin({
-            setup(event) {
-              received.push(event.options, event.plugin.name, event.isDev);
-            },
-          });
+        public: publicData,
+        definition: {
+          setup(event) {
+            received.push(
+              event.public,
+              Object.isFrozen(event.public),
+              event.plugin.name,
+              event.isDev,
+            );
+          },
         },
       },
     ]);
 
     await manager.start();
 
-    expect(received).toEqual([publicOptions, true, publicOptions, "analytics", true]);
+    expect(received).toEqual([publicData, true, "analytics", true]);
   });
 
   it("does not re-enter startup when setup reports an error", async () => {
@@ -155,20 +157,20 @@ describe("client plugin lifecycle", () => {
       {
         name: "reporter",
         enforce: "pre",
-        definition: defineClientPlugin({
+        definition: {
           error({ error, phase }) {
             calls.push(`${phase}:${error === failure}`);
           },
-        }),
+        },
       },
       {
         name: "diagnostic",
-        definition: defineClientPlugin({
+        definition: {
           async setup() {
             calls.push("setup");
             await manager.reportError(failure, "setup:diagnostic");
           },
-        }),
+        },
       },
     ]);
 
@@ -186,13 +188,13 @@ describe("client plugin lifecycle", () => {
     const manager = createManager([
       {
         name: "navigation-observer",
-        definition: defineClientPlugin({
+        definition: {
           navigation: {
             loaded({ to }) {
               loaded.push(to.pathname);
             },
           },
-        }),
+        },
       },
     ]);
 
@@ -219,17 +221,17 @@ describe("client plugin lifecycle", () => {
     const manager = createManager([
       {
         name: "broken",
-        definition: defineClientPlugin({
+        definition: {
           navigation: {
             before() {
               throw failure;
             },
           },
-        }),
+        },
       },
       {
         name: "reporter",
-        definition: defineClientPlugin({
+        definition: {
           navigation: {
             before() {
               calls.push("continued");
@@ -238,7 +240,7 @@ describe("client plugin lifecycle", () => {
           error({ error, phase }) {
             calls.push(`${phase}:${error === failure}`);
           },
-        }),
+        },
       },
     ]);
 
@@ -253,7 +255,7 @@ describe("client plugin lifecycle", () => {
     const manager = createManager([
       {
         name: "errors",
-        definition: defineClientPlugin({
+        definition: {
           navigation: {
             resolved() {
               calls.push("resolved");
@@ -265,7 +267,7 @@ describe("client plugin lifecycle", () => {
           error({ phase }) {
             calls.push(phase);
           },
-        }),
+        },
       },
     ]);
 
