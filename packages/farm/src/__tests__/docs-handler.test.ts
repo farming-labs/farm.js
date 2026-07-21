@@ -231,6 +231,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("data-farm-docs-search-root");
     expect(html).toContain('data-api="/api/docs"');
     expect(html).toContain('aria-label="Search documentation"');
+    expect(html).toContain("window.__farmDocsSearchBootstrap");
+    expect(htmlText.indexOf("window.__farmDocsSearchBootstrap")).toBeLessThan(
+      htmlText.indexOf("<body>"),
+    );
     expect(html).toContain('<script type="module" src="/farm-client.js"></script>');
     const topbar = htmlText.slice(
       htmlText.indexOf('<header class="topbar">'),
@@ -404,6 +408,7 @@ describe("createFarmDocsHandler", () => {
       expect(html).not.toContain('data-search-full=""');
       expect(html).not.toContain('id="farm-docs-search-root"');
       expect(html).not.toContain('aria-keyshortcuts="Meta+K Control+K"');
+      expect(html).not.toContain("window.__farmDocsSearchBootstrap");
       expect(html).not.toContain('<script type="module" src="/farm-client.js"></script>');
     }
   });

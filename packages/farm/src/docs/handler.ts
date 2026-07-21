@@ -25,7 +25,7 @@ import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
 import { resolveFarmDocsPageLastModified } from "./last-modified";
 import { farmDocsPixelBorderCss } from "./pixel-border-css";
-import { isFarmDocsSearchEnabled } from "./search-client";
+import { generateFarmDocsSearchBootstrapRuntime, isFarmDocsSearchEnabled } from "./search-client";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
@@ -1492,6 +1492,10 @@ function renderDocsSearchMount(clientEntry: string): string {
   <script type="module" src="${escapeAttribute(clientEntry)}"></script>`;
 }
 
+function renderDocsSearchBootstrapScript(): string {
+  return `<script>${generateFarmDocsSearchBootstrapRuntime()}</script>`;
+}
+
 function renderPixelToc(items: TocItem[]): string {
   if (items.length === 0) return '<p class="toc-empty">No sections</p>';
   return `<div class="toc-track">
@@ -1788,6 +1792,7 @@ function renderPixelDocsHtml(
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   <style>${themeCss}
 ${renderFarmDocsBridgeCss(docs)}</style>
+  ${searchEnabled ? renderDocsSearchBootstrapScript() : ""}
 </head>
 <body>
   <div id="nd-docs-layout" class="grid">
