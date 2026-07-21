@@ -2,11 +2,22 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  generateFarmDocsSearchBootstrapRuntime,
   generateFarmDocsSearchClientRuntime,
   isFarmDocsSearchEnabled,
 } from "../docs/search-client";
 
 describe("Farm docs search client", () => {
+  it("captures search interactions before the client bundle is ready", () => {
+    const runtime = generateFarmDocsSearchBootstrapRuntime();
+
+    expect(runtime).toContain("__farmDocsSearchBootstrap");
+    expect(runtime).toContain("[data-search-full]");
+    expect(runtime).toContain("__FARM_DOCS_SEARCH_PENDING__");
+    expect(runtime).toContain("__FARM_MOUNT_DOCS_SEARCH__?.()");
+    expect(runtime).toContain('queue("keyboard",event)');
+  });
+
   it("mounts the shared Omni React search component", () => {
     const runtime = generateFarmDocsSearchClientRuntime(true, "/theme/docs-command-search.mjs");
 
@@ -15,6 +26,10 @@ describe("Farm docs search client", () => {
     expect(runtime).toContain("data-farm-docs-search-root");
     expect(runtime).toContain("container.dataset.api || '/api/docs'");
     expect(runtime).toContain("React.createElement");
+    expect(runtime).toContain("__FARM_DOCS_SEARCH_BRIDGE_ACTIVE__");
+    expect(runtime).toContain("FarmDocsSearchBridge");
+    expect(runtime).toContain("queueMicrotask");
+    expect(runtime).toContain("trigger.click()");
     expect(runtime).not.toContain("fetch('/api/docs");
   });
 
