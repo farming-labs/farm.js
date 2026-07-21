@@ -149,6 +149,39 @@ const frameworks = [
     outputEntry: ".output/server/index.mjs",
     clean: [".nuxt", ".output", "node_modules/.cache", "node_modules/.vite"],
   },
+  {
+    id: "tanstack",
+    label: "TanStack Start",
+    version: "1.168.32",
+    stack: "React 19.2.4 · Vite 8.1.5",
+    directory: "tanstack",
+    devHost: "localhost",
+    installedPackages: [
+      { name: "@tanstack/react-start", version: "1.168.32" },
+      { name: "@tanstack/react-router", version: "1.170.18" },
+      { name: "react", version: "19.2.4" },
+      { name: "react-dom", version: "19.2.4" },
+      { name: "vite", version: "8.1.5" },
+      { name: "nitro", version: "3.0.260610-beta" },
+    ],
+    cli: "node_modules/vite/bin/vite.js",
+    devArgs: (port) => ["dev", "--host", "localhost", "--port", String(port), "--strictPort"],
+    buildArgs: () => ["build"],
+    production: (port) => ({
+      command: process.execPath,
+      args: [".output/server/index.mjs"],
+      env: { HOST: "127.0.0.1", PORT: String(port), NODE_ENV: "production" },
+    }),
+    outputEntry: ".output/server/index.mjs",
+    clean: [
+      ".nitro",
+      ".output",
+      ".tanstack",
+      "node_modules/.nitro",
+      "node_modules/.vite",
+      "node_modules/.vite-temp",
+    ],
+  },
 ];
 
 function parseOptions(argv) {
@@ -683,9 +716,11 @@ async function collectBenchmarkInputFiles(directory = benchmarkDir, relativeDire
     "node_modules",
     ".farm",
     ".next",
+    ".nitro",
     ".nuxt",
     ".output",
     ".svelte-kit",
+    ".tanstack",
     "build",
     "results",
   ]);
@@ -856,7 +891,7 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
       responseLatency:
         "Sequential full-body loopback HTTP requests with a fresh connection; warmups excluded",
       productionCommand:
-        "Recommended framework production command; Next.js uses next start and the other rows use generated server entries",
+        "Recommended framework production command; Next.js uses next start and every other row uses a generated server entry",
     },
     quality: {
       contendedRounds,
@@ -1086,7 +1121,7 @@ async function runBenchmark() {
     const order = shuffled(selected, options.seed - 1);
     console.log("\nBurn-in (discarded): " + order.map((framework) => framework.label).join(" → "));
     for (const framework of order) {
-      process.stdout.write("  " + framework.label.padEnd(12) + " ");
+      process.stdout.write("  " + framework.label.padEnd(14) + " ");
       const result = await runRound(framework, -1, options);
       console.log(
         "dev " +
@@ -1117,7 +1152,7 @@ async function runBenchmark() {
     );
 
     for (const framework of order) {
-      process.stdout.write("  " + framework.label.padEnd(12) + " ");
+      process.stdout.write("  " + framework.label.padEnd(14) + " ");
       const result = await runRound(framework, round, options);
       const samples = samplesByFramework.get(framework.id);
       samples.devFirstPageMs.push(result.devFirstPageMs);

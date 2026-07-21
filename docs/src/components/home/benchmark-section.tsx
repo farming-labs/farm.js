@@ -2,6 +2,7 @@ import { ExternalLink, Gauge } from "lucide-react";
 import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
 import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
 import svelteIconUrl from "simple-icons/icons/svelte.svg?url";
+import tanstackIconUrl from "simple-icons/icons/tanstack.svg?url";
 import farmingLabsLogoUrl from "../../assets/farming-labs-logo-dark.svg?url";
 import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
 
@@ -15,6 +16,7 @@ const frameworkIcons = {
   next: nextIconUrl,
   sveltekit: svelteIconUrl,
   nuxt: nuxtIconUrl,
+  tanstack: tanstackIconUrl,
 } as const;
 
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
@@ -224,13 +226,20 @@ function MobileBenchmarkResults() {
     <div className="farm-top-rule xl:hidden">
       <h3 className="sr-only">Framework benchmark results</h3>
       <ul className="grid gap-px bg-white/12 md:grid-cols-2">
-        {benchmarkReport.frameworks.map((framework) => {
+        {benchmarkReport.frameworks.map((framework, index) => {
           const isFarm = framework.id === "farm";
+          const isOddLastCard =
+            benchmarkReport.frameworks.length % 2 === 1 &&
+            index === benchmarkReport.frameworks.length - 1;
 
           return (
             <li
               key={framework.id}
-              className={"relative p-5 sm:p-6 " + (isFarm ? "bg-white/[0.045]" : "bg-black")}
+              className={
+                "relative p-5 sm:p-6 " +
+                (isFarm ? "bg-white/[0.045]" : "bg-black") +
+                (isOddLastCard ? " md:col-span-2" : "")
+              }
             >
               {isFarm ? (
                 <span aria-hidden className="absolute inset-y-0 left-0 w-px bg-white" />
@@ -374,9 +383,9 @@ export function BenchmarkSection() {
               Farm.js reached its first rendered dev page in a median of {firstDevPage}
             </h2>
             <p className="mt-5 max-w-2xl text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-              Farm.js, Next.js, SvelteKit, and Nuxt ran the same small dynamic-SSR fixture on one
-              machine. Startup, fixture-project build, warm response, and payload results are
-              published side by side with every raw sample.
+              Farm.js, Next.js, SvelteKit, Nuxt, and TanStack Start ran the same small dynamic-SSR
+              fixture on one machine. Startup, fixture-project build, warm response, and payload
+              results are published side by side with every raw sample.
             </p>
           </div>
 

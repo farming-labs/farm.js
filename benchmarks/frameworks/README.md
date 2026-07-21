@@ -1,7 +1,7 @@
 # Meta-framework benchmark
 
-This suite compares Farm.js, Next.js, SvelteKit, and Nuxt as complete server-rendered framework
-stacks. It does not treat their underlying build tools as interchangeable.
+This suite compares Farm.js, Next.js, SvelteKit, Nuxt, and TanStack Start as complete
+server-rendered framework stacks. It does not treat their underlying build tools as interchangeable.
 
 ## Fixture and validation
 
@@ -44,16 +44,17 @@ are applied consistently.
 
 Production boot and response measurements use the normal framework server path:
 
-| Framework | Production command                         |
-| --------- | ------------------------------------------ |
-| Farm.js   | Generated `.farm/.output/server/index.mjs` |
-| Next.js   | `next start`                               |
-| SvelteKit | Adapter-generated `build/index.js`         |
-| Nuxt      | Generated `.output/server/index.mjs`       |
+| Framework      | Production command                         |
+| -------------- | ------------------------------------------ |
+| Farm.js        | Generated `.farm/.output/server/index.mjs` |
+| Next.js        | `next start`                               |
+| SvelteKit      | Adapter-generated `build/index.js`         |
+| Nuxt           | Generated `.output/server/index.mjs`       |
+| TanStack Start | Generated `.output/server/index.mjs`       |
 
 ## Reproduce
 
-Use a single even-numbered LTS Node release for the entire comparison. The full four-framework suite
+Use a single even-numbered LTS Node release for the entire comparison. The full five-framework suite
 requires Node 22.19+, Node 24.11+, or a newer supported even release; the published run uses Node
 24.14.0. From the repository root, install the main workspace and the isolated benchmark workspace:
 
@@ -74,7 +75,7 @@ To reproduce and publish the canonical report and landing-page data:
 node benchmarks/frameworks/run.mjs --runs 7 --requests 30 --warmups 5 --publish
 ```
 
-`--publish` requires all four frameworks, at least seven measured rounds, 30 measured requests, five
+`--publish` requires all five frameworks, at least seven measured rounds, 30 measured requests, five
 warmups, the discarded burn-in, and a fresh untimed build of the local Farm packages. It writes:
 
 - `results/latest.json` — metadata, per-round data, and every raw sample.
