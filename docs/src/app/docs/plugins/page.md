@@ -1,12 +1,12 @@
 ---
 title: "Plugin Ecosystem"
-description: "Extend Farm's framework lifecycle with typed config, runtime, router, render, build, and development hooks."
+description: "Extend Farm's server and browser lifecycle with typed runtime, router, render, build, navigation, and development hooks."
 section: "Extending"
 ---
 
 # Plugin Ecosystem
 
-Plugins are Farm's framework extension surface. Use a plugin to change how Farm configures an app, handles requests, discovers routes, renders HTML, builds output, or responds to development events.
+Plugins are Farm's framework extension surface. Use a plugin to change how Farm configures an app, handles requests, discovers routes, renders HTML, builds output, observes browser hydration and navigation, or responds to development events.
 
 Use an [integration](/docs/integrations) for a product or service such as authentication, payments, email, analytics, or a database. Integrations own product config, endpoints, typed callers, and providers. Plugins own framework lifecycle behavior.
 
@@ -34,6 +34,7 @@ The lifecycle is intentionally broad enough for infrastructure and tooling witho
 | Traffic | Implement global redirects, rewrites, compression, maintenance mode, or response tagging. |
 | Routing | Generate route manifests, enforce route conventions, or report conflicting patterns. |
 | Rendering | Inject metadata, transform final HTML, or measure server rendering. |
+| Browser runtime | Observe hydration, navigation, errors, performance entries, and cleanup. |
 | Deployment | Configure Nitro output, add platform metadata, or validate runtime capabilities. |
 | Development | Add a route inspector, HMR diagnostics, performance reporting, or custom dev-server behavior. |
 | Organization tooling | Package shared logging, security, and build policy for every company application. |
@@ -102,6 +103,11 @@ export const frameworkPlugin = definePlugin({
     server(viteServer, { state }) {},
     update(update, { state }) {},
   },
+
+  client: {
+    source: "./src/plugins/framework-plugin.client.ts",
+    public: { release: "2026.07" },
+  },
 });
 ```
 
@@ -116,6 +122,7 @@ Only define the groups your plugin needs.
 | `render` | Observe rendering or transform final HTML. |
 | `build` | Run around bundling and configure the Nitro build. |
 | `dev` | Access the Vite server and HMR updates. |
+| `client` | Attach a browser-safe lifecycle module with explicit public options. |
 
 ## Complete lifecycle reference
 
@@ -133,6 +140,7 @@ Only define the groups your plugin needs.
 | `render` | No | Observes page rendering and may transform final HTML. |
 | `build` | No | Observes bundling and may configure the Nitro build. |
 | `dev` | No | Accesses the Vite development server and HMR updates. |
+| `client` | No | Points to the browser module used for setup, hydration, navigation, errors, performance, and cleanup. |
 
 Both hooks receive Farm's plugin context. `setup` additionally receives the resolved `env`. Its returned state is private to that plugin instance and is not serialized to the browser.
 
@@ -200,6 +208,23 @@ Adding `render.html` requires Farm to buffer the final document. Prefer `render.
 | `dev.update` | Observe changed files and invalidated module IDs during HMR. |
 
 Development hooks do not run as part of the deployed request lifecycle.
+
+## Client lifecycle
+
+The optional `client` property keeps browser behavior under the same plugin identity and ordering as its server hooks. It points to a separate module so Farm can bundle browser code without serializing the server plugin, its setup state, or private environment values.
+
+```ts
+client: {
+  source: "./src/plugins/tracing.client.ts",
+  public: {
+    release: "2026.07",
+  },
+},
+```
+
+The client module uses `defineClientPlugin()` from `@farmjs/core/plugin/client`. Farm runs setup once, surrounds initial hydration, emits navigation phases from the active router, isolates hook failures, aborts superseded navigation sessions, and closes plugins during page hide or HMR disposal.
+
+Only JSON-safe values in `client.public` enter the browser bundle. Server setup state, request context, and private environment values never cross this boundary. See [Client Plugins](/docs/plugins/client) for the complete interface and security model.
 
 ## Runtime flow
 
@@ -304,6 +329,6 @@ The Node-specific `beforeRequest` and `afterResponse` hooks remain available as 
 - Use `waitUntil()` only for work that may safely outlive the response.
 - Make `runtime.error` resilient; an error reporter must not hide the original failure.
 - Release timers, sockets, and watchers in `runtime.close` when the host exposes shutdown.
-- Test hook ordering, short circuits, transformed bodies and headers, context collisions, and production output.
+- Test server and client hook ordering, short circuits, transformed bodies and headers, context collisions, hydration, SPA navigation, and production output.
 
 Continue with [Create a Plugin](/docs/plugins/create-plugin) for complete examples.

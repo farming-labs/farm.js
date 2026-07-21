@@ -3,7 +3,8 @@ import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
 import { logger, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
-import type { FarmPluginRuntimeSession, PluginManager } from "./plugin";
+import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
+import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import { OpenAPIManager } from "./openapi/manager";
@@ -1869,6 +1870,8 @@ export function farmPlugin(
             resolvedConfig?.root || server?.config.root || process.cwd(),
           ),
           resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production"),
+          resolvedConfig?.plugins || [],
+          resolvedConfig?.root || server?.config.root || process.cwd(),
         );
       }
 
@@ -2651,16 +2654,20 @@ function generateClientCode(
   docsSearchEnabled = false,
   docsSearchModuleId?: string,
   devtools = resolveFarmDevtoolsConfig(false, "production"),
+  plugins: readonly FarmPlugin[] = [],
+  root = process.cwd(),
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
     ? `import { ClerkProvider } from '@clerk/react';`
     : "";
+  const clientPluginEntry = generateFarmClientPluginEntryCode(plugins, root);
 
   return `
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
 import { installChunkErrorRecovery, SPARouter } from '@farmjs/core/client'
+import { createClientPluginManager } from '@farmjs/core/plugin/client'
 import { reviveDeferredData } from '@farmjs/core/deferred'
 import {
   createFarmDeploymentMismatchError,
@@ -2668,6 +2675,7 @@ import {
   isFarmDeploymentMismatchResponse,
 } from '@farmjs/core/deployment'
 ${providerImportBlock}
+${clientPluginEntry.imports}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 ${generateFarmDevtoolsClientRuntime(devtools)}
 
@@ -3020,6 +3028,25 @@ const spaRouter = new SPARouter({
   shouldUseDocumentNavigation: matchesDocumentNavigation,
 });
 window.__FARM_SPA_ROUTER__ = spaRouter;
+
+const farmClientRuntime = createClientPluginManager(
+  ${clientPluginEntry.registrations},
+  {
+    router: spaRouter,
+    isDev: import.meta.env?.DEV === true,
+    isProd: import.meta.env?.PROD === true,
+    deploymentId: window.__FARM_DEPLOYMENT_ID__,
+  },
+);
+spaRouter.setClientPluginManager(farmClientRuntime);
+window.__FARM_CLIENT_RUNTIME__ = farmClientRuntime;
+void farmClientRuntime.start();
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    void farmClientRuntime.close('hmr');
+  });
+}
 
 // Cache for loaded page modules
 const pageModuleCache = new Map();
@@ -3534,14 +3561,26 @@ async function hydrate() {
       return
     }
 
-    const hydrated = await tryHydrateImportedPage(
-      pageContainer,
-      { modulePath },
-      currentPageProps.params || {},
-      layouts,
-      shouldHydrate,
-      currentPageProps,
-    ).catch(() => false);
+    const hydrationSession = await farmClientRuntime.beginHydration({
+      container: pageContainer,
+      mode: shouldHydrate ? 'hydrate' : 'render',
+    });
+
+    let hydrated = false;
+    try {
+      hydrated = await tryHydrateImportedPage(
+        pageContainer,
+        { modulePath },
+        currentPageProps.params || {},
+        layouts,
+        shouldHydrate,
+        currentPageProps,
+      );
+      await farmClientRuntime.completeHydration(hydrationSession);
+    } catch (error) {
+      await farmClientRuntime.failHydration(hydrationSession, error);
+      throw error;
+    }
 
     if (hydrated) {
       replayPreHydrationClicks();

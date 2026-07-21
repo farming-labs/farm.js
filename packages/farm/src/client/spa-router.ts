@@ -6,10 +6,8 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from "../deployment";
-import {
-  _hydrateFarmI18n,
-  isFarmLocaleChangeHref,
-} from "../i18n/client-runtime";
+import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
+import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 
 /**
@@ -112,6 +110,14 @@ export class SPARouter {
   private options: Required<Omit<RouterOptions, "deploymentId">> &
     Pick<RouterOptions, "deploymentId">;
   private onNavigate?: (data: PageData) => Promise<void>;
+  private clientPlugins?: Pick<
+    FarmClientPluginManager,
+    | "beginNavigation"
+    | "markNavigationLoaded"
+    | "resolveNavigation"
+    | "scheduleNavigationRendered"
+    | "failNavigation"
+  >;
 
   constructor(options: RouterOptions = {}) {
     this.options = {
@@ -145,6 +151,13 @@ export class SPARouter {
   }
 
   /**
+   * Connect Farm's browser plugin lifecycle to SPA navigation.
+   */
+  setClientPluginManager(manager: FarmClientPluginManager) {
+    this.clientPlugins = manager;
+  }
+
+  /**
    * Navigate to a new URL
    */
   async navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
@@ -156,7 +169,10 @@ export class SPARouter {
     const search = url.search;
     const fullPath = pathname + search;
 
-    if (isFarmLocaleChangeHref(url.toString()) || this.options.shouldUseDocumentNavigation(pathname)) {
+    if (
+      isFarmLocaleChangeHref(url.toString()) ||
+      this.options.shouldUseDocumentNavigation(pathname)
+    ) {
       if (replace) window.location.replace(url.toString());
       else window.location.assign(url.toString());
       return;
@@ -188,9 +204,19 @@ export class SPARouter {
       action: replace ? "replace" : "push",
     });
 
+    let clientNavigation: FarmClientNavigationSession | undefined;
     try {
+      clientNavigation = await this.clientPlugins?.beginNavigation({
+        from,
+        to: url,
+        action: replace ? "replace" : "push",
+      });
+
       // Fetch page data (from cache or server)
       const pageData = await this.fetchPageData(fullPath);
+      if (clientNavigation) {
+        await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
+      }
 
       if (pageData.isClientComponent === false) {
         this.finishNavigation();
@@ -210,8 +236,15 @@ export class SPARouter {
         }),
       );
 
+      if (clientNavigation) {
+        await this.clientPlugins?.resolveNavigation(clientNavigation);
+        void this.clientPlugins?.scheduleNavigationRendered(clientNavigation);
+      }
       this.finishNavigation();
     } catch (error) {
+      if (clientNavigation) {
+        await this.clientPlugins?.failNavigation(clientNavigation, error);
+      }
       this.finishNavigation();
       console.error("[Farm.js] Navigation error:", error);
       // Fall back to full page navigation
@@ -387,7 +420,7 @@ export class SPARouter {
       return;
     }
 
-    const transition = startViewTransition(() => callback());
+    const transition = startViewTransition.call(document, () => callback());
     const updateDone = transition?.updateCallbackDone || transition?.ready;
     if (updateDone && typeof updateDone.then === "function") {
       await updateDone;
@@ -464,8 +497,17 @@ export class SPARouter {
       action: "pop",
     });
 
+    let clientNavigation: FarmClientNavigationSession | undefined;
     try {
+      clientNavigation = await this.clientPlugins?.beginNavigation({
+        from: null,
+        to: window.location.href,
+        action: "pop",
+      });
       const pageData = await this.fetchPageData(path);
+      if (clientNavigation) {
+        await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
+      }
 
       // Update document title
       if (pageData.metadata?.title) {
@@ -484,8 +526,15 @@ export class SPARouter {
         this.restoreScrollPosition(window.location.pathname);
       }
 
+      if (clientNavigation) {
+        await this.clientPlugins?.resolveNavigation(clientNavigation);
+        void this.clientPlugins?.scheduleNavigationRendered(clientNavigation);
+      }
       this.finishNavigation();
     } catch (error) {
+      if (clientNavigation) {
+        await this.clientPlugins?.failNavigation(clientNavigation, error);
+      }
       this.finishNavigation();
       console.error("[Farm.js] Popstate navigation error:", error);
       // Reload the page as fallback

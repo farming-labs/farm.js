@@ -90,6 +90,11 @@ export {
   replaceState,
 } from "./client/spa-router";
 export { installChunkErrorRecovery, isChunkLoadError } from "./client/chunk-recovery";
+export {
+  createClientPluginManager,
+  defineClientPlugin,
+  FarmClientPluginManager,
+} from "./client/plugin";
 export type {
   LinkProps,
   PrefetchBehavior,
@@ -104,6 +109,33 @@ export type {
   RouteParams,
 } from "./client/link";
 export type { FarmChunkRecoveryOptions } from "./client/chunk-recovery";
+export type {
+  FarmClientHydrationCompleteEvent,
+  FarmClientHydrationEvent,
+  FarmClientHydrationMode,
+  FarmClientHydrationSession,
+  FarmClientLocation,
+  FarmClientNavigationAction,
+  FarmClientNavigationErrorEvent,
+  FarmClientNavigationEvent,
+  FarmClientNavigationLoadedEvent,
+  FarmClientNavigationResolvedEvent,
+  FarmClientNavigationSession,
+  FarmClientPerformanceEvent,
+  FarmClientPlugin,
+  FarmClientPluginCloseEvent,
+  FarmClientPluginDefinition,
+  FarmClientPluginEnforce,
+  FarmClientPluginErrorEvent,
+  FarmClientPluginErrorPhase,
+  FarmClientPluginFactory,
+  FarmClientPluginManagerOptions,
+  FarmClientPluginMetadata,
+  FarmClientPluginRegistration,
+  FarmClientPluginRouter,
+  FarmClientPluginSetupEvent,
+  FarmClientPluginStateEvent,
+} from "./client/plugin";
 export type { UseBlockerOptions, UseBlockerReturn, UseRouterOptions } from "./client/router";
 export type {
   FarmNavigateOptions,

@@ -128,6 +128,7 @@ export class FarmApp {
       deploy: config.deploy || {},
       storage: config.storage || {},
       integrations: config.integrations || {},
+      plugins: config.plugins || [],
       migrations: config.migrations || { commands: [] },
       cron: resolveCronConfig(config.cron),
       workflows: resolveWorkflowsConfig(config.workflows),
