@@ -7,8 +7,8 @@ import farmingLabsLogoUrl from "../../assets/farming-labs-logo-dark.svg?url";
 import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
 
 const benchmarkLinks = {
-  methodology: "https://github.com/farm-js/farm.js/blob/main/benchmarks/frameworks/README.md",
-  results: "https://github.com/farm-js/farm.js/blob/main/benchmarks/frameworks/results/latest.json",
+  methodology: "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/README.md",
+  results: "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/results/latest.json",
 } as const;
 
 const frameworkIcons = {
