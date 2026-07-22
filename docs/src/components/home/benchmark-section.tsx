@@ -594,7 +594,7 @@ function BenchmarkAreaChart() {
                       <rect
                         fill="black"
                         fillOpacity={isFarm ? "0.96" : "0.94"}
-                        height="56"
+                        height="62"
                         stroke="white"
                         strokeOpacity={isFarm ? "0.16" : "0.12"}
                         width="226"
@@ -615,10 +615,10 @@ function BenchmarkAreaChart() {
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="10"
-                        x={tooltipX + 28}
+                        x={tooltipX + 32}
                         y={tooltipY + 17}
                       >
-                        {framework.label}
+                        {framework.label.toUpperCase()}
                       </text>
                       <text
                         fill="currentColor"
@@ -626,7 +626,7 @@ function BenchmarkAreaChart() {
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="9"
                         x={tooltipX + 10}
-                        y={tooltipY + 35}
+                        y={tooltipY + 39}
                       >
                         {point.label.toUpperCase()} MEDIAN ·{" "}
                         {formatMetricValue(point.metric, point.rawValue)}
@@ -637,7 +637,7 @@ function BenchmarkAreaChart() {
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="8"
                         x={tooltipX + 10}
-                        y={tooltipY + 48}
+                        y={tooltipY + 53}
                       >
                         RANGE {getColumnRangeLabel(point.metric)}
                       </text>
