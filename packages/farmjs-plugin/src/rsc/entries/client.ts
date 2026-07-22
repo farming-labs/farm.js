@@ -13,7 +13,16 @@ import type { EntryContext } from "../types.js";
  */
 export function generateClientEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
+  const routesDir = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
+  const routesPath = routesDir ? `/${routesDir}` : "";
+  const globalsCssPath = `/${ctx.srcDir}${routesPath}/globals.css`;
   let imports = `
+const farmGlobalStylesheets = import.meta.glob(${JSON.stringify(globalsCssPath)}, {
+  eager: true,
+  import: 'default',
+  query: '?url',
+});
+export const farmGlobalStylesheet = Object.values(farmGlobalStylesheets)[0];
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
