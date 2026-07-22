@@ -614,8 +614,8 @@ function BenchmarkAreaChart() {
                         dominantBaseline="middle"
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
-                        fontSize="9"
-                        x={tooltipX + 32}
+                        fontSize="8.5"
+                        x={tooltipX + 29}
                         y={tooltipY + 17}
                       >
                         {framework.label.toUpperCase()}
