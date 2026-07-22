@@ -33,7 +33,7 @@ const chartMetrics = [
   ["responseBytes", "HTML"],
 ] as const satisfies readonly (readonly [MetricKey, string])[];
 
-const chartInsetX = 92;
+const chartInsetX = 42;
 const chartTopY = 250;
 
 function formatByteCount(bytes: number) {
@@ -313,20 +313,6 @@ function BenchmarkAreaChart() {
 
     return 0;
   });
-  const devStartLabels = foregroundSeries
-    .map(({ framework, points }) => ({ framework, point: points[0] }))
-    .filter((item): item is { framework: FrameworkResult; point: ChartPoint } => Boolean(item.point))
-    .sort((a, b) => a.point.y - b.point.y)
-    .reduce<Array<{ framework: FrameworkResult; point: ChartPoint; y: number }>>((labels, item) => {
-      const previous = labels[labels.length - 1];
-      const minimumY = previous ? previous.y + 14 : chartTopY + 12;
-      const y = Math.min(baselineY - 8, Math.max(item.point.y, minimumY));
-
-      labels.push({ ...item, y });
-
-      return labels;
-    }, []);
-
   return (
     <div className="relative col-span-full min-h-[40rem] overflow-hidden bg-black">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 max-w-2xl px-6 pt-6 sm:px-12 sm:pt-12">
@@ -564,48 +550,6 @@ function BenchmarkAreaChart() {
             </g>
             );
           })}
-          <g aria-hidden="true">
-            <text
-              fill="currentColor"
-              fillOpacity="0.32"
-              fontFamily="var(--font-geist-mono, monospace)"
-              fontSize="8"
-              x={chartInsetX - 14}
-              y={chartTopY - 8}
-              textAnchor="end"
-            >
-              DEV START
-            </text>
-            {devStartLabels.map(({ framework, point, y }) => {
-              const isFarm = framework.id === "farm";
-
-              return (
-                <g key={`${framework.id}-dev-start-label`}>
-                  <path
-                    d={`M ${(chartInsetX - 10).toFixed(2)} ${y.toFixed(2)} L ${(chartInsetX - 4).toFixed(
-                      2,
-                    )} ${y.toFixed(2)} L ${(point.x - 7).toFixed(2)} ${point.y.toFixed(2)}`}
-                    fill="none"
-                    stroke="currentColor"
-                    strokeOpacity={isFarm ? "0.38" : "0.16"}
-                    strokeWidth="1"
-                    vectorEffect="non-scaling-stroke"
-                  />
-                  <text
-                    fill="currentColor"
-                    fillOpacity={isFarm ? "0.78" : "0.42"}
-                    fontFamily="var(--font-geist-mono, monospace)"
-                    fontSize="8"
-                    textAnchor="end"
-                    x={chartInsetX - 14}
-                    y={y + 2}
-                  >
-                    {framework.label.toUpperCase()}
-                  </text>
-                </g>
-              );
-            })}
-          </g>
           {foregroundSeries.map(({ framework, points }) => (
             <g key={`${framework.id}-points`}>
               {points.map((point) => {
