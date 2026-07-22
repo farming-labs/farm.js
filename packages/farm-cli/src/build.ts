@@ -1,10 +1,10 @@
 import {
-  build,
   loadConfig,
+  loadFarmProductionVite,
   logger,
   resolveConfig,
   resolveDeployConfig,
-} from "@farmjs/core/internal/build-runtime";
+} from "@farmjs/core/internal/config-runtime";
 
 export interface BuildFarmOptions {
   root?: string;
@@ -19,7 +19,18 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
 
   try {
     const mode = "production";
-    const userConfig = await loadConfig(root, undefined, mode);
+    const productionVitePromise = loadFarmProductionVite();
+    const [userConfigResult, buildRuntimeResult, productionViteResult] = await Promise.allSettled([
+      productionVitePromise.then((runtime) => loadConfig(root, undefined, mode, runtime.loadEnv)),
+      import("@farmjs/core/internal/build-runtime"),
+      productionVitePromise,
+    ]);
+
+    if (userConfigResult.status === "rejected") throw userConfigResult.reason;
+    if (buildRuntimeResult.status === "rejected") throw buildRuntimeResult.reason;
+    if (productionViteResult.status === "rejected") throw productionViteResult.reason;
+
+    const userConfig = userConfigResult.value;
 
     if (!userConfig) {
       throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
@@ -35,9 +46,10 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
     }
 
     // Build
-    await build(config, {
+    await buildRuntimeResult.value.build(config, {
       preset: config.preset,
       root,
+      productionVite: productionViteResult.value,
     });
 
     logger.success("✅ Build completed successfully!");

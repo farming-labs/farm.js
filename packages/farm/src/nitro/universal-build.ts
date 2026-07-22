@@ -8,7 +8,7 @@ import {
   generateFarmClientPluginEntryCode,
   type FarmClientPluginEntryCode,
 } from "../client-plugin-build";
-import { build as viteBuild, type Rollup } from "vite";
+import type { Rollup } from "vite";
 import * as nitro from "nitro";
 import os from "os";
 import path from "path";
@@ -54,6 +54,8 @@ import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import type { TransformOptions } from "esbuild";
+import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
+import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -106,12 +108,14 @@ const NITRO_EXTERNAL_MODULES = new Set([
   "lightningcss",
   "rollup",
   "vite",
+  "vite-rolldown",
   "nitro",
   "nitropack",
   "sharp",
 ]);
 const FARM_SSR_PACKAGE_IMPORT = "#farm-ssr-entry";
 const FARM_SSR_OUTPUT_DIR = "farm-ssr";
+const FARM_CLIENT_BUILD_TARGET = ["es2020", "edge88", "firefox78", "chrome87", "safari14"];
 
 function cloneConfigValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   if (value === null || typeof value !== "object") return value;
@@ -534,6 +538,7 @@ export async function buildUniversal(
     root?: string;
     pluginManager?: PluginManager;
     routeRuntimeManifest?: FarmRouteRuntimeManifest;
+    productionVite?: FarmProductionViteRuntime | Promise<FarmProductionViteRuntime>;
   } = {},
 ): Promise<void> {
   const root = options.root || config.root || process.cwd();
@@ -542,22 +547,24 @@ export async function buildUniversal(
   const distDir = config.distDir || ".farm";
   const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const lifecyclePluginManager = options.pluginManager;
+  // Attach all-settled handlers immediately so an earlier discovery failure
+  // cannot leave a rejected preload unobserved.
+  const productionViteResultPromise = Promise.allSettled([
+    Promise.resolve(options.productionVite ?? loadFarmProductionVite()),
+  ]);
 
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
 
   try {
-    const routeRuntimeManifest =
-      options.routeRuntimeManifest ||
-      (await createFarmRouteRuntimeManifest({
-        config,
-        routeManager,
-        apiRouteManager,
-        root,
-      }));
-    const runtimeValidation = validateFarmRouteRuntimeDeployment(routeRuntimeManifest, preset);
-    for (const warning of runtimeValidation.warnings) {
-      logger.warn(warning);
-    }
+    const routeRuntimeManifestPromise = options.routeRuntimeManifest
+      ? Promise.resolve(options.routeRuntimeManifest)
+      : createFarmRouteRuntimeManifest({
+          config,
+          routeManager,
+          apiRouteManager,
+          root,
+        });
+    const routeRuntimeManifestResultPromise = Promise.allSettled([routeRuntimeManifestPromise]);
 
     // Get page routes first (needed for both client and SSR builds)
     const pageRoutes: UniversalPageRoute[] = [];
@@ -610,14 +617,28 @@ export async function buildUniversal(
     logger.info(`📋 Found ${pageRoutes.length} page routes and ${layoutRoutes.length} layouts`);
 
     const clientOutputDir = path.join(root, distDir, "client");
+    const [productionViteResult] = await productionViteResultPromise;
+    if (productionViteResult.status === "rejected") {
+      // Route evaluation may still be using the project module server. Drain it
+      // before the outer build cleanup closes that server.
+      await routeRuntimeManifestResultPromise;
+      throw productionViteResult.reason;
+    }
+    const productionVite = productionViteResult.value;
+    if (productionVite.builder === "rolldown") {
+      logger.info("⚡ Building application bundles with Vite Rolldown");
+    }
 
-    // Step 1 & 2: Build client and SSR bundles IN PARALLEL for faster builds
+    // Route metadata and the client/SSR graphs read independent inputs. Drain
+    // every task before propagating a deterministic first failure so a rejected
+    // sibling cannot keep mutating build output in the background.
     logger.info("📦 Building client and SSR bundles in parallel...");
-    const [_, ssrResult] = await Promise.all([
+    const [clientBuildResult, ssrBuildResult] = await Promise.allSettled([
       // Client build (to disk)
-      buildClient(config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
+      buildClient(productionVite, config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
       // SSR build (in memory)
       buildSSRInMemory(
+        productionVite,
         config,
         root,
         routeManager,
@@ -628,6 +649,20 @@ export async function buildUniversal(
         layoutRoutes,
       ),
     ]);
+    const [routeRuntimeManifestResult] = await routeRuntimeManifestResultPromise;
+    if (routeRuntimeManifestResult.status === "rejected") {
+      throw routeRuntimeManifestResult.reason;
+    }
+    if (clientBuildResult.status === "rejected") throw clientBuildResult.reason;
+    if (ssrBuildResult.status === "rejected") throw ssrBuildResult.reason;
+
+    const ssrResult = ssrBuildResult.value;
+    const routeRuntimeManifest = routeRuntimeManifestResult.value;
+
+    const runtimeValidation = validateFarmRouteRuntimeDeployment(routeRuntimeManifest, preset);
+    for (const warning of runtimeValidation.warnings) {
+      logger.warn(warning);
+    }
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile } = ssrResult;
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
@@ -687,6 +722,7 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
  * Build client bundle (to disk) with hydration for "use client" components
  */
 async function buildClient(
+  productionVite: FarmProductionViteRuntime,
   config: ResolvedFarmConfig,
   root: string,
   srcDir: string,
@@ -694,6 +730,7 @@ async function buildClient(
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
 ) {
+  const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
   const fs = await import("fs/promises");
@@ -767,7 +804,7 @@ async function buildClient(
     postcssSearchPath = clientEntryDir;
     try {
       const tailwindVite = (await import("@tailwindcss/vite")).default;
-      tailwindVitePlugin = tailwindVite();
+      tailwindVitePlugin = adaptTailwindVitePlugin(tailwindVite(), productionVite.builder);
       logger.info("📦 Enabled built-in Tailwind support (@tailwindcss/vite)");
     } catch (error) {
       logger.warn(
@@ -783,6 +820,9 @@ async function buildClient(
         jsxDev: false,
       },
       build: {
+        // Preserve Farm's Vite 5 browser baseline when the production builder
+        // uses Vite 8, whose default target only covers newer browsers.
+        target: FARM_CLIENT_BUILD_TARGET,
         outDir: outputDir,
         emptyOutDir: true,
         assetsInlineLimit: 0,
@@ -874,6 +914,7 @@ async function buildClient(
               id.endsWith(".node") ||
               id === "nitro" ||
               id === "vite" ||
+              id === "vite-rolldown" ||
               id === "esbuild" ||
               id === "rollup" ||
               id.startsWith("nitro/") ||
@@ -1938,6 +1979,7 @@ if (isFarmDocsSearchPage()) {
  * Managers are created at runtime from the bundled code
  */
 async function buildSSRInMemory(
+  productionVite: FarmProductionViteRuntime,
   config: ResolvedFarmConfig,
   root: string,
   routeManager: RouteManager,
@@ -1947,6 +1989,7 @@ async function buildSSRInMemory(
   collectedPageRoutes: readonly UniversalPageRoute[],
   collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
 ): Promise<{ bundle: OutputBundle; entryFile: string }> {
+  const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
   const fs = await import("fs/promises");
@@ -1959,12 +2002,21 @@ async function buildSSRInMemory(
   pluginManager.addPlugins(config.plugins || []);
   const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
   let postcssConfigDir: string | undefined;
+  let tailwindVitePlugin: any = undefined;
   if (!hasScopedPostcssConfig) {
     postcssConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-postcss-"));
     await fs.writeFile(
       path.join(postcssConfigDir, "postcss.config.cjs"),
       "module.exports = { plugins: [] };\n",
     );
+    try {
+      const tailwindVite = (await import("@tailwindcss/vite")).default;
+      tailwindVitePlugin = adaptTailwindVitePlugin(tailwindVite(), productionVite.builder);
+    } catch (error) {
+      logger.warn(
+        `Tailwind plugin auto-enable failed for SSR; continuing without it: ${(error as Error).message}`,
+      );
+    }
   }
 
   let ssrBundle: OutputBundle;
@@ -2178,6 +2230,7 @@ async function buildSSRInMemory(
           "@rollup/rollup-win32-arm64-msvc",
           "@rollup/rollup-win32-ia32-msvc",
           "vite",
+          "vite-rolldown",
           "nitro",
           "nitropack",
           "@prisma/client",
@@ -2200,6 +2253,7 @@ async function buildSSRInMemory(
         __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
       },
       plugins: [
+        ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         {
           name: "farm-react-production-mode",
           enforce: "pre",
@@ -4474,10 +4528,21 @@ async function copySharpRuntime(
   root: string,
   nitroFuncDir: string,
   fs: typeof import("fs/promises"),
-) {
+): Promise<void> {
   if (config.images.provider === "none") return;
 
   const projectRequire = createRequire(path.join(root, "package.json"));
+  let sharpRequire = projectRequire;
+  if (!resolvePackageJson(projectRequire, "sharp")) {
+    try {
+      // Applications are not required to depend on Sharp directly. Resolve
+      // Farm's optional dependency from the installed framework entry when the
+      // project dependency tree does not expose it.
+      sharpRequire = createRequire(projectRequire.resolve("@farmjs/core"));
+    } catch {
+      // The existing missing-Sharp diagnostic below remains authoritative.
+    }
+  }
   const copiedPackages = new Map<string, string>();
   const packageCopies = new Map<string, Promise<void>>();
   const targetNodeModules = path.join(nitroFuncDir, "node_modules");
@@ -4521,7 +4586,7 @@ async function copySharpRuntime(
     ]);
   }
 
-  await copyPackage("sharp", projectRequire);
+  await copyPackage("sharp", sharpRequire);
   if (!copiedPackages.has("sharp")) {
     throw new Error(
       "Farm image optimization requires sharp. Reinstall dependencies without omitting optional packages.",

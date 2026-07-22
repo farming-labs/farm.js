@@ -1,10 +1,8 @@
 import type { ResolvedFarmConfig } from "../config";
 import { resolveDeployOutputPath } from "../config";
-import { build as viteBuild, createServer as createViteServer, type ViteDevServer } from "vite";
-import { createNitro, build as nitroBuild } from "nitro";
+import type { ViteDevServer } from "vite";
 import path from "path";
 import { logger } from "../utils";
-import { createNitroConfig } from "../nitro";
 import { createFarmApp } from "../app";
 import { APIRouteManager } from "../api/route-manager";
 import { getFarmAppDirectories } from "../layers";
@@ -14,11 +12,18 @@ import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import { mergeFarmViteConfig } from "../server/vite-config";
+import {
+  canUseRolldownForRouteDiscovery,
+  loadFarmProductionVite,
+  type FarmProductionViteRuntime,
+} from "./production-vite";
 
 interface BuildOptions {
   preset?: string;
   root?: string;
   universal?: boolean; // Use universal build pattern (TanStack Start style)
+  /** @internal Production Vite preload started by the CLI. */
+  productionVite?: FarmProductionViteRuntime | Promise<FarmProductionViteRuntime>;
 }
 
 /**
@@ -30,6 +35,10 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
   const srcDir = config.srcDir || "src";
   const distDir = config.distDir || ".farm";
   const deployOutputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
+  const productionViteResultPromise =
+    options.universal === false
+      ? undefined
+      : Promise.allSettled([Promise.resolve(options.productionVite ?? loadFarmProductionVite())]);
 
   logger.info(`🚜 Building Farm.js application with preset: ${preset}...`);
 
@@ -54,7 +63,20 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
 
     // Step 1: Initialize Farm app to get route managers
     logger.info("🔍 Discovering routes and API endpoints...");
-    projectModuleServer = await createProjectModuleServer(config, root);
+    const productionViteResult = productionViteResultPromise
+      ? (await productionViteResultPromise)[0]
+      : undefined;
+    if (productionViteResult?.status === "rejected") throw productionViteResult.reason;
+    const productionVite = productionViteResult?.value;
+    const useProductionViteForDiscovery =
+      productionVite && canUseRolldownForRouteDiscovery(config.vite);
+    if (productionVite?.builder === "rolldown" && !useProductionViteForDiscovery) {
+      logger.info("🔌 Using Vite Rollup for route discovery with custom Vite configuration");
+    }
+    const createViteServer = useProductionViteForDiscovery
+      ? productionVite.createServer
+      : (await import("vite")).createServer;
+    projectModuleServer = await createProjectModuleServer(createViteServer, config, root);
     const farmApp = createFarmApp(config, projectModuleServer);
     await farmApp.initialize();
 
@@ -98,16 +120,18 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
         preset,
         root,
         pluginManager,
+        productionVite,
       });
     } else {
+      const { build: legacyViteBuild } = await import("vite");
       // Legacy build pattern (for backward compatibility)
       // Step 1: Build client bundle with Vite
       logger.info("📦 Building client bundle...");
-      await buildClient(config, root, srcDir, path.join(root, distDir, "client"));
+      await buildClient(legacyViteBuild, config, root, srcDir, path.join(root, distDir, "client"));
 
       // Step 2: Build SSR bundle with Vite
       logger.info("📦 Building SSR bundle...");
-      await buildSSR(config, root, srcDir, path.join(root, distDir, "server"));
+      await buildSSR(legacyViteBuild, config, root, srcDir, path.join(root, distDir, "server"));
 
       // Step 3: Build with Nitro
       logger.info(`🚀 Building server with Nitro (preset: ${preset})...`);
@@ -160,6 +184,7 @@ export async function build(config: ResolvedFarmConfig, options: BuildOptions = 
 }
 
 async function createProjectModuleServer(
+  createViteServer: FarmProductionViteRuntime["createServer"],
   config: ResolvedFarmConfig,
   root: string,
 ): Promise<ViteDevServer> {
@@ -212,6 +237,7 @@ async function createProjectModuleServer(
  * Build client bundle
  */
 async function buildClient(
+  viteBuild: (typeof import("vite"))["build"],
   config: ResolvedFarmConfig,
   root: string,
   srcDir: string,
@@ -249,6 +275,7 @@ async function buildClient(
  * Build SSR bundle
  */
 async function buildSSR(
+  viteBuild: (typeof import("vite"))["build"],
   config: ResolvedFarmConfig,
   root: string,
   srcDir: string,
@@ -304,6 +331,10 @@ async function buildNitro(
   distDir: string,
   pluginManager?: PluginManager,
 ) {
+  const [{ createNitroConfig }, { createNitro, build: nitroBuild }] = await Promise.all([
+    import("../nitro"),
+    import("nitro"),
+  ]);
   let nitroConfig = await createNitroConfig(
     config,
     routeManager,

@@ -3,7 +3,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defineConfig,
   defineFarmConfig,
@@ -51,6 +51,25 @@ describe("config helpers", () => {
 });
 
 describe("loadConfig", () => {
+  it("uses a preloaded environment reader when provided", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-env-loader-"));
+    const loadEnvironment = vi.fn(() => ({ FARM_PRELOADED_ENV: "ready" }));
+    await fs.writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { value: process.env.FARM_PRELOADED_ENV };",
+    );
+
+    const config = await loadConfig(
+      root,
+      undefined,
+      "production",
+      loadEnvironment as (typeof import("vite"))["loadEnv"],
+    );
+
+    expect(loadEnvironment).toHaveBeenCalledWith("production", root, "");
+    expect(config).toMatchObject({ value: "ready" });
+  });
+
   it("loads env files before importing farm.config", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-config-env-"));
 

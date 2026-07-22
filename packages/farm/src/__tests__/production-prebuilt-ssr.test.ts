@@ -266,7 +266,7 @@ describe("production prebuilt SSR output", () => {
         await fs.readFile(path.join(root, ".farm", ".output", "server", "package.json"), "utf8"),
       );
       expect(serverPackage.imports?.["#farm-ssr-entry"]).toMatch(/^\.\/farm-ssr\//);
-      expect(info).not.toHaveBeenCalledWith(expect.stringContaining("Rolldown"));
+      expect(info).not.toHaveBeenCalledWith("⚡ Built the Node adapter with Rolldown");
     } finally {
       if (previousBuilder === undefined) delete process.env.NITRO_BUILDER;
       else process.env.NITRO_BUILDER = previousBuilder;

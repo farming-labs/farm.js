@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
+type EsbuildTransform = (typeof import("esbuild"))["transform"];
+
 export type FarmLayerEntry = string;
 
 export interface ResolvedFarmLayer {
@@ -38,6 +40,14 @@ export interface FarmLayerResolution<TConfig extends Record<string, any>> {
   };
   layers: ResolvedFarmLayer[];
 }
+
+const FARM_CORE_PACKAGE = "@farmjs/core";
+const FARM_CONFIG_ENTRY = "@farmjs/core/config";
+const FARM_CORE_REFERENCE_RE = /(["'])@farmjs\/core\1/g;
+const FARM_CONFIG_HELPER_IMPORT_RE =
+  /(?:^|\n)[\t ]*import[\t ]*\{([^{}]*)\}[\t ]*from[\t ]*(["'])@farmjs\/core\2[\t ]*;?[\t ]*(?:\n|$)/g;
+const FARM_CONFIG_HELPER_SPECIFIER_RE =
+  /^(?:defineConfig|defineFarmConfig)(?:\s+as\s+[$A-Z_a-z][$\w]*)?$/;
 
 const CONFIG_FILENAMES = [
   "farm.config.ts",
@@ -209,9 +219,10 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
   configPath: string,
   options: { root: string; cacheRoot?: string },
 ): Promise<TConfig> {
-  const { build } = await import("esbuild");
+  const { build, transform } = await import("esbuild");
   const cacheRoot = path.resolve(options.cacheRoot || options.root);
   const configCacheDir = path.join(cacheRoot, ".farm", ".config-loader");
+  const configEntryChecks = new Map<string, Promise<boolean>>();
   await mkdir(configCacheDir, { recursive: true });
 
   const modulePath = path.join(
@@ -231,6 +242,38 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
       {
         name: "farm-config-package-resolution",
         setup(pluginBuild) {
+          pluginBuild.onResolve({ filter: /^@farmjs\/core$/ }, async (args) => {
+            if (
+              args.pluginData?.farmConfigExternal ||
+              args.kind !== "import-statement" ||
+              !args.importer
+            ) {
+              return;
+            }
+
+            let configEntryCheck = configEntryChecks.get(args.importer);
+            if (!configEntryCheck) {
+              configEntryCheck = onlyImportsFarmConfigHelpers(args.importer, transform);
+              configEntryChecks.set(args.importer, configEntryCheck);
+            }
+            if (!(await configEntryCheck)) return;
+
+            const resolved = await pluginBuild.resolve(FARM_CONFIG_ENTRY, {
+              importer: args.importer,
+              kind: args.kind,
+              namespace: args.namespace,
+              resolveDir: args.resolveDir,
+              pluginData: { farmConfigExternal: true },
+            });
+            if (resolved.errors.length > 0 || !resolved.path) return;
+
+            return {
+              path: resolved.path,
+              external: true,
+              warnings: resolved.warnings,
+            };
+          });
+
           pluginBuild.onResolve({ filter: /^[^./]/ }, async (args) => {
             if (args.pluginData?.farmConfigExternal) return;
 
@@ -270,6 +313,65 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
     return config as TConfig;
   } finally {
     await unlink(modulePath).catch(() => undefined);
+  }
+}
+
+async function onlyImportsFarmConfigHelpers(
+  importer: string,
+  transform: EsbuildTransform,
+): Promise<boolean> {
+  try {
+    const source = readFileSync(importer, "utf8");
+    if (!source.includes(FARM_CORE_PACKAGE)) return false;
+
+    const transformed = await transform(source, {
+      format: "esm",
+      jsx: "automatic",
+      loader: getEsbuildLoader(importer),
+      sourcefile: importer,
+    });
+    const references = [...transformed.code.matchAll(FARM_CORE_REFERENCE_RE)];
+    if (references.length === 0) return false;
+
+    const safeImportRanges: Array<{ start: number; end: number }> = [];
+    for (const match of transformed.code.matchAll(FARM_CONFIG_HELPER_IMPORT_RE)) {
+      const specifiers = match[1]
+        .split(",")
+        .map((specifier) => specifier.trim())
+        .filter(Boolean);
+      if (
+        specifiers.length === 0 ||
+        !specifiers.every((specifier) => FARM_CONFIG_HELPER_SPECIFIER_RE.test(specifier))
+      ) {
+        continue;
+      }
+
+      const start = match.index ?? 0;
+      safeImportRanges.push({ start, end: start + match[0].length });
+    }
+
+    return references.every((reference) => {
+      const index = reference.index ?? -1;
+      return safeImportRanges.some((range) => index >= range.start && index < range.end);
+    });
+  } catch {
+    // Unsupported syntax or non-file importers retain the existing package resolution path.
+    return false;
+  }
+}
+
+function getEsbuildLoader(file: string): "js" | "jsx" | "ts" | "tsx" {
+  switch (path.extname(file)) {
+    case ".ts":
+    case ".mts":
+    case ".cts":
+      return "ts";
+    case ".tsx":
+      return "tsx";
+    case ".jsx":
+      return "jsx";
+    default:
+      return "js";
   }
 }
 
