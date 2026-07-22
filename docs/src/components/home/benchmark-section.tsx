@@ -621,7 +621,7 @@ function BenchmarkAreaChart() {
                         fillOpacity={isFarm ? "0.68" : "0.62"}
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="9"
-                        x={tooltipX + 28}
+                        x={tooltipX + 10}
                         y={tooltipY + 35}
                       >
                         {point.label.toUpperCase()} MEDIAN ·{" "}
@@ -632,7 +632,7 @@ function BenchmarkAreaChart() {
                         fillOpacity={isFarm ? "0.52" : "0.48"}
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="8"
-                        x={tooltipX + 28}
+                        x={tooltipX + 10}
                         y={tooltipY + 48}
                       >
                         RANGE {getColumnRangeLabel(point.metric)}
