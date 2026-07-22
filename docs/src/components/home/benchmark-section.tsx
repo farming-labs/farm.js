@@ -305,9 +305,13 @@ function BenchmarkAreaChart() {
     return 0;
   });
   return (
-    <div className="relative col-span-full min-h-[40rem] overflow-hidden bg-black">
+    <div className="relative col-span-full min-h-[40rem] overflow-hidden border-t border-white/12 bg-black">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 max-w-2xl px-6 pt-6 sm:px-12 sm:pt-12">
         <span className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/46">
+          <span className="text-white/44">01.5</span>
+          <span aria-hidden className="text-white/18">
+            /
+          </span>
           <Activity aria-hidden className="size-4" strokeWidth={1.5} />
           Benchmark monitor
         </span>
