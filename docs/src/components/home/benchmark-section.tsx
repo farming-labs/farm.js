@@ -135,7 +135,7 @@ function getTooltipX(x: number, width: number) {
 }
 
 function getTooltipY(y: number) {
-  return Math.max(260, y - 64);
+  return Math.max(252, y - 68);
 }
 
 function BenchmarkIndexLabel() {
@@ -309,7 +309,7 @@ function BenchmarkAreaChart() {
             <span
               key={framework.id}
               className={
-                "inline-flex items-center gap-2 border border-white/12 bg-black/70 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur transition-colors duration-150 hover:border-white/24 hover:text-white " +
+                "inline-flex items-center gap-2 bg-black/45 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur transition-colors duration-200 hover:bg-white/[0.045] hover:text-white " +
                 (framework.id === "farm" ? "text-white" : "text-white/48")
               }
             >
@@ -345,18 +345,19 @@ function BenchmarkAreaChart() {
               .benchmark-series-line,
               .benchmark-point-ring,
               .benchmark-point-tooltip {
-                transition-duration: 180ms;
+                transition-duration: 240ms;
                 transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
               }
 
               .benchmark-series-line {
-                transition-property: stroke-opacity, stroke-width;
+                transition-property: stroke-opacity, stroke-width, filter;
               }
 
               .benchmark-series:hover .benchmark-series-line,
               .benchmark-series:focus-within .benchmark-series-line {
-                stroke-opacity: 1;
-                stroke-width: 3.2;
+                filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.24));
+                stroke-opacity: 0.98;
+                stroke-width: 2.35;
               }
 
               .benchmark-point-ring {
@@ -370,13 +371,13 @@ function BenchmarkAreaChart() {
                 fill-opacity: 1;
                 opacity: 1;
                 stroke-opacity: 1;
-                transform: scale(1.32);
+                transform: scale(1.22);
               }
 
               .benchmark-point-tooltip {
                 opacity: 0;
                 pointer-events: none;
-                transform: translateY(6px);
+                transform: translateY(8px);
                 transition-property: opacity, transform;
               }
 
@@ -397,13 +398,13 @@ function BenchmarkAreaChart() {
           </style>
           <defs>
             <linearGradient id="farmBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.36" />
-              <stop offset="55%" stopColor="currentColor" stopOpacity="0.1" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
+              <stop offset="55%" stopColor="currentColor" stopOpacity="0.045" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
             <linearGradient id="tanstackBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.16" />
-              <stop offset="55%" stopColor="currentColor" stopOpacity="0.05" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.07" />
+              <stop offset="55%" stopColor="currentColor" stopOpacity="0.022" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
           </defs>
@@ -411,7 +412,7 @@ function BenchmarkAreaChart() {
             <line
               key={y}
               stroke="currentColor"
-              strokeOpacity="0.08"
+              strokeOpacity="0.045"
               strokeWidth="1"
               x1="0"
               x2={width}
@@ -444,7 +445,7 @@ function BenchmarkAreaChart() {
                   fontSize="10"
                   textAnchor={index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle"}
                   x={x}
-                  y={height - 30}
+                  y={height - 48}
                 >
                   {label.toUpperCase()}
                 </text>
@@ -485,7 +486,7 @@ function BenchmarkAreaChart() {
                     stroke="white"
                     strokeDasharray={framework.id === "tanstack" ? "0" : "8 8"}
                     strokeOpacity={seriesOpacity[framework.id]}
-                    strokeWidth={framework.id === "tanstack" ? "2.4" : "1.5"}
+                    strokeWidth={framework.id === "tanstack" ? "1.65" : "1.05"}
                     vectorEffect="non-scaling-stroke"
                   />
                   <path
@@ -517,8 +518,8 @@ function BenchmarkAreaChart() {
                           cx={point.x}
                           cy={point.y}
                           fill="black"
-                          fillOpacity="0.85"
-                          r={framework.id === "tanstack" ? "3" : "2.4"}
+                          fillOpacity="0.74"
+                          r={framework.id === "tanstack" ? "2.6" : "2.1"}
                           stroke="white"
                           strokeOpacity={seriesOpacity[framework.id]}
                           strokeWidth="1"
@@ -532,9 +533,9 @@ function BenchmarkAreaChart() {
                           r="13"
                         />
                         <g className="benchmark-point-tooltip">
-                          <rect
-                            fill="black"
-                            fillOpacity="0.92"
+                      <rect
+                        fill="black"
+                        fillOpacity="0.9"
                             height="48"
                             stroke="white"
                             strokeOpacity="0.18"
@@ -609,8 +610,8 @@ function BenchmarkAreaChart() {
                 d={farmSeries.path}
                 fill="none"
                 stroke="white"
-                strokeOpacity="0.98"
-                strokeWidth="3"
+                strokeOpacity="0.9"
+                strokeWidth="2.05"
                 vectorEffect="non-scaling-stroke"
               />
               <path
@@ -644,11 +645,11 @@ function BenchmarkAreaChart() {
                       cx={point.x}
                       cy={point.y}
                       fill="black"
-                      fillOpacity="0.95"
-                      r="4"
+                      fillOpacity="0.82"
+                      r="3.3"
                       stroke="white"
-                      strokeOpacity="0.95"
-                      strokeWidth="1.5"
+                      strokeOpacity="0.88"
+                      strokeWidth="1.2"
                     />
                     <circle
                       cx={point.x}
@@ -661,7 +662,7 @@ function BenchmarkAreaChart() {
                     <g className="benchmark-point-tooltip">
                       <rect
                         fill="black"
-                        fillOpacity="0.94"
+                        fillOpacity="0.92"
                         height="48"
                         stroke="white"
                         strokeOpacity="0.24"
