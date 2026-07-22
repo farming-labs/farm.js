@@ -33,6 +33,9 @@ const chartMetrics = [
   ["responseBytes", "HTML"],
 ] as const satisfies readonly (readonly [MetricKey, string])[];
 
+const chartInsetX = 92;
+const chartTopY = 250;
+
 function formatByteCount(bytes: number) {
   return bytes >= 1024 ? (bytes / 1024).toFixed(1) + " KB" : Math.round(bytes) + " B";
 }
@@ -81,8 +84,8 @@ type ChartPoint = {
 };
 
 function getChartPoints(framework: FrameworkResult, width: number, height: number) {
-  const insetX = 42;
-  const insetTop = 250;
+  const insetX = chartInsetX;
+  const insetTop = chartTopY;
   const insetBottom = 96;
   const step = (width - insetX * 2) / Math.max(1, chartMetrics.length - 1);
 
@@ -281,7 +284,6 @@ function BenchmarkAreaChart() {
 
   const width = 960;
   const height = 500;
-  const chartTopY = 250;
   const baselineY = height - 72;
   const series = benchmarkReport.frameworks.map((framework) => {
     const points = getChartPoints(framework, width, height);
@@ -311,6 +313,19 @@ function BenchmarkAreaChart() {
 
     return 0;
   });
+  const devStartLabels = foregroundSeries
+    .map(({ framework, points }) => ({ framework, point: points[0] }))
+    .filter((item): item is { framework: FrameworkResult; point: ChartPoint } => Boolean(item.point))
+    .sort((a, b) => a.point.y - b.point.y)
+    .reduce<Array<{ framework: FrameworkResult; point: ChartPoint; y: number }>>((labels, item) => {
+      const previous = labels[labels.length - 1];
+      const minimumY = previous ? previous.y + 14 : chartTopY + 12;
+      const y = Math.min(baselineY - 8, Math.max(item.point.y, minimumY));
+
+      labels.push({ ...item, y });
+
+      return labels;
+    }, []);
 
   return (
     <div className="relative col-span-full min-h-[40rem] overflow-hidden bg-black">
@@ -441,8 +456,8 @@ function BenchmarkAreaChart() {
             fill="url(#benchmarkRangeFill)"
             height={baselineY - chartTopY}
             pointerEvents="none"
-            width={width - 84}
-            x="42"
+            width={width - chartInsetX * 2}
+            x={chartInsetX}
             y={chartTopY}
           />
           {[250, 295, 339, 384, 428].map((y) => (
@@ -458,7 +473,9 @@ function BenchmarkAreaChart() {
             />
           ))}
           {chartMetrics.map(([metric, label], index) => {
-            const x = 42 + (index * (width - 84)) / Math.max(1, chartMetrics.length - 1);
+            const x =
+              chartInsetX +
+              (index * (width - chartInsetX * 2)) / Math.max(1, chartMetrics.length - 1);
             const { maximum, minimum } = getMetricExtent(metric);
             const textAnchor = index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle";
 
@@ -547,6 +564,48 @@ function BenchmarkAreaChart() {
             </g>
             );
           })}
+          <g aria-hidden="true">
+            <text
+              fill="currentColor"
+              fillOpacity="0.32"
+              fontFamily="var(--font-geist-mono, monospace)"
+              fontSize="8"
+              x={chartInsetX - 14}
+              y={chartTopY - 8}
+              textAnchor="end"
+            >
+              DEV START
+            </text>
+            {devStartLabels.map(({ framework, point, y }) => {
+              const isFarm = framework.id === "farm";
+
+              return (
+                <g key={`${framework.id}-dev-start-label`}>
+                  <path
+                    d={`M ${(chartInsetX - 10).toFixed(2)} ${y.toFixed(2)} L ${(chartInsetX - 4).toFixed(
+                      2,
+                    )} ${y.toFixed(2)} L ${(point.x - 7).toFixed(2)} ${point.y.toFixed(2)}`}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeOpacity={isFarm ? "0.38" : "0.16"}
+                    strokeWidth="1"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <text
+                    fill="currentColor"
+                    fillOpacity={isFarm ? "0.78" : "0.42"}
+                    fontFamily="var(--font-geist-mono, monospace)"
+                    fontSize="8"
+                    textAnchor="end"
+                    x={chartInsetX - 14}
+                    y={y + 2}
+                  >
+                    {framework.label.toUpperCase()}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
           {foregroundSeries.map(({ framework, points }) => (
             <g key={`${framework.id}-points`}>
               {points.map((point) => {
