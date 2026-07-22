@@ -87,7 +87,7 @@ type ChartPoint = {
 
 function getChartPoints(framework: FrameworkResult, width: number, height: number) {
   const insetX = 42;
-  const insetTop = 205;
+  const insetTop = 250;
   const insetBottom = 96;
   const step = (width - insetX * 2) / Math.max(1, chartMetrics.length - 1);
 
@@ -128,6 +128,14 @@ function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: n
   return firstPoint && lastPoint
     ? `${path} L ${lastPoint.x.toFixed(2)} ${baselineY} L ${firstPoint.x.toFixed(2)} ${baselineY} Z`
     : path;
+}
+
+function getTooltipX(x: number, width: number) {
+  return Math.max(52, Math.min(width - 190, x - 76));
+}
+
+function getTooltipY(y: number) {
+  return Math.max(260, y - 64);
 }
 
 function BenchmarkIndexLabel() {
@@ -295,6 +303,28 @@ function BenchmarkAreaChart() {
             Higher bands mean closer to the fastest median for that benchmark.
           </span>
         </p>
+
+        <div className="pointer-events-none flex max-w-2xl flex-wrap gap-2">
+          {benchmarkReport.frameworks.map((framework) => (
+            <span
+              key={framework.id}
+              className={
+                "inline-flex items-center gap-2 border border-white/12 bg-black/70 px-2.5 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur transition-colors duration-150 hover:border-white/24 hover:text-white " +
+                (framework.id === "farm" ? "text-white" : "text-white/48")
+              }
+            >
+              <span
+                className={
+                  "h-0.5 w-5 " +
+                  (framework.id === "farm" || framework.id === "tanstack"
+                    ? "bg-current"
+                    : "border-t border-dashed border-current")
+                }
+              />
+              {framework.label}
+            </span>
+          ))}
+        </div>
       </div>
 
       <div className="pointer-events-none absolute right-6 top-6 z-10 hidden border border-white/12 bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-normal text-white/44 backdrop-blur sm:block">
@@ -310,6 +340,61 @@ function BenchmarkAreaChart() {
           role="img"
           viewBox={`0 0 ${width} ${height}`}
         >
+          <style>
+            {`
+              .benchmark-series-line,
+              .benchmark-point-ring,
+              .benchmark-point-tooltip {
+                transition-duration: 180ms;
+                transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+              }
+
+              .benchmark-series-line {
+                transition-property: stroke-opacity, stroke-width;
+              }
+
+              .benchmark-series:hover .benchmark-series-line,
+              .benchmark-series:focus-within .benchmark-series-line {
+                stroke-opacity: 1;
+                stroke-width: 3.2;
+              }
+
+              .benchmark-point-ring {
+                transition-property: opacity, transform, fill-opacity, stroke-opacity;
+                transform-box: fill-box;
+                transform-origin: center;
+              }
+
+              .benchmark-point:hover .benchmark-point-ring,
+              .benchmark-point:focus .benchmark-point-ring {
+                fill-opacity: 1;
+                opacity: 1;
+                stroke-opacity: 1;
+                transform: scale(1.32);
+              }
+
+              .benchmark-point-tooltip {
+                opacity: 0;
+                pointer-events: none;
+                transform: translateY(6px);
+                transition-property: opacity, transform;
+              }
+
+              .benchmark-point:hover .benchmark-point-tooltip,
+              .benchmark-point:focus .benchmark-point-tooltip {
+                opacity: 1;
+                transform: translateY(0);
+              }
+
+              @media (prefers-reduced-motion: reduce) {
+                .benchmark-series-line,
+                .benchmark-point-ring,
+                .benchmark-point-tooltip {
+                  transition-duration: 1ms;
+                }
+              }
+            `}
+          </style>
           <defs>
             <linearGradient id="farmBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="currentColor" stopOpacity="0.36" />
@@ -322,7 +407,7 @@ function BenchmarkAreaChart() {
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {[205, 261, 317, 373, 429].map((y) => (
+          {[250, 295, 339, 384, 428].map((y) => (
             <line
               key={y}
               stroke="currentColor"
@@ -342,7 +427,7 @@ function BenchmarkAreaChart() {
               fontFamily="var(--font-geist-mono, monospace)"
               fontSize="9"
               x="18"
-              y={209 + index * 56}
+              y={254 + index * 44.5}
             >
               {label}
             </text>
@@ -361,7 +446,7 @@ function BenchmarkAreaChart() {
                   x={x}
                   y={height - 30}
                 >
-                  {label}
+                  {label.toUpperCase()}
                 </text>
               </g>
             );
@@ -373,12 +458,14 @@ function BenchmarkAreaChart() {
                 key={framework.id}
                 d={closeAreaPath(path, points, baselineY)}
                 fill="url(#tanstackBenchmarkFill)"
+                pointerEvents="none"
               />
             ))}
           {farmSeries ? (
             <path
               d={closeAreaPath(farmSeries.path, farmSeries.points, baselineY)}
               fill="url(#farmBenchmarkFill)"
+              pointerEvents="none"
             />
           ) : null}
           {series
@@ -390,8 +477,9 @@ function BenchmarkAreaChart() {
                 .join(" · ");
 
               return (
-                <g key={framework.id} className="group">
+                <g key={framework.id} className="benchmark-series group">
                   <path
+                    className="benchmark-series-line"
                     d={path}
                     fill="none"
                     stroke="white"
@@ -404,22 +492,90 @@ function BenchmarkAreaChart() {
                     aria-label={`${framework.label} — ${title}`}
                     d={path}
                     fill="none"
+                    pointerEvents="none"
                     stroke="transparent"
                     strokeWidth="18"
                     vectorEffect="non-scaling-stroke"
                   />
-                  {points.map((point) => (
-                    <circle
-                      key={point.metric}
-                      cx={point.x}
-                      cy={point.y}
-                      fill="black"
-                      r={framework.id === "tanstack" ? "3" : "2.4"}
-                      stroke="white"
-                      strokeOpacity={seriesOpacity[framework.id]}
-                      strokeWidth="1"
-                    />
-                  ))}
+                  {points.map((point) => {
+                    const tooltipX = getTooltipX(point.x, width);
+                    const tooltipY = getTooltipY(point.y);
+
+                    return (
+                      <g
+                        key={point.metric}
+                        aria-label={`${framework.label} · ${point.label}: ${formatMetricValue(
+                          point.metric,
+                          framework.metrics[point.metric].median,
+                        )} · ${Math.round(point.value)} speed index`}
+                        className="benchmark-point"
+                        role="img"
+                        tabIndex={0}
+                      >
+                        <circle
+                          className="benchmark-point-ring"
+                          cx={point.x}
+                          cy={point.y}
+                          fill="black"
+                          fillOpacity="0.85"
+                          r={framework.id === "tanstack" ? "3" : "2.4"}
+                          stroke="white"
+                          strokeOpacity={seriesOpacity[framework.id]}
+                          strokeWidth="1"
+                        />
+                        <circle
+                          cx={point.x}
+                          cy={point.y}
+                          fill="white"
+                          fillOpacity="0.001"
+                          pointerEvents="all"
+                          r="13"
+                        />
+                        <g className="benchmark-point-tooltip">
+                          <rect
+                            fill="black"
+                            fillOpacity="0.92"
+                            height="48"
+                            stroke="white"
+                            strokeOpacity="0.18"
+                            width="178"
+                            x={tooltipX}
+                            y={tooltipY}
+                          />
+                          <text
+                            fill="currentColor"
+                            fontFamily="var(--font-geist-mono, monospace)"
+                            fontSize="10"
+                            x={tooltipX + 10}
+                            y={tooltipY + 16}
+                          >
+                            {framework.label}
+                          </text>
+                          <text
+                            fill="currentColor"
+                            fillOpacity="0.62"
+                            fontFamily="var(--font-geist-mono, monospace)"
+                            fontSize="9"
+                            x={tooltipX + 10}
+                            y={tooltipY + 32}
+                          >
+                            {point.label.toUpperCase()} ·{" "}
+                            {formatMetricValue(point.metric, framework.metrics[point.metric].median)}
+                          </text>
+                          <text
+                            fill="currentColor"
+                            fillOpacity="0.48"
+                            fontFamily="var(--font-geist-mono, monospace)"
+                            fontSize="8"
+                            x={tooltipX + 10}
+                            y={tooltipY + 43}
+                          >
+                            {Math.round(point.value)} SPEED INDEX
+                          </text>
+                        </g>
+                      </g>
+                    );
+                  })}
                   {lastPoint ? (
                     <g className="opacity-0 transition-opacity duration-150 group-hover:opacity-100">
                       <rect
@@ -430,14 +586,14 @@ function BenchmarkAreaChart() {
                         strokeOpacity="0.18"
                         width={framework.label.length * 7 + 22}
                         x={Math.max(48, Math.min(width - 180, lastPoint.x - 98))}
-                        y={Math.max(208, lastPoint.y - 32)}
+                        y={Math.max(260, lastPoint.y - 32)}
                       />
                       <text
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="10"
                         x={Math.max(59, Math.min(width - 169, lastPoint.x - 87))}
-                        y={Math.max(223, lastPoint.y - 17)}
+                        y={Math.max(275, lastPoint.y - 17)}
                       >
                         {framework.label}
                       </text>
@@ -447,8 +603,9 @@ function BenchmarkAreaChart() {
               );
             })}
           {farmSeries ? (
-            <g className="group">
+            <g className="benchmark-series group">
               <path
+                className="benchmark-series-line"
                 d={farmSeries.path}
                 fill="none"
                 stroke="white"
@@ -462,26 +619,90 @@ function BenchmarkAreaChart() {
                   .join(" · ")}`}
                 d={farmSeries.path}
                 fill="none"
+                pointerEvents="none"
                 stroke="transparent"
                 strokeWidth="20"
                 vectorEffect="non-scaling-stroke"
               />
-              {farmSeries.points.map((point) => (
-                <circle
-                  key={point.metric}
-                  cx={point.x}
-                  cy={point.y}
-                  fill="black"
-                  r="4"
-                  stroke="white"
-                  strokeOpacity="0.95"
-                  strokeWidth="1.5"
-                  aria-label={`Farm.js · ${point.label}: ${formatMetricValue(
-                    point.metric,
-                    farmResult.metrics[point.metric].median,
-                  )}`}
-                />
-              ))}
+              {farmSeries.points.map((point) => {
+                const tooltipX = getTooltipX(point.x, width);
+                const tooltipY = getTooltipY(point.y);
+
+                return (
+                  <g
+                    key={point.metric}
+                    aria-label={`Farm.js · ${point.label}: ${formatMetricValue(
+                      point.metric,
+                      farmResult.metrics[point.metric].median,
+                    )} · ${Math.round(point.value)} speed index`}
+                    className="benchmark-point"
+                    role="img"
+                    tabIndex={0}
+                  >
+                    <circle
+                      className="benchmark-point-ring"
+                      cx={point.x}
+                      cy={point.y}
+                      fill="black"
+                      fillOpacity="0.95"
+                      r="4"
+                      stroke="white"
+                      strokeOpacity="0.95"
+                      strokeWidth="1.5"
+                    />
+                    <circle
+                      cx={point.x}
+                      cy={point.y}
+                      fill="white"
+                      fillOpacity="0.001"
+                      pointerEvents="all"
+                      r="14"
+                    />
+                    <g className="benchmark-point-tooltip">
+                      <rect
+                        fill="black"
+                        fillOpacity="0.94"
+                        height="48"
+                        stroke="white"
+                        strokeOpacity="0.24"
+                        width="178"
+                        x={tooltipX}
+                        y={tooltipY}
+                      />
+                      <text
+                        fill="currentColor"
+                        fontFamily="var(--font-geist-mono, monospace)"
+                        fontSize="10"
+                        x={tooltipX + 10}
+                        y={tooltipY + 16}
+                      >
+                        Farm.js
+                      </text>
+                      <text
+                        fill="currentColor"
+                        fillOpacity="0.68"
+                        fontFamily="var(--font-geist-mono, monospace)"
+                        fontSize="9"
+                        x={tooltipX + 10}
+                        y={tooltipY + 32}
+                      >
+                        {point.label.toUpperCase()} ·{" "}
+                        {formatMetricValue(point.metric, farmResult.metrics[point.metric].median)}
+                      </text>
+                      <text
+                        fill="currentColor"
+                        fillOpacity="0.52"
+                        fontFamily="var(--font-geist-mono, monospace)"
+                        fontSize="8"
+                        x={tooltipX + 10}
+                        y={tooltipY + 43}
+                      >
+                        {Math.round(point.value)} SPEED INDEX
+                      </text>
+                    </g>
+                  </g>
+                );
+              })}
               <text
                 className="opacity-0 transition-opacity duration-150 group-hover:opacity-100"
                 fill="currentColor"
@@ -489,7 +710,7 @@ function BenchmarkAreaChart() {
                 fontSize="11"
                 textAnchor="end"
                 x={width - 54}
-                y={Math.max(217, farmSeries.points[farmSeries.points.length - 1]?.y ?? 217) - 14}
+                y={Math.max(260, farmSeries.points[farmSeries.points.length - 1]?.y ?? 260) - 14}
               >
                 Farm.js
               </text>
