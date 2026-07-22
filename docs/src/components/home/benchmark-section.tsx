@@ -36,6 +36,7 @@ const chartMetrics = [
   ["buildMs", "Build"],
   ["productionBootMs", "Prod boot"],
   ["productionResponseMs", "SSR"],
+  ["responseBytes", "HTML"],
 ] as const satisfies readonly (readonly [MetricKey, string])[];
 
 function formatRunDate(value: string) {
@@ -61,6 +62,15 @@ function formatRatio(value: number) {
 
 function getMetricMinimum(key: MetricKey) {
   return Math.min(...benchmarkReport.frameworks.map((framework) => framework.metrics[key].median));
+}
+
+function getMetricExtent(key: MetricKey) {
+  const values = benchmarkReport.frameworks.map((framework) => framework.metrics[key].median);
+
+  return {
+    maximum: Math.max(...values),
+    minimum: Math.min(...values),
+  };
 }
 
 function getBestCompetitor(key: MetricKey) {
@@ -92,9 +102,7 @@ function getChartPoints(framework: FrameworkResult, width: number, height: numbe
   const step = (width - insetX * 2) / Math.max(1, chartMetrics.length - 1);
 
   return chartMetrics.map(([metric, label], index) => {
-    const values = benchmarkReport.frameworks.map((item) => item.metrics[metric].median);
-    const minimum = Math.min(...values);
-    const maximum = Math.max(...values);
+    const { maximum, minimum } = getMetricExtent(metric);
     const rawValue = framework.metrics[metric].median;
     const rank = maximum === minimum ? 0 : (rawValue - minimum) / (maximum - minimum);
     const x = insetX + index * step;
@@ -133,6 +141,15 @@ function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: n
     : path;
 }
 
+function closeCeilingPath(path: string, points: readonly ChartPoint[], ceilingY: number) {
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  return firstPoint && lastPoint
+    ? `${path} L ${lastPoint.x.toFixed(2)} ${ceilingY} L ${firstPoint.x.toFixed(2)} ${ceilingY} Z`
+    : path;
+}
+
 function getTooltipX(x: number, width: number) {
   return Math.max(52, Math.min(width - 238, x - 76));
 }
@@ -142,9 +159,7 @@ function getTooltipY(y: number) {
 }
 
 function getColumnRangeLabel(key: MetricKey) {
-  const values = benchmarkReport.frameworks.map((framework) => framework.metrics[key].median);
-  const minimum = Math.min(...values);
-  const maximum = Math.max(...values);
+  const { maximum, minimum } = getMetricExtent(key);
 
   return `${formatMetricValue(key, minimum)} → ${formatMetricValue(key, maximum)}`;
 }
@@ -281,6 +296,7 @@ function BenchmarkAreaChart() {
 
   const width = 960;
   const height = 500;
+  const chartTopY = 250;
   const baselineY = height - 72;
   const series = benchmarkReport.frameworks.map((framework) => {
     const points = getChartPoints(framework, width, height);
@@ -299,6 +315,17 @@ function BenchmarkAreaChart() {
     nuxt: "0.2",
     tanstack: "0.58",
   } as const;
+  const foregroundSeries = [...series].sort((a, b) => {
+    if (a.framework.id === "farm") {
+      return 1;
+    }
+
+    if (b.framework.id === "farm") {
+      return -1;
+    }
+
+    return 0;
+  });
 
   return (
     <div className="relative col-span-full min-h-[40rem] overflow-hidden bg-black">
@@ -309,9 +336,9 @@ function BenchmarkAreaChart() {
         </span>
 
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
-          Monitor framework latency across startup, build, boot, and SSR.{" "}
+          Monitor framework latency and output size across startup, build, boot, SSR, and HTML.{" "}
           <span className="text-white/42">
-            Lower vertices are faster medians inside each benchmark column.
+            Lower vertices are better medians inside each benchmark column.
           </span>
         </p>
 
@@ -340,7 +367,7 @@ function BenchmarkAreaChart() {
 
       <div className="pointer-events-none absolute right-6 top-6 z-10 hidden border border-white/12 bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-normal text-white/44 backdrop-blur sm:block">
         <span className="block text-white/68">X: benchmark set</span>
-        <span className="mt-1 block">Y: measured median / lower is faster</span>
+        <span className="mt-1 block">Y: measured median / lower is better</span>
       </div>
 
       <div className="relative h-[40rem]">
@@ -410,8 +437,13 @@ function BenchmarkAreaChart() {
           </style>
           <defs>
             <linearGradient id="farmBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.12" />
-              <stop offset="55%" stopColor="currentColor" stopOpacity="0.028" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.095" />
+              <stop offset="58%" stopColor="currentColor" stopOpacity="0.034" />
+              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="benchmarkRangeFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.05" />
+              <stop offset="48%" stopColor="currentColor" stopOpacity="0.016" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
             <linearGradient id="tanstackBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
@@ -420,6 +452,14 @@ function BenchmarkAreaChart() {
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
           </defs>
+          <rect
+            fill="url(#benchmarkRangeFill)"
+            height={baselineY - chartTopY}
+            pointerEvents="none"
+            width={width - 84}
+            x="42"
+            y={chartTopY}
+          />
           {[250, 295, 339, 384, 428].map((y) => (
             <line
               key={y}
@@ -432,30 +472,41 @@ function BenchmarkAreaChart() {
               y2={y}
             />
           ))}
-          {["HIGH", "", "MID", "", "LOW"].map((label, index) => (
-            <text
-              key={`${label}-${index}`}
-              fill="currentColor"
-              fillOpacity={label ? "0.35" : "0"}
-              fontFamily="var(--font-geist-mono, monospace)"
-              fontSize="9"
-              x="18"
-              y={254 + index * 44.5}
-            >
-              {label}
-            </text>
-          ))}
-          {chartMetrics.map(([, label], index) => {
+          {chartMetrics.map(([metric, label], index) => {
             const x = 42 + (index * (width - 84)) / Math.max(1, chartMetrics.length - 1);
+            const { maximum, minimum } = getMetricExtent(metric);
+            const textAnchor = index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle";
 
             return (
               <g key={label}>
                 <text
                   fill="currentColor"
+                  fillOpacity="0.34"
+                  fontFamily="var(--font-geist-mono, monospace)"
+                  fontSize="8"
+                  textAnchor={textAnchor}
+                  x={x}
+                  y={chartTopY + 6}
+                >
+                  {formatMetricValue(metric, maximum)}
+                </text>
+                <text
+                  fill="currentColor"
+                  fillOpacity="0.42"
+                  fontFamily="var(--font-geist-mono, monospace)"
+                  fontSize="8"
+                  textAnchor={textAnchor}
+                  x={x}
+                  y={baselineY + 2}
+                >
+                  {formatMetricValue(metric, minimum)}
+                </text>
+                <text
+                  fill="currentColor"
                   fillOpacity="0.48"
                   fontFamily="var(--font-geist-mono, monospace)"
                   fontSize="10"
-                  textAnchor={index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle"}
+                  textAnchor={textAnchor}
                   x={x}
                   y={height - 48}
                 >
@@ -476,12 +527,12 @@ function BenchmarkAreaChart() {
             ))}
           {farmSeries ? (
             <path
-              d={closeAreaPath(farmSeries.path, farmSeries.points, baselineY)}
+              d={closeCeilingPath(farmSeries.path, farmSeries.points, chartTopY)}
               fill="url(#farmBenchmarkFill)"
               pointerEvents="none"
             />
           ) : null}
-          {series.map(({ framework, path }) => {
+          {foregroundSeries.map(({ framework, path }) => {
             const title = chartMetrics
               .map(([key, label]) => `${label}: ${formatMetricValue(key, framework.metrics[key].median)}`)
               .join(" · ");
@@ -511,7 +562,7 @@ function BenchmarkAreaChart() {
             </g>
             );
           })}
-          {series.map(({ framework, points }) => (
+          {foregroundSeries.map(({ framework, points }) => (
             <g key={`${framework.id}-points`}>
               {points.map((point) => {
                 const tooltipX = getTooltipX(point.x, width);
@@ -597,7 +648,7 @@ function BenchmarkAreaChart() {
                         x={tooltipX + 10}
                         y={tooltipY + 58}
                       >
-                        LOWER = FASTER IN THIS COLUMN
+                        LOWER = BETTER IN THIS COLUMN
                       </text>
                     </g>
                   </g>
