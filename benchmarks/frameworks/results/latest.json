@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-07-22T00:17:50.324Z",
+  "generatedAt": "2026-07-22T12:36:43.924Z",
   "revision": {
-    "commit": "ff5a0a3a20b2ce9d23753b57592fd71ae2a3ef75",
+    "benchmarkInputsDirty": false,
+    "commit": "69f0948b97c3870d0f7cb7af665c209df8dfd0b8",
     "branch": "perf/rolldown-production-build",
     "farmSourceDirty": false,
     "farmSourceDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -10,8 +11,8 @@
     "workspaceDirty": true
   },
   "inputs": {
-    "sha256": "58e331fd39d110764cc006af2dc95cccb6ede975c4af78fd5bf37219fb7fd81d",
-    "rootLockSha256": "f1c3f2688723b890732f00a658528e394cd58662b101c7112cca1319184fdd03"
+    "sha256": "b9f6214fc78195928d4159058d3b097a8cbf21bf4917a1fb09a16f44294ad1a9",
+    "rootLockSha256": "8e829ea62304403856c8ea12b2e9b4beef50a096a5c35dfb7fa0b8d4a201b431"
   },
   "fixture": {
     "name": "small-dynamic-ssr",
@@ -25,8 +26,10 @@
     "farmPackagesPrepared": true,
     "measuredRequestsPerRun": 30,
     "warmupRequestsPerRun": 5,
-    "order": "Deterministically randomized round-robin",
-    "cache": "Generated framework caches removed before dev and build; OS filesystem cache warm",
+    "order": "Seeded, position-balanced cyclic schedule",
+    "cache": "Generated framework caches removed before dev and build; OS filesystem and any product-enabled Node compile cache warm",
+    "nodeCompileCache": "Ambient Node compile-cache controls removed; framework CLIs retain their normal compile-cache behavior",
+    "readinessPollIntervalMs": 2,
     "timer": "External monotonic wall clock",
     "devFirstPage": "Framework process spawn to the first HTTP 200 containing the expected rendered marker",
     "cleanBuild": "Framework build process spawn to successful exit after generated-cache removal",
@@ -52,329 +55,329 @@
     {
       "index": 1,
       "order": ["tanstack", "next", "nuxt", "sveltekit", "farm"],
-      "loadAverage": [5.1, 4.05, 4.58],
+      "loadAverage": [5.34, 4.77, 7.45],
       "frameworks": {
         "tanstack": {
-          "devFirstPageMs": 834.47,
-          "devWarmResponseMs": 8.72,
-          "buildMs": 648.31,
-          "productionBootMs": 89.82,
-          "productionResponseMs": 1.12,
+          "devFirstPageMs": 853.91,
+          "devWarmResponseMs": 8.51,
+          "buildMs": 654.08,
+          "productionBootMs": 76.48,
+          "productionResponseMs": 1.1,
           "responseBytes": 9285
         },
         "next": {
-          "devFirstPageMs": 1359.69,
-          "devWarmResponseMs": 30.23,
-          "buildMs": 2350.24,
-          "productionBootMs": 240.84,
-          "productionResponseMs": 4.04,
+          "devFirstPageMs": 1355.03,
+          "devWarmResponseMs": 34.54,
+          "buildMs": 2365.77,
+          "productionBootMs": 236.72,
+          "productionResponseMs": 3.73,
           "responseBytes": 30842
         },
         "nuxt": {
-          "devFirstPageMs": 2287.39,
-          "devWarmResponseMs": 3.27,
-          "buildMs": 4294.89,
-          "productionBootMs": 118.57,
-          "productionResponseMs": 1.12,
+          "devFirstPageMs": 2313.43,
+          "devWarmResponseMs": 2.91,
+          "buildMs": 4686.08,
+          "productionBootMs": 117.66,
+          "productionResponseMs": 1.31,
           "responseBytes": 8527
         },
         "sveltekit": {
-          "devFirstPageMs": 781.64,
-          "devWarmResponseMs": 1.88,
-          "buildMs": 1638.93,
-          "productionBootMs": 63.6,
-          "productionResponseMs": 0.74,
+          "devFirstPageMs": 818.5,
+          "devWarmResponseMs": 2.11,
+          "buildMs": 1768.91,
+          "productionBootMs": 68.14,
+          "productionResponseMs": 0.76,
           "responseBytes": 8355
         },
         "farm": {
-          "devFirstPageMs": 345.33,
-          "devWarmResponseMs": 5.11,
-          "buildMs": 529.2,
-          "productionBootMs": 98.31,
-          "productionResponseMs": 0.8,
-          "responseBytes": 7528
+          "devFirstPageMs": 272.66,
+          "devWarmResponseMs": 5.44,
+          "buildMs": 563.97,
+          "productionBootMs": 67.43,
+          "productionResponseMs": 1.1,
+          "responseBytes": 7591
         }
       }
     },
     {
       "index": 2,
-      "order": ["sveltekit", "nuxt", "farm", "tanstack", "next"],
-      "loadAverage": [5.05, 4.1, 4.58],
+      "order": ["next", "nuxt", "sveltekit", "farm", "tanstack"],
+      "loadAverage": [4.38, 4.59, 7.32],
       "frameworks": {
-        "sveltekit": {
-          "devFirstPageMs": 758.07,
-          "devWarmResponseMs": 1.93,
-          "buildMs": 1678.92,
-          "productionBootMs": 62.16,
-          "productionResponseMs": 0.68,
-          "responseBytes": 8356
+        "next": {
+          "devFirstPageMs": 1481.08,
+          "devWarmResponseMs": 32.88,
+          "buildMs": 2575.74,
+          "productionBootMs": 268.21,
+          "productionResponseMs": 4.41,
+          "responseBytes": 30842
         },
         "nuxt": {
-          "devFirstPageMs": 2380.67,
-          "devWarmResponseMs": 3.41,
-          "buildMs": 4330.03,
-          "productionBootMs": 120.33,
-          "productionResponseMs": 1.13,
+          "devFirstPageMs": 2443.07,
+          "devWarmResponseMs": 3.61,
+          "buildMs": 4611.97,
+          "productionBootMs": 114.09,
+          "productionResponseMs": 1.3,
           "responseBytes": 8527
         },
+        "sveltekit": {
+          "devFirstPageMs": 783.94,
+          "devWarmResponseMs": 1.8,
+          "buildMs": 1826.14,
+          "productionBootMs": 64.49,
+          "productionResponseMs": 0.69,
+          "responseBytes": 8355
+        },
         "farm": {
-          "devFirstPageMs": 344.05,
-          "devWarmResponseMs": 5.23,
-          "buildMs": 545.64,
-          "productionBootMs": 99.02,
-          "productionResponseMs": 0.84,
-          "responseBytes": 7528
+          "devFirstPageMs": 282.87,
+          "devWarmResponseMs": 5.47,
+          "buildMs": 536.55,
+          "productionBootMs": 68.02,
+          "productionResponseMs": 0.92,
+          "responseBytes": 7591
         },
         "tanstack": {
-          "devFirstPageMs": 800.56,
-          "devWarmResponseMs": 8.53,
-          "buildMs": 653.15,
-          "productionBootMs": 88.86,
-          "productionResponseMs": 1.07,
+          "devFirstPageMs": 823.3,
+          "devWarmResponseMs": 9.22,
+          "buildMs": 689.52,
+          "productionBootMs": 80.84,
+          "productionResponseMs": 1.13,
           "responseBytes": 9285
-        },
-        "next": {
-          "devFirstPageMs": 1384.51,
-          "devWarmResponseMs": 30.43,
-          "buildMs": 2351.03,
-          "productionBootMs": 238.93,
-          "productionResponseMs": 3.88,
-          "responseBytes": 30842
         }
       }
     },
     {
       "index": 3,
-      "order": ["farm", "tanstack", "nuxt", "sveltekit", "next"],
-      "loadAverage": [4.93, 4.11, 4.58],
+      "order": ["nuxt", "sveltekit", "farm", "tanstack", "next"],
+      "loadAverage": [3.76, 4.44, 7.2],
       "frameworks": {
-        "farm": {
-          "devFirstPageMs": 346.12,
-          "devWarmResponseMs": 5.62,
-          "buildMs": 561.58,
-          "productionBootMs": 97.46,
-          "productionResponseMs": 0.85,
-          "responseBytes": 7528
-        },
-        "tanstack": {
-          "devFirstPageMs": 801.23,
-          "devWarmResponseMs": 8.97,
-          "buildMs": 655.88,
-          "productionBootMs": 91.13,
-          "productionResponseMs": 1.17,
-          "responseBytes": 9285
-        },
         "nuxt": {
-          "devFirstPageMs": 2449.97,
-          "devWarmResponseMs": 3.48,
-          "buildMs": 4229.63,
-          "productionBootMs": 120.06,
-          "productionResponseMs": 1.06,
+          "devFirstPageMs": 2356.6,
+          "devWarmResponseMs": 3.06,
+          "buildMs": 4914.28,
+          "productionBootMs": 128.1,
+          "productionResponseMs": 1.28,
           "responseBytes": 8527
         },
         "sveltekit": {
-          "devFirstPageMs": 783.66,
-          "devWarmResponseMs": 1.95,
-          "buildMs": 1644.03,
-          "productionBootMs": 63.62,
-          "productionResponseMs": 0.68,
-          "responseBytes": 8355
+          "devFirstPageMs": 907.18,
+          "devWarmResponseMs": 2.12,
+          "buildMs": 1750.91,
+          "productionBootMs": 67.78,
+          "productionResponseMs": 0.65,
+          "responseBytes": 8356
+        },
+        "farm": {
+          "devFirstPageMs": 291.87,
+          "devWarmResponseMs": 5.2,
+          "buildMs": 537.5,
+          "productionBootMs": 66.58,
+          "productionResponseMs": 0.9,
+          "responseBytes": 7591
+        },
+        "tanstack": {
+          "devFirstPageMs": 800.8,
+          "devWarmResponseMs": 10.94,
+          "buildMs": 829.69,
+          "productionBootMs": 83.12,
+          "productionResponseMs": 1.13,
+          "responseBytes": 9285
         },
         "next": {
-          "devFirstPageMs": 1371.96,
-          "devWarmResponseMs": 31.32,
-          "buildMs": 2407.49,
-          "productionBootMs": 312,
-          "productionResponseMs": 5.03,
+          "devFirstPageMs": 1701.66,
+          "devWarmResponseMs": 35.75,
+          "buildMs": 2628.06,
+          "productionBootMs": 277.47,
+          "productionResponseMs": 4.48,
           "responseBytes": 30842
         }
       }
     },
     {
       "index": 4,
-      "order": ["farm", "next", "tanstack", "nuxt", "sveltekit"],
-      "loadAverage": [4.17, 3.99, 4.52],
+      "order": ["sveltekit", "farm", "tanstack", "next", "nuxt"],
+      "loadAverage": [6.07, 4.92, 7.31],
       "frameworks": {
-        "farm": {
-          "devFirstPageMs": 346.6,
-          "devWarmResponseMs": 5.19,
-          "buildMs": 529.25,
-          "productionBootMs": 96.88,
-          "productionResponseMs": 0.79,
-          "responseBytes": 7528
+        "sveltekit": {
+          "devFirstPageMs": 874.2,
+          "devWarmResponseMs": 2.38,
+          "buildMs": 1790.96,
+          "productionBootMs": 67.85,
+          "productionResponseMs": 0.69,
+          "responseBytes": 8356
         },
-        "next": {
-          "devFirstPageMs": 1378.71,
-          "devWarmResponseMs": 30.41,
-          "buildMs": 2461.95,
-          "productionBootMs": 239.54,
-          "productionResponseMs": 3.98,
-          "responseBytes": 30842
+        "farm": {
+          "devFirstPageMs": 286.11,
+          "devWarmResponseMs": 5.29,
+          "buildMs": 553.71,
+          "productionBootMs": 66.89,
+          "productionResponseMs": 1.01,
+          "responseBytes": 7591
         },
         "tanstack": {
-          "devFirstPageMs": 982.5,
-          "devWarmResponseMs": 8.56,
-          "buildMs": 963.32,
-          "productionBootMs": 88.2,
-          "productionResponseMs": 1.12,
+          "devFirstPageMs": 813.5,
+          "devWarmResponseMs": 9.14,
+          "buildMs": 748.14,
+          "productionBootMs": 79.34,
+          "productionResponseMs": 1.22,
           "responseBytes": 9285
         },
-        "nuxt": {
-          "devFirstPageMs": 2300.07,
-          "devWarmResponseMs": 3.17,
-          "buildMs": 4283.24,
-          "productionBootMs": 118.68,
-          "productionResponseMs": 1.14,
-          "responseBytes": 8527
+        "next": {
+          "devFirstPageMs": 1529,
+          "devWarmResponseMs": 31.56,
+          "buildMs": 2578.9,
+          "productionBootMs": 250.73,
+          "productionResponseMs": 4.44,
+          "responseBytes": 30842
         },
-        "sveltekit": {
-          "devFirstPageMs": 791.19,
-          "devWarmResponseMs": 1.96,
-          "buildMs": 1683.94,
-          "productionBootMs": 62.14,
-          "productionResponseMs": 0.72,
-          "responseBytes": 8355
+        "nuxt": {
+          "devFirstPageMs": 2431.25,
+          "devWarmResponseMs": 3.46,
+          "buildMs": 4702.76,
+          "productionBootMs": 127.18,
+          "productionResponseMs": 1.26,
+          "responseBytes": 8527
         }
       }
     },
     {
       "index": 5,
-      "order": ["sveltekit", "nuxt", "farm", "tanstack", "next"],
-      "loadAverage": [4.86, 4.17, 4.57],
+      "order": ["farm", "tanstack", "next", "nuxt", "sveltekit"],
+      "loadAverage": [7.57, 5.39, 7.43],
       "frameworks": {
-        "sveltekit": {
-          "devFirstPageMs": 761.52,
-          "devWarmResponseMs": 1.98,
-          "buildMs": 1662.19,
-          "productionBootMs": 62.31,
-          "productionResponseMs": 0.75,
-          "responseBytes": 8356
-        },
-        "nuxt": {
-          "devFirstPageMs": 2286.78,
-          "devWarmResponseMs": 3.19,
-          "buildMs": 4382.14,
-          "productionBootMs": 119.37,
-          "productionResponseMs": 1.17,
-          "responseBytes": 8527
-        },
         "farm": {
-          "devFirstPageMs": 341.94,
-          "devWarmResponseMs": 5.4,
-          "buildMs": 550.36,
-          "productionBootMs": 97.6,
-          "productionResponseMs": 0.84,
-          "responseBytes": 7528
+          "devFirstPageMs": 411.86,
+          "devWarmResponseMs": 5.63,
+          "buildMs": 810.67,
+          "productionBootMs": 72.84,
+          "productionResponseMs": 1.03,
+          "responseBytes": 7591
         },
         "tanstack": {
-          "devFirstPageMs": 802.35,
-          "devWarmResponseMs": 8.69,
-          "buildMs": 760.13,
-          "productionBootMs": 129.18,
-          "productionResponseMs": 1.19,
+          "devFirstPageMs": 1392.64,
+          "devWarmResponseMs": 8.55,
+          "buildMs": 714.01,
+          "productionBootMs": 85.56,
+          "productionResponseMs": 1.23,
           "responseBytes": 9285
         },
         "next": {
-          "devFirstPageMs": 1433.11,
-          "devWarmResponseMs": 30.26,
-          "buildMs": 2376.81,
-          "productionBootMs": 254.42,
-          "productionResponseMs": 4.15,
+          "devFirstPageMs": 1432.03,
+          "devWarmResponseMs": 30.52,
+          "buildMs": 2532.62,
+          "productionBootMs": 237.52,
+          "productionResponseMs": 3.68,
           "responseBytes": 30842
+        },
+        "nuxt": {
+          "devFirstPageMs": 2275.23,
+          "devWarmResponseMs": 2.73,
+          "buildMs": 4447.14,
+          "productionBootMs": 115.72,
+          "productionResponseMs": 1.1,
+          "responseBytes": 8527
+        },
+        "sveltekit": {
+          "devFirstPageMs": 888.17,
+          "devWarmResponseMs": 1.86,
+          "buildMs": 1676.39,
+          "productionBootMs": 64.63,
+          "productionResponseMs": 0.78,
+          "responseBytes": 8356
         }
       }
     },
     {
       "index": 6,
-      "order": ["nuxt", "farm", "sveltekit", "next", "tanstack"],
-      "loadAverage": [4.03, 4.03, 4.51],
+      "order": ["sveltekit", "farm", "tanstack", "nuxt", "next"],
+      "loadAverage": [7.01, 5.39, 7.38],
       "frameworks": {
+        "sveltekit": {
+          "devFirstPageMs": 774.79,
+          "devWarmResponseMs": 1.83,
+          "buildMs": 1638.25,
+          "productionBootMs": 62.65,
+          "productionResponseMs": 0.77,
+          "responseBytes": 8355
+        },
+        "farm": {
+          "devFirstPageMs": 321.94,
+          "devWarmResponseMs": 5.06,
+          "buildMs": 654.19,
+          "productionBootMs": 68.76,
+          "productionResponseMs": 1.05,
+          "responseBytes": 7591
+        },
+        "tanstack": {
+          "devFirstPageMs": 816.44,
+          "devWarmResponseMs": 9,
+          "buildMs": 674.06,
+          "productionBootMs": 81.16,
+          "productionResponseMs": 1.34,
+          "responseBytes": 9285
+        },
         "nuxt": {
-          "devFirstPageMs": 2319.48,
-          "devWarmResponseMs": 3.37,
-          "buildMs": 4340.52,
-          "productionBootMs": 124.36,
+          "devFirstPageMs": 2371.06,
+          "devWarmResponseMs": 2.91,
+          "buildMs": 4503.75,
+          "productionBootMs": 110.04,
           "productionResponseMs": 1.14,
           "responseBytes": 8527
         },
-        "farm": {
-          "devFirstPageMs": 343.93,
-          "devWarmResponseMs": 5.16,
-          "buildMs": 550.65,
-          "productionBootMs": 95.63,
-          "productionResponseMs": 0.84,
-          "responseBytes": 7528
-        },
-        "sveltekit": {
-          "devFirstPageMs": 786.17,
-          "devWarmResponseMs": 1.97,
-          "buildMs": 1693.82,
-          "productionBootMs": 62.79,
-          "productionResponseMs": 0.7,
-          "responseBytes": 8356
-        },
         "next": {
-          "devFirstPageMs": 1461.29,
-          "devWarmResponseMs": 30.82,
-          "buildMs": 2486.39,
-          "productionBootMs": 243.54,
-          "productionResponseMs": 4.08,
+          "devFirstPageMs": 1435.41,
+          "devWarmResponseMs": 31.9,
+          "buildMs": 2338.09,
+          "productionBootMs": 239.17,
+          "productionResponseMs": 4.35,
           "responseBytes": 30842
-        },
-        "tanstack": {
-          "devFirstPageMs": 792.25,
-          "devWarmResponseMs": 8.81,
-          "buildMs": 662.55,
-          "productionBootMs": 91.82,
-          "productionResponseMs": 1.18,
-          "responseBytes": 9285
         }
       }
     },
     {
       "index": 7,
-      "order": ["tanstack", "farm", "sveltekit", "next", "nuxt"],
-      "loadAverage": [4.3, 4.08, 4.52],
+      "order": ["farm", "tanstack", "nuxt", "next", "sveltekit"],
+      "loadAverage": [6.37, 5.38, 7.33],
       "frameworks": {
+        "farm": {
+          "devFirstPageMs": 269.94,
+          "devWarmResponseMs": 5.58,
+          "buildMs": 534.49,
+          "productionBootMs": 63.11,
+          "productionResponseMs": 0.94,
+          "responseBytes": 7591
+        },
         "tanstack": {
-          "devFirstPageMs": 797.99,
-          "devWarmResponseMs": 8.79,
-          "buildMs": 669.01,
-          "productionBootMs": 88.99,
-          "productionResponseMs": 1.18,
+          "devFirstPageMs": 793.85,
+          "devWarmResponseMs": 8.43,
+          "buildMs": 652.12,
+          "productionBootMs": 77.92,
+          "productionResponseMs": 1.08,
           "responseBytes": 9285
         },
-        "farm": {
-          "devFirstPageMs": 347.12,
-          "devWarmResponseMs": 5.37,
-          "buildMs": 541.02,
-          "productionBootMs": 97.04,
-          "productionResponseMs": 0.83,
-          "responseBytes": 7528
-        },
-        "sveltekit": {
-          "devFirstPageMs": 790.04,
-          "devWarmResponseMs": 1.97,
-          "buildMs": 1689.97,
-          "productionBootMs": 63.11,
-          "productionResponseMs": 0.75,
-          "responseBytes": 8355
-        },
-        "next": {
-          "devFirstPageMs": 1443.11,
-          "devWarmResponseMs": 30.85,
-          "buildMs": 2378.11,
-          "productionBootMs": 241.19,
-          "productionResponseMs": 4.01,
-          "responseBytes": 30842
-        },
         "nuxt": {
-          "devFirstPageMs": 2293,
-          "devWarmResponseMs": 3.3,
-          "buildMs": 4229.43,
-          "productionBootMs": 120.48,
+          "devFirstPageMs": 2328.43,
+          "devWarmResponseMs": 2.77,
+          "buildMs": 4394.58,
+          "productionBootMs": 115.01,
           "productionResponseMs": 1.13,
           "responseBytes": 8527
+        },
+        "next": {
+          "devFirstPageMs": 1377.1,
+          "devWarmResponseMs": 33.24,
+          "buildMs": 2538.27,
+          "productionBootMs": 237.13,
+          "productionResponseMs": 4.6,
+          "responseBytes": 30842
+        },
+        "sveltekit": {
+          "devFirstPageMs": 855.39,
+          "devWarmResponseMs": 1.86,
+          "buildMs": 1713.03,
+          "productionBootMs": 62.11,
+          "productionResponseMs": 0.68,
+          "responseBytes": 8355
         }
       }
     }
@@ -384,88 +387,88 @@
       "id": "farm",
       "label": "Farm.js",
       "version": "0.0.3-beta.3",
-      "stack": "React 19.2.4 · Vite 8.1.5 (Rolldown)",
+      "stack": "React 19.2.4 · Vite 5.4.20 dev · Vite 8.1.5 (Rolldown) build",
       "metrics": {
         "devFirstPageMs": {
-          "median": 345.33,
-          "p95": 347.12,
-          "min": 341.94,
-          "max": 347.12,
-          "samples": [345.33, 344.05, 346.12, 346.6, 341.94, 343.93, 347.12]
+          "median": 286.11,
+          "p95": 411.86,
+          "min": 269.94,
+          "max": 411.86,
+          "samples": [272.66, 282.87, 291.87, 286.11, 411.86, 321.94, 269.94]
         },
         "devFirstRequestMs": {
-          "median": 48.21,
-          "p95": 50.28,
-          "min": 46.45,
-          "max": 50.28,
-          "samples": [48.21, 46.54, 50.28, 48.31, 46.45, 47.43, 48.38]
+          "median": 53.82,
+          "p95": 75.95,
+          "min": 50.5,
+          "max": 75.95,
+          "samples": [51.28, 57.78, 50.5, 53.82, 75.95, 70.17, 53.54]
         },
         "devWarmResponseMs": {
-          "median": 5.26,
-          "p95": 6.5,
-          "min": 1.83,
-          "max": 7.69,
+          "median": 5.31,
+          "p95": 6.18,
+          "min": 1.78,
+          "max": 6.99,
           "samples": [
-            5.42, 5.55, 5.79, 5.37, 6.7, 5.12, 5.08, 5.2, 5.04, 5.11, 5.21, 4.95, 5.06, 6.34, 5.11,
-            5.15, 5.3, 5.41, 5.5, 5.4, 2.93, 2.16, 2.49, 2.55, 2.41, 2.07, 2.08, 2.1, 2, 2.96, 5.58,
-            5.68, 6.19, 5.68, 6.77, 5.3, 5.27, 5.55, 5.31, 5.08, 5.31, 5.21, 5.23, 5.2, 5.32, 5.13,
-            5.28, 5.52, 5.38, 5.43, 2.82, 2.25, 2.47, 2.29, 2.36, 2.07, 2.03, 2.06, 2.18, 2.92,
-            6.29, 5.96, 6.19, 6.22, 7.69, 6.48, 5.87, 5.79, 5.68, 5.46, 6.1, 5.59, 5.72, 5.84, 5.47,
-            5.49, 5.62, 6.67, 6.06, 5.94, 3.02, 2.48, 2.58, 2.87, 2.54, 2.19, 2.24, 2.1, 2.32, 3.16,
-            6.5, 5.48, 5.96, 5.51, 6.68, 5.39, 5.56, 5.09, 5.13, 5.1, 5.1, 5.19, 5.33, 5.24, 5.3,
-            5.47, 5.35, 5.44, 5.99, 5.37, 2.77, 2.27, 2.68, 2.42, 2.24, 2.08, 1.97, 1.94, 2.03,
-            2.98, 5.96, 5.81, 6.11, 5.89, 7.26, 5.21, 5.35, 5.26, 6.4, 5.9, 6.79, 7.15, 6.28, 5.73,
-            5.89, 5.48, 5.4, 5.58, 5.46, 5.29, 2.98, 2.33, 2.57, 2.37, 2.34, 2.04, 1.83, 2.15, 2.16,
-            2.96, 5.5, 5.36, 5.67, 6.25, 7, 5.06, 5.17, 5.07, 5.26, 5.3, 5.16, 5.04, 5.35, 5.19,
-            5.01, 5.2, 5.39, 5.27, 5.45, 5.39, 2.87, 2.64, 2.46, 2.35, 2.35, 2.09, 2.09, 2.24, 2.4,
-            2.88, 6.08, 5.8, 5.94, 5.42, 7.26, 5.48, 5.26, 5.72, 5.25, 5.59, 5.84, 6.37, 6.01, 5.67,
-            5.68, 5.37, 5.41, 5.22, 5.29, 5.43, 2.82, 2.18, 2.33, 2.63, 2.46, 2.29, 1.89, 1.99,
-            2.05, 2.88
+            5.78, 5.75, 6.01, 5.6, 5.76, 5.77, 5.87, 5.79, 5.89, 6.33, 5.43, 5.58, 5.51, 5.16, 5.42,
+            5.57, 5.41, 5.54, 5.71, 5.44, 3.96, 2.94, 2.65, 2.83, 2.33, 2.67, 2.54, 2.77, 2.45,
+            2.46, 5.65, 6.11, 6.55, 6.99, 5.61, 5.77, 6.54, 5.71, 6.14, 6.69, 5.31, 5.08, 6.2, 5.4,
+            6.18, 5.85, 5.3, 5.98, 5.5, 5.47, 3.66, 3.94, 2.61, 2.36, 2.37, 1.96, 1.8, 2.78, 2.88,
+            2.45, 5.7, 5.58, 6.06, 5.63, 5.31, 5.33, 5.66, 5.31, 5.43, 6.17, 5.26, 5.18, 5.2, 5.16,
+            5.04, 5.26, 5.19, 5.29, 5.21, 5.1, 3.72, 2.64, 5.38, 4.41, 2.78, 2.46, 2.36, 2.3, 2.88,
+            2.28, 5.62, 6.15, 5.82, 5.57, 5.69, 5.42, 5.31, 5.75, 5.48, 6.88, 5.39, 5.06, 5.51,
+            5.29, 4.98, 5.12, 5.65, 5.25, 5.35, 5.61, 2.91, 2.7, 2.83, 3.15, 3.01, 2.13, 2.04, 2.08,
+            2.22, 2.33, 5.75, 5.9, 6.44, 5.89, 5.64, 5.63, 5.81, 5.93, 5.98, 6.45, 5.64, 5.73, 5.27,
+            5.62, 5.72, 5.37, 5.78, 5.66, 5.38, 5.71, 3.13, 3.2, 2.26, 2.2, 2.35, 2.73, 2.04, 1.92,
+            2.5, 1.95, 5.1, 5.4, 5.71, 5.09, 5.19, 5.31, 5.17, 5.06, 5.15, 6.27, 5.11, 4.92, 4.93,
+            4.97, 5.17, 5.01, 5.18, 5.36, 5.3, 5.18, 2.66, 2.59, 2.48, 2.15, 2.14, 1.85, 1.78, 2.01,
+            1.85, 1.89, 5.89, 5.91, 6.04, 5.82, 5.67, 5.78, 5.59, 5.46, 5.29, 5.78, 5.52, 5.58,
+            5.59, 6, 5.73, 5.7, 5.74, 5.77, 5.9, 5.5, 4.4, 2.66, 2.71, 2.63, 2.27, 1.95, 1.81, 1.98,
+            2.15, 2.13
           ]
         },
         "buildMs": {
-          "median": 545.64,
-          "p95": 561.58,
-          "min": 529.2,
-          "max": 561.58,
-          "samples": [529.2, 545.64, 561.58, 529.25, 550.36, 550.65, 541.02]
+          "median": 553.71,
+          "p95": 810.67,
+          "min": 534.49,
+          "max": 810.67,
+          "samples": [563.97, 536.55, 537.5, 553.71, 810.67, 654.19, 534.49]
         },
         "productionBootMs": {
-          "median": 97.46,
-          "p95": 99.02,
-          "min": 95.63,
-          "max": 99.02,
-          "samples": [98.31, 99.02, 97.46, 96.88, 97.6, 95.63, 97.04]
+          "median": 67.43,
+          "p95": 72.84,
+          "min": 63.11,
+          "max": 72.84,
+          "samples": [67.43, 68.02, 66.58, 66.89, 72.84, 68.76, 63.11]
         },
         "productionResponseMs": {
-          "median": 0.83,
-          "p95": 1.29,
-          "min": 0.62,
-          "max": 2.42,
+          "median": 0.99,
+          "p95": 1.45,
+          "min": 0.73,
+          "max": 1.81,
           "samples": [
-            1.13, 1.21, 1.3, 0.87, 0.8, 0.75, 0.9, 0.71, 0.68, 0.65, 0.78, 0.77, 0.72, 0.75, 0.98,
-            0.79, 0.83, 0.75, 0.78, 0.77, 0.71, 0.73, 0.98, 0.94, 0.89, 0.85, 0.95, 0.83, 0.86,
-            0.81, 2.42, 1.38, 1.58, 0.97, 0.81, 0.85, 0.98, 0.81, 0.75, 0.69, 0.65, 0.64, 0.64, 1,
-            0.96, 0.97, 1.12, 0.79, 0.84, 0.79, 0.89, 0.95, 0.93, 0.92, 0.84, 0.81, 0.95, 0.83,
-            0.84, 0.77, 1.12, 1.13, 1.32, 0.95, 0.84, 0.76, 0.97, 0.7, 0.7, 0.66, 0.63, 0.64, 0.62,
-            0.85, 0.93, 0.89, 0.77, 0.77, 0.88, 0.8, 0.78, 0.91, 0.99, 0.98, 0.99, 1.59, 1.07, 0.92,
-            0.74, 0.75, 1.05, 1.08, 1.23, 0.9, 0.79, 0.74, 1.05, 0.79, 0.71, 0.67, 0.63, 0.64, 0.64,
-            0.67, 0.96, 0.81, 0.82, 0.75, 0.78, 0.75, 0.68, 0.75, 0.9, 0.85, 0.9, 0.95, 0.88, 0.75,
-            0.8, 0.8, 1.06, 1.12, 1.32, 0.95, 0.87, 0.92, 1.08, 0.86, 0.78, 0.7, 0.67, 0.71, 0.86,
-            0.79, 0.84, 0.83, 0.92, 0.81, 0.78, 0.79, 0.87, 0.83, 0.84, 0.93, 0.95, 0.97, 0.87,
-            0.78, 0.81, 0.83, 1.24, 1.22, 1.3, 1.02, 0.93, 0.95, 1.05, 0.76, 0.76, 0.84, 0.75, 0.69,
-            0.68, 0.73, 0.78, 0.88, 0.83, 0.89, 1.84, 0.83, 0.74, 0.81, 0.81, 0.88, 0.97, 0.89,
-            0.99, 0.79, 0.76, 0.85, 1.15, 1.29, 1.34, 0.99, 0.83, 0.86, 0.93, 0.77, 0.75, 0.69,
-            0.67, 0.68, 0.83, 0.84, 0.96, 0.84, 0.78, 0.86, 0.76, 0.77, 0.8, 0.83, 0.78, 0.89, 0.87,
-            0.86, 1.03, 0.83, 0.78, 0.78
+            1.4, 1.44, 1.44, 1.28, 1.28, 1.09, 0.92, 0.88, 0.98, 0.89, 0.85, 1.03, 1.18, 1.49, 1.16,
+            1.09, 1.1, 1, 0.99, 1.04, 1.28, 1.81, 1.7, 1.12, 1.06, 1.17, 1.55, 1.31, 0.83, 0.78,
+            1.13, 1.29, 1.36, 1.21, 0.97, 0.91, 0.96, 0.9, 0.89, 0.86, 0.81, 1, 0.84, 0.95, 0.92,
+            0.95, 0.89, 0.96, 0.97, 1, 0.83, 0.86, 0.9, 0.91, 0.77, 0.99, 1.13, 0.96, 0.84, 0.82,
+            1.26, 1.4, 1.37, 1.12, 0.98, 0.9, 0.87, 0.83, 0.87, 1.06, 0.87, 0.99, 0.81, 0.8, 0.81,
+            0.89, 0.81, 0.84, 0.86, 1.06, 0.89, 1, 1.08, 1.13, 0.95, 0.98, 1.03, 0.95, 0.82, 0.83,
+            1.26, 1.63, 1.66, 1.39, 1.02, 1.1, 0.95, 0.89, 0.85, 0.76, 0.76, 0.8, 0.73, 0.79, 0.84,
+            0.97, 0.83, 1.02, 1.01, 1.01, 1.05, 1.26, 1.2, 1.29, 1.1, 1.06, 1.07, 0.94, 0.83, 0.8,
+            1.33, 1.49, 1.4, 1.08, 0.81, 0.96, 1.02, 1.32, 1.33, 0.97, 0.91, 0.86, 0.9, 1.17, 1.17,
+            1.11, 0.98, 0.93, 0.85, 0.92, 0.81, 0.97, 1.23, 1.58, 1.45, 1.15, 1.26, 0.84, 1.08,
+            1.03, 1.37, 1.48, 1.43, 1.18, 1.16, 1.35, 1.42, 1.05, 1.05, 0.87, 0.87, 0.92, 1.08,
+            1.04, 0.91, 1.09, 0.99, 1.01, 0.94, 1.03, 1.02, 1.27, 1.67, 1.26, 1.14, 1.41, 1.36,
+            0.99, 0.77, 0.85, 1.2, 1.41, 1.42, 1.11, 0.86, 0.86, 0.98, 0.92, 1.03, 1, 0.92, 0.85,
+            0.9, 0.93, 1.01, 0.95, 0.94, 0.9, 0.85, 0.94, 0.87, 0.98, 1.2, 1.02, 1.02, 1.03, 0.98,
+            0.94, 0.78, 0.81
           ]
         },
         "responseBytes": {
-          "median": 7528,
-          "p95": 7528,
-          "min": 7528,
-          "max": 7528,
-          "samples": [7528, 7528, 7528, 7528, 7528, 7528, 7528]
+          "median": 7591,
+          "p95": 7591,
+          "min": 7591,
+          "max": 7591,
+          "samples": [7591, 7591, 7591, 7591, 7591, 7591, 7591]
         }
       }
     },
@@ -476,79 +479,80 @@
       "stack": "React 19.2.4 · Turbopack default",
       "metrics": {
         "devFirstPageMs": {
-          "median": 1384.51,
-          "p95": 1461.29,
-          "min": 1359.69,
-          "max": 1461.29,
-          "samples": [1359.69, 1384.51, 1371.96, 1378.71, 1433.11, 1461.29, 1443.11]
+          "median": 1435.41,
+          "p95": 1701.66,
+          "min": 1355.03,
+          "max": 1701.66,
+          "samples": [1355.03, 1481.08, 1701.66, 1529, 1432.03, 1435.41, 1377.1]
         },
         "devFirstRequestMs": {
-          "median": 1138.44,
-          "p95": 1199.36,
-          "min": 1116.02,
-          "max": 1199.36,
-          "samples": [1116.02, 1138.4, 1129.46, 1138.44, 1164.13, 1190.27, 1199.36]
+          "median": 1162.61,
+          "p95": 1431.5,
+          "min": 1109.63,
+          "max": 1431.5,
+          "samples": [1109.63, 1220.86, 1431.5, 1273.67, 1148.82, 1162.61, 1129.63]
         },
         "devWarmResponseMs": {
-          "median": 30.66,
-          "p95": 37.89,
-          "min": 19.6,
-          "max": 41,
+          "median": 33.02,
+          "p95": 40.9,
+          "min": 19.38,
+          "max": 63,
           "samples": [
-            38.25, 32.28, 31.63, 30.17, 36.1, 30.23, 30.79, 37.43, 32.05, 29.67, 29.82, 35.25,
-            30.57, 29.62, 35.09, 29.76, 30.38, 19.6, 20.08, 26.24, 20.02, 20, 19.82, 29.31, 35.46,
-            30.58, 32.37, 35.69, 30.22, 30.16, 37.89, 35.24, 34.7, 32.9, 39.07, 30.97, 30.12, 36.04,
-            29.78, 30.21, 29.9, 34.67, 30.4, 31.85, 34.52, 29.8, 30.47, 19.72, 19.78, 26.64, 20.97,
-            20, 29.3, 36.01, 30.43, 30.49, 31.83, 35.68, 30.06, 30.09, 38.58, 39.62, 32.26, 31.33,
-            36.56, 32.94, 32.35, 37.89, 33.09, 31.1, 30.12, 34.49, 31.61, 30.63, 34.83, 31.32,
-            30.23, 19.87, 19.93, 26.42, 20.27, 19.9, 29.38, 35.18, 30.63, 30.14, 34.44, 35.12,
-            30.28, 30.66, 39, 32.07, 31.61, 30.41, 36.45, 30.22, 31.98, 35.84, 30.59, 30.33, 29.9,
-            36.41, 31.07, 29.95, 35.1, 29.99, 30.14, 19.86, 20, 26.37, 20.45, 19.86, 19.93, 29.38,
-            35.72, 31.34, 32.58, 36.01, 30.43, 30.3, 38.64, 31.9, 31.44, 30.16, 38.11, 29.8, 30.66,
-            36.25, 30.99, 29.73, 30.17, 34.55, 30.36, 29.65, 34.73, 30.14, 30.26, 19.84, 20.02,
-            26.56, 20.3, 19.91, 19.82, 29.54, 35.74, 33.42, 36.87, 35.68, 30.69, 29.96, 38.13,
-            33.18, 31.95, 30.81, 38.49, 30.19, 30.82, 35.81, 30.12, 31.41, 30.89, 34.97, 29.79,
-            30.52, 35.11, 31.04, 30.57, 19.73, 19.87, 27.02, 20.73, 20.35, 30.21, 37.24, 30.93,
-            30.71, 32.52, 35.9, 30.75, 30.93, 41, 32.01, 31.57, 35.28, 31, 30.17, 30.7, 36.52,
-            30.56, 29.99, 35.84, 30.01, 30.48, 31.08, 34.86, 30.01, 30.44, 19.65, 34.28, 31.06,
-            30.5, 35.24, 30.81, 30.25, 31.85, 35.23, 30.85, 30.43, 34.98, 30.15
+            40.9, 33.49, 32.68, 30.85, 52.11, 38.29, 44.23, 41.5, 34.54, 32.88, 34.2, 41.46, 34.54,
+            33.19, 38.12, 32.24, 33.85, 21.92, 41.83, 35.09, 33.76, 34.73, 39.52, 33.65, 36.19,
+            37.96, 31.86, 30.85, 30.58, 36.05, 41.81, 35.56, 34.44, 32.68, 40.2, 32.36, 32.46,
+            39.58, 32.7, 31.97, 32.41, 36.76, 32.88, 31.82, 37.7, 32.82, 32.81, 21.5, 22.13, 30.4,
+            33.13, 32.97, 38.68, 33.18, 32.76, 34.43, 37.23, 33.68, 32.63, 37.91, 43.84, 35.92,
+            37.24, 34.84, 38.43, 32.89, 31.67, 63, 33.41, 34.11, 34.34, 39.32, 32.89, 39.87, 48.76,
+            35.75, 33.3, 31.79, 39.71, 32.41, 30.78, 37.51, 32.7, 36.29, 39.29, 40.16, 38.36, 34.56,
+            40.13, 33.63, 39.93, 33.11, 35.9, 32.16, 39.78, 30.54, 31.16, 39.35, 31.93, 30.55,
+            31.26, 38.37, 31.82, 30.87, 37.05, 30.75, 31.56, 21.12, 21.32, 28.62, 30.52, 30.95,
+            36.77, 31.09, 31.45, 33.37, 38.18, 32.13, 31.13, 37.81, 37.95, 31.75, 31.5, 30.64,
+            36.65, 30.06, 30.21, 35.39, 29.89, 30.28, 31.65, 35.97, 29.99, 30.52, 34.85, 29.96,
+            30.1, 19.52, 19.38, 26.12, 20.14, 19.75, 19.83, 38.09, 35.15, 32.28, 32.47, 37.31,
+            32.74, 30.38, 40.31, 35.06, 32.49, 33.49, 38.98, 32.54, 31.38, 38.68, 31.61, 31.62,
+            32.39, 36.66, 32.13, 32.47, 36.55, 31.9, 30.07, 19.69, 19.72, 26.42, 31.04, 30.53,
+            35.21, 30.45, 30.09, 31.56, 34.6, 30.67, 29.82, 34.54, 37.44, 33.49, 33.24, 33.02, 39.7,
+            32.37, 32.58, 39.39, 32.43, 33.55, 32.92, 36.77, 33.07, 32.43, 41.19, 34.08, 32.93,
+            22.51, 21.94, 30.69, 33.61, 32.64, 38.72, 33.53, 32.09, 35.92, 38.17, 33.86, 30.98,
+            35.48
           ]
         },
         "buildMs": {
-          "median": 2378.11,
-          "p95": 2486.39,
-          "min": 2350.24,
-          "max": 2486.39,
-          "samples": [2350.24, 2351.03, 2407.49, 2461.95, 2376.81, 2486.39, 2378.11]
+          "median": 2538.27,
+          "p95": 2628.06,
+          "min": 2338.09,
+          "max": 2628.06,
+          "samples": [2365.77, 2575.74, 2628.06, 2578.9, 2532.62, 2338.09, 2538.27]
         },
         "productionBootMs": {
-          "median": 241.19,
-          "p95": 312,
-          "min": 238.93,
-          "max": 312,
-          "samples": [240.84, 238.93, 312, 239.54, 254.42, 243.54, 241.19]
+          "median": 239.17,
+          "p95": 277.47,
+          "min": 236.72,
+          "max": 277.47,
+          "samples": [236.72, 268.21, 277.47, 250.73, 237.52, 239.17, 237.13]
         },
         "productionResponseMs": {
-          "median": 4.1,
-          "p95": 6.79,
-          "min": 3.23,
-          "max": 27.1,
+          "median": 4.25,
+          "p95": 6.03,
+          "min": 3.12,
+          "max": 20.15,
           "samples": [
-            4.87, 5.41, 5.53, 4.42, 4.72, 4.17, 5.22, 4.63, 5.12, 4.98, 4.04, 3.81, 3.82, 3.89,
-            4.54, 3.79, 3.5, 3.54, 3.69, 3.41, 3.84, 4.33, 4.9, 4.23, 4.1, 3.62, 3.73, 3.54, 3.34,
-            3.29, 4.65, 5.26, 6.18, 4.44, 4.17, 4.09, 3.92, 3.88, 3.85, 4.71, 5.04, 3.85, 3.5, 3.71,
-            3.79, 3.79, 3.59, 3.61, 4.38, 3.96, 3.84, 4.23, 3.94, 3.88, 3.88, 3.65, 3.94, 3.61,
-            3.23, 3.24, 8.05, 8.4, 7.1, 5.05, 5.58, 4.26, 4.13, 4.45, 7.23, 5.59, 6.79, 4.41, 4.08,
-            3.66, 4.18, 3.9, 4.32, 4.96, 5.17, 7.56, 15.92, 27.1, 4.95, 6.49, 5.03, 7.17, 10.11,
-            4.63, 4.19, 3.86, 5.44, 7.4, 6.52, 4.57, 4.39, 4.19, 3.74, 3.98, 4.11, 4.84, 5.01, 3.98,
-            3.8, 3.4, 3.44, 3.81, 3.76, 3.61, 4.32, 3.78, 3.76, 4.15, 4.05, 3.85, 4.07, 3.84, 5.53,
-            3.83, 3.47, 3.69, 5.03, 5.38, 5.41, 4.67, 4.33, 4.24, 4.69, 4.22, 4.15, 4.6, 4.38, 3.96,
-            3.76, 3.45, 4.2, 3.96, 4.05, 4.16, 3.91, 3.65, 3.99, 4.34, 4.66, 4.03, 4.26, 3.58, 3.28,
-            3.63, 3.45, 3.39, 4.69, 6.25, 5.72, 4.76, 4.88, 4.59, 5.21, 4.2, 4.43, 5.16, 4.08, 3.64,
-            3.75, 3.68, 4.32, 5.2, 5.27, 3.89, 3.78, 3.49, 3.82, 4.3, 4.55, 3.99, 3.99, 3.71, 3.4,
-            3.35, 3.34, 3.35, 4.75, 4.93, 5.31, 4.42, 4.32, 4.16, 5.03, 4.18, 4.05, 4.73, 4.29,
-            4.02, 3.65, 3.47, 4.36, 3.9, 3.67, 3.63, 3.73, 3.62, 3.76, 4.35, 4.85, 4.01, 3.99, 3.67,
-            3.6, 3.8, 3.48, 3.31
+            4.56, 5.63, 5.95, 4.32, 3.98, 3.86, 3.63, 3.73, 3.72, 4.52, 5.02, 3.77, 3.39, 3.16,
+            3.33, 3.64, 3.47, 3.48, 4.29, 3.65, 3.48, 4.16, 4.05, 3.86, 3.85, 3.56, 4.08, 3.53,
+            3.16, 3.21, 5.55, 5.65, 6.37, 4.95, 4.61, 4.37, 5.39, 4.64, 4.46, 5.57, 4.5, 4.19, 3.98,
+            4.51, 5.11, 3.88, 4.13, 4.3, 4.2, 3.86, 4.41, 4.68, 4.91, 4.21, 4.84, 3.99, 4.04, 3.45,
+            4.23, 3.75, 5.35, 6.03, 5.92, 4.78, 4.62, 4.85, 5.13, 4.04, 5.08, 5.22, 4.2, 3.83, 4.48,
+            3.94, 4.58, 4.04, 4.64, 4.3, 3.7, 3.51, 4.66, 4.78, 4.58, 4.74, 4.48, 4.03, 3.49, 3.56,
+            4.14, 3.93, 4.77, 6.23, 5.39, 4.5, 4.72, 4.51, 4.79, 4.25, 4.96, 4.95, 4.27, 4.18, 4.17,
+            4.05, 4.62, 4.19, 4.23, 3.94, 3.64, 3.92, 4.48, 4.47, 4.59, 4.58, 4.44, 3.78, 3.76,
+            5.86, 3.83, 3.48, 4.53, 4.94, 5.79, 4.3, 3.96, 3.82, 3.66, 3.83, 3.74, 4.49, 4.93, 3.86,
+            3.47, 3.41, 3.53, 3.51, 3.58, 3.68, 4.42, 3.59, 4.07, 4.11, 3.53, 3.41, 3.59, 3.52,
+            3.81, 3.32, 3.12, 3.17, 4.63, 5.45, 6.47, 4.72, 5.13, 4.08, 4.66, 4.37, 4.65, 5.4, 4.18,
+            4.28, 3.91, 3.51, 5.45, 4.42, 4.08, 4.62, 4.21, 4.12, 4.35, 5.28, 5.16, 4.09, 4.42,
+            4.25, 3.78, 3.59, 3.21, 3.27, 5.1, 7.24, 20.15, 6.84, 6.35, 5.43, 4.26, 4.18, 5.58,
+            8.21, 8.36, 6.83, 4.92, 4.66, 3.89, 4.15, 3.99, 3.91, 4.48, 3.77, 4.77, 5.83, 3.93,
+            3.78, 4.01, 3.8, 5, 4.49, 4.53, 4.6
           ]
         },
         "responseBytes": {
@@ -567,77 +571,77 @@
       "stack": "Svelte 5.56.7 · Vite 8.1.5",
       "metrics": {
         "devFirstPageMs": {
-          "median": 783.66,
-          "p95": 791.19,
-          "min": 758.07,
-          "max": 791.19,
-          "samples": [781.64, 758.07, 783.66, 791.19, 761.52, 786.17, 790.04]
+          "median": 855.39,
+          "p95": 907.18,
+          "min": 774.79,
+          "max": 907.18,
+          "samples": [818.5, 783.94, 907.18, 874.2, 888.17, 774.79, 855.39]
         },
         "devFirstRequestMs": {
-          "median": 295.03,
-          "p95": 297.6,
-          "min": 292.54,
-          "max": 297.6,
-          "samples": [292.54, 295.03, 294.48, 296.4, 295.03, 297.13, 297.6]
+          "median": 314.75,
+          "p95": 357.08,
+          "min": 287.85,
+          "max": 357.08,
+          "samples": [314.75, 293.61, 357.08, 342.66, 298.8, 287.85, 315.86]
         },
         "devWarmResponseMs": {
           "median": 1.95,
-          "p95": 2.58,
-          "min": 1.64,
-          "max": 4.19,
+          "p95": 2.96,
+          "min": 1.62,
+          "max": 5.86,
           "samples": [
-            2.57, 2.45, 2.99, 1.75, 1.75, 1.72, 1.78, 2.12, 2.02, 1.83, 1.77, 1.92, 1.89, 2.01,
-            1.69, 1.73, 1.91, 2.71, 1.8, 1.87, 1.75, 1.88, 2.34, 1.89, 1.82, 2.58, 1.88, 2.15, 1.74,
-            1.66, 2.16, 2.26, 2.79, 1.93, 1.91, 2.02, 2.03, 2.01, 1.85, 1.79, 1.88, 1.91, 1.77, 1.9,
-            2.18, 2.15, 1.88, 1.91, 1.83, 1.95, 1.8, 2.03, 2.64, 2.1, 1.78, 1.69, 1.96, 2.24, 1.99,
-            1.81, 2.68, 2.86, 2.6, 1.88, 1.86, 1.98, 1.91, 2.28, 2.29, 2.53, 1.86, 1.83, 2.06, 1.73,
-            1.72, 1.93, 2.06, 2.59, 2.05, 1.81, 1.77, 1.82, 1.84, 2, 1.95, 2, 2.53, 1.96, 1.88, 1.8,
-            2.34, 2.37, 2.51, 2.18, 2.01, 2.15, 2.08, 1.79, 1.8, 1.85, 1.88, 1.95, 1.73, 1.85, 2.14,
-            2.06, 1.83, 1.98, 1.95, 1.96, 1.91, 1.97, 2.51, 2.34, 1.89, 1.74, 1.77, 1.96, 2.02,
-            1.81, 4.19, 2.57, 2.45, 2.07, 1.77, 1.75, 1.8, 1.98, 2.22, 1.98, 1.74, 1.82, 1.86, 1.91,
-            2.28, 2.33, 2.22, 1.92, 1.77, 1.96, 1.82, 1.95, 1.98, 2.38, 2.02, 1.95, 1.97, 2.04,
-            2.03, 2.07, 2.1, 2.26, 2.29, 2.1, 2.04, 1.84, 1.89, 1.89, 1.92, 1.94, 1.85, 2.13, 2.12,
-            4.09, 2.19, 2, 1.82, 1.79, 1.84, 1.78, 1.9, 2.01, 1.97, 2.1, 1.9, 1.92, 1.84, 2.03,
-            2.41, 2.15, 2.4, 2.22, 2.37, 2.08, 1.95, 1.92, 1.81, 1.91, 2.02, 1.98, 1.82, 1.85, 1.92,
-            1.84, 1.97, 2, 2.27, 2.1, 1.92, 1.74, 1.64, 1.86, 1.83, 2.27, 2.23, 2.16, 2.03, 1.98,
-            1.98, 1.88
+            2.98, 2.53, 2.46, 2.25, 2.91, 2.2, 1.95, 2.73, 2, 1.96, 1.86, 2.36, 2.56, 2.01, 2.11,
+            2.43, 1.93, 1.93, 2.05, 2.75, 2.11, 2.02, 2.43, 2.34, 1.84, 1.86, 2.19, 2.83, 2.1, 1.97,
+            2.05, 2, 2.68, 2.06, 1.78, 1.81, 1.72, 1.83, 1.72, 1.77, 1.77, 1.77, 1.78, 1.74, 1.92,
+            1.8, 1.82, 1.85, 1.79, 1.82, 1.72, 1.76, 1.85, 1.93, 1.82, 1.87, 1.8, 2.01, 1.8, 1.76,
+            2.34, 2.44, 2.54, 1.97, 1.85, 2.64, 2.28, 2.05, 2.44, 2.33, 1.75, 1.68, 2.15, 3.25, 2.8,
+            2.12, 2.16, 2.12, 1.85, 1.85, 3.03, 2.81, 2.19, 2.07, 2, 1.91, 2.02, 2.7, 2.08, 1.88,
+            2.97, 2.47, 3.52, 2.67, 2.14, 3.95, 2.06, 2.19, 3.05, 2.64, 2.23, 2.96, 2, 1.83, 2.36,
+            2.93, 2.38, 2.28, 2.34, 1.86, 1.74, 1.88, 2.82, 2.81, 2.12, 2.48, 2.05, 4.32, 2.42, 2.6,
+            2.07, 2.17, 2.35, 1.95, 1.81, 1.69, 1.81, 1.8, 1.86, 1.83, 1.75, 1.83, 1.84, 1.86, 5.86,
+            2.22, 1.94, 2.21, 2.08, 4.71, 2.13, 1.96, 1.72, 1.92, 1.82, 1.76, 1.83, 1.91, 1.81,
+            1.77, 2.24, 2.25, 2.39, 1.97, 1.88, 1.76, 1.83, 1.82, 1.85, 1.86, 1.83, 1.73, 1.68,
+            1.75, 1.72, 1.91, 1.72, 1.8, 1.76, 1.79, 1.74, 1.84, 1.69, 1.95, 1.87, 1.89, 1.85, 1.88,
+            1.85, 1.79, 2.83, 2.77, 2.36, 2.38, 2.14, 1.77, 1.73, 2.13, 2.2, 1.86, 1.67, 1.63, 1.76,
+            1.7, 1.62, 1.88, 1.85, 2.01, 1.88, 1.79, 1.62, 1.81, 1.84, 1.9, 1.87, 1.79, 2.16, 2.17,
+            2.07, 1.85
           ]
         },
         "buildMs": {
-          "median": 1678.92,
-          "p95": 1693.82,
-          "min": 1638.93,
-          "max": 1693.82,
-          "samples": [1638.93, 1678.92, 1644.03, 1683.94, 1662.19, 1693.82, 1689.97]
+          "median": 1750.91,
+          "p95": 1826.14,
+          "min": 1638.25,
+          "max": 1826.14,
+          "samples": [1768.91, 1826.14, 1750.91, 1790.96, 1676.39, 1638.25, 1713.03]
         },
         "productionBootMs": {
-          "median": 62.79,
-          "p95": 63.62,
-          "min": 62.14,
-          "max": 63.62,
-          "samples": [63.6, 62.16, 63.62, 62.14, 62.31, 62.79, 63.11]
+          "median": 64.63,
+          "p95": 68.14,
+          "min": 62.11,
+          "max": 68.14,
+          "samples": [68.14, 64.49, 67.78, 67.85, 64.63, 62.65, 62.11]
         },
         "productionResponseMs": {
-          "median": 0.73,
-          "p95": 1.1,
-          "min": 0.57,
-          "max": 1.35,
+          "median": 0.72,
+          "p95": 1.22,
+          "min": 0.52,
+          "max": 1.8,
           "samples": [
-            1.1, 1.04, 1.15, 0.86, 0.74, 0.7, 0.7, 0.82, 0.81, 0.73, 0.73, 0.99, 0.66, 0.59, 0.59,
-            0.77, 0.73, 0.69, 0.71, 0.79, 0.75, 0.81, 0.75, 0.76, 0.74, 0.97, 0.69, 0.62, 0.57,
-            0.63, 0.98, 1.04, 1.22, 0.95, 0.8, 0.71, 0.8, 0.77, 0.77, 0.73, 0.74, 0.85, 0.62, 0.59,
-            0.6, 0.59, 0.58, 0.64, 0.68, 0.63, 0.74, 0.71, 0.64, 0.64, 0.63, 0.89, 0.63, 0.63, 0.65,
-            0.65, 1.09, 1.06, 1.16, 0.84, 0.73, 0.74, 0.68, 0.72, 0.73, 0.68, 0.83, 0.83, 0.62,
-            0.63, 0.63, 0.64, 0.6, 0.63, 0.66, 0.69, 0.65, 0.74, 0.59, 0.6, 0.66, 0.9, 0.7, 0.64,
-            0.58, 0.67, 1.04, 1.16, 1.16, 0.84, 0.78, 0.81, 0.85, 0.74, 0.72, 0.73, 0.79, 0.91,
-            0.63, 0.58, 0.6, 0.71, 0.74, 0.72, 0.74, 0.69, 0.67, 0.68, 0.63, 0.65, 0.63, 1.18, 0.8,
-            0.69, 0.64, 0.69, 1.17, 1.08, 1.15, 0.91, 0.87, 0.8, 0.76, 0.78, 0.79, 0.74, 0.74, 0.8,
-            0.72, 0.68, 0.61, 0.63, 0.59, 0.69, 0.86, 0.83, 0.74, 0.75, 0.75, 0.73, 0.82, 0.89,
-            0.72, 0.68, 0.75, 0.73, 1.06, 1.1, 1.35, 1, 0.78, 0.69, 0.79, 0.72, 0.74, 0.81, 0.82,
-            0.65, 0.59, 0.57, 0.57, 0.6, 0.6, 0.64, 0.72, 0.68, 0.81, 0.74, 0.64, 0.68, 1.01, 0.74,
-            0.62, 0.61, 0.7, 0.7, 1.07, 1.01, 1.08, 0.96, 0.86, 0.8, 0.78, 0.78, 0.78, 0.73, 1.16,
-            0.77, 0.67, 0.61, 0.59, 0.61, 0.61, 0.66, 0.69, 0.65, 0.72, 0.68, 0.67, 0.66, 0.92, 0.8,
-            0.75, 0.67, 0.79, 0.86
+            1.27, 1.26, 1.23, 0.9, 0.84, 0.72, 0.66, 0.73, 0.94, 0.98, 1.8, 0.83, 0.66, 0.71, 0.72,
+            0.71, 0.69, 0.83, 1, 0.88, 0.76, 0.79, 0.71, 0.69, 0.87, 0.71, 0.6, 0.63, 0.73, 0.93,
+            1.09, 1.05, 1.79, 1.02, 0.69, 0.74, 0.83, 0.73, 0.72, 0.68, 0.8, 0.63, 0.55, 0.52, 0.52,
+            0.56, 0.57, 0.61, 0.69, 0.75, 0.7, 0.68, 0.6, 0.61, 1.22, 0.96, 0.7, 0.65, 0.58, 0.62,
+            1.04, 1.12, 1.22, 0.82, 0.65, 0.61, 0.59, 0.56, 0.61, 0.6, 0.95, 0.77, 0.65, 0.73, 0.7,
+            0.62, 0.6, 0.63, 0.69, 0.63, 0.61, 0.63, 0.61, 0.69, 0.81, 0.72, 0.72, 0.7, 0.65, 0.69,
+            1.12, 1.08, 1.1, 0.86, 0.67, 0.74, 0.74, 0.64, 0.67, 0.65, 0.65, 1.21, 0.77, 0.69, 0.6,
+            0.67, 0.9, 0.8, 0.72, 0.66, 0.68, 0.69, 0.64, 0.64, 0.7, 1, 0.66, 0.78, 0.59, 0.65,
+            1.42, 1.3, 1.29, 0.93, 0.98, 1.14, 0.78, 0.7, 0.74, 0.72, 0.83, 0.89, 0.66, 0.65, 0.73,
+            0.83, 0.93, 1.22, 1.06, 0.86, 0.77, 0.77, 0.73, 0.72, 0.8, 1.05, 0.77, 0.72, 0.61, 0.65,
+            1.11, 1.22, 1.18, 0.92, 0.71, 0.88, 0.78, 0.73, 0.77, 0.87, 0.68, 0.93, 0.64, 0.57,
+            0.57, 0.71, 0.81, 0.84, 1, 0.85, 0.8, 0.84, 0.7, 0.69, 0.74, 0.87, 0.72, 0.69, 0.63,
+            0.68, 1.04, 1.11, 1.19, 0.81, 0.75, 0.65, 0.79, 0.74, 0.72, 0.7, 0.65, 0.92, 0.68, 0.61,
+            0.59, 0.61, 0.57, 0.71, 0.74, 0.7, 0.73, 0.68, 0.61, 0.63, 0.6, 0.97, 0.65, 0.65, 0.6,
+            0.66
           ]
         },
         "responseBytes": {
@@ -645,7 +649,7 @@
           "p95": 8356,
           "min": 8355,
           "max": 8356,
-          "samples": [8355, 8356, 8355, 8355, 8356, 8356, 8355]
+          "samples": [8355, 8355, 8356, 8356, 8356, 8355, 8355]
         }
       }
     },
@@ -656,77 +660,75 @@
       "stack": "Vue 3.5.40 · Vite default",
       "metrics": {
         "devFirstPageMs": {
-          "median": 2300.07,
-          "p95": 2449.97,
-          "min": 2286.78,
-          "max": 2449.97,
-          "samples": [2287.39, 2380.67, 2449.97, 2300.07, 2286.78, 2319.48, 2293]
+          "median": 2356.6,
+          "p95": 2443.07,
+          "min": 2275.23,
+          "max": 2443.07,
+          "samples": [2313.43, 2443.07, 2356.6, 2431.25, 2275.23, 2371.06, 2328.43]
         },
         "devFirstRequestMs": {
-          "median": 2002.7,
-          "p95": 2152.29,
-          "min": 1988.45,
-          "max": 2152.29,
-          "samples": [1991.35, 2082.31, 2152.29, 2002.7, 1988.45, 2019.29, 1995.76]
+          "median": 2049.96,
+          "p95": 2130.86,
+          "min": 1990.66,
+          "max": 2130.86,
+          "samples": [2027.28, 2130.86, 2049.96, 2117.25, 1990.66, 2078.69, 2042.15]
         },
         "devWarmResponseMs": {
-          "median": 3.35,
-          "p95": 5.43,
-          "min": 2.63,
-          "max": 8.76,
+          "median": 3,
+          "p95": 4.77,
+          "min": 2.46,
+          "max": 8.74,
           "samples": [
-            4.02, 4.5, 3.82, 2.93, 4.22, 3.63, 3.43, 4.28, 4.44, 3.67, 3.36, 3.67, 4.99, 8.76, 3.25,
-            3.05, 3.2, 2.98, 2.8, 2.98, 3.07, 3.5, 3.27, 2.99, 2.89, 2.84, 2.88, 3.61, 3.26, 2.89,
-            4.12, 5.5, 4.49, 3.36, 2.94, 4.02, 4.4, 3.77, 3.56, 3.41, 3.19, 3.37, 4.15, 7.91, 3.72,
-            3.49, 3.18, 4.32, 3.47, 3.23, 3.52, 3.41, 3.36, 3.82, 3.21, 3.02, 2.83, 3.33, 3.11,
-            3.21, 3.29, 4.57, 3.97, 2.98, 7.44, 3.65, 3.74, 3.48, 3.53, 3.62, 3.56, 3.5, 4.74, 7.61,
-            3.51, 3.42, 3.51, 3.38, 3.3, 3.48, 3.07, 2.99, 3.16, 3.68, 3.56, 2.9, 2.91, 3.37, 3.2,
-            3.13, 4.12, 4.71, 3.96, 2.95, 2.91, 3.08, 3.13, 4.23, 3.84, 3.91, 3.67, 3.78, 5.06,
-            7.49, 3.94, 3.14, 2.87, 3.08, 2.95, 2.82, 2.86, 2.92, 2.82, 3.22, 2.97, 3.41, 3.49,
-            3.17, 3.29, 3.13, 3.52, 4.97, 3.85, 3.32, 3.3, 3.75, 3.21, 2.88, 3.1, 3.4, 3.19, 3.24,
-            5.59, 5.43, 3.16, 2.78, 2.94, 2.98, 2.95, 3.04, 2.88, 3.02, 3.46, 3.35, 3.19, 2.8, 3.04,
-            3.13, 3.26, 3.69, 3.65, 5.43, 5.01, 3.66, 3.42, 4.5, 4.97, 3.93, 3.68, 3.67, 3.37, 3.86,
-            4.59, 6.1, 3.26, 3.09, 2.85, 3.1, 3.06, 2.87, 2.86, 2.88, 3.04, 3.79, 3.04, 2.66, 2.94,
-            3.18, 3.21, 3.58, 3.6, 4.39, 3.92, 3.19, 2.86, 2.83, 2.88, 3.48, 3.39, 2.9, 4.98, 3.35,
-            4.56, 5.94, 3.3, 2.63, 3.06, 3.7, 2.78, 3.2, 3.17, 3.35, 3.7, 3.39, 3.07, 2.74, 3.3,
-            3.87, 3.35, 3.16
+            3.25, 4.44, 4.2, 3.29, 3.15, 3.13, 2.71, 3.44, 3.7, 2.9, 2.97, 2.82, 4.53, 6.06, 3.4,
+            2.71, 2.73, 2.87, 2.57, 2.82, 3.02, 2.86, 2.94, 2.91, 2.8, 2.73, 2.76, 3, 2.91, 2.91,
+            3.97, 4.51, 4.77, 3.68, 3.89, 3.2, 3.25, 4.12, 3.48, 3.48, 2.77, 3.08, 5.65, 7.01, 3.6,
+            4.1, 3.48, 3.98, 2.95, 3.61, 3.86, 3.27, 3.82, 3.06, 3.8, 3.46, 3.96, 3.26, 3.28, 4.24,
+            3.5, 4.74, 4.01, 2.97, 2.92, 3.3, 3.06, 3.27, 3.01, 2.66, 3.04, 3.3, 4.69, 6.77, 3.36,
+            2.83, 2.95, 3.22, 2.79, 3.14, 3.06, 2.62, 3.38, 2.92, 2.8, 2.89, 3.39, 2.91, 3.23, 2.92,
+            3.83, 5.97, 4.06, 3.1, 3.09, 3.49, 3.6, 3.22, 3.13, 3.06, 3.57, 3.74, 4.16, 6.59, 4.08,
+            3.7, 2.92, 2.83, 3.22, 3.74, 3.46, 2.78, 2.95, 3.36, 3.54, 3.48, 2.87, 3.04, 3.46, 4,
+            3.1, 4.09, 3.79, 2.85, 2.63, 2.71, 2.87, 2.8, 2.88, 2.6, 2.71, 2.86, 4.09, 6.51, 3.21,
+            2.54, 2.64, 2.68, 2.71, 2.61, 2.53, 2.46, 2.6, 2.81, 2.8, 2.58, 2.72, 2.73, 2.88, 2.73,
+            3.28, 4.25, 3.89, 2.68, 2.55, 2.9, 2.84, 3, 2.85, 2.61, 2.82, 3, 3.9, 6.49, 3.11, 8.74,
+            3.8, 2.79, 2.78, 2.81, 2.91, 3.31, 3.1, 2.9, 3, 2.7, 2.75, 2.82, 2.94, 2.97, 3.35, 4.09,
+            3.85, 2.77, 2.67, 2.89, 2.89, 2.77, 2.84, 2.76, 2.72, 2.84, 4.39, 6.15, 3.12, 2.66,
+            2.54, 2.77, 2.62, 2.81, 2.65, 2.64, 2.66, 2.76, 2.63, 2.7, 2.71, 2.89, 2.96, 2.87
           ]
         },
         "buildMs": {
-          "median": 4294.89,
-          "p95": 4382.14,
-          "min": 4229.43,
-          "max": 4382.14,
-          "samples": [4294.89, 4330.03, 4229.63, 4283.24, 4382.14, 4340.52, 4229.43]
+          "median": 4611.97,
+          "p95": 4914.28,
+          "min": 4394.58,
+          "max": 4914.28,
+          "samples": [4686.08, 4611.97, 4914.28, 4702.76, 4447.14, 4503.75, 4394.58]
         },
         "productionBootMs": {
-          "median": 120.06,
-          "p95": 124.36,
-          "min": 118.57,
-          "max": 124.36,
-          "samples": [118.57, 120.33, 120.06, 118.68, 119.37, 124.36, 120.48]
+          "median": 115.72,
+          "p95": 128.1,
+          "min": 110.04,
+          "max": 128.1,
+          "samples": [117.66, 114.09, 128.1, 127.18, 115.72, 110.04, 115.01]
         },
         "productionResponseMs": {
-          "median": 1.13,
-          "p95": 1.62,
-          "min": 0.93,
-          "max": 3.22,
+          "median": 1.2,
+          "p95": 1.91,
+          "min": 0.92,
+          "max": 3.52,
           "samples": [
-            1.4, 1.52, 1.51, 1.13, 1.03, 1, 0.98, 1.26, 1.2, 1.12, 1.06, 1.01, 1.15, 1.1, 1.11,
-            1.43, 1.19, 1.22, 1.04, 1.08, 1, 1.04, 0.98, 1.18, 1.12, 1.07, 1.3, 1.44, 1.17, 2.01,
-            1.63, 1.48, 1.49, 1.12, 1.03, 0.98, 0.98, 1.38, 1.23, 1.05, 1.15, 1.14, 1.15, 1.16,
-            1.23, 1.16, 1.66, 1.13, 0.98, 0.95, 0.93, 1.1, 1.08, 1.03, 1.04, 1.01, 1.02, 1.19, 1.14,
-            1.18, 1.49, 1.43, 1.47, 1.08, 1.04, 0.99, 1.17, 1.18, 1.12, 1.18, 1.07, 1, 1.04, 1.05,
-            0.98, 1.41, 1.18, 1.06, 1.04, 0.98, 1.05, 1.01, 1.04, 0.98, 1.02, 0.99, 1.08, 1.38,
-            1.17, 2.09, 1.65, 1.54, 1.52, 1.17, 1.07, 1.03, 1.3, 1.21, 1.22, 1.15, 1.25, 1.11, 1.11,
-            1.12, 1.16, 1.1, 1.52, 1.14, 1.06, 0.99, 1, 1.14, 1.07, 1.12, 1.14, 1.13, 1.23, 1.63,
-            1.25, 1.18, 1.61, 1.51, 1.5, 1.09, 1.04, 1.34, 1.24, 1.22, 1.22, 1.2, 1.11, 1.13, 1.13,
-            1.13, 1.13, 1.14, 1.56, 1.18, 1.03, 1.17, 0.99, 1.04, 1.17, 1.06, 1.08, 1.06, 1.17,
-            1.62, 1.37, 1.29, 1.38, 1.41, 1.47, 1.1, 1.02, 1.07, 1.07, 1.07, 1.27, 1.16, 1.29, 3.22,
-            1.69, 1.17, 1.05, 1.39, 1.14, 1.04, 1.01, 1.16, 1.13, 1.11, 1.15, 1.07, 1.1, 1.06, 1.09,
-            1.51, 1.24, 2.02, 1.37, 1.45, 1.52, 1.28, 1.26, 1.18, 1.13, 1.18, 1.15, 1.11, 1.02,
-            1.18, 1.13, 1.1, 1.09, 1.33, 1.07, 1.04, 1.01, 1.15, 1.08, 1.1, 1.07, 1.03, 1.1, 1.06,
-            1.02, 1.16, 1.15, 1.9
+            1.91, 1.7, 1.53, 1.37, 1.62, 1.17, 1.16, 1.15, 1.22, 1.17, 1.31, 1.65, 1.45, 1.31, 1.17,
+            1.43, 1.63, 1.54, 1.23, 1.13, 1.13, 1.1, 1.29, 1.33, 1.78, 1.24, 1.25, 1.49, 1.9, 2.47,
+            2.85, 1.7, 1.71, 1.19, 1.05, 1.04, 1.17, 1.16, 2.03, 1.5, 1.27, 1.25, 1.23, 1.49, 1.36,
+            1.28, 1.47, 1.67, 1.23, 1.39, 1.74, 1.28, 1.2, 1.13, 1.3, 1.31, 1.29, 1.78, 1.36, 1.6,
+            2.1, 2.32, 1.86, 1.7, 1.58, 1.15, 1.18, 1.15, 1.12, 1.25, 1.32, 1.66, 1.34, 1.25, 1.15,
+            1.54, 1.65, 1.27, 1.01, 1.08, 0.99, 1.1, 1.09, 1.32, 1.72, 1.44, 1.26, 1.36, 1.28, 2.72,
+            3.52, 1.97, 1.62, 1.16, 1.02, 0.98, 1.2, 1.33, 1.86, 1.67, 1.26, 1.01, 1.2, 2, 1.66,
+            1.2, 1.09, 1.41, 1.2, 1.38, 1.61, 1.35, 1.19, 1.04, 1.16, 1.78, 1.3, 1.28, 1.06, 1.19,
+            1.33, 1.4, 1.5, 1.05, 1.02, 1, 1.18, 1.23, 1.19, 1.13, 1.05, 1.08, 1.2, 1.07, 1.01, 1.3,
+            1.16, 1.1, 1.01, 1.1, 1.1, 1.13, 1.06, 1.11, 1.06, 1.05, 1.09, 1.22, 1.04, 1.95, 1.3,
+            1.4, 1.47, 1.09, 0.99, 1.2, 1.2, 1.24, 1.15, 1.2, 1.14, 1.13, 1.16, 1.14, 1.09, 1.32,
+            1.06, 1.22, 1.1, 0.98, 0.92, 0.97, 1.15, 1.1, 1.06, 1.04, 1.05, 1.15, 1.14, 1.86, 1.59,
+            1.45, 1.51, 1.1, 1.01, 1.1, 0.99, 1.14, 1.21, 1.2, 1.16, 1.11, 1.13, 1.1, 1.15, 1.1,
+            1.59, 1.15, 1, 1.02, 1.14, 1.05, 1.2, 1.11, 1.09, 1.02, 1.06, 1.36, 1.17, 1.18
           ]
         },
         "responseBytes": {
@@ -745,77 +747,77 @@
       "stack": "React 19.2.4 · Vite 8.1.5",
       "metrics": {
         "devFirstPageMs": {
-          "median": 801.23,
-          "p95": 982.5,
-          "min": 792.25,
-          "max": 982.5,
-          "samples": [834.47, 800.56, 801.23, 982.5, 802.35, 792.25, 797.99]
+          "median": 816.44,
+          "p95": 1392.64,
+          "min": 793.85,
+          "max": 1392.64,
+          "samples": [853.91, 823.3, 800.8, 813.5, 1392.64, 816.44, 793.85]
         },
         "devFirstRequestMs": {
-          "median": 394.67,
-          "p95": 427.65,
-          "min": 388.73,
-          "max": 427.65,
-          "samples": [427.65, 393.81, 391.58, 403.74, 395.45, 388.73, 394.67]
+          "median": 406.19,
+          "p95": 844.38,
+          "min": 400.92,
+          "max": 844.38,
+          "samples": [406.19, 411.04, 403.44, 400.92, 844.38, 410.39, 405.36]
         },
         "devWarmResponseMs": {
-          "median": 8.74,
-          "p95": 11.14,
-          "min": 5.71,
-          "max": 12.63,
+          "median": 9,
+          "p95": 13.08,
+          "min": 4.57,
+          "max": 84.5,
           "samples": [
-            8.64, 9.45, 9.63, 9.24, 8.64, 8.67, 8.81, 8.6, 8.53, 8.51, 9.42, 8.74, 8.72, 8.45, 8.84,
-            8.93, 9.16, 8.95, 8.72, 8.91, 11.29, 9.08, 8.61, 8.58, 8.7, 8.82, 8.49, 8.69, 8.67,
-            8.88, 9.07, 9.39, 9.99, 9.42, 8.63, 11.53, 8.44, 8.41, 8.4, 8.34, 8.51, 8.42, 8.25,
-            8.28, 8.43, 8.11, 8.8, 9.03, 8.52, 8.45, 8.8, 9.12, 8.71, 8.54, 8.82, 8.53, 8.49, 8.65,
-            8.53, 9.46, 8.67, 9.09, 9.66, 9.04, 8.42, 8.55, 8.92, 12.45, 8.99, 9.76, 11.65, 11.34,
-            9.45, 8.5, 9.12, 9.22, 9.51, 8.97, 8.69, 8.61, 12.07, 9.2, 8.56, 9.12, 8.51, 8.61, 8.48,
-            8.68, 8.82, 8.91, 9.02, 9.01, 10.09, 9.01, 8.65, 8.36, 9.29, 8.55, 8.47, 8.56, 9.18,
-            8.73, 8.49, 8.32, 8.97, 8.68, 9.74, 12.08, 9.44, 6.18, 9.52, 6.11, 7.46, 11.14, 5.71,
-            7.97, 7.44, 7.25, 5.85, 5.71, 8.7, 9.04, 9.65, 9.37, 8.76, 8.59, 8.65, 8.61, 9.12, 8.67,
-            8.55, 8.71, 8.53, 8.49, 9.03, 8.22, 8.75, 10.35, 8.92, 8.81, 11.39, 8.87, 8.61, 8.97,
-            8.39, 8.69, 8.43, 8.4, 8.3, 8.51, 8.8, 9.19, 9.73, 9.35, 8.59, 9.1, 8.99, 8.8, 8.69,
-            8.5, 9.13, 9.21, 8.98, 10.12, 8.59, 8.32, 8.85, 8.78, 8.71, 8.68, 11.52, 8.89, 8.87,
-            8.81, 9.17, 8.47, 8.6, 8.67, 9.37, 8.52, 8.92, 9.44, 9.66, 9.33, 8.67, 8.92, 8.79, 8.75,
-            8.63, 8.51, 8.46, 9.04, 8.39, 8.23, 8.55, 8.57, 8.86, 8.79, 8.68, 9.2, 9.3, 12.63, 9.32,
-            9.52, 9.29, 9.37, 8.58, 8.56, 8.62, 8.5
+            8.38, 9.1, 9.19, 8.94, 8.45, 8.59, 8.45, 8.49, 8.25, 8.34, 8.48, 8.27, 8.51, 8.24, 8.48,
+            8.7, 8.63, 8.97, 8.7, 8.52, 11.77, 12.82, 8.7, 8.55, 8.68, 8.59, 8.41, 8.43, 8.25, 8.19,
+            12.42, 10.84, 11.28, 9.41, 10.16, 8.76, 9.85, 9.35, 9.12, 9.23, 8.89, 8.96, 8.54, 9.05,
+            8.84, 9.22, 8.87, 8.63, 8.73, 9.55, 13.08, 10.22, 9.73, 9.8, 8.63, 9.53, 8.64, 9.84,
+            9.22, 8.76, 9.17, 9.94, 10.21, 21.79, 27.46, 18.52, 26.1, 10.7, 9.17, 9.07, 11.44,
+            10.09, 9.6, 53.35, 84.5, 32.86, 14.91, 12.81, 13.35, 10.29, 13.07, 12.91, 11.57, 9.78,
+            10.65, 9.71, 10.94, 10.06, 9.54, 14.06, 9.29, 9.09, 10.16, 9.42, 9.26, 8.72, 9.17, 8.87,
+            8.87, 9.26, 9.04, 9.51, 8.91, 9.49, 9.62, 9.19, 9.14, 9.27, 9.02, 8.75, 12.37, 9.11,
+            9.23, 9.31, 8.89, 9.55, 8.54, 9.02, 8.32, 8.95, 9.3, 9.5, 10.64, 8.93, 9.24, 9.08, 9.08,
+            9.44, 9.32, 8.94, 8.55, 12.29, 9.51, 9.21, 9.24, 9.48, 5.55, 4.96, 5.24, 4.86, 5.02,
+            4.7, 4.98, 4.95, 4.57, 5.95, 5.37, 4.67, 5.36, 4.88, 9.9, 10.18, 10.42, 10.24, 9.74,
+            9.62, 10.11, 9.63, 9.12, 9.97, 10.12, 10.51, 10.46, 9.05, 8.78, 9, 8.88, 8.89, 8.54,
+            8.4, 9, 12.01, 8.9, 8.33, 8.61, 8.58, 8.35, 8.39, 8.56, 8.6, 8.45, 8.81, 9.33, 9.11,
+            8.55, 8.34, 8.62, 8.41, 8.33, 8.3, 8.57, 8.33, 8.52, 8.16, 8.77, 8.06, 4.71, 4.78, 8.42,
+            8.36, 11.43, 8.86, 8.55, 8.5, 8.55, 8.09, 8.43, 8.43, 8.36, 8.16
           ]
         },
         "buildMs": {
-          "median": 662.55,
-          "p95": 963.32,
-          "min": 648.31,
-          "max": 963.32,
-          "samples": [648.31, 653.15, 655.88, 963.32, 760.13, 662.55, 669.01]
+          "median": 689.52,
+          "p95": 829.69,
+          "min": 652.12,
+          "max": 829.69,
+          "samples": [654.08, 689.52, 829.69, 748.14, 714.01, 674.06, 652.12]
         },
         "productionBootMs": {
-          "median": 89.82,
-          "p95": 129.18,
-          "min": 88.2,
-          "max": 129.18,
-          "samples": [89.82, 88.86, 91.13, 88.2, 129.18, 91.82, 88.99]
+          "median": 80.84,
+          "p95": 85.56,
+          "min": 76.48,
+          "max": 85.56,
+          "samples": [76.48, 80.84, 83.12, 79.34, 85.56, 81.16, 77.92]
         },
         "productionResponseMs": {
-          "median": 1.17,
-          "p95": 2.15,
-          "min": 0.87,
-          "max": 3.5,
+          "median": 1.16,
+          "p95": 2.24,
+          "min": 0.9,
+          "max": 11.77,
           "samples": [
-            1.43, 1.46, 1.8, 1.3, 2.86, 1.4, 1.05, 1.02, 1.09, 1.1, 1.11, 1.05, 1.15, 1.18, 1.1,
-            1.07, 1.03, 1.02, 1.11, 1.05, 1.34, 1.36, 1.18, 1.11, 1.33, 1.28, 1.23, 1.1, 1.12, 1.31,
-            1.89, 2, 2.14, 1.58, 1.61, 1.35, 1.05, 0.97, 0.91, 1.03, 1.09, 1.04, 1.07, 0.95, 0.87,
-            1.02, 0.95, 0.91, 0.96, 1.01, 1.29, 1.66, 1.46, 1.99, 1.33, 1.18, 0.98, 0.99, 1.17,
-            1.21, 1.48, 1.48, 1.74, 1.36, 1.28, 1.17, 0.98, 0.96, 0.96, 1.11, 1.13, 1.15, 1.16,
-            1.19, 0.98, 1.02, 0.98, 0.94, 1.02, 1.21, 1.39, 1.42, 1.18, 1.34, 1.22, 1.4, 1.14, 1.19,
-            1.12, 1.19, 2.33, 2.41, 1.91, 1.23, 1.07, 1.22, 0.93, 1.37, 1.27, 1.09, 1.12, 1.11,
-            1.08, 1.09, 1.01, 0.98, 0.96, 0.99, 1.08, 0.99, 1.12, 1.59, 1.24, 1.23, 1.32, 1.15,
-            1.22, 1.17, 1.12, 1.23, 1.57, 1.51, 1.97, 1.29, 1.3, 1.31, 1.09, 1.04, 1.11, 1.16, 1.16,
-            1.35, 1.15, 1.03, 0.89, 0.92, 0.92, 1.07, 1.19, 1.09, 1.82, 2.32, 1.38, 2.13, 1.75,
-            1.59, 2.08, 1.28, 1.07, 1.12, 1.86, 1.78, 1.87, 1.27, 1.18, 1.37, 1.04, 0.96, 1.06,
-            1.08, 1.11, 1.12, 1.15, 1.06, 0.9, 0.93, 0.93, 0.99, 1.04, 0.95, 1.35, 2.28, 2.32, 2.34,
-            2.15, 1.52, 1.62, 2.21, 2.33, 1.92, 1.41, 1.47, 1.74, 1.38, 1.39, 1.21, 0.95, 1.08,
-            0.98, 1.18, 1.16, 1.16, 1.17, 1.07, 1.03, 1.01, 1.16, 1.26, 1.18, 1.14, 1.41, 1.58,
-            1.47, 1.08, 1.28, 3.5, 2.1, 1.34, 1.07, 1.23
+            1.56, 1.57, 1.75, 1.21, 1.24, 1.14, 0.97, 0.96, 0.98, 1.07, 1.13, 1.08, 1.1, 1.1, 0.95,
+            0.99, 0.99, 1.05, 1.17, 1.01, 1.31, 1.24, 1.12, 1.07, 1.22, 1.11, 1.06, 1.1, 1.08, 1.38,
+            1.58, 2.55, 1.9, 3.77, 1.85, 1.32, 1.09, 0.99, 0.94, 1.13, 1.08, 2, 1.26, 1.08, 0.96,
+            0.95, 0.9, 0.92, 1, 1.09, 1.32, 1.45, 1.17, 1.11, 1.15, 1.11, 1.17, 1.16, 1.13, 1.37,
+            1.61, 1.92, 1.86, 1.33, 1.78, 1.61, 1.09, 1.06, 1.03, 1.08, 1.14, 1.23, 1.13, 1.02,
+            0.91, 0.91, 0.9, 0.92, 1.03, 1.82, 1.76, 1.51, 1.13, 1.11, 1.24, 1.2, 1.23, 1.07, 1.07,
+            1.29, 1.7, 2.24, 2.13, 1.32, 1.14, 1.25, 0.99, 0.96, 0.97, 1.04, 1.12, 1.37, 1.37, 1.1,
+            1.22, 1.45, 1.11, 1.07, 1.23, 1.06, 1.31, 1.5, 1.21, 1.19, 1.43, 1.71, 1.2, 1.52, 1.47,
+            1.13, 1.82, 1.96, 2, 3.45, 7.18, 2.07, 4.39, 3.61, 11.77, 3.65, 4.21, 1.65, 1.23, 1.34,
+            1.03, 1.07, 0.97, 1.02, 1.11, 1, 1.21, 1.31, 1.14, 1.08, 1.15, 1.1, 1.02, 1.06, 1.06,
+            1.28, 2.05, 1.81, 1.77, 1.2, 1.25, 1.49, 1.63, 1.27, 1.09, 1.09, 1.19, 1.89, 1.31, 1.13,
+            0.99, 0.96, 0.93, 1.14, 1.77, 1.91, 2.03, 1.8, 1.48, 2.04, 2.34, 1.39, 1.07, 1.34, 1.33,
+            1.74, 1.6, 1.51, 1.63, 1.18, 1.11, 1.26, 1.03, 0.98, 1.05, 1.13, 1.09, 1.05, 1.04, 1.05,
+            0.99, 0.96, 0.94, 1.13, 1.16, 1.04, 1.21, 1.4, 1.2, 1.08, 1.15, 1.05, 1.07, 1.06, 1.08,
+            1.18
           ]
         },
         "responseBytes": {
