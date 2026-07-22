@@ -276,6 +276,8 @@ function BenchmarkAreaChart() {
 
     return {
       framework,
+      averageScore:
+        points.reduce((total, point) => total + point.value, 0) / Math.max(1, points.length),
       path: buildStepBeforePath(points),
       points,
     };
@@ -300,7 +302,7 @@ function BenchmarkAreaChart() {
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
           Monitor framework latency across startup, build, boot, and SSR.{" "}
           <span className="text-white/42">
-            Higher bands mean closer to the fastest median for that benchmark.
+            100 means fastest in that column; Farm sits on top where it wins.
           </span>
         </p>
 
@@ -343,9 +345,10 @@ function BenchmarkAreaChart() {
           <style>
             {`
               .benchmark-series-line,
+              .benchmark-series-tooltip,
               .benchmark-point-ring,
               .benchmark-point-tooltip {
-                transition-duration: 240ms;
+                transition-duration: 260ms;
                 transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
               }
 
@@ -355,9 +358,28 @@ function BenchmarkAreaChart() {
 
               .benchmark-series:hover .benchmark-series-line,
               .benchmark-series:focus-within .benchmark-series-line {
-                filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.24));
-                stroke-opacity: 0.98;
-                stroke-width: 2.35;
+                filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.18));
+                stroke-opacity: 0.96;
+                stroke-width: 1.95;
+              }
+
+              .benchmark-series-tooltip {
+                opacity: 0;
+                pointer-events: none;
+                transform: translateY(8px);
+                transition-property: opacity, transform;
+              }
+
+              .benchmark-series:hover .benchmark-series-tooltip,
+              .benchmark-series:focus-within .benchmark-series-tooltip {
+                opacity: 1;
+                transform: translateY(0);
+              }
+
+              .benchmark-series:has(.benchmark-point:hover) .benchmark-series-tooltip,
+              .benchmark-series:has(.benchmark-point:focus) .benchmark-series-tooltip {
+                opacity: 0;
+                transform: translateY(8px);
               }
 
               .benchmark-point-ring {
@@ -398,13 +420,13 @@ function BenchmarkAreaChart() {
           </style>
           <defs>
             <linearGradient id="farmBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
-              <stop offset="55%" stopColor="currentColor" stopOpacity="0.045" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.12" />
+              <stop offset="55%" stopColor="currentColor" stopOpacity="0.028" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
             <linearGradient id="tanstackBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.07" />
-              <stop offset="55%" stopColor="currentColor" stopOpacity="0.022" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.045" />
+              <stop offset="55%" stopColor="currentColor" stopOpacity="0.014" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
           </defs>
@@ -471,11 +493,13 @@ function BenchmarkAreaChart() {
           ) : null}
           {series
             .filter((item) => item.framework.id !== "farm")
-            .map(({ framework, path, points }) => {
+            .map(({ averageScore, framework, path, points }) => {
               const lastPoint = points[points.length - 1];
               const title = chartMetrics
                 .map(([key, label]) => `${label}: ${formatMetricValue(key, framework.metrics[key].median)}`)
                 .join(" · ");
+              const tooltipX = lastPoint ? Math.max(52, Math.min(width - 220, lastPoint.x - 170)) : 52;
+              const tooltipY = lastPoint ? Math.max(260, lastPoint.y - 76) : 260;
 
               return (
                 <g key={framework.id} className="benchmark-series group">
@@ -486,16 +510,16 @@ function BenchmarkAreaChart() {
                     stroke="white"
                     strokeDasharray={framework.id === "tanstack" ? "0" : "8 8"}
                     strokeOpacity={seriesOpacity[framework.id]}
-                    strokeWidth={framework.id === "tanstack" ? "1.65" : "1.05"}
+                    strokeWidth={framework.id === "tanstack" ? "1.2" : "0.8"}
                     vectorEffect="non-scaling-stroke"
                   />
                   <path
                     aria-label={`${framework.label} — ${title}`}
                     d={path}
                     fill="none"
-                    pointerEvents="none"
+                    pointerEvents="stroke"
                     stroke="transparent"
-                    strokeWidth="18"
+                    strokeWidth="20"
                     vectorEffect="non-scaling-stroke"
                   />
                   {points.map((point) => {
@@ -533,9 +557,9 @@ function BenchmarkAreaChart() {
                           r="13"
                         />
                         <g className="benchmark-point-tooltip">
-                      <rect
-                        fill="black"
-                        fillOpacity="0.9"
+                          <rect
+                            fill="black"
+                            fillOpacity="0.9"
                             height="48"
                             stroke="white"
                             strokeOpacity="0.18"
@@ -578,25 +602,45 @@ function BenchmarkAreaChart() {
                     );
                   })}
                   {lastPoint ? (
-                    <g className="opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                    <g className="benchmark-series-tooltip">
                       <rect
                         fill="black"
-                        fillOpacity="0.88"
-                        height="22"
+                        fillOpacity="0.9"
+                        height="52"
                         stroke="white"
                         strokeOpacity="0.18"
-                        width={framework.label.length * 7 + 22}
-                        x={Math.max(48, Math.min(width - 180, lastPoint.x - 98))}
-                        y={Math.max(260, lastPoint.y - 32)}
+                        width="206"
+                        x={tooltipX}
+                        y={tooltipY}
                       />
                       <text
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="10"
-                        x={Math.max(59, Math.min(width - 169, lastPoint.x - 87))}
-                        y={Math.max(275, lastPoint.y - 17)}
+                        x={tooltipX + 10}
+                        y={tooltipY + 17}
                       >
                         {framework.label}
+                      </text>
+                      <text
+                        fill="currentColor"
+                        fillOpacity="0.62"
+                        fontFamily="var(--font-geist-mono, monospace)"
+                        fontSize="9"
+                        x={tooltipX + 10}
+                        y={tooltipY + 33}
+                      >
+                        {Math.round(averageScore)} AVG SPEED INDEX
+                      </text>
+                      <text
+                        fill="currentColor"
+                        fillOpacity="0.45"
+                        fontFamily="var(--font-geist-mono, monospace)"
+                        fontSize="8"
+                        x={tooltipX + 10}
+                        y={tooltipY + 45}
+                      >
+                        HOVER DOTS FOR RAW MEDIANS
                       </text>
                     </g>
                   ) : null}
@@ -610,8 +654,8 @@ function BenchmarkAreaChart() {
                 d={farmSeries.path}
                 fill="none"
                 stroke="white"
-                strokeOpacity="0.9"
-                strokeWidth="2.05"
+                strokeOpacity="0.86"
+                strokeWidth="1.45"
                 vectorEffect="non-scaling-stroke"
               />
               <path
@@ -620,9 +664,9 @@ function BenchmarkAreaChart() {
                   .join(" · ")}`}
                 d={farmSeries.path}
                 fill="none"
-                pointerEvents="none"
+                pointerEvents="stroke"
                 stroke="transparent"
-                strokeWidth="20"
+                strokeWidth="22"
                 vectorEffect="non-scaling-stroke"
               />
               {farmSeries.points.map((point) => {
@@ -704,17 +748,55 @@ function BenchmarkAreaChart() {
                   </g>
                 );
               })}
-              <text
-                className="opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                fill="currentColor"
-                fontFamily="var(--font-geist-mono, monospace)"
-                fontSize="11"
-                textAnchor="end"
-                x={width - 54}
-                y={Math.max(260, farmSeries.points[farmSeries.points.length - 1]?.y ?? 260) - 14}
-              >
-                Farm.js
-              </text>
+              {(() => {
+                const lastPoint = farmSeries.points[farmSeries.points.length - 1];
+                const tooltipX = lastPoint ? Math.max(52, Math.min(width - 220, lastPoint.x - 170)) : 52;
+                const tooltipY = lastPoint ? Math.max(260, lastPoint.y - 76) : 260;
+
+                return (
+                  <g className="benchmark-series-tooltip">
+                    <rect
+                      fill="black"
+                      fillOpacity="0.92"
+                      height="52"
+                      stroke="white"
+                      strokeOpacity="0.24"
+                      width="206"
+                      x={tooltipX}
+                      y={tooltipY}
+                    />
+                    <text
+                      fill="currentColor"
+                      fontFamily="var(--font-geist-mono, monospace)"
+                      fontSize="10"
+                      x={tooltipX + 10}
+                      y={tooltipY + 17}
+                    >
+                      Farm.js
+                    </text>
+                    <text
+                      fill="currentColor"
+                      fillOpacity="0.68"
+                      fontFamily="var(--font-geist-mono, monospace)"
+                      fontSize="9"
+                      x={tooltipX + 10}
+                      y={tooltipY + 33}
+                    >
+                      {Math.round(farmSeries.averageScore)} AVG SPEED INDEX
+                    </text>
+                    <text
+                      fill="currentColor"
+                      fillOpacity="0.5"
+                      fontFamily="var(--font-geist-mono, monospace)"
+                      fontSize="8"
+                      x={tooltipX + 10}
+                      y={tooltipY + 45}
+                    >
+                      100 = FASTEST PER COLUMN
+                    </text>
+                  </g>
+                );
+              })()}
             </g>
           ) : null}
         </svg>
