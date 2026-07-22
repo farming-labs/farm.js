@@ -336,9 +336,9 @@ function BenchmarkAreaChart() {
         </span>
 
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
-          Monitor framework latency and output size across startup, build, boot, SSR, and HTML.{" "}
+          Farm.js leads the benchmark app across latency and output size.{" "}
           <span className="text-white/42">
-            Lower vertices are better medians inside each benchmark column.
+            Raw medians for startup, build, boot, SSR, and HTML.
           </span>
         </p>
 
@@ -603,9 +603,9 @@ function BenchmarkAreaChart() {
                       <rect
                         fill="black"
                         fillOpacity={isFarm ? "0.96" : "0.94"}
-                        height="66"
+                        height="52"
                         stroke="white"
-                        strokeOpacity={isFarm ? "0.32" : "0.24"}
+                        strokeOpacity={isFarm ? "0.16" : "0.12"}
                         width="226"
                         x={tooltipX}
                         y={tooltipY}
@@ -639,16 +639,6 @@ function BenchmarkAreaChart() {
                         y={tooltipY + 45}
                       >
                         RANGE {getColumnRangeLabel(point.metric)}
-                      </text>
-                      <text
-                        fill="currentColor"
-                        fillOpacity={isFarm ? "0.46" : "0.42"}
-                        fontFamily="var(--font-geist-mono, monospace)"
-                        fontSize="8"
-                        x={tooltipX + 10}
-                        y={tooltipY + 58}
-                      >
-                        LOWER = BETTER IN THIS COLUMN
                       </text>
                     </g>
                   </g>
