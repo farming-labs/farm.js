@@ -206,7 +206,14 @@ describe("production prebuilt SSR output", () => {
 
     try {
       const staticPageDir = path.join(root, "src", "app", "static-page");
-      await fs.mkdir(staticPageDir, { recursive: true });
+      const dynamicPageDir = path.join(root, "src", "app", "[slug]");
+      const exactPageDir = path.join(root, "src", "app", "about");
+      const optionalCatchAllDir = path.join(root, "src", "app", "docs", "[[...parts]]");
+      await Promise.all(
+        [staticPageDir, dynamicPageDir, exactPageDir, optionalCatchAllDir].map((dir) =>
+          fs.mkdir(dir, { recursive: true }),
+        ),
+      );
       await fs.writeFile(
         path.join(staticPageDir, "page.tsx"),
         `
@@ -222,6 +229,24 @@ export default function StaticPage() {
 }
 `.trim(),
       );
+      await Promise.all([
+        fs.writeFile(
+          path.join(dynamicPageDir, "page.tsx"),
+          `
+export default function DynamicPage({ params }) {
+  return <main>dynamic production route {params.slug}</main>;
+}
+`.trim(),
+        ),
+        fs.writeFile(
+          path.join(exactPageDir, "page.tsx"),
+          `export default function AboutPage() { return <main>exact production route</main>; }`,
+        ),
+        fs.writeFile(
+          path.join(optionalCatchAllDir, "page.tsx"),
+          `export default function DocsPage() { return <main>optional catch-all production route</main>; }`,
+        ),
+      ]);
       const config = await resolveConfig(
         {
           root,
@@ -296,6 +321,26 @@ export default function StaticPage() {
         );
         expect(authenticatedStaticResponse.headers.get("x-production-header")).toBe("standalone");
         await expect(authenticatedStaticResponse.text()).resolves.toBe(staticHtml);
+
+        for (const pathname of ["/about", "/about/"]) {
+          const exactResponse = await fetch(new URL(pathname, response.url));
+          expect(exactResponse.status).toBe(200);
+          await expect(exactResponse.text()).resolves.toContain("exact production route");
+        }
+
+        const dynamicResponse = await fetch(new URL("/contact", response.url));
+        expect(dynamicResponse.status).toBe(200);
+        const dynamicHtml = await dynamicResponse.text();
+        expect(dynamicHtml).toContain("dynamic production route");
+        expect(dynamicHtml).toContain("contact");
+
+        for (const pathname of ["/docs", "/docs/routing/production"]) {
+          const catchAllResponse = await fetch(new URL(pathname, response.url));
+          expect(catchAllResponse.status).toBe(200);
+          await expect(catchAllResponse.text()).resolves.toContain(
+            "optional catch-all production route",
+          );
+        }
       });
       await runProductionRequest(
         serverDir,
@@ -317,12 +362,27 @@ export default function StaticPage() {
 
     try {
       const failureApiDir = path.join(root, "src", "app", "api", "failure");
+      const afterApiDir = path.join(root, "src", "app", "api", "after-response");
+      const afterMarkerPath = path.join(root, "after-response.txt");
       await fs.mkdir(failureApiDir, { recursive: true });
+      await fs.mkdir(afterApiDir, { recursive: true });
       await fs.writeFile(
         path.join(failureApiDir, "route.ts"),
         `
 export async function GET() {
   throw new Error("database-password-sentinel");
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(afterApiDir, "route.ts"),
+        `
+import { writeFile } from "node:fs/promises";
+import { after } from "@farmjs/core";
+
+export async function GET() {
+  after(() => writeFile(${JSON.stringify(afterMarkerPath)}, "finished"));
+  return Response.json({ accepted: true }, { status: 202 });
 }
 `.trim(),
       );
@@ -346,6 +406,24 @@ export async function GET() {
           expect(body).not.toContain("database-password-sentinel");
         },
         "/api/failure",
+      );
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(202);
+          await expect(response.json()).resolves.toEqual({ accepted: true });
+
+          let marker = "";
+          for (let attempt = 0; attempt < 100 && marker !== "finished"; attempt++) {
+            try {
+              marker = await fs.readFile(afterMarkerPath, "utf8");
+            } catch {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+            }
+          }
+          expect(marker).toBe("finished");
+        },
+        "/api/after-response",
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -732,6 +810,71 @@ export const GET = createEndpoint(
         await fs.readFile(path.join(root, ".farm", ".output", "server", "package.json"), "utf8"),
       );
       expect(serverPackage.imports?.["#farm-ssr-entry"]).toMatch(/^\.\/farm-ssr\//);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("keeps plugin-replaced requests current during production rendering", async () => {
+    const root = await createProductionFixture();
+    const runtimePlugin = `
+{
+  name: "production-runtime-request-context",
+  runtime: {
+    before({ request }) {
+      const headers = new Headers(request.headers);
+      headers.set("x-plugin-request", "transformed");
+      return new Request(request, { headers });
+    },
+  },
+}`;
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.mjs"),
+        `export default { plugins: [${runtimePlugin}] };`,
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+import { getCurrentRequest } from "@farmjs/core/request";
+
+export default function Page() {
+  return <main data-plugin-request={getCurrentRequest().headers.get("x-plugin-request")}>plugin request context</main>;
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "production-runtime-request-context-test",
+          plugins: [
+            definePlugin({
+              name: "production-runtime-request-context",
+              runtime: {
+                before({ request }) {
+                  const headers = new Headers(request.headers);
+                  headers.set("x-plugin-request", "transformed");
+                  return new Request(request, { headers });
+                },
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html.match(/<main[^>]*>/)?.[0]).toContain('data-plugin-request="transformed"');
+        },
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

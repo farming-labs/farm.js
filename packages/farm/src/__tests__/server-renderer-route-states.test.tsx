@@ -24,9 +24,9 @@ const temporaryDirectories: string[] = [];
 afterEach(async () => {
   vi.restoreAllMocks();
   await Promise.all(
-    temporaryDirectories.splice(0).map((directory) =>
-      rm(directory, { recursive: true, force: true }),
-    ),
+    temporaryDirectories
+      .splice(0)
+      .map((directory) => rm(directory, { recursive: true, force: true })),
   );
 });
 
@@ -225,9 +225,7 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(imageResponse.statusCode).toBe(200);
     expect(imageResponse.headers.get("content-type")).toBe("image/png");
     expect(imageResponse.headers.get("content-length")).toBe(imageBytes.byteLength);
-    expect(imageResponse.headers.get("cache-control")).toBe(
-      "public, max-age=31536000, immutable",
-    );
+    expect(imageResponse.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
     expect(imageResponse.headers.get("etag")).toBe('"0123456789abcdef"');
     expect(imageResponse.body.length).toBeGreaterThan(0);
   });
@@ -288,6 +286,32 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain('window.__FARM_DEPLOYMENT_ID__ = "release-2"');
     expect(response.body).toContain('<meta name="farm-deployment-id" content="release-2">');
   });
+
+  it("reuses one fresh client manifest for route hydration metadata", async () => {
+    const onGenerateClientManifest = vi.fn();
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Hydrated dashboard");
+          },
+        },
+      },
+      {
+        clientMetadata: { isClientComponent: true, shouldHydrate: true },
+        onGenerateClientManifest,
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(onGenerateClientManifest).toHaveBeenCalledTimes(1);
+    expect(response.body).toContain('data-farm-client="true"');
+    expect(response.body).toContain("window.__FARM_IS_CLIENT__ = true");
+    expect(response.body).toContain('"isClientComponent":true');
+    expect(response.body).toContain('"shouldHydrate":true');
+  });
 });
 
 function DeferredReviews({ reviews }: { reviews: Promise<string[]> }) {
@@ -304,6 +328,8 @@ function createRenderer(
   options: {
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
+    clientMetadata?: { isClientComponent: boolean; shouldHydrate: boolean };
+    onGenerateClientManifest?: () => void;
   } = {},
 ) {
   const metadataImageEntry = {
@@ -388,13 +414,14 @@ function createRenderer(
       return mod;
     },
     generateClientManifest() {
+      options.onGenerateClientManifest?.();
       return {
         routes: [
           {
             pattern: "/dashboard",
             modulePath: "/src/app/dashboard/page.tsx",
-            shouldHydrate: false,
-            isClientComponent: false,
+            shouldHydrate: options.clientMetadata?.shouldHydrate ?? false,
+            isClientComponent: options.clientMetadata?.isClientComponent ?? false,
             segments: [{ segment: "dashboard", isDynamic: false }],
           },
         ],

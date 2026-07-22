@@ -2384,6 +2384,8 @@ function generateVirtualEntryCode(
   i18nCatalogs: FarmI18nCatalogs,
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
+  const hasMiddlewareRuntime =
+    middlewareRoutes.length > 0 || hasFarmMiddlewareConfig(config.middleware);
   const farmDocsBaseConfig = config.docs?.enabled
     ? { ...config.docs, config: undefined }
     : undefined;
@@ -2409,8 +2411,16 @@ function generateVirtualEntryCode(
   const hasMarkdownPages = pageRoutes.some(
     (route) => route.source !== undefined || isFarmMarkdownPageFile(route.modulePath),
   );
+  const orderedPageRoutes = pageRoutes
+    .map((route, index) => ({ route, index }))
+    .sort(
+      (left, right) =>
+        routePatternSpecificity(right.route.pattern) -
+          routePatternSpecificity(left.route.pattern) || left.index - right.index,
+    )
+    .map(({ route }) => route);
 
-  pageRoutes.forEach((route, index) => {
+  orderedPageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
     if (route.source !== undefined || isFarmMarkdownPageFile(route.modulePath)) {
       pageRegistrations.push(`
@@ -2675,6 +2685,8 @@ ${mdxComponentsImport}
 ${integrationImports}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
+import * as React from "react";
+import * as ReactDOMServer from "react-dom/server";
 
 // Custom 404 page component (if provided)
 const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
@@ -2816,6 +2828,16 @@ const apiRoutes = [${apiRegistrations.join(",")}
 // Page routes bundled at build time
 const pageRoutes = [${pageRegistrations.join(",")}
 ];
+const exactPageRoutes = new Map();
+const patternPageRoutes = [];
+for (const route of pageRoutes) {
+  if (/[\\[\\]*:]/.test(route.pattern)) {
+    patternPageRoutes.push(route);
+  } else {
+    const exactPath = normalizeRuntimePath(route.pattern);
+    if (!exactPageRoutes.has(exactPath)) exactPageRoutes.set(exactPath, route);
+  }
+}
 
 // Layout routes bundled at build time (sorted by depth, root first)
 const layoutRoutes = [${layoutRegistrations.join(",")}
@@ -3461,12 +3483,10 @@ async function handleMetadataImageRequest(request, routePathname) {
     if (typeof value === "string" || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
       body = value;
     } else {
-      const React = await import("react");
       if (!React.isValidElement(value)) {
         throw new Error("Metadata image must return a Response, string, bytes, or React element");
       }
-      const { renderToStaticMarkup } = await import("react-dom/server");
-      body = renderToStaticMarkup(value);
+      body = ReactDOMServer.renderToStaticMarkup(value);
     }
 
     return new Response(method === "HEAD" ? null : body, {
@@ -3554,8 +3574,9 @@ function applyConfiguredResponseHeaders(response, pathname) {
   let headers;
   for (const headerRoute of configuredHeaderRoutes) {
     if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
-    if (!headers) headers = new Headers(response.headers);
     for (const header of headerRoute.headers) {
+      if ((headers || response.headers).get(header.key) === header.value) continue;
+      if (!headers) headers = new Headers(response.headers);
       headers.set(header.key, header.value);
     }
   }
@@ -3572,11 +3593,15 @@ function applyConfiguredResponseHeaders(response, pathname) {
 const fileMiddlewareModules = [${middlewareRegistrations.join(",")}
 ];
 
-const farmMiddlewareRunner = createProductionMiddlewareRunner({
+const farmMiddlewareRunner = ${
+    hasMiddlewareRuntime
+      ? `createProductionMiddlewareRunner({
   config: farmUserConfig?.middleware,
   modules: fileMiddlewareModules,
   i18n: farmI18nConfig,
-});
+})`
+      : "null"
+  };
 
 ${apiHandlerCode}
 
@@ -3617,7 +3642,10 @@ async function handleIntegrationRequest(request) {
  * Match URL to page route pattern
  */
 function matchPageRoute(pathname) {
-  for (const route of pageRoutes) {
+  const exactRoute = exactPageRoutes.get(normalizeRuntimePath(pathname));
+  if (exactRoute) return { route: exactRoute, params: {} };
+
+  for (const route of patternPageRoutes) {
     const params = matchRuntimePathPattern(route.pattern, pathname);
     if (params !== null) return { route, params };
   }
@@ -3923,25 +3951,40 @@ async function handleFarmRequestInContext(
     }
   }
 
-  if (farmImageHandler) {
+  if (farmImageHandler && pathname === ${JSON.stringify(config.images.path)}) {
     const imageResponse = await farmImageHandler(request);
     if (imageResponse) {
       return imageResponse;
     }
   }
 
+  ${
+    hasServerRuntimeIntegrations
+      ? `
   const integrationResponse = await handleIntegrationRequest(request.clone());
   if (integrationResponse) {
     return integrationResponse;
   }
+  `
+      : ""
+  }
 
+  ${
+    config.docs?.enabled
+      ? `
   if (farmDocsHandler) {
     const docsResponse = await farmDocsHandler(request.clone());
     if (docsResponse) {
       return docsResponse;
     }
   }
+  `
+      : ""
+  }
 
+  ${
+    hasMarkdownPages
+      ? `
   const markdownSourceResponse = await createFarmMarkdownSourceResponse?.({
     request: request.clone(),
     config: farmMdxConfig,
@@ -3953,7 +3996,13 @@ async function handleFarmRequestInContext(
   if (markdownSourceResponse) {
     return markdownSourceResponse;
   }
+  `
+      : ""
+  }
 
+  ${
+    config.md?.enabled
+      ? `
   if (farmMarkdownConfig?.enabled) {
     const markdownResponse = await createMarkdownMirrorResponse({
       request: request.clone(),
@@ -3966,7 +4015,14 @@ async function handleFarmRequestInContext(
       return markdownResponse;
     }
   }
+  `
+      : ""
+  }
 
+  ${
+    hasMiddlewareRuntime
+      ? `
+  const requestBeforeMiddleware = request;
   const middlewareResult = await farmMiddlewareRunner(request);
   if (middlewareResult.response) {
     return middlewareResult.response;
@@ -3982,19 +4038,38 @@ async function handleFarmRequestInContext(
   // Middleware may replace the Request when it rewrites a URL. Re-enter the
   // request store so pages, layouts, and route context observe that rewritten
   // request instead of the original outer-handler value.
-  return _runWithCurrentRequest(request, async () => {
+  const runResolvedRequest = async () => {
+  `
+      : `
+  const middlewareData = undefined;
+  const middlewareContext = undefined;
+  const middlewareHeaders = undefined;
+  `
+  }
 
+  ${
+    apiRoutes.length > 0
+      ? `
   const apiResponse = await handleAPIRequest(request.clone());
   if (apiResponse) {
     return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
   }
+  `
+      : ""
+  }
 
+  ${
+    metadataImageRoutes.length > 0
+      ? `
   const metadataImageResponse = await handleMetadataImageRequest(
     request.clone(),
     routePathname
   );
   if (metadataImageResponse) {
     return applyProductionMiddlewareHeaders(metadataImageResponse, middlewareHeaders);
+  }
+  `
+      : ""
   }
 
   // Preserve the explicit JSON 404 for /api/* misses.
@@ -4069,17 +4144,15 @@ async function handleFarmRequestInContext(
         // Parse search params - make it a resolved Promise for async components
         const searchParamsObj = Object.fromEntries(url.searchParams.entries());
         
-        // Import React SSR utilities
-        const ReactDOMServer = await import("react-dom/server");
-        const React = await import("react");
-        
         // Render the page component
-        const routeContext = await resolveFarmRouteContext(farmResolvedRuntimeConfig, {
-          request,
-          params,
-          search: searchParamsObj,
-          path: pathname,
-        });
+        const routeContext = hasConfiguredRouteContext
+          ? await resolveFarmRouteContext(farmResolvedRuntimeConfig, {
+              request,
+              params,
+              search: searchParamsObj,
+              path: pathname,
+            })
+          : undefined;
         const rawPageProps = withFarmRouteContext(
           {
             params,
@@ -4154,8 +4227,7 @@ async function handleFarmRequestInContext(
           }
         }
         
-        const renderedPage = await _runWithMiddlewareData(middlewareData, () =>
-          _runWithMiddlewareContext(middlewareContext, async () => {
+        const renderPageElement = async () => {
             // First, render the page content
             let pageElement;
 
@@ -4195,9 +4267,15 @@ async function handleFarmRequestInContext(
               }
             }
 
-            return renderFarmElement(ReactDOMServer, wrappedElement);
-          })
-        );
+          return renderFarmElement(ReactDOMServer, wrappedElement);
+        };
+        const renderedPage = ${
+          hasMiddlewareRuntime
+            ? `await _runWithMiddlewareData(middlewareData, () =>
+          _runWithMiddlewareContext(middlewareContext, renderPageElement)
+        )`
+            : "await renderPageElement()"
+        };
         
         // Collect static and generated metadata from layouts and page.
         // Later entries override earlier entries, matching the development renderer.
@@ -4461,8 +4539,6 @@ async function handleFarmRequestInContext(
       const errorBoundaryMatch = getMatchingErrorBoundary(routePathname);
       if (errorBoundaryMatch?.route.module?.default) {
         try {
-          const ReactDOMServer = await import("react-dom/server");
-          const React = await import("react");
           const searchParamsObj = Object.fromEntries(url.searchParams.entries());
           const ErrorComponent = errorBoundaryMatch.route.module.default;
           let errorElement = React.createElement(ErrorComponent, {
@@ -4486,11 +4562,15 @@ async function handleFarmRequestInContext(
             }
           }
 
-          const errorHtml = await _runWithMiddlewareData(middlewareData, () =>
-            _runWithMiddlewareContext(middlewareContext, () =>
-              renderFarmElementToString(ReactDOMServer, errorElement)
-            )
-          );
+          const renderErrorElement = () =>
+            renderFarmElementToString(ReactDOMServer, errorElement);
+          const errorHtml = ${
+            hasMiddlewareRuntime
+              ? `await _runWithMiddlewareData(middlewareData, () =>
+            _runWithMiddlewareContext(middlewareContext, renderErrorElement)
+          )`
+              : "await renderErrorElement()"
+          };
           const errorDocument = applyFarmI18nDocument(
             createFarmErrorDocument(errorHtml, "Application Error"),
             pathname,
@@ -4539,9 +4619,6 @@ async function handleFarmRequestInContext(
   // 404 fallback - render proper HTML page
   emitFarmEvent({ type: "route.notFound", pathname });
   try {
-    const ReactDOMServer = await import("react-dom/server");
-    const React = await import("react");
-    
     // Default 404 page component
     function Default404Page() {
       return React.createElement("div", {
@@ -4688,7 +4765,16 @@ async function handleFarmRequestInContext(
       { status: 404, headers: { "Content-Type": "text/html" } }
     ), middlewareHeaders);
   }
-  });
+  ${
+    hasMiddlewareRuntime
+      ? `
+  };
+  return request === requestBeforeMiddleware
+    ? runResolvedRequest()
+    : _runWithCurrentRequest(request, runResolvedRequest);
+  `
+      : ""
+  }
 }
 
 async function handleFarmPluginRequest(request, runtimeOptions) {
@@ -4741,11 +4827,14 @@ async function handleFarmPluginRequest(request, runtimeOptions) {
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
-  const runtimeOptions = getFarmPluginRequestOptions(request);
+  const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
   const runRequest = () => farmPluginRuntime
     ? farmPluginRuntime.runRuntimeRequest(
-        request,
-        (runtimeRequest) => handleFarmPluginRequest(runtimeRequest, runtimeOptions),
+      request,
+        (runtimeRequest) =>
+          _runWithCurrentRequest(runtimeRequest, () =>
+            handleFarmPluginRequest(runtimeRequest, runtimeOptions)
+          ),
         {
           ...runtimeOptions,
           waitUntil: typeof context?.waitUntil === "function"
@@ -5097,15 +5186,40 @@ function mergeVaryHeaders(target, source) {
   if (values.size > 0) target.set('Vary', Array.from(values).join(', '))
 }
 
+function createResponseFinishedHook(event) {
+  const nodeResponse = event.node?.res
+  if (!nodeResponse || typeof nodeResponse.once !== 'function') return undefined
+
+  return (callback) => {
+    if (nodeResponse.writableEnded || nodeResponse.writableFinished) {
+      queueMicrotask(callback)
+      return
+    }
+
+    let finished = false
+    const finish = () => {
+      if (finished) return
+      finished = true
+      nodeResponse.off('finish', finish)
+      nodeResponse.off('close', finish)
+      callback()
+    }
+    nodeResponse.once('finish', finish)
+    nodeResponse.once('close', finish)
+  }
+}
+
 // Export the wrapped handler for Nitro
 export default defineEventHandler(async (event) => {
   const response = await handler.fetch(event.req, {
     waitUntil: (promise) => event.waitUntil(promise),
+    onResponseFinished: createResponseFinishedHook(event),
   })
 
   // Nitro records asset compression negotiation on the event response. Merge
   // Farm's cache signals there so H3 preserves both sets of Vary values.
-  mergeVaryHeaders(event.res.headers, response.headers.get('Vary'))
+  const farmVary = response.headers.get('Vary')
+  if (farmVary) mergeVaryHeaders(event.res.headers, farmVary)
   return response
 })
   `.trim();

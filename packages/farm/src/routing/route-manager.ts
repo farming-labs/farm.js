@@ -81,6 +81,14 @@ interface RedirectEntry {
   definition: ProgrammaticRedirectRoute;
 }
 
+function routeSpecificity(entry: RouteEntry): number {
+  return entry.route.segments.reduce((score, segment) => {
+    if (!segment.isDynamic) return score + 100;
+    if (!segment.isCatchAll) return score + 50;
+    return score + (segment.isOptional ? 5 : 10);
+  }, entry.route.segments.length);
+}
+
 /**
  * Manages route discovery and matching for the Farm.js application
  */
@@ -118,6 +126,12 @@ export class RouteManager {
       await this.discoverFileRoutes(source);
       await this.discoverProgrammaticRoutes(source);
     }
+
+    this.routes = new Map(
+      Array.from(this.routes.entries()).sort(
+        ([, left], [, right]) => routeSpecificity(right) - routeSpecificity(left),
+      ),
+    );
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
@@ -754,9 +768,7 @@ export class RouteManager {
     if (i18n.routing === "none") {
       return {
         ssg: [],
-        ssr: Array.from(
-          new Set([...result.ssr, ...result.ssg.map((page) => page.urlPath)]),
-        ),
+        ssr: Array.from(new Set([...result.ssr, ...result.ssg.map((page) => page.urlPath)])),
       };
     }
 
@@ -788,9 +800,7 @@ export class RouteManager {
 
   private getI18nConfig(): ResolvedFarmI18nConfig | undefined {
     const i18n = this.config.i18n;
-    return i18n && typeof i18n === "object" && "enabled" in i18n && i18n.enabled
-      ? i18n
-      : undefined;
+    return i18n && typeof i18n === "object" && "enabled" in i18n && i18n.enabled ? i18n : undefined;
   }
 
   /**

@@ -1580,14 +1580,24 @@ export function farmPlugin(
           const pathname = new URL(urlPath, `http://${req.headers.host || "localhost:3000"}`)
             .pathname;
           const routeManager = farmApp.getRouteManager();
-          if (pm) {
+          const hasBeforeRouteMatchHook = pm?.hasHook("beforeRouteMatch") ?? false;
+          const hasAfterRouteMatchHook = pm?.hasHook("afterRouteMatch") ?? false;
+          const hasBeforeRequestHook = pm?.hasHook("beforeRequest") ?? false;
+          const hasBeforeRenderHook = pm?.hasHook("beforeRender") ?? false;
+          const hasAfterResponseHook = pm?.hasHook("afterResponse") ?? false;
+          const hasHTMLTransformHook =
+            (pm?.hasHook("transformHTML") ?? false) || (pm?.hasHook("afterRender") ?? false);
+          const hasRuntimeRequestHooks = pm?.hasRuntimeRequestHooks() ?? false;
+          const hasRuntimeAfterHook = pm?.hasRuntimeHook("after") ?? false;
+
+          if (pm && hasBeforeRouteMatchHook) {
             await pm.runHookParallel("beforeRouteMatch", {
               pathname,
               method,
             });
           }
           const routeMatch = routeManager.matchRoute(pathname);
-          if (pm) {
+          if (pm && hasAfterRouteMatchHook) {
             await pm.runHookParallel("afterRouteMatch", {
               pathname,
               matched: !!routeMatch?.route,
@@ -1603,7 +1613,7 @@ export function farmPlugin(
             params: routeMatch?.params || {},
           };
           let runtimeSession: FarmPluginRuntimeSession | undefined;
-          if (pm) {
+          if (pm && hasRuntimeRequestHooks) {
             try {
               runtimeSession = await pm.beginRuntimeRequest(
                 createRequestFromNodeRequest(req, new URL(fullUrl)),
@@ -1639,7 +1649,7 @@ export function farmPlugin(
           // logRequest(method, urlPath, "PAGE");
 
           try {
-            if (middlewareManager) {
+            if (middlewareManager?.hasMiddleware()) {
               const middlewareRequest = createRequestFromNodeRequest(req, new URL(fullUrl));
               const handled = await farmApp
                 .getServerRenderer()
@@ -1664,7 +1674,7 @@ export function farmPlugin(
             }
 
             // Run beforeRequest hooks
-            if (pm) {
+            if (pm && hasBeforeRequestHook) {
               await pm.runHookParallel("beforeRequest", req, res);
             }
 
@@ -1685,156 +1695,164 @@ export function farmPlugin(
               return;
             }
 
-            // Intercept res.end to call afterResponse hooks and log response before response is fully sent
-            const originalWrite = res.write.bind(res);
-            const originalEnd = res.end.bind(res);
-            let afterResponseCalled = false;
-            const htmlChunks: Buffer[] = [];
-            let didStreamHtml = false;
-            const bufferPluginResponse = Boolean(
-              runtimeSession &&
-              pm
-                ?.getPlugins()
-                .some(
-                  (plugin) =>
-                    plugin.runtime?.after ||
-                    plugin.render?.html ||
-                    plugin.afterRender ||
-                    plugin.transformHTML,
-                ),
+            // Only intercept streamed output when an installed plugin can
+            // observe or replace the response. The default dev path can write
+            // directly to Node without buffering and replaying the whole HTML.
+            const shouldInterceptResponse = Boolean(
+              pm &&
+              (hasAfterResponseHook ||
+                hasHTMLTransformHook ||
+                (runtimeSession && hasRuntimeAfterHook)),
             );
+            if (pm && shouldInterceptResponse) {
+              const originalWrite = res.write.bind(res);
+              const originalEnd = res.end.bind(res);
+              let afterResponseCalled = false;
+              const htmlChunks: Buffer[] = [];
+              let didStreamHtml = false;
+              const bufferPluginResponse = Boolean(
+                hasHTMLTransformHook || (runtimeSession && hasRuntimeAfterHook),
+              );
 
-            res.write = ((chunk: any, ...args: any[]) => {
-              const contentTypeHeader =
-                res.getHeader("content-type") || res.getHeader("Content-Type");
-              const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
-              const isHtmlResponse = contentType.includes("text/html");
+              res.write = ((chunk: any, ...args: any[]) => {
+                const contentTypeHeader =
+                  res.getHeader("content-type") || res.getHeader("Content-Type");
+                const contentType = typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+                const isHtmlResponse = contentType.includes("text/html");
 
-              if (isHtmlResponse && chunk !== undefined && chunk !== null) {
-                const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-                htmlChunks.push(bufferChunk);
-                didStreamHtml = true;
-                if (bufferPluginResponse) {
-                  const callback = args.find((arg) => typeof arg === "function");
-                  callback?.();
-                  return true;
+                if (isHtmlResponse && chunk !== undefined && chunk !== null) {
+                  const bufferChunk = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
+                  htmlChunks.push(bufferChunk);
+                  didStreamHtml = true;
+                  if (bufferPluginResponse) {
+                    const callback = args.find((arg) => typeof arg === "function");
+                    callback?.();
+                    return true;
+                  }
+                  const writeResult = originalWrite(chunk, ...args);
+                  if (typeof (res as any).flush === "function") {
+                    (res as any).flush();
+                  }
+                  return writeResult;
                 }
-                const writeResult = originalWrite(chunk, ...args);
-                if (typeof (res as any).flush === "function") {
-                  (res as any).flush();
-                }
-                return writeResult;
-              }
 
-              return originalWrite(chunk, ...args);
-            }) as any;
+                return originalWrite(chunk, ...args);
+              }) as any;
 
-            res.end = ((...args: any[]) => {
-              if (!afterResponseCalled && pm) {
-                afterResponseCalled = true;
-                const duration = Date.now() - startTime;
-                logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
-                const originalEndArgs = [...args];
-                Promise.resolve()
-                  .then(async () => {
-                    const contentTypeHeader =
-                      res.getHeader("content-type") || res.getHeader("Content-Type");
-                    const contentType =
-                      typeof contentTypeHeader === "string" ? contentTypeHeader : "";
-                    const isHtmlResponse = contentType.includes("text/html");
-                    if (isHtmlResponse) {
-                      const firstArg = args[0];
-                      if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
-                        const bufferChunk = Buffer.isBuffer(firstArg)
-                          ? firstArg
-                          : Buffer.from(firstArg, "utf-8");
-                        htmlChunks.push(bufferChunk);
+              res.end = ((...args: any[]) => {
+                if (!afterResponseCalled && pm) {
+                  afterResponseCalled = true;
+                  const duration = Date.now() - startTime;
+                  logResponse(method, urlPath, res.statusCode || 200, duration, "PAGE");
+                  const originalEndArgs = [...args];
+                  Promise.resolve()
+                    .then(async () => {
+                      const contentTypeHeader =
+                        res.getHeader("content-type") || res.getHeader("Content-Type");
+                      const contentType =
+                        typeof contentTypeHeader === "string" ? contentTypeHeader : "";
+                      const isHtmlResponse = contentType.includes("text/html");
+                      if (isHtmlResponse) {
+                        const firstArg = args[0];
+                        if (typeof firstArg === "string" || Buffer.isBuffer(firstArg)) {
+                          const bufferChunk = Buffer.isBuffer(firstArg)
+                            ? firstArg
+                            : Buffer.from(firstArg, "utf-8");
+                          htmlChunks.push(bufferChunk);
+                        }
+
+                        const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
+                        let html = fullHtml;
+                        if (!didStreamHtml || bufferPluginResponse) {
+                          html = await pm.runHookSerial("transformHTML", html);
+                          html = await pm.runHookSerial("afterRender", html, renderPayload);
+                          const callback =
+                            typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+                              ? originalEndArgs[originalEndArgs.length - 1]
+                              : undefined;
+                          originalEndArgs.length = 0;
+                          originalEndArgs.push(html);
+                          if (callback) originalEndArgs.push(callback);
+                        } else {
+                          await pm.runHookSerial("transformHTML", fullHtml);
+                          await pm.runHookSerial("afterRender", fullHtml, renderPayload);
+                        }
                       }
 
-                      const fullHtml = Buffer.concat(htmlChunks).toString("utf-8");
-                      let html = fullHtml;
-                      if (!didStreamHtml || bufferPluginResponse) {
-                        html = await pm.runHookSerial("transformHTML", html);
-                        html = await pm.runHookSerial("afterRender", html, renderPayload);
-                        const callback =
-                          typeof originalEndArgs[originalEndArgs.length - 1] === "function"
-                            ? originalEndArgs[originalEndArgs.length - 1]
-                            : undefined;
-                        originalEndArgs.length = 0;
-                        originalEndArgs.push(html);
-                        if (callback) originalEndArgs.push(callback);
-                      } else {
-                        await pm.runHookSerial("transformHTML", fullHtml);
-                        await pm.runHookSerial("afterRender", fullHtml, renderPayload);
-                      }
-                    }
-
-                    if (runtimeSession) {
-                      pm.copyRequestContext(req, runtimeSession.request);
-                      const status = res.statusCode || 200;
-                      const canHaveBody =
-                        method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
-                      const firstArg = originalEndArgs[0];
-                      const responseBody = canHaveBody
-                        ? isHtmlResponse
-                          ? didStreamHtml && !bufferPluginResponse
-                            ? Buffer.concat(htmlChunks)
+                      if (runtimeSession) {
+                        pm.copyRequestContext(req, runtimeSession.request);
+                        const status = res.statusCode || 200;
+                        const canHaveBody =
+                          method !== "HEAD" && status !== 204 && status !== 205 && status !== 304;
+                        const firstArg = originalEndArgs[0];
+                        const responseBody = canHaveBody
+                          ? isHtmlResponse
+                            ? didStreamHtml && !bufferPluginResponse
+                              ? Buffer.concat(htmlChunks)
+                              : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
+                                ? firstArg
+                                : undefined
                             : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
                               ? firstArg
                               : undefined
-                          : typeof firstArg === "string" || Buffer.isBuffer(firstArg)
-                            ? firstArg
-                            : undefined
-                        : null;
-                      const runtimeResponse = await pm.endRuntimeRequest(
-                        runtimeSession,
-                        new Response(
-                          Buffer.isBuffer(responseBody)
-                            ? responseBody.toString("utf8")
-                            : responseBody,
-                          {
-                            status,
-                            headers: createHeadersFromNodeResponse(res),
-                          },
-                        ),
-                      );
-                      applyWebResponseToNodeResponse(runtimeResponse, res);
+                          : null;
+                        const runtimeResponse = await pm.endRuntimeRequest(
+                          runtimeSession,
+                          new Response(
+                            Buffer.isBuffer(responseBody)
+                              ? responseBody.toString("utf8")
+                              : responseBody,
+                            {
+                              status,
+                              headers: createHeadersFromNodeResponse(res),
+                            },
+                          ),
+                        );
+                        applyWebResponseToNodeResponse(runtimeResponse, res);
 
-                      if (!didStreamHtml || bufferPluginResponse) {
-                        const callback =
-                          typeof originalEndArgs[originalEndArgs.length - 1] === "function"
-                            ? originalEndArgs[originalEndArgs.length - 1]
+                        if (!didStreamHtml || bufferPluginResponse) {
+                          const callback =
+                            typeof originalEndArgs[originalEndArgs.length - 1] === "function"
+                              ? originalEndArgs[originalEndArgs.length - 1]
+                              : undefined;
+                          const body = runtimeResponse.body
+                            ? Buffer.from(await runtimeResponse.arrayBuffer())
                             : undefined;
-                        const body = runtimeResponse.body
-                          ? Buffer.from(await runtimeResponse.arrayBuffer())
-                          : undefined;
-                        originalEndArgs.length = 0;
-                        if (body) originalEndArgs.push(body);
-                        if (callback) originalEndArgs.push(callback);
+                          originalEndArgs.length = 0;
+                          if (body) originalEndArgs.push(body);
+                          if (callback) originalEndArgs.push(callback);
+                        }
                       }
-                    }
-                  })
-                  .then(() => pm.runHookParallel("afterResponse", req, res))
-                  .then(() => {
-                    originalEnd(...originalEndArgs);
-                  })
-                  .catch((err) => {
-                    emitPluginError("response-end", err, { pathname }).catch(() => {});
-                    console.error("Error in afterResponse hook:", err);
-                    originalEnd(...originalEndArgs);
-                  });
-              } else {
-                originalEnd(...args);
-              }
-            }) as any;
+                    })
+                    .then(() =>
+                      hasAfterResponseHook
+                        ? pm.runHookParallel("afterResponse", req, res)
+                        : undefined,
+                    )
+                    .then(() => {
+                      originalEnd(...originalEndArgs);
+                    })
+                    .catch((err) => {
+                      emitPluginError("response-end", err, { pathname }).catch(() => {});
+                      console.error("Error in afterResponse hook:", err);
+                      originalEnd(...originalEndArgs);
+                    });
+                } else {
+                  originalEnd(...args);
+                }
+              }) as any;
+            }
 
             // Note: __FARM_PROPS__ is set by the renderer with actual page props (params, searchParams)
 
             const renderer = farmApp.getServerRenderer();
-            if (pm) {
+            if (pm && hasBeforeRenderHook) {
               await pm.runHookParallel("beforeRender", renderPayload);
             }
             await renderer.renderPage(req as any, res as any);
+            if (!shouldInterceptResponse) {
+              logResponse(method, urlPath, res.statusCode || 200, Date.now() - startTime, "PAGE");
+            }
           } catch (error) {
             // Log error response
             const duration = Date.now() - startTime;

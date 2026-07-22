@@ -1,4 +1,3 @@
-import { lookup } from "node:dns/promises";
 import type { ResolvedFarmImageConfig } from "./image-config";
 import {
   FarmImageRequestError,
@@ -50,6 +49,9 @@ export function createNodeImageUrlValidator(config: ResolvedFarmImageConfig) {
 
     let addresses: Array<{ address: string; family: number }>;
     try {
+      // DNS is only needed by remote image requests. Keeping it out of the
+      // initial server module graph reduces normal page/API startup work.
+      const { lookup } = await import("node:dns/promises");
       addresses = await lookup(url.hostname, { all: true, verbatim: true });
     } catch {
       throw new FarmImageRequestError(

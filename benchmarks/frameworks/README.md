@@ -20,7 +20,9 @@ It verifies the installed package versions against every label in the report bef
 
 - **First dev page:** process spawn to the first validated, fully read HTTP response. This includes
   startup and lazy compilation instead of relying on framework-specific ready messages.
-- **Warm dev response:** sequential validated loopback responses after warm-up requests.
+- **Warm dev response:** sequential validated loopback responses after 30 equal warm-up requests.
+  This reduces early runtime JIT effects; cold compilation remains visible in the separate
+  first-dev-page metric.
 - **Clean build:** build-process wall time after the fixture's generated framework caches are
   removed. This is a complete fixture-project production build; the local Farm framework-package
   build happens beforehand and is excluded from the timed sample.
@@ -92,10 +94,10 @@ corepack pnpm --dir benchmarks/frameworks self-check
 To reproduce and publish the canonical report and landing-page data:
 
 ```sh
-node benchmarks/frameworks/run.mjs --runs 7 --requests 30 --warmups 5 --publish
+node benchmarks/frameworks/run.mjs --runs 7 --requests 30 --warmups 30 --publish
 ```
 
-`--publish` requires all five frameworks, at least seven measured rounds, 30 measured requests, five
+`--publish` requires all five frameworks, at least seven measured rounds, 30 measured requests, 30
 warmups, the discarded burn-in, and a fresh untimed build of the local Farm packages. It writes:
 
 - `results/latest.json` — metadata, per-round data, and every raw sample.

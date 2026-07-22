@@ -47,7 +47,7 @@ const metrics = [
   {
     key: "devWarmResponseMs",
     label: "Warm dev",
-    detail: "p50 / p95 after warmup",
+    detail: `p50 / p95 after ${benchmarkReport.methodology.warmupRequestsPerRun} warmups`,
     valueType: "duration",
     showP95: true,
   },

@@ -856,11 +856,16 @@ export class ServerRenderer {
         }
       }
 
-      let isClientComponent = false;
-      let shouldHydrate = false;
-      const moduleMetadata = getClientModuleMetadata(route.modulePath, this.config.root);
-      isClientComponent = moduleMetadata.isClientComponent;
-      shouldHydrate = moduleMetadata.shouldHydrate;
+      // Build one fresh manifest per response and reuse its route metadata below.
+      // This preserves immediate HMR visibility without scanning every route twice.
+      const routeManifest = this.routeManager.generateClientManifest(this.config.root);
+      const routeManifestEntry = routeManifest.routes.find(
+        (entry) => entry.pattern === route.pattern,
+      );
+      const moduleMetadata =
+        routeManifestEntry || getClientModuleMetadata(route.modulePath, this.config.root);
+      const isClientComponent = moduleMetadata.isClientComponent;
+      const shouldHydrate = moduleMetadata.shouldHydrate;
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
@@ -998,6 +1003,7 @@ export class ServerRenderer {
               },
               {
                 responseHeaders: pprHeaders,
+                routeManifest,
                 captureStaticShell: Boolean(pprShellOptions),
                 observabilityRoute: pathname,
                 onSuspenseHoleDetected: pprShellOptions
@@ -1414,6 +1420,7 @@ export class ServerRenderer {
     clearMiddlewareData?: () => void,
     options: {
       responseHeaders?: Record<string, string> | undefined;
+      routeManifest?: ReturnType<RouteManager["generateClientManifest"]>;
       onComplete?: (html: string) => void | Promise<void>;
       captureStaticShell?: boolean;
       observabilityRoute?: string;
@@ -1448,7 +1455,8 @@ export class ServerRenderer {
 
       // Generate manifest for client-side SPA navigation (TanStack Start pattern)
       // This manifest is inlined in HTML - no separate file or API endpoint
-      const manifest = this.routeManager.generateClientManifest(this.config.root);
+      const manifest =
+        options.routeManifest ?? this.routeManager.generateClientManifest(this.config.root);
 
       // Convert to object format for client
       const clientManifest = {
@@ -1460,17 +1468,13 @@ export class ServerRenderer {
 
       // Convert routes array to object keyed by pattern
       for (const routeEntry of manifest.routes) {
-        const moduleMetadata = getClientModuleMetadata(routeEntry.modulePath, this.config.root);
-        const isClient = moduleMetadata.isClientComponent;
-        const shouldHydrateRoute = moduleMetadata.shouldHydrate;
-
         clientManifest.routes[routeEntry.pattern] = {
           modulePath: routeEntry.modulePath,
           pattern: routeEntry.pattern,
           segments: routeEntry.segments,
           search: routeEntry.search,
-          isClientComponent: isClient,
-          shouldHydrate: shouldHydrateRoute,
+          isClientComponent: routeEntry.isClientComponent,
+          shouldHydrate: routeEntry.shouldHydrate,
           preloads: [routeEntry.modulePath],
           assets: [],
         };

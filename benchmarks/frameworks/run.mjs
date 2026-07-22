@@ -250,7 +250,7 @@ function parseOptions(argv) {
   const options = {
     runs: 7,
     requests: 30,
-    warmups: 5,
+    warmups: 30,
     seed: 20260721,
     only: frameworks.map((framework) => framework.id),
     prepare: true,
@@ -320,9 +320,9 @@ function parseOptions(argv) {
     const isCanonicalSet =
       options.only.length === canonicalIds.length &&
       canonicalIds.every((id) => options.only.includes(id));
-    if (!isCanonicalSet || options.runs < 7 || options.requests < 30 || options.warmups < 5) {
+    if (!isCanonicalSet || options.runs < 7 || options.requests < 30 || options.warmups < 30) {
       throw new Error(
-        "Publishing requires all frameworks, at least 7 rounds, 30 requests, and 5 warmups",
+        "Publishing requires all frameworks, at least 7 rounds, 30 requests, and 30 warmups",
       );
     }
     if (!options.burnIn) throw new Error("Publishing requires the unmeasured burn-in round");
@@ -342,7 +342,7 @@ function printHelp() {
       "",
       "  --runs N          cold dev/build/boot rounds (default: 7)",
       "  --requests N      measured requests per server and round (default: 30)",
-      "  --warmups N       warm-up requests per server and round (default: 5)",
+      "  --warmups N       excluded warm-up requests per server and round (default: 30)",
       "  --only LIST       comma-separated framework ids",
       "  --seed N          deterministic round-order seed",
       "  --skip-prepare    skip the untimed local Farm package build",
@@ -1230,6 +1230,9 @@ function createMarkdown(report) {
     "",
     "- Fixture: " + report.fixture.description,
     "- Build metric: complete fixture-project production build; local Farm package preparation is excluded.",
+    "- Warm responses: " +
+      report.methodology.warmupRequestsPerRun +
+      " equal warm-up requests per server and round are excluded from the samples.",
     "- Runs: " +
       (report.methodology.burnInRounds
         ? report.methodology.burnInRounds + " discarded burn-in plus "
