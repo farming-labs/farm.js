@@ -1,5 +1,9 @@
 import { Activity, ExternalLink, Gauge, Rocket, TimerReset } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
+import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
+import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
+import svelteIconUrl from "simple-icons/icons/svelte.svg?url";
+import tanstackIconUrl from "simple-icons/icons/tanstack.svg?url";
 import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
 
 const benchmarkLinks = {
@@ -14,6 +18,13 @@ const farmResult = benchmarkReport.frameworks.find((framework) => framework.id =
 const competitorResults = benchmarkReport.frameworks.filter((framework) => framework.id !== "farm");
 const tanstackResult = benchmarkReport.frameworks.find((framework) => framework.id === "tanstack");
 const nextResult = benchmarkReport.frameworks.find((framework) => framework.id === "next");
+const frameworkIconUrls = {
+  farm: "/favicon.svg",
+  next: nextIconUrl,
+  nuxt: nuxtIconUrl,
+  sveltekit: svelteIconUrl,
+  tanstack: tanstackIconUrl,
+} as const satisfies Record<FrameworkResult["id"], string>;
 
 const leadMetrics = [
   ["devFirstPageMs", "Dev start"],
@@ -257,26 +268,6 @@ function MiniComparisonTable({ metric }: { metric: MetricKey }) {
   );
 }
 
-function LeadBand() {
-  if (!farmResult) {
-    return null;
-  }
-
-  const wins = leadMetrics.filter(([key]) => farmResult.metrics[key].median === getMetricMinimum(key));
-
-  return (
-    <div className="col-span-full border-y border-white/12 px-6 py-10 sm:px-12 sm:py-14">
-      <p className="text-center text-5xl font-semibold leading-none tracking-[-0.045em] text-white sm:text-6xl lg:text-7xl">
-        {wins.length}/{leadMetrics.length} Benchmark Leads
-      </p>
-      <p className="mx-auto mt-5 max-w-2xl text-center text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-        The uptime block becomes benchmark proof: Farm leads most tracked production and dev
-        latency signals, with every raw sample linked.
-      </p>
-    </div>
-  );
-}
-
 function BenchmarkAreaChart() {
   if (!farmResult) {
     return null;
@@ -437,6 +428,13 @@ function BenchmarkAreaChart() {
               <stop offset="55%" stopColor="currentColor" stopOpacity="0.014" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
+            <filter id="benchmarkIconInvert">
+              <feComponentTransfer>
+                <feFuncR tableValues="1 0" type="table" />
+                <feFuncG tableValues="1 0" type="table" />
+                <feFuncB tableValues="1 0" type="table" />
+              </feComponentTransfer>
+            </filter>
           </defs>
           <rect
             fill="url(#benchmarkRangeFill)"
@@ -556,6 +554,7 @@ function BenchmarkAreaChart() {
                 const tooltipX = getTooltipX(point.x, width);
                 const tooltipY = getTooltipY(point.y);
                 const isFarm = framework.id === "farm";
+                const iconUrl = frameworkIconUrls[framework.id];
 
                 return (
                   <g
@@ -598,11 +597,30 @@ function BenchmarkAreaChart() {
                         x={tooltipX}
                         y={tooltipY}
                       />
+                      <rect
+                        fill="white"
+                        fillOpacity="0.06"
+                        height="16"
+                        stroke="white"
+                        strokeOpacity="0.08"
+                        width="16"
+                        x={tooltipX + 10}
+                        y={tooltipY + 7}
+                      />
+                      <image
+                        filter={isFarm ? undefined : "url(#benchmarkIconInvert)"}
+                        height="12"
+                        href={iconUrl}
+                        opacity={isFarm ? "0.9" : "0.82"}
+                        width="12"
+                        x={tooltipX + 12}
+                        y={tooltipY + 9}
+                      />
                       <text
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="10"
-                        x={tooltipX + 10}
+                        x={tooltipX + 32}
                         y={tooltipY + 16}
                       >
                         {framework.label}
@@ -760,7 +778,6 @@ export function BenchmarkSection() {
           </ComparisonPanel>
         </div>
 
-        <LeadBand />
         <BenchmarkAreaChart />
       </div>
 
