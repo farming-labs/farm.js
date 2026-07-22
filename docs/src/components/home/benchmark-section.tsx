@@ -86,9 +86,9 @@ type ChartPoint = {
 };
 
 function getChartPoints(framework: FrameworkResult, width: number, height: number) {
-  const insetX = 44;
-  const insetTop = 32;
-  const insetBottom = 62;
+  const insetX = 42;
+  const insetTop = 205;
+  const insetBottom = 96;
   const step = (width - insetX * 2) / Math.max(1, chartMetrics.length - 1);
 
   return chartMetrics.map(([metric, label], index) => {
@@ -102,10 +102,23 @@ function getChartPoints(framework: FrameworkResult, width: number, height: numbe
   });
 }
 
-function buildLinePath(points: readonly ChartPoint[]) {
+function buildStepBeforePath(points: readonly ChartPoint[]) {
+  if (!points.length) {
+    return "";
+  }
+
   return points
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
-    .join(" ");
+    .slice(1)
+    .reduce(
+      (path, point, index) => {
+        const previous = points[index];
+
+        return `${path} L ${point.x.toFixed(2)} ${previous.y.toFixed(2)} L ${point.x.toFixed(
+          2,
+        )} ${point.y.toFixed(2)}`;
+      },
+      `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`,
+    );
 }
 
 function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: number) {
@@ -248,41 +261,48 @@ function BenchmarkAreaChart() {
   }
 
   const width = 960;
-  const height = 330;
-  const baselineY = height - 34;
+  const height = 500;
+  const baselineY = height - 72;
   const series = benchmarkReport.frameworks.map((framework) => {
     const points = getChartPoints(framework, width, height);
 
     return {
       framework,
-      path: buildLinePath(points),
+      path: buildStepBeforePath(points),
       points,
     };
   });
   const farmSeries = series.find((item) => item.framework.id === "farm");
   const seriesOpacity = {
-    farm: "0.96",
-    next: "0.38",
-    sveltekit: "0.62",
-    nuxt: "0.28",
-    tanstack: "0.72",
+    farm: "0.95",
+    next: "0.24",
+    sveltekit: "0.36",
+    nuxt: "0.2",
+    tanstack: "0.58",
   } as const;
 
   return (
-    <div className="relative col-span-full overflow-hidden bg-black">
-      <div className="relative z-10 max-w-xl px-6 pt-6 sm:px-12 sm:pt-12">
+    <div className="relative col-span-full min-h-[40rem] overflow-hidden bg-black">
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 max-w-2xl px-6 pt-6 sm:px-12 sm:pt-12">
         <span className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/46">
           <Activity aria-hidden className="size-4" strokeWidth={1.5} />
-          Framework trace
+          Benchmark monitor
         </span>
 
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
-          Frameworks are the hoverable series; benchmark sets run across the x-axis.{" "}
-          <span className="text-white/42">Y-axis is speed index: fastest is 100.</span>
+          Monitor framework latency across startup, build, boot, and SSR.{" "}
+          <span className="text-white/42">
+            Higher bands mean closer to the fastest median for that benchmark.
+          </span>
         </p>
       </div>
 
-      <div className="relative h-[24rem] sm:h-[28rem]">
+      <div className="pointer-events-none absolute right-6 top-6 z-10 hidden border border-white/12 bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-normal text-white/44 backdrop-blur sm:block">
+        <span className="block text-white/68">X: benchmark set</span>
+        <span className="mt-1 block">Y: speed index / fastest = 100</span>
+      </div>
+
+      <div className="relative h-[40rem]">
         <svg
           aria-label="Farm.js benchmark comparison area chart"
           className="absolute inset-x-0 bottom-0 h-full w-full text-white"
@@ -292,69 +312,69 @@ function BenchmarkAreaChart() {
         >
           <defs>
             <linearGradient id="farmBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
-              <stop offset="58%" stopColor="currentColor" stopOpacity="0.07" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.36" />
+              <stop offset="55%" stopColor="currentColor" stopOpacity="0.1" />
+              <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+            </linearGradient>
+            <linearGradient id="tanstackBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.16" />
+              <stop offset="55%" stopColor="currentColor" stopOpacity="0.05" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
           </defs>
-          {[
-            [32, "100"],
-            [91, "75"],
-            [150, "50"],
-            [209, "25"],
-            [268, "0"],
-          ].map(([y, label]) => (
-            <g key={label}>
-              <line
-                stroke="currentColor"
-                strokeOpacity="0.08"
-                strokeWidth="1"
-                x1="44"
-                x2={width - 44}
-                y1={y}
-                y2={y}
-              />
-              <text
-                fill="currentColor"
-                fillOpacity="0.34"
-                fontFamily="var(--font-geist-mono, monospace)"
-                fontSize="9"
-                textAnchor="end"
-                x="34"
-                y={Number(y) + 3}
-              >
-                {label}
-              </text>
-            </g>
+          {[205, 261, 317, 373, 429].map((y) => (
+            <line
+              key={y}
+              stroke="currentColor"
+              strokeOpacity="0.08"
+              strokeWidth="1"
+              x1="0"
+              x2={width}
+              y1={y}
+              y2={y}
+            />
+          ))}
+          {[100, 75, 50, 25, 0].map((label, index) => (
+            <text
+              key={label}
+              fill="currentColor"
+              fillOpacity="0.35"
+              fontFamily="var(--font-geist-mono, monospace)"
+              fontSize="9"
+              x="18"
+              y={209 + index * 56}
+            >
+              {label}
+            </text>
           ))}
           {chartMetrics.map(([, label], index) => {
-            const x = 44 + (index * (width - 88)) / Math.max(1, chartMetrics.length - 1);
+            const x = 42 + (index * (width - 84)) / Math.max(1, chartMetrics.length - 1);
 
             return (
               <g key={label}>
-                <line
-                  stroke="currentColor"
-                  strokeOpacity="0.06"
-                  strokeWidth="1"
-                  x1={x}
-                  x2={x}
-                  y1="0"
-                  y2={height}
-                />
                 <text
                   fill="currentColor"
-                  fillOpacity="0.4"
+                  fillOpacity="0.48"
                   fontFamily="var(--font-geist-mono, monospace)"
                   fontSize="10"
                   textAnchor={index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle"}
                   x={x}
-                  y={height - 12}
+                  y={height - 30}
                 >
                   {label}
                 </text>
               </g>
             );
           })}
+          {series
+            .filter((item) => item.framework.id === "tanstack")
+            .map(({ framework, path, points }) => (
+              <path
+                key={framework.id}
+                d={closeAreaPath(path, points, baselineY)}
+                fill="url(#tanstackBenchmarkFill)"
+              />
+            ))}
           {farmSeries ? (
             <path
               d={closeAreaPath(farmSeries.path, farmSeries.points, baselineY)}
@@ -374,10 +394,10 @@ function BenchmarkAreaChart() {
                   <path
                     d={path}
                     fill="none"
-                    stroke="currentColor"
+                    stroke="white"
                     strokeDasharray={framework.id === "tanstack" ? "0" : "8 8"}
                     strokeOpacity={seriesOpacity[framework.id]}
-                    strokeWidth={framework.id === "tanstack" ? "2.2" : "1.6"}
+                    strokeWidth={framework.id === "tanstack" ? "2.4" : "1.5"}
                     vectorEffect="non-scaling-stroke"
                   />
                   <path
@@ -394,24 +414,34 @@ function BenchmarkAreaChart() {
                       cx={point.x}
                       cy={point.y}
                       fill="black"
-                      r="2.5"
-                      stroke="currentColor"
+                      r={framework.id === "tanstack" ? "3" : "2.4"}
+                      stroke="white"
                       strokeOpacity={seriesOpacity[framework.id]}
                       strokeWidth="1"
                     />
                   ))}
                   {lastPoint ? (
-                    <text
-                      className="opacity-0 transition-opacity duration-150 group-hover:opacity-100"
-                      fill="currentColor"
-                      fontFamily="var(--font-geist-mono, monospace)"
-                      fontSize="10"
-                      textAnchor="end"
-                      x={width - 48}
-                      y={Math.max(18, lastPoint.y - 8)}
-                    >
-                      {framework.label}
-                    </text>
+                    <g className="opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+                      <rect
+                        fill="black"
+                        fillOpacity="0.88"
+                        height="22"
+                        stroke="white"
+                        strokeOpacity="0.18"
+                        width={framework.label.length * 7 + 22}
+                        x={Math.max(48, Math.min(width - 180, lastPoint.x - 98))}
+                        y={Math.max(208, lastPoint.y - 32)}
+                      />
+                      <text
+                        fill="currentColor"
+                        fontFamily="var(--font-geist-mono, monospace)"
+                        fontSize="10"
+                        x={Math.max(59, Math.min(width - 169, lastPoint.x - 87))}
+                        y={Math.max(223, lastPoint.y - 17)}
+                      >
+                        {framework.label}
+                      </text>
+                    </g>
                   ) : null}
                 </g>
               );
@@ -421,9 +451,9 @@ function BenchmarkAreaChart() {
               <path
                 d={farmSeries.path}
                 fill="none"
-                stroke="currentColor"
+                stroke="white"
                 strokeOpacity="0.98"
-                strokeWidth="2.8"
+                strokeWidth="3"
                 vectorEffect="non-scaling-stroke"
               />
               <path
@@ -442,8 +472,8 @@ function BenchmarkAreaChart() {
                   cx={point.x}
                   cy={point.y}
                   fill="black"
-                  r="3.5"
-                  stroke="currentColor"
+                  r="4"
+                  stroke="white"
                   strokeOpacity="0.95"
                   strokeWidth="1.5"
                   aria-label={`Farm.js · ${point.label}: ${formatMetricValue(
@@ -458,36 +488,14 @@ function BenchmarkAreaChart() {
                 fontFamily="var(--font-geist-mono, monospace)"
                 fontSize="11"
                 textAnchor="end"
-                x={width - 48}
-                y={Math.max(18, farmSeries.points[farmSeries.points.length - 1]?.y ?? 18) - 12}
+                x={width - 54}
+                y={Math.max(217, farmSeries.points[farmSeries.points.length - 1]?.y ?? 217) - 14}
               >
                 Farm.js
               </text>
             </g>
           ) : null}
         </svg>
-
-        <div className="absolute bottom-16 left-6 right-6 z-10 flex flex-wrap gap-3 sm:left-12 sm:right-12">
-          {benchmarkReport.frameworks.map((framework) => (
-            <span
-              key={framework.id}
-              className={
-                "inline-flex items-center gap-2 border border-white/14 bg-black/80 px-3 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur " +
-                (framework.id === "farm" ? "text-white/68" : "text-white/42")
-              }
-            >
-              <span
-                className={
-                  "h-0.5 w-5 " +
-                  (framework.id === "farm" || framework.id === "tanstack"
-                    ? "bg-current"
-                    : "border-t border-dashed border-current")
-                }
-              />
-              {framework.label}
-            </span>
-          ))}
-        </div>
       </div>
     </div>
   );
