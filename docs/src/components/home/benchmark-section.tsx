@@ -150,7 +150,7 @@ function closeCeilingPath(path: string, points: readonly ChartPoint[], ceilingY:
 }
 
 function getTooltipX(x: number, width: number) {
-  return Math.max(52, Math.min(width - 238, x - 76));
+  return Math.max(52, Math.min(width - 252, x - 76));
 }
 
 function getTooltipY(y: number) {
@@ -590,22 +590,22 @@ function BenchmarkAreaChart() {
                       <rect
                         fill="black"
                         fillOpacity={isFarm ? "0.96" : "0.94"}
-                        height="52"
+                        height="56"
                         stroke="white"
                         strokeOpacity={isFarm ? "0.16" : "0.12"}
-                        width="226"
+                        width="240"
                         x={tooltipX}
                         y={tooltipY}
                       />
                       <rect
                         fill="white"
-                        fillOpacity="0.06"
-                        height="16"
+                        fillOpacity="0.055"
+                        height="18"
                         stroke="white"
                         strokeOpacity="0.08"
-                        width="16"
-                        x={tooltipX + 10}
-                        y={tooltipY + 7}
+                        width="18"
+                        x={tooltipX + 12}
+                        y={tooltipY + 8}
                       />
                       <image
                         filter={isFarm ? undefined : "url(#benchmarkIconInvert)"}
@@ -613,15 +613,16 @@ function BenchmarkAreaChart() {
                         href={iconUrl}
                         opacity={isFarm ? "0.9" : "0.82"}
                         width="12"
-                        x={tooltipX + 12}
-                        y={tooltipY + 9}
+                        x={tooltipX + 15}
+                        y={tooltipY + 11}
                       />
                       <text
+                        dominantBaseline="middle"
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="10"
-                        x={tooltipX + 32}
-                        y={tooltipY + 16}
+                        x={tooltipX + 40}
+                        y={tooltipY + 17}
                       >
                         {framework.label}
                       </text>
@@ -630,8 +631,8 @@ function BenchmarkAreaChart() {
                         fillOpacity={isFarm ? "0.68" : "0.62"}
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="9"
-                        x={tooltipX + 10}
-                        y={tooltipY + 32}
+                        x={tooltipX + 40}
+                        y={tooltipY + 35}
                       >
                         {point.label.toUpperCase()} MEDIAN ·{" "}
                         {formatMetricValue(point.metric, point.rawValue)}
@@ -641,8 +642,8 @@ function BenchmarkAreaChart() {
                         fillOpacity={isFarm ? "0.52" : "0.48"}
                         fontFamily="var(--font-geist-mono, monospace)"
                         fontSize="8"
-                        x={tooltipX + 10}
-                        y={tooltipY + 45}
+                        x={tooltipX + 40}
+                        y={tooltipY + 48}
                       >
                         RANGE {getColumnRangeLabel(point.metric)}
                       </text>
