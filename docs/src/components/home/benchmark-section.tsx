@@ -1,23 +1,10 @@
 import { Activity, ExternalLink, Gauge, Rocket, TimerReset } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
-import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
-import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
-import svelteIconUrl from "simple-icons/icons/svelte.svg?url";
-import tanstackIconUrl from "simple-icons/icons/tanstack.svg?url";
-import farmingLabsLogoUrl from "../../assets/farming-labs-logo-dark.svg?url";
 import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
 
 const benchmarkLinks = {
   methodology: "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/README.md",
   results: "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/results/latest.json",
-} as const;
-
-const frameworkIcons = {
-  farm: farmingLabsLogoUrl,
-  next: nextIconUrl,
-  sveltekit: svelteIconUrl,
-  nuxt: nuxtIconUrl,
-  tanstack: tanstackIconUrl,
 } as const;
 
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
@@ -90,25 +77,44 @@ function getAdvantageAgainst(framework: FrameworkResult | undefined, key: Metric
   return framework.metrics[key].median / farmResult.metrics[key].median;
 }
 
-function buildLinePath(points: readonly number[], width: number, height: number) {
+type ChartPoint = {
+  label: string;
+  metric: MetricKey;
+  value: number;
+  x: number;
+  y: number;
+};
+
+function getChartPoints(framework: FrameworkResult, width: number, height: number) {
   const insetX = 44;
   const insetTop = 32;
   const insetBottom = 62;
-  const step = (width - insetX * 2) / Math.max(1, points.length - 1);
+  const step = (width - insetX * 2) / Math.max(1, chartMetrics.length - 1);
 
+  return chartMetrics.map(([metric, label], index) => {
+    const best = getMetricMinimum(metric);
+    const value = (best / framework.metrics[metric].median) * 100;
+    const x = insetX + index * step;
+    const clamped = Math.max(0, Math.min(100, value));
+    const y = insetTop + (100 - clamped) * ((height - insetTop - insetBottom) / 100);
+
+    return { label, metric, value, x, y };
+  });
+}
+
+function buildLinePath(points: readonly ChartPoint[]) {
   return points
-    .map((value, index) => {
-      const x = insetX + index * step;
-      const clamped = Math.max(0, Math.min(100, value));
-      const y = insetTop + (100 - clamped) * ((height - insetTop - insetBottom) / 100);
-
-      return `${index === 0 ? "M" : "L"} ${x.toFixed(2)} ${y.toFixed(2)}`;
-    })
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`)
     .join(" ");
 }
 
-function closeAreaPath(path: string, width: number, height: number) {
-  return `${path} L ${width} ${height} L 0 ${height} Z`;
+function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: number) {
+  const firstPoint = points[0];
+  const lastPoint = points[points.length - 1];
+
+  return firstPoint && lastPoint
+    ? `${path} L ${lastPoint.x.toFixed(2)} ${baselineY} L ${firstPoint.x.toFixed(2)} ${baselineY} Z`
+    : path;
 }
 
 function BenchmarkIndexLabel() {
@@ -137,44 +143,6 @@ function BenchmarkLink({ href, children }: { href: string; children: string }) {
         strokeWidth={1.5}
       />
     </a>
-  );
-}
-
-function FrameworkMark({ framework }: { framework: FrameworkResult }) {
-  const icon = frameworkIcons[framework.id];
-  const isFarm = framework.id === "farm";
-
-  return (
-    <span className="flex min-w-0 items-center gap-3">
-      <span
-        className={
-          "grid size-8 shrink-0 place-items-center border bg-black " +
-          (isFarm ? "border-white/36" : "border-white/12")
-        }
-      >
-        <img
-          alt=""
-          aria-hidden
-          className={
-            "max-h-4 max-w-4 brightness-0 invert " + (isFarm ? "opacity-95" : "opacity-54")
-          }
-          src={icon}
-        />
-      </span>
-      <span className="min-w-0">
-        <span
-          className={
-            "block truncate font-mono text-[11px] font-medium uppercase tracking-normal " +
-            (isFarm ? "text-white" : "text-white/70")
-          }
-        >
-          {framework.label}
-        </span>
-        <span className="mt-1 block truncate font-mono text-[9px] tracking-normal text-white/42">
-          {framework.version}
-        </span>
-      </span>
-    </span>
   );
 }
 
@@ -281,31 +249,36 @@ function BenchmarkAreaChart() {
 
   const width = 960;
   const height = 330;
-  const closestCompetitor = chartMetrics.map(([key]) => getBestCompetitor(key).metrics[key].median);
-  const farmIndex = chartMetrics.map(([key]) => {
-    const best = getMetricMinimum(key);
+  const baselineY = height - 34;
+  const series = benchmarkReport.frameworks.map((framework) => {
+    const points = getChartPoints(framework, width, height);
 
-    return (best / farmResult.metrics[key].median) * 100;
+    return {
+      framework,
+      path: buildLinePath(points),
+      points,
+    };
   });
-  const competitorIndex = chartMetrics.map(([key], index) => {
-    const best = getMetricMinimum(key);
-
-    return (best / closestCompetitor[index]) * 100;
-  });
-  const farmPath = buildLinePath(farmIndex, width, height);
-  const competitorPath = buildLinePath(competitorIndex, width, height);
+  const farmSeries = series.find((item) => item.framework.id === "farm");
+  const seriesOpacity = {
+    farm: "0.96",
+    next: "0.38",
+    sveltekit: "0.62",
+    nuxt: "0.28",
+    tanstack: "0.72",
+  } as const;
 
   return (
     <div className="relative col-span-full overflow-hidden bg-black">
       <div className="relative z-10 max-w-xl px-6 pt-6 sm:px-12 sm:pt-12">
         <span className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/46">
           <Activity aria-hidden className="size-4" strokeWidth={1.5} />
-          Activity feed
+          Framework trace
         </span>
 
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
-          A real comparison graph, not a table pretending to be one.{" "}
-          <span className="text-white/42">Higher line means closer to fastest.</span>
+          Frameworks are the hoverable series; benchmark sets run across the x-axis.{" "}
+          <span className="text-white/42">Y-axis is speed index: fastest is 100.</span>
         </p>
       </div>
 
@@ -319,26 +292,40 @@ function BenchmarkAreaChart() {
         >
           <defs>
             <linearGradient id="farmBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.34" />
-              <stop offset="55%" stopColor="currentColor" stopOpacity="0.08" />
+              <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
+              <stop offset="58%" stopColor="currentColor" stopOpacity="0.07" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
-            <linearGradient id="competitorBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stopColor="currentColor" stopOpacity="0.14" />
-              <stop offset="70%" stopColor="currentColor" stopOpacity="0.03" />
-            </linearGradient>
           </defs>
-          {[75, 150, 225, 300].map((y) => (
-            <line
-              key={y}
-              stroke="currentColor"
-              strokeOpacity="0.08"
-              strokeWidth="1"
-              x1="0"
-              x2={width}
-              y1={y}
-              y2={y}
-            />
+          {[
+            [32, "100"],
+            [91, "75"],
+            [150, "50"],
+            [209, "25"],
+            [268, "0"],
+          ].map(([y, label]) => (
+            <g key={label}>
+              <line
+                stroke="currentColor"
+                strokeOpacity="0.08"
+                strokeWidth="1"
+                x1="44"
+                x2={width - 44}
+                y1={y}
+                y2={y}
+              />
+              <text
+                fill="currentColor"
+                fillOpacity="0.34"
+                fontFamily="var(--font-geist-mono, monospace)"
+                fontSize="9"
+                textAnchor="end"
+                x="34"
+                y={Number(y) + 3}
+              >
+                {label}
+              </text>
+            </g>
           ))}
           {chartMetrics.map(([, label], index) => {
             const x = 44 + (index * (width - 88)) / Math.max(1, chartMetrics.length - 1);
@@ -361,43 +348,145 @@ function BenchmarkAreaChart() {
                   fontSize="10"
                   textAnchor={index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle"}
                   x={x}
-                  y={height - 14}
+                  y={height - 12}
                 >
                   {label}
                 </text>
               </g>
             );
           })}
-          <path d={closeAreaPath(competitorPath, width, height)} fill="url(#competitorBenchmarkFill)" />
-          <path
-            d={competitorPath}
-            fill="none"
-            stroke="currentColor"
-            strokeDasharray="7 7"
-            strokeOpacity="0.28"
-            strokeWidth="2"
-            vectorEffect="non-scaling-stroke"
-          />
-          <path d={closeAreaPath(farmPath, width, height)} fill="url(#farmBenchmarkFill)" />
-          <path
-            d={farmPath}
-            fill="none"
-            stroke="currentColor"
-            strokeOpacity="0.9"
-            strokeWidth="2.5"
-            vectorEffect="non-scaling-stroke"
-          />
+          {farmSeries ? (
+            <path
+              d={closeAreaPath(farmSeries.path, farmSeries.points, baselineY)}
+              fill="url(#farmBenchmarkFill)"
+            />
+          ) : null}
+          {series
+            .filter((item) => item.framework.id !== "farm")
+            .map(({ framework, path, points }) => {
+              const lastPoint = points[points.length - 1];
+              const title = chartMetrics
+                .map(([key, label]) => `${label}: ${formatMetricValue(key, framework.metrics[key].median)}`)
+                .join(" · ");
+
+              return (
+                <g key={framework.id} className="group">
+                  <path
+                    d={path}
+                    fill="none"
+                    stroke="currentColor"
+                    strokeDasharray={framework.id === "tanstack" ? "0" : "8 8"}
+                    strokeOpacity={seriesOpacity[framework.id]}
+                    strokeWidth={framework.id === "tanstack" ? "2.2" : "1.6"}
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  <path
+                    aria-label={`${framework.label} — ${title}`}
+                    d={path}
+                    fill="none"
+                    stroke="transparent"
+                    strokeWidth="18"
+                    vectorEffect="non-scaling-stroke"
+                  />
+                  {points.map((point) => (
+                    <circle
+                      key={point.metric}
+                      cx={point.x}
+                      cy={point.y}
+                      fill="black"
+                      r="2.5"
+                      stroke="currentColor"
+                      strokeOpacity={seriesOpacity[framework.id]}
+                      strokeWidth="1"
+                    />
+                  ))}
+                  {lastPoint ? (
+                    <text
+                      className="opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                      fill="currentColor"
+                      fontFamily="var(--font-geist-mono, monospace)"
+                      fontSize="10"
+                      textAnchor="end"
+                      x={width - 48}
+                      y={Math.max(18, lastPoint.y - 8)}
+                    >
+                      {framework.label}
+                    </text>
+                  ) : null}
+                </g>
+              );
+            })}
+          {farmSeries ? (
+            <g className="group">
+              <path
+                d={farmSeries.path}
+                fill="none"
+                stroke="currentColor"
+                strokeOpacity="0.98"
+                strokeWidth="2.8"
+                vectorEffect="non-scaling-stroke"
+              />
+              <path
+                aria-label={`Farm.js — ${chartMetrics
+                  .map(([key, label]) => `${label}: ${formatMetricValue(key, farmResult.metrics[key].median)}`)
+                  .join(" · ")}`}
+                d={farmSeries.path}
+                fill="none"
+                stroke="transparent"
+                strokeWidth="20"
+                vectorEffect="non-scaling-stroke"
+              />
+              {farmSeries.points.map((point) => (
+                <circle
+                  key={point.metric}
+                  cx={point.x}
+                  cy={point.y}
+                  fill="black"
+                  r="3.5"
+                  stroke="currentColor"
+                  strokeOpacity="0.95"
+                  strokeWidth="1.5"
+                  aria-label={`Farm.js · ${point.label}: ${formatMetricValue(
+                    point.metric,
+                    farmResult.metrics[point.metric].median,
+                  )}`}
+                />
+              ))}
+              <text
+                className="opacity-0 transition-opacity duration-150 group-hover:opacity-100"
+                fill="currentColor"
+                fontFamily="var(--font-geist-mono, monospace)"
+                fontSize="11"
+                textAnchor="end"
+                x={width - 48}
+                y={Math.max(18, farmSeries.points[farmSeries.points.length - 1]?.y ?? 18) - 12}
+              >
+                Farm.js
+              </text>
+            </g>
+          ) : null}
         </svg>
 
         <div className="absolute bottom-16 left-6 right-6 z-10 flex flex-wrap gap-3 sm:left-12 sm:right-12">
-          <span className="inline-flex items-center gap-2 border border-white/14 bg-black/80 px-3 py-1.5 font-mono text-[9px] uppercase tracking-normal text-white/62 backdrop-blur">
-            <span className="h-0.5 w-6 bg-white" />
-            Farm.js
-          </span>
-          <span className="inline-flex items-center gap-2 border border-white/14 bg-black/80 px-3 py-1.5 font-mono text-[9px] uppercase tracking-normal text-white/42 backdrop-blur">
-            <span className="h-0.5 w-6 border-t border-dashed border-white/42" />
-            Closest rival per metric
-          </span>
+          {benchmarkReport.frameworks.map((framework) => (
+            <span
+              key={framework.id}
+              className={
+                "inline-flex items-center gap-2 border border-white/14 bg-black/80 px-3 py-1.5 font-mono text-[9px] uppercase tracking-normal backdrop-blur " +
+                (framework.id === "farm" ? "text-white/68" : "text-white/42")
+              }
+            >
+              <span
+                className={
+                  "h-0.5 w-5 " +
+                  (framework.id === "farm" || framework.id === "tanstack"
+                    ? "bg-current"
+                    : "border-t border-dashed border-current")
+                }
+              />
+              {framework.label}
+            </span>
+          ))}
         </div>
       </div>
     </div>
@@ -419,10 +508,10 @@ function MetricStrip() {
 
         return (
           <div key={key} className="bg-black px-5 py-4">
-            <dt className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/42">
+            <p className="font-mono text-[8px] font-normal uppercase tracking-normal text-white/42">
               {label}
-            </dt>
-            <dd className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
+            </p>
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-1">
               <span className="font-mono text-sm font-medium tabular-nums tracking-normal text-white">
                 {formatMetricValue(key, farmValue)}
               </span>
@@ -434,7 +523,7 @@ function MetricStrip() {
               >
                 {isLead ? formatRatio(ratio) + " edge" : "near lead"}
               </span>
-            </dd>
+            </div>
           </div>
         );
       })}
