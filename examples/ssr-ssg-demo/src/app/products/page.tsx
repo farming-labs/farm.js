@@ -1,8 +1,8 @@
 /**
- * Products Page - SSG with ISR (Incremental Static Regeneration)
+ * Products Page - SSG with runtime revalidation
  * 
- * This page is pre-rendered at BUILD TIME but will be regenerated
- * periodically based on the `revalidate` interval.
+ * This page is rendered at the origin and sent with shared-cache
+ * stale-while-revalidate headers based on the `revalidate` interval.
  * 
  * Use ISR when:
  * - Content updates periodically but not on every request
@@ -15,7 +15,7 @@ export const revalidate = 60; // Regenerate every 60 seconds
 
 export const metadata = {
   title: "Products - ISR Demo",
-  description: "Static page that regenerates every 60 seconds",
+  description: "Cacheable page that revalidates every 60 seconds",
 };
 
 // Simulated product data - in real app, fetch from API
@@ -52,12 +52,13 @@ export default async function ProductsPage() {
 
         <p className="text-gray-600 mb-4">
           This page uses <strong>Incremental Static Regeneration (ISR)</strong>.
-          It's pre-rendered at build time but regenerates every 60 seconds.
+          A shared cache or CDN can serve the generated HTML and revalidate it
+          every 60 seconds.
         </p>
 
         <div className="bg-gray-100 rounded-lg p-4">
           <p className="text-sm text-gray-500">
-            Page generated: {generatedAt}
+            Origin generated: {generatedAt}
             <br />
             <span className="text-orange-600">Will regenerate after 60 seconds of staleness</span>
           </p>
@@ -86,9 +87,9 @@ export default async function ProductsPage() {
               1
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900">Initial Build</h3>
+              <h3 className="font-semibold text-gray-900">Origin Render</h3>
               <p className="text-gray-600">
-                Page is pre-rendered at build time like regular SSG.
+                The origin renders the page when the shared cache needs it.
               </p>
             </div>
           </div>
@@ -100,7 +101,7 @@ export default async function ProductsPage() {
             <div>
               <h3 className="font-semibold text-gray-900">Serve Static</h3>
               <p className="text-gray-600">
-                Users receive the static HTML instantly.
+                The shared cache serves the stored HTML without another render.
               </p>
             </div>
           </div>

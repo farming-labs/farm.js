@@ -15,6 +15,7 @@ import {
   statSync,
 } from "fs";
 import type { NitroConfig } from "nitro/config";
+import { resolveRscBuildOutputPath } from "./build-paths.js";
 
 const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
 const MIN_MANIFEST_BYTES = 100; // real manifest is ~500+, stub is 64
@@ -32,7 +33,7 @@ export function waitForRscManifest(
 ): Promise<void> {
   const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
   const timeoutMs = options.timeoutMs ?? POLL_TIMEOUT_MS;
-  const manifestPath = path.join(root, outDir, "rsc", MANIFEST_FILENAME);
+  const manifestPath = resolveRscBuildOutputPath(root, outDir, "rsc", MANIFEST_FILENAME);
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const check = () => {
@@ -67,10 +68,10 @@ export function waitForRscOutputs(
 ): Promise<void> {
   const intervalMs = options.intervalMs ?? POLL_INTERVAL_MS;
   const timeoutMs = options.timeoutMs ?? 20_000;
-  const rendererPath = path.join(root, outDir, "rsc", "index.js");
-  const ssrPath = path.join(root, outDir, "ssr", "index.js");
-  const manifestInRsc = path.join(root, outDir, "rsc", MANIFEST_FILENAME);
-  const manifestInSsr = path.join(root, outDir, "ssr", MANIFEST_FILENAME);
+  const rendererPath = resolveRscBuildOutputPath(root, outDir, "rsc", "index.js");
+  const ssrPath = resolveRscBuildOutputPath(root, outDir, "ssr", "index.js");
+  const manifestInRsc = resolveRscBuildOutputPath(root, outDir, "rsc", MANIFEST_FILENAME);
+  const manifestInSsr = resolveRscBuildOutputPath(root, outDir, "ssr", MANIFEST_FILENAME);
   const deadline = Date.now() + timeoutMs;
   return new Promise((resolve, reject) => {
     const check = () => {
@@ -214,6 +215,12 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     },
     publicAssets,
     renderer: { entry: entryPath },
+    // The prebuilt RSC/SSR bundles are copied after Nitro finishes, so Nitro's
+    // module graph cannot otherwise see their bare package imports. Trace both
+    // entry points explicitly to keep node-server output self-contained.
+    externals: {
+      traceInclude: [rendererPath, ...(ssrPath ? [ssrPath] : [])],
+    },
     // Externalize rsc/ssr so we don't bundle (they reference Vite-generated manifest). We copy dist into server output after build.
     rollupConfig: {
       external: (id: string) =>
@@ -258,16 +265,35 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     );
   }
 
-  // Patch rsc-entry.mjs: replace long relative/absolute paths to dist with ../../dist/ so deploy works.
-  const entryChunkPath = path.join(serverDir, "chunks", "build", "rsc-entry.mjs");
-  try {
+  // Nitro may group the entry under chunks/build or chunks/_ depending on the
+  // selected builder. Find it by name and make copied-dist imports relative to
+  // the emitted chunk so the output survives being moved away from the project.
+  const entryChunkPaths: string[] = [];
+  const findEntryChunks = (dir: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const candidate = path.join(dir, name);
+      if (statSync(candidate).isDirectory()) findEntryChunks(candidate);
+      else if (name === "rsc-entry.mjs") entryChunkPaths.push(candidate);
+    }
+  };
+  findEntryChunks(path.join(serverDir, "chunks"));
+  for (const entryChunkPath of entryChunkPaths) {
     let code = readFileSync(entryChunkPath, "utf-8");
+    const relativeImport = (target: string) => {
+      const relative = path.relative(path.dirname(entryChunkPath), target).replace(/\\/g, "/");
+      return relative.startsWith(".") ? relative : `./${relative}`;
+    };
     // Match any path that ends with dist/rsc/index.js or dist/ssr/index.js (minified, no spaces)
-    code = code.replace(/(["'`])[^"'`]*?dist\/rsc\/index\.js\1/g, '"../../dist/rsc/index.js"');
-    code = code.replace(/(["'`])[^"'`]*?dist\/ssr\/index\.js\1/g, '"../../dist/ssr/index.js"');
+    code = code.replace(
+      /(["'`])[^"'`]*?dist\/rsc\/index\.js\1/g,
+      JSON.stringify(relativeImport(path.join(serverDistDir, "rsc", "index.js"))),
+    );
+    code = code.replace(
+      /(["'`])[^"'`]*?dist\/ssr\/index\.js\1/g,
+      JSON.stringify(relativeImport(path.join(serverDistDir, "ssr", "index.js"))),
+    );
     writeFileSync(entryChunkPath, code, "utf-8");
-  } catch {
-    // Entry chunk path may vary; skip patch if not found
   }
 
   // Patch SSR bundle: inject production client CSS href and bootstrap script so HTML has styles and hydration works
@@ -323,7 +349,7 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
     }
     try {
       let ssrCode = readFileSync(ssrIndexPath, "utf-8");
-      if (clientCssHref && ssrCode.includes("__FARM_CLIENT_CSS_HREF__")) {
+      if (ssrCode.includes("__FARM_CLIENT_CSS_HREF__")) {
         ssrCode = ssrCode.replace("__FARM_CLIENT_CSS_HREF__", clientCssHref);
       }
       if (clientEntryHref && ssrCode.includes("__FARM_CLIENT_ENTRY_HREF__")) {

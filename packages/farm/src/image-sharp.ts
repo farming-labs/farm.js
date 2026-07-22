@@ -1,5 +1,4 @@
 import { lookup } from "node:dns/promises";
-import sharp from "sharp";
 import type { ResolvedFarmImageConfig } from "./image-config";
 import {
   FarmImageRequestError,
@@ -10,6 +9,10 @@ import {
 
 export function createSharpImageTransformer(): FarmImageTransformer {
   return async ({ source, sourceType, width, quality, accept, formats, signal }) => {
+    // Sharp is an optional native runtime. Load it only when an image request
+    // actually needs a transform so disabled/unused image pipelines do not add
+    // a startup dependency or native-module initialization cost.
+    const { default: sharp } = await import("sharp");
     throwIfAborted(signal);
     const outputFormat = selectOutputFormat(accept, formats);
     let pipeline = sharp(source, {

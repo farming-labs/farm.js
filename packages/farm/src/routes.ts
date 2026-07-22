@@ -104,7 +104,9 @@ export type ProgrammaticRouteDataCacheContext<
   TSearch = ProgrammaticRouteSearchFallback,
   TBefore = unknown,
   TContext = ProgrammaticRouteContext,
-> = ProgrammaticRouteDataContext<TParams, TSearch, TContext> & { before: TBefore };
+> = ProgrammaticRouteDataContext<TParams, TSearch, TContext> & {
+  before: TBefore;
+};
 
 export type ProgrammaticRouteGuardContext<
   TParams = ProgrammaticRouteParamsFallback,
@@ -839,6 +841,10 @@ export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRou
     (mod as any).__farmRouteParsesProps = true;
     (mod as any).__farmResolveRouteProps = (props: PageProps) =>
       resolveProgrammaticRouteProps(route, props);
+    (mod as any).__farmResolveRouteCanonicalPath = (
+      rawSearch: ProgrammaticRouteSearchFallback,
+      path: string,
+    ) => resolveProgrammaticRouteSearch(route.search, rawSearch, path, route.path).canonicalPath;
   }
 
   if (route.pending || route.error || route.notFound) {
@@ -917,6 +923,43 @@ function createProgrammaticPageComponent(route: ProgrammaticPageRoute): Componen
 
   const Component = route.component;
 
+  if (route.pending) {
+    const PendingComponent = route.pending;
+    const routePropsResources = new WeakMap<object, ProgrammaticRoutePropsResource>();
+    const FarmProgrammaticPageContent = function FarmProgrammaticPageContent(props: PageProps) {
+      try {
+        const resolvedProps = readProgrammaticRouteProps(route, props, routePropsResources);
+        return createElement(Component, stripProgrammaticRoutePropsMarker(resolvedProps));
+      } catch (error) {
+        if (isPromiseLike(error) || isProgrammaticRedirectSignal(error)) {
+          throw error;
+        }
+
+        if (isProgrammaticNotFoundSignal(error) && route.notFound) {
+          return createElement(route.notFound, createProgrammaticRouteErrorProps(error, props));
+        }
+
+        if (route.error) {
+          return createElement(route.error, createProgrammaticRouteErrorProps(error, props));
+        }
+
+        throw error;
+      }
+    };
+    const PageContent = FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
+    const FarmProgrammaticPage = function FarmProgrammaticPage(props: PageProps) {
+      return createElement(
+        Suspense,
+        {
+          fallback: createElement(PendingComponent, createProgrammaticRoutePendingProps(props)),
+        },
+        createElement(PageContent, props),
+      );
+    };
+
+    return FarmProgrammaticPage as unknown as ComponentType<PageProps>;
+  }
+
   const FarmProgrammaticPageContent = async function FarmProgrammaticPageContent(props: PageProps) {
     try {
       const resolvedProps = isProgrammaticRoutePropsResolved(props)
@@ -941,23 +984,50 @@ function createProgrammaticPageComponent(route: ProgrammaticPageRoute): Componen
     }
   };
 
-  if (route.pending) {
-    const PendingComponent = route.pending;
-    const PageContent = FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
-    const FarmProgrammaticPage = function FarmProgrammaticPage(props: PageProps) {
-      return createElement(
-        Suspense,
-        {
-          fallback: createElement(PendingComponent, createProgrammaticRoutePendingProps(props)),
-        },
-        createElement(PageContent, props),
-      );
-    };
+  return FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
+}
 
-    return FarmProgrammaticPage as unknown as ComponentType<PageProps>;
+type ProgrammaticRoutePropsResource =
+  | { status: "pending"; promise: Promise<Record<string, any>> }
+  | { status: "resolved"; value: Record<string, any> }
+  | { status: "rejected"; error: unknown };
+
+function readProgrammaticRouteProps(
+  route: ProgrammaticPageRoute,
+  props: PageProps,
+  resources: WeakMap<object, ProgrammaticRoutePropsResource>,
+): Record<string, any> {
+  if (isProgrammaticRoutePropsResolved(props)) {
+    return props;
   }
 
-  return FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
+  let resource = resources.get(props as object);
+  if (!resource) {
+    const deferredRouteProps = (props as any).__farmRoutePropsPromise;
+    const promise = Promise.resolve<Record<string, any>>(
+      isPromiseLike(deferredRouteProps)
+        ? (deferredRouteProps as PromiseLike<Record<string, any>>)
+        : resolveProgrammaticRouteProps(route, props),
+    );
+    resource = { status: "pending", promise };
+    resources.set(props as object, resource);
+    promise.then(
+      (value) => resources.set(props as object, { status: "resolved", value }),
+      (error) => resources.set(props as object, { status: "rejected", error }),
+    );
+  }
+
+  if (resource.status === "pending") throw resource.promise;
+  if (resource.status === "rejected") throw resource.error;
+  return resource.value;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return Boolean(
+    value &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof (value as PromiseLike<unknown>).then === "function",
+  );
 }
 
 function createProgrammaticRoutePendingProps(
@@ -1144,7 +1214,12 @@ function stripProgrammaticRoutePropsMarker<TProps>(props: TProps): TProps {
     return props;
   }
 
-  const { __farmRoutePropsResolved, __farmCanonicalPath, ...componentProps } = props as any;
+  const {
+    __farmRoutePropsResolved,
+    __farmCanonicalPath,
+    __farmRoutePropsPromise,
+    ...componentProps
+  } = props as any;
   return componentProps;
 }
 

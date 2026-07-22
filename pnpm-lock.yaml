@@ -1366,6 +1366,9 @@ importers:
       better-call:
         specifier: ^1.0.19
         version: 1.0.19
+      es-module-lexer:
+        specifier: 2.0.0
+        version: 2.0.0
       nitro:
         specifier: 3.0.1-alpha.0
         version: 3.0.1-alpha.0(rolldown@1.2.0)(vite@6.4.1)

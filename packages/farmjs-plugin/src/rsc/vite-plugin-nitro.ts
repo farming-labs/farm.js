@@ -20,6 +20,7 @@ import path from "path";
 import type { ResolvedConfig } from "vite";
 import { buildRscNitro } from "./nitro-build.js";
 import { waitForRscOutputs } from "./nitro-build.js";
+import { resolveRscBuildOutputPath } from "./build-paths.js";
 
 /** Rollup output chunk (from writeBundle); we only use entry chunks. */
 interface OutputChunkLike {
@@ -124,9 +125,9 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
         : path.isAbsolute(path.dirname(rscOutDir))
           ? path.relative(root, path.dirname(rscOutDir)) || "."
           : path.dirname(rscOutDir);
-      const rscOk = existsSync(path.join(root, baseOutDir, "rsc", "index.js"));
-      const ssrOk = existsSync(path.join(root, baseOutDir, "ssr", "index.js"));
-      const clientOk = existsSync(path.join(root, baseOutDir, "client", "assets"));
+      const rscOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "rsc", "index.js"));
+      const ssrOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "ssr", "index.js"));
+      const clientOk = existsSync(resolveRscBuildOutputPath(root, baseOutDir, "client", "assets"));
       if (!rscOk || !ssrOk || !clientOk) return;
       nitroRunScheduled = true;
 
@@ -137,7 +138,7 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
           // Outputs already verified; proceed (nitro-build stubs manifest if missing)
         });
 
-        let rendererPath = path.join(root, rscOutDir, "index.js");
+        let rendererPath = resolveRscBuildOutputPath(root, rscOutDir, "index.js");
         if (serverBundle) {
           const serverEntryChunks: OutputChunkLike[] = [];
           for (const chunk of Object.values(serverBundle)) {
@@ -149,15 +150,15 @@ export default function nitro(options: NitroPluginOptions = {}): Plugin {
             ? serverEntryChunks.find((c) => (c.name ?? c.fileName) === serverEntryName)
             : serverEntryChunks[0];
           if (selected?.fileName) {
-            rendererPath = path.join(root, rscOutDir, selected.fileName);
+            rendererPath = resolveRscBuildOutputPath(root, rscOutDir, selected.fileName);
           }
         }
 
         await buildRscNitro({
           root,
           rendererPath,
-          publicDir: path.join(root, clientOutDir),
-          ssrPath: path.join(root, ssrOutDir, "index.js"),
+          publicDir: resolveRscBuildOutputPath(root, clientOutDir),
+          ssrPath: resolveRscBuildOutputPath(root, ssrOutDir, "index.js"),
           assetsDir: undefined,
           preset,
         });
@@ -193,7 +194,7 @@ export async function runNitroFromBuildApp(): Promise<void> {
 
   await waitForRscOutputs(root, baseOutDir, { timeoutMs: 25_000 });
 
-  let rendererPath = path.join(root, paths.rscOutDir, "index.js");
+  let rendererPath = resolveRscBuildOutputPath(root, paths.rscOutDir, "index.js");
   if (bundle) {
     const serverEntryChunks: OutputChunkLike[] = [];
     for (const chunk of Object.values(bundle)) {
@@ -205,15 +206,15 @@ export async function runNitroFromBuildApp(): Promise<void> {
       ? serverEntryChunks.find((c) => (c.name ?? c.fileName) === paths.serverEntryName)
       : serverEntryChunks[0];
     if (selected?.fileName) {
-      rendererPath = path.join(root, paths.rscOutDir, selected.fileName);
+      rendererPath = resolveRscBuildOutputPath(root, paths.rscOutDir, selected.fileName);
     }
   }
 
   await buildRscNitro({
     root,
     rendererPath,
-    publicDir: path.join(root, paths.clientOutDir),
-    ssrPath: path.join(root, paths.ssrOutDir, "index.js"),
+    publicDir: resolveRscBuildOutputPath(root, paths.clientOutDir),
+    ssrPath: resolveRscBuildOutputPath(root, paths.ssrOutDir, "index.js"),
     assetsDir: undefined,
     preset,
   });

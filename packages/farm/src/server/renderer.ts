@@ -253,9 +253,20 @@ async function parseRouteModuleProps(
     search: Record<string, string | string[] | undefined>;
     routePath: string;
   },
-): Promise<PageProps & { search: unknown; data?: unknown; __farmRoutePropsResolved?: true }> {
+): Promise<
+  PageProps & {
+    search: unknown;
+    data?: unknown;
+    __farmCanonicalPath?: string;
+    __farmRoutePropsPromise?: Promise<Record<string, unknown>>;
+    __farmRoutePropsResolved?: true;
+  }
+> {
   const resolveRouteProps = (routeModule as any).__farmResolveRouteProps;
   if (typeof resolveRouteProps === "function") {
+    // Resolve the top-level route state before starting the HTTP stream. It can
+    // still return explicit defer() values for nested Suspense boundaries, but
+    // redirects, notFound(), and failures must retain their real HTTP status.
     return await resolveRouteProps(input.props);
   }
 
@@ -756,6 +767,7 @@ export class ServerRenderer {
         search: unknown;
         data?: unknown;
         error?: unknown;
+        __farmRoutePropsPromise?: Promise<Record<string, unknown>>;
         __farmRoutePropsResolved?: true;
       };
 

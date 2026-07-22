@@ -17,6 +17,14 @@ export function generateRscEntry(ctx: EntryContext): string {
   const routeRoots = ctx.routeRoots?.length
     ? ctx.routeRoots
     : [{ name: "project", base: glob, glob }];
+  const routeSourceRoots = routeRoots.map((root) => {
+    const routeSuffix = appSegment ? `/${appSegment}` : "";
+    const sourceGlob =
+      routeSuffix && root.glob.endsWith(routeSuffix)
+        ? root.glob.slice(0, -routeSuffix.length)
+        : root.glob;
+    return { ...root, sourceGlob };
+  });
 
   const debugLog = `// Debug disabled`;
   let code = `
@@ -42,9 +50,12 @@ import {
 import {
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
+  applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
 } from '@farmjs/core/middleware';
+import { invokeAPIRouteEndpoint, matchAPIRoute } from '@farmjs/core/api/runtime';
 import { _runWithAfterRequest } from '@farmjs/core/after';
+import { _runWithCurrentRequest } from '@farmjs/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 `;
@@ -86,7 +97,7 @@ function applyActionResponseHeaders(headers, request) {
 }
 
 // Auto-discover all route modules. Every glob remains a literal so Vite can analyze it.
-${routeRoots
+${routeSourceRoots
   .map(
     (
       root,
@@ -95,7 +106,16 @@ ${routeRoots
 const layouts${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/layout.{tsx,jsx,ts,js}`)}, { eager: true });
 const loadings${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/loading.{tsx,jsx,ts,js}`)}, { eager: true });
 const errors${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/error.{tsx,jsx,ts,js}`)}, { eager: true });
-const middlewares${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/middleware.{tsx,jsx,ts,js}`)}, { eager: true });`,
+const middlewares${index} = import.meta.glob(${JSON.stringify(`${root.glob}/**/middleware.{tsx,jsx,ts,js}`)}, { eager: true });
+const apiRouteModules${index} = import.meta.glob(${JSON.stringify(`${root.glob}/api/**/route.{tsx,jsx,ts,js}`)}, { eager: true });
+const routeDefinitionModules${index} = import.meta.glob(${JSON.stringify(
+      root.sourceGlob === root.glob
+        ? `${root.sourceGlob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`
+        : [
+            `${root.sourceGlob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`,
+            `${root.glob}/{farm.route,farm.routes,routes}.{tsx,jsx,ts,js}`,
+          ],
+    )}, { eager: true });`,
   )
   .join("\n")}
 
@@ -117,6 +137,24 @@ function mergeRouteModules(sources) {
   return merged;
 }
 
+function collectRouteModuleEntries(sources) {
+  const entries = [];
+  for (const [sourceIndex, source] of sources.entries()) {
+    const baseValue = source.base.replace(/\\\\/g, '/').replace(/^\\.\\//, '');
+    const normalizedBase = baseValue.endsWith('/') ? baseValue.slice(0, -1) : baseValue;
+    for (const [filePath, module] of Object.entries(source.modules)) {
+      const normalizedFile = filePath.replace(/\\\\/g, '/').replace(/^\\.\\//, '');
+      const baseIndex = normalizedFile.indexOf(normalizedBase);
+      let relativePath = baseIndex === -1
+        ? normalizedFile
+        : normalizedFile.slice(baseIndex + normalizedBase.length);
+      if (!relativePath.startsWith('/')) relativePath = '/' + relativePath;
+      entries.push({ sourceIndex, sourceName: source.name, filePath: normalizedFile, relativePath, module });
+    }
+  }
+  return entries;
+}
+
 const pages = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: pages${index} }`)
     .join(", ")}]);
@@ -132,6 +170,111 @@ const errors = mergeRouteModules([${routeRoots
 const middlewares = mergeRouteModules([${routeRoots
     .map((root, index) => `{ base: ${JSON.stringify(root.base)}, modules: middlewares${index} }`)
     .join(", ")}]);
+const apiRouteModules = collectRouteModuleEntries([${routeSourceRoots
+    .map(
+      (root, index) =>
+        `{ name: ${JSON.stringify(root.name)}, base: ${JSON.stringify(root.base)}, modules: apiRouteModules${index} }`,
+    )
+    .join(", ")}]);
+const routeDefinitionModules = collectRouteModuleEntries([${routeSourceRoots
+    .map(
+      (root, index) =>
+        `{ name: ${JSON.stringify(root.name)}, base: ${JSON.stringify(root.sourceGlob)}, modules: routeDefinitionModules${index} }`,
+    )
+    .join(", ")}]);
+
+const apiRouteMethods = ['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'];
+const apiRouteMap = new Map();
+
+function registerApiEndpoint(routePath, filePath, method, endpoint) {
+  if (!routePath || typeof endpoint !== 'function') return;
+  const normalizedMethod = String(method || 'GET').toUpperCase();
+  let route = apiRouteMap.get(routePath);
+  if (!route) {
+    route = { path: routePath, methods: [], handlers: {}, files: {} };
+    apiRouteMap.set(routePath, route);
+  }
+  if (!route.methods.includes(normalizedMethod)) route.methods.push(normalizedMethod);
+  route.handlers[normalizedMethod] = endpoint;
+  route.files[normalizedMethod] = filePath;
+}
+
+function getProgrammaticApiRoutes(routeModule) {
+  const candidates = [routeModule?.default, routeModule?.routes, routeModule?.Route];
+  for (const candidate of candidates) {
+    if (candidate?.__farmRoutes === true && Array.isArray(candidate.routes)) {
+      return candidate.routes.filter((route) => route?.kind === 'api');
+    }
+    if (candidate?.kind === 'api') return [candidate];
+    if (Array.isArray(candidate)) {
+      return candidate.filter((route) => route?.kind === 'api');
+    }
+  }
+  return Object.values(routeModule || {}).filter((route) => route?.kind === 'api');
+}
+
+function registerApiRouteSources(fileModules, definitionModules, sourceCount) {
+  // Process both discovery styles for each source before advancing from layers
+  // to the project. A later project source therefore wins regardless of whether
+  // either endpoint came from app/api/**/route or a routes definition file.
+  for (let sourceIndex = 0; sourceIndex < sourceCount; sourceIndex++) {
+    for (const entry of fileModules) {
+      if (entry.sourceIndex !== sourceIndex) continue;
+      const { filePath, relativePath, module: routeModule } = entry;
+      const routePath = relativePath.replace(/\\/route\\.[tj]sx?$/i, '') || '/api';
+      for (const method of apiRouteMethods) {
+        if (typeof routeModule?.[method] === 'function') {
+          registerApiEndpoint(routePath, filePath, method, routeModule[method]);
+        }
+      }
+    }
+
+    for (const entry of definitionModules) {
+      if (entry.sourceIndex !== sourceIndex) continue;
+      const { filePath, module: routeModule } = entry;
+      for (const endpoint of Object.values(routeModule)) {
+        if (typeof endpoint === 'function' && endpoint.__path) {
+          registerApiEndpoint(endpoint.__path, filePath, endpoint.__method || 'GET', endpoint);
+        }
+      }
+
+      for (const route of getProgrammaticApiRoutes(routeModule)) {
+        for (const [method, endpoint] of Object.entries(route.methods || {})) {
+          registerApiEndpoint(route.path, filePath, method, endpoint);
+        }
+      }
+    }
+  }
+}
+
+registerApiRouteSources(apiRouteModules, routeDefinitionModules, ${routeSourceRoots.length});
+
+async function handleAPIRequest(request) {
+  const url = new URL(request.url);
+  const match = matchAPIRoute(apiRouteMap, url.pathname);
+  if (!match) return null;
+
+  const method = request.method.toUpperCase();
+  const endpoint = match.route.handlers[method];
+  if (!endpoint) {
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
+      status: 405,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  try {
+    return await invokeAPIRouteEndpoint(endpoint, request, match.params);
+  } catch (error) {
+    console.error('[API Error] ' + url.pathname + ':', error);
+    return new Response(JSON.stringify({
+      error: 'Internal Server Error',
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+}
 const farmMiddlewareRunner = createProductionMiddlewareRunner({
   modules: Object.entries(middlewares).map(([filePath, module]) => ({
     path: middlewarePathToRoute(filePath),
@@ -145,6 +288,7 @@ debug('Discovered layouts:', Object.keys(layouts));
 debug('Discovered loadings:', Object.keys(loadings));
 debug('Discovered errors:', Object.keys(errors));
 debug('Discovered middlewares:', Object.keys(middlewares));
+debug('Discovered API routes:', Array.from(apiRouteMap.keys()));
 
 /**
  * Convert loading/error file path to route pattern (segment the boundary applies to).
@@ -323,7 +467,7 @@ function matchRoute(pathname) {
         Page: pages[filePath].default,
         pattern: filePath,
         params: match.params,
-        metadata: pages[filePath].metadata,
+        pageMetadata: pages[filePath].metadata,
       };
     }
   }
@@ -332,46 +476,47 @@ function matchRoute(pathname) {
   return null;
 }
 
+function mergeDocumentMetadata(...sources) {
+  const metadata = {};
+  for (const source of sources) {
+    if (typeof source?.title === 'string') metadata.title = source.title;
+    if (typeof source?.description === 'string') metadata.description = source.description;
+  }
+  return metadata;
+}
+
 /**
- * Find the layout for a given page file path (pattern from matchRoute = pages key).
- * Layer roots are normalized to virtual keys such as '/layout.tsx' and '/about/layout.tsx'.
+ * Find every applicable layout module from root to the page directory.
+ * Rendering still uses the nearest layout, while document metadata inherits
+ * through the complete root -> nested layouts -> page chain.
  */
-function getLayout(pageFilePath) {
+function getLayoutModules(pageFilePath) {
   const tryKeys = (...keys) => {
     for (const k of keys) {
-      if (layouts[k]?.default) return layouts[k].default;
+      if (layouts[k]?.default) return layouts[k];
     }
     return null;
   };
   const dir = pageFilePath.replace(/\\/page\\.[tj]sx?$/i, '');
   const extensions = ['tsx', 'jsx', 'ts', 'js'];
-
-  // Layout next to page (try with/without leading slash to match glob keys)
-  for (const ext of extensions) {
-    const a = dir + '/layout.' + ext;
-    const b = dir.startsWith('/') ? a : '/' + dir + '/layout.' + ext;
-    const layout = tryKeys(a, b);
-    if (layout) return layout;
-  }
-
-  // Walk up to parent layout
   const parts = dir.split('/').filter(Boolean);
-  while (parts.length > 1) {
-    parts.pop();
-    const parentDir = '/' + parts.join('/');
-    const relParent = parts.join('/');
+  const matches = [];
+
+  for (let depth = 0; depth <= parts.length; depth++) {
+    const relativeDir = parts.slice(0, depth).join('/');
+    const absoluteDir = relativeDir ? '/' + relativeDir : '';
+    let matchedLayout = null;
     for (const ext of extensions) {
-    const layout = tryKeys(parentDir + '/layout.' + ext, relParent + '/layout.' + ext);
-    if (layout) return layout;
+      matchedLayout = tryKeys(
+        absoluteDir + '/layout.' + ext,
+        relativeDir ? relativeDir + '/layout.' + ext : 'layout.' + ext,
+      );
+      if (matchedLayout) break;
     }
+    if (matchedLayout && !matches.includes(matchedLayout)) matches.push(matchedLayout);
   }
 
-  // Root layout
-  for (const ext of extensions) {
-    const layout = tryKeys('/layout.' + ext, 'layout.' + ext);
-    if (layout) return layout;
-  }
-  return null;
+  return matches;
 }
 
 /**
@@ -388,9 +533,13 @@ async function handleFarmRequest(request) {
     return createFarmDeploymentMismatchResponse(deploymentMismatch);
   }
 
+  const initialApiMatch = matchAPIRoute(apiRouteMap, url.pathname);
+  const isInitialApiRequest = Boolean(initialApiMatch) ||
+    url.pathname === '/api' || url.pathname.startsWith('/api/');
+
   ${
     ctx.actionsEnabled
-      ? `if (request.method === 'POST') {
+      ? `if (request.method === 'POST' && !isInitialApiRequest) {
     try {
       validateServerActionRequest(request, serverActionSecurity);
     } catch (error) {
@@ -428,9 +577,23 @@ async function handleFarmRequest(request) {
     middlewareHeaders.set('cache-control', 'private, no-store');
   }
 
-  return await _runWithMiddlewareData(middlewareResult.data, () =>
-    _runWithMiddlewareContext(middlewareContext, async () => {
+  // A rewrite replaces the Request. Re-enter request context so downstream
+  // APIs and server components observe the rewritten URL.
+  return await _runWithCurrentRequest(request, () =>
+    _runWithMiddlewareData(middlewareResult.data, () =>
+      _runWithMiddlewareContext(middlewareContext, async () => {
   const glob = '';
+
+  const apiResponse = await handleAPIRequest(request.clone());
+  if (apiResponse) {
+    return applyProductionMiddlewareHeaders(apiResponse, middlewareHeaders);
+  }
+  if (url.pathname === '/api' || url.pathname.startsWith('/api/')) {
+    return applyProductionMiddlewareHeaders(new Response(
+      JSON.stringify({ error: 'API route not found', pathname: url.pathname }),
+      { status: 404, headers: { 'Content-Type': 'application/json' } },
+    ), middlewareHeaders);
+  }
 `;
 
   // If actions enabled, add action handling before rendering
@@ -558,8 +721,14 @@ async function handleFarmRequest(request) {
     return new Response('Not Found', { status: 404 });
   }
   
-  const { Page, pattern, params, metadata } = matched;
-  const Layout = getLayout(pattern) || (function PassThrough({ children }) { return children; });
+  const { Page, pattern, params, pageMetadata } = matched;
+  const LayoutModules = getLayoutModules(pattern);
+  const LayoutModule = LayoutModules[LayoutModules.length - 1];
+  const Layout = LayoutModule?.default || (function PassThrough({ children }) { return children; });
+  const metadata = mergeDocumentMetadata(
+    ...LayoutModules.map((layoutModule) => layoutModule.metadata),
+    pageMetadata,
+  );
   const configuredRoutesDir = ${ctx.routesDir === undefined ? "undefined" : JSON.stringify(ctx.routesDir)};
   const routesDir = configuredRoutesDir === undefined ? 'app' : configuredRoutesDir.trim();
   const routesPath = routesDir ? '/' + routesDir : '';
@@ -626,6 +795,10 @@ async function handleFarmRequest(request) {
       )
     ),
     rootContent: rootInner,
+    metadata: {
+      title: typeof metadata?.title === 'string' ? metadata.title : undefined,
+      description: typeof metadata?.description === 'string' ? metadata.description : undefined,
+    },
 `;
 
   // Include action results in payload if actions are enabled
@@ -700,7 +873,8 @@ async function handleFarmRequest(request) {
   responseHeaders.set('content-type', 'text/html');
   applyActionResponseHeaders(responseHeaders, request);
   return new Response(html, { headers: responseHeaders });
-    })
+      })
+    )
   );
   } catch (err) {
     console.error('[RSC] Handler error:', err);
@@ -724,7 +898,8 @@ async function handleFarmRequest(request) {
       try {
         const matched = matchRoute(pathname);
         const layoutPattern = matched ? matched.pattern : null;
-        const Layout = matched ? getLayout(layoutPattern) : null;
+        const LayoutModules = matched ? getLayoutModules(layoutPattern) : [];
+        const Layout = LayoutModules[LayoutModules.length - 1]?.default;
         const LayoutComp = Layout || (function PassThrough({ children }) { return children; });
         const errParams = matched ? matched.params : {};
         const errSearchParams = Object.fromEntries(url.searchParams);
@@ -756,7 +931,7 @@ async function handleFarmRequest(request) {
         console.error('[RSC] Error boundary render failed:', e);
       }
     }
-    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Server Error';
+    const message = 'Internal Server Error';
     return new Response(JSON.stringify({ error: true, url: request.url, status: 500, message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
@@ -765,7 +940,9 @@ async function handleFarmRequest(request) {
 }
 
 async function handler(request, context) {
-  return _runWithAfterRequest(request, () => handleFarmRequest(request), context);
+  return _runWithCurrentRequest(request, () =>
+    _runWithAfterRequest(request, () => handleFarmRequest(request), context)
+  );
 }
 
 export default { fetch: handler };

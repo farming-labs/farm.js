@@ -71,6 +71,9 @@ export interface EntryContext {
   /** Route files subdirectory within srcDir */
   routesDir?: string;
 
+  /** Root-relative Vite URL for an existing global stylesheet. */
+  globalCssPath?: string;
+
   /** Ordered route roots. Modules from later roots override matching earlier modules. */
   routeRoots?: Array<{
     name: string;
@@ -114,6 +117,12 @@ export interface RscPayload {
 
   /** Content for div#root only (for client hydration to avoid double/repeated content) */
   rootContent?: React.ReactElement;
+
+  /** Serializable document metadata used during client-side navigation. */
+  metadata?: {
+    title?: string;
+    description?: string;
+  };
 
   /** Server action return value (if action was executed) */
   returnValue?: {

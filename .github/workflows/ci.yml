@@ -91,7 +91,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -104,10 +104,17 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      - name: Build basic example
-        run: |
-          cd examples/basic
-          pnpm build
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Verify production output
+        run: pnpm test:e2e:production:run
+
+      - name: Verify docs and SSR/SSG production output
+        run: pnpm test:e2e:production:sites:run
+
+      - name: Verify RSC production output
+        run: pnpm test:e2e:rsc
 
       - name: Build playground
         run: |

@@ -17,6 +17,7 @@ import {
   loadFarmProductionVite,
   type FarmProductionViteRuntime,
 } from "./production-vite";
+import { withProductionNodeEnv } from "./production-node-env";
 
 interface BuildOptions {
   preset?: string;
@@ -30,6 +31,10 @@ interface BuildOptions {
  * Build Farm.js application for production
  */
 export async function build(config: ResolvedFarmConfig, options: BuildOptions = {}) {
+  return withProductionNodeEnv(() => buildWithProductionNodeEnv(config, options));
+}
+
+async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: BuildOptions) {
   const root = options.root || config.root || process.cwd();
   const preset = options.preset || config.preset || "node-server";
   const srcDir = config.srcDir || "src";

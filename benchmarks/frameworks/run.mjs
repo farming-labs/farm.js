@@ -13,19 +13,69 @@ const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
 const appsRoot = path.join(benchmarkDir, "apps");
 const resultsDir = path.join(benchmarkDir, "results");
+const benchmarkGitPath = path.relative(repoRoot, benchmarkDir).split(path.sep).join("/");
 const lockPath = path.join(benchmarkDir, ".benchmark.lock");
 const marker = "framework-benchmark-v1";
 const basePort = 46100;
 const processTimeoutMs = 8 * 60 * 1000;
+const readinessPollIntervalMs = 2;
 const activeChildren = new Set();
 let shuttingDown = false;
 let benchmarkLockHandle;
 const require = createRequire(import.meta.url);
 
+const sanitizedEnvironmentKeys = new Set([
+  "BABEL_ENV",
+  "BODY_SIZE_LIMIT",
+  "BROWSERSLIST",
+  "DEBUG",
+  "FORCE_COLOR",
+  "HOST",
+  "HOST_HEADER",
+  "NODE_COMPILE_CACHE",
+  "NODE_COMPILE_CACHE_PORTABLE",
+  "NODE_DEBUG",
+  "NODE_DISABLE_COMPILE_CACHE",
+  "NODE_ENV",
+  "NODE_OPTIONS",
+  "NODE_PATH",
+  "ORIGIN",
+  "PORT",
+  "PROTOCOL_HEADER",
+  "XFF_DEPTH",
+]);
+const sanitizedEnvironmentPrefixes = [
+  "__NEXT_",
+  "BROWSERSLIST_",
+  "ESBUILD_",
+  "FARM_",
+  "NEXT_",
+  "NEXT_PRIVATE_",
+  "NITRO_",
+  "NUXT_",
+  "ROLLDOWN_",
+  "ROLLUP_",
+  "RSPACK_",
+  "RUST_",
+  "SVELTE_",
+  "SVELTEKIT_",
+  "SWC_",
+  "TANSTACK_",
+  "TSR_",
+  "TURBO_",
+  "TURBOPACK_",
+  "VITE_",
+];
+
+function shouldForwardEnvironmentVariable(key) {
+  return (
+    !sanitizedEnvironmentKeys.has(key) &&
+    !sanitizedEnvironmentPrefixes.some((prefix) => key.startsWith(prefix))
+  );
+}
+
 const sanitizedEnvironment = Object.fromEntries(
-  Object.entries(process.env).filter(
-    ([key]) => !["BABEL_ENV", "NODE_ENV", "NODE_OPTIONS"].includes(key),
-  ),
+  Object.entries(process.env).filter(([key]) => shouldForwardEnvironmentVariable(key)),
 );
 
 const baseEnv = {
@@ -43,7 +93,7 @@ const frameworks = [
     id: "farm",
     label: "Farm.js",
     version: "0.0.3-beta.3",
-    stack: "React 19.2.4 · Vite 8.1.5 (Rolldown)",
+    stack: "React 19.2.4 · Vite 5.4.20 dev · Vite 8.1.5 (Rolldown) build",
     directory: "farm",
     devHost: "localhost",
     installedPackages: [
@@ -185,6 +235,17 @@ const frameworks = [
   },
 ];
 
+function parseIntegerOption(name, value) {
+  if (typeof value !== "string" || !/^[+-]?\d+$/.test(value)) {
+    throw new Error(name + " must be an integer");
+  }
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new Error(name + " must be a safe integer");
+  }
+  return parsed;
+}
+
 function parseOptions(argv) {
   const options = {
     runs: 7,
@@ -205,7 +266,7 @@ function parseOptions(argv) {
     if (name === "--runs" || name === "--requests" || name === "--warmups" || name === "--seed") {
       if (inlineValue === undefined) index += 1;
       const key = name.slice(2);
-      options[key] = Number.parseInt(nextValue, 10);
+      options[key] = parseIntegerOption(name, nextValue);
       continue;
     }
 
@@ -246,6 +307,9 @@ function parseOptions(argv) {
       throw new Error("--" + key + " must be a positive integer");
     }
   }
+  if (!Number.isSafeInteger(options.seed)) {
+    throw new Error("--seed must be a safe integer");
+  }
 
   const unknown = options.only.filter((id) => !frameworks.some((framework) => framework.id === id));
   if (unknown.length) throw new Error("Unknown framework: " + unknown.join(", "));
@@ -284,6 +348,7 @@ function printHelp() {
       "  --skip-prepare    skip the untimed local Farm package build",
       "  --skip-burn-in    skip the unmeasured OS-cache warm-up round",
       "  --publish         replace canonical raw, Markdown, and landing data",
+      "  --self-check      validate harness invariants without running benchmarks",
     ].join("\n"),
   );
 }
@@ -354,6 +419,141 @@ function shuffled(values, seed) {
     [output[index], output[target]] = [output[target], output[index]];
   }
   return output;
+}
+
+function createBalancedRoundOrders(values, count, seed) {
+  if (!values.length || count < 1) return [];
+  const orders = [];
+
+  for (let block = 0; orders.length < count; block += 1) {
+    const blockSeed = (seed + Math.imul(block, 0x9e3779b1)) >>> 0;
+    const base = shuffled(values, blockSeed);
+    if (block % 2 === 1) base.reverse();
+
+    for (let offset = 0; offset < base.length && orders.length < count; offset += 1) {
+      orders.push(base.map((_, position) => base[(position + offset) % base.length]));
+    }
+  }
+
+  return orders;
+}
+
+function assertPositionBalanced(orders, values) {
+  if (!orders.length) throw new Error("The measured round schedule is empty");
+  const expectedIds = new Set(values.map((value) => value.id));
+  const positionCounts = new Map(
+    values.map((value) => [value.id, Array.from({ length: values.length }, () => 0)]),
+  );
+
+  for (const order of orders) {
+    const ids = order.map((value) => value.id);
+    if (ids.length !== values.length || new Set(ids).size !== values.length) {
+      throw new Error("Each measured round must contain every selected framework exactly once");
+    }
+    if (ids.some((id) => !expectedIds.has(id))) {
+      throw new Error("The measured round schedule contains an unknown framework");
+    }
+    ids.forEach((id, position) => {
+      positionCounts.get(id)[position] += 1;
+    });
+  }
+
+  for (const [id, counts] of positionCounts) {
+    if (Math.max(...counts) - Math.min(...counts) > 1) {
+      throw new Error(
+        "Measured round positions are not balanced for " + id + ": " + counts.join(", "),
+      );
+    }
+  }
+}
+
+function runSelfChecks() {
+  if (readinessPollIntervalMs > 2) {
+    throw new Error("Readiness polling must retain single-digit millisecond precision");
+  }
+
+  for (const key of sanitizedEnvironmentKeys) {
+    if (shouldForwardEnvironmentVariable(key)) {
+      throw new Error("Benchmark-controlled environment variable was not sanitized: " + key);
+    }
+  }
+  for (const key of [
+    "__NEXT_PRIVATE_STANDALONE_CONFIG",
+    "BROWSERSLIST_ENV",
+    "ESBUILD_BINARY_PATH",
+    "FARM_VITE_BUILDER",
+    "NEXT_RUNTIME",
+    "NEXT_PRIVATE_STANDALONE",
+    "NITRO_BUILDER",
+    "NITRO_PRESET",
+    "NUXT_SOMETHING",
+    "ROLLDOWN_OPTIONS_VALIDATION",
+    "ROLLUP_WATCH",
+    "RSPACK_CONFIG_VALIDATE",
+    "RUST_LOG",
+    "SVELTE_SOMETHING",
+    "SVELTEKIT_SOMETHING",
+    "SWC_BINARY_PATH",
+    "TANSTACK_SOMETHING",
+    "TSR_CONFIG",
+    "TURBO_HASH",
+    "TURBOPACK_LOG_LEVEL",
+    "VITE_SOMETHING",
+  ]) {
+    if (shouldForwardEnvironmentVariable(key)) {
+      throw new Error("Framework environment variable was not sanitized: " + key);
+    }
+  }
+  for (const key of ["PATH", "SHELL", "TMPDIR"]) {
+    if (!shouldForwardEnvironmentVariable(key)) {
+      throw new Error("Ordinary process environment variable was unexpectedly sanitized: " + key);
+    }
+  }
+
+  for (const value of ["not-a-number", "1.5", "9007199254740992"]) {
+    let rejected = false;
+    try {
+      parseOptions(["--seed", value]);
+    } catch (error) {
+      rejected = error instanceof Error && error.message.startsWith("--seed must be");
+    }
+    if (!rejected) throw new Error("Invalid benchmark seed was accepted: " + value);
+  }
+  for (const value of ["-1", "0", "20260721"]) {
+    if (parseOptions(["--seed", value]).seed !== Number(value)) {
+      throw new Error("Valid benchmark seed was parsed incorrectly: " + value);
+    }
+  }
+
+  const cleanIdentity = {
+    benchmarkInputsDirty: false,
+    farmSourceDirty: false,
+    rootLockDirty: false,
+  };
+  assertPublishableRunIdentity(cleanIdentity);
+  for (const key of Object.keys(cleanIdentity)) {
+    let rejected = false;
+    try {
+      assertPublishableRunIdentity({ ...cleanIdentity, [key]: true });
+    } catch {
+      rejected = true;
+    }
+    if (!rejected) throw new Error("Dirty publish identity was accepted: " + key);
+  }
+
+  for (let selectedCount = 1; selectedCount <= frameworks.length; selectedCount += 1) {
+    const selected = frameworks.slice(0, selectedCount);
+    for (let rounds = 1; rounds <= selectedCount * 3 + 2; rounds += 1) {
+      const orders = createBalancedRoundOrders(selected, rounds, 20260721);
+      assertPositionBalanced(orders, selected);
+      const repeated = createBalancedRoundOrders(selected, rounds, 20260721);
+      if (JSON.stringify(orders) !== JSON.stringify(repeated)) {
+        throw new Error("Measured round schedules must be deterministic");
+      }
+    }
+  }
+
+  console.log("Benchmark harness self-checks passed");
 }
 
 function appendOutput(state, chunk) {
@@ -559,7 +759,7 @@ async function waitForRenderedPage(child, output, url, startedAt) {
     } catch {
       // The port is not listening yet.
     }
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, readinessPollIntervalMs));
   }
   throw new Error("Timed out waiting for " + url + "\n" + output.value);
 }
@@ -784,7 +984,15 @@ async function collectRunIdentity() {
     "packages/farm",
     "packages/farm-cli",
   ]);
+  const benchmarkInputStatus = readCommand("git", [
+    "status",
+    "--porcelain",
+    "--",
+    benchmarkGitPath,
+    ":(exclude)" + benchmarkGitPath + "/results/**",
+  ]);
   return {
+    benchmarkInputsDirty: benchmarkInputStatus !== "",
     commit: readCommand("git", ["rev-parse", "HEAD"]),
     branch: readCommand("git", ["branch", "--show-current"]),
     farmSourceDirty: farmSourceStatus !== "",
@@ -800,6 +1008,7 @@ async function collectRunIdentity() {
 
 function assertRunIdentityUnchanged(start, end) {
   for (const key of [
+    "benchmarkInputsDirty",
     "commit",
     "branch",
     "farmSourceDirty",
@@ -811,6 +1020,14 @@ function assertRunIdentityUnchanged(start, end) {
     if (start[key] !== end[key]) {
       throw new Error("Benchmark inputs changed during the run (identity field: " + key + ")");
     }
+  }
+}
+
+function assertPublishableRunIdentity(identity) {
+  if (identity.benchmarkInputsDirty || identity.farmSourceDirty || identity.rootLockDirty) {
+    throw new Error(
+      "Publishing requires clean benchmark inputs, Farm source packages, and root pnpm-lock.yaml",
+    );
   }
 }
 
@@ -857,6 +1074,7 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
     revision: {
+      benchmarkInputsDirty: identity.benchmarkInputsDirty,
       commit: identity.commit,
       branch: identity.branch,
       farmSourceDirty: identity.farmSourceDirty,
@@ -881,8 +1099,12 @@ function createReport(options, selected, samplesByFramework, rounds, identity) {
       farmPackagesPrepared: options.prepare,
       measuredRequestsPerRun: options.requests,
       warmupRequestsPerRun: options.warmups,
-      order: "Deterministically randomized round-robin",
-      cache: "Generated framework caches removed before dev and build; OS filesystem cache warm",
+      order: "Seeded, position-balanced cyclic schedule",
+      cache:
+        "Generated framework caches removed before dev and build; OS filesystem and any product-enabled Node compile cache warm",
+      nodeCompileCache:
+        "Ambient Node compile-cache controls removed; framework CLIs retain their normal compile-cache behavior",
+      readinessPollIntervalMs,
       timer: "External monotonic wall clock",
       devFirstPage:
         "Framework process spawn to the first HTTP 200 containing the expected rendered marker",
@@ -927,6 +1149,7 @@ function createPublishedReport(report) {
   return {
     generatedAt: report.generatedAt,
     revision: {
+      benchmarkInputsDirty: report.revision.benchmarkInputsDirty,
       commit: report.revision.commit.slice(0, 12),
       farmSourceDirty: report.revision.farmSourceDirty,
       rootLockDirty: report.revision.rootLockDirty,
@@ -941,7 +1164,11 @@ function createPublishedReport(report) {
       seed: report.methodology.seed,
       farmPackagesPrepared: report.methodology.farmPackagesPrepared,
       measuredRequestsPerRun: report.methodology.measuredRequestsPerRun,
+      warmupRequestsPerRun: report.methodology.warmupRequestsPerRun,
+      order: report.methodology.order,
       cache: report.methodology.cache,
+      nodeCompileCache: report.methodology.nodeCompileCache,
+      readinessPollIntervalMs: report.methodology.readinessPollIntervalMs,
     },
     system: report.system,
     frameworks: report.frameworks.map((framework) => ({
@@ -1008,7 +1235,9 @@ function createMarkdown(report) {
         ? report.methodology.burnInRounds + " discarded burn-in plus "
         : "no burn-in; ") +
       report.methodology.runs +
-      " randomized measured rounds.",
+      " measured rounds; order: " +
+      report.methodology.order.toLowerCase() +
+      ".",
     "- Cache policy: " + report.methodology.cache + ".",
     "- Machine: " +
       report.system.cpu +
@@ -1019,6 +1248,7 @@ function createMarkdown(report) {
       ".",
     "- Runtime: Node " + report.system.node + ", pnpm " + report.system.pnpm + ".",
     "- Benchmark input SHA-256: " + report.inputs.sha256 + ".",
+    "- Benchmark inputs dirty: " + (report.revision.benchmarkInputsDirty ? "yes" : "no") + ".",
     "- Farm source dirty: " + (report.revision.farmSourceDirty ? "yes" : "no") + ".",
     "- Root lockfile dirty: " + (report.revision.rootLockDirty ? "yes" : "no") + ".",
     "- Workspace dirty: " +
@@ -1076,8 +1306,15 @@ async function writeReports(report) {
 }
 
 async function main() {
-  if (process.argv.slice(2).some((argument) => argument === "--help" || argument === "-h")) {
+  const arguments_ = process.argv.slice(2);
+  if (arguments_.some((argument) => argument === "--help" || argument === "-h")) {
     printHelp();
+    return;
+  }
+  if (arguments_.includes("--self-check")) {
+    if (arguments_.length !== 1)
+      throw new Error("--self-check cannot be combined with other options");
+    runSelfChecks();
     return;
   }
   await acquireBenchmarkLock();
@@ -1092,12 +1329,12 @@ async function runBenchmark() {
   const options = parseOptions(process.argv.slice(2));
   const selected = frameworks.filter((framework) => options.only.includes(framework.id));
   assertSupportedNode(selected);
+  const measuredOrders = createBalancedRoundOrders(selected, options.runs, options.seed);
+  assertPositionBalanced(measuredOrders, selected);
 
   for (const framework of selected) await assertInstalled(framework);
   const startIdentity = await collectRunIdentity();
-  if (options.publish && (startIdentity.farmSourceDirty || startIdentity.rootLockDirty)) {
-    throw new Error("Publishing requires clean Farm source packages and root pnpm-lock.yaml");
-  }
+  if (options.publish) assertPublishableRunIdentity(startIdentity);
   if (options.prepare && selected.some((framework) => framework.id === "farm")) {
     await prepareFarm();
   }
@@ -1136,7 +1373,7 @@ async function runBenchmark() {
   }
 
   for (let round = 0; round < options.runs; round += 1) {
-    const order = shuffled(selected, options.seed + round);
+    const order = measuredOrders[round];
     const roundRecord = {
       index: round + 1,
       order: order.map((framework) => framework.id),

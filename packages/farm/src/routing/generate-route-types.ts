@@ -5,17 +5,31 @@ import type { ParsedRoute } from "../types";
 import { discoverProgrammaticRoutePaths } from "../routes.server";
 import type { FarmSourceRoot } from "../layers";
 
-function routePatternToTsTypeLiteral(pattern: string): string {
-  if (pattern === "/") return '"/"';
-  const segments = pattern.slice(1).split("/").filter(Boolean);
+function routeSegmentsToTsTypeLiteral(segments: string[]): string {
+  if (segments.length === 0) return '"/"';
   const hasDynamic = segments.some((s) => s.startsWith("["));
-  if (!hasDynamic) return JSON.stringify(pattern);
+  if (!hasDynamic) return JSON.stringify("/" + segments.join("/"));
   const parts = segments.map((s) => {
     if (s.startsWith("[[...") || s.startsWith("[...")) return "${string}";
     if (s.startsWith("[")) return "${string}";
     return s;
   });
   return "`/" + parts.join("/") + "`";
+}
+
+function routePatternToTsTypeLiterals(pattern: string): string[] {
+  if (pattern === "/") return ['"/"'];
+
+  let variants: string[][] = [[]];
+  for (const segment of pattern.slice(1).split("/").filter(Boolean)) {
+    if (segment.startsWith("[[...") && segment.endsWith("]]")) {
+      variants = variants.flatMap((parts) => [parts, [...parts, segment]]);
+    } else {
+      variants = variants.map((parts) => [...parts, segment]);
+    }
+  }
+
+  return variants.map(routeSegmentsToTsTypeLiteral);
 }
 
 function routePatternToRouteLiteral(pattern: string): string {
@@ -97,7 +111,7 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
   }
 
   const sortedPatterns = Array.from(patterns).sort();
-  const typeLiterals = sortedPatterns.map(routePatternToTsTypeLiteral);
+  const typeLiterals = Array.from(new Set(sortedPatterns.flatMap(routePatternToTsTypeLiterals)));
   const patternLiterals = sortedPatterns.map(routePatternToRouteLiteral);
 
   const routePathType = suppressLintOnLink

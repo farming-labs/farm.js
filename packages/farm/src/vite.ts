@@ -165,7 +165,10 @@ function getPublicEnvDefine(config: FarmVitePluginOptions): Record<string, unkno
 }
 
 function createRequestFromNodeRequest(
-  req: { method?: string; headers: Record<string, string | string[] | undefined> },
+  req: {
+    method?: string;
+    headers: Record<string, string | string[] | undefined>;
+  },
   url: URL,
 ): Request {
   const headers = new Headers();
@@ -677,10 +680,18 @@ export function farmPlugin(
         modulePath: string;
       }> = [];
       for (const [pattern, entry] of routeManager.getRoutes()) {
-        discoveredRoutes.push({ kind: "page", pattern, modulePath: entry.modulePath });
+        discoveredRoutes.push({
+          kind: "page",
+          pattern,
+          modulePath: entry.modulePath,
+        });
       }
       for (const [pattern, entry] of routeManager.getLayouts()) {
-        discoveredRoutes.push({ kind: "layout", pattern, modulePath: entry.modulePath });
+        discoveredRoutes.push({
+          kind: "layout",
+          pattern,
+          modulePath: entry.modulePath,
+        });
       }
       if (pm) {
         for (const route of discoveredRoutes) {
@@ -1177,7 +1188,10 @@ export function farmPlugin(
                 return;
               }
             } catch (error) {
-              await emitPluginError("before-request", error, { urlPath, method });
+              await emitPluginError("before-request", error, {
+                urlPath,
+                method,
+              });
               logger.error(`Request hook error: ${error}`);
               res.statusCode = 500;
               res.setHeader("Content-Type", "application/json");
@@ -1261,7 +1275,10 @@ export function farmPlugin(
                 await sendWebResponse(res, handledResponse);
                 return;
               } catch (error) {
-                await emitPluginError("api-handler", error, { urlPath, method });
+                await emitPluginError("api-handler", error, {
+                  urlPath,
+                  method,
+                });
                 logger.error(`API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
@@ -1336,7 +1353,10 @@ export function farmPlugin(
                   return;
                 }
               } catch (error) {
-                await emitPluginError("docs-api-handler", error, { urlPath, method });
+                await emitPluginError("docs-api-handler", error, {
+                  urlPath,
+                  method,
+                });
                 logger.error(`Docs API route error: ${error}`);
                 res.statusCode = 500;
                 res.setHeader("Content-Type", "application/json");
@@ -1440,12 +1460,18 @@ export function farmPlugin(
 
                 for (const layoutModule of layoutModules) {
                   if ((layoutModule as any).metadata) {
-                    mergedMetadata = { ...mergedMetadata, ...(layoutModule as any).metadata };
+                    mergedMetadata = {
+                      ...mergedMetadata,
+                      ...(layoutModule as any).metadata,
+                    };
                   }
                 }
 
                 if ((routeModule as any).metadata) {
-                  mergedMetadata = { ...mergedMetadata, ...(routeModule as any).metadata };
+                  mergedMetadata = {
+                    ...mergedMetadata,
+                    ...(routeModule as any).metadata,
+                  };
                 }
 
                 // Build search params
@@ -1490,7 +1516,9 @@ export function farmPlugin(
                     searchParams: (routeProps as any).search,
                     ...("data" in routeProps ? { data: (routeProps as any).data } : {}),
                     ...((routeProps as any).__farmCanonicalPath
-                      ? { __farmCanonicalPath: (routeProps as any).__farmCanonicalPath }
+                      ? {
+                          __farmCanonicalPath: (routeProps as any).__farmCanonicalPath,
+                        }
                       : {}),
                     ...((routeProps as any).__farmRoutePropsResolved
                       ? { __farmRoutePropsResolved: true }
@@ -1902,7 +1930,10 @@ export const getManifest = () => ({
           routes: {} as Record<string, any>,
           layouts: {} as Record<string, any>,
           sharedAssets: [
-            { tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } },
+            {
+              tag: "link",
+              attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
+            },
           ],
         };
 
@@ -2273,6 +2304,10 @@ function generateProgrammaticRouteModule(moduleId: string, root?: string): strin
 
   return `
 import { createElement as __farmCreateElement } from "react";
+import {
+  createLayoutModuleFromProgrammaticLayout as __farmCreateLayoutRouteModule,
+  createRouteModuleFromProgrammaticPage as __farmCreatePageRouteModule,
+} from "@farmjs/core/routes";
 import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
 
 const __farmIsRouteDefinition = (value) => (
@@ -2323,28 +2358,30 @@ if (!__farmRoute) {
   )});
 }
 
-export const metadata = __farmRoute.metadata;
-export const generateMetadata = __farmRoute.generateMetadata;
+const __farmRouteModule = __farmRoute.kind === "layout"
+  ? __farmCreateLayoutRouteModule(__farmRoute)
+  : __farmCreatePageRouteModule(__farmRoute);
+
+export const metadata = __farmRouteModule.metadata;
+export const generateMetadata = __farmRouteModule.generateMetadata;
 const __farmIsSearchSchema = (value) => value && typeof value.parse === "function";
 const __farmGetSearchSchema = (search) => __farmIsSearchSchema(search) ? search : search?.schema;
 const __farmGetSearchOptions = (search) => __farmIsSearchSchema(search) ? undefined : search;
 const __farmSearchSchema = __farmGetSearchSchema(__farmRoute.search);
 const __farmSearchOptions = __farmGetSearchOptions(__farmRoute.search);
-export const __farmRouteSchemas = {
-  params: __farmRoute.params,
-  search: __farmSearchSchema,
-};
-export const __farmRouteSearch = __farmSearchOptions ? {
-  stripDefaults: __farmSearchOptions.stripDefaults,
-  preserve: __farmSearchOptions.preserve,
-  temporary: __farmSearchOptions.temporary,
-} : undefined;
-export const __farmRouteData = __farmRoute.data;
-export const __farmRouteParsesProps = __farmRoute.kind === "page" && !!(
-  __farmRoute.params ||
-  __farmRoute.search ||
-  __farmRoute.data
-);
+export const __farmRouteSchemas = __farmRouteModule.__farmRouteSchemas;
+export const __farmRouteSearch = __farmRouteModule.__farmRouteSearch;
+export const __farmRouteData = __farmRouteModule.__farmRouteData;
+export const __farmRouteGuard = __farmRouteModule.__farmRouteGuard;
+export const __farmRouteParsesProps = __farmRouteModule.__farmRouteParsesProps;
+export const __farmRouteComponents = __farmRouteModule.__farmRouteComponents;
+export const __farmResolveRouteCanonicalPath =
+  __farmRouteModule.__farmResolveRouteCanonicalPath;
+export const ssg = __farmRouteModule.ssg;
+export const dynamic = __farmRouteModule.dynamic;
+export const revalidate = __farmRouteModule.revalidate;
+export const ppr = __farmRouteModule.ppr;
+export const getStaticPaths = __farmRouteModule.getStaticPaths;
 
 const __farmParseSchema = (schema, value, label) => {
   if (!schema || typeof schema.parse !== "function") {
@@ -2372,7 +2409,12 @@ const __farmStripRoutePropsMarker = (props) => {
     return props;
   }
 
-  const { __farmRoutePropsResolved, __farmCanonicalPath, ...componentProps } = props;
+  const {
+    __farmRoutePropsResolved,
+    __farmCanonicalPath,
+    __farmRoutePropsPromise,
+    ...componentProps
+  } = props;
   return componentProps;
 };
 
@@ -2449,42 +2491,9 @@ const __farmResolveCanonicalPath = (rawSearch, parsedSearch, path) => {
 };
 
 export async function __farmResolveRouteProps(props) {
-  const rawSearch = await props.searchParams;
-  const params = __farmParseSchema(__farmRoute.params, props.params, "params");
-  const search = __farmParseSchema(__farmSearchSchema, rawSearch, "search");
-  const canonicalPath = __farmResolveCanonicalPath(rawSearch, search, props.path);
-  const baseProps = {
-    ...props,
-    params,
-    search,
-    searchParams: Promise.resolve(search),
-  };
-
-  if (!__farmRoute.data) {
-    return __farmMarkRoutePropsResolved(__farmAddCanonicalPath(baseProps, canonicalPath));
-  }
-
-  const before = __farmRoute.data.before
-    ? await __farmRoute.data.before(baseProps)
-    : undefined;
-  const data = await __farmRoute.data.main({
-    ...baseProps,
-    before,
-  });
-
-  if (__farmRoute.data.after) {
-    await __farmRoute.data.after({
-      ...baseProps,
-      before,
-      data,
-    });
-  }
-
-  return __farmMarkRoutePropsResolved({
-    ...baseProps,
-    data,
-    ...(canonicalPath ? { __farmCanonicalPath: canonicalPath } : {}),
-  });
+  return typeof __farmRouteModule.__farmResolveRouteProps === "function"
+    ? __farmRouteModule.__farmResolveRouteProps(props)
+    : props;
 }
 
 const __farmNeedsPageWrapper = __farmRoute.kind === "page" && !!(
@@ -2494,9 +2503,12 @@ const __farmNeedsPageWrapper = __farmRoute.kind === "page" && !!(
 );
 
 async function __farmProgrammaticPage(props) {
+  const deferredRouteProps = props?.__farmRoutePropsPromise;
   const resolvedProps = props?.__farmRoutePropsResolved === true
     ? props
-    : await __farmResolveRouteProps(props);
+    : deferredRouteProps && typeof deferredRouteProps.then === "function"
+      ? await deferredRouteProps
+      : await __farmResolveRouteProps(props);
 
   return __farmCreateElement(
     __farmRoute.component,
@@ -2504,9 +2516,7 @@ async function __farmProgrammaticPage(props) {
   );
 }
 
-export default __farmNeedsPageWrapper
-  ? __farmProgrammaticPage
-  : __farmRoute.component;
+export default __farmRouteModule.default;
 `;
 }
 
@@ -2649,7 +2659,11 @@ function parseRouteModuleSchema(
 }
 
 function generateClientCode(
-  integrationProviders: Array<{ name: string; type: string; props?: Record<string, unknown> }> = [],
+  integrationProviders: Array<{
+    name: string;
+    type: string;
+    props?: Record<string, unknown>;
+  }> = [],
   documentNavigationMatchers: string[] = [],
   docsSearchEnabled = false,
   docsSearchModuleId?: string,
@@ -3178,12 +3192,15 @@ async function buildRouteComponentProps(pageModule, params, searchParams, path, 
   }
 
   if (typeof pageModule?.__farmResolveRouteProps === 'function') {
-    return await pageModule.__farmResolveRouteProps({
+    const rawProps = {
       ...(existingProps || {}),
       params,
       searchParams: Promise.resolve(searchParams),
       path,
-    });
+    };
+    // Keep top-level route errors inside the router's navigation transaction.
+    // Explicit defer() values can still suspend nested UI after this resolves.
+    return await pageModule.__farmResolveRouteProps(rawProps);
   }
 
   const schemas = pageModule?.__farmRouteSchemas;

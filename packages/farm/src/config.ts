@@ -54,6 +54,8 @@ import {
 import { resolveFarmI18nConfig } from "./i18n/config";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
 
+const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
+
 export type {
   FarmDocsConfigInput,
   FarmDocsNavigationConfig,
@@ -282,6 +284,8 @@ export interface ResolvedFarmConfig extends Required<
     | "i18n"
   >
 > {
+  /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
+  [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   extends: readonly FarmLayerEntry[];
   layers: ResolvedFarmLayer[];
   plugins: FarmPlugin[];
@@ -298,6 +302,10 @@ export interface ResolvedFarmConfig extends Required<
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
+}
+
+export function hasCustomFarmRouteContext(config: ResolvedFarmConfig): boolean {
+  return config[FARM_RESOLVED_CUSTOM_CONTEXT] === true;
 }
 
 export type FarmLayerConfig = Omit<
@@ -698,6 +706,7 @@ export async function resolveConfig(
   );
 
   const resolved: ResolvedFarmConfig = {
+    [FARM_RESOLVED_CUSTOM_CONTEXT]: typeof userConfig.context === "function",
     root,
     srcDir,
     extends: userConfig.extends || [],

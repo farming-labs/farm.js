@@ -14,7 +14,7 @@ export function generateSsrEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
   const routesDir = ctx.routesDir === undefined ? "app" : ctx.routesDir.trim();
   const routesPath = routesDir ? `/${routesDir}` : "";
-  const globalsCssPath = `/${ctx.srcDir}${routesPath}/globals.css`;
+  const globalsCssPath = ctx.globalCssPath ?? `/${ctx.srcDir}${routesPath}/globals.css`;
 
   return `
 import React from 'react';
@@ -31,7 +31,6 @@ const CLIENT_CSS_HREF = "__FARM_CLIENT_CSS_HREF__";
 const PLACEHOLDER_CSS_HREF = "__FARM_CLIENT_CSS_HREF__";
 const resolvedCssHref =
   typeof CLIENT_CSS_HREF === "string" &&
-  CLIENT_CSS_HREF.length > 0 &&
   CLIENT_CSS_HREF.indexOf(PLACEHOLDER_CSS_HREF) < 0
     ? CLIENT_CSS_HREF
     : DEV_GLOBAL_CSS_HREF;

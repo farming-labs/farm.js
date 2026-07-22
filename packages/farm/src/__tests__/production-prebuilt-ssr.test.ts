@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
 import { resolveConfig } from "../config";
+import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
 import { logger } from "../utils";
 
@@ -17,7 +18,9 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 async function createProductionFixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-prebuilt-ssr-"));
 
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), { recursive: true });
+  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), {
+    recursive: true,
+  });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
   await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
   await fs.writeFile(
@@ -46,6 +49,30 @@ export default function Page() {
   );
 
   return root;
+}
+
+async function linkReact18(root: string): Promise<void> {
+  const pnpmStore = path.resolve(packageRoot, "../../node_modules/.pnpm");
+  const entries = await fs.readdir(pnpmStore);
+  const reactEntry = entries.find((entry) => /^react@18\.\d+\.\d+$/.test(entry));
+  const reactDOMEntry = entries.find((entry) =>
+    /^react-dom@18\.\d+\.\d+_react@18\.\d+\.\d+$/.test(entry),
+  );
+
+  if (!reactEntry || !reactDOMEntry) {
+    throw new Error("React 18 test dependencies are missing from the pnpm store");
+  }
+
+  await fs.symlink(
+    path.join(pnpmStore, reactEntry, "node_modules", "react"),
+    path.join(root, "node_modules", "react"),
+    "dir",
+  );
+  await fs.symlink(
+    path.join(pnpmStore, reactDOMEntry, "node_modules", "react-dom"),
+    path.join(root, "node_modules", "react-dom"),
+    "dir",
+  );
 }
 
 async function getAvailablePort(): Promise<number> {
@@ -178,16 +205,55 @@ describe("production prebuilt SSR output", () => {
     const root = await createProductionFixture();
 
     try {
+      const staticPageDir = path.join(root, "src", "app", "static-page");
+      await fs.mkdir(staticPageDir, { recursive: true });
+      await fs.writeFile(
+        path.join(staticPageDir, "page.tsx"),
+        `
+"use client";
+
+import { useState } from "react";
+
+export const ssg = true;
+
+export default function StaticPage() {
+  const [count] = useState(0);
+  return <main>static production page {count}</main>;
+}
+`.trim(),
+      );
       const config = await resolveConfig(
         {
           root,
           srcDir: "src",
           images: { provider: "none" },
+          redirects: () => [
+            {
+              source: "/legacy-home",
+              destination: "/",
+              permanent: true,
+            },
+          ],
+          headers: () => [
+            {
+              source: "/:path*",
+              headers: [{ key: "X-Production-Header", value: "standalone" }],
+            },
+          ],
           generateBuildId: () => "prebuilt-ssr-test",
         },
         "production",
       );
+      const nodeEnvBeforeBuild = process.env.NODE_ENV;
       await build(config, { root, preset: "node-server" });
+      expect(process.env.NODE_ENV).toBe(nodeEnvBeforeBuild);
+
+      const clientBundle = await fs.readFile(
+        path.join(root, ".farm", "client", "farm-client.js"),
+        "utf8",
+      );
+      expect(clientBundle).toContain("Minified React error");
+      expect(clientBundle).not.toContain("Download the React DevTools");
 
       const serverDir = path.join(root, ".farm", ".output", "server");
       const serverPackage = JSON.parse(
@@ -200,13 +266,440 @@ describe("production prebuilt SSR output", () => {
       ).resolves.toBe(true);
       await expect(readJavaScriptOutput(serverDir)).resolves.toContain("mergeVaryHeaders");
 
-      await fs.rm(path.join(root, ".farm", "ssr"), { recursive: true, force: true });
+      await fs.rm(path.join(root, ".farm", "ssr"), {
+        recursive: true,
+        force: true,
+      });
       await runProductionRequest(serverDir, async (response) => {
         expect(response.status).toBe(200);
+        expect(response.headers.get("x-production-header")).toBe("standalone");
+        expect(response.headers.get("cache-control")).toBe("private, no-store");
         await expect(response.text()).resolves.toContain("prebuilt SSR output");
+
+        const staticUrl = new URL("/static-page", response.url);
+        const staticResponse = await fetch(staticUrl);
+        expect(staticResponse.status).toBe(200);
+        expect(staticResponse.headers.get("content-type")).toContain("text/html");
+        expect(staticResponse.headers.get("cache-control")).toBe(
+          "public, max-age=0, must-revalidate",
+        );
+        expect(staticResponse.headers.get("x-production-header")).toBe("standalone");
+        const staticHtml = await staticResponse.text();
+        expect(staticHtml).toContain("static production page");
+
+        const authenticatedStaticResponse = await fetch(staticUrl, {
+          headers: { Authorization: "Bearer production-test" },
+        });
+        expect(authenticatedStaticResponse.status).toBe(200);
+        expect(authenticatedStaticResponse.headers.get("cache-control")).toBe(
+          "public, max-age=0, must-revalidate",
+        );
+        expect(authenticatedStaticResponse.headers.get("x-production-header")).toBe("standalone");
+        await expect(authenticatedStaticResponse.text()).resolves.toBe(staticHtml);
       });
+      await runProductionRequest(
+        serverDir,
+        async (response) => {
+          expect(response.status).toBe(308);
+          expect(response.headers.get("location")).toBe("/");
+          expect(response.headers.get("x-production-header")).toBe("standalone");
+        },
+        "/legacy-home",
+        { redirect: "manual" },
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("keeps standalone production API failures generic", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const failureApiDir = path.join(root, "src", "app", "api", "failure");
+      await fs.mkdir(failureApiDir, { recursive: true });
+      await fs.writeFile(
+        path.join(failureApiDir, "route.ts"),
+        `
+export async function GET() {
+  throw new Error("database-password-sentinel");
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "production-api-failure-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(500);
+          const body = await response.text();
+          expect(body).toContain("Internal Server Error");
+          expect(body).not.toContain("database-password-sentinel");
+        },
+        "/api/failure",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it.each([
+    { label: "React 18", useReact18: true },
+    { label: "React 19", useReact18: false },
+  ])(
+    "streams $label Suspense and renders the nearest route error boundary",
+    async ({ useReact18 }) => {
+      const root = await createProductionFixture();
+
+      try {
+        if (useReact18) await linkReact18(root);
+        const suspenseDir = path.join(root, "src", "app", "suspense");
+        const failureDir = path.join(root, "src", "app", "failure");
+        await fs.mkdir(suspenseDir, { recursive: true });
+        await fs.mkdir(failureDir, { recursive: true });
+        await fs.writeFile(
+          path.join(root, "src", "app", "layout.tsx"),
+          `
+export default function RootLayout({ children }) {
+  return <div data-layout="root">{children}</div>;
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(suspenseDir, "content.tsx"),
+          `
+export default function SuspenseContent() {
+  return <p data-suspense="ready">suspense-ready</p>;
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(suspenseDir, "page.tsx"),
+          `
+import React, { lazy, Suspense } from "react";
+
+const SuspenseContent = lazy(() =>
+  new Promise((resolve) => {
+    setTimeout(() => resolve(import("./content")), 750);
+  }),
+);
+
+export default function SuspensePage() {
+  const renderCount = (globalThis.__farmSuspensePageRenderCount || 0) + 1;
+  globalThis.__farmSuspensePageRenderCount = renderCount;
+
+  return (
+    <main data-page-render-count={renderCount}>
+      <Suspense fallback={<p>suspense-fallback</p>}>
+        <SuspenseContent />
+      </Suspense>
+    </main>
+  );
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(failureDir, "page.tsx"),
+          `
+import React, { lazy, Suspense } from "react";
+
+export const ppr = true;
+
+const LateFailure = lazy(() =>
+  new Promise((_, reject) => {
+    setTimeout(() => reject(new Error("intentional-production-failure")), 100);
+  }),
+);
+
+export default function FailurePage() {
+  return (
+    <Suspense fallback={<p>failure-loading</p>}>
+      <LateFailure />
+    </Suspense>
+  );
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(failureDir, "error.tsx"),
+          `
+export default function FailureBoundary({ error, path }) {
+  return (
+    <section data-error-boundary="route">
+      <h1>route-error-boundary</h1>
+      <p>{error.message}</p>
+      <p>{path}</p>
+    </section>
+  );
+}
+`.trim(),
+        );
+        await fs.writeFile(
+          path.join(root, "src", "farm.routes.tsx"),
+          `
+import { createRoute, defineRoutes, notFound, redirect } from "@farmjs/core";
+
+function ProgrammaticPending() {
+  return <p data-programmatic-pending="true">programmatic-data-pending</p>;
+}
+
+function ProgrammaticPage({ data }) {
+  return (
+    <p data-programmatic-ready="true" data-programmatic-count={data.count}>
+      programmatic-data-{data.message}
+    </p>
+  );
+}
+
+function ProgrammaticError({ error }) {
+  return <p data-programmatic-error="true">{error.message}</p>;
+}
+
+function ProgrammaticNotFound() {
+  return <p data-programmatic-not-found="true">programmatic-not-found</p>;
+}
+
+export const ProgrammaticPendingRoute = createRoute("/programmatic-pending", {
+  search: {
+    schema: { parse(value) { return value; } },
+    temporary: ["toast"],
+  },
+  data: {
+    async main() {
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      const count = ((globalThis as any).__farmProgrammaticPendingCount || 0) + 1;
+      (globalThis as any).__farmProgrammaticPendingCount = count;
+      return { message: "ready", count };
+    },
+  },
+  pending: ProgrammaticPending,
+  component: ProgrammaticPage,
+});
+
+export const ProgrammaticErrorRoute = createRoute("/programmatic-error", {
+  data: {
+    async main() {
+      await Promise.resolve();
+      throw new Error("programmatic-load-failed");
+    },
+  },
+  pending: ProgrammaticPending,
+  error: ProgrammaticError,
+  component: ProgrammaticPage,
+});
+
+export const ProgrammaticNotFoundRoute = createRoute("/programmatic-not-found", {
+  data: {
+    async main() {
+      await Promise.resolve();
+      notFound();
+    },
+  },
+  pending: ProgrammaticPending,
+  notFound: ProgrammaticNotFound,
+  component: ProgrammaticPage,
+});
+
+export const ProgrammaticRedirectRoute = createRoute("/programmatic-redirect", {
+  data: {
+    async main() {
+      await Promise.resolve();
+      redirect("/programmatic-pending");
+    },
+  },
+  pending: ProgrammaticPending,
+  component: ProgrammaticPage,
+});
+
+export default defineRoutes(() => [
+  ProgrammaticPendingRoute,
+  ProgrammaticErrorRoute,
+  ProgrammaticNotFoundRoute,
+  ProgrammaticRedirectRoute,
+]);
+`.trim(),
+        );
+
+        const config = await resolveConfig(
+          {
+            root,
+            srcDir: "src",
+            images: { provider: "none" },
+            generateBuildId: () => "production-boundaries-test",
+          },
+          "production",
+        );
+        await build(config, { root, preset: "node-server" });
+
+        const serverDir = path.join(root, ".farm", ".output", "server");
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            expect(response.headers.get("cache-control")).toBe("private, no-store");
+            expect(response.body).not.toBeNull();
+            const reader = response.body!.getReader();
+            const decoder = new TextDecoder();
+            let html = "";
+
+            while (!html.includes("suspense-fallback")) {
+              const chunk = await reader.read();
+              expect(chunk.done).toBe(false);
+              html += decoder.decode(chunk.value, { stream: true });
+            }
+
+            expect(html).not.toContain("suspense-ready");
+
+            while (true) {
+              const chunk = await reader.read();
+              if (chunk.done) break;
+              html += decoder.decode(chunk.value, { stream: true });
+            }
+            html += decoder.decode();
+            expect(html).toContain("suspense-ready");
+            expect(html).toContain('data-page-render-count="1"');
+            expect(html).not.toContain('data-page-render-count="2"');
+            expect(html).toContain('<link rel="modulepreload" href="/farm-client.js">');
+            expect(html).not.toContain("renderToString which does not support Suspense");
+          },
+          "/suspense",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(200);
+            const html = await response.text();
+            expect(html).toContain('data-programmatic-ready="true"');
+            expect(html).toContain('data-programmatic-count="1"');
+            expect(html).not.toContain("programmatic-data-pending");
+            expect(html).toContain("history.replaceState");
+            expect(html).not.toContain("toast=saved");
+          },
+          "/programmatic-pending?toast=saved",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(500);
+            expect(response.headers.get("cache-control")).toBe("private, no-store");
+            await expect(response.text()).resolves.toContain("programmatic-load-failed");
+          },
+          "/programmatic-error",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(404);
+            expect(response.headers.get("cache-control")).toBe("private, no-store");
+            await expect(response.text()).resolves.toContain("programmatic-not-found");
+          },
+          "/programmatic-not-found",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(307);
+            expect(response.headers.get("location")).toBe("/programmatic-pending");
+          },
+          "/programmatic-redirect",
+          { redirect: "manual" },
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(500);
+            expect(response.headers.get("cache-control")).toBe("private, no-store");
+            expect(response.headers.get("x-farm-ppr")).not.toBe("hit");
+            const html = await response.text();
+            expect(html).toContain('id="root"');
+            expect(html).toContain("route-error-boundary");
+            expect(html).toContain("intentional-production-failure");
+            expect(html).toContain("/failure");
+          },
+          "/failure",
+        );
+        await runProductionRequest(
+          serverDir,
+          async (response) => {
+            expect(response.status).toBe(500);
+            expect(response.headers.get("x-farm-ppr")).not.toBe("hit");
+            await expect(response.text()).resolves.toContain("route-error-boundary");
+          },
+          "/failure",
+        );
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it("boots an isolated Node output when runtime routes import the package root", async () => {
+    const root = await createProductionFixture();
+    const isolatedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-standalone-root-api-"));
+
+    try {
+      const apiDir = path.join(root, "src", "app", "api", "runtime");
+      await fs.mkdir(apiDir, { recursive: true });
+      await fs.writeFile(
+        path.join(apiDir, "route.ts"),
+        `
+import { createEndpoint } from "@farmjs/core";
+
+export const GET = createEndpoint(
+  "/api/runtime",
+  { method: "GET" },
+  () => ({ ok: true, source: "package-root" }),
+);
+`.trim(),
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          cron: {
+            runtimeProbe: {
+              schedule: "0 2 * * *",
+              path: "/api/runtime",
+            },
+          },
+          generateBuildId: () => "isolated-root-api-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const isolatedOutput = path.join(isolatedRoot, "output");
+      await fs.cp(path.join(root, ".farm", ".output"), isolatedOutput, {
+        recursive: true,
+      });
+      await fs.rm(root, { recursive: true, force: true });
+
+      await runProductionRequest(
+        path.join(isolatedOutput, "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await expect(response.json()).resolves.toEqual({
+            ok: true,
+            source: "package-root",
+          });
+        },
+        "/api/runtime",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(isolatedRoot, { recursive: true, force: true });
     }
   }, 120_000);
 
@@ -349,7 +842,9 @@ describe("production prebuilt SSR output", () => {
       await build(config, { root, preset: "node-server" });
 
       const isolatedOutput = path.join(isolatedRoot, "output");
-      await fs.cp(path.join(root, ".farm", ".output"), isolatedOutput, { recursive: true });
+      await fs.cp(path.join(root, ".farm", ".output"), isolatedOutput, {
+        recursive: true,
+      });
       await fs.rm(root, { recursive: true, force: true });
 
       const serverDir = path.join(isolatedOutput, "server");
@@ -361,7 +856,11 @@ describe("production prebuilt SSR output", () => {
         fs.access(path.join(serverDir, "node_modules", "sharp", "package.json")),
       ).resolves.toBeUndefined();
 
-      const query = new URLSearchParams({ url: "/product.png", w: "16", q: "75" });
+      const query = new URLSearchParams({
+        url: "/product.png",
+        w: "16",
+        q: "75",
+      });
       await runProductionRequest(
         serverDir,
         async (response) => {
@@ -552,7 +1051,9 @@ export default function Page() {
                       ...nitroConfig.hooks,
                       "rollup:before"(_nitro: unknown, rollupConfig: { plugins: unknown[] }) {
                         rollupHookCalls++;
-                        rollupConfig.plugins.push({ name: "late-rollup-hook-test" });
+                        rollupConfig.plugins.push({
+                          name: "late-rollup-hook-test",
+                        });
                       },
                     },
                   };
@@ -567,6 +1068,55 @@ export default function Page() {
 
       expect(rollupHookCalls).toBe(1);
       await expectNitroFallback(root);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("keeps platform-owned integration config out of Cloudflare runtime output", async () => {
+    const root = await createProductionFixture();
+    const runtimeMarker = "platform-owned-config-must-not-enter-worker";
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `
+import { defineConfig } from "@farmjs/core";
+
+export default defineConfig({
+  runtimeMarker: ${JSON.stringify(runtimeMarker)},
+});
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "platform-owned-cloudflare-test",
+          integrations: {
+            agent: defineIntegration({
+              category: "agent",
+              type: "platform-owned",
+              instance: {},
+              serverRuntime: false,
+            }),
+          },
+          deploy: {
+            target: "cloudflare",
+            preset: "cloudflare-module",
+          },
+        },
+        "production",
+      );
+      await build(config, { root, preset: "cloudflare-module" });
+
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).not.toContain(runtimeMarker);
+      expect(serverOutput).not.toContain("buildNitroUniversal");
+      expect(serverOutput).not.toContain('from"lightningcss"');
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }

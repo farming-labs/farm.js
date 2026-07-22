@@ -5,6 +5,8 @@ type VitePluginLike = {
   transform?: unknown;
 };
 
+type VitePluginHook = (...args: any[]) => any;
+
 /**
  * Tailwind 4.1 supports Farm's Node 18 baseline, but its Vite plugin resolves
  * against Farm's Vite 5 compatibility dependency. When that plugin runs in
@@ -24,7 +26,7 @@ function adaptPluginOption(pluginOption: unknown): unknown {
   const plugin = pluginOption as VitePluginLike;
   if (!plugin.name?.startsWith("@tailwindcss/vite:generate:")) return pluginOption;
 
-  if (typeof plugin.transform === "function") {
+  if (isVitePluginHook(plugin.transform)) {
     return {
       ...plugin,
       transform: withVite5TransformContext(plugin.transform),
@@ -35,7 +37,7 @@ function adaptPluginOption(pluginOption: unknown): unknown {
     plugin.transform &&
     typeof plugin.transform === "object" &&
     "handler" in plugin.transform &&
-    typeof plugin.transform.handler === "function"
+    isVitePluginHook(plugin.transform.handler)
   ) {
     return {
       ...plugin,
@@ -47,6 +49,10 @@ function adaptPluginOption(pluginOption: unknown): unknown {
   }
 
   return pluginOption;
+}
+
+function isVitePluginHook(value: unknown): value is VitePluginHook {
+  return typeof value === "function";
 }
 
 function withVite5TransformContext<T extends (...args: any[]) => any>(handler: T): T {

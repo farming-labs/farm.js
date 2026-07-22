@@ -135,6 +135,9 @@
       "internal/config-runtime": [
         "./dist/internal/config-runtime.d.ts"
       ],
+      "internal/production-node-env": [
+        "./dist/internal/production-node-env.d.ts"
+      ],
       "config": [
         "./dist/config.d.ts"
       ],
@@ -144,6 +147,12 @@
       ],
       "api/route-manager": [
         "./dist/api/route-manager.d.ts"
+      ],
+      "api/runtime": [
+        "./dist/api/runtime.d.ts"
+      ],
+      "request": [
+        "./dist/request.d.ts"
       ],
       "client": [
         "./types/client.d.ts",
@@ -358,6 +367,16 @@
       "import": "./dist/api/route-manager.mjs",
       "require": "./dist/api/route-manager.cjs"
     },
+    "./api/runtime": {
+      "types": "./dist/api/runtime.d.ts",
+      "import": "./dist/api/runtime.mjs",
+      "require": "./dist/api/runtime.cjs"
+    },
+    "./request": {
+      "types": "./dist/request.d.ts",
+      "import": "./dist/request.mjs",
+      "require": "./dist/request.cjs"
+    },
     "./router": {
       "types": "./dist/router.d.ts",
       "import": "./dist/router.mjs",
@@ -427,6 +446,11 @@
       "types": "./dist/internal/config-runtime.d.ts",
       "import": "./dist/internal/config-runtime.mjs",
       "require": "./dist/internal/config-runtime.cjs"
+    },
+    "./internal/production-node-env": {
+      "types": "./dist/internal/production-node-env.d.ts",
+      "import": "./dist/internal/production-node-env.mjs",
+      "require": "./dist/internal/production-node-env.cjs"
     }
   },
   "scripts": {
