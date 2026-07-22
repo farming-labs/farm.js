@@ -608,13 +608,13 @@ function BenchmarkAreaChart() {
                         opacity={isFarm ? "0.9" : "0.82"}
                         width="12"
                         x={tooltipX + 10}
-                        y={tooltipY + 11}
+                        y={tooltipY + 10.5}
                       />
                       <text
                         dominantBaseline="middle"
                         fill="currentColor"
                         fontFamily="var(--font-geist-mono, monospace)"
-                        fontSize="10"
+                        fontSize="9"
                         x={tooltipX + 32}
                         y={tooltipY + 17}
                       >
