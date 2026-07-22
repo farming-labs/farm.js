@@ -9,13 +9,7 @@ const benchmarkLinks = {
 
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
 type MetricKey = keyof FrameworkResult["metrics"];
-type ReportProvenance = {
-  inputs?: { readonly sha256: string };
-  methodology: { readonly burnInRounds?: number };
-  revision: { readonly workspaceDirty?: boolean };
-};
 
-const reportProvenance = benchmarkReport as typeof benchmarkReport & ReportProvenance;
 const farmResult = benchmarkReport.frameworks.find((framework) => framework.id === "farm");
 const competitorResults = benchmarkReport.frameworks.filter((framework) => framework.id !== "farm");
 const tanstackResult = benchmarkReport.frameworks.find((framework) => framework.id === "tanstack");
@@ -38,15 +32,6 @@ const chartMetrics = [
   ["productionResponseMs", "SSR"],
   ["responseBytes", "HTML"],
 ] as const satisfies readonly (readonly [MetricKey, string])[];
-
-function formatRunDate(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-    year: "numeric",
-  }).format(new Date(value));
-}
 
 function formatByteCount(bytes: number) {
   return bytes >= 1024 ? (bytes / 1024).toFixed(1) + " KB" : Math.round(bytes) + " B";
@@ -282,7 +267,7 @@ function LeadBand() {
         {wins.length}/{leadMetrics.length} Benchmark Leads
       </p>
       <p className="mx-auto mt-5 max-w-2xl text-center text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-        The uptime block becomes benchmark proof: Farm leads most measured production and dev
+        The uptime block becomes benchmark proof: Farm leads most tracked production and dev
         latency signals, with every raw sample linked.
       </p>
     </div>
@@ -367,7 +352,7 @@ function BenchmarkAreaChart() {
 
       <div className="pointer-events-none absolute right-6 top-6 z-10 hidden border border-white/12 bg-black/70 px-3 py-2 font-mono text-[9px] uppercase tracking-normal text-white/44 backdrop-blur sm:block">
         <span className="block text-white/68">X: benchmark set</span>
-        <span className="mt-1 block">Y: measured median / lower is better</span>
+        <span className="mt-1 block">Y: raw median / lower is better</span>
       </div>
 
       <div className="relative h-[40rem]">
@@ -697,13 +682,6 @@ export function BenchmarkSection() {
   const buildAdvantage = getAdvantageAgainst(tanstackResult, "buildMs");
   const devAdvantage = getAdvantageAgainst(tanstackResult, "devFirstPageMs");
   const bootAdvantage = getAdvantageAgainst(nextResult, "productionBootMs");
-  const runDate = formatRunDate(benchmarkReport.generatedAt);
-  const burnInRounds = reportProvenance.methodology.burnInRounds ?? 0;
-  const inputHash = reportProvenance.inputs?.sha256.slice(0, 12);
-  const revisionSuffix = benchmarkReport.revision.farmSourceDirty ? " + source changes" : "";
-  const workspaceSuffix = reportProvenance.revision.workspaceDirty
-    ? " · broader workspace dirty"
-    : "";
 
   return (
     <section
@@ -784,46 +762,6 @@ export function BenchmarkSection() {
       </div>
 
       <MetricStrip />
-
-      <div className="farm-top-rule grid gap-px bg-white/12 sm:grid-cols-2 lg:grid-cols-4">
-        {[
-          [
-            "Rounds",
-            String(benchmarkReport.methodology.runs) +
-              " measured" +
-              (burnInRounds ? " + " + burnInRounds + " burn-in" : ""),
-          ],
-          ["Machine", benchmarkReport.system.cpu + " / " + benchmarkReport.system.memoryGb + " GB"],
-          ["Runtime", "Node " + benchmarkReport.system.node],
-          ["Measured", runDate],
-        ].map(([label, value]) => (
-          <div key={label} className="bg-black px-5 py-4">
-            <span className="block font-mono text-[8px] font-normal uppercase tracking-normal text-white/48">
-              {label}
-            </span>
-            <span className="mt-1 block font-mono text-[10px] font-normal uppercase tracking-normal text-white/62">
-              {value}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="farm-top-rule flex flex-col gap-3 px-5 py-4 font-mono text-[9px] font-normal uppercase leading-4 tracking-normal text-white/52 lg:flex-row lg:items-start lg:justify-between">
-        <p className="max-w-4xl">
-          Synthetic local-loopback baseline, not a universal ranking. It excludes browser render,
-          hydration, HMR, network, hosted availability, and real production-app behavior. Generated
-          framework caches were cleared while the OS cache stayed warm
-          {burnInRounds ? "; the burn-in round was discarded" : ""}.
-        </p>
-        <p className="shrink-0 text-white/48 lg:text-right">
-          <span className="block">
-            Farm {benchmarkReport.revision.commit}
-            {revisionSuffix}
-            {workspaceSuffix}
-          </span>
-          {inputHash ? <span className="block">Input SHA {inputHash}</span> : null}
-        </p>
-      </div>
     </section>
   );
 }
