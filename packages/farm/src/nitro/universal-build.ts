@@ -683,8 +683,29 @@ export async function buildUniversal(
     if (routeRuntimeManifestResult.status === "rejected") {
       throw routeRuntimeManifestResult.reason;
     }
-    if (clientBuildResult.status === "rejected") throw clientBuildResult.reason;
     if (ssrBuildResult.status === "rejected") throw ssrBuildResult.reason;
+    if (clientBuildResult.status === "rejected") {
+      if (
+        productionVite.builder !== "rolldown" ||
+        !(clientBuildResult.reason instanceof IncompleteClientBuildOutputError)
+      ) {
+        throw clientBuildResult.reason;
+      }
+
+      // Rolldown can very rarely complete a parallel client build without
+      // traversing its entry graph. Preserve the fast parallel path, then
+      // recover only that invalid result once the SSR graph is fully drained.
+      logger.warn("Client bundle was incomplete; retrying after the SSR build...");
+      await buildClient(
+        productionVite,
+        config,
+        root,
+        srcDir,
+        clientOutputDir,
+        pageRoutes,
+        layoutRoutes,
+      );
+    }
 
     const ssrResult = ssrBuildResult.value;
     const routeRuntimeManifest = routeRuntimeManifestResult.value;
@@ -746,6 +767,60 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
     const filePath = path.join(outputDir, fileName);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, output.source);
+  }
+}
+
+class IncompleteClientBuildOutputError extends Error {
+  constructor(detail: string) {
+    super(`Farm client build produced incomplete output: ${detail}`);
+    this.name = "IncompleteClientBuildOutputError";
+  }
+}
+
+async function validateClientBuildOutput(
+  root: string,
+  srcDir: string,
+  outputDir: string,
+): Promise<void> {
+  const fs = await import("fs/promises");
+  const clientEntryPath = path.join(outputDir, "farm-client.js");
+  let clientEntrySize = 0;
+
+  try {
+    const clientEntry = await fs.stat(clientEntryPath);
+    if (clientEntry.isFile()) clientEntrySize = clientEntry.size;
+  } catch {
+    // Report the missing entry through the shared incomplete-output diagnostic.
+  }
+
+  if (clientEntrySize === 0) {
+    throw new IncompleteClientBuildOutputError("farm-client.js is missing or empty");
+  }
+
+  const clientCssPath = path.join(outputDir, "farm-client.css");
+  const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
+  let expectsCss = false;
+  try {
+    const globalsCss = await fs.readFile(globalsCssPath, "utf8");
+    expectsCss = globalsCss.replace(/\/\*[\s\S]*?\*\//g, "").trim().length > 0;
+  } catch {
+    // Vite reports a missing imported stylesheet before output validation.
+  }
+
+  try {
+    const clientCss = await fs.stat(clientCssPath);
+    if (expectsCss && (!clientCss.isFile() || clientCss.size === 0)) {
+      throw new IncompleteClientBuildOutputError("farm-client.css is empty");
+    }
+  } catch (error) {
+    if (error instanceof IncompleteClientBuildOutputError) throw error;
+    if (expectsCss) {
+      throw new IncompleteClientBuildOutputError("farm-client.css is missing");
+    }
+
+    // Farm's HTML always references this stable path. Keep intentionally
+    // style-free applications from receiving an unnecessary 404.
+    await fs.writeFile(clientCssPath, "");
   }
 }
 
@@ -1003,6 +1078,7 @@ async function buildClient(
         ],
       },
     });
+    await validateClientBuildOutput(root, srcDir, outputDir);
   } finally {
     // Clean up temporary entry file
     try {
