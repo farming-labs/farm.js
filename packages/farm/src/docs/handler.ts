@@ -1863,6 +1863,8 @@ export function createFarmDocsHandler(
   docs: FarmDocsResolvedConfig | undefined,
   options: FarmDocsHandlerOptions,
 ) {
+  const faviconHref = resolveFarmDocsFavicon(options);
+
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
 
@@ -1900,7 +1902,7 @@ export function createFarmDocsHandler(
         docs,
         resolvePixelBorderThemeCss(options),
         options.clientEntry || "/farm-client.js",
-        resolveFarmDocsFavicon(options),
+        faviconHref,
       ),
       {
         status: 200,
