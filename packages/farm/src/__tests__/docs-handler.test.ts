@@ -63,8 +63,14 @@ describe("createFarmDocsHandler", () => {
   async function createDocsFixture() {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-handler-"));
     const docsDir = path.join(root, "src", "app", "docs");
+    const publicDir = path.join(root, "public");
     await fs.mkdir(path.join(docsDir, "guide"), { recursive: true });
     await fs.mkdir(path.join(docsDir, "integrations", "stripe"), { recursive: true });
+    await fs.mkdir(publicDir, { recursive: true });
+    await fs.writeFile(
+      path.join(publicDir, "favicon.svg"),
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"></svg>',
+    );
     await fs.writeFile(
       path.join(docsDir, "page.md"),
       [
@@ -203,6 +209,7 @@ describe("createFarmDocsHandler", () => {
     expect(response?.headers.get("content-type")).toContain("text/html");
     const html = await response?.text();
     const htmlText = html || "";
+    expect(html).toContain('<link rel="icon" href="/favicon.svg">');
     expect(html).toContain('data-docs-theme="farm-docs"');
     expect(html).toContain('id="nd-docs-layout"');
     expect(html).toContain('id="nd-toc"');
@@ -263,8 +270,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("max(10px, env(safe-area-inset-bottom))");
     expect(html).toContain("width: 56px");
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
-    expect(html).toContain("width: min(680px, calc(100vw - 32px))");
-    expect(html).toContain("width: calc(100vw - 20px)");
+    expect(html).toContain("width: min(720px, calc(100vw - 32px))");
+    expect(html).toContain("width: calc(100vw - 16px)");
     expect(html).toContain(".omni-overlay {\n  position: fixed;");
     expect(html).toContain(".omni-content {\n  --omni-content-top:");
     expect(html).toContain(".omni-footer-hints {");
@@ -386,6 +393,21 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("uses the built-in docs favicon when the project does not provide one", async () => {
+    const { root, docs } = await createDocsFixture();
+    await fs.unlink(path.join(root, "public", "favicon.svg"));
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const response = await handler(
+      new Request("http://farm.test/docs", {
+        headers: { accept: "text/html" },
+      }),
+    );
+    const html = await response?.text();
+
+    expect(html).toContain('<link rel="icon" href="data:image/svg+xml,');
   });
 
   it("hides the search interface and shortcut when docs search is disabled", async () => {
