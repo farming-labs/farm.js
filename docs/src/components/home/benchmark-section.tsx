@@ -425,7 +425,7 @@ function BenchmarkAreaChart() {
             /
           </span>
           <Activity aria-hidden className="size-4" strokeWidth={1.5} />
-          Benchmark monitor
+          Benchmark
         </span>
 
         <p className="my-6 text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
