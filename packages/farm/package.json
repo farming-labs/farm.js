@@ -455,6 +455,7 @@
   },
   "scripts": {
     "build": "tsup",
+    "build:runtime": "tsup --config tsup.runtime.config.ts",
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:coverage": "vitest --coverage",

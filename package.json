@@ -25,7 +25,7 @@
     "test:e2e:rsc": "corepack pnpm --filter @farmjs/core build && corepack pnpm --filter @farmjs/plugin build && FARM_SKIP_NPM_INSTALL=1 NITRO_PRESET=node-server corepack pnpm --filter farm-rsc-demo build && playwright test --config playwright.rsc.config.ts",
     "test:e2e:list": "playwright test --list",
     "docs:dev": "pnpm --filter @farmjs/core build && pnpm --filter farmjs-docs dev",
-    "docs:build": "pnpm --filter @farmjs/core build && pnpm --filter farmjs-docs build",
+    "docs:build": "pnpm --filter farmjs-docs build",
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "lint": "oxlint . && oxfmt --check .",
     "format": "oxlint --fix . && oxfmt .",
