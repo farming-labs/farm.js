@@ -697,6 +697,36 @@
   overflow: visible;
 }
 
+.benchmark-comparison-rotator {
+  position: relative;
+}
+
+.benchmark-comparison-item {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translate3d(0, 68%, 0);
+  will-change: opacity, transform;
+  animation: benchmark-comparison-cycle 12s cubic-bezier(0.22, 1, 0.36, 1)
+    infinite;
+}
+
+.benchmark-comparison-item:nth-child(1) {
+  animation-delay: -0.3s;
+}
+
+.benchmark-comparison-item:nth-child(2) {
+  animation-delay: 2.7s;
+}
+
+.benchmark-comparison-item:nth-child(3) {
+  animation-delay: 5.7s;
+}
+
+.benchmark-comparison-item:nth-child(4) {
+  animation-delay: 8.7s;
+}
+
 .benchmark-startup-top,
 .benchmark-startup-page,
 .benchmark-build-module,
@@ -733,6 +763,25 @@
 .benchmark-build-output {
   animation: benchmark-illustration-lift 10s ease-in-out infinite;
   animation-delay: -2.5s;
+}
+
+@keyframes benchmark-comparison-cycle {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 68%, 0);
+  }
+
+  2.5%,
+  22% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+
+  25%,
+  100% {
+    opacity: 0;
+    transform: translate3d(0, -58%, 0);
+  }
 }
 
 @keyframes benchmark-illustration-lift {
@@ -831,6 +880,16 @@
   .benchmark-build-output {
     animation: none;
     transform: none;
+  }
+
+  .benchmark-comparison-item {
+    animation: none;
+    opacity: 0;
+    transform: none;
+  }
+
+  .benchmark-comparison-item:first-child {
+    opacity: 1;
   }
 
   .farm-hero-title-frame-border,

@@ -1,10 +1,4 @@
-import {
-  Activity,
-  ExternalLink,
-  Gauge,
-  Rocket,
-  TimerReset,
-} from "lucide-react";
+import { Activity, Rocket, TimerReset } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
 import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
@@ -15,13 +9,6 @@ import {
   formatBenchmarkDuration,
 } from "../../lib/framework-benchmark";
 
-const benchmarkLinks = {
-  methodology:
-    "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/README.md",
-  results:
-    "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/results/latest.json",
-} as const;
-
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
 type MetricKey = keyof FrameworkResult["metrics"];
 
@@ -30,9 +17,6 @@ const farmResult = benchmarkReport.frameworks.find(
 );
 const competitorResults = benchmarkReport.frameworks.filter(
   (framework) => framework.id !== "farm",
-);
-const tanstackResult = benchmarkReport.frameworks.find(
-  (framework) => framework.id === "tanstack",
 );
 const frameworkIconUrls = {
   farm: "/favicon.svg",
@@ -203,35 +187,6 @@ function getColumnRangeLabel(key: MetricKey) {
   return `${formatMetricValue(key, minimum)} → ${formatMetricValue(key, maximum)}`;
 }
 
-function BenchmarkIndexLabel() {
-  return (
-    <span className="flex items-center gap-1.5 font-mono text-[10px] font-normal uppercase tracking-normal text-current">
-      <span className="text-white/44">01.5</span>
-      <span aria-hidden className="text-white/18">
-        /
-      </span>
-      <Gauge aria-hidden className="size-3.5" strokeWidth={1.5} />
-      <span>Benchmarks</span>
-    </span>
-  );
-}
-
-function BenchmarkLink({ href, children }: { href: string; children: string }) {
-  return (
-    <a
-      className="group inline-flex min-h-9 items-center gap-1.5 border border-white/12 px-3 font-mono text-[9px] font-normal uppercase tracking-normal text-white/52 transition-[background-color,border-color,color] duration-150 hover:border-white/24 hover:bg-white/[0.045] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-      href={href}
-    >
-      {children}
-      <ExternalLink
-        aria-hidden
-        className="size-3 text-white/30 transition-colors group-hover:text-white/72"
-        strokeWidth={1.5}
-      />
-    </a>
-  );
-}
-
 function ComparisonPanel({
   description,
   icon: Icon,
@@ -247,18 +202,18 @@ function ComparisonPanel({
   }>;
   illustration: ReactNode;
   label: string;
-  title: string;
+  title: ReactNode;
 }) {
   return (
-    <article className="flex min-h-[36rem] flex-col bg-black p-6 sm:min-h-[39rem] sm:p-8 lg:p-10">
+    <article className="flex min-h-[30rem] flex-col bg-black p-6 sm:min-h-[32rem] sm:p-8 lg:p-10">
       <span className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/46">
         <Icon aria-hidden className="size-4" strokeWidth={1.5} />
         {label}
       </span>
       {illustration}
-      <p className="mt-5 max-w-lg text-2xl font-medium leading-tight tracking-normal text-white sm:mt-7 sm:text-3xl">
+      <h3 className="mt-4 max-w-xl text-2xl font-medium leading-tight tracking-normal text-white sm:mt-5 sm:text-3xl">
         {title}
-      </p>
+      </h3>
       <p className="mt-3 max-w-md text-sm leading-6 text-white/42">
         {description}
       </p>
@@ -266,11 +221,51 @@ function ComparisonPanel({
   );
 }
 
+function AnimatedComparisonTitle({
+  lead,
+  metric,
+}: {
+  lead: string;
+  metric: MetricKey;
+}) {
+  const comparisons = competitorResults.map((framework) => ({
+    framework,
+    ratio: getAdvantageAgainst(framework, metric),
+  }));
+  const accessibleComparison = comparisons
+    .map(
+      ({ framework, ratio }) =>
+        `${formatRatio(ratio)} faster than ${framework.label}`,
+    )
+    .join("; ");
+
+  return (
+    <>
+      <span className="sr-only">
+        {lead}: {accessibleComparison}.
+      </span>
+      <span aria-hidden className="block">
+        {lead}
+      </span>
+      <span
+        aria-hidden
+        className="benchmark-comparison-rotator mt-1 block h-[2.4em] overflow-hidden text-white/72 sm:h-[1.25em]"
+      >
+        {comparisons.map(({ framework, ratio }) => (
+          <span key={framework.id} className="benchmark-comparison-item block">
+            {formatRatio(ratio)} faster than {framework.label}.
+          </span>
+        ))}
+      </span>
+    </>
+  );
+}
+
 function StartupIllustration() {
   return (
     <div
       aria-hidden
-      className="benchmark-illustration relative mt-5 flex h-60 items-center justify-center sm:h-64"
+      className="benchmark-illustration relative mt-4 flex h-52 items-center justify-center sm:h-56"
     >
       <svg
         className="h-full w-full max-w-[28rem] text-white"
@@ -382,7 +377,7 @@ function BuildIllustration() {
   return (
     <div
       aria-hidden
-      className="benchmark-illustration relative mt-5 flex h-60 items-center justify-center sm:h-64"
+      className="benchmark-illustration relative mt-4 flex h-52 items-center justify-center sm:h-56"
     >
       <svg
         className="h-full w-full max-w-[28rem] text-white"
@@ -945,61 +940,28 @@ function MetricStrip() {
 }
 
 export function BenchmarkSection() {
-  const firstDevPage = farmResult
-    ? formatBenchmarkDuration(farmResult.metrics.devFirstPageMs.median)
-    : "—";
-  const buildAdvantage = getAdvantageAgainst(tanstackResult, "buildMs");
-  const devAdvantage = getAdvantageAgainst(tanstackResult, "devFirstPageMs");
-
   return (
     <section
       aria-labelledby="framework-benchmark-title"
       className="farm-full-rule w-full"
       id="benchmarks"
     >
-      <div className="grid w-full lg:grid-cols-[14rem_minmax(0,1fr)]">
-        <div className="flex items-start border-b border-white/12 p-6 text-white/52 sm:px-6 sm:py-8 lg:border-b-0 lg:border-r">
-          <BenchmarkIndexLabel />
-        </div>
+      <h2 className="sr-only" id="framework-benchmark-title">
+        Framework benchmarks
+      </h2>
 
-        <div className="px-6 py-10 sm:px-10 sm:py-12 lg:px-12">
-          <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-            <div className="max-w-3xl">
-              <p className="font-mono text-[10px] font-normal uppercase tracking-normal text-white/52">
-                Benchmark proof
-              </p>
-              <h2
-                className="mt-4 text-balance text-3xl font-medium leading-[1.06] tracking-normal text-white sm:text-4xl"
-                id="framework-benchmark-title"
-              >
-                Farm reaches the first rendered dev page in {firstDevPage}
-              </h2>
-              <p className="mt-5 max-w-2xl text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-                The benchmark is a real project built with each framework, not a
-                framework package compile. It runs the same dynamic SSR fixture
-                across Farm.js, Next.js, SvelteKit, Nuxt, and TanStack Start.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2 lg:justify-end">
-              <BenchmarkLink href={benchmarkLinks.methodology}>
-                Methodology
-              </BenchmarkLink>
-              <BenchmarkLink href={benchmarkLinks.results}>
-                Raw samples
-              </BenchmarkLink>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="farm-top-rule grid bg-black lg:grid-cols-2">
+      <div className="grid bg-black lg:grid-cols-2">
         <ComparisonPanel
           description="Cold dev startup through the first rendered SSR page, measured against the same routed fixture."
           icon={Rocket}
           illustration={<StartupIllustration />}
           label="Startup advantage"
-          title={`Farm opens the benchmark app ${formatRatio(devAdvantage)} faster than TanStack Start.`}
+          title={
+            <AnimatedComparisonTitle
+              lead="Farm opens the benchmark app"
+              metric="devFirstPageMs"
+            />
+          }
         />
         <div className="border-t border-white/12 lg:border-l lg:border-t-0">
           <ComparisonPanel
@@ -1007,7 +969,12 @@ export function BenchmarkSection() {
             icon={TimerReset}
             illustration={<BuildIllustration />}
             label="Production build"
-            title={`Farm builds the same fixture ${formatRatio(buildAdvantage)} faster than TanStack Start.`}
+            title={
+              <AnimatedComparisonTitle
+                lead="Farm builds the same fixture"
+                metric="buildMs"
+              />
+            }
           />
         </div>
 
