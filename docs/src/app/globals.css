@@ -697,126 +697,74 @@
   overflow: visible;
 }
 
-.benchmark-startup-source,
-.benchmark-startup-target,
-.benchmark-rendered-page,
-.benchmark-build-source,
-.benchmark-build-target,
-.benchmark-illustration-pulse {
+.benchmark-startup-top,
+.benchmark-startup-page,
+.benchmark-build-module,
+.benchmark-build-output {
   transform-box: fill-box;
   transform-origin: center;
   will-change: opacity, transform;
 }
 
-.benchmark-startup-source {
-  animation: benchmark-illustration-float 6.8s ease-in-out infinite;
+.benchmark-startup-top {
+  animation: benchmark-illustration-lift 9s ease-in-out infinite;
 }
 
-.benchmark-startup-target {
-  animation: benchmark-illustration-settle 6.8s ease-in-out infinite;
+.benchmark-startup-page {
+  animation: benchmark-illustration-reveal 9s ease-in-out infinite;
 }
 
-.benchmark-rendered-page {
-  animation: benchmark-illustration-reveal 6.8s ease-in-out infinite;
+.benchmark-build-module {
+  animation: benchmark-illustration-drift 10s ease-in-out infinite;
 }
 
-.benchmark-build-source {
-  animation: benchmark-illustration-float 7.2s ease-in-out infinite;
+.benchmark-build-module--back {
+  animation-delay: -1.5s;
 }
 
-.benchmark-build-source--one {
-  animation-delay: -1.2s;
+.benchmark-build-module--left {
+  animation-delay: -4s;
 }
 
-.benchmark-build-source--two {
-  animation-delay: -3.6s;
+.benchmark-build-module--right {
+  animation-delay: -6.5s;
 }
 
-.benchmark-build-source--three {
-  animation-delay: -5.4s;
+.benchmark-build-output {
+  animation: benchmark-illustration-lift 10s ease-in-out infinite;
+  animation-delay: -2.5s;
 }
 
-.benchmark-build-target {
-  animation: benchmark-illustration-settle 7.2s ease-in-out infinite;
-  animation-delay: -2.4s;
-}
-
-.benchmark-illustration-flow {
-  animation: benchmark-illustration-flow 3.8s linear infinite;
-  will-change: stroke-dashoffset;
-}
-
-.benchmark-illustration-flow--slow {
-  animation-duration: 5.6s;
-}
-
-.benchmark-illustration-pulse {
-  animation: benchmark-illustration-pulse 3.8s ease-in-out infinite;
-}
-
-.benchmark-illustration-pulse--delayed {
-  animation-delay: -1.4s;
-}
-
-@keyframes benchmark-illustration-float {
+@keyframes benchmark-illustration-lift {
   0%,
   100% {
     transform: translate3d(0, 0, 0);
   }
 
   50% {
-    transform: translate3d(0, -3px, 0);
+    transform: translate3d(0, -2px, 0);
   }
 }
 
-@keyframes benchmark-illustration-settle {
+@keyframes benchmark-illustration-drift {
   0%,
   100% {
     transform: translate3d(0, 0, 0);
   }
 
   50% {
-    transform: translate3d(1px, -2px, 0);
-  }
-}
-
-@keyframes benchmark-illustration-flow {
-  to {
-    stroke-dashoffset: -44;
-  }
-}
-
-@keyframes benchmark-illustration-pulse {
-  0%,
-  52%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.76);
-  }
-
-  66% {
-    opacity: 1;
-    transform: scale(1.2);
-  }
-
-  78% {
-    opacity: 0.62;
-    transform: scale(1);
+    transform: translate3d(0, -1.5px, 0);
   }
 }
 
 @keyframes benchmark-illustration-reveal {
   0%,
-  14%,
   100% {
-    opacity: 0.58;
-    transform: translate3d(-2px, -1px, 0);
+    opacity: 0.68;
   }
 
-  30%,
-  80% {
+  50% {
     opacity: 1;
-    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -877,13 +825,10 @@
     display: none;
   }
 
-  .benchmark-startup-source,
-  .benchmark-startup-target,
-  .benchmark-rendered-page,
-  .benchmark-build-source,
-  .benchmark-build-target,
-  .benchmark-illustration-flow,
-  .benchmark-illustration-pulse {
+  .benchmark-startup-top,
+  .benchmark-startup-page,
+  .benchmark-build-module,
+  .benchmark-build-output {
     animation: none;
     transform: none;
   }
