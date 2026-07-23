@@ -12,6 +12,8 @@ build/
 out/
 .farm/
 **/.farm/
+.nitro/
+**/.nitro/
 **/src/.farm-client-entry.tsx
 **/.eve/
 **/.output/
@@ -48,6 +50,11 @@ pids
 coverage/
 *.lcov
 test-run.log
+
+# Browser test output
+playwright-report/
+test-results/
+blob-report/
 
 # nyc test coverage
 .nyc_output
@@ -109,5 +116,3 @@ Thumbs.db
 
 # Turbo
 .turbo/
-
-.vercel
