@@ -1,6 +1,6 @@
-import { defineConfig } from "tsup";
+import { defineConfig, type Options } from "tsup";
 
-export default defineConfig({
+export const farmPackageBuildOptions = {
   entry: {
     index: "src/index.ts",
     server: "src/server.ts",
@@ -80,4 +80,6 @@ export default defineConfig({
   outExtension({ format }) {
     return { js: format === "cjs" ? ".cjs" : ".mjs" };
   },
-});
+} satisfies Options;
+
+export default defineConfig(farmPackageBuildOptions);
