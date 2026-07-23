@@ -974,7 +974,7 @@ export function BenchmarkSection() {
           label="Startup advantage"
           title={
             <AnimatedComparisonTitle
-              lead="Farm opens the benchmark app"
+              lead="Farm gets your first page running"
               metric="devFirstPageMs"
             />
           }
