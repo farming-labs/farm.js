@@ -927,34 +927,37 @@ code:not(pre code) {
 
 .omni-overlay {
   z-index: 100;
-  background: color-mix(in srgb, var(--color-fd-background) 76%, transparent);
-  backdrop-filter: blur(6px);
+  background: color-mix(in srgb, var(--color-fd-background) 68%, transparent);
+  backdrop-filter: blur(8px);
 }
 
 .omni-content {
-  --omni-content-top: clamp(72px, 14vh, 112px);
+  --omni-content-top: clamp(72px, 13vh, 104px);
   z-index: 101;
-  width: min(680px, calc(100vw - 32px));
-  max-height: min(640px, calc(100dvh - var(--omni-content-top) - 24px));
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(680px, calc(100dvh - var(--omni-content-top) - 24px));
   overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--color-fd-foreground) 18%, transparent);
-  background: color-mix(in srgb, var(--color-fd-background) 96%, var(--color-fd-card));
+  border: 1px solid color-mix(in srgb, var(--color-fd-foreground) 20%, transparent);
+  background: color-mix(in srgb, var(--color-fd-background) 93%, var(--color-fd-card));
   box-shadow:
-    3px 3px 0 color-mix(in srgb, var(--color-fd-foreground) 10%, transparent),
-    0 24px 80px color-mix(in srgb, #000 48%, transparent);
+    4px 4px 0 color-mix(in srgb, var(--color-fd-foreground) 11%, transparent),
+    0 28px 88px color-mix(in srgb, #000 58%, transparent);
   font-family: var(--fd-docs-font-sans);
 }
 
 .omni-header {
   flex: 0 0 auto;
+  padding: 8px;
   border-bottom-color: color-mix(in srgb, var(--color-fd-foreground) 12%, transparent);
-  background: color-mix(in srgb, var(--color-fd-foreground) 2%, transparent);
+  background: color-mix(in srgb, var(--color-fd-foreground) 1.5%, transparent);
 }
 
 .omni-search-row {
-  min-height: 54px;
+  min-height: 50px;
   gap: 10px;
-  padding: 0 14px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--color-fd-foreground) 11%, transparent);
+  background: color-mix(in srgb, var(--color-fd-foreground) 3%, transparent);
 }
 
 .omni-search-icon {
@@ -963,9 +966,9 @@ code:not(pre code) {
 }
 
 .omni-search-icon svg {
-  width: 17px;
-  height: 17px;
-  stroke-width: 1.8;
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.6;
 }
 
 .omni-search-input {
@@ -975,18 +978,19 @@ code:not(pre code) {
   font-family: var(--fd-docs-font-sans);
   font-size: 15px;
   line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .omni-close-btn {
-  min-width: 38px;
+  min-width: 40px;
   height: 24px;
   flex: 0 0 auto;
-  border-color: color-mix(in srgb, var(--color-fd-foreground) 14%, transparent);
-  background: color-mix(in srgb, var(--color-fd-foreground) 4%, transparent);
+  border-color: color-mix(in srgb, var(--color-fd-foreground) 13%, transparent);
+  background: var(--color-fd-background);
   padding: 0 7px;
   font-family: var(--fd-docs-font-mono);
   font-size: 9px;
-  letter-spacing: 0;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
@@ -1006,54 +1010,69 @@ code:not(pre code) {
 }
 
 .omni-body {
-  min-height: 168px;
+  min-height: 184px;
   max-height: none;
-  padding: 6px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--color-fd-background) 97%, var(--color-fd-card));
   scrollbar-gutter: stable;
 }
 
 .omni-group + .omni-group {
-  margin-top: 4px;
+  margin-top: 8px;
   border-top: 1px solid color-mix(in srgb, var(--color-fd-foreground) 8%, transparent);
-  padding-top: 4px;
+  padding-top: 8px;
 }
 
 .omni-group-label {
   display: block;
-  padding: 7px 8px 5px;
+  padding: 2px 8px 8px;
   color: color-mix(in srgb, var(--color-fd-foreground) 45%, transparent);
   font-family: var(--fd-docs-font-mono);
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.08em;
-  line-height: 1;
+  letter-spacing: 0.1em;
+  line-height: 1rem;
   text-transform: uppercase;
 }
 
 .omni-group-items {
-  gap: 2px;
+  gap: 4px;
 }
 
 .omni-item {
-  min-height: 54px;
-  border-left: 2px solid transparent;
-  padding: 9px 10px;
+  min-height: 62px;
+  border: 1px solid transparent;
+  border-left-width: 2px;
+  padding: 10px 12px;
   color: var(--color-fd-foreground);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    transform 120ms ease;
 }
 
 .omni-item:hover,
 .omni-item-active {
   border-left-color: color-mix(in srgb, var(--color-fd-foreground) 72%, transparent);
-  background: color-mix(in srgb, var(--color-fd-foreground) 7%, transparent);
+  border-top-color: color-mix(in srgb, var(--color-fd-foreground) 9%, transparent);
+  border-right-color: color-mix(in srgb, var(--color-fd-foreground) 9%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--color-fd-foreground) 9%, transparent);
+  background: color-mix(in srgb, var(--color-fd-foreground) 7.5%, transparent);
   color: var(--color-fd-foreground);
 }
 
+.omni-item:active {
+  transform: translateY(1px);
+}
+
 .omni-item-subtitle {
-  margin-bottom: 3px;
+  margin-bottom: 4px;
   color: color-mix(in srgb, var(--color-fd-foreground) 44%, transparent);
   font-family: var(--fd-docs-font-mono);
   font-size: 10px;
-  line-height: 1.3;
+  line-height: 1.4;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
 }
 
 .omni-item-active .omni-item-subtitle {
@@ -1062,19 +1081,22 @@ code:not(pre code) {
 
 .omni-item-label {
   color: var(--color-fd-foreground);
-  font-size: 13px;
-  font-weight: 520;
+  font-family: var(--fd-docs-font-sans);
+  font-size: 14px;
+  font-weight: 560;
   line-height: 1.4;
+  letter-spacing: -0.01em;
 }
 
 .omni-item-description {
   -webkit-line-clamp: 2;
-  margin-top: 4px;
+  margin-top: 5px;
   border-left: 0;
   padding-left: 0;
-  color: color-mix(in srgb, var(--color-fd-foreground) 60%, transparent);
-  font-size: 12px;
-  line-height: 1.45;
+  color: color-mix(in srgb, var(--color-fd-foreground) 55%, transparent);
+  font-family: var(--fd-docs-font-sans);
+  font-size: 12.5px;
+  line-height: 1.5;
 }
 
 .omni-highlight {
@@ -1085,7 +1107,7 @@ code:not(pre code) {
 
 .omni-loading,
 .omni-empty {
-  min-height: 168px;
+  min-height: 184px;
   align-items: center;
   justify-content: center;
 }
@@ -1097,28 +1119,35 @@ code:not(pre code) {
 .omni-empty {
   display: flex;
   flex-direction: column;
-  padding: 36px 24px;
+  padding: 32px 24px;
+  color: color-mix(in srgb, var(--color-fd-foreground) 52%, transparent);
+  font-family: var(--fd-docs-font-sans);
+  font-size: 13px;
   line-height: 1.5;
 }
 
 .omni-empty-icon {
   width: 34px;
   height: 34px;
+  margin-bottom: 12px;
   border: 1px solid color-mix(in srgb, var(--color-fd-foreground) 12%, transparent);
-  background: transparent;
+  background: color-mix(in srgb, var(--color-fd-foreground) 3%, transparent);
+  color: color-mix(in srgb, var(--color-fd-foreground) 56%, transparent);
 }
 
 .omni-footer {
   flex: 0 0 auto;
   border-top-color: color-mix(in srgb, var(--color-fd-foreground) 10%, transparent);
-  background: color-mix(in srgb, var(--color-fd-foreground) 2%, transparent);
+  background: color-mix(in srgb, var(--color-fd-foreground) 1.5%, transparent);
 }
 
 .omni-footer-inner {
-  min-height: 40px;
+  min-height: 42px;
   gap: 12px;
-  padding: 0 12px;
+  padding: 0 14px;
+  color: color-mix(in srgb, var(--color-fd-foreground) 46%, transparent);
   font-size: 10px;
+  letter-spacing: 0.025em;
 }
 
 .omni-footer-hints {
@@ -1129,7 +1158,7 @@ code:not(pre code) {
   width: 18px;
   height: 18px;
   border-color: color-mix(in srgb, var(--color-fd-foreground) 12%, transparent);
-  background: color-mix(in srgb, var(--color-fd-foreground) 4%, transparent);
+  background: color-mix(in srgb, var(--color-fd-foreground) 3%, transparent);
   padding: 3px;
 }
 
@@ -1137,7 +1166,7 @@ code:not(pre code) {
   min-height: 24px;
   gap: 5px;
   border: 1px solid color-mix(in srgb, var(--color-fd-foreground) 12%, transparent);
-  background: color-mix(in srgb, var(--color-fd-foreground) 4%, transparent);
+  background: var(--color-fd-background);
   padding: 0 7px;
 }
 
@@ -1152,7 +1181,7 @@ code:not(pre code) {
   border-color: color-mix(in srgb, var(--color-fd-foreground) 16%, transparent);
   background: var(--color-fd-background);
   padding: 4px;
-  box-shadow: 2px 2px 0 color-mix(in srgb, var(--color-fd-foreground) 10%, transparent);
+  box-shadow: 4px 4px 0 color-mix(in srgb, var(--color-fd-foreground) 10%, transparent);
 }
 
 .omni-filter-option {
@@ -1179,15 +1208,19 @@ code:not(pre code) {
       var(--fd-mobile-nav-height, 56px) + max(10px, env(safe-area-inset-top))
     );
     top: var(--omni-content-top);
-    width: calc(100vw - 20px);
+    width: calc(100vw - 16px);
     max-height: calc(100dvh - var(--omni-content-top) - max(10px, env(safe-area-inset-bottom)));
     box-shadow:
-      2px 2px 0 color-mix(in srgb, var(--color-fd-foreground) 10%, transparent),
+      3px 3px 0 color-mix(in srgb, var(--color-fd-foreground) 10%, transparent),
       0 18px 56px color-mix(in srgb, #000 42%, transparent);
   }
 
+  .omni-header {
+    padding: 6px;
+  }
+
   .omni-search-row {
-    min-height: 52px;
+    min-height: 48px;
     gap: 8px;
     padding: 0 11px;
   }
@@ -1205,8 +1238,8 @@ code:not(pre code) {
   }
 
   .omni-body {
-    min-height: 136px;
-    padding: 4px;
+    min-height: 148px;
+    padding: 6px;
   }
 
   .omni-group-label {
@@ -1214,8 +1247,8 @@ code:not(pre code) {
   }
 
   .omni-item {
-    min-height: 52px;
-    padding: 9px 8px;
+    min-height: 56px;
+    padding: 9px 10px;
   }
 
   .omni-item-description {
@@ -1224,7 +1257,7 @@ code:not(pre code) {
 
   .omni-loading,
   .omni-empty {
-    min-height: 136px;
+    min-height: 148px;
   }
 
   .omni-footer-inner {
@@ -1251,6 +1284,10 @@ code:not(pre code) {
   .omni-overlay,
   .omni-content {
     animation: none;
+  }
+
+  .omni-item {
+    transition: none;
   }
 }
 `;

@@ -51,8 +51,9 @@ export interface LoadedFarmDocsPage extends FarmDocsPage {
 
 const DOCS_FILE_NAMES = ["page.mdx", "page.md", "index.mdx", "index.md"];
 const DOCS_FILE_EXTENSIONS = [".mdx", ".md"];
-const FARM_DOCS_FAVICON =
+const FARM_DOCS_FALLBACK_FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
+const FARM_DOCS_FAVICON_FILES = ["favicon.svg", "favicon.ico", "favicon.png"];
 
 const GEIST_SANS_FONT_URL = "/assets/Geist-Variable-CrgPqtmy.woff2";
 const GEIST_MONO_FONT_URL = "/assets/GeistMono-Variable-BNLlm6Cd.woff2";
@@ -68,6 +69,19 @@ function normalizeEntry(entry: string | undefined): string {
 
 function normalizeSlug(value: string): string {
   return trimSlashes(decodeURIComponent(value)).replace(/\.(mdx?|markdown)$/i, "");
+}
+
+function resolveFarmDocsFavicon(options: FarmDocsHandlerOptions): string {
+  const publicDir = path.join(path.resolve(options.root), "public");
+
+  for (const fileName of FARM_DOCS_FAVICON_FILES) {
+    const faviconPath = path.join(publicDir, fileName);
+    if (existsSync(faviconPath) && statSync(faviconPath).isFile()) {
+      return `/${fileName}`;
+    }
+  }
+
+  return FARM_DOCS_FALLBACK_FAVICON;
 }
 
 function isSafeSegment(segment: string): boolean {
@@ -1769,6 +1783,7 @@ function renderPixelDocsHtml(
   docs: FarmDocsResolvedConfig,
   themeCss: string,
   clientEntry: string,
+  faviconHref: string,
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -1786,7 +1801,7 @@ function renderPixelDocsHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
-  <link rel="icon" href="${FARM_DOCS_FAVICON}">
+  <link rel="icon" href="${escapeAttribute(faviconHref)}">
   <link rel="preload" href="${GEIST_SANS_FONT_URL}" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="${GEIST_MONO_FONT_URL}" as="font" type="font/woff2" crossorigin>
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
@@ -1885,6 +1900,7 @@ export function createFarmDocsHandler(
         docs,
         resolvePixelBorderThemeCss(options),
         options.clientEntry || "/farm-client.js",
+        resolveFarmDocsFavicon(options),
       ),
       {
         status: 200,
