@@ -275,95 +275,100 @@ function StartupIllustration() {
       <svg
         className="h-full w-full max-w-[34rem] text-white"
         fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         viewBox="0 0 560 320"
       >
-        <defs>
-          <linearGradient
-            id="benchmarkStartupSurface"
-            x1="0"
-            x2="0"
-            y1="0"
-            y2="1"
-          >
-            <stop stopColor="currentColor" stopOpacity="0.055" />
-            <stop offset="1" stopColor="currentColor" stopOpacity="0.008" />
-          </linearGradient>
-        </defs>
         <path
-          d="M118 118L280 31L442 118L280 205L118 118Z"
-          fill="url(#benchmarkStartupSurface)"
+          d="M57 129L134 88L211 129L134 170L57 129Z"
+          fill="currentColor"
+          fillOpacity="0.025"
           stroke="currentColor"
-          strokeOpacity="0.5"
+          strokeOpacity="0.44"
           strokeWidth="1.2"
         />
         <path
-          d="M118 118V139L280 226L442 139V118"
+          d="M57 129V174L134 215L211 174V129"
           stroke="currentColor"
-          strokeOpacity="0.38"
+          strokeOpacity="0.34"
           strokeWidth="1.2"
         />
         <path
-          d="M118 154V174L280 261L442 174V154"
+          d="M57 184L134 225L211 184"
           stroke="currentColor"
-          strokeOpacity="0.24"
-          strokeWidth="1.1"
-        />
-        <path
-          d="M118 189V209L280 296L442 209V189"
-          stroke="currentColor"
-          strokeOpacity="0.14"
-        />
-        <path
-          d="M118 139V209"
-          stroke="currentColor"
-          strokeDasharray="2 7"
           strokeOpacity="0.2"
         />
         <path
-          d="M442 139V209"
+          d="M57 202L134 243L211 202"
           stroke="currentColor"
-          strokeDasharray="2 7"
-          strokeOpacity="0.2"
+          strokeOpacity="0.12"
         />
         <path
-          d="M280 226V296"
+          d="M134 170V243"
           stroke="currentColor"
-          strokeDasharray="2 7"
+          strokeDasharray="2 6"
           strokeOpacity="0.16"
         />
+
         <path
-          d="M214 117C226 88 251 72 280 72C309 72 334 88 346 117"
-          stroke="currentColor"
-          strokeOpacity="0.42"
-          strokeWidth="1.2"
-        />
-        <path
-          d="M212 120H348"
-          stroke="currentColor"
-          strokeOpacity="0.52"
-          strokeWidth="1.2"
-        />
-        <path d="M224 129H336" stroke="currentColor" strokeOpacity="0.34" />
-        <path d="M238 138H322" stroke="currentColor" strokeOpacity="0.24" />
-        <path d="M256 147H304" stroke="currentColor" strokeOpacity="0.16" />
-        <circle
-          cx="280"
-          cy="117"
+          d="M279 68H483C494 68 503 77 503 88V224C503 235 494 244 483 244H279C268 244 259 235 259 224V88C259 77 268 68 279 68Z"
           fill="currentColor"
-          fillOpacity="0.72"
+          fillOpacity="0.015"
+          stroke="currentColor"
+          strokeOpacity="0.46"
+          strokeWidth="1.2"
+        />
+        <path d="M259 101H503" stroke="currentColor" strokeOpacity="0.24" />
+        <circle
+          cx="279"
+          cy="85"
+          fill="currentColor"
+          fillOpacity="0.4"
           r="2.5"
         />
+        <circle
+          cx="289"
+          cy="85"
+          fill="currentColor"
+          fillOpacity="0.24"
+          r="2.5"
+        />
+        <circle
+          cx="299"
+          cy="85"
+          fill="currentColor"
+          fillOpacity="0.14"
+          r="2.5"
+        />
+
+        <path d="M287 130H384" stroke="currentColor" strokeOpacity="0.36" />
+        <path d="M287 143H451" stroke="currentColor" strokeOpacity="0.18" />
+        <path
+          d="M287 169H352V216H287V169Z"
+          fill="currentColor"
+          fillOpacity="0.02"
+          stroke="currentColor"
+          strokeOpacity="0.24"
+        />
+        <path d="M369 171H465" stroke="currentColor" strokeOpacity="0.22" />
+        <path d="M369 185H447" stroke="currentColor" strokeOpacity="0.14" />
+        <path d="M369 199H428" stroke="currentColor" strokeOpacity="0.1" />
+
+        <path
+          d="M199 151C226 151 229 156 259 156"
+          stroke="currentColor"
+          strokeDasharray="3 7"
+          strokeOpacity="0.28"
+        />
+        <path d="M207 143H245" stroke="currentColor" strokeOpacity="0.13" />
+        <path d="M207 163H237" stroke="currentColor" strokeOpacity="0.1" />
+        <circle cx="259" cy="156" fill="currentColor" fillOpacity="0.8" r="3" />
       </svg>
     </div>
   );
 }
 
 function BuildIllustration() {
-  const panels = Array.from({ length: 10 }, (_, index) => ({
-    x: 194 - index * 12,
-    y: 33 + index * 10,
-  }));
-
   return (
     <div
       aria-hidden
@@ -372,41 +377,101 @@ function BuildIllustration() {
       <svg
         className="h-full w-full max-w-[34rem] text-white"
         fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
         viewBox="0 0 560 320"
       >
-        {panels.map(({ x, y }, index) => (
-          <path
-            d={`M${x} ${y}L${x + 214} ${y + 91}V${y + 178}L${x} ${y + 87}V${y}Z`}
-            fill="black"
-            fillOpacity={index === 9 ? "0.96" : "0.58"}
-            key={`${x}-${y}`}
-            stroke="currentColor"
-            strokeOpacity={String(0.12 + index * 0.028)}
-            strokeWidth={index === 9 ? "1.3" : "1"}
-          />
-        ))}
         <path
-          d="M86 160L300 251V274L86 183V160Z"
-          fill="black"
+          d="M62 52H174L192 70V126H62V52Z"
+          fill="currentColor"
+          fillOpacity="0.018"
           stroke="currentColor"
-          strokeOpacity="0.52"
-          strokeWidth="1.3"
+          strokeOpacity="0.32"
         />
-        <path d="M108 176L276 247" stroke="currentColor" strokeOpacity="0.36" />
-        <path d="M108 183L244 241" stroke="currentColor" strokeOpacity="0.22" />
-        <path d="M108 190L212 234" stroke="currentColor" strokeOpacity="0.14" />
+        <path d="M174 52V70H192" stroke="currentColor" strokeOpacity="0.24" />
+        <path d="M82 79H146" stroke="currentColor" strokeOpacity="0.3" />
+        <path d="M82 94H162" stroke="currentColor" strokeOpacity="0.16" />
+
+        <path
+          d="M42 146H154L172 164V220H42V146Z"
+          fill="currentColor"
+          fillOpacity="0.022"
+          stroke="currentColor"
+          strokeOpacity="0.44"
+          strokeWidth="1.2"
+        />
+        <path d="M154 146V164H172" stroke="currentColor" strokeOpacity="0.3" />
+        <path d="M62 173H126" stroke="currentColor" strokeOpacity="0.38" />
+        <path d="M62 188H142" stroke="currentColor" strokeOpacity="0.2" />
+
+        <path
+          d="M84 236H196L214 254V298H84V236Z"
+          fill="currentColor"
+          fillOpacity="0.012"
+          stroke="currentColor"
+          strokeOpacity="0.2"
+        />
+        <path d="M196 236V254H214" stroke="currentColor" strokeOpacity="0.16" />
+        <path d="M104 263H168" stroke="currentColor" strokeOpacity="0.18" />
+
+        <path
+          d="M192 92L280 151"
+          stroke="currentColor"
+          strokeDasharray="2 7"
+          strokeOpacity="0.16"
+        />
+        <path
+          d="M172 183L280 162"
+          stroke="currentColor"
+          strokeDasharray="2 7"
+          strokeOpacity="0.3"
+        />
+        <path
+          d="M214 268L280 174"
+          stroke="currentColor"
+          strokeDasharray="2 7"
+          strokeOpacity="0.14"
+        />
+        <circle cx="280" cy="162" fill="currentColor" fillOpacity="0.8" r="3" />
+
+        <path
+          d="M306 121L399 72L492 121L399 170L306 121Z"
+          fill="currentColor"
+          fillOpacity="0.035"
+          stroke="currentColor"
+          strokeOpacity="0.5"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M306 121V202L399 251L492 202V121"
+          fill="currentColor"
+          fillOpacity="0.012"
+          stroke="currentColor"
+          strokeOpacity="0.38"
+          strokeWidth="1.2"
+        />
+        <path d="M399 170V251" stroke="currentColor" strokeOpacity="0.28" />
+        <path
+          d="M329 209L399 246L469 209"
+          stroke="currentColor"
+          strokeOpacity="0.14"
+        />
+
+        <path d="M358 119H440" stroke="currentColor" strokeOpacity="0.36" />
+        <path d="M371 127H427" stroke="currentColor" strokeOpacity="0.22" />
+        <path d="M386 135H412" stroke="currentColor" strokeOpacity="0.14" />
         <circle
-          cx="286"
-          cy="252"
+          cx="399"
+          cy="119"
           fill="currentColor"
           fillOpacity="0.72"
           r="2.5"
         />
         <path
-          d="M300 251L416 202"
+          d="M280 162H306"
           stroke="currentColor"
-          strokeDasharray="2 7"
-          strokeOpacity="0.18"
+          strokeOpacity="0.58"
+          strokeWidth="1.2"
         />
       </svg>
     </div>
