@@ -8,6 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { build } from "../build";
+import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { resolveConfig } from "../config";
 import { defineIntegration } from "../integrations";
 import { definePlugin } from "../plugin";
@@ -201,6 +202,73 @@ async function expectNitroFallback(root: string): Promise<void> {
 }
 
 describe("production prebuilt SSR output", () => {
+  it("retries an incomplete Rolldown client bundle after the parallel SSR build", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "globals.css"),
+        ".client-output-marker { color: red; }",
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `
+"use client";
+
+export default function Page() {
+  return <main className="client-output-marker">client output retry</main>;
+}
+`.trim(),
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "client-output-retry-test",
+        },
+        "production",
+      );
+      const productionVite = await loadFarmProductionVite();
+      let clientBuildAttempts = 0;
+      const buildWithIncompleteFirstClient = (async (inlineConfig: any) => {
+        if (!inlineConfig.build?.ssr) {
+          clientBuildAttempts++;
+          if (clientBuildAttempts === 1) {
+            const outputDir = path.resolve(inlineConfig.root, inlineConfig.build.outDir);
+            await fs.mkdir(outputDir, { recursive: true });
+            await fs.writeFile(path.join(outputDir, "farm-client.js"), "");
+            return { output: [] };
+          }
+        }
+
+        return productionVite.build(inlineConfig);
+      }) as FarmProductionViteRuntime["build"];
+      const retryingProductionVite: FarmProductionViteRuntime = {
+        ...productionVite,
+        build: buildWithIncompleteFirstClient,
+        builder: "rolldown",
+      };
+
+      await build(config, {
+        root,
+        preset: "node-server",
+        productionVite: retryingProductionVite,
+      });
+
+      expect(clientBuildAttempts).toBe(2);
+      await expect(
+        fs.readFile(path.join(root, ".farm", "client", "farm-client.js"), "utf8"),
+      ).resolves.not.toBe("");
+      await expect(
+        fs.readFile(path.join(root, ".farm", "client", "farm-client.css"), "utf8"),
+      ).resolves.toContain(".client-output-marker");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("boots standalone Node output through the package import mapping", async () => {
     const root = await createProductionFixture();
 
