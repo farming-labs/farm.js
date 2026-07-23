@@ -270,99 +270,140 @@ function StartupIllustration() {
   return (
     <div
       aria-hidden
-      className="relative mt-5 flex h-64 items-center justify-center sm:h-72"
+      className="benchmark-illustration relative mt-5 flex h-64 items-center justify-center sm:h-72"
     >
       <svg
-        className="h-full w-full max-w-[34rem] text-white"
+        className="h-full w-full max-w-[31rem] text-white"
         fill="none"
         strokeLinecap="round"
         strokeLinejoin="round"
         viewBox="0 0 560 320"
       >
-        <path
-          d="M57 129L134 88L211 129L134 170L57 129Z"
-          fill="currentColor"
-          fillOpacity="0.025"
-          stroke="currentColor"
-          strokeOpacity="0.44"
-          strokeWidth="1.2"
-        />
-        <path
-          d="M57 129V174L134 215L211 174V129"
-          stroke="currentColor"
-          strokeOpacity="0.34"
-          strokeWidth="1.2"
-        />
-        <path
-          d="M57 184L134 225L211 184"
-          stroke="currentColor"
-          strokeOpacity="0.2"
-        />
-        <path
-          d="M57 202L134 243L211 202"
-          stroke="currentColor"
-          strokeOpacity="0.12"
-        />
-        <path
-          d="M134 170V243"
-          stroke="currentColor"
-          strokeDasharray="2 6"
-          strokeOpacity="0.16"
-        />
+        <g className="benchmark-startup-source">
+          <path
+            d="M54 139L125 101L196 139L125 177L54 139Z"
+            fill="currentColor"
+            fillOpacity="0.03"
+            stroke="currentColor"
+            strokeOpacity="0.52"
+            strokeWidth="1.2"
+          />
+          <path
+            d="M54 139V185L125 223L196 185V139"
+            fill="currentColor"
+            fillOpacity="0.012"
+            stroke="currentColor"
+            strokeOpacity="0.36"
+            strokeWidth="1.2"
+          />
+          <path d="M125 177V223" stroke="currentColor" strokeOpacity="0.22" />
+          <path
+            d="M82 141L125 118L168 141"
+            stroke="currentColor"
+            strokeOpacity="0.24"
+          />
+          <path
+            d="M93 147L125 130L157 147"
+            stroke="currentColor"
+            strokeOpacity="0.14"
+          />
+          <circle
+            cx="125"
+            cy="141"
+            fill="currentColor"
+            fillOpacity="0.72"
+            r="2.5"
+          />
+        </g>
 
         <path
-          d="M279 68H483C494 68 503 77 503 88V224C503 235 494 244 483 244H279C268 244 259 235 259 224V88C259 77 268 68 279 68Z"
-          fill="currentColor"
-          fillOpacity="0.015"
+          className="benchmark-illustration-flow"
+          d="M196 164C221 164 226 141 253 141"
           stroke="currentColor"
-          strokeOpacity="0.46"
+          strokeDasharray="3 8"
+          strokeOpacity="0.38"
           strokeWidth="1.2"
         />
-        <path d="M259 101H503" stroke="currentColor" strokeOpacity="0.24" />
         <circle
-          cx="279"
-          cy="85"
+          className="benchmark-illustration-pulse"
+          cx="253"
+          cy="141"
           fill="currentColor"
-          fillOpacity="0.4"
-          r="2.5"
-        />
-        <circle
-          cx="289"
-          cy="85"
-          fill="currentColor"
-          fillOpacity="0.24"
-          r="2.5"
-        />
-        <circle
-          cx="299"
-          cy="85"
-          fill="currentColor"
-          fillOpacity="0.14"
-          r="2.5"
+          fillOpacity="0.86"
+          r="3"
         />
 
-        <path d="M287 130H384" stroke="currentColor" strokeOpacity="0.36" />
-        <path d="M287 143H451" stroke="currentColor" strokeOpacity="0.18" />
-        <path
-          d="M287 169H352V216H287V169Z"
-          fill="currentColor"
-          fillOpacity="0.02"
-          stroke="currentColor"
-          strokeOpacity="0.24"
-        />
-        <path d="M369 171H465" stroke="currentColor" strokeOpacity="0.22" />
-        <path d="M369 185H447" stroke="currentColor" strokeOpacity="0.14" />
-        <path d="M369 199H428" stroke="currentColor" strokeOpacity="0.1" />
+        <g className="benchmark-startup-target">
+          <path
+            d="M253 61L503 167V258L253 152V61Z"
+            fill="currentColor"
+            fillOpacity="0.018"
+            stroke="currentColor"
+            strokeOpacity="0.5"
+            strokeWidth="1.2"
+          />
+          <path
+            d="M253 82L503 188"
+            stroke="currentColor"
+            strokeOpacity="0.25"
+          />
+          <circle
+            cx="269"
+            cy="79"
+            fill="currentColor"
+            fillOpacity="0.44"
+            r="2.2"
+          />
+          <circle
+            cx="279"
+            cy="83"
+            fill="currentColor"
+            fillOpacity="0.26"
+            r="2.2"
+          />
+          <circle
+            cx="289"
+            cy="87"
+            fill="currentColor"
+            fillOpacity="0.14"
+            r="2.2"
+          />
 
-        <path
-          d="M199 151C226 151 229 156 259 156"
-          stroke="currentColor"
-          strokeDasharray="3 7"
-          strokeOpacity="0.28"
-        />
-        <path d="M207 143H245" stroke="currentColor" strokeOpacity="0.13" />
-        <path d="M207 163H237" stroke="currentColor" strokeOpacity="0.1" />
-        <circle cx="259" cy="156" fill="currentColor" fillOpacity="0.8" r="3" />
+          <g className="benchmark-rendered-page">
+            <path
+              d="M282 101L400 151"
+              stroke="currentColor"
+              strokeOpacity="0.38"
+            />
+            <path
+              d="M282 114L460 189"
+              stroke="currentColor"
+              strokeOpacity="0.18"
+            />
+            <path
+              d="M282 129L350 158V184L282 155V129Z"
+              fill="currentColor"
+              fillOpacity="0.025"
+              stroke="currentColor"
+              strokeOpacity="0.28"
+            />
+            <path
+              d="M365 165L465 207"
+              stroke="currentColor"
+              strokeOpacity="0.24"
+            />
+            <path
+              d="M365 178L449 214"
+              stroke="currentColor"
+              strokeOpacity="0.15"
+            />
+            <path
+              d="M365 191L432 219"
+              stroke="currentColor"
+              strokeOpacity="0.1"
+            />
+          </g>
+        </g>
       </svg>
     </div>
   );
@@ -372,107 +413,170 @@ function BuildIllustration() {
   return (
     <div
       aria-hidden
-      className="relative mt-5 flex h-64 items-center justify-center sm:h-72"
+      className="benchmark-illustration relative mt-5 flex h-64 items-center justify-center sm:h-72"
     >
       <svg
-        className="h-full w-full max-w-[34rem] text-white"
+        className="h-full w-full max-w-[31rem] text-white"
         fill="none"
         strokeLinecap="round"
         strokeLinejoin="round"
         viewBox="0 0 560 320"
       >
-        <path
-          d="M62 52H174L192 70V126H62V52Z"
-          fill="currentColor"
-          fillOpacity="0.018"
-          stroke="currentColor"
-          strokeOpacity="0.32"
-        />
-        <path d="M174 52V70H192" stroke="currentColor" strokeOpacity="0.24" />
-        <path d="M82 79H146" stroke="currentColor" strokeOpacity="0.3" />
-        <path d="M82 94H162" stroke="currentColor" strokeOpacity="0.16" />
+        <g className="benchmark-build-source benchmark-build-source--one">
+          <path
+            d="M48 83L94 58L140 83L94 108L48 83Z"
+            fill="currentColor"
+            fillOpacity="0.018"
+            stroke="currentColor"
+            strokeOpacity="0.28"
+          />
+          <path
+            d="M48 83V112L94 137L140 112V83"
+            stroke="currentColor"
+            strokeOpacity="0.2"
+          />
+          <path
+            d="M72 83L94 71L116 83"
+            stroke="currentColor"
+            strokeOpacity="0.18"
+          />
+        </g>
+
+        <g className="benchmark-build-source benchmark-build-source--two">
+          <path
+            d="M118 151L170 123L222 151L170 179L118 151Z"
+            fill="currentColor"
+            fillOpacity="0.03"
+            stroke="currentColor"
+            strokeOpacity="0.5"
+            strokeWidth="1.2"
+          />
+          <path
+            d="M118 151V184L170 212L222 184V151"
+            stroke="currentColor"
+            strokeOpacity="0.34"
+          />
+          <path
+            d="M145 151L170 138L195 151"
+            stroke="currentColor"
+            strokeOpacity="0.32"
+          />
+          <circle
+            cx="170"
+            cy="151"
+            fill="currentColor"
+            fillOpacity="0.66"
+            r="2.2"
+          />
+        </g>
+
+        <g className="benchmark-build-source benchmark-build-source--three">
+          <path
+            d="M47 229L94 204L141 229L94 254L47 229Z"
+            fill="currentColor"
+            fillOpacity="0.015"
+            stroke="currentColor"
+            strokeOpacity="0.24"
+          />
+          <path
+            d="M47 229V258L94 283L141 258V229"
+            stroke="currentColor"
+            strokeOpacity="0.16"
+          />
+          <path
+            d="M72 229L94 217L116 229"
+            stroke="currentColor"
+            strokeOpacity="0.14"
+          />
+        </g>
 
         <path
-          d="M42 146H154L172 164V220H42V146Z"
-          fill="currentColor"
-          fillOpacity="0.022"
+          className="benchmark-illustration-flow benchmark-illustration-flow--slow"
+          d="M140 103C196 103 224 135 280 158"
           stroke="currentColor"
-          strokeOpacity="0.44"
+          strokeDasharray="3 8"
+          strokeOpacity="0.17"
+        />
+        <path
+          className="benchmark-illustration-flow"
+          d="M222 170C244 170 255 162 280 162"
+          stroke="currentColor"
+          strokeDasharray="3 8"
+          strokeOpacity="0.4"
           strokeWidth="1.2"
         />
-        <path d="M154 146V164H172" stroke="currentColor" strokeOpacity="0.3" />
-        <path d="M62 173H126" stroke="currentColor" strokeOpacity="0.38" />
-        <path d="M62 188H142" stroke="currentColor" strokeOpacity="0.2" />
-
         <path
-          d="M84 236H196L214 254V298H84V236Z"
-          fill="currentColor"
-          fillOpacity="0.012"
+          className="benchmark-illustration-flow benchmark-illustration-flow--slow"
+          d="M141 247C196 242 228 199 280 166"
           stroke="currentColor"
-          strokeOpacity="0.2"
+          strokeDasharray="3 8"
+          strokeOpacity="0.15"
         />
-        <path d="M196 236V254H214" stroke="currentColor" strokeOpacity="0.16" />
-        <path d="M104 263H168" stroke="currentColor" strokeOpacity="0.18" />
-
-        <path
-          d="M192 92L280 151"
-          stroke="currentColor"
-          strokeDasharray="2 7"
-          strokeOpacity="0.16"
-        />
-        <path
-          d="M172 183L280 162"
-          stroke="currentColor"
-          strokeDasharray="2 7"
-          strokeOpacity="0.3"
-        />
-        <path
-          d="M214 268L280 174"
-          stroke="currentColor"
-          strokeDasharray="2 7"
-          strokeOpacity="0.14"
-        />
-        <circle cx="280" cy="162" fill="currentColor" fillOpacity="0.8" r="3" />
-
-        <path
-          d="M306 121L399 72L492 121L399 170L306 121Z"
-          fill="currentColor"
-          fillOpacity="0.035"
-          stroke="currentColor"
-          strokeOpacity="0.5"
-          strokeWidth="1.2"
-        />
-        <path
-          d="M306 121V202L399 251L492 202V121"
-          fill="currentColor"
-          fillOpacity="0.012"
-          stroke="currentColor"
-          strokeOpacity="0.38"
-          strokeWidth="1.2"
-        />
-        <path d="M399 170V251" stroke="currentColor" strokeOpacity="0.28" />
-        <path
-          d="M329 209L399 246L469 209"
-          stroke="currentColor"
-          strokeOpacity="0.14"
-        />
-
-        <path d="M358 119H440" stroke="currentColor" strokeOpacity="0.36" />
-        <path d="M371 127H427" stroke="currentColor" strokeOpacity="0.22" />
-        <path d="M386 135H412" stroke="currentColor" strokeOpacity="0.14" />
         <circle
-          cx="399"
-          cy="119"
+          className="benchmark-illustration-pulse benchmark-illustration-pulse--delayed"
+          cx="280"
+          cy="162"
           fill="currentColor"
-          fillOpacity="0.72"
-          r="2.5"
+          fillOpacity="0.86"
+          r="3"
         />
+
         <path
-          d="M280 162H306"
+          className="benchmark-illustration-flow"
+          d="M280 162L314 145"
           stroke="currentColor"
-          strokeOpacity="0.58"
+          strokeDasharray="3 8"
+          strokeOpacity="0.54"
           strokeWidth="1.2"
         />
+
+        <g className="benchmark-build-target">
+          <path
+            d="M314 126L404 78L494 126L404 174L314 126Z"
+            fill="currentColor"
+            fillOpacity="0.04"
+            stroke="currentColor"
+            strokeOpacity="0.54"
+            strokeWidth="1.2"
+          />
+          <path
+            d="M314 126V205L404 253L494 205V126"
+            fill="currentColor"
+            fillOpacity="0.012"
+            stroke="currentColor"
+            strokeOpacity="0.4"
+            strokeWidth="1.2"
+          />
+          <path d="M404 174V253" stroke="currentColor" strokeOpacity="0.28" />
+          <path
+            d="M333 211L404 249L475 211"
+            stroke="currentColor"
+            strokeOpacity="0.18"
+          />
+          <path
+            d="M348 219L404 249L460 219"
+            stroke="currentColor"
+            strokeOpacity="0.1"
+          />
+          <path
+            d="M363 126L445 126"
+            stroke="currentColor"
+            strokeOpacity="0.38"
+          />
+          <path
+            d="M375 134L433 134"
+            stroke="currentColor"
+            strokeOpacity="0.22"
+          />
+          <path d="M389 142H419" stroke="currentColor" strokeOpacity="0.13" />
+          <circle
+            cx="404"
+            cy="126"
+            fill="currentColor"
+            fillOpacity="0.72"
+            r="2.5"
+          />
+        </g>
       </svg>
     </div>
   );
