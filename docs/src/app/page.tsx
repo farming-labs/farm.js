@@ -716,7 +716,7 @@ function Hero() {
       />
       <div className="relative z-10 mx-auto flex w-full max-w-[58rem] flex-col items-center px-6 pb-16 pt-11 text-center sm:px-10 sm:pb-20 sm:pt-12 lg:px-12">
         <div className="text-white/42">
-          <IndexedLabel icon={Route} index="00" label="App Router / Typed APIs / One Runtime" />
+          <IndexedLabel icon={Route} index="00" label="Build / Ship / Scale" />
         </div>
         <HeroTitleFrame>
           <h1 className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
