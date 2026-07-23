@@ -224,7 +224,7 @@ function StartupIllustration() {
   return (
     <div
       aria-hidden
-      className="relative mt-8 h-28 overflow-hidden border border-white/10 bg-white/[0.015] sm:h-32"
+      className="relative mt-8 h-24 overflow-hidden border-y border-white/10 bg-white/[0.012] sm:h-28"
     >
       <svg
         className="absolute inset-0 h-full w-full text-white"
@@ -232,45 +232,40 @@ function StartupIllustration() {
         preserveAspectRatio="none"
         viewBox="0 0 520 150"
       >
+        <defs>
+          <linearGradient id="benchmarkStartupGlow" x1="0" x2="1" y1="0" y2="1">
+            <stop stopColor="currentColor" stopOpacity="0.14" />
+            <stop offset="0.58" stopColor="currentColor" stopOpacity="0.045" />
+            <stop offset="1" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
         <path
-          d="M48 104L184 42H364L228 104H48Z"
+          d="M-20 118L128 50H342L194 118H-20Z"
+          fill="url(#benchmarkStartupGlow)"
+          stroke="currentColor"
+          strokeOpacity="0.14"
+        />
+        <path
+          d="M86 126L234 58H448L300 126H86Z"
           fill="currentColor"
-          fillOpacity="0.09"
+          fillOpacity="0.045"
           stroke="currentColor"
-          strokeOpacity="0.24"
+          strokeOpacity="0.1"
         />
         <path
-          d="M132 116L268 54H448L312 116H132Z"
+          d="M194 134L342 66H556L408 134H194Z"
           fill="currentColor"
-          fillOpacity="0.06"
+          fillOpacity="0.025"
           stroke="currentColor"
-          strokeOpacity="0.18"
+          strokeOpacity="0.07"
         />
-        <path
-          d="M216 128L352 66H496L360 128H216Z"
-          fill="currentColor"
-          fillOpacity="0.04"
-          stroke="currentColor"
-          strokeOpacity="0.12"
-        />
-        <path
-          d="M78 103H226"
-          stroke="currentColor"
-          strokeDasharray="3 8"
-          strokeOpacity="0.36"
-        />
-        <path d="M78 103H132" stroke="currentColor" strokeWidth="3" />
-        <circle cx="78" cy="103" fill="black" r="5" stroke="currentColor" strokeWidth="1.5" />
-        <circle cx="132" cy="103" fill="currentColor" r="4" />
-        <path d="M330 43H444" stroke="currentColor" strokeOpacity="0.2" strokeWidth="5" />
-        <path d="M330 43H356" stroke="currentColor" strokeWidth="5" />
+        <path d="M54 99H220" stroke="currentColor" strokeDasharray="2 10" strokeOpacity="0.2" />
+        <path d="M54 99H118" stroke="currentColor" strokeOpacity="0.72" strokeWidth="2" />
+        <circle cx="54" cy="99" fill="black" r="4" stroke="currentColor" strokeOpacity="0.62" />
+        <circle cx="118" cy="99" fill="currentColor" fillOpacity="0.82" r="3.5" />
+        <path d="M320 48H438" stroke="currentColor" strokeOpacity="0.1" strokeWidth="4" />
+        <path d="M320 48H350" stroke="currentColor" strokeOpacity="0.68" strokeWidth="4" />
       </svg>
-      <div className="absolute bottom-3 left-4 font-mono text-[8px] uppercase tracking-normal text-white/42">
-        First page lock
-      </div>
-      <div className="absolute right-4 top-3 font-mono text-[8px] uppercase tracking-normal text-white/54">
-        253ms
-      </div>
     </div>
   );
 }
@@ -279,7 +274,7 @@ function BuildIllustration() {
   return (
     <div
       aria-hidden
-      className="relative mt-8 h-28 overflow-hidden border border-white/10 bg-white/[0.015] sm:h-32"
+      className="relative mt-8 h-24 overflow-hidden border-y border-white/10 bg-white/[0.012] sm:h-28"
     >
       <svg
         className="absolute inset-0 h-full w-full text-white"
@@ -290,52 +285,46 @@ function BuildIllustration() {
         <defs>
           <linearGradient id="benchmarkBuildFade" x1="0" x2="1" y1="0" y2="0">
             <stop stopColor="currentColor" stopOpacity="0" />
-            <stop offset="0.45" stopColor="currentColor" stopOpacity="0.22" />
+            <stop offset="0.45" stopColor="currentColor" stopOpacity="0.12" />
             <stop offset="1" stopColor="currentColor" stopOpacity="0" />
           </linearGradient>
         </defs>
-        {[26, 44, 62, 96, 114].map((y, index) => (
+        {[34, 52, 70, 100].map((y, index) => (
           <path
-            d={`M${28 + index * 18} ${y}H${480 - index * 22}`}
+            d={`M${46 + index * 22} ${y}H${478 - index * 34}`}
             key={y}
             stroke="url(#benchmarkBuildFade)"
-            strokeWidth={index === 2 ? "2" : "1"}
+            strokeWidth={index === 1 ? "2" : "1"}
           />
         ))}
         <path
-          d="M82 106L194 54H346L234 106H82Z"
+          d="M62 106L190 50H354L226 106H62Z"
           fill="currentColor"
-          fillOpacity="0.08"
-          stroke="currentColor"
-          strokeOpacity="0.24"
-        />
-        <path
-          d="M154 118L266 66H418L306 118H154Z"
-          fill="currentColor"
-          fillOpacity="0.05"
+          fillOpacity="0.065"
           stroke="currentColor"
           strokeOpacity="0.16"
         />
         <path
-          d="M226 130L338 78H486L374 130H226Z"
+          d="M132 118L260 62H424L296 118H132Z"
           fill="currentColor"
-          fillOpacity="0.035"
+          fillOpacity="0.04"
           stroke="currentColor"
           strokeOpacity="0.1"
         />
-        <path d="M104 94H230" stroke="currentColor" strokeOpacity="0.22" />
-        <path d="M104 94H146" stroke="currentColor" strokeWidth="3" />
-        <path d="M276 70H414" stroke="currentColor" strokeOpacity="0.18" strokeWidth="5" />
-        <path d="M276 70H304" stroke="currentColor" strokeWidth="5" />
-        <circle cx="146" cy="94" fill="currentColor" r="4" />
-        <circle cx="104" cy="94" fill="black" r="5" stroke="currentColor" strokeWidth="1.5" />
+        <path
+          d="M202 130L330 74H500L372 130H202Z"
+          fill="currentColor"
+          fillOpacity="0.024"
+          stroke="currentColor"
+          strokeOpacity="0.065"
+        />
+        <path d="M96 94H232" stroke="currentColor" strokeOpacity="0.14" />
+        <path d="M96 94H142" stroke="currentColor" strokeOpacity="0.66" strokeWidth="2" />
+        <path d="M300 70H422" stroke="currentColor" strokeOpacity="0.1" strokeWidth="4" />
+        <path d="M300 70H326" stroke="currentColor" strokeOpacity="0.66" strokeWidth="4" />
+        <circle cx="142" cy="94" fill="currentColor" fillOpacity="0.78" r="3.5" />
+        <circle cx="96" cy="94" fill="black" r="4" stroke="currentColor" strokeOpacity="0.62" />
       </svg>
-      <div className="absolute bottom-3 left-4 font-mono text-[8px] uppercase tracking-normal text-white/42">
-        Rolldown build path
-      </div>
-      <div className="absolute right-4 top-3 font-mono text-[8px] uppercase tracking-normal text-white/54">
-        527ms
-      </div>
     </div>
   );
 }
