@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 
+// Match Vite's startup path by reusing Node's on-disk compilation cache when
+// the runtime supports it. Older Node releases keep the existing behavior.
+try {
+  const nodeModule = require("node:module");
+  nodeModule.enableCompileCache?.();
+  setTimeout(() => {
+    try {
+      nodeModule.flushCompileCache?.();
+    } catch {}
+  }, 10_000).unref();
+} catch {}
+
 const { program } = require("commander");
 
 const banner = `

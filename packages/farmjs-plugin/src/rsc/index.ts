@@ -22,7 +22,8 @@
  * ```
  */
 
-import type { Plugin, UserConfig } from "vite";
+import { parseAst, type ConfigEnv, type Plugin, type UserConfig } from "vite";
+import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
 import type { FarmServerActionsConfig } from "@farmjs/core/server-action-security";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "@farmjs/core/server";
@@ -31,6 +32,7 @@ import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
+import { resolveRscBuildOutputPath } from "./build-paths.js";
 import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "node:url";
@@ -204,6 +206,233 @@ const VIRTUAL_RSC_ENTRY = "virtual:@farmjs/rsc/entry-rsc";
 const VIRTUAL_SSR_ENTRY = "virtual:@farmjs/rsc/entry-ssr";
 const VIRTUAL_CLIENT_ENTRY = "virtual:@farmjs/rsc/entry-client";
 const VIRTUAL_HYDRATE_ENTRY = "virtual:@farmjs/rsc/hydrate";
+const FARM_CORE_PACKAGE_ROOT = path.resolve(path.dirname(require_.resolve("@farmjs/core")), "..");
+
+// Exact-root imports in RSC application code are rewritten to focused public
+// runtime subpaths. The root barrel itself also exports config/build/plugin
+// surfaces and is intentionally not bundled into standalone request handlers.
+// Keeping this list to published runtime entries prevents Vite, Nitro builders,
+// Rolldown, and native build integrations from entering the production graph.
+const CORE_RUNTIME_SUBPATHS = [
+  "integrations",
+  "api",
+  "query/parsers",
+  "query/client",
+  "query/server",
+  "query",
+  "middleware",
+  "router",
+  "routes",
+  "docs",
+  "markdown",
+  "app-markdown",
+  "observability",
+  "workflows",
+  "cron",
+  "env",
+  "environment",
+  "i18n/server",
+  "i18n/client",
+  "i18n",
+  "server-fn",
+  "server-fn/client",
+  "server-query",
+  "server-query/client",
+  "server-action-security",
+  "deployment",
+  "client",
+  "plugin/client",
+  "cache",
+  "deferred",
+  "after",
+  "navigation",
+  "headers",
+  "request",
+  "agent-runtime",
+  "image",
+  "image/server",
+] as const;
+
+// These public runtime entries depend on packages that Nitro does not
+// currently trace from the rewritten RSC graph. Rejecting them is preferable
+// to producing an isolated server that builds successfully and then fails on
+// its first request.
+const CORE_UNSUPPORTED_STANDALONE_SUBPATHS = ["storage"] as const;
+
+const CORE_RUNTIME_EXPORT_OVERRIDES: Record<string, string> = {
+  api: "integrations",
+  getCurrentRequest: "request",
+  getFarmRedirectError: "navigation",
+  isFarmNotFoundError: "navigation",
+  isFarmRedirectError: "navigation",
+  notFound: "navigation",
+  permanentRedirect: "navigation",
+  redirect: "navigation",
+  usePathname: "navigation",
+  useRouter: "client",
+  useSearchParams: "navigation",
+};
+
+interface CoreRuntimeExportSources {
+  supported: Map<string, string>;
+  unsupported: Map<string, string>;
+}
+
+let coreRuntimeExportSourcesPromise: Promise<CoreRuntimeExportSources> | undefined;
+
+function collectEsmExportNames(source: string): Set<string> {
+  const names = new Set<string>();
+  const ast = parseAst(source) as any;
+  for (const statement of ast.body || []) {
+    if (statement.type !== "ExportNamedDeclaration") continue;
+    for (const specifier of statement.specifiers || []) {
+      const exported = specifier.exported;
+      const name = exported?.name ?? exported?.value;
+      if (typeof name === "string") names.add(name);
+    }
+  }
+  return names;
+}
+
+async function getCoreRuntimeExportSources(): Promise<CoreRuntimeExportSources> {
+  if (coreRuntimeExportSourcesPromise) return coreRuntimeExportSourcesPromise;
+
+  coreRuntimeExportSourcesPromise = (async () => {
+    const manifest = JSON.parse(
+      await fs.readFile(path.join(FARM_CORE_PACKAGE_ROOT, "package.json"), "utf8"),
+    ) as {
+      exports: Record<string, { import?: string }>;
+    };
+    const rootEntry = manifest.exports["."]?.import;
+    if (!rootEntry) throw new Error("@farmjs/core has no ESM root export");
+
+    const rootExports = collectEsmExportNames(
+      await fs.readFile(path.resolve(FARM_CORE_PACKAGE_ROOT, rootEntry), "utf8"),
+    );
+    const sources = new Map<string, string>();
+    const unsupportedSources = new Map<string, string>();
+    const exportsBySubpath = new Map<string, Set<string>>();
+
+    for (const subpath of CORE_RUNTIME_SUBPATHS) {
+      const entry = manifest.exports[`./${subpath}`]?.import;
+      if (!entry) continue;
+      const exportedNames = collectEsmExportNames(
+        await fs.readFile(path.resolve(FARM_CORE_PACKAGE_ROOT, entry), "utf8"),
+      );
+      exportsBySubpath.set(subpath, exportedNames);
+      for (const name of exportedNames) {
+        if (rootExports.has(name)) sources.set(name, subpath);
+      }
+    }
+
+    for (const subpath of CORE_UNSUPPORTED_STANDALONE_SUBPATHS) {
+      const entry = manifest.exports[`./${subpath}`]?.import;
+      if (!entry) continue;
+      const exportedNames = collectEsmExportNames(
+        await fs.readFile(path.resolve(FARM_CORE_PACKAGE_ROOT, entry), "utf8"),
+      );
+      for (const name of exportedNames) {
+        if (rootExports.has(name)) unsupportedSources.set(name, subpath);
+      }
+    }
+
+    for (const [name, subpath] of Object.entries(CORE_RUNTIME_EXPORT_OVERRIDES)) {
+      if (rootExports.has(name) && exportsBySubpath.get(subpath)?.has(name)) {
+        sources.set(name, subpath);
+      }
+    }
+
+    return { supported: sources, unsupported: unsupportedSources };
+  })();
+
+  return coreRuntimeExportSourcesPromise;
+}
+
+function unsupportedStandaloneSubpathError(subpath: string, id: string): Error {
+  return new Error(
+    `[Farm.js] @farmjs/core/${subpath} is not supported in the standalone RSC runtime (${id}). ` +
+      "Its external runtime dependencies are not copied into the isolated server output yet. " +
+      "Importing it would create a production build that boots but fails when the module is used.",
+  );
+}
+
+const CORE_ROOT_NAMED_IMPORT_RE = /^import\s*\{([\s\S]*?)\}\s*from\s*(["'])@farmjs\/core\2\s*$/;
+
+async function rewriteCoreRuntimeImports(code: string, id: string): Promise<string | null> {
+  if (!code.includes("@farmjs/core")) return null;
+  await initModuleLexer;
+  const [moduleImports] = parseModuleImports(code, id);
+  const rootImports = moduleImports.filter(
+    (moduleImport) => moduleImport.n === "@farmjs/core" && moduleImport.d === -1,
+  );
+  if (rootImports.length === 0) return null;
+
+  const { supported: exportSources, unsupported: unsupportedSources } =
+    await getCoreRuntimeExportSources();
+  const replacements: Array<{ start: number; end: number; code: string }> = [];
+
+  for (const rootImport of rootImports) {
+    const statement = code.slice(rootImport.ss, rootImport.se);
+    if (/^import\s+type\b/.test(statement)) continue;
+
+    const namedImport = CORE_ROOT_NAMED_IMPORT_RE.exec(statement);
+    if (!namedImport) {
+      throw new Error(
+        `[Farm.js] Unsupported @farmjs/core import syntax in ${id}. ` +
+          "Standalone RSC request modules must use named imports from the root or a supported focused public subpath.",
+      );
+    }
+
+    const body = namedImport[1];
+    const grouped = new Map<string, string[]>();
+    const specifiers = body
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/\/\/.*$/gm, "")
+      .split(",")
+      .map((specifier) => specifier.trim())
+      .filter(Boolean);
+
+    for (const specifier of specifiers) {
+      if (specifier.startsWith("type ")) continue;
+      const match = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(specifier);
+      if (!match) {
+        throw new Error(`[Farm.js] Unsupported @farmjs/core import syntax in ${id}: ${specifier}`);
+      }
+      const [, imported, local = imported] = match;
+      const unsupportedSubpath = unsupportedSources.get(imported);
+      if (unsupportedSubpath) {
+        throw unsupportedStandaloneSubpathError(unsupportedSubpath, id);
+      }
+      const subpath = exportSources.get(imported);
+      if (!subpath) {
+        throw new Error(
+          `[Farm.js] The @farmjs/core root export "${imported}" is not available in the standalone RSC runtime. ` +
+            "Config, plugin, Vite, build, code-generation, and framework-bootstrap APIs must stay outside application request modules.",
+        );
+      }
+      const imports = grouped.get(subpath) || [];
+      imports.push(imported === local ? imported : `${imported} as ${local}`);
+      grouped.set(subpath, imports);
+    }
+
+    const replacement = Array.from(
+      grouped,
+      ([subpath, imports]) => `import { ${imports.join(", ")} } from "@farmjs/core/${subpath}";`,
+    ).join("\n");
+    const end = code[rootImport.se] === ";" ? rootImport.se + 1 : rootImport.se;
+    replacements.push({ start: rootImport.ss, end, code: replacement });
+  }
+
+  if (replacements.length === 0) return null;
+
+  let rewritten = code;
+  for (const replacement of replacements.sort((left, right) => right.start - left.start)) {
+    rewritten =
+      rewritten.slice(0, replacement.start) + replacement.code + rewritten.slice(replacement.end);
+  }
+
+  return rewritten;
+}
 
 /**
  * Farm.js RSC Plugin
@@ -289,12 +518,48 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
     {
+      name: "@farmjs/plugin/rsc:core-runtime",
+      // Run after Vite/esbuild has lowered TS/JSX. es-module-lexer deliberately
+      // parses JavaScript module syntax and rejects raw JSX expression text.
+      enforce: "post",
+      apply: "build",
+
+      async transform(code, id, options) {
+        const environmentName = (this as { environment?: { name?: string } }).environment?.name;
+        const isServerEnvironment =
+          options?.ssr || environmentName === "rsc" || environmentName === "ssr";
+        if (!isServerEnvironment) return null;
+
+        const rewritten = await rewriteCoreRuntimeImports(code, id);
+        return rewritten ? { code: rewritten, map: null } : null;
+      },
+
+      resolveId(id, _importer, options) {
+        const environmentName = (this as { environment?: { name?: string } }).environment?.name;
+        const isServerEnvironment =
+          options?.ssr || environmentName === "rsc" || environmentName === "ssr";
+        if (isServerEnvironment && id === "@farmjs/core/storage") {
+          throw unsupportedStandaloneSubpathError("storage", _importer || "unknown importer");
+        }
+        if (isServerEnvironment && id === "@farmjs/core") {
+          throw new Error(
+            "[Farm.js] Standalone RSC runtime modules must use named @farmjs/core imports. " +
+              "Namespace/default imports and build-only root exports cannot be bundled safely; use a focused public subpath.",
+          );
+        }
+        return null;
+      },
+    },
+    {
       name: "@farmjs/plugin/rsc:config",
       enforce: "pre",
 
-      async config(config: UserConfig) {
+      async config(config: UserConfig, env: ConfigEnv) {
         const c = config as UserConfig & {
-          experimental?: { serverComponents?: boolean; serverActions?: boolean };
+          experimental?: {
+            serverComponents?: boolean;
+            serverActions?: boolean;
+          };
           srcDir?: string;
           outDir?: string;
           basePath?: string;
@@ -344,6 +609,18 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         await fs.mkdir(entriesDir, { recursive: true });
         const configuredRoutesDir =
           options.routesDir === undefined ? "app" : options.routesDir.trim();
+        const globalCssFile = path.resolve(root, srcDir, configuredRoutesDir, "globals.css");
+        let globalCssPath: string | undefined;
+        try {
+          if ((await fs.stat(globalCssFile)).isFile()) {
+            const rootRelativeCssPath = path.relative(root, globalCssFile).replace(/\\/g, "/");
+            globalCssPath = rootRelativeCssPath.startsWith("../")
+              ? `/@fs/${globalCssFile.replace(/\\/g, "/")}`
+              : `/${rootRelativeCssPath}`;
+          }
+        } catch {
+          // Global CSS is optional.
+        }
         const routeRoots = getFarmSourceRoots(c).map((source) => {
           const routeSuffix = configuredRoutesDir ? `/${configuredRoutesDir}` : "";
           const projectSourceDir = source.srcDir.replace(/\\/g, "/").replace(/^\.?\//, "");
@@ -358,6 +635,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           outDir,
           basePath: c.basePath ?? "/",
           routesDir: options.routesDir,
+          globalCssPath,
           routeRoots,
           actionsEnabled,
           serverActions: resolveServerActionsConfig({
@@ -450,9 +728,17 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
                       replacement: path.join(farmCorePath, "dist/environment.mjs"),
                     },
                     {
-                      find: /^@farmjs\/core$/,
-                      replacement: path.join(farmCorePath, "dist/index.mjs"),
+                      find: /^@farmjs\/core\/headers$/,
+                      replacement: path.join(farmCorePath, "dist/headers.mjs"),
                     },
+                    ...(env.command === "serve"
+                      ? [
+                          {
+                            find: /^@farmjs\/core$/,
+                            replacement: path.join(farmCorePath, "dist/index.mjs"),
+                          },
+                        ]
+                      : []),
                   ]
                 : []),
             ],
@@ -544,9 +830,9 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           const { buildRscNitro } = await import("./nitro-build.js");
           await buildRscNitro({
             root,
-            rendererPath: path.join(root, rscEnv.config.build.outDir, "index.js"),
-            publicDir: path.join(root, clientEnv.config.build.outDir),
-            ssrPath: path.join(root, ssrEnv.config.build.outDir, "index.js"),
+            rendererPath: resolveRscBuildOutputPath(root, rscEnv.config.build.outDir, "index.js"),
+            publicDir: resolveRscBuildOutputPath(root, clientEnv.config.build.outDir),
+            ssrPath: resolveRscBuildOutputPath(root, ssrEnv.config.build.outDir, "index.js"),
             assetsDir: clientEnv.config.build.assetsDir,
             preset: process.env.NITRO_PRESET || "vercel",
           });
@@ -811,7 +1097,9 @@ if (document.readyState === 'loading') {
                   "entry.rsc.tsx",
                 );
                 const resolved =
-                  (await rscEnv.pluginContainer.resolveId(rscSource, importer, { ssr: true })) ??
+                  (await rscEnv.pluginContainer.resolveId(rscSource, importer, {
+                    ssr: true,
+                  })) ??
                   (await rscEnv.pluginContainer.resolveId(rscSource, undefined, { ssr: true })) ??
                   (await rscEnv.pluginContainer.resolveId(absoluteRscEntry, undefined, {
                     ssr: true,
@@ -937,7 +1225,16 @@ if (document.readyState === 'loading') {
               const ReactDOMServer = await import("react-dom/server");
 
               const Page = pageModule.default;
-              const metadata = pageModule.metadata || {};
+              const metadata = {
+                title:
+                  typeof pageModule.metadata?.title === "string"
+                    ? pageModule.metadata.title
+                    : layoutModule?.metadata?.title,
+                description:
+                  typeof pageModule.metadata?.description === "string"
+                    ? pageModule.metadata.description
+                    : layoutModule?.metadata?.description,
+              };
               const Layout = layoutModule?.default;
 
               // Parse URL params (basic dynamic route support)
@@ -1043,7 +1340,13 @@ if (document.readyState === 'loading') {
                 }),
                 ...(isSyncPage
                   ? []
-                  : [h("script", { key: "vite-client", type: "module", src: "/@vite/client" })]),
+                  : [
+                      h("script", {
+                        key: "vite-client",
+                        type: "module",
+                        src: "/@vite/client",
+                      }),
+                    ]),
               ].filter(Boolean);
 
               // Create body elements

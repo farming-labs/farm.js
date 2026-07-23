@@ -100,7 +100,7 @@ export default function BlogPostPage({ params }: PageProps) {
         </div>
 
         <nav className="text-sm text-gray-500 mb-4">
-          <a href="/blog" className="hover:text-green-600">Blog</a>
+          <a href="/blog/hello-world" className="hover:text-green-600">Blog</a>
           <span className="mx-2">/</span>
           <span>{slug}</span>
         </nav>

@@ -667,9 +667,7 @@ describe("programmatic routes", () => {
     }) as any;
 
     expect(suspenseElement.props.fallback.type).toBe(Pending);
-    const errorElement = await suspenseElement.props.children.type(
-      suspenseElement.props.children.props,
-    );
+    const errorElement = await renderSuspendedChild(suspenseElement.props.children);
     expect(errorElement.type).toBe(ErrorView);
     expect(errorElement.props.error).toBeInstanceOf(Error);
 
@@ -683,6 +681,70 @@ describe("programmatic routes", () => {
 
     expect(missingElement.type).toBe(MissingView);
     expect(missingElement.props.error.digest).toBe("FARM_NOT_FOUND");
+  });
+
+  it("preserves pending work without delaying pre-resolved route props", async () => {
+    const data = createControlledPromise<{ id: string }>();
+    const main = vi.fn(() => data.promise);
+    function ProductPage(props: any) {
+      return props;
+    }
+    function Pending() {
+      return null;
+    }
+
+    const route = createRoute("/products/[id]", {
+      data: { main },
+      pending: Pending,
+      component: ProductPage as any,
+    });
+    const routeModule = createRouteModuleFromProgrammaticPageForTest(route);
+    const Page = routeModule.default as any;
+    const inputProps = {
+      params: { id: "p1" },
+      searchParams: Promise.resolve({}),
+      path: "/products/p1",
+    };
+
+    const pendingBoundary = Page(inputProps) as any;
+    expect(pendingBoundary.props.fallback.type).toBe(Pending);
+
+    let suspension!: Promise<unknown>;
+    try {
+      pendingBoundary.props.children.type(pendingBoundary.props.children.props);
+    } catch (error) {
+      suspension = error as Promise<unknown>;
+    }
+    expect(typeof suspension?.then).toBe("function");
+    let settled = false;
+    void suspension.then(() => {
+      settled = true;
+    });
+    for (let turn = 0; turn < 5 && main.mock.calls.length === 0; turn += 1) {
+      await Promise.resolve();
+    }
+    expect(main).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+
+    data.resolve({ id: "p1" });
+    await suspension;
+    const pendingResult = pendingBoundary.props.children.type(pendingBoundary.props.children.props);
+    expect(pendingResult.type).toBe(ProductPage);
+    expect(pendingResult.props.data).toEqual({ id: "p1" });
+
+    const resolvedProps = await (routeModule as any).__farmResolveRouteProps(inputProps);
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    let resolvedContent: any;
+    try {
+      const resolvedBoundary = Page(resolvedProps) as any;
+      resolvedContent = resolvedBoundary.props.children.type(resolvedBoundary.props.children.props);
+      expect(setTimeoutSpy).not.toHaveBeenCalled();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
+
+    expect(resolvedContent.type).toBe(ProductPage);
+    expect(resolvedContent.props.data).toBe(resolvedProps.data);
   });
 });
 
@@ -698,4 +760,18 @@ function createControlledPromise<T>() {
     reject = rejectPromise;
   });
   return { promise, resolve, reject };
+}
+
+async function renderSuspendedChild(element: any): Promise<any> {
+  try {
+    return element.type(element.props);
+  } catch (error) {
+    if (!error || typeof (error as PromiseLike<unknown>).then !== "function") throw error;
+    try {
+      await error;
+    } catch {
+      // The retry reads the resource's rejected state and renders the route boundary.
+    }
+    return element.type(element.props);
+  }
 }

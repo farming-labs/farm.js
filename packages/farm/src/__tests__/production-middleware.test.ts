@@ -11,6 +11,18 @@ import {
   createMiddlewareProductionFixture,
 } from "./fixtures/middleware-production-fixture";
 
+async function readJavaScriptOutput(dir: string): Promise<string> {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  const contents = await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) return readJavaScriptOutput(entryPath);
+      return entry.name.endsWith(".mjs") ? fs.readFile(entryPath, "utf8") : "";
+    }),
+  );
+  return contents.join("\n");
+}
+
 describe("production middleware runtime", () => {
   it("runs farm.config middleware and app middleware in a production build", async () => {
     const root = await createMiddlewareProductionFixture();
@@ -41,18 +53,8 @@ describe("production middleware runtime", () => {
           ),
         ),
       ).resolves.toBeUndefined();
-      const nitroBundle = await fs.readFile(
-        path.join(
-          root,
-          ".vercel",
-          "output",
-          "functions",
-          "__nitro.func",
-          "chunks",
-          "nitro",
-          "nitro.mjs",
-        ),
-        "utf8",
+      const nitroBundle = await readJavaScriptOutput(
+        path.join(root, ".vercel", "output", "functions", "__nitro.func"),
       );
       expect(nitroBundle).not.toContain("@img/sharp-");
       globalThis.fetch = (async (input: URL | RequestInfo, init?: RequestInit) => {
@@ -130,7 +132,9 @@ describe("production middleware runtime", () => {
       expect((await staticImageResponse.arrayBuffer()).byteLength).toBeGreaterThan(0);
 
       const staticImageHeadResponse = await serverModule.default.fetch(
-        new Request(`https://example.test${dashboardImageHref}`, { method: "HEAD" }),
+        new Request(`https://example.test${dashboardImageHref}`, {
+          method: "HEAD",
+        }),
       );
       expect(staticImageHeadResponse.status).toBe(200);
       expect((await staticImageHeadResponse.arrayBuffer()).byteLength).toBe(0);
@@ -217,6 +221,66 @@ describe("production middleware runtime", () => {
         /property="og:image" content="\/opengraph-image\?v=[a-f0-9]{16}"/,
       );
 
+      const tenantAResponse = await serverModule.default.fetch(
+        new Request("https://example.test/context/42", {
+          headers: {
+            "x-farm-tenant": "tenant-a",
+            "x-request-id": "request-a",
+          },
+        }),
+      );
+      expect(tenantAResponse.status).toBe(200);
+      expect(tenantAResponse.headers.get("cache-control")).toBe("private, no-store");
+      await expect(tenantAResponse.text()).resolves.toContain(
+        "production route context: tenant-a / 42 / request-a / private",
+      );
+
+      const tenantBResponse = await serverModule.default.fetch(
+        new Request("https://example.test/context/42", {
+          headers: {
+            "x-farm-tenant": "tenant-b",
+            "x-request-id": "request-b",
+          },
+        }),
+      );
+      expect(tenantBResponse.status).toBe(200);
+      expect(tenantBResponse.headers.get("cache-control")).toBe("private, no-store");
+      const tenantBHtml = await tenantBResponse.text();
+      expect(tenantBHtml).toContain(
+        "production route context: tenant-b / 42 / request-b / private",
+      );
+      expect(tenantBHtml).not.toContain("tenant-a");
+
+      for (const tenant of ["tenant-a", "tenant-b"]) {
+        const pprResponse = await serverModule.default.fetch(
+          new Request("https://example.test/context-ppr", {
+            headers: { "x-farm-tenant": tenant },
+          }),
+        );
+        expect(pprResponse.status).toBe(200);
+        expect(pprResponse.headers.get("cache-control")).toBe("private, no-store");
+        expect(pprResponse.headers.get("x-farm-ppr")).toBe("bypass");
+        await expect(pprResponse.text()).resolves.toContain("configured context PPR route");
+      }
+
+      const generatedMetadataResponse = await serverModule.default.fetch(
+        new Request("https://example.test/metadata/42?variant=featured"),
+      );
+      const generatedMetadataHtml = await generatedMetadataResponse.text();
+      expect(generatedMetadataResponse.status).toBe(200);
+      expect(generatedMetadataHtml).toContain("<title>Product 42 featured</title>");
+      expect(generatedMetadataHtml).toContain(
+        '<meta name="description" content="Layout metadata for 42">',
+      );
+      expect(generatedMetadataHtml).toContain('<meta property="og:title" content="Product 42">');
+      expect(generatedMetadataHtml).toContain(
+        '<meta property="og:description" content="Layout Open Graph metadata for 42">',
+      );
+      expect(generatedMetadataHtml).toContain(
+        '<meta property="og:site_name" content="Farm catalog">',
+      );
+      expect(generatedMetadataHtml).toContain('<meta property="og:type" content="article">');
+
       const explicitResponse = await serverModule.default.fetch(
         new Request("https://example.test/dashboard/explicit"),
       );
@@ -231,7 +295,15 @@ describe("production middleware runtime", () => {
         new Request("https://example.test/api/programmatic/42"),
       );
       expect(programmaticApiResponse.status).toBe(200);
-      await expect(programmaticApiResponse.json()).resolves.toEqual({ id: "42" });
+      await expect(programmaticApiResponse.json()).resolves.toEqual({
+        id: "42",
+      });
+
+      const rewriteResponse = await serverModule.default.fetch(
+        new Request("https://example.test/rewrite-alias"),
+      );
+      expect(rewriteResponse.status).toBe(200);
+      await expect(rewriteResponse.text()).resolves.toContain("current request: /rewrite-target");
     } finally {
       globalThis.fetch = originalFetch;
       delete (globalThis as any).__farmMiddlewareEvents;

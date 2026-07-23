@@ -420,6 +420,8 @@ export interface FarmPlugin<
 
 export class PluginManager {
   private plugins: FarmPlugin[] = [];
+  private hookPresence = new Map<keyof FarmPlugin, boolean>();
+  private runtimeHookPresence = new Map<"context" | "before" | "after" | "error", boolean>();
   private context: FarmPluginContext;
   private pluginStates = new Map<FarmPlugin, unknown>();
   private setupComplete = false;
@@ -755,6 +757,8 @@ export class PluginManager {
 
   addPlugin(plugin: FarmPlugin) {
     this.plugins.push(plugin);
+    this.hookPresence.clear();
+    this.runtimeHookPresence.clear();
   }
 
   addPlugins(plugins: FarmPlugin[]) {
@@ -772,6 +776,33 @@ export class PluginManager {
     const normal = this.plugins.filter((p) => !p.enforce);
     const post = this.plugins.filter((p) => p.enforce === "post");
     return [...pre, ...normal, ...post];
+  }
+
+  hasHook(hookName: keyof FarmPlugin): boolean {
+    const cached = this.hookPresence.get(hookName);
+    if (cached !== undefined) return cached;
+
+    const present = this.plugins.some((plugin) => this.getPluginHooks(plugin, hookName).length > 0);
+    this.hookPresence.set(hookName, present);
+    return present;
+  }
+
+  hasRuntimeHook(hookName: "context" | "before" | "after" | "error"): boolean {
+    const cached = this.runtimeHookPresence.get(hookName);
+    if (cached !== undefined) return cached;
+
+    const present = this.plugins.some((plugin) => typeof plugin.runtime?.[hookName] === "function");
+    this.runtimeHookPresence.set(hookName, present);
+    return present;
+  }
+
+  hasRuntimeRequestHooks(): boolean {
+    return (
+      this.hasRuntimeHook("context") ||
+      this.hasRuntimeHook("before") ||
+      this.hasRuntimeHook("after") ||
+      this.hasRuntimeHook("error")
+    );
   }
 
   copyRequestContext(source: FarmRequest | Request, target: FarmRequest | Request): void {

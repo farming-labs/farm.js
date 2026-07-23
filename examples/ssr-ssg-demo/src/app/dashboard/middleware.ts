@@ -9,7 +9,13 @@ export default middleware()
   .use(async (ctx, next) => {
     console.log('[Dashboard Middleware] Checking access...');
     
-    const authHeader = ctx.request.headers.authorization;
+    const requestHeaders = ctx.request.headers as
+      | Headers
+      | Record<string, string | string[] | undefined>;
+    const authHeader =
+      requestHeaders instanceof Headers
+        ? requestHeaders.get("authorization")
+        : requestHeaders.authorization;
     
     if (authHeader) {
       console.log('[Dashboard Middleware] User is authenticated');

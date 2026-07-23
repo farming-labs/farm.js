@@ -354,14 +354,23 @@ export interface RouteModule {
    * Return all paths to pre-render for dynamic SSG routes
    * Required for dynamic routes (e.g., [slug]) when ssg = true
    */
-  getStaticPaths?: () => Promise<Record<string, string>[]> | Record<string, string>[];
+  getStaticPaths?: () => Promise<StaticPathParams[]> | StaticPathParams[];
   /**
    * @deprecated Use getStaticPaths instead
    */
-  generateStaticParams?: () => Promise<Record<string, string>[]> | Record<string, string>[];
+  generateStaticParams?: () => Promise<StaticPathParams[]> | StaticPathParams[];
   metadata?: Metadata & Record<string, any>;
   generateMetadata?: (props: PageProps) => Promise<Metadata> | Metadata;
 }
+
+/** A value accepted for one static route parameter. */
+export type StaticPathPrimitive = string | number | boolean;
+
+/**
+ * Parameters returned by `getStaticPaths` or `generateStaticParams`.
+ * Arrays create individual URL segments for catch-all route parameters.
+ */
+export type StaticPathParams = Record<string, StaticPathPrimitive | readonly StaticPathPrimitive[]>;
 
 export interface LayoutModule {
   default: Layout;

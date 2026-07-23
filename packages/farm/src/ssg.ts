@@ -50,7 +50,13 @@
  */
 
 import { readFile } from "fs/promises";
-import type { RouteModule, SSGPage, SSGCollectionResult } from "./types";
+import type {
+  RouteModule,
+  SSGPage,
+  SSGCollectionResult,
+  StaticPathParams,
+  StaticPathPrimitive,
+} from "./types";
 
 interface RouteEntry {
   path: string;
@@ -76,6 +82,10 @@ interface DirectiveRenderingConfig {
   dynamic?: RouteRenderingDynamic;
   directive: string;
 }
+
+const OPTIONAL_CATCH_ALL_SEGMENT = /^\[\[\.\.\.([^\]]+)\]\]$/;
+const REQUIRED_CATCH_ALL_SEGMENT = /^\[\.\.\.([^\]]+)\]$/;
+const REQUIRED_DYNAMIC_SEGMENT = /^\[([^\]]+)\]$/;
 
 /**
  * Resolve route rendering from Farm exports, Next-compatible exports, and
@@ -347,23 +357,17 @@ export async function collectSSGPages(
           // Get all paths to pre-render
           const paths = await getStaticPaths();
 
-          for (const params of paths) {
-            // Build URL path by replacing dynamic segments
-            let urlPath = route.path;
-            for (const [key, value] of Object.entries(params)) {
-              // Handle [...slug] catch-all routes
-              urlPath = urlPath.replace(`[...${key}]`, value);
-              // Handle [slug] dynamic routes
-              urlPath = urlPath.replace(`[${key}]`, value);
-            }
+          // Materialize every path before adding any of them. If one entry is
+          // invalid, the outer error handler can safely fall the whole route
+          // back to SSR without leaving a partial SSG manifest behind.
+          const materializedPages = paths.map((params) => ({
+            urlPath: materializeSSGRoutePath(route.path, params),
+            filePath: route.filePath,
+            params: normalizeStaticPathParams(params),
+            revalidate: rendering.revalidate,
+          }));
 
-            ssgPages.push({
-              urlPath,
-              filePath: route.filePath,
-              params,
-              revalidate: rendering.revalidate,
-            });
-          }
+          ssgPages.push(...materializedPages);
         } else {
           // Static SSG page
           ssgPages.push({
@@ -385,6 +389,134 @@ export async function collectSSGPages(
   }
 
   return { ssg: ssgPages, ssr: ssrRoutes };
+}
+
+function materializeSSGRoutePath(routePattern: string, params: StaticPathParams): string {
+  const outputSegments: string[] = [];
+
+  for (const segment of routePattern.split("/")) {
+    if (!segment) {
+      continue;
+    }
+
+    const optionalCatchAll = segment.match(OPTIONAL_CATCH_ALL_SEGMENT);
+    if (optionalCatchAll) {
+      const parameterName = optionalCatchAll[1]!;
+      const value = params[parameterName];
+      const values = readCatchAllSegments(value, {
+        optional: true,
+        parameterName,
+        routePattern,
+      });
+      outputSegments.push(...values.map(encodePathSegment));
+      continue;
+    }
+
+    const requiredCatchAll = segment.match(REQUIRED_CATCH_ALL_SEGMENT);
+    if (requiredCatchAll) {
+      const parameterName = requiredCatchAll[1]!;
+      const value = params[parameterName];
+      const values = readCatchAllSegments(value, {
+        optional: false,
+        parameterName,
+        routePattern,
+      });
+      outputSegments.push(...values.map(encodePathSegment));
+      continue;
+    }
+
+    const requiredDynamic = segment.match(REQUIRED_DYNAMIC_SEGMENT);
+    if (requiredDynamic) {
+      const parameterName = requiredDynamic[1]!;
+      const value = params[parameterName];
+      if (isStaticPathArray(value)) {
+        throw new Error(
+          `Cannot materialize SSG route "${routePattern}": parameter "${parameterName}" ` +
+            "must be a scalar value; arrays are only supported for catch-all segments.",
+        );
+      }
+      if (isMissingPathValue(value)) {
+        throw missingRequiredParameterError(routePattern, parameterName);
+      }
+      outputSegments.push(encodePathSegment(value));
+      continue;
+    }
+
+    outputSegments.push(segment);
+  }
+
+  return outputSegments.length > 0 ? `/${outputSegments.join("/")}` : "/";
+}
+
+function readCatchAllSegments(
+  value: StaticPathParams[string] | undefined,
+  options: {
+    optional: boolean;
+    parameterName: string;
+    routePattern: string;
+  },
+): StaticPathPrimitive[] {
+  if (isMissingPathValue(value) || (isStaticPathArray(value) && value.length === 0)) {
+    if (options.optional) {
+      return [];
+    }
+    throw missingRequiredParameterError(options.routePattern, options.parameterName);
+  }
+
+  const segments = isStaticPathArray(value) ? [...value] : [value as StaticPathPrimitive];
+  if (segments.some(isMissingPathValue)) {
+    throw new Error(
+      `Cannot materialize SSG route "${options.routePattern}": catch-all parameter ` +
+        `"${options.parameterName}" contains an empty path segment.`,
+    );
+  }
+
+  return segments;
+}
+
+function normalizeStaticPathParams(params: StaticPathParams): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [
+      key,
+      isStaticPathArray(value) ? value.map(String).join("/") : String(value),
+    ]),
+  );
+}
+
+function isMissingPathValue(value: unknown): value is "" | null | undefined {
+  return value === "" || value === null || typeof value === "undefined";
+}
+
+function isStaticPathArray(
+  value: StaticPathParams[string] | undefined,
+): value is readonly StaticPathPrimitive[] {
+  return Array.isArray(value);
+}
+
+function missingRequiredParameterError(routePattern: string, parameterName: string): Error {
+  return new Error(
+    `Cannot materialize SSG route "${routePattern}": required parameter ` +
+      `"${parameterName}" is missing or empty.`,
+  );
+}
+
+function encodePathSegment(value: StaticPathPrimitive): string {
+  const encoded = encodeURIComponent(String(value)).replace(
+    /[!'()*]/g,
+    (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`,
+  );
+
+  // Dot-only URL segments are normalized as navigation by URL parsers and
+  // filesystem joins. Pre-rendering them could therefore escape the intended
+  // route directory or overwrite a parent artifact. They cannot faithfully be
+  // represented as a static URL segment, so keep the route server-rendered.
+  if (encoded === "." || encoded === "..") {
+    throw new Error(
+      `Cannot materialize SSG path segment "${encoded}": dot-only segments are unsafe to prerender.`,
+    );
+  }
+
+  return encoded;
 }
 
 /**
