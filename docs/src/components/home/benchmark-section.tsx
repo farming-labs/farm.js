@@ -1,23 +1,39 @@
-import { Activity, ExternalLink, Gauge, Rocket, TimerReset } from "lucide-react";
+import {
+  Activity,
+  ExternalLink,
+  Gauge,
+  Rocket,
+  TimerReset,
+} from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
 import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
 import svelteIconUrl from "simple-icons/icons/svelte.svg?url";
 import tanstackIconUrl from "simple-icons/icons/tanstack.svg?url";
-import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
+import {
+  benchmarkReport,
+  formatBenchmarkDuration,
+} from "../../lib/framework-benchmark";
 
 const benchmarkLinks = {
-  methodology: "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/README.md",
-  results: "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/results/latest.json",
+  methodology:
+    "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/README.md",
+  results:
+    "https://github.com/Kinfe123/farm.js/blob/main/benchmarks/frameworks/results/latest.json",
 } as const;
 
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
 type MetricKey = keyof FrameworkResult["metrics"];
 
-const farmResult = benchmarkReport.frameworks.find((framework) => framework.id === "farm");
-const competitorResults = benchmarkReport.frameworks.filter((framework) => framework.id !== "farm");
-const tanstackResult = benchmarkReport.frameworks.find((framework) => framework.id === "tanstack");
-const nextResult = benchmarkReport.frameworks.find((framework) => framework.id === "next");
+const farmResult = benchmarkReport.frameworks.find(
+  (framework) => framework.id === "farm",
+);
+const competitorResults = benchmarkReport.frameworks.filter(
+  (framework) => framework.id !== "farm",
+);
+const tanstackResult = benchmarkReport.frameworks.find(
+  (framework) => framework.id === "tanstack",
+);
 const frameworkIconUrls = {
   farm: "/favicon.svg",
   next: nextIconUrl,
@@ -48,11 +64,15 @@ const chartInsetX = 42;
 const chartTopY = 250;
 
 function formatByteCount(bytes: number) {
-  return bytes >= 1024 ? (bytes / 1024).toFixed(1) + " KB" : Math.round(bytes) + " B";
+  return bytes >= 1024
+    ? (bytes / 1024).toFixed(1) + " KB"
+    : Math.round(bytes) + " B";
 }
 
 function formatMetricValue(key: MetricKey, value: number) {
-  return key === "responseBytes" ? formatByteCount(value) : formatBenchmarkDuration(value);
+  return key === "responseBytes"
+    ? formatByteCount(value)
+    : formatBenchmarkDuration(value);
 }
 
 function formatRatio(value: number) {
@@ -60,11 +80,17 @@ function formatRatio(value: number) {
 }
 
 function getMetricMinimum(key: MetricKey) {
-  return Math.min(...benchmarkReport.frameworks.map((framework) => framework.metrics[key].median));
+  return Math.min(
+    ...benchmarkReport.frameworks.map(
+      (framework) => framework.metrics[key].median,
+    ),
+  );
 }
 
 function getMetricExtent(key: MetricKey) {
-  const values = benchmarkReport.frameworks.map((framework) => framework.metrics[key].median);
+  const values = benchmarkReport.frameworks.map(
+    (framework) => framework.metrics[key].median,
+  );
 
   return {
     maximum: Math.max(...values),
@@ -78,7 +104,10 @@ function getBestCompetitor(key: MetricKey) {
   );
 }
 
-function getAdvantageAgainst(framework: FrameworkResult | undefined, key: MetricKey) {
+function getAdvantageAgainst(
+  framework: FrameworkResult | undefined,
+  key: MetricKey,
+) {
   if (!farmResult || !framework) {
     return 0;
   }
@@ -94,7 +123,11 @@ type ChartPoint = {
   y: number;
 };
 
-function getChartPoints(framework: FrameworkResult, width: number, height: number) {
+function getChartPoints(
+  framework: FrameworkResult,
+  width: number,
+  height: number,
+) {
   const insetX = chartInsetX;
   const insetTop = chartTopY;
   const insetBottom = 96;
@@ -103,7 +136,8 @@ function getChartPoints(framework: FrameworkResult, width: number, height: numbe
   return chartMetrics.map(([metric, label], index) => {
     const { maximum, minimum } = getMetricExtent(metric);
     const rawValue = framework.metrics[metric].median;
-    const rank = maximum === minimum ? 0 : (rawValue - minimum) / (maximum - minimum);
+    const rank =
+      maximum === minimum ? 0 : (rawValue - minimum) / (maximum - minimum);
     const x = insetX + index * step;
     const clamped = Math.max(0, Math.min(1, rank));
     const y = insetTop + (1 - clamped) * (height - insetTop - insetBottom);
@@ -117,21 +151,23 @@ function buildStepBeforePath(points: readonly ChartPoint[]) {
     return "";
   }
 
-  return points
-    .slice(1)
-    .reduce(
-      (path, point, index) => {
-        const previous = points[index];
+  return points.slice(1).reduce(
+    (path, point, index) => {
+      const previous = points[index];
 
-        return `${path} L ${point.x.toFixed(2)} ${previous.y.toFixed(2)} L ${point.x.toFixed(
-          2,
-        )} ${point.y.toFixed(2)}`;
-      },
-      `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`,
-    );
+      return `${path} L ${point.x.toFixed(2)} ${previous.y.toFixed(2)} L ${point.x.toFixed(
+        2,
+      )} ${point.y.toFixed(2)}`;
+    },
+    `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`,
+  );
 }
 
-function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: number) {
+function closeAreaPath(
+  path: string,
+  points: readonly ChartPoint[],
+  baselineY: number,
+) {
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
 
@@ -140,7 +176,11 @@ function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: n
     : path;
 }
 
-function closeCeilingPath(path: string, points: readonly ChartPoint[], ceilingY: number) {
+function closeCeilingPath(
+  path: string,
+  points: readonly ChartPoint[],
+  ceilingY: number,
+) {
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
 
@@ -193,29 +233,35 @@ function BenchmarkLink({ href, children }: { href: string; children: string }) {
 }
 
 function ComparisonPanel({
-  children,
+  description,
   icon: Icon,
   illustration,
   label,
   title,
 }: {
-  children: ReactNode;
-  icon: ComponentType<{ "aria-hidden"?: boolean; className?: string; strokeWidth?: number }>;
-  illustration?: ReactNode;
+  description: string;
+  icon: ComponentType<{
+    "aria-hidden"?: boolean;
+    className?: string;
+    strokeWidth?: number;
+  }>;
+  illustration: ReactNode;
   label: string;
   title: string;
 }) {
   return (
-    <article className="min-h-[20rem] bg-black p-6 sm:p-8 lg:p-10">
+    <article className="flex min-h-[36rem] flex-col bg-black p-6 sm:min-h-[39rem] sm:p-8 lg:p-10">
       <span className="flex items-center gap-2 font-mono text-[10px] font-normal uppercase tracking-normal text-white/46">
         <Icon aria-hidden className="size-4" strokeWidth={1.5} />
         {label}
       </span>
-      <p className="mt-7 max-w-md text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
+      {illustration}
+      <p className="mt-5 max-w-lg text-2xl font-medium leading-tight tracking-normal text-white sm:mt-7 sm:text-3xl">
         {title}
       </p>
-      {illustration}
-      {children}
+      <p className="mt-3 max-w-md text-sm leading-6 text-white/42">
+        {description}
+      </p>
     </article>
   );
 }
@@ -224,158 +270,145 @@ function StartupIllustration() {
   return (
     <div
       aria-hidden
-      className="relative mt-8 h-24 overflow-hidden border-y border-white/10 bg-white/[0.012] sm:h-28"
+      className="relative mt-5 flex h-64 items-center justify-center sm:h-72"
     >
       <svg
-        className="absolute inset-0 h-full w-full text-white"
+        className="h-full w-full max-w-[34rem] text-white"
         fill="none"
-        preserveAspectRatio="none"
-        viewBox="0 0 520 150"
+        viewBox="0 0 560 320"
       >
         <defs>
-          <linearGradient id="benchmarkStartupGlow" x1="0" x2="1" y1="0" y2="1">
-            <stop stopColor="currentColor" stopOpacity="0.14" />
-            <stop offset="0.58" stopColor="currentColor" stopOpacity="0.045" />
-            <stop offset="1" stopColor="currentColor" stopOpacity="0" />
+          <linearGradient
+            id="benchmarkStartupSurface"
+            x1="0"
+            x2="0"
+            y1="0"
+            y2="1"
+          >
+            <stop stopColor="currentColor" stopOpacity="0.055" />
+            <stop offset="1" stopColor="currentColor" stopOpacity="0.008" />
           </linearGradient>
         </defs>
         <path
-          d="M-20 118L128 50H342L194 118H-20Z"
-          fill="url(#benchmarkStartupGlow)"
+          d="M118 118L280 31L442 118L280 205L118 118Z"
+          fill="url(#benchmarkStartupSurface)"
+          stroke="currentColor"
+          strokeOpacity="0.5"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M118 118V139L280 226L442 139V118"
+          stroke="currentColor"
+          strokeOpacity="0.38"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M118 154V174L280 261L442 174V154"
+          stroke="currentColor"
+          strokeOpacity="0.24"
+          strokeWidth="1.1"
+        />
+        <path
+          d="M118 189V209L280 296L442 209V189"
           stroke="currentColor"
           strokeOpacity="0.14"
         />
         <path
-          d="M86 126L234 58H448L300 126H86Z"
-          fill="currentColor"
-          fillOpacity="0.045"
+          d="M118 139V209"
           stroke="currentColor"
-          strokeOpacity="0.1"
+          strokeDasharray="2 7"
+          strokeOpacity="0.2"
         />
         <path
-          d="M194 134L342 66H556L408 134H194Z"
-          fill="currentColor"
-          fillOpacity="0.025"
+          d="M442 139V209"
           stroke="currentColor"
-          strokeOpacity="0.07"
+          strokeDasharray="2 7"
+          strokeOpacity="0.2"
         />
-        <path d="M54 99H220" stroke="currentColor" strokeDasharray="2 10" strokeOpacity="0.2" />
-        <path d="M54 99H118" stroke="currentColor" strokeOpacity="0.72" strokeWidth="2" />
-        <circle cx="54" cy="99" fill="black" r="4" stroke="currentColor" strokeOpacity="0.62" />
-        <circle cx="118" cy="99" fill="currentColor" fillOpacity="0.82" r="3.5" />
-        <path d="M320 48H438" stroke="currentColor" strokeOpacity="0.1" strokeWidth="4" />
-        <path d="M320 48H350" stroke="currentColor" strokeOpacity="0.68" strokeWidth="4" />
+        <path
+          d="M280 226V296"
+          stroke="currentColor"
+          strokeDasharray="2 7"
+          strokeOpacity="0.16"
+        />
+        <path
+          d="M214 117C226 88 251 72 280 72C309 72 334 88 346 117"
+          stroke="currentColor"
+          strokeOpacity="0.42"
+          strokeWidth="1.2"
+        />
+        <path
+          d="M212 120H348"
+          stroke="currentColor"
+          strokeOpacity="0.52"
+          strokeWidth="1.2"
+        />
+        <path d="M224 129H336" stroke="currentColor" strokeOpacity="0.34" />
+        <path d="M238 138H322" stroke="currentColor" strokeOpacity="0.24" />
+        <path d="M256 147H304" stroke="currentColor" strokeOpacity="0.16" />
+        <circle
+          cx="280"
+          cy="117"
+          fill="currentColor"
+          fillOpacity="0.72"
+          r="2.5"
+        />
       </svg>
     </div>
   );
 }
 
 function BuildIllustration() {
+  const panels = Array.from({ length: 10 }, (_, index) => ({
+    x: 194 - index * 12,
+    y: 33 + index * 10,
+  }));
+
   return (
     <div
       aria-hidden
-      className="relative mt-8 h-24 overflow-hidden border-y border-white/10 bg-white/[0.012] sm:h-28"
+      className="relative mt-5 flex h-64 items-center justify-center sm:h-72"
     >
       <svg
-        className="absolute inset-0 h-full w-full text-white"
+        className="h-full w-full max-w-[34rem] text-white"
         fill="none"
-        preserveAspectRatio="none"
-        viewBox="0 0 520 150"
+        viewBox="0 0 560 320"
       >
-        <defs>
-          <linearGradient id="benchmarkBuildFade" x1="0" x2="1" y1="0" y2="0">
-            <stop stopColor="currentColor" stopOpacity="0" />
-            <stop offset="0.45" stopColor="currentColor" stopOpacity="0.12" />
-            <stop offset="1" stopColor="currentColor" stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        {[34, 52, 70, 100].map((y, index) => (
+        {panels.map(({ x, y }, index) => (
           <path
-            d={`M${46 + index * 22} ${y}H${478 - index * 34}`}
-            key={y}
-            stroke="url(#benchmarkBuildFade)"
-            strokeWidth={index === 1 ? "2" : "1"}
+            d={`M${x} ${y}L${x + 214} ${y + 91}V${y + 178}L${x} ${y + 87}V${y}Z`}
+            fill="black"
+            fillOpacity={index === 9 ? "0.96" : "0.58"}
+            key={`${x}-${y}`}
+            stroke="currentColor"
+            strokeOpacity={String(0.12 + index * 0.028)}
+            strokeWidth={index === 9 ? "1.3" : "1"}
           />
         ))}
         <path
-          d="M62 106L190 50H354L226 106H62Z"
-          fill="currentColor"
-          fillOpacity="0.065"
+          d="M86 160L300 251V274L86 183V160Z"
+          fill="black"
           stroke="currentColor"
-          strokeOpacity="0.16"
+          strokeOpacity="0.52"
+          strokeWidth="1.3"
+        />
+        <path d="M108 176L276 247" stroke="currentColor" strokeOpacity="0.36" />
+        <path d="M108 183L244 241" stroke="currentColor" strokeOpacity="0.22" />
+        <path d="M108 190L212 234" stroke="currentColor" strokeOpacity="0.14" />
+        <circle
+          cx="286"
+          cy="252"
+          fill="currentColor"
+          fillOpacity="0.72"
+          r="2.5"
         />
         <path
-          d="M132 118L260 62H424L296 118H132Z"
-          fill="currentColor"
-          fillOpacity="0.04"
+          d="M300 251L416 202"
           stroke="currentColor"
-          strokeOpacity="0.1"
+          strokeDasharray="2 7"
+          strokeOpacity="0.18"
         />
-        <path
-          d="M202 130L330 74H500L372 130H202Z"
-          fill="currentColor"
-          fillOpacity="0.024"
-          stroke="currentColor"
-          strokeOpacity="0.065"
-        />
-        <path d="M96 94H232" stroke="currentColor" strokeOpacity="0.14" />
-        <path d="M96 94H142" stroke="currentColor" strokeOpacity="0.66" strokeWidth="2" />
-        <path d="M300 70H422" stroke="currentColor" strokeOpacity="0.1" strokeWidth="4" />
-        <path d="M300 70H326" stroke="currentColor" strokeOpacity="0.66" strokeWidth="4" />
-        <circle cx="142" cy="94" fill="currentColor" fillOpacity="0.78" r="3.5" />
-        <circle cx="96" cy="94" fill="black" r="4" stroke="currentColor" strokeOpacity="0.62" />
       </svg>
-    </div>
-  );
-}
-
-function MiniComparisonTable({ metric }: { metric: MetricKey }) {
-  if (!farmResult) {
-    return null;
-  }
-
-  return (
-    <div className="mt-8 space-y-3">
-      {[farmResult, ...competitorResults].map((framework) => {
-        const isFarm = framework.id === "farm";
-        const value = framework.metrics[metric].median;
-        const maximum = Math.max(
-          ...benchmarkReport.frameworks.map((item) => item.metrics[metric].median),
-        );
-        const width = Math.max(7, (value / maximum) * 100);
-
-        return (
-          <div
-            key={framework.id}
-            className="grid grid-cols-[7.25rem_minmax(0,1fr)_4.75rem] items-center gap-3"
-          >
-            <span
-              className={
-                "truncate font-mono text-[9px] font-normal uppercase tracking-normal " +
-                (isFarm ? "text-white" : "text-white/44")
-              }
-            >
-              {framework.label}
-            </span>
-            <span className="h-1.5 overflow-hidden rounded-full bg-white/[0.07]">
-              <span
-                className={
-                  "block h-full rounded-full " + (isFarm ? "bg-white" : "bg-white/22")
-                }
-                style={{ width: width + "%" }}
-              />
-            </span>
-            <span
-              className={
-                "text-right font-mono text-[9px] tabular-nums " +
-                (isFarm ? "text-white" : "text-white/42")
-              }
-            >
-              {formatMetricValue(metric, value)}
-            </span>
-          </div>
-        );
-      })}
     </div>
   );
 }
@@ -539,7 +572,13 @@ function BenchmarkAreaChart() {
               <stop offset="48%" stopColor="currentColor" stopOpacity="0.016" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
-            <linearGradient id="tanstackBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
+            <linearGradient
+              id="tanstackBenchmarkFill"
+              x1="0"
+              x2="0"
+              y1="0"
+              y2="1"
+            >
               <stop offset="0%" stopColor="currentColor" stopOpacity="0.045" />
               <stop offset="55%" stopColor="currentColor" stopOpacity="0.014" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
@@ -575,9 +614,15 @@ function BenchmarkAreaChart() {
           {chartMetrics.map(([metric, label], index) => {
             const x =
               chartInsetX +
-              (index * (width - chartInsetX * 2)) / Math.max(1, chartMetrics.length - 1);
+              (index * (width - chartInsetX * 2)) /
+                Math.max(1, chartMetrics.length - 1);
             const { maximum, minimum } = getMetricExtent(metric);
-            const textAnchor = index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle";
+            const textAnchor =
+              index === 0
+                ? "start"
+                : index === chartMetrics.length - 1
+                  ? "end"
+                  : "middle";
 
             return (
               <g key={label}>
@@ -629,39 +674,54 @@ function BenchmarkAreaChart() {
             ))}
           {farmSeries ? (
             <path
-              d={closeCeilingPath(farmSeries.path, farmSeries.points, chartTopY)}
+              d={closeCeilingPath(
+                farmSeries.path,
+                farmSeries.points,
+                chartTopY,
+              )}
               fill="url(#farmBenchmarkFill)"
               pointerEvents="none"
             />
           ) : null}
           {foregroundSeries.map(({ framework, path }) => {
             const title = chartMetrics
-              .map(([key, label]) => `${label}: ${formatMetricValue(key, framework.metrics[key].median)}`)
+              .map(
+                ([key, label]) =>
+                  `${label}: ${formatMetricValue(key, framework.metrics[key].median)}`,
+              )
               .join(" · ");
             const isFarm = framework.id === "farm";
 
             return (
               <g key={framework.id} className="benchmark-series group">
-              <path
-                className="benchmark-series-line"
-                d={path}
-                fill="none"
-                stroke="white"
-                strokeDasharray={!isFarm && framework.id !== "tanstack" ? "8 8" : undefined}
-                strokeOpacity={seriesOpacity[framework.id]}
-                strokeWidth={isFarm ? "1.45" : framework.id === "tanstack" ? "1.2" : "0.8"}
-                vectorEffect="non-scaling-stroke"
-              />
-              <path
-                aria-label={`${framework.label} — ${title}`}
-                d={path}
-                fill="none"
-                pointerEvents="stroke"
-                stroke="transparent"
-                strokeWidth={isFarm ? "22" : "20"}
-                vectorEffect="non-scaling-stroke"
-              />
-            </g>
+                <path
+                  className="benchmark-series-line"
+                  d={path}
+                  fill="none"
+                  stroke="white"
+                  strokeDasharray={
+                    !isFarm && framework.id !== "tanstack" ? "8 8" : undefined
+                  }
+                  strokeOpacity={seriesOpacity[framework.id]}
+                  strokeWidth={
+                    isFarm
+                      ? "1.45"
+                      : framework.id === "tanstack"
+                        ? "1.2"
+                        : "0.8"
+                  }
+                  vectorEffect="non-scaling-stroke"
+                />
+                <path
+                  aria-label={`${framework.label} — ${title}`}
+                  d={path}
+                  fill="none"
+                  pointerEvents="stroke"
+                  stroke="transparent"
+                  strokeWidth={isFarm ? "22" : "20"}
+                  vectorEffect="non-scaling-stroke"
+                />
+              </g>
             );
           })}
           {foregroundSeries.map(({ framework, points }) => (
@@ -689,9 +749,17 @@ function BenchmarkAreaChart() {
                       cy={point.y}
                       fill="black"
                       fillOpacity={isFarm ? "0.82" : "0.74"}
-                      r={isFarm ? "3.3" : framework.id === "tanstack" ? "2.6" : "2.1"}
+                      r={
+                        isFarm
+                          ? "3.3"
+                          : framework.id === "tanstack"
+                            ? "2.6"
+                            : "2.1"
+                      }
                       stroke="white"
-                      strokeOpacity={isFarm ? "0.88" : seriesOpacity[framework.id]}
+                      strokeOpacity={
+                        isFarm ? "0.88" : seriesOpacity[framework.id]
+                      }
                       strokeWidth={isFarm ? "1.2" : "1"}
                     />
                     <circle
@@ -714,7 +782,9 @@ function BenchmarkAreaChart() {
                         y={tooltipY}
                       />
                       <image
-                        filter={isFarm ? undefined : "url(#benchmarkIconInvert)"}
+                        filter={
+                          isFarm ? undefined : "url(#benchmarkIconInvert)"
+                        }
                         height="12"
                         href={iconUrl}
                         opacity={isFarm ? "0.9" : "0.82"}
@@ -776,7 +846,9 @@ function MetricStrip() {
         const farmValue = farmResult.metrics[key].median;
         const isLead = farmValue === getMetricMinimum(key);
         const rival = isLead ? getBestCompetitor(key) : undefined;
-        const ratio = rival ? rival.metrics[key].median / farmValue : getMetricMinimum(key) / farmValue;
+        const ratio = rival
+          ? rival.metrics[key].median / farmValue
+          : getMetricMinimum(key) / farmValue;
 
         return (
           <div key={key} className="bg-black px-5 py-4">
@@ -809,7 +881,6 @@ export function BenchmarkSection() {
     : "—";
   const buildAdvantage = getAdvantageAgainst(tanstackResult, "buildMs");
   const devAdvantage = getAdvantageAgainst(tanstackResult, "devFirstPageMs");
-  const bootAdvantage = getAdvantageAgainst(nextResult, "productionBootMs");
 
   return (
     <section
@@ -835,15 +906,19 @@ export function BenchmarkSection() {
                 Farm reaches the first rendered dev page in {firstDevPage}
               </h2>
               <p className="mt-5 max-w-2xl text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-                The benchmark is a real project built with each framework, not a framework package
-                compile. It runs the same dynamic SSR fixture across Farm.js, Next.js, SvelteKit,
-                Nuxt, and TanStack Start.
+                The benchmark is a real project built with each framework, not a
+                framework package compile. It runs the same dynamic SSR fixture
+                across Farm.js, Next.js, SvelteKit, Nuxt, and TanStack Start.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-2 lg:justify-end">
-              <BenchmarkLink href={benchmarkLinks.methodology}>Methodology</BenchmarkLink>
-              <BenchmarkLink href={benchmarkLinks.results}>Raw samples</BenchmarkLink>
+              <BenchmarkLink href={benchmarkLinks.methodology}>
+                Methodology
+              </BenchmarkLink>
+              <BenchmarkLink href={benchmarkLinks.results}>
+                Raw samples
+              </BenchmarkLink>
             </div>
           </div>
         </div>
@@ -851,40 +926,20 @@ export function BenchmarkSection() {
 
       <div className="farm-top-rule grid bg-black lg:grid-cols-2">
         <ComparisonPanel
+          description="Cold dev startup through the first rendered SSR page, measured against the same routed fixture."
           icon={Rocket}
           illustration={<StartupIllustration />}
           label="Startup advantage"
           title={`Farm opens the benchmark app ${formatRatio(devAdvantage)} faster than TanStack Start.`}
-        >
-          <MiniComparisonTable metric="devFirstPageMs" />
-        </ComparisonPanel>
+        />
         <div className="border-t border-white/12 lg:border-l lg:border-t-0">
           <ComparisonPanel
+            description="A complete production compile of the same SSR project, with generated output ready to boot."
             icon={TimerReset}
             illustration={<BuildIllustration />}
             label="Production build"
             title={`Farm builds the same fixture ${formatRatio(buildAdvantage)} faster than TanStack Start.`}
-          >
-            <div className="mt-8 grid grid-cols-2 gap-px bg-white/12">
-              <div className="bg-black p-4">
-                <p className="font-mono text-[8px] uppercase tracking-normal text-white/42">
-                  Farm build
-                </p>
-                <p className="mt-1 font-mono text-lg font-medium tabular-nums text-white">
-                  {farmResult ? formatMetricValue("buildMs", farmResult.metrics.buildMs.median) : "—"}
-                </p>
-              </div>
-              <div className="bg-black p-4">
-                <p className="font-mono text-[8px] uppercase tracking-normal text-white/42">
-                  Boot vs Next.js
-                </p>
-                <p className="mt-1 font-mono text-lg font-medium tabular-nums text-white">
-                  {formatRatio(bootAdvantage)}
-                </p>
-              </div>
-            </div>
-            <MiniComparisonTable metric="buildMs" />
-          </ComparisonPanel>
+          />
         </div>
 
         <BenchmarkAreaChart />
