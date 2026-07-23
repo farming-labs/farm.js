@@ -249,13 +249,29 @@ function AnimatedComparisonTitle({
       </span>
       <span
         aria-hidden
-        className="benchmark-comparison-rotator mt-1 block h-[2.4em] overflow-hidden text-white/72 sm:h-[1.25em]"
+        className="mt-1 grid h-[2.5em] grid-cols-[5ch_auto] items-start gap-x-[0.28em] overflow-hidden text-white/72 sm:flex sm:h-[1.25em] sm:items-baseline"
       >
-        {comparisons.map(({ framework, ratio }) => (
-          <span key={framework.id} className="benchmark-comparison-item block">
-            {formatRatio(ratio)} faster than {framework.label}.
-          </span>
-        ))}
+        <span className="benchmark-comparison-rotator block h-[1.25em] w-[5ch] shrink-0 overflow-hidden">
+          {comparisons.map(({ framework, ratio }) => (
+            <span
+              key={framework.id}
+              className="benchmark-comparison-item block"
+            >
+              {formatRatio(ratio)}
+            </span>
+          ))}
+        </span>
+        <span className="whitespace-nowrap">faster than</span>
+        <span className="benchmark-comparison-rotator col-span-2 block h-[1.25em] w-full overflow-hidden sm:w-[11rem] sm:flex-none">
+          {comparisons.map(({ framework }) => (
+            <span
+              key={framework.id}
+              className="benchmark-comparison-item block"
+            >
+              {framework.label}.
+            </span>
+          ))}
+        </span>
       </span>
     </>
   );
