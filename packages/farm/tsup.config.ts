@@ -73,8 +73,6 @@ export default defineConfig({
   sourcemap: true,
   splitting: false,
   treeshake: false,
-  onSuccess:
-    "node -e \"require('fs').copyFileSync('src/docs/pixel-border.css','dist/pixel-border.css')\"",
   esbuildOptions(options) {
     options.keepNames = true;
     return options;

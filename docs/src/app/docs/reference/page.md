@@ -10,20 +10,20 @@ A compact map of the main package exports and where to learn more.
 
 ## Core exports
 
-| Export area | What it covers |
-| --- | --- |
-| @farmjs/core | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache. |
-| @farmjs/core/client | Link, router helpers, API client, integration client. |
-| @farmjs/core/plugin/client | Client plugin types, `defineClientPlugin`, and the browser lifecycle manager. |
-| @farmjs/core/navigation | Next-compatible redirect, notFound, and client navigation hooks. |
-| @farmjs/core/headers | Next-compatible request headers and cookies helpers. |
-| @farmjs/core/router | Lightweight route matching, href building, and active-route checks. |
-| @farmjs/core/query | Query and route param types. |
-| @farmjs/core/storage | Storage clients and mount helpers. |
-| @farmjs/core/cache | Data cache, revalidation, cache keys. |
-| @farmjs/core/after | Post-response server work with `after()`. |
-| @farmjs/core/cron | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
-| @farmjs/integrations | Auth, billing, email, jobs, AI, API keys, provider clients. |
+| Export area                | What it covers                                                                       |
+| -------------------------- | ------------------------------------------------------------------------------------ |
+| @farmjs/core               | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
+| @farmjs/core/client        | Link, router helpers, API client, integration client.                                |
+| @farmjs/core/plugin/client | Advanced browser lifecycle manager and client plugin event types.                    |
+| @farmjs/core/navigation    | Next-compatible redirect, notFound, and client navigation hooks.                     |
+| @farmjs/core/headers       | Next-compatible request headers and cookies helpers.                                 |
+| @farmjs/core/router        | Lightweight route matching, href building, and active-route checks.                  |
+| @farmjs/core/query         | Query and route param types.                                                         |
+| @farmjs/core/storage       | Storage clients and mount helpers.                                                   |
+| @farmjs/core/cache         | Data cache, revalidation, cache keys.                                                |
+| @farmjs/core/after         | Post-response server work with `after()`.                                            |
+| @farmjs/core/cron          | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
+| @farmjs/integrations       | Auth, billing, email, jobs, AI, API keys, provider clients.                          |
 
 ## Recommended reading path
 
@@ -35,24 +35,24 @@ A compact map of the main package exports and where to learn more.
 
 ## Integration exports
 
-| Package | Exports |
-| --- | --- |
-| `@farmjs/core` | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`. |
-| `@farmjs/core/cron` | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers. |
-| `@farmjs/core/workflows` | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
-| `@farmjs/core/client` | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
-| `@farmjs/core/plugin/client` | `defineClientPlugin`, `createClientPluginManager`, browser lifecycle types. |
-| `@farmjs/core/navigation` | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`. |
-| `@farmjs/core/headers` | `headers`, `cookies`. |
-| `@farmjs/core/router` | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`. |
-| `@farmjs/core/storage` | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`. |
-| `@farmjs/core/after` | `after` for short work that starts after the current response finishes. |
-| `@farmjs/integrations/stripe` | Stripe billing integration. |
-| `@farmjs/integrations/auth` | Better Auth, Auth.js, Clerk, Auth0, WorkOS helpers when using the auth barrel. |
-| `@farmjs/integrations/supabase` | Supabase auth integration. |
-| `@farmjs/integrations/email` | Resend integration and email template helper. |
-| `@farmjs/integrations/jobs` | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime. |
-| `@farmjs/integrations/unkey` | Unkey API key integration. |
+| Package                         | Exports                                                                                                    |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `@farmjs/core`                  | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`.        |
+| `@farmjs/core/cron`             | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                        |
+| `@farmjs/core/workflows`        | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
+| `@farmjs/core/client`           | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`.              |
+| `@farmjs/core/plugin/client`    | `createClientPluginManager` and browser lifecycle types for advanced tooling.                              |
+| `@farmjs/core/navigation`       | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`.                |
+| `@farmjs/core/headers`          | `headers`, `cookies`.                                                                                      |
+| `@farmjs/core/router`           | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
+| `@farmjs/core/storage`          | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |
+| `@farmjs/core/after`            | `after` for short work that starts after the current response finishes.                                    |
+| `@farmjs/integrations/stripe`   | Stripe billing integration.                                                                                |
+| `@farmjs/integrations/auth`     | Better Auth, Auth.js, Clerk, Auth0, WorkOS helpers when using the auth barrel.                             |
+| `@farmjs/integrations/supabase` | Supabase auth integration.                                                                                 |
+| `@farmjs/integrations/email`    | Resend integration and email template helper.                                                              |
+| `@farmjs/integrations/jobs`     | Jobs integration, `task`, `defineTasks`, Trigger.dev runtime, Inngest runtime.                             |
+| `@farmjs/integrations/unkey`    | Unkey API key integration.                                                                                 |
 
 ## Mental model
 

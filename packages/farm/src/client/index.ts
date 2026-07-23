@@ -55,7 +55,7 @@ export {
 } from "./spa-router";
 export { installChunkErrorRecovery, isChunkLoadError } from "./chunk-recovery";
 export type { FarmChunkRecoveryOptions } from "./chunk-recovery";
-export { createClientPluginManager, defineClientPlugin, FarmClientPluginManager } from "./plugin";
+export { createClientPluginManager, FarmClientPluginManager } from "./plugin";
 export type {
   FarmClientHydrationCompleteEvent,
   FarmClientHydrationEvent,
@@ -71,11 +71,9 @@ export type {
   FarmClientPerformanceEvent,
   FarmClientPlugin,
   FarmClientPluginCloseEvent,
-  FarmClientPluginDefinition,
   FarmClientPluginEnforce,
   FarmClientPluginErrorEvent,
   FarmClientPluginErrorPhase,
-  FarmClientPluginFactory,
   FarmClientPluginManagerOptions,
   FarmClientPluginMetadata,
   FarmClientPluginRegistration,

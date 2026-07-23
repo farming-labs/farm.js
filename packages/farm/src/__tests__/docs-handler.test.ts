@@ -17,6 +17,17 @@ import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
+import { farmDocsPixelBorderCss } from "../docs/pixel-border-css";
+
+describe("farmDocsPixelBorderCss", () => {
+  it("bundles the search dialog layout for production adapters", () => {
+    expect(farmDocsPixelBorderCss).toContain(".omni-overlay {\n  position: fixed;");
+    expect(farmDocsPixelBorderCss).toContain(
+      ".omni-content {\n  --omni-content-top: clamp(5rem, 16vh, 7rem);\n  position: fixed;",
+    );
+    expect(farmDocsPixelBorderCss).toContain(".omni-search-input {\n  width: 0;\n  flex: 1;");
+  });
+});
 
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
@@ -220,6 +231,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("data-farm-docs-search-root");
     expect(html).toContain('data-api="/api/docs"');
     expect(html).toContain('aria-label="Search documentation"');
+    expect(html).toContain("window.__farmDocsSearchBootstrap");
+    expect(htmlText.indexOf("window.__farmDocsSearchBootstrap")).toBeLessThan(
+      htmlText.indexOf("<body>"),
+    );
     expect(html).toContain('<script type="module" src="/farm-client.js"></script>');
     const topbar = htmlText.slice(
       htmlText.indexOf('<header class="topbar">'),
@@ -250,6 +265,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
     expect(html).toContain("width: min(680px, calc(100vw - 32px))");
     expect(html).toContain("width: calc(100vw - 20px)");
+    expect(html).toContain(".omni-overlay {\n  position: fixed;");
+    expect(html).toContain(".omni-content {\n  --omni-content-top:");
     expect(html).toContain(".omni-footer-hints {");
     expect(html).toContain("font-size: 16px");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
@@ -391,6 +408,7 @@ describe("createFarmDocsHandler", () => {
       expect(html).not.toContain('data-search-full=""');
       expect(html).not.toContain('id="farm-docs-search-root"');
       expect(html).not.toContain('aria-keyshortcuts="Meta+K Control+K"');
+      expect(html).not.toContain("window.__farmDocsSearchBootstrap");
       expect(html).not.toContain('<script type="module" src="/farm-client.js"></script>');
     }
   });

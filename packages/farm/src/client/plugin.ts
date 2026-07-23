@@ -24,9 +24,9 @@ export interface FarmClientPluginMetadata {
   version?: string;
 }
 
-export interface FarmClientPluginSetupEvent<TOptions = unknown> {
+export interface FarmClientPluginSetupEvent<TPublic = undefined> {
   plugin: FarmClientPluginMetadata;
-  options: Readonly<TOptions>;
+  public: Readonly<TPublic>;
   router: FarmClientPluginRouter;
   isDev: boolean;
   isProd: boolean;
@@ -35,8 +35,8 @@ export interface FarmClientPluginSetupEvent<TOptions = unknown> {
 
 export interface FarmClientPluginStateEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientPluginSetupEvent<TOptions> {
+  TPublic = undefined,
+> extends FarmClientPluginSetupEvent<TPublic> {
   state: TState;
 }
 
@@ -47,13 +47,13 @@ export interface FarmClientHydrationSession {
   startedAt: number;
 }
 
-export interface FarmClientHydrationEvent<TState = unknown, TOptions = unknown>
-  extends FarmClientPluginStateEvent<TState, TOptions>, FarmClientHydrationSession {}
+export interface FarmClientHydrationEvent<TState = unknown, TPublic = undefined>
+  extends FarmClientPluginStateEvent<TState, TPublic>, FarmClientHydrationSession {}
 
 export interface FarmClientHydrationCompleteEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientHydrationEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientHydrationEvent<TState, TPublic> {
   durationMs: number;
   recovered: boolean;
 }
@@ -71,28 +71,28 @@ export interface FarmClientNavigationSession {
   };
 }
 
-export interface FarmClientNavigationEvent<TState = unknown, TOptions = unknown>
-  extends FarmClientPluginStateEvent<TState, TOptions>, FarmClientNavigationSession {}
+export interface FarmClientNavigationEvent<TState = unknown, TPublic = undefined>
+  extends FarmClientPluginStateEvent<TState, TPublic>, FarmClientNavigationSession {}
 
 export interface FarmClientNavigationLoadedEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientNavigationEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientNavigationEvent<TState, TPublic> {
   durationMs: number;
   data?: unknown;
 }
 
 export interface FarmClientNavigationResolvedEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientNavigationEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientNavigationEvent<TState, TPublic> {
   durationMs: number;
 }
 
 export interface FarmClientNavigationErrorEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientNavigationResolvedEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientNavigationResolvedEvent<TState, TPublic> {
   error: unknown;
 }
 
@@ -108,8 +108,8 @@ export type FarmClientPluginErrorPhase =
 
 export interface FarmClientPluginErrorEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientPluginStateEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientPluginStateEvent<TState, TPublic> {
   error: unknown;
   phase: FarmClientPluginErrorPhase;
   location: FarmClientLocation;
@@ -118,51 +118,43 @@ export interface FarmClientPluginErrorEvent<
 
 export interface FarmClientPerformanceEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientPluginStateEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientPluginStateEvent<TState, TPublic> {
   entry: PerformanceEntry;
   location: FarmClientLocation;
 }
 
 export interface FarmClientPluginCloseEvent<
   TState = unknown,
-  TOptions = unknown,
-> extends FarmClientPluginStateEvent<TState, TOptions> {
+  TPublic = undefined,
+> extends FarmClientPluginStateEvent<TState, TPublic> {
   reason: "pagehide" | "hmr" | "manual" | (string & {});
 }
 
-export interface FarmClientPlugin<TState = unknown, TOptions = unknown> {
-  setup?(event: FarmClientPluginSetupEvent<TOptions>): MaybePromise<TState>;
+export interface FarmClientPlugin<TState = unknown, TPublic = undefined> {
+  setup?(event: FarmClientPluginSetupEvent<TPublic>): MaybePromise<TState>;
   hydration?: {
-    before?(event: FarmClientHydrationEvent<TState, TOptions>): MaybePromise<void>;
-    after?(event: FarmClientHydrationCompleteEvent<TState, TOptions>): MaybePromise<void>;
+    before?(event: FarmClientHydrationEvent<TState, TPublic>): MaybePromise<void>;
+    after?(event: FarmClientHydrationCompleteEvent<TState, TPublic>): MaybePromise<void>;
   };
   navigation?: {
-    before?(event: FarmClientNavigationEvent<TState, TOptions>): MaybePromise<void>;
-    loaded?(event: FarmClientNavigationLoadedEvent<TState, TOptions>): MaybePromise<void>;
-    resolved?(event: FarmClientNavigationResolvedEvent<TState, TOptions>): MaybePromise<void>;
-    rendered?(event: FarmClientNavigationResolvedEvent<TState, TOptions>): MaybePromise<void>;
-    error?(event: FarmClientNavigationErrorEvent<TState, TOptions>): MaybePromise<void>;
+    before?(event: FarmClientNavigationEvent<TState, TPublic>): MaybePromise<void>;
+    loaded?(event: FarmClientNavigationLoadedEvent<TState, TPublic>): MaybePromise<void>;
+    resolved?(event: FarmClientNavigationResolvedEvent<TState, TPublic>): MaybePromise<void>;
+    rendered?(event: FarmClientNavigationResolvedEvent<TState, TPublic>): MaybePromise<void>;
+    error?(event: FarmClientNavigationErrorEvent<TState, TPublic>): MaybePromise<void>;
   };
-  error?(event: FarmClientPluginErrorEvent<TState, TOptions>): MaybePromise<void>;
-  performance?(event: FarmClientPerformanceEvent<TState, TOptions>): MaybePromise<void>;
-  close?(event: FarmClientPluginCloseEvent<TState, TOptions>): MaybePromise<void>;
+  error?(event: FarmClientPluginErrorEvent<TState, TPublic>): MaybePromise<void>;
+  performance?(event: FarmClientPerformanceEvent<TState, TPublic>): MaybePromise<void>;
+  close?(event: FarmClientPluginCloseEvent<TState, TPublic>): MaybePromise<void>;
 }
 
-export type FarmClientPluginFactory<TOptions = unknown> = (
-  options: Readonly<TOptions>,
-) => MaybePromise<FarmClientPlugin<any, TOptions>>;
-
-export type FarmClientPluginDefinition<TOptions = unknown> =
-  | FarmClientPlugin<any, TOptions>
-  | FarmClientPluginFactory<TOptions>;
-
-export interface FarmClientPluginRegistration<TOptions = unknown> {
+export interface FarmClientPluginRegistration<TPublic = undefined> {
   name: string;
   version?: string;
   enforce?: FarmClientPluginEnforce;
-  definition: FarmClientPluginDefinition<TOptions>;
-  options?: TOptions;
+  definition: FarmClientPlugin<any, TPublic>;
+  public?: TPublic;
 }
 
 export interface FarmClientPluginManagerOptions {
@@ -417,13 +409,10 @@ export class FarmClientPluginManager {
     try {
       for (const registration of this.registrations) {
         try {
-          const definition =
-            typeof registration.definition === "function"
-              ? await registration.definition(readonlyOptions(registration.options))
-              : registration.definition;
+          const definition = registration.definition;
           if (!definition || typeof definition !== "object") {
             throw new TypeError(
-              `Client plugin "${registration.name}" did not return a plugin object`,
+              `Client plugin "${registration.name}" does not define a lifecycle object`,
             );
           }
 
@@ -559,13 +548,13 @@ export class FarmClientPluginManager {
 
   private createSetupEvent(
     instance: Pick<FarmClientPluginInstance, "registration">,
-  ): FarmClientPluginSetupEvent {
+  ): FarmClientPluginSetupEvent<any> {
     return {
       plugin: {
         name: instance.registration.name,
         version: instance.registration.version,
       },
-      options: readonlyOptions(instance.registration.options),
+      public: readonlyPublicData(instance.registration.public),
       router: this.options.router,
       isDev: Boolean(this.options.isDev),
       isProd: Boolean(this.options.isProd),
@@ -573,7 +562,9 @@ export class FarmClientPluginManager {
     };
   }
 
-  private createStateEvent(instance: FarmClientPluginInstance): FarmClientPluginStateEvent {
+  private createStateEvent(
+    instance: FarmClientPluginInstance,
+  ): FarmClientPluginStateEvent<any, any> {
     return {
       ...this.createSetupEvent(instance),
       state: instance.state,
@@ -599,12 +590,6 @@ export function createClientPluginManager(
   options: FarmClientPluginManagerOptions,
 ): FarmClientPluginManager {
   return new FarmClientPluginManager(registrations, options);
-}
-
-export function defineClientPlugin<TState = undefined, TOptions = unknown>(
-  plugin: FarmClientPlugin<TState, TOptions>,
-): FarmClientPlugin<TState, TOptions> {
-  return plugin;
 }
 
 function sortRegistrations(
@@ -644,11 +629,11 @@ function toClientLocation(
   };
 }
 
-function readonlyOptions<T>(options: T | undefined): Readonly<T> {
-  if (options && typeof options === "object") {
-    return Object.freeze(options);
+function readonlyPublicData<T>(value: T | undefined): Readonly<T> {
+  if (value && typeof value === "object") {
+    return Object.freeze(value);
   }
-  return options as Readonly<T>;
+  return value as Readonly<T>;
 }
 
 function now(): number {

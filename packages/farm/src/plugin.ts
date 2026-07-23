@@ -1,5 +1,6 @@
 import type { FarmConfig, FarmRequest, FarmResponse } from "./types";
 import type { ViteDevServer } from "vite";
+import type { FarmClientPlugin } from "./client/plugin";
 import { getResolvedEnv, type ResolvedFarmEnv } from "./env";
 import {
   clearRequestContext,
@@ -279,22 +280,19 @@ export interface FarmPluginDevHooks<TState = unknown> {
   update?(update: HMRUpdatePayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
 }
 
-export type FarmPluginClientSource = string | URL;
-
-export interface FarmPluginClientConfig<TPublic = unknown> {
-  /** Browser-safe module exporting a client plugin object or factory as its default export. */
-  source: FarmPluginClientSource;
-  /** Explicitly public, JSON-safe options embedded in the browser bundle. */
+export interface FarmPluginClientConfig<
+  TState = unknown,
+  TPublic = undefined,
+> extends FarmClientPlugin<TState, TPublic> {
+  /** Explicitly public, JSON-safe data embedded in the browser bundle. */
   public?: TPublic;
 }
-
-export type FarmPluginClientReference<TPublic = unknown> =
-  | FarmPluginClientSource
-  | FarmPluginClientConfig<TPublic>;
 
 export interface FarmPlugin<
   TState = any,
   TRequestContext extends object = Record<string, unknown>,
+  TClientState = any,
+  TClientPublic = any,
 > {
   name: string;
   version?: string;
@@ -310,8 +308,8 @@ export interface FarmPlugin<
   render?: FarmPluginRenderHooks<TState>;
   build?: FarmPluginBuildHooks<TState>;
   dev?: FarmPluginDevHooks<TState>;
-  /** Optional browser lifecycle module for this logical plugin. */
-  client?: FarmPluginClientReference;
+  /** Optional browser lifecycle for this logical plugin. */
+  client?: FarmPluginClientConfig<TClientState, TClientPublic>;
 
   /** @deprecated Use `setup` instead. */
   init?: (context: FarmPluginContext) => void | Promise<void>;
@@ -1119,7 +1117,11 @@ export class PluginManager {
 export function definePlugin<
   TState = undefined,
   TRequestContext extends object = Record<string, never>,
->(plugin: FarmPlugin<TState, TRequestContext>): FarmPlugin<TState, TRequestContext> {
+  TClientState = unknown,
+  TClientPublic = undefined,
+>(
+  plugin: FarmPlugin<TState, TRequestContext, TClientState, TClientPublic>,
+): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic> {
   return plugin;
 }
 export { farmPlugin } from "./vite";

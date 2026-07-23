@@ -4,6 +4,12 @@ import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 import { integrationLab } from './src/lib/integration-lab.ts';
 
+declare global {
+  interface Window {
+    __FARM_CLIENT_PLUGIN_EVENTS__?: string[];
+  }
+}
+
 const myCustomPlugin: FarmPlugin = {
   name: 'my-custom-plugin',
   
@@ -23,8 +29,56 @@ const runtimeLifecyclePlugin = definePlugin({
   name: 'runtime-lifecycle-e2e',
 
   client: {
-    source: './src/lib/runtime-lifecycle.client.ts',
     public: { label: 'feature-lab' },
+
+    setup({ plugin, public: config, isDev }) {
+      const events: string[] = [];
+      const record = (event: string) => {
+        events.push(event);
+        window.__FARM_CLIENT_PLUGIN_EVENTS__ = [...events];
+        document.documentElement.dataset.farmClientPluginEvent = event;
+        window.dispatchEvent(new CustomEvent('farm:client-plugin-event', { detail: event }));
+      };
+
+      document.documentElement.dataset.farmClientPlugin = config.label;
+      record(`setup:${plugin.name}:${config.label}:${isDev ? 'dev' : 'prod'}`);
+      return { record };
+    },
+
+    hydration: {
+      before({ state, mode }) {
+        state.record(`hydration:before:${mode}`);
+      },
+      after({ state, recovered }) {
+        state.record(`hydration:after:${recovered ? 'recovered' : 'ready'}`);
+      },
+    },
+
+    navigation: {
+      before({ state, to }) {
+        state.record(`navigation:before:${to.pathname}`);
+      },
+      loaded({ state, to }) {
+        state.record(`navigation:loaded:${to.pathname}`);
+      },
+      resolved({ state, to }) {
+        state.record(`navigation:resolved:${to.pathname}`);
+      },
+      rendered({ state, to }) {
+        state.record(`navigation:rendered:${to.pathname}`);
+      },
+      error({ state, to }) {
+        state.record(`navigation:error:${to.pathname}`);
+      },
+    },
+
+    error({ state, phase }) {
+      state.record(`error:${phase}`);
+    },
+
+    close({ state, reason }) {
+      state.record(`close:${reason}`);
+    },
   },
 
   setup() {

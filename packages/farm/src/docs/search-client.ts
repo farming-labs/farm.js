@@ -24,10 +24,11 @@ export function resolveFarmDocsSearchClientModule(root: string): string | undefi
   return undefined;
 }
 
-export function generateFarmDocsSearchClientRuntime(
-  enabled: boolean,
-  moduleId?: string,
-): string {
+export function generateFarmDocsSearchBootstrapRuntime(): string {
+  return `(()=>{if(window.__farmDocsSearchBootstrap)return;window.__farmDocsSearchBootstrap=true;const queue=(trigger,event)=>{if(window.__FARM_DOCS_SEARCH_BRIDGE_ACTIVE__)return;event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();window.__FARM_DOCS_SEARCH_PENDING__=trigger;window.__FARM_MOUNT_DOCS_SEARCH__?.()};document.addEventListener("click",(event)=>{const target=event.target instanceof Element?event.target.closest("[data-search-full]"):null;if(target)queue("button",event)},true);document.addEventListener("keydown",(event)=>{if((event.metaKey||event.ctrlKey)&&event.key.toLowerCase()==="k")queue("keyboard",event)},true)})();`;
+}
+
+export function generateFarmDocsSearchClientRuntime(enabled: boolean, moduleId?: string): string {
   if (!enabled || !moduleId) {
     return `
 function isFarmDocsSearchPage() {
@@ -44,10 +45,84 @@ async function mountFarmDocsSearch() {
 let farmDocsSearchRoot = null;
 let farmDocsSearchContainer = null;
 let farmDocsSearchModulePromise = null;
+let farmDocsSearchPendingTrigger = window.__FARM_DOCS_SEARCH_PENDING__ === 'keyboard'
+  ? 'keyboard'
+  : window.__FARM_DOCS_SEARCH_PENDING__
+    ? 'button'
+    : null;
+let farmDocsSearchReady = false;
 
 function isFarmDocsSearchPage() {
   return document.querySelector('[data-farm-docs-search-root]') instanceof HTMLElement;
 }
+
+function replayFarmDocsSearchOpen() {
+  const pendingTrigger = farmDocsSearchPendingTrigger;
+  farmDocsSearchPendingTrigger = null;
+  window.__FARM_DOCS_SEARCH_PENDING__ = null;
+  if (!pendingTrigger) return;
+
+  queueMicrotask(() => {
+    if (pendingTrigger === 'keyboard') {
+      document.dispatchEvent(
+        new KeyboardEvent('keydown', {
+          key: 'k',
+          metaKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+    } else {
+      const trigger = document.querySelector('[data-search-full]');
+      if (trigger instanceof HTMLElement) trigger.click();
+    }
+  });
+}
+
+function FarmDocsSearchBridge({ component, api }) {
+  React.useEffect(() => {
+    farmDocsSearchReady = true;
+    replayFarmDocsSearchOpen();
+    return () => {
+      farmDocsSearchReady = false;
+    };
+  }, []);
+
+  return React.createElement(component, { api });
+}
+
+function queueFarmDocsSearchOpen(trigger, event) {
+  if (farmDocsSearchReady) return;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation();
+  farmDocsSearchPendingTrigger = trigger;
+  window.__FARM_DOCS_SEARCH_PENDING__ = trigger;
+  void mountFarmDocsSearch();
+}
+
+document.addEventListener(
+  'click',
+  (event) => {
+    const target = event.target instanceof Element
+      ? event.target.closest('[data-search-full]')
+      : null;
+    if (target) queueFarmDocsSearchOpen('button', event);
+  },
+  true,
+);
+
+document.addEventListener(
+  'keydown',
+  (event) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      queueFarmDocsSearchOpen('keyboard', event);
+    }
+  },
+  true,
+);
+
+window.__FARM_DOCS_SEARCH_BRIDGE_ACTIVE__ = true;
 
 async function mountFarmDocsSearch() {
   const container = document.querySelector('[data-farm-docs-search-root]');
@@ -60,6 +135,7 @@ async function mountFarmDocsSearch() {
     if (!container.isConnected) return false;
 
     if (farmDocsSearchRoot) {
+      farmDocsSearchReady = false;
       try {
         farmDocsSearchRoot.unmount();
       } catch {}
@@ -68,7 +144,8 @@ async function mountFarmDocsSearch() {
     farmDocsSearchContainer = container;
     farmDocsSearchRoot = createRoot(container);
     farmDocsSearchRoot.render(
-      React.createElement(DocsCommandSearch, {
+      React.createElement(FarmDocsSearchBridge, {
+        component: DocsCommandSearch,
         api: container.dataset.api || '/api/docs',
       }),
     );

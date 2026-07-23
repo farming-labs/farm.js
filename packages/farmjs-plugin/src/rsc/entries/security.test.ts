@@ -21,7 +21,15 @@ const context: EntryContext = {
 
 describe("generated server action security", () => {
   it("imports an existing global stylesheet into the browser asset graph", () => {
-    expect(generateClientEntry(context)).toContain(`import "/src/app/globals.css";`);
+    const entry = generateClientEntry(context);
+
+    expect(entry).toContain(
+      'const farmGlobalStylesheets = import.meta.glob("/src/app/globals.css", {',
+    );
+    expect(entry).toContain("eager: true");
+    expect(entry).toContain("import: 'default'");
+    expect(entry).toContain("query: '?url'");
+    expect(entry).toContain("export const farmGlobalStylesheet");
     expect(generateClientEntry({ ...context, globalCssPath: undefined })).not.toContain(
       "globals.css",
     );
@@ -65,6 +73,26 @@ describe("generated server action security", () => {
     expect(entry).toContain("cache: 'no-store'");
     expect(entry).toContain("error.name = 'ServerActionError'");
     expect(entry).not.toContain("throw p.returnValue?.data");
+  });
+
+  it("emits the resolved global stylesheet URL for every routes directory shape", () => {
+    const defaultEntry = generateClientEntry(context);
+    const customEntry = generateClientEntry({
+      ...context,
+      globalCssPath: "/src/routes/globals.css",
+      routesDir: " routes ",
+    });
+    const rootEntry = generateClientEntry({
+      ...context,
+      globalCssPath: "/src/globals.css",
+      routesDir: "",
+    });
+
+    expect(defaultEntry).toContain(
+      'const farmGlobalStylesheets = import.meta.glob("/src/app/globals.css", {',
+    );
+    expect(customEntry).toContain('import.meta.glob("/src/routes/globals.css", {');
+    expect(rootEntry).toContain('import.meta.glob("/src/globals.css", {');
   });
 
   it("uses the shared middleware runtime and server context during RSC rendering", () => {
