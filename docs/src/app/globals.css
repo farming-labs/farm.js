@@ -729,41 +729,59 @@
 }
 
 .benchmark-startup-top,
+.benchmark-startup-stack,
 .benchmark-startup-page,
 .benchmark-build-module,
-.benchmark-build-output {
+.benchmark-build-output,
+.benchmark-startup-page circle,
+.benchmark-build-output circle {
   transform-box: fill-box;
   transform-origin: center;
   will-change: opacity, transform;
 }
 
+.benchmark-startup-stack {
+  animation: benchmark-startup-stack 8s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
+}
+
 .benchmark-startup-top {
-  animation: benchmark-illustration-lift 9s ease-in-out infinite;
+  animation: benchmark-startup-lift 8s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
 }
 
 .benchmark-startup-page {
-  animation: benchmark-illustration-reveal 9s ease-in-out infinite;
+  animation: benchmark-startup-reveal 8s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
 }
 
-.benchmark-build-module {
-  animation: benchmark-illustration-drift 10s ease-in-out infinite;
+.benchmark-startup-page circle,
+.benchmark-build-output circle {
+  animation: benchmark-illustration-signal 2.4s ease-in-out infinite;
 }
 
 .benchmark-build-module--back {
-  animation-delay: -1.5s;
+  animation: benchmark-build-back 9s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
 }
 
 .benchmark-build-module--left {
-  animation-delay: -4s;
+  animation: benchmark-build-left 9s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
 }
 
 .benchmark-build-module--right {
-  animation-delay: -6.5s;
+  animation: benchmark-build-right 9s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
 }
 
 .benchmark-build-output {
-  animation: benchmark-illustration-lift 10s ease-in-out infinite;
-  animation-delay: -2.5s;
+  animation: benchmark-build-output 9s cubic-bezier(0.45, 0, 0.55, 1)
+    infinite;
+}
+
+.benchmark-build-output circle {
+  animation-delay: -0.8s;
 }
 
 @keyframes benchmark-comparison-cycle {
@@ -785,36 +803,122 @@
   }
 }
 
-@keyframes benchmark-illustration-lift {
+@keyframes benchmark-startup-stack {
   0%,
+  18%,
+  82%,
   100% {
     transform: translate3d(0, 0, 0);
   }
 
-  50% {
-    transform: translate3d(0, -2px, 0);
+  42%,
+  58% {
+    transform: translate3d(0, 4px, 0);
   }
 }
 
-@keyframes benchmark-illustration-drift {
+@keyframes benchmark-startup-lift {
   0%,
+  18%,
+  82%,
   100% {
     transform: translate3d(0, 0, 0);
   }
 
-  50% {
-    transform: translate3d(0, -1.5px, 0);
+  42%,
+  58% {
+    transform: translate3d(0, -9px, 0);
   }
 }
 
-@keyframes benchmark-illustration-reveal {
+@keyframes benchmark-startup-reveal {
+  0%,
+  18%,
+  82%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.985);
+  }
+
+  42%,
+  58% {
+    opacity: 1;
+    transform: scale(1.015);
+  }
+}
+
+@keyframes benchmark-build-back {
+  0%,
+  18%,
+  82%,
+  100% {
+    opacity: 0.72;
+    transform: translate3d(0, 0, 0);
+  }
+
+  42%,
+  58% {
+    opacity: 1;
+    transform: translate3d(0, 8px, 0);
+  }
+}
+
+@keyframes benchmark-build-left {
+  0%,
+  18%,
+  82%,
+  100% {
+    opacity: 0.72;
+    transform: translate3d(0, 0, 0);
+  }
+
+  42%,
+  58% {
+    opacity: 1;
+    transform: translate3d(10px, -2px, 0);
+  }
+}
+
+@keyframes benchmark-build-right {
+  0%,
+  18%,
+  82%,
+  100% {
+    opacity: 0.72;
+    transform: translate3d(0, 0, 0);
+  }
+
+  42%,
+  58% {
+    opacity: 1;
+    transform: translate3d(-10px, -2px, 0);
+  }
+}
+
+@keyframes benchmark-build-output {
+  0%,
+  18%,
+  82%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+
+  42%,
+  58% {
+    transform: translate3d(0, -7px, 0) scale(1.015);
+  }
+}
+
+@keyframes benchmark-illustration-signal {
   0%,
   100% {
-    opacity: 0.68;
+    opacity: 0.52;
+    transform: scale(0.78);
   }
 
   50% {
     opacity: 1;
+    transform: scale(1.35);
   }
 }
 
@@ -876,10 +980,14 @@
   }
 
   .benchmark-startup-top,
+  .benchmark-startup-stack,
   .benchmark-startup-page,
   .benchmark-build-module,
-  .benchmark-build-output {
+  .benchmark-build-output,
+  .benchmark-startup-page circle,
+  .benchmark-build-output circle {
     animation: none;
+    opacity: 1;
     transform: none;
   }
 
