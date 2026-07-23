@@ -195,11 +195,13 @@ function BenchmarkLink({ href, children }: { href: string; children: string }) {
 function ComparisonPanel({
   children,
   icon: Icon,
+  illustration,
   label,
   title,
 }: {
   children: ReactNode;
   icon: ComponentType<{ "aria-hidden"?: boolean; className?: string; strokeWidth?: number }>;
+  illustration?: ReactNode;
   label: string;
   title: string;
 }) {
@@ -212,8 +214,129 @@ function ComparisonPanel({
       <p className="mt-7 max-w-md text-2xl font-medium leading-tight tracking-normal text-white sm:text-3xl">
         {title}
       </p>
+      {illustration}
       {children}
     </article>
+  );
+}
+
+function StartupIllustration() {
+  return (
+    <div
+      aria-hidden
+      className="relative mt-8 h-28 overflow-hidden border border-white/10 bg-white/[0.015] sm:h-32"
+    >
+      <svg
+        className="absolute inset-0 h-full w-full text-white"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox="0 0 520 150"
+      >
+        <path
+          d="M48 104L184 42H364L228 104H48Z"
+          fill="currentColor"
+          fillOpacity="0.09"
+          stroke="currentColor"
+          strokeOpacity="0.24"
+        />
+        <path
+          d="M132 116L268 54H448L312 116H132Z"
+          fill="currentColor"
+          fillOpacity="0.06"
+          stroke="currentColor"
+          strokeOpacity="0.18"
+        />
+        <path
+          d="M216 128L352 66H496L360 128H216Z"
+          fill="currentColor"
+          fillOpacity="0.04"
+          stroke="currentColor"
+          strokeOpacity="0.12"
+        />
+        <path
+          d="M78 103H226"
+          stroke="currentColor"
+          strokeDasharray="3 8"
+          strokeOpacity="0.36"
+        />
+        <path d="M78 103H132" stroke="currentColor" strokeWidth="3" />
+        <circle cx="78" cy="103" fill="black" r="5" stroke="currentColor" strokeWidth="1.5" />
+        <circle cx="132" cy="103" fill="currentColor" r="4" />
+        <path d="M330 43H444" stroke="currentColor" strokeOpacity="0.2" strokeWidth="5" />
+        <path d="M330 43H356" stroke="currentColor" strokeWidth="5" />
+      </svg>
+      <div className="absolute bottom-3 left-4 font-mono text-[8px] uppercase tracking-normal text-white/42">
+        First page lock
+      </div>
+      <div className="absolute right-4 top-3 font-mono text-[8px] uppercase tracking-normal text-white/54">
+        253ms
+      </div>
+    </div>
+  );
+}
+
+function BuildIllustration() {
+  return (
+    <div
+      aria-hidden
+      className="relative mt-8 h-28 overflow-hidden border border-white/10 bg-white/[0.015] sm:h-32"
+    >
+      <svg
+        className="absolute inset-0 h-full w-full text-white"
+        fill="none"
+        preserveAspectRatio="none"
+        viewBox="0 0 520 150"
+      >
+        <defs>
+          <linearGradient id="benchmarkBuildFade" x1="0" x2="1" y1="0" y2="0">
+            <stop stopColor="currentColor" stopOpacity="0" />
+            <stop offset="0.45" stopColor="currentColor" stopOpacity="0.22" />
+            <stop offset="1" stopColor="currentColor" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[26, 44, 62, 96, 114].map((y, index) => (
+          <path
+            d={`M${28 + index * 18} ${y}H${480 - index * 22}`}
+            key={y}
+            stroke="url(#benchmarkBuildFade)"
+            strokeWidth={index === 2 ? "2" : "1"}
+          />
+        ))}
+        <path
+          d="M82 106L194 54H346L234 106H82Z"
+          fill="currentColor"
+          fillOpacity="0.08"
+          stroke="currentColor"
+          strokeOpacity="0.24"
+        />
+        <path
+          d="M154 118L266 66H418L306 118H154Z"
+          fill="currentColor"
+          fillOpacity="0.05"
+          stroke="currentColor"
+          strokeOpacity="0.16"
+        />
+        <path
+          d="M226 130L338 78H486L374 130H226Z"
+          fill="currentColor"
+          fillOpacity="0.035"
+          stroke="currentColor"
+          strokeOpacity="0.1"
+        />
+        <path d="M104 94H230" stroke="currentColor" strokeOpacity="0.22" />
+        <path d="M104 94H146" stroke="currentColor" strokeWidth="3" />
+        <path d="M276 70H414" stroke="currentColor" strokeOpacity="0.18" strokeWidth="5" />
+        <path d="M276 70H304" stroke="currentColor" strokeWidth="5" />
+        <circle cx="146" cy="94" fill="currentColor" r="4" />
+        <circle cx="104" cy="94" fill="black" r="5" stroke="currentColor" strokeWidth="1.5" />
+      </svg>
+      <div className="absolute bottom-3 left-4 font-mono text-[8px] uppercase tracking-normal text-white/42">
+        Rolldown build path
+      </div>
+      <div className="absolute right-4 top-3 font-mono text-[8px] uppercase tracking-normal text-white/54">
+        527ms
+      </div>
+    </div>
   );
 }
 
@@ -740,6 +863,7 @@ export function BenchmarkSection() {
       <div className="farm-top-rule grid bg-black lg:grid-cols-2">
         <ComparisonPanel
           icon={Rocket}
+          illustration={<StartupIllustration />}
           label="Startup advantage"
           title={`Farm opens the benchmark app ${formatRatio(devAdvantage)} faster than TanStack Start.`}
         >
@@ -748,6 +872,7 @@ export function BenchmarkSection() {
         <div className="border-t border-white/12 lg:border-l lg:border-t-0">
           <ComparisonPanel
             icon={TimerReset}
+            illustration={<BuildIllustration />}
             label="Production build"
             title={`Farm builds the same fixture ${formatRatio(buildAdvantage)} faster than TanStack Start.`}
           >
