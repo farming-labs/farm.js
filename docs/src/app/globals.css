@@ -708,7 +708,7 @@
   transform: translate3d(0, 46%, 0);
   white-space: nowrap;
   will-change: opacity, transform;
-  animation: benchmark-comparison-cycle 16s cubic-bezier(0.22, 1, 0.36, 1)
+  animation: benchmark-comparison-cycle 12s cubic-bezier(0.22, 1, 0.36, 1)
     infinite;
 }
 
@@ -717,15 +717,15 @@
 }
 
 .benchmark-comparison-item:nth-child(2) {
-  animation-delay: 3.52s;
+  animation-delay: 2.52s;
 }
 
 .benchmark-comparison-item:nth-child(3) {
-  animation-delay: 7.52s;
+  animation-delay: 5.52s;
 }
 
 .benchmark-comparison-item:nth-child(4) {
-  animation-delay: 11.52s;
+  animation-delay: 8.52s;
 }
 
 .benchmark-startup-top,
@@ -772,7 +772,7 @@
     transform: translate3d(0, 46%, 0);
   }
 
-  3%,
+  4%,
   22% {
     opacity: 1;
     transform: translate3d(0, 0, 0);

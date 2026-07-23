@@ -249,9 +249,9 @@ function AnimatedComparisonTitle({
       </span>
       <span
         aria-hidden
-        className="mt-1 grid h-[2.5em] grid-cols-[5ch_auto] items-start gap-x-[0.28em] overflow-hidden text-white/72 sm:flex sm:h-[1.25em] sm:items-baseline"
+        className="mt-1 grid h-[2.5em] grid-cols-[3.75ch_auto] items-start gap-x-[0.16em] overflow-hidden text-white/72 sm:flex sm:h-[1.25em] sm:items-start"
       >
-        <span className="benchmark-comparison-rotator block h-[1.25em] w-[5ch] shrink-0 overflow-hidden">
+        <span className="benchmark-comparison-rotator block h-[1.25em] w-[3.75ch] shrink-0 overflow-hidden">
           {comparisons.map(({ framework, ratio }) => (
             <span
               key={framework.id}
