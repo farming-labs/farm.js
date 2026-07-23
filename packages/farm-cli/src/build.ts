@@ -1,10 +1,13 @@
 import {
-  build,
   loadConfig,
+  loadFarmProductionVite,
   logger,
   resolveConfig,
   resolveDeployConfig,
-} from "@farmjs/core/internal/build-runtime";
+} from "@farmjs/core/internal/config-runtime";
+import { withProductionNodeEnv } from "@farmjs/core/internal/production-node-env";
+
+export { withProductionNodeEnv };
 
 export interface BuildFarmOptions {
   root?: string;
@@ -18,26 +21,44 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
   const root = options.root || process.cwd();
 
   try {
-    const mode = "production";
-    const userConfig = await loadConfig(root, undefined, mode);
+    await withProductionNodeEnv(async () => {
+      const mode = "production";
+      const productionVitePromise = loadFarmProductionVite();
+      const [userConfigResult, buildRuntimeResult, productionViteResult] = await Promise.allSettled(
+        [
+          productionVitePromise.then((runtime) =>
+            loadConfig(root, undefined, mode, runtime.loadEnv),
+          ),
+          import("@farmjs/core/internal/build-runtime"),
+          productionVitePromise,
+        ],
+      );
 
-    if (!userConfig) {
-      throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
-    }
+      if (userConfigResult.status === "rejected") throw userConfigResult.reason;
+      if (buildRuntimeResult.status === "rejected") throw buildRuntimeResult.reason;
+      if (productionViteResult.status === "rejected") throw productionViteResult.reason;
 
-    const config = await resolveConfig(userConfig, mode);
+      const userConfig = userConfigResult.value;
 
-    // Override preset if provided via CLI
-    if (options.preset) {
-      const deploy = resolveDeployConfig(userConfig, { preset: options.preset as any });
-      config.preset = deploy.preset;
-      config.deploy = deploy;
-    }
+      if (!userConfig) {
+        throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
+      }
 
-    // Build
-    await build(config, {
-      preset: config.preset,
-      root,
+      const config = await resolveConfig(userConfig, mode);
+
+      // Override preset if provided via CLI
+      if (options.preset) {
+        const deploy = resolveDeployConfig(userConfig, { preset: options.preset as any });
+        config.preset = deploy.preset;
+        config.deploy = deploy;
+      }
+
+      // Build
+      await buildRuntimeResult.value.build(config, {
+        preset: config.preset,
+        root,
+        productionVite: productionViteResult.value,
+      });
     });
 
     logger.success("✅ Build completed successfully!");

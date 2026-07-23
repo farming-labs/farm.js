@@ -22,6 +22,25 @@ The i18n suite builds the framework and `examples/i18n`, starts the Nitro produc
 verifies locale signal precedence, canonical redirects, cache boundaries, localized API context,
 hydration, client locale switching, cookie persistence, and RTL rendering.
 
+Run the emitted docs and SSR/SSG production smoke suite with:
+
+```sh
+pnpm test:e2e:production:sites
+```
+
+This builds both sites with the Node production preset, boots only their emitted server entries,
+and verifies docs navigation, SSR responses, middleware-covered SSG routes, client hydration, and
+API handlers. CI can use `test:e2e:production:sites:run` after the framework packages are built.
+
+Run the emitted React Server Components suite with:
+
+```sh
+pnpm test:e2e:rsc
+```
+
+It verifies the standalone server, hashed CSS, navigation metadata, client hydration, server
+actions, API middleware, post-response work, server-function middleware, and server-query refresh.
+
 ## Framework feature coverage
 
 `framework-features.spec.ts` runs the features together in `examples/basic` and verifies:

@@ -13,7 +13,7 @@ import type { EntryContext } from "../types.js";
  */
 export function generateClientEntry(ctx: EntryContext): string {
   const debugLog = `// Debug disabled`;
-  let imports = `
+  let imports = `${ctx.globalCssPath ? `import ${JSON.stringify(ctx.globalCssPath)};\n` : ""}
 import React from 'react';
 import { hydrateRoot } from 'react-dom/client';
 import { createFromReadableStream } from '@vitejs/plugin-rsc/browser';
@@ -151,6 +151,26 @@ async function main() {
     React.useEffect(() => {
       setPayloadRef.current = (p) => React.startTransition(() => set(p));
     }, []);
+
+    // Keep document metadata in sync when an RSC navigation swaps only #root.
+    React.useEffect(() => {
+      if (typeof payload.metadata?.title === 'string') {
+        document.title = payload.metadata.title;
+      } else {
+        document.title = '';
+      }
+      let description = document.querySelector('meta[name="description"]');
+      if (typeof payload.metadata?.description === 'string') {
+        if (!description) {
+          description = document.createElement('meta');
+          description.setAttribute('name', 'description');
+          document.head.appendChild(description);
+        }
+        description.setAttribute('content', payload.metadata.description);
+      } else {
+        description?.remove();
+      }
+    }, [payload.metadata?.title, payload.metadata?.description]);
     
     // Set up client-side navigation
     React.useEffect(() => {
@@ -219,9 +239,6 @@ async function main() {
       
       const newPayload = await createFromReadableStream(res.body);
       setPayloadRef.current?.(newPayload);
-      
-      // Update document title if available
-      // The title will be in the payload's root tree
       debug('RSC navigation complete');
     } catch (e) {
       console.error('[Farm.js] RSC navigation failed:', e);

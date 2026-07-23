@@ -8,12 +8,27 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export async function createMiddlewareProductionFixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-middleware-"));
 
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), { recursive: true });
+  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), {
+    recursive: true,
+  });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
 
-  await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), { recursive: true });
-  await fs.mkdir(path.join(root, "src", "app", "dashboard", "explicit"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), {
+    recursive: true,
+  });
+  await fs.mkdir(path.join(root, "src", "app", "dashboard", "explicit"), {
+    recursive: true,
+  });
   await fs.mkdir(path.join(root, "src", "app", "users", "[id]", "settings"), {
+    recursive: true,
+  });
+  await fs.mkdir(path.join(root, "src", "app", "context-ppr"), {
+    recursive: true,
+  });
+  await fs.mkdir(path.join(root, "src", "app", "rewrite-target"), {
+    recursive: true,
+  });
+  await fs.mkdir(path.join(root, "src", "app", "metadata", "[id]"), {
     recursive: true,
   });
   await fs.writeFile(path.join(root, "package.json"), JSON.stringify({ type: "module" }, null, 2));
@@ -28,6 +43,12 @@ export default {
   images: {
     path: "/media/image",
     qualities: [60],
+  },
+  context({ request, path }) {
+    return {
+      tenant: request.headers.get("x-farm-tenant") || "public",
+      requestId: request.headers.get("x-request-id") || "request:" + path,
+    };
   },
   observability: {
     onEvent(event) {
@@ -44,6 +65,13 @@ export default {
     },
   },
   middleware: [
+    {
+      matcher: "/rewrite-alias",
+      async handler(ctx, next) {
+        ctx.rewrite("/rewrite-target");
+        await next();
+      },
+    },
     {
       matcher: "/dashboard/config-response",
       handler(ctx) {
@@ -63,6 +91,27 @@ export default {
 `.trim(),
   );
   await fs.writeFile(path.join(root, "src", "app", "globals.css"), "");
+  await fs.writeFile(
+    path.join(root, "src", "app", "rewrite-target", "page.tsx"),
+    `
+import React from "react";
+import { getCurrentRequest } from "@farmjs/core/request";
+
+export default function RewriteTargetPage() {
+  return React.createElement("main", null, "current request: " + new URL(getCurrentRequest().url).pathname);
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "context-ppr", "page.tsx"),
+    `
+export const ppr = true;
+
+export default function ContextPPRPage() {
+  return <main>configured context PPR route</main>;
+}
+`.trim(),
+  );
   const productImage = await sharp({
     create: {
       width: 2,
@@ -110,8 +159,24 @@ export const ProgrammaticRoute = createRoute("/programmatic/[id]", {
   },
 });
 
+export const ContextRoute = createRoute("/context/[id]", {
+  data: {
+    main({ context, params }: any) {
+      return {
+        id: params.id,
+        tenant: context.tenant,
+        requestId: context.requestId,
+      };
+    },
+  },
+  component({ data, context }: any) {
+    return <main>{\`production route context: \${data.tenant} / \${data.id} / \${data.requestId} / \${context ? "leaked" : "private"}\`}</main>;
+  },
+});
+
 export default defineRoutes(({ api }) => [
   ProgrammaticRoute,
+  ContextRoute,
   api("/api/programmatic/[id]", {
     async GET(_request: Request, context: { params: Promise<{ id: string }> }) {
       const params = await context.params;
@@ -119,6 +184,57 @@ export default defineRoutes(({ api }) => [
     },
   }),
 ]);
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "metadata", "layout.tsx"),
+    `
+import React from "react";
+
+export const metadata = {
+  openGraph: {
+    siteName: "Farm catalog",
+  },
+};
+
+export function generateMetadata({ params }: any) {
+  return {
+    description: \`Layout metadata for \${params.id}\`,
+    openGraph: {
+      description: \`Layout Open Graph metadata for \${params.id}\`,
+    },
+  };
+}
+
+export default function MetadataLayout({ children }: any) {
+  return React.createElement("section", null, children);
+}
+`.trim(),
+  );
+  await fs.writeFile(
+    path.join(root, "src", "app", "metadata", "[id]", "page.tsx"),
+    `
+import React from "react";
+
+export const metadata = {
+  openGraph: {
+    type: "article",
+  },
+};
+
+export async function generateMetadata({ params, searchParams }: any) {
+  const search = await searchParams;
+  return {
+    title: \`Product \${params.id} \${search.variant}\`,
+    openGraph: {
+      title: \`Product \${params.id}\`,
+    },
+  };
+}
+
+export default function MetadataPage({ params }: any) {
+  return React.createElement("main", null, \`metadata page: \${params.id}\`);
+}
 `.trim(),
   );
   await fs.writeFile(

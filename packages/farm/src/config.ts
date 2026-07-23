@@ -45,20 +45,16 @@ import {
 } from "./layers";
 import path from "path";
 import { normalizeFarmDeploymentId } from "./deployment";
-import {
-  resolveFarmDevtoolsConfig,
-  type ResolvedFarmDevtoolsConfig,
-} from "./devtools-config";
+import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
 import {
   resolveFarmImageConfig,
   type FarmImageConfig,
   type ResolvedFarmImageConfig,
 } from "./image-config";
 import { resolveFarmI18nConfig } from "./i18n/config";
-import type {
-  FarmI18nUserConfig,
-  ResolvedFarmI18nConfig,
-} from "./i18n/types";
+import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
+
+const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
 export type {
   FarmDocsConfigInput,
@@ -288,6 +284,8 @@ export interface ResolvedFarmConfig extends Required<
     | "i18n"
   >
 > {
+  /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
+  [FARM_RESOLVED_CUSTOM_CONTEXT]?: boolean;
   extends: readonly FarmLayerEntry[];
   layers: ResolvedFarmLayer[];
   plugins: FarmPlugin[];
@@ -306,6 +304,10 @@ export interface ResolvedFarmConfig extends Required<
   i18n: ResolvedFarmI18nConfig;
 }
 
+export function hasCustomFarmRouteContext(config: ResolvedFarmConfig): boolean {
+  return config[FARM_RESOLVED_CUSTOM_CONTEXT] === true;
+}
+
 export type FarmLayerConfig = Omit<
   FarmUserConfig,
   | "root"
@@ -319,13 +321,7 @@ export type FarmLayerConfig = Omit<
   | "deploymentId"
 >;
 
-/** Define a Farm application config while preserving literal types. */
-export function defineConfig<const TConfig extends FarmUserConfig>(config: TConfig): TConfig {
-  return config;
-}
-
-/** @deprecated Use {@link defineConfig}. */
-export const defineFarmConfig = defineConfig;
+export { defineConfig, defineFarmConfig } from "./config-entry";
 
 export function normalizeDeployTarget(target?: FarmDeployTarget): FarmDeployTarget | undefined {
   if (!target) return undefined;
@@ -710,6 +706,7 @@ export async function resolveConfig(
   );
 
   const resolved: ResolvedFarmConfig = {
+    [FARM_RESOLVED_CUSTOM_CONTEXT]: typeof userConfig.context === "function",
     root,
     srcDir,
     extends: userConfig.extends || [],
@@ -784,9 +781,10 @@ export async function loadConfig(
   rootDir?: string,
   configPath?: string,
   mode = process.env.NODE_ENV === "production" ? "production" : "development",
+  loadEnvironment?: (typeof import("vite"))["loadEnv"],
 ): Promise<FarmUserConfig | undefined> {
   const { existsSync } = await import("fs");
-  const { loadEnv } = await import("vite");
+  const loadEnv = loadEnvironment || (await import("vite")).loadEnv;
 
   const root = rootDir || process.cwd();
   const loadedEnv = loadEnv(mode, root, "");

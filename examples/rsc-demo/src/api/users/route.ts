@@ -1,4 +1,4 @@
-import { createEndpoint } from '@farmjs/core';
+import { createEndpoint } from '@farmjs/core/api';
 import { z } from 'zod';
 
 // Mock database

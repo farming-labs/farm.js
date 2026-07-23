@@ -19,5 +19,11 @@ export default middleware()
   );
 
 export const config = {
-  matcher: ['/((?!_next|static|favicon.ico).*)'],
+  matcher: '/:path*',
+  exclude: [
+    '/_next/:path*',
+    '/assets/:path*',
+    '/static/:path*',
+    '/favicon.ico',
+  ],
 };

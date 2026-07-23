@@ -470,6 +470,18 @@ export interface FarmIntegration<
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any> | undefined>;
 
+const FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME = Symbol.for(
+  "@farmjs/core/integration-plugin-server-runtime",
+);
+
+/** @internal Identifies lifecycle plugins owned by platform-managed integrations. */
+export function getFarmIntegrationPluginServerRuntime(plugin: FarmPlugin): boolean | undefined {
+  const value = (plugin as FarmPlugin & Record<symbol, unknown>)[
+    FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME
+  ];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 type IntegrationRouteBuilderOptions<
   TBody,
   TQuery,
@@ -1593,7 +1605,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
     };
   };
 
-  return {
+  const plugin: FarmPlugin = {
     name: `farm:integration:${integration.category}:${integration.type}`,
     enforce: "pre",
 
@@ -1955,6 +1967,12 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
       }
     },
   };
+
+  Object.defineProperty(plugin, FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME, {
+    value: integration.serverRuntime !== false,
+  });
+
+  return plugin;
 }
 
 function createIntegrationHandlerContext(input: {

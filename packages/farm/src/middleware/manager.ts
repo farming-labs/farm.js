@@ -460,6 +460,10 @@ export class MiddlewareManager {
     return [...this.configMiddleware, ...this.middleware];
   }
 
+  hasMiddleware(): boolean {
+    return this.configMiddleware.length > 0 || this.middleware.length > 0;
+  }
+
   private matchRoutePath(
     pathname: string,
     middlewarePath: string,

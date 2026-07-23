@@ -11,8 +11,18 @@ export default middleware()
   .when((ctx) => ctx.pathname.startsWith('/api'), async (ctx, next) => {
     ctx.headers.set('X-API-Version', '1.0.0');
     await next();
+  })
+  .when((ctx) => ctx.pathname === '/api/request-alias', async (ctx, next) => {
+    ctx.rewrite('/api/request-url');
+    await next();
   });
 
 export const config = {
-  matcher: ['/((?!_next|static|favicon.ico).*)'],
+  matcher: '/:path*',
+  exclude: [
+    '/_next/:path*',
+    '/assets/:path*',
+    '/static/:path*',
+    '/favicon.ico',
+  ],
 };

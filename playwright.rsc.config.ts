@@ -16,13 +16,13 @@ export default defineConfig({
   webServer: {
     command: "NODE_ENV=production PORT=4174 corepack pnpm --dir examples/rsc-demo run preview",
     url: "http://localhost:4174",
-    reuseExistingServer: true,
+    reuseExistingServer: false,
     timeout: 120_000,
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"], channel: "chrome" },
+      use: { ...devices["Desktop Chrome"] },
     },
   ],
 });

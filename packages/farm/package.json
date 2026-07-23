@@ -132,12 +132,27 @@
       "internal/build-runtime": [
         "./dist/internal/build-runtime.d.ts"
       ],
+      "internal/config-runtime": [
+        "./dist/internal/config-runtime.d.ts"
+      ],
+      "internal/production-node-env": [
+        "./dist/internal/production-node-env.d.ts"
+      ],
+      "config": [
+        "./dist/config.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
       ],
       "api/route-manager": [
         "./dist/api/route-manager.d.ts"
+      ],
+      "api/runtime": [
+        "./dist/api/runtime.d.ts"
+      ],
+      "request": [
+        "./dist/request.d.ts"
       ],
       "client": [
         "./types/client.d.ts",
@@ -166,6 +181,11 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs",
       "default": "./dist/index.mjs"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "import": "./dist/config.mjs",
+      "require": "./dist/config.cjs"
     },
     "./server": {
       "types": "./dist/server.d.ts",
@@ -347,6 +367,16 @@
       "import": "./dist/api/route-manager.mjs",
       "require": "./dist/api/route-manager.cjs"
     },
+    "./api/runtime": {
+      "types": "./dist/api/runtime.d.ts",
+      "import": "./dist/api/runtime.mjs",
+      "require": "./dist/api/runtime.cjs"
+    },
+    "./request": {
+      "types": "./dist/request.d.ts",
+      "import": "./dist/request.mjs",
+      "require": "./dist/request.cjs"
+    },
     "./router": {
       "types": "./dist/router.d.ts",
       "import": "./dist/router.mjs",
@@ -411,6 +441,16 @@
       "types": "./dist/internal/build-runtime.d.ts",
       "import": "./dist/internal/build-runtime.mjs",
       "require": "./dist/internal/build-runtime.cjs"
+    },
+    "./internal/config-runtime": {
+      "types": "./dist/internal/config-runtime.d.ts",
+      "import": "./dist/internal/config-runtime.mjs",
+      "require": "./dist/internal/config-runtime.cjs"
+    },
+    "./internal/production-node-env": {
+      "types": "./dist/internal/production-node-env.d.ts",
+      "import": "./dist/internal/production-node-env.mjs",
+      "require": "./dist/internal/production-node-env.cjs"
     }
   },
   "scripts": {
@@ -432,11 +472,11 @@
     "@mdx-js/mdx": "^3.1.1",
     "@scalar/api-reference": "^1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
-    "@tailwindcss/vite": "^4.1.0",
+    "@tailwindcss/vite": "4.1.18",
     "@vitejs/plugin-react": "^4.2.1",
     "better-call": "^1.0.19",
     "db0": "^0.3.4",
-    "esbuild": "^0.19.11",
+    "esbuild": "^0.28.0",
     "fast-glob": "^3.3.2",
     "h3": "2.0.1-rc.5",
     "image-size": "^2.0.2",
@@ -452,7 +492,7 @@
     "sirv": "^2.0.4",
     "sugar-high": "^0.9.5",
     "supports-color": "^10.2.2",
-    "tailwindcss": "^4.0.0",
+    "tailwindcss": "4.1.18",
     "unstorage": "^2.0.0-alpha.3",
     "vite": "^5.0.10",
     "zod": "^4.1.12"
@@ -473,6 +513,7 @@
   },
   "optionalDependencies": {
     "rolldown": "1.2.0",
-    "sharp": "^0.34.5"
+    "sharp": "^0.34.5",
+    "vite-rolldown": "npm:vite@8.1.5"
   }
 }

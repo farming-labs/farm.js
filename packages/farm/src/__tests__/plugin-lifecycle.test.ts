@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { PluginManager, definePlugin } from "../plugin";
+import { createLoggerPlugin } from "../plugins/logger";
 import { getRequestContext, getRequestContextSnapshot } from "../request-context";
 import type { PageProps } from "../types";
 
@@ -12,6 +13,34 @@ function createManager() {
 }
 
 describe("plugin lifecycle hooks", () => {
+  it("indexes request capabilities and invalidates them when plugins are added", () => {
+    const manager = createManager();
+
+    manager.addPlugin(createLoggerPlugin());
+    expect(manager.hasHook("beforeRequest")).toBe(false);
+    expect(manager.hasHook("afterResponse")).toBe(false);
+    expect(manager.hasRuntimeRequestHooks()).toBe(false);
+
+    manager.addPlugin(
+      createLoggerPlugin({
+        beforeRequest() {},
+      }),
+    );
+    expect(manager.hasHook("beforeRequest")).toBe(true);
+    expect(manager.hasHook("afterResponse")).toBe(false);
+
+    manager.addPlugin(
+      definePlugin({
+        name: "runtime-after-capability",
+        runtime: {
+          after() {},
+        },
+      }),
+    );
+    expect(manager.hasRuntimeHook("after")).toBe(true);
+    expect(manager.hasRuntimeRequestHooks()).toBe(true);
+  });
+
   it("runs the universal runtime pipeline with typed context and transforms", async () => {
     const manager = createManager();
     const seen: string[] = [];

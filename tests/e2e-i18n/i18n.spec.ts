@@ -52,6 +52,18 @@ test.describe("Farm internationalization", () => {
     expect(explicitLocale.headers().vary).not.toContain("Accept-Language");
     expect(explicitLocale.headers()["set-cookie"]).toBeUndefined();
 
+    const explicitLocaleWithSession = await request.get("/am", {
+      headers: { cookie: "farm_locale=ar; session=private" },
+    });
+    expect(explicitLocaleWithSession.status()).toBe(200);
+    expect(explicitLocaleWithSession.headers()["cache-control"]).toBe("private, no-store");
+
+    const explicitLocaleWithMalformedCookie = await request.get("/am", {
+      headers: { cookie: "farm_locale" },
+    });
+    expect(explicitLocaleWithMalformedCookie.status()).toBe(200);
+    expect(explicitLocaleWithMalformedCookie.headers()["cache-control"]).toBe("private, no-store");
+
     const html = await explicitLocale.text();
     expect(html).toContain('<html lang="am" dir="ltr">');
     expect(html).toContain("አንድ መተግበሪያ፣ ለሁሉም ቋንቋ");

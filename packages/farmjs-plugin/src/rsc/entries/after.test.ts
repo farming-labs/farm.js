@@ -24,7 +24,7 @@ describe("generated after lifecycle", () => {
     expect(entry).toContain("async function handleFarmRequest(request)");
     expect(entry).toContain("async function handler(request, context)");
     expect(entry).toContain(
-      "return _runWithAfterRequest(request, () => handleFarmRequest(request), context)",
+      "return _runWithCurrentRequest(request, () =>\n    _runWithAfterRequest(request, () => handleFarmRequest(request), context)",
     );
     expect(entry).toContain("export default { fetch: handler }");
   });

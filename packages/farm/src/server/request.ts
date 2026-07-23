@@ -2,7 +2,21 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { FarmRequest } from "../types";
 import { _setCurrentRequestResolver } from "./request-bridge";
 
-const requestStore = new AsyncLocalStorage<Request>();
+const REQUEST_STORAGE_KEY = Symbol.for("@farmjs/core/request-storage");
+
+function getRequestStore(): AsyncLocalStorage<Request> {
+  const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;
+  const existing = runtime[REQUEST_STORAGE_KEY];
+  if (existing instanceof AsyncLocalStorage) {
+    return existing as AsyncLocalStorage<Request>;
+  }
+
+  const storage = new AsyncLocalStorage<Request>();
+  runtime[REQUEST_STORAGE_KEY] = storage;
+  return storage;
+}
+
+const requestStore = getRequestStore();
 
 _setCurrentRequestResolver(() => requestStore.getStore());
 

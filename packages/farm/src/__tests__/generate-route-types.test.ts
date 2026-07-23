@@ -92,6 +92,24 @@ describe("generateRouteTypes", () => {
     expect(content).toContain("`/docs/${string}`");
   });
 
+  it("includes the base and nested URLs for an optional catch-all page", async () => {
+    const routeDir = path.join(tmpDir, "src", "app", "docs", "[[...slug]]");
+    await fs.promises.mkdir(routeDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(routeDir, "page.tsx"),
+      "export default function Docs() { return null; }",
+    );
+
+    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
+    const content = fs.readFileSync(outPath, "utf8");
+    const routePath = content.match(/export type RoutePath = ([^;]+);/)?.[1];
+
+    expect(routePath).toContain('"/docs"');
+    expect(routePath).toContain("`/docs/${string}`");
+    expect(content).toContain('export type RoutePattern = "/" | "/about"');
+    expect(content).toContain('"/docs/[[...slug]]"');
+  });
+
   it("includes literal page paths from programmatic route files", async () => {
     await fs.promises.writeFile(
       path.join(tmpDir, "src", "farm.routes.ts"),

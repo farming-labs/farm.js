@@ -1,14 +1,14 @@
 # Meta-framework benchmark
 
-Generated 2026-07-21T22:39:51.067Z at Farm commit 3fda11ded4ff.
+Generated 2026-07-22T16:33:44.037Z at Farm commit c6cdea5169f1.
 
 | Framework               | First dev page | Warm dev | Fixture build | Production boot | Production response p50 / p95 |     HTML |
 | ----------------------- | -------------: | -------: | ------------: | --------------: | ----------------------------: | -------: |
-| Farm.js 0.0.3-beta.3    |          454ms |   5.08ms |         1.06s |            99ms |               0.80ms / 1.18ms |  7,528 B |
-| Next.js 16.2.10         |          1.37s |     31ms |         2.44s |           239ms |               3.99ms / 5.79ms | 30,842 B |
-| SvelteKit 2.70.1        |          781ms |   1.82ms |         1.64s |            63ms |               0.68ms / 1.12ms |  8,355 B |
-| Nuxt 4.5.0              |          2.28s |   2.89ms |         4.25s |           118ms |               1.11ms / 1.80ms |  8,527 B |
-| TanStack Start 1.168.32 |          798ms |   8.44ms |         652ms |            89ms |               1.12ms / 1.99ms |  9,285 B |
+| Farm.js 0.0.3-beta.3    |          253ms |   1.72ms |         527ms |            64ms |               0.66ms / 0.87ms |  7,591 B |
+| Next.js 16.2.10         |          1.39s |     30ms |         2.38s |           254ms |               3.43ms / 4.48ms | 30,842 B |
+| SvelteKit 2.70.1        |          802ms |   1.80ms |         1.68s |            66ms |               0.63ms / 0.83ms |  8,355 B |
+| Nuxt 4.5.0              |          2.33s |   2.95ms |         4.46s |           117ms |               1.00ms / 1.61ms |  8,527 B |
+| TanStack Start 1.168.32 |          803ms |   4.40ms |         658ms |            80ms |               0.94ms / 2.03ms |  9,285 B |
 
 Lower is better. Values are medians unless a percentile is named.
 
@@ -16,14 +16,16 @@ Lower is better. Values are medians unless a percentile is named.
 
 - Fixture: One dynamic SSR route rendering the same 120-item list and shared CSS in each framework.
 - Build metric: complete fixture-project production build; local Farm package preparation is excluded.
-- Runs: 1 discarded burn-in plus 7 randomized measured rounds.
-- Cache policy: Generated framework caches removed before dev and build; OS filesystem cache warm.
+- Warm responses: 30 equal warm-up requests per server and round are excluded from the samples.
+- Runs: 1 discarded burn-in plus 7 measured rounds; order: seeded, position-balanced cyclic schedule.
+- Cache policy: Generated framework caches removed before dev and build; OS filesystem and any product-enabled Node compile cache warm.
 - Machine: Apple M1, 16 GB, macOS 26.2.
-- Runtime: Node 24.14.0, pnpm 8.12.1.
-- Benchmark input SHA-256: e7d11f64c58b03e0199f48d00428f668aee2f4b945c0efdc8fbc4eeaf2e539e9.
+- Runtime: Node 24.18.0, pnpm 8.12.1.
+- Benchmark input SHA-256: 3898d19883ae5c0ec1a0f313d3b0ed29b8e2dab2d493700e8845f56bd4e5c40d.
+- Benchmark inputs dirty: no.
 - Farm source dirty: no.
 - Root lockfile dirty: no.
-- Workspace dirty: yes; the broader workspace state is recorded.
+- Workspace dirty: no.
 - Contended measured rounds detected: none.
 
 See ../README.md for metric boundaries, controls, limitations, and reproduction steps. The complete samples are in latest.json.

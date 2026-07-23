@@ -156,7 +156,9 @@ export async function createServer(config: FarmConfig = {}) {
         pluginManager.addPlugin(createRewritesPlugin(rewrites));
       }
 
-      if (resolvedConfig.compress) {
+      // Compression is applied by production adapters. Its hook is a no-op in
+      // development, so do not put every dev response through that lifecycle.
+      if (resolvedConfig.compress && mode === "production") {
         pluginManager.addPlugin(createCompressionPlugin());
       }
 

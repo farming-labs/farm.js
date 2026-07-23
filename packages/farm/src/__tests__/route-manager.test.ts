@@ -110,6 +110,24 @@ describe("RouteManager", () => {
       const result = routeManager.matchRoute("/users/123");
       expect(result.layouts.length).toBeGreaterThan(0);
     });
+
+    it("prefers exact and more specific dynamic routes regardless of discovery order", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["[slug]/page.tsx", "docs/[[...parts]]/page.tsx", "about/page.tsx"];
+        }
+        return [];
+      });
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.matchRoute("/about/").route?.pattern).toBe("/about");
+      expect(routeManager.matchRoute("/docs").route?.pattern).toBe("/docs/[[...parts]]");
+      expect(routeManager.matchRoute("/docs/routing/production").route?.pattern).toBe(
+        "/docs/[[...parts]]",
+      );
+      expect(routeManager.matchRoute("/contact").route?.pattern).toBe("/[slug]");
+    });
   });
 
   describe("discoverRoutes", () => {

@@ -5,6 +5,7 @@ import { PluginManager } from "../plugin";
 import {
   defineIntegration,
   dispatchIntegrationRequest,
+  getFarmIntegrationPluginServerRuntime,
   getRegisteredIntegrationRuntime,
   getIntegrationDocumentNavigationMatchers,
   getIntegrationSchemas,
@@ -71,6 +72,27 @@ describe("integrations runtime", () => {
 
     expect(integration.category).toBe("auth");
     expect(integration.slot).toBe("auth");
+  });
+
+  it("marks platform-owned integration lifecycle plugins as non-server runtime", () => {
+    const platformOwned = defineIntegration({
+      category: "agent",
+      type: "platform-owned",
+      instance: {},
+      serverRuntime: false,
+    });
+    const serverOwned = defineIntegration({
+      category: "agent",
+      type: "server-owned",
+      instance: {},
+    });
+
+    expect(
+      getFarmIntegrationPluginServerRuntime(resolveIntegrationPlugins({ agent: platformOwned })[0]),
+    ).toBe(false);
+    expect(
+      getFarmIntegrationPluginServerRuntime(resolveIntegrationPlugins({ agent: serverOwned })[0]),
+    ).toBe(true);
   });
 
   it("preserves optional integration schemas and exposes them through schema helpers", async () => {

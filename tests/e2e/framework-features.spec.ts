@@ -1,5 +1,7 @@
 import { expect, test, type APIRequestContext } from "@playwright/test";
 
+const expectedRuntimeMode = process.env.FARM_E2E_MODE === "prod" ? "prod" : "dev";
+
 async function readFeatureState(request: APIRequestContext) {
   const response = await request.get("/api/feature-lab/state");
   expect(response.ok()).toBeTruthy();
@@ -36,6 +38,14 @@ test.describe("Framework feature integration", () => {
     const lab = await request.get("/feature-lab");
     expect(lab.status()).toBe(200);
     expect(lab.headers()["x-farm-feature-lab"]).toBe("active");
+    expect(lab.headers()["x-frame-options"]).toBe("DENY");
+    expect(lab.headers()["x-content-type-options"]).toBe("nosniff");
+
+    const configuredRedirect = await request.get("/blog/benchmark-check", {
+      maxRedirects: 0,
+    });
+    expect(configuredRedirect.status()).toBe(307);
+    expect(configuredRedirect.headers().location).toBe("/posts/benchmark-check");
     expect(await lab.text()).toContain("Framework feature lab");
 
     const layer = await request.get("/feature-lab/layer");
@@ -79,17 +89,25 @@ test.describe("Framework feature integration", () => {
     expect(firstHtml).toContain("acme:42:first");
     expect(firstHtml).toContain("server:https://api.example.com:FARM_SERVER_BOUNDARY_SENTINEL");
     expect(firstHtml).toContain("runtime:server");
-    expect(firstHtml).toContain("product-pending");
+    // Initial SSR resolves top-level route state before committing headers so
+    // redirects, notFound(), and route errors retain their real HTTP status.
+    expect(firstHtml).not.toContain("product-pending");
     expect(firstHtml).toContain("product-reviews-pending");
     expect(firstHtml).toContain("Deferred route data");
-    await expect(readFeatureState(request)).resolves.toEqual({ mainCalls: 1, afterCalls: 1 });
+    await expect(readFeatureState(request)).resolves.toEqual({
+      mainCalls: 1,
+      afterCalls: 1,
+    });
 
     const cached = await request.get(routeUrl, {
       headers: { "x-farm-tenant": "acme", "x-request-id": "second" },
     });
     expect(cached.status()).toBe(200);
     expect(await cached.text()).toContain("acme:42:first");
-    await expect(readFeatureState(request)).resolves.toEqual({ mainCalls: 1, afterCalls: 2 });
+    await expect(readFeatureState(request)).resolves.toEqual({
+      mainCalls: 1,
+      afterCalls: 2,
+    });
 
     const invalidation = await request.post("/api/feature-lab/cache/42");
     expect(invalidation.ok()).toBeTruthy();
@@ -100,7 +118,10 @@ test.describe("Framework feature integration", () => {
     });
     expect(refreshed.status()).toBe(200);
     expect(await refreshed.text()).toContain("acme:42:third");
-    await expect(readFeatureState(request)).resolves.toEqual({ mainCalls: 2, afterCalls: 3 });
+    await expect(readFeatureState(request)).resolves.toEqual({
+      mainCalls: 2,
+      afterCalls: 3,
+    });
   });
 
   test("applies guards and programmatic route state components", async ({ request }) => {
@@ -129,15 +150,26 @@ test.describe("Framework feature integration", () => {
     await expect(page.getByTestId("client-runtime-boundary")).toHaveText("runtime:client");
   });
 
+  test("hydrates and navigates optional catch-all routes", async ({ page }) => {
+    await page.goto("/optional-catchall/one/two");
+    await expect(page.getByTestId("optional-catchall-slug")).toHaveText("one/two");
+
+    const counter = page.getByRole("button", { name: "Hydrated count: 0" });
+    await counter.click();
+    await expect(page.getByRole("button", { name: "Hydrated count: 1" })).toBeVisible();
+
+    await page.getByRole("link", { name: "Open base route" }).click();
+    await expect(page).toHaveURL(/\/optional-catchall$/);
+    await expect(page.getByTestId("optional-catchall-slug")).toHaveText("base");
+  });
+
   test("runs client plugins through hydration and SPA navigation", async ({ page }) => {
     await page.goto("/feature-lab");
 
     await expect
-      .poll(() =>
-        page.evaluate(() => (window as any).__FARM_CLIENT_PLUGIN_EVENTS__ || []),
-      )
+      .poll(() => page.evaluate(() => (window as any).__FARM_CLIENT_PLUGIN_EVENTS__ || []))
       .toEqual([
-        "setup:runtime-lifecycle-e2e:feature-lab:dev",
+        `setup:runtime-lifecycle-e2e:feature-lab:${expectedRuntimeMode}`,
         "hydration:before:hydrate",
         "hydration:after:ready",
       ]);
@@ -147,11 +179,9 @@ test.describe("Framework feature integration", () => {
     await expect(page).toHaveURL(/\/store-e2e$/);
 
     await expect
-      .poll(() =>
-        page.evaluate(() => (window as any).__FARM_CLIENT_PLUGIN_EVENTS__ || []),
-      )
+      .poll(() => page.evaluate(() => (window as any).__FARM_CLIENT_PLUGIN_EVENTS__ || []))
       .toEqual([
-        "setup:runtime-lifecycle-e2e:feature-lab:dev",
+        `setup:runtime-lifecycle-e2e:feature-lab:${expectedRuntimeMode}`,
         "hydration:before:hydrate",
         "hydration:after:ready",
         "navigation:before:/store-e2e",
@@ -162,7 +192,10 @@ test.describe("Framework feature integration", () => {
   });
 
   test("canonicalizes typed search and exposes request route context", async ({ page }) => {
-    await page.setExtraHTTPHeaders({ "x-farm-tenant": "acme", "x-request-id": "browser" });
+    await page.setExtraHTTPHeaders({
+      "x-farm-tenant": "acme",
+      "x-request-id": "browser",
+    });
     await page.goto("/feature-lab/products/44?tab=info&locale=am&toast=saved");
 
     await expect(page.getByTestId("product-tab")).toHaveText("info");
@@ -263,7 +296,10 @@ test.describe("Framework feature integration", () => {
     expect(await image.text()).toContain("Feature product 7");
 
     const run = await request.get("/api/maintenance/cleanup", {
-      headers: { "x-farm-cron-name": "dailyCleanup" },
+      headers: {
+        "x-farm-cron-name": "dailyCleanup",
+        "x-farm-cron-secret": "farm-production-e2e-secret",
+      },
     });
     expect(run.status()).toBe(200);
     expect(await run.json()).toEqual({
