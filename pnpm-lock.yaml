@@ -1140,7 +1140,7 @@ importers:
         version: 12.0.2
       nitro:
         specifier: 3.0.1-alpha.0
-        version: 3.0.1-alpha.0(drizzle-orm@0.45.2)(mongodb@6.21.0)(vite@5.4.20)
+        version: 3.0.1-alpha.0(drizzle-orm@0.45.2)(mongodb@6.21.0)(rolldown@1.2.0)(vite@5.4.20)
       pg:
         specifier: ^8.20.0
         version: 8.20.0
@@ -1181,6 +1181,9 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12
     optionalDependencies:
+      rolldown:
+        specifier: 1.2.0
+        version: 1.2.0
       sharp:
         specifier: ^0.34.5
         version: 0.34.5
@@ -13321,7 +13324,7 @@ packages:
       - uploadthing
     dev: false
 
-  /nitro@3.0.1-alpha.0(drizzle-orm@0.45.2)(mongodb@6.21.0)(vite@5.4.20):
+  /nitro@3.0.1-alpha.0(drizzle-orm@0.45.2)(mongodb@6.21.0)(rolldown@1.2.0)(vite@5.4.20):
     resolution: {integrity: sha512-lR3RplfXBOZXNlFQf9AJkqFVFhg5/CNbpBijM0dSYhGymb+FthJSdL6crmXVg518h2NVOd40rehhGZaf9ijW9w==}
     engines: {node: ^20.19.0 || >=22.12.0}
     hasBin: true
@@ -13349,6 +13352,7 @@ packages:
       ofetch: 1.5.1
       ohash: 2.0.11
       rendu: 0.0.6
+      rolldown: 1.2.0
       rollup: 4.52.4
       srvx: 0.8.16
       undici: 7.16.0

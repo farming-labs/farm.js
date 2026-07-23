@@ -12,13 +12,13 @@ import { build as viteBuild, type Rollup } from "vite";
 import * as nitro from "nitro";
 import os from "os";
 import path from "path";
-import { existsSync, readFileSync } from "fs";
+import { constants as fsConstants, existsSync, readFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { builtinModules, createRequire } from "module";
+import { isDeepStrictEqual } from "node:util";
 import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { isFarmMarkdownPageFile } from "../app-markdown";
-import { virtualBundlePlugin } from "./virtual-bundle-plugin";
 import type { ProgrammaticRedirectRoute } from "../routes";
 import type { NitroConfig } from "nitro/config";
 import {
@@ -53,9 +53,11 @@ import type { FarmRouteRuntimeManifest } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
+import type { TransformOptions } from "esbuild";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
+type NitroEsbuildOptions = NonNullable<NonNullable<NitroConfig["esbuild"]>["options"]>;
 type UniversalPageRoute = {
   pattern: string;
   modulePath: string;
@@ -108,6 +110,70 @@ const NITRO_EXTERNAL_MODULES = new Set([
   "nitropack",
   "sharp",
 ]);
+const FARM_SSR_PACKAGE_IMPORT = "#farm-ssr-entry";
+const FARM_SSR_OUTPUT_DIR = "farm-ssr";
+
+function cloneConfigValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return seen.get(value) as T;
+  if (value instanceof RegExp) return new RegExp(value.source, value.flags) as T;
+  if (value instanceof Date) return new Date(value) as T;
+
+  if (Array.isArray(value)) {
+    const clone: unknown[] = [];
+    seen.set(value, clone);
+    for (const entry of value) clone.push(cloneConfigValue(entry, seen));
+    return clone as T;
+  }
+
+  const clone: Record<PropertyKey, unknown> = {};
+  seen.set(value, clone);
+  for (const key of Reflect.ownKeys(value)) {
+    clone[key] = cloneConfigValue((value as Record<PropertyKey, unknown>)[key], seen);
+  }
+  return clone as T;
+}
+
+function snapshotSSRRebundleOptions(config: NitroConfig) {
+  return cloneConfigValue({
+    alias: config.alias,
+    commonJS: config.commonJS,
+    entry: config.entry,
+    externals: config.externals,
+    exportConditions: config.exportConditions,
+    imports: config.imports,
+    inlineDynamicImports: config.inlineDynamicImports,
+    moduleSideEffects: config.moduleSideEffects,
+    noExternals: config.noExternals,
+    node: config.node,
+    nodeModulesDirs: config.nodeModulesDirs,
+    plugins: config.plugins,
+    replace: config.replace,
+    serverEntry: config.serverEntry,
+    typescript: config.typescript,
+    unenv: config.unenv,
+    virtual: config.virtual,
+    wasm: config.experimental?.wasm,
+    bundleRuntimeDependencies: config.experimental?.bundleRuntimeDependencies,
+  });
+}
+
+async function canUseRolldownBuilder(): Promise<boolean> {
+  const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
+  const isSupportedNode =
+    (major === 20 && minor >= 19) || major > 22 || (major === 22 && minor >= 12);
+  if (!isSupportedNode) {
+    return false;
+  }
+
+  try {
+    await import("rolldown");
+    return true;
+  } catch {
+    // Rolldown is optional so Node 18 and --no-optional installs retain Rollup.
+    return false;
+  }
+}
 
 function isCloudflareImagePreset(preset: string): boolean {
   return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
@@ -141,6 +207,171 @@ function isNitroRollupExternal(id: string): boolean {
     normalizedId.includes("/node_modules/@prisma/client/") ||
     normalizedId.includes("/node_modules/.prisma/client/")
   );
+}
+
+function collectSSRExternalPackages(ssrBundle: OutputBundle): Set<string> {
+  const emittedFiles = new Set(
+    Object.keys(ssrBundle).map((fileName) => fileName.replace(/^\.\//, "")),
+  );
+  const externalPackages = new Set<string>();
+
+  for (const [fileName, output] of Object.entries(ssrBundle)) {
+    if (output.type !== "chunk") continue;
+
+    for (const importId of [...output.imports, ...output.dynamicImports]) {
+      const normalizedImportId = importId.replace(/\\/g, "/");
+      const normalizedId = normalizedImportId.replace(/^\.\//, "");
+      const resolvedRelativeId =
+        normalizedImportId.startsWith("./") || normalizedImportId.startsWith("../")
+          ? path.posix.normalize(path.posix.join(path.posix.dirname(fileName), normalizedImportId))
+          : null;
+      if (
+        emittedFiles.has(normalizedId) ||
+        (resolvedRelativeId !== null && emittedFiles.has(resolvedRelativeId)) ||
+        NODE_BUILTIN_MODULES.has(importId) ||
+        importId.startsWith("node:")
+      ) {
+        continue;
+      }
+
+      if (
+        path.isAbsolute(importId) ||
+        /^[A-Za-z]:[\\/]/.test(importId) ||
+        importId.startsWith("#") ||
+        importId.startsWith("\0")
+      ) {
+        externalPackages.add(importId);
+        continue;
+      }
+
+      const segments = importId.split("/");
+      const packageName = importId.startsWith("@") ? segments.slice(0, 2).join("/") : segments[0];
+      if (packageName) externalPackages.add(packageName);
+    }
+  }
+
+  return externalPackages;
+}
+
+function createExternalSSRBundlePlugin(
+  nitroEntryPath: string,
+  ssrOutputDir: string,
+  ssrEntryFile: string,
+): Rollup.Plugin {
+  const resolvedNitroEntry = path.resolve(nitroEntryPath);
+  const resolvedSSREntry = path.resolve(ssrOutputDir, ssrEntryFile);
+
+  return {
+    name: "farm-externalize-prebuilt-ssr",
+    resolveId(source, importer) {
+      if (!importer || path.resolve(importer) !== resolvedNitroEntry) {
+        return null;
+      }
+
+      const resolvedImport = path.resolve(path.dirname(importer), source);
+      if (resolvedImport !== resolvedSSREntry) return null;
+
+      // A package import remains valid even when Nitro moves its adapter into a
+      // nested chunk. A relative external import would be resolved from that
+      // adapter chunk and can point at the wrong location.
+      return { id: FARM_SSR_PACKAGE_IMPORT, external: true };
+    },
+  };
+}
+
+function hasRollupPlugins(plugins: unknown): boolean {
+  if (Array.isArray(plugins)) {
+    return plugins.some((plugin) => hasRollupPlugins(plugin));
+  }
+  return Boolean(plugins);
+}
+
+export function hasFarmRuntimeConfigModule(
+  config: Pick<ResolvedFarmConfig, "layers">,
+  configModulePath: string | null,
+): boolean {
+  return Boolean(configModulePath || (config.layers || []).some((layer) => layer.configFile));
+}
+
+function createEsbuildTransformOptions(
+  configuredEsbuildOptions: NitroEsbuildOptions,
+  minify: boolean,
+  defaultTarget: string,
+): TransformOptions {
+  const {
+    include: _include,
+    exclude: _exclude,
+    sourceMap: _sourceMap,
+    loaders: _loaders,
+    ...configuredTransformOptions
+  } = configuredEsbuildOptions;
+  const configuredTarget = Array.isArray(configuredTransformOptions.target)
+    ? configuredTransformOptions.target.filter(
+        (target): target is string => typeof target === "string",
+      )
+    : configuredTransformOptions.target;
+  const transformTarget =
+    Array.isArray(configuredTarget) && configuredTarget.length === 0
+      ? defaultTarget
+      : (configuredTarget ?? defaultTarget);
+  const transformSupported = configuredTransformOptions.supported
+    ? Object.fromEntries(
+        Object.entries(configuredTransformOptions.supported).filter(
+          (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+        ),
+      )
+    : undefined;
+
+  return {
+    ...(configuredTransformOptions as TransformOptions),
+    format: "esm",
+    target: transformTarget,
+    loader: "js",
+    sourcemap: false,
+    minify,
+    keepNames: configuredTransformOptions.keepNames ?? true,
+    legalComments: configuredTransformOptions.legalComments ?? "none",
+    supported: transformSupported,
+  };
+}
+
+function createEsbuildChunkMinifyPlugin(
+  configuredEsbuildOptions: NitroEsbuildOptions,
+): Rollup.Plugin {
+  const configuredTransformOptions = createEsbuildTransformOptions(
+    configuredEsbuildOptions,
+    true,
+    "esnext",
+  );
+  // Nitro already applies the configured esbuild transform to every module.
+  // Keep this final chunk pass limited to minification controls so options such
+  // as banner, footer, define, drop, and property mangling are not applied twice.
+  const transformOptions: TransformOptions = {
+    format: "esm",
+    target: configuredTransformOptions.target,
+    loader: "js",
+    sourcemap: false,
+    minify: true,
+    keepNames: configuredTransformOptions.keepNames,
+    legalComments: configuredTransformOptions.legalComments,
+    charset: configuredTransformOptions.charset,
+  };
+
+  return {
+    name: "farm-esbuild-minify",
+    async renderChunk(code, chunk) {
+      const { transform } = await import("esbuild");
+      const result = await transform(code, {
+        ...transformOptions,
+        sourcefile: chunk.fileName,
+      });
+      if (!result.code) return null;
+      return {
+        code: result.code,
+        map: result.map || null,
+      };
+    },
+  };
 }
 
 function trimSlashes(value: string): string {
@@ -386,7 +617,16 @@ export async function buildUniversal(
       // Client build (to disk)
       buildClient(config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
       // SSR build (in memory)
-      buildSSRInMemory(config, root, srcDir, routeManager, apiRouteManager, serverRenderer, preset),
+      buildSSRInMemory(
+        config,
+        root,
+        routeManager,
+        apiRouteManager,
+        serverRenderer,
+        preset,
+        pageRoutes,
+        layoutRoutes,
+      ),
     ]);
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile } = ssrResult;
@@ -466,7 +706,11 @@ async function buildClient(
   pluginManager.addPlugins(config.plugins || []);
 
   // Detect which pages should hydrate on the client.
-  const clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }> = [];
+  const clientPages: Array<{
+    pattern: string;
+    modulePath: string;
+    relativePath: string;
+  }> = [];
 
   for (const route of pageRoutes) {
     if (isFarmMarkdownPageFile(route.modulePath)) {
@@ -871,7 +1115,11 @@ function generateUniversalRouterStateProperties(): string {
 }
 
 function generateClientHydrationEntry(
-  clientPages: Array<{ pattern: string; modulePath: string; relativePath: string }>,
+  clientPages: Array<{
+    pattern: string;
+    modulePath: string;
+    relativePath: string;
+  }>,
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   root: string,
   srcDir: string,
@@ -886,7 +1134,13 @@ function generateClientHydrationEntry(
     detection: [],
     fallbackLocale: "en",
     strict: false,
-    cookie: { name: "farm_locale", maxAge: 0, path: "/", sameSite: "lax", secure: false },
+    cookie: {
+      name: "farm_locale",
+      maxAge: 0,
+      path: "/",
+      sameSite: "lax",
+      secure: false,
+    },
     direction: {},
   },
   plugins: readonly FarmPlugin[] = [],
@@ -956,10 +1210,7 @@ function isFarmLocaleDocumentChange() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import React from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
-import { installChunkErrorRecovery } from "@farmjs/core/client";
-import { createClientPluginManager } from "@farmjs/core/plugin/client";
+import { createClientPluginManager, installChunkErrorRecovery } from "@farmjs/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
@@ -1220,8 +1471,7 @@ ${cssImport}
 ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
-import { installChunkErrorRecovery } from "@farmjs/core/client";
-import { createClientPluginManager } from "@farmjs/core/plugin/client";
+import { createClientPluginManager, installChunkErrorRecovery } from "@farmjs/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 
@@ -1690,11 +1940,12 @@ if (isFarmDocsSearchPage()) {
 async function buildSSRInMemory(
   config: ResolvedFarmConfig,
   root: string,
-  srcDir: string,
   routeManager: RouteManager,
   apiRouteManager: APIRouteManager,
   serverRenderer: ServerRenderer,
   preset: string,
+  collectedPageRoutes: readonly UniversalPageRoute[],
+  collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
 ): Promise<{ bundle: OutputBundle; entryFile: string }> {
   const { farmPlugin } = await import("../vite");
   const { PluginManager } = await import("../plugin");
@@ -1719,18 +1970,10 @@ async function buildSSRInMemory(
   let ssrBundle: OutputBundle;
   let ssrEntryFile: string;
 
-  // Generate route manifest from managers
-  // This captures route patterns and module paths
-  const pageRoutes: UniversalPageRoute[] = [];
-  for (const [pattern, entry] of routeManager.getRoutes()) {
-    pageRoutes.push({
-      pattern,
-      modulePath: entry.modulePath,
-      ...(isFarmMarkdownPageFile(entry.modulePath)
-        ? { source: await fs.readFile(entry.modulePath, "utf8") }
-        : {}),
-    });
-  }
+  // Reuse the route and layout manifests already collected for the parallel
+  // client build instead of rescanning the same project tree.
+  const pageRoutes = collectedPageRoutes.map((route) => ({ ...route }));
+  const layoutRoutes = collectedLayoutRoutes.map((route) => ({ ...route }));
 
   const metadataImageRoutes: UniversalMetadataImageRoute[] = [];
   for (const entry of routeManager.getMetadataImages().values()) {
@@ -1759,7 +2002,11 @@ async function buildSSRInMemory(
   }
 
   // Generate API route manifest
-  const apiRoutes: Array<{ path: string; filePath: string; methods: string[] }> = [];
+  const apiRoutes: Array<{
+    path: string;
+    filePath: string;
+    methods: string[];
+  }> = [];
   for (const [routePath, route] of apiRouteManager.getRoutes()) {
     apiRoutes.push({
       path: routePath,
@@ -1772,48 +2019,8 @@ async function buildSSRInMemory(
     ? (await readFarmI18nCatalogs(config.i18n)).catalogs
     : {};
 
-  // Discover layout files by scanning the source directory
-  const layoutRoutes: Array<{ pattern: string; modulePath: string }> = [];
   const appDirs = getFarmAppDirectories(config);
-  const appDir = path.join(root, srcDir, "app");
   const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
-
-  async function findLayouts(dir: string, routePrefix: string = "/"): Promise<void> {
-    try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?)$/)) {
-          layoutRoutes.push({
-            pattern: routePrefix,
-            modulePath: path.join(dir, entry.name),
-          });
-        } else if (
-          entry.isDirectory() &&
-          !entry.name.startsWith("_") &&
-          !entry.name.startsWith(".")
-        ) {
-          const subRoute = routePrefix === "/" ? `/${entry.name}` : `${routePrefix}/${entry.name}`;
-          await findLayouts(path.join(dir, entry.name), subRoute);
-        }
-      }
-    } catch {
-      // Directory doesn't exist or can't be read
-    }
-  }
-
-  await findLayouts(appDir);
-  const seenLayoutPatterns = new Set(layoutRoutes.map((layout) => layout.pattern));
-  for (const [pattern, entry] of routeManager.getLayouts()) {
-    if (seenLayoutPatterns.has(pattern)) {
-      continue;
-    }
-
-    seenLayoutPatterns.add(pattern);
-    layoutRoutes.push({
-      pattern,
-      modulePath: entry.modulePath,
-    });
-  }
 
   // Check for custom not-found page
   let notFoundPath: string | null = null;
@@ -1843,8 +2050,15 @@ async function buildSSRInMemory(
     `📋 Found ${pageRoutes.length} page routes, ${layoutRoutes.length} layouts, ${apiRoutes.length} API routes, and ${middlewareRoutes.length} middleware files`,
   );
 
-  const hasConfiguredIntegrations = Object.values(config.integrations || {}).some(
-    (integration) => integration?.serverRuntime !== false,
+  const configuredIntegrationValues = Object.values(config.integrations || {});
+  const hasAnyConfiguredIntegrations = configuredIntegrationValues.some(
+    (integration) => typeof integration === "object" && integration !== null,
+  );
+  const hasServerRuntimeIntegrations = configuredIntegrationValues.some(
+    (integration) =>
+      typeof integration === "object" &&
+      integration !== null &&
+      (!("serverRuntime" in integration) || integration.serverRuntime !== false),
   );
   const hasObservabilityHandler =
     !!config.observability &&
@@ -1852,15 +2066,36 @@ async function buildSSRInMemory(
     "onEvent" in config.observability;
   const hasMdxComponentConfig = Boolean(config.mdx?.components);
   const hasMiddlewareConfig = hasFarmMiddlewareConfig(config.middleware);
-  const hasRuntimePlugins = (config.plugins || []).some((plugin) => Boolean(plugin.runtime));
+  const hasServerRuntimePlugins = (config.plugins || []).some((plugin) =>
+    Boolean(
+      plugin.setup ||
+      plugin.init ||
+      plugin.ready ||
+      plugin.shutdown ||
+      plugin.runtime ||
+      plugin.router ||
+      plugin.render ||
+      plugin.beforeRouteMatch ||
+      plugin.afterRouteMatch ||
+      plugin.beforeRender ||
+      plugin.afterRender ||
+      plugin.onError ||
+      plugin.transformHTML,
+    ),
+  );
   const configModulePath =
-    hasConfiguredIntegrations ||
+    hasServerRuntimeIntegrations ||
     hasObservabilityHandler ||
     hasMdxComponentConfig ||
     hasMiddlewareConfig ||
-    hasRuntimePlugins
+    hasServerRuntimePlugins
       ? await findFarmConfigPath(root)
       : null;
+  const hasRuntimeConfigModule = hasFarmRuntimeConfigModule(config, configModulePath);
+  const hasRuntimeIntegrationConfig = hasRuntimeConfigModule && hasAnyConfiguredIntegrations;
+  const hasConfiguredRuntimePlugins = Boolean(
+    hasRuntimeConfigModule && (config.plugins || []).length > 0,
+  );
 
   // Generate virtual entry code that imports and bundles all routes
   // This ensures all route handlers are captured in the bundle closure
@@ -1874,6 +2109,9 @@ async function buildSSRInMemory(
     notFoundPath,
     config,
     configModulePath,
+    hasServerRuntimeIntegrations,
+    hasRuntimeIntegrationConfig,
+    hasConfiguredRuntimePlugins,
     preset,
     i18nCatalogs,
   );
@@ -1962,6 +2200,24 @@ async function buildSSRInMemory(
         __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
       },
       plugins: [
+        {
+          name: "farm-react-production-mode",
+          enforce: "pre",
+          transform(code, id) {
+            const normalizedId = id.replace(/\\/g, "/");
+            const isReactRuntime =
+              normalizedId.includes("/node_modules/react/") ||
+              normalizedId.includes("/node_modules/react-dom/");
+            const nodeEnvExpression = ["process", "env", "NODE_ENV"].join(".");
+
+            if (!isReactRuntime || !code.includes(nodeEnvExpression)) return null;
+
+            return {
+              code: code.split(nodeEnvExpression).join('"production"'),
+              map: null,
+            };
+          },
+        },
         farmPlugin(config, pluginManager),
         farmEnvironmentFunctionsPlugin(),
         {
@@ -2007,8 +2263,6 @@ async function buildSSRInMemory(
       resolve: {
         alias: {
           "@": path.resolve(root, "src"),
-          // Ensure imports can resolve farm modules
-          farm: path.resolve(root, "node_modules", "@farmjs", "core", "src"),
         },
       },
     });
@@ -2039,9 +2293,14 @@ function generateVirtualEntryCode(
   notFoundPath: string | null,
   config: ResolvedFarmConfig,
   configModulePath: string | null,
+  hasServerRuntimeIntegrations: boolean,
+  hasRuntimeIntegrationConfig: boolean,
+  hasConfiguredRuntimePlugins: boolean,
   preset: string,
   i18nCatalogs: FarmI18nCatalogs,
 ): string {
+  const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
+
   // Generate imports for all API routes
   const apiImports: string[] = [];
   const apiRegistrations: string[] = [];
@@ -2060,6 +2319,9 @@ function generateVirtualEntryCode(
   // Generate imports for all page routes
   const pageImports: string[] = [];
   const pageRegistrations: string[] = [];
+  const hasMarkdownPages = pageRoutes.some(
+    (route) => route.source !== undefined || isFarmMarkdownPageFile(route.modulePath),
+  );
 
   pageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
@@ -2143,21 +2405,39 @@ function generateVirtualEntryCode(
   const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "farm/api/route-manager";`
+      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "@farmjs/core/api/route-manager";`
       : "";
-  const cacheHelpersImport = `import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "farm/cache";`;
-  const navigationHelpersImport = `import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "farm/navigation";`;
-  const metadataHelpersImport = `import { addMetadataImageReference, mergeMetadata, renderMetadataHead } from "farm/metadata";`;
-  const afterHelpersImport = `import { _runWithAfterRequest } from "farm/after";`;
-  const observabilityHelpersImport = `import { configureFarmObservability, emitFarmEvent } from "farm/observability";`;
-  const pluginRuntimeImport = `import { PluginManager } from "farm/plugin";`;
-  const middlewareRuntimeImport = `import { _runWithMiddlewareContext, _runWithMiddlewareData, applyProductionMiddlewareHeaders, createProductionMiddlewareRunner } from "farm/middleware";`;
-  const i18nRoutingImport = `import { createFarmLocaleCookie, getFarmLocaleVaryHeaders, localizeFarmHref, localizeFarmPathname, stripFarmLocaleFromPathname } from "farm/i18n";`;
+  const productionRuntimeImport = `import {
+  _runWithAfterRequest,
+  _runWithMiddlewareContext,
+  _runWithMiddlewareData,
+  addMetadataImageReference,
+  applyProductionMiddlewareHeaders,
+  configureFarmObservability,
+  createFarmCacheKey,
+  createFarmLocaleCookie,
+  createProductionMiddlewareRunner,
+  emitFarmEvent,
+  getFarmDataCache,
+  getFarmLocaleVaryHeaders,
+  getFarmRedirectError,
+  isFarmNotFoundError,
+  isFarmRedirectError,
+  localizeFarmHref,
+  localizeFarmPathname,
+  mergeMetadata,
+  normalizeRevalidatePath,
+  renderMetadataHead,
+  stripFarmLocaleFromPathname,
+} from "@farmjs/core/internal/production-runtime";`;
+  const pluginRuntimeImport = hasPluginRuntime
+    ? `import { PluginManager } from "@farmjs/core/plugin";`
+    : "";
   const i18nServerImport = config.i18n.enabled
-    ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "farm/i18n/server";`
+    ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "@farmjs/core/i18n/server";`
     : "";
   const docsHandlerImport = config.docs?.enabled
-    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "farm/docs";`
+    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farmjs/core/docs";`
     : "";
   const docsRuntimeImport = config.docs?.enabled
     ? `import { existsSync as farmDocsExistsSync } from "node:fs";
@@ -2165,9 +2445,11 @@ import { dirname as farmDocsDirname, join as farmDocsJoin } from "node:path";
 import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     : "";
   const markdownHandlerImport = config.md?.enabled
-    ? `import { createMarkdownMirrorResponse } from "farm/markdown";`
+    ? `import { createMarkdownMirrorResponse } from "@farmjs/core/markdown";`
     : "";
-  const appMarkdownImport = `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "farm/app-markdown";`;
+  const appMarkdownImport = hasMarkdownPages
+    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farmjs/core/app-markdown";`
+    : "const createFarmMarkdownSourceResponse = null;";
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
       ? path.isAbsolute(config.mdx.components)
@@ -2191,19 +2473,28 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     (_configFile, index) =>
       `(FarmLayerConfigModule${index}.default || FarmLayerConfigModule${index})`,
   );
+  const integrationRuntimeExports = [
+    ...(hasServerRuntimeIntegrations
+      ? ["dispatchIntegrationRequest", "matchIntegrationRoute"]
+      : []),
+    ...(hasRuntimeIntegrationConfig ? ["resolveIntegrationPlugins"] : []),
+  ];
+  const integrationRuntimeImport = integrationRuntimeExports.length
+    ? `import { ${integrationRuntimeExports.join(", ")} } from "@farmjs/core/integrations";`
+    : "";
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
 ${layerConfigImports}
-import { dispatchIntegrationRequest, matchIntegrationRoute, resolveIntegrationPlugins } from "farm";
+${integrationRuntimeImport}
 `;
   const imageRuntime = resolveImageRuntime(config, preset);
   const imageRuntimeImport =
     imageRuntime === "none"
       ? ""
-      : `import { createCloudflareImageTransformer, createFarmImageHandler } from "farm/image-server";`;
+      : `import { createCloudflareImageTransformer, createFarmImageHandler } from "@farmjs/core/image/server";`;
   const imageNodeRuntimeImport =
     imageRuntime === "node"
-      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "farm/image-sharp";`
+      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "@farmjs/core/image/sharp";`
       : "";
   const apiHandlerCode =
     apiRoutes.length > 0
@@ -2256,14 +2547,8 @@ ${metadataImageImports.join("\n")}
 ${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
-${cacheHelpersImport}
-${navigationHelpersImport}
-${metadataHelpersImport}
-${afterHelpersImport}
-${observabilityHelpersImport}
+${productionRuntimeImport}
 ${pluginRuntimeImport}
-${middlewareRuntimeImport}
-${i18nRoutingImport}
 ${i18nServerImport}
 ${docsHandlerImport}
 ${docsRuntimeImport}
@@ -2285,16 +2570,27 @@ const configuredIntegrations = Object.assign(
   {},
   ...farmRuntimeConfigs.map((runtimeConfig) => runtimeConfig.integrations || {}),
 );
+const serverRuntimeIntegrations = Object.fromEntries(
+  Object.entries(configuredIntegrations).filter(([, integration]) =>
+    integration && typeof integration === "object" && integration.serverRuntime !== false
+  ),
+);
 const integrationRuntimeConfig = Object.assign({}, ...farmRuntimeConfigs, {
   integrations: configuredIntegrations,
 });
 const configuredPlugins = [
-  ...resolveIntegrationPlugins(configuredIntegrations),
-  ...farmRuntimeConfigs.flatMap((runtimeConfig) =>
+  ${hasRuntimeIntegrationConfig ? "...resolveIntegrationPlugins(configuredIntegrations)," : ""}
+  ${
+    hasConfiguredRuntimePlugins
+      ? `...farmRuntimeConfigs.flatMap((runtimeConfig) =>
     Array.isArray(runtimeConfig.plugins) ? runtimeConfig.plugins : [],
-  ),
+  ),`
+      : ""
+  }
 ];
-const farmPluginRuntime = configuredPlugins.length > 0
+const farmPluginRuntime = ${
+    hasPluginRuntime
+      ? `configuredPlugins.length > 0
   ? (() => {
       const manager = new PluginManager({
         config: farmUserConfig || {},
@@ -2304,7 +2600,9 @@ const farmPluginRuntime = configuredPlugins.length > 0
       manager.addPlugins(configuredPlugins);
       return manager;
     })()
-  : null;
+  : null`
+      : "null"
+  };
 const hasFarmPluginHTMLTransforms = configuredPlugins.some(
   (plugin) => plugin.render?.html || plugin.afterRender || plugin.transformHTML,
 );
@@ -2744,8 +3042,8 @@ ${apiHandlerCode}
 
 async function handleIntegrationRequest(request) {
   ${
-    configModulePath
-      ? `const matchedIntegrationRoute = matchIntegrationRoute(configuredIntegrations, {
+    hasServerRuntimeIntegrations
+      ? `const matchedIntegrationRoute = matchIntegrationRoute(serverRuntimeIntegrations, {
     pathname: new URL(request.url).pathname,
     method: request.method,
   });
@@ -2796,10 +3094,14 @@ function getFarmPluginRequestOptions(request) {
   const routePathname = getFarmRoutePathname(pathname);
   const route = { pathname };
   const isDocsAPIRequest = ${config.docs?.enabled ? "isFarmDocsAPIRequest(pathname)" : "false"};
-  const integrationMatch = matchIntegrationRoute(configuredIntegrations, {
+  const integrationMatch = ${
+    hasServerRuntimeIntegrations
+      ? `matchIntegrationRoute(serverRuntimeIntegrations, {
     pathname,
     method: request.method,
-  });
+  })`
+      : "null"
+  };
 
   if (integrationMatch) {
     return {
@@ -3649,6 +3951,15 @@ async function buildNitroUniversal(
   const isCloudflareWorker = preset === "cloudflare-module";
   const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const ssrOutputDir = path.join(root, distDir, "ssr");
+  const imageRuntime = resolveImageRuntime(config, preset);
+  const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
+  const copiedRuntimePackages = new Set(imageRuntime === "node" ? ["sharp"] : []);
+  // Nitro normally rebundles the Vite SSR graph so its bare dependencies are
+  // deployable. Skip that duplicate pass only when Farm already knows how to
+  // package every remaining external; otherwise retain Nitro's proven path.
+  const isPrebuiltSSRCandidate =
+    preset === "node-server" &&
+    [...ssrExternalPackages].every((packageName) => copiedRuntimePackages.has(packageName));
 
   logger.info(`📦 Nitro output directory: ${outputDir}`);
   logger.info(`📦 SSR entry file: ${ssrEntryFile}`);
@@ -3674,15 +3985,11 @@ async function buildNitroUniversal(
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });
 
-  for (const [fileName, content] of Object.entries(ssrBundle)) {
-    const chunk = content as Rollup.OutputChunk | Rollup.OutputAsset;
-    if (chunk.type === "chunk") {
-      const filePath = path.join(ssrOutputDir, fileName);
-      // Ensure parent directory exists for nested files like assets/foo.js
-      const fileDir = path.dirname(filePath);
-      await fs.mkdir(fileDir, { recursive: true });
-      await fs.writeFile(filePath, chunk.code);
-    }
+  for (const [fileName, output] of Object.entries(ssrBundle)) {
+    const filePath = path.join(ssrOutputDir, fileName);
+    // Ensure parent directory exists for nested chunks and emitted assets.
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, output.type === "chunk" ? output.code : output.source);
   }
 
   // Create entry that wraps the SSR handler with h3's fromWebHandler
@@ -3721,6 +4028,11 @@ export default defineEventHandler(async (event) => {
   `.trim();
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
+  const prebuiltSSRPlugin = createExternalSSRBundlePlugin(
+    nitroEntryPath,
+    ssrOutputDir,
+    ssrEntryFile,
+  );
 
   let nitroConfig: NitroConfig = {
     preset,
@@ -3798,23 +4110,159 @@ export default defineEventHandler(async (event) => {
     rollupConfig: {
       external: isNitroRollupExternal,
     },
-    minify: true, // Enable minification for smaller bundles
+    // Keep the public Nitro boolean intact for build hooks. It is translated to
+    // Nitro's existing esbuild pass after hooks run, avoiding a second Terser pass.
+    minify: true,
     sourceMap: false, // Skip sourcemaps for faster build
   };
+  const initialSSRRebundleOptions = snapshotSSRRebundleOptions(nitroConfig);
 
   if (pluginManager) {
     nitroConfig = await pluginManager.runHookSerial("beforeNitroBuild", nitroConfig);
   }
 
+  const expectedServerDir = path.join(outputDir, "server");
+  const customRollupKeys = Object.keys(nitroConfig.rollupConfig || {}).filter(
+    (key) => key !== "external" && key !== "plugins",
+  );
+  const configuredEsbuild = nitroConfig.esbuild?.options;
+  const hasUnsupportedEsbuildOverrides = Boolean(
+    configuredEsbuild?.include !== undefined ||
+    configuredEsbuild?.exclude !== undefined ||
+    configuredEsbuild?.loaders !== undefined ||
+    configuredEsbuild?.sourceMap,
+  );
+  const hasLateBuildMutationConfig = Boolean(
+    Object.keys(nitroConfig.hooks || {}).length > 0 ||
+    (Array.isArray(nitroConfig.modules) ? nitroConfig.modules.some(Boolean) : nitroConfig.modules),
+  );
+  const hasUnsupportedSSRRebundleOverrides = !isDeepStrictEqual(
+    initialSSRRebundleOptions,
+    snapshotSSRRebundleOptions(nitroConfig),
+  );
+  const requestedBuilder = nitroConfig.builder ?? process.env.NITRO_BUILDER;
+  const canReusePrebuiltSSR =
+    isPrebuiltSSRCandidate &&
+    nitroConfig.preset === "node-server" &&
+    (requestedBuilder === undefined ||
+      requestedBuilder === "rollup" ||
+      requestedBuilder === "rolldown") &&
+    nitroConfig.sourceMap === false &&
+    !hasUnsupportedEsbuildOverrides &&
+    !hasLateBuildMutationConfig &&
+    !hasUnsupportedSSRRebundleOverrides &&
+    nitroConfig.rollupConfig?.external === isNitroRollupExternal &&
+    !hasRollupPlugins(nitroConfig.rollupConfig?.plugins) &&
+    customRollupKeys.length === 0 &&
+    path.resolve(nitroConfig.output?.serverDir || "") === path.resolve(expectedServerDir) &&
+    Boolean(
+      nitroConfig.handlers?.some(
+        (handler) => path.resolve(handler?.handler || "") === nitroEntryPath,
+      ),
+    );
+  const selectRolldownBuilder =
+    canReusePrebuiltSSR && requestedBuilder === undefined && (await canUseRolldownBuilder());
+  if (selectRolldownBuilder) nitroConfig.builder = "rolldown";
+  const useRolldownBuilder =
+    canReusePrebuiltSSR && (nitroConfig.builder ?? process.env.NITRO_BUILDER) === "rolldown";
+
+  const shouldMinify = nitroConfig.minify !== false;
+  const configuredEsbuildOptions = nitroConfig.esbuild?.options || {};
+  const effectiveMinify = configuredEsbuildOptions.minify ?? shouldMinify;
+  const useFarmEsbuildMinifier =
+    effectiveMinify &&
+    nitroConfig.sourceMap === false &&
+    !hasUnsupportedEsbuildOverrides &&
+    !hasLateBuildMutationConfig;
+  const esbuildChunkMinifier = useFarmEsbuildMinifier
+    ? createEsbuildChunkMinifyPlugin(configuredEsbuildOptions)
+    : null;
+  if (canReusePrebuiltSSR) {
+    const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
+    nitroConfig.rollupConfig = {
+      ...nitroConfig.rollupConfig,
+      plugins: [
+        ...(Array.isArray(configuredRollupPlugins)
+          ? configuredRollupPlugins
+          : configuredRollupPlugins
+            ? [configuredRollupPlugins]
+            : []),
+        prebuiltSSRPlugin,
+      ],
+    };
+  }
+
+  nitroConfig.minify = useFarmEsbuildMinifier ? false : shouldMinify;
+  nitroConfig.esbuild = {
+    ...nitroConfig.esbuild,
+    options: {
+      ...configuredEsbuildOptions,
+      minify: useFarmEsbuildMinifier ? false : configuredEsbuildOptions.minify,
+      keepNames: configuredEsbuildOptions.keepNames ?? true,
+      legalComments: configuredEsbuildOptions.legalComments ?? "none",
+    },
+  };
+
   // Build with Nitro
   const nitroInstance = await nitro.createNitro(nitroConfig);
   await nitro.prepare(nitroInstance);
   await nitro.copyPublicAssets(nitroInstance);
+  if (esbuildChunkMinifier || useRolldownBuilder) {
+    // Register after Nitro and user hooks are prepared so the minifier is the
+    // final renderChunk transform, matching Nitro's Terser ordering.
+    nitroInstance.hooks.hook("rollup:before", (_nitro, rollupConfig) => {
+      if (useRolldownBuilder) {
+        // Nitro 3 alpha still emits transform options that this Rolldown API
+        // rejects. The generated native Node adapter contains neither JSX nor
+        // browser-global injections, so omit both without changing its output.
+        const rolldownConfig = rollupConfig as typeof rollupConfig & {
+          inject?: unknown;
+          jsx?: unknown;
+        };
+        delete rolldownConfig.inject;
+        delete rolldownConfig.jsx;
+      }
+      if (esbuildChunkMinifier) {
+        const configuredPlugins = rollupConfig.plugins;
+        rollupConfig.plugins = [
+          ...(Array.isArray(configuredPlugins)
+            ? configuredPlugins
+            : configuredPlugins
+              ? [configuredPlugins]
+              : []),
+          esbuildChunkMinifier,
+        ];
+      }
+    });
+  }
   await nitro.build(nitroInstance);
   await nitroInstance.close();
 
-  if (resolveImageRuntime(config, preset) === "node") {
-    await copySharpRuntime(config, root, path.join(outputDir, "server"), fs);
+  const copyResults = await Promise.allSettled([
+    canReusePrebuiltSSR
+      ? copyPrebuiltSSRBundle(
+          ssrBundle,
+          path.join(outputDir, "server", FARM_SSR_OUTPUT_DIR),
+          configuredEsbuildOptions,
+          effectiveMinify,
+          fs,
+        )
+      : Promise.resolve(),
+    imageRuntime === "node"
+      ? copySharpRuntime(config, root, path.join(outputDir, "server"), fs)
+      : Promise.resolve(),
+  ]);
+  const failedCopy = copyResults.find(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (failedCopy) throw failedCopy.reason;
+
+  if (canReusePrebuiltSSR) {
+    await registerPrebuiltSSRPackageImport(path.join(outputDir, "server"), ssrEntryFile, fs);
+    logger.info("⚡ Reused Farm's prebuilt SSR bundle for the Node output");
+  }
+  if (useRolldownBuilder) {
+    logger.info("⚡ Built the Node adapter with Rolldown");
   }
 
   if (pluginManager) {
@@ -3833,6 +4281,73 @@ export default defineEventHandler(async (event) => {
   }
 
   logger.success(`✅ Nitro build completed with preset: ${preset}`);
+}
+
+async function copyPrebuiltSSRBundle(
+  ssrBundle: OutputBundle,
+  targetDir: string,
+  configuredEsbuildOptions: NitroEsbuildOptions,
+  minify: boolean,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  const {
+    include: _include,
+    exclude: _exclude,
+    sourceMap: _sourceMap,
+    loaders: _loaders,
+    ...configuredTransformOptions
+  } = configuredEsbuildOptions;
+  const hasConfiguredTransforms = Object.keys(configuredTransformOptions).some(
+    (option) => option !== "minify",
+  );
+  const transformOptions = createEsbuildTransformOptions(
+    configuredEsbuildOptions,
+    minify,
+    "node18",
+  );
+  const transform = minify || hasConfiguredTransforms ? (await import("esbuild")).transform : null;
+
+  await fs.rm(targetDir, { recursive: true, force: true });
+  await Promise.all(
+    Object.entries(ssrBundle).map(async ([fileName, output]) => {
+      const targetPath = path.join(targetDir, fileName);
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+
+      if (output.type === "asset") {
+        await fs.writeFile(targetPath, output.source);
+        return;
+      }
+
+      let code = output.code;
+      if (transform) {
+        const result = await transform(code, {
+          ...transformOptions,
+          sourcefile: fileName,
+        });
+        code = result.code;
+      }
+
+      await fs.writeFile(targetPath, code);
+    }),
+  );
+}
+
+async function registerPrebuiltSSRPackageImport(
+  serverDir: string,
+  ssrEntryFile: string,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  const packagePath = path.join(serverDir, "package.json");
+  const packageJSON = JSON.parse(await fs.readFile(packagePath, "utf8"));
+  const existingImports =
+    packageJSON.imports && typeof packageJSON.imports === "object" ? packageJSON.imports : {};
+  const outputEntry = `${FARM_SSR_OUTPUT_DIR}/${ssrEntryFile}`.replace(/\\/g, "/");
+
+  packageJSON.imports = {
+    ...existingImports,
+    [FARM_SSR_PACKAGE_IMPORT]: `./${outputEntry}`,
+  };
+  await fs.writeFile(packagePath, `${JSON.stringify(packageJSON, null, 2)}\n`);
 }
 
 /**
@@ -3942,7 +4457,10 @@ async function copyFarmDocsContentForVercel(
   });
   await fs.rm(bundledContentDir, { recursive: true, force: true });
   await fs.mkdir(path.dirname(bundledContentDir), { recursive: true });
-  await fs.cp(docsContentDir, bundledContentDir, { recursive: true, force: true });
+  await fs.cp(docsContentDir, bundledContentDir, {
+    recursive: true,
+    force: true,
+  });
   await fs.writeFile(
     path.join(bundledContentDir, FARM_DOCS_LAST_MODIFIED_MANIFEST),
     `${JSON.stringify(lastModifiedManifest, null, 2)}\n`,
@@ -3961,11 +4479,22 @@ async function copySharpRuntime(
 
   const projectRequire = createRequire(path.join(root, "package.json"));
   const copiedPackages = new Map<string, string>();
+  const packageCopies = new Map<string, Promise<void>>();
   const targetNodeModules = path.join(nitroFuncDir, "node_modules");
 
-  async function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
-    if (copiedPackages.has(packageName)) return;
+  function copyPackage(packageName: string, parentRequire: NodeJS.Require): Promise<void> {
+    const activeCopy = packageCopies.get(packageName);
+    if (activeCopy) return activeCopy;
 
+    const packageCopy = copyPackageOnce(packageName, parentRequire);
+    packageCopies.set(packageName, packageCopy);
+    return packageCopy;
+  }
+
+  async function copyPackageOnce(
+    packageName: string,
+    parentRequire: NodeJS.Require,
+  ): Promise<void> {
     const packageJsonPath = resolvePackageJson(parentRequire, packageName);
     if (!packageJsonPath) return;
     const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
@@ -3974,20 +4503,22 @@ async function copySharpRuntime(
     copiedPackages.set(packageName, String(packageJson.version || "*"));
 
     await fs.mkdir(path.dirname(targetDir), { recursive: true });
-    await fs.cp(packageDir, targetDir, {
-      recursive: true,
-      force: true,
-      dereference: true,
-    });
-
     const packageRequire = createRequire(packageJsonPath);
     const dependencies = {
       ...(packageJson.dependencies || {}),
       ...(packageJson.optionalDependencies || {}),
     };
-    for (const dependency of Object.keys(dependencies)) {
-      await copyPackage(dependency, packageRequire);
-    }
+    await Promise.all([
+      fs.cp(packageDir, targetDir, {
+        recursive: true,
+        force: true,
+        dereference: true,
+        // Reflinks make native runtime packaging nearly metadata-only on
+        // supporting filesystems and transparently fall back to byte copies.
+        mode: fsConstants.COPYFILE_FICLONE,
+      }),
+      ...Object.keys(dependencies).map((dependency) => copyPackage(dependency, packageRequire)),
+    ]);
   }
 
   await copyPackage("sharp", projectRequire);
@@ -4001,7 +4532,7 @@ async function copySharpRuntime(
   const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
   functionPackage.dependencies = {
     ...functionPackage.dependencies,
-    ...Object.fromEntries(copiedPackages),
+    ...Object.fromEntries([...copiedPackages].sort(([left], [right]) => left.localeCompare(right))),
   };
   await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
   logger.info(`🖼️  Bundled Sharp image runtime (${copiedPackages.size} packages)`);
@@ -4046,8 +4577,14 @@ async function copyPrismaClientForVercel(
   const targetClientDir = path.join(targetPrismaScopeDir, "client");
 
   await fs.mkdir(targetPrismaScopeDir, { recursive: true });
-  await fs.cp(prismaClientDir, targetClientDir, { recursive: true, force: true });
-  await fs.cp(generatedClientDir, targetGeneratedDir, { recursive: true, force: true });
+  await fs.cp(prismaClientDir, targetClientDir, {
+    recursive: true,
+    force: true,
+  });
+  await fs.cp(generatedClientDir, targetGeneratedDir, {
+    recursive: true,
+    force: true,
+  });
 
   const functionPackagePath = path.join(nitroFuncDir, "package.json");
   const clientPackagePath = path.join(prismaClientDir, "package.json");

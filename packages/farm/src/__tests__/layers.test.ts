@@ -13,7 +13,7 @@ import {
   resolveFarmLayers,
 } from "../layers";
 import { MiddlewareManager } from "../middleware/manager";
-import { discoverMiddlewareRoutes } from "../nitro/universal-build";
+import { discoverMiddlewareRoutes, hasFarmRuntimeConfigModule } from "../nitro/universal-build";
 import { RouteManager } from "../routing/route-manager";
 import { farmPlugin } from "../vite";
 
@@ -106,6 +106,7 @@ describe("Farm layers", () => {
       "admin-plugin",
       "project-plugin",
     ]);
+    expect(hasFarmRuntimeConfigModule(resolved, null)).toBe(true);
     expect(Array.isArray(resolved.middleware)).toBe(true);
     expect(resolved.serverActions.bodySizeLimit).toBe(1_000_000);
   });

@@ -55,7 +55,7 @@ program
   .option("-p, --preset <preset>", "Nitro preset (node-server, vercel, cloudflare, etc.)")
   .action(async (options) => {
     try {
-      const { buildFarm } = require("../dist/index.js");
+      const { buildFarm } = require("../dist/build.js");
       await buildFarm({
         root: options.root,
         preset: options.preset,
