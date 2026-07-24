@@ -1,4 +1,4 @@
-import type { PageProps } from "@farmjs/core";
+import type { Metadata, PageProps } from "@farmjs/core";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -65,11 +65,26 @@ import type { FileTreeNode } from "../components/ui/file-tree";
 import { FlickeringGrid } from "../components/ui/flickering-grid";
 import { farmBenchmark, formatBenchmarkDuration } from "../lib/framework-benchmark";
 
+const homepageTitle = "Farm.js - Framework for modern integrated apps";
+const homepageDescription =
+  "Farm.js is the framework for modern integrated apps, unifying routing, typed APIs, middleware, integrations, docs, and deployment.";
+
 export const metadata = {
-  title: "Farm.js - The React framework for product apps",
-  description:
-    "Farm.js brings app routing, typed APIs, middleware, integrations, agent runtimes, docs, migrations, and production deployment into one React framework.",
-};
+  title: homepageTitle,
+  description: homepageDescription,
+  openGraph: {
+    title: homepageTitle,
+    description: homepageDescription,
+    url: "https://farmjs.dev/",
+    siteName: "Farm.js",
+    type: "website",
+  },
+  twitter: {
+    card: "summary",
+    title: homepageTitle,
+    description: homepageDescription,
+  },
+} satisfies Metadata;
 
 const navItems = [
   { index: "01", label: "Guide", href: "/docs/getting-started", icon: BookOpen },
@@ -85,6 +100,14 @@ type ProductStackItem = {
   icon?: LucideIcon;
   wordmark?: boolean;
 };
+
+function withFarmReferral(href: string) {
+  const url = new URL(href);
+  url.searchParams.set("utm_source", "farmjs.dev");
+  url.searchParams.set("utm_medium", "referral");
+  url.searchParams.set("utm_campaign", "product_stack");
+  return url.toString();
+}
 
 const integrationDirectoryItems = [
   {
@@ -195,25 +218,55 @@ const integrationDirectoryItems = [
 ] as const;
 
 const ecosystemItems = [
-  { label: "React 19", href: "/docs/getting-started", brand: reactIconUrl },
-  { label: "Vite", href: "/docs/getting-started", brand: viteIconUrl },
-  { label: "Nitro", href: "/docs/deployment", brand: nitroIconUrl },
-  ...integrationDirectoryItems,
+  { label: "React 19", href: withFarmReferral("https://react.dev/"), brand: reactIconUrl },
+  { label: "Stripe", href: withFarmReferral("https://stripe.com/"), brand: stripeIconUrl },
+  {
+    label: "Cloudflare Agents",
+    href: withFarmReferral("https://developers.cloudflare.com/agents/"),
+    brand: cloudflareIconUrl,
+  },
+  {
+    label: "Better Auth",
+    href: withFarmReferral("https://better-auth.com/"),
+    brand: betterAuthIconUrl,
+  },
+  { label: "Vercel", href: withFarmReferral("https://vercel.com/"), brand: vercelIconUrl },
+  { label: "Inngest", href: withFarmReferral("https://www.inngest.com/"), brand: inngestIconUrl },
+  { label: "Vite", href: withFarmReferral("https://vite.dev/"), brand: viteIconUrl },
+  { label: "Supabase", href: withFarmReferral("https://supabase.com/"), brand: supabaseIconUrl },
+  {
+    label: "Trigger.dev",
+    href: withFarmReferral("https://trigger.dev/"),
+    brand: triggerIconUrl,
+  },
+  { label: "Docker", href: withFarmReferral("https://www.docker.com/"), brand: dockerIconUrl },
+  { label: "Clerk", href: withFarmReferral("https://clerk.com/"), brand: clerkIconUrl },
+  { label: "Resend", href: withFarmReferral("https://resend.com/"), brand: resendIconUrl },
+  { label: "Nitro", href: withFarmReferral("https://nitro.build/"), brand: nitroIconUrl },
+  { label: "Polar", href: withFarmReferral("https://polar.sh/"), brand: polarIconUrl },
+  { label: "Netlify", href: withFarmReferral("https://www.netlify.com/"), brand: netlifyIconUrl },
+  { label: "Auth.js", href: withFarmReferral("https://authjs.dev/"), brand: authJsIconUrl },
+  { label: "Autumn", href: withFarmReferral("https://useautumn.com/"), brand: autumnIconUrl },
+  {
+    label: "Cloudflare",
+    href: withFarmReferral("https://www.cloudflare.com/"),
+    brand: cloudflareIconUrl,
+  },
+  { label: "Prisma", href: withFarmReferral("https://www.prisma.io/"), brand: prismaIconUrl },
+  { label: "Auth0", href: withFarmReferral("https://auth0.com/"), brand: auth0IconUrl },
+  {
+    label: "shadcn/ui",
+    href: withFarmReferral("https://ui.shadcn.com/"),
+    brand: shadcnIconUrl,
+  },
+  { label: "WorkOS", href: withFarmReferral("https://workos.com/"), brand: workosIconUrl },
+  { label: "Unkey", href: withFarmReferral("https://www.unkey.com/"), brand: unkeyIconUrl },
   {
     label: "eve",
-    href: "/docs/integrations/eve",
+    href: withFarmReferral("https://www.eve.dev/"),
     brand: eveIconUrl,
     wordmark: true,
   },
-  {
-    label: "Cloudflare Agents",
-    href: "/docs/integrations/cf-agent",
-    brand: cloudflareIconUrl,
-  },
-  { label: "Vercel", href: "/docs/deployment", brand: vercelIconUrl },
-  { label: "Cloudflare", href: "/docs/deployment", brand: cloudflareIconUrl },
-  { label: "Netlify", href: "/docs/deployment", brand: netlifyIconUrl },
-  { label: "Docker", href: "/docs/deployment", brand: dockerIconUrl },
 ] satisfies readonly ProductStackItem[];
 
 type DeploymentTile = {
@@ -776,11 +829,13 @@ function ProductStackTile({
 
   return (
     <a
-      aria-label={item.wordmark ? item.label : undefined}
+      aria-label={`${item.label} website (opens in a new tab)`}
       aria-hidden={duplicate ? true : undefined}
       className={className}
       href={item.href}
+      rel="noreferrer"
       tabIndex={duplicate ? -1 : undefined}
+      target="_blank"
     >
       {item.brand ? (
         <BrandIcon
