@@ -7,7 +7,7 @@ import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plug
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
-import { OpenAPIManager } from "./openapi/manager";
+import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateFarmTypeArtifacts } from "./type-artifacts";
 import {
@@ -15,18 +15,7 @@ import {
   parseProgrammaticRouteModuleId,
   scanProgrammaticPagePaths,
 } from "./routes";
-import {
-  createFarmDocsAPIHandler,
-  createFarmDocsHandler,
-  getFarmDocsDocumentNavigationMatchers,
-  getFarmDocsRouteTypeEntries,
-  isFarmDocsAPIRequest,
-} from "./docs";
-import {
-  generateFarmDocsSearchClientRuntime,
-  isFarmDocsSearchEnabled,
-  resolveFarmDocsSearchClientModule,
-} from "./docs/search-client";
+import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse } from "./markdown";
 import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
 import { sendWebResponse } from "./server/response";
@@ -41,16 +30,8 @@ import {
   getIntegrationProviders,
   matchIntegrationRoute,
 } from "./integrations";
-import {
-  createFarmWorkflowRequestHandler,
-  discoverFarmWorkflows,
-  resolveWorkflowsConfig,
-  type FarmDiscoveredWorkflow,
-} from "./workflows";
+import type { FarmDiscoveredWorkflow } from "./workflows";
 import { resolveFarmRouteContext, withFarmRouteContext } from "./route-context";
-import { createFarmDevtoolsSnapshot } from "./devtools";
-import { renderFarmDevtoolsHtml } from "./devtools-ui";
-import { generateFarmDevtoolsClientRuntime } from "./devtools-client";
 import {
   FARM_DEVTOOLS_LAUNCH_PARAM,
   FARM_DEVTOOLS_PATH,
@@ -81,6 +62,43 @@ interface FarmVitePluginOptions extends FarmConfig {
 }
 
 const FARM_I18N_CLIENT_BRIDGE_ID = "\0farm-i18n-client-bridge";
+const EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME = `
+function isFarmDocsSearchPage() {
+  return false;
+}
+
+async function mountFarmDocsSearch() {
+  return false;
+}
+`;
+
+function loadFarmDocsDevRuntime() {
+  return import("./docs");
+}
+
+function loadFarmDocsSearchDevRuntime() {
+  return import("./docs/search-client");
+}
+
+function loadFarmOpenAPIDevRuntime() {
+  return import("./openapi/manager");
+}
+
+function loadFarmWorkflowsDevRuntime() {
+  return import("./workflows");
+}
+
+function loadFarmDevtoolsSnapshotRuntime() {
+  return import("./devtools");
+}
+
+function loadFarmDevtoolsUIRuntime() {
+  return import("./devtools-ui");
+}
+
+function loadFarmDevtoolsClientRuntime() {
+  return import("./devtools-client");
+}
 
 export function farmI18nClientBridgePlugin(): Plugin {
   return {
@@ -527,10 +545,11 @@ export function farmPlugin(
             : farmConfig.i18n.messages,
         );
       }
-      const workflowConfig = resolveWorkflowsConfig(farmConfig.workflows);
+      const workflowConfig = farmConfig.workflows;
+      const farmDocsDevRuntime = farmConfig.docs.enabled ? await loadFarmDocsDevRuntime() : null;
       const getExtraRouteTypes = () => [
         ...(options.openapi?.enabled && options.openapi.route ? [options.openapi.route] : []),
-        ...getFarmDocsRouteTypeEntries(farmConfig.docs),
+        ...(farmDocsDevRuntime?.getFarmDocsRouteTypeEntries(farmConfig.docs) ?? []),
       ];
       const appDirSlugs = sourceRoots.map((source) =>
         path.join(source.root, source.srcDir, "app").replace(/\\/g, "/"),
@@ -708,21 +727,31 @@ export function farmPlugin(
         i18n: farmApp.getI18nRuntime(),
       });
       await apiRouteManager.discoverRoutes();
-      const discoveredWorkflows = await discoverFarmWorkflows(
-        { ...farmConfig, workflows: workflowConfig },
-        {
-          loadModule: async (filePath) =>
-            server.ssrLoadModule(filePath) as Promise<Record<string, any>>,
-        },
-      );
-      if (discoveredWorkflows.length > 0) {
-        workflowHandler = createFarmWorkflowRequestHandler({
-          workflows: discoveredWorkflows,
-          config: workflowConfig,
-          loadModule: async (workflow: FarmDiscoveredWorkflow) =>
-            server.ssrLoadModule(workflow.filePath) as Promise<Record<string, any>>,
-        });
-        logger.success(`✅ Discovered ${discoveredWorkflows.length} Farm workflow task(s)`);
+      let discoveredWorkflows: FarmDiscoveredWorkflow[] = [];
+      const hasWorkflowDirectory =
+        workflowConfig.enabled &&
+        workflowConfig.dirs.some((dir) =>
+          fs.existsSync(path.isAbsolute(dir) ? dir : path.join(farmConfig.root, dir)),
+        );
+      if (hasWorkflowDirectory) {
+        const { createFarmWorkflowRequestHandler, discoverFarmWorkflows } =
+          await loadFarmWorkflowsDevRuntime();
+        discoveredWorkflows = await discoverFarmWorkflows(
+          { ...farmConfig, workflows: workflowConfig },
+          {
+            loadModule: async (filePath) =>
+              server.ssrLoadModule(filePath) as Promise<Record<string, any>>,
+          },
+        );
+        if (discoveredWorkflows.length > 0) {
+          workflowHandler = createFarmWorkflowRequestHandler({
+            workflows: discoveredWorkflows,
+            config: workflowConfig,
+            loadModule: async (workflow: FarmDiscoveredWorkflow) =>
+              server.ssrLoadModule(workflow.filePath) as Promise<Record<string, any>>,
+          });
+          logger.success(`✅ Discovered ${discoveredWorkflows.length} Farm workflow task(s)`);
+        }
       }
       if (pm) {
         for (const [, apiRoute] of apiRouteManager.getRoutes()) {
@@ -753,6 +782,7 @@ export function farmPlugin(
 
       // Initialize OpenAPI manager if enabled
       if (options.openapi?.enabled) {
+        const { OpenAPIManager } = await loadFarmOpenAPIDevRuntime();
         openAPIManager = new OpenAPIManager(appDirs, options.openapi);
         await openAPIManager.generateSpec();
         logger.success("✅ OpenAPI documentation enabled");
@@ -773,34 +803,40 @@ export function farmPlugin(
         }
       };
 
-      const farmDocsHandler = createFarmDocsHandler(farmConfig.docs, {
-        root: farmConfig.root,
-        srcDir: farmConfig.srcDir,
-        clientEntry: "/@farm/client.js",
-      });
-      const farmDocsAPIHandler = farmConfig.docs?.enabled
-        ? createFarmDocsAPIHandler({
+      const farmDocsHandler = farmDocsDevRuntime
+        ? farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
+            root: farmConfig.root,
+            srcDir: farmConfig.srcDir,
+            clientEntry: "/@farm/client.js",
+          })
+        : null;
+      const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime
+        ? farmDocsDevRuntime.createFarmDocsAPIHandler({
             rootDir: farmConfig.root,
             srcDir: farmConfig.srcDir,
             docs: farmConfig.docs,
           })
         : null;
-      const farmDocsFontAssets = new Map([
-        [
-          "/assets/Geist-Variable-CrgPqtmy.woff2",
-          path.join(
-            farmConfig.root,
-            "node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
-          ),
-        ],
-        [
-          "/assets/GeistMono-Variable-BNLlm6Cd.woff2",
-          path.join(
-            farmConfig.root,
-            "node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
-          ),
-        ],
-      ]);
+      const farmDocsFontAssets = new Map<string, string>(
+        farmDocsDevRuntime
+          ? [
+              [
+                "/assets/Geist-Variable-CrgPqtmy.woff2",
+                path.join(
+                  farmConfig.root,
+                  "node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
+                ),
+              ],
+              [
+                "/assets/GeistMono-Variable-BNLlm6Cd.woff2",
+                path.join(
+                  farmConfig.root,
+                  "node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
+                ),
+              ],
+            ]
+          : [],
+      );
 
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
       const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
@@ -932,6 +968,7 @@ export function farmPlugin(
               return;
             }
 
+            const { createFarmDevtoolsSnapshot } = await loadFarmDevtoolsSnapshotRuntime();
             const snapshot = await createFarmDevtoolsSnapshot({
               root: farmConfig.root,
               srcDir: farmConfig.srcDir,
@@ -953,11 +990,12 @@ export function farmPlugin(
                 : "text/html; charset=utf-8",
             );
             res.setHeader("Cache-Control", "no-store");
-            res.end(
-              requestPathname.endsWith(".json")
-                ? JSON.stringify(snapshot, null, 2)
-                : renderFarmDevtoolsHtml(snapshot),
-            );
+            if (requestPathname.endsWith(".json")) {
+              res.end(JSON.stringify(snapshot, null, 2));
+            } else {
+              const { renderFarmDevtoolsHtml } = await loadFarmDevtoolsUIRuntime();
+              res.end(renderFarmDevtoolsHtml(snapshot));
+            }
             return;
           }
 
@@ -973,15 +1011,17 @@ export function farmPlugin(
               docsHeaders.set(key, Array.isArray(value) ? value.join(", ") : value);
             }
           }
-          const docsResponse = await farmDocsHandler(
-            new Request(fullUrl, {
-              method: requestMethod,
-              headers: docsHeaders,
-            }),
-          );
-          if (docsResponse) {
-            await sendWebResponse(res, docsResponse);
-            return;
+          if (farmDocsHandler) {
+            const docsResponse = await farmDocsHandler(
+              new Request(fullUrl, {
+                method: requestMethod,
+                headers: docsHeaders,
+              }),
+            );
+            if (docsResponse) {
+              await sendWebResponse(res, docsResponse);
+              return;
+            }
           }
 
           const markdownSourceResponse = await createFarmMarkdownSourceResponse({
@@ -1287,7 +1327,7 @@ export function farmPlugin(
               }
             }
 
-            if (farmDocsAPIHandler && isFarmDocsAPIRequest(pathname)) {
+            if (farmDocsAPIHandler && farmDocsDevRuntime?.isFarmDocsAPIRequest(pathname)) {
               try {
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
                 const headers = new Headers();
@@ -1904,20 +1944,37 @@ export function farmPlugin(
       if (id === "/@farm/client" || id === "/@farm/client.js") {
         const resolvedConfig = farmApp?.getConfig();
         const integrations = resolvedConfig?.integrations || options.integrations;
+        const root = resolvedConfig?.root || server?.config.root || process.cwd();
+        const docs = resolvedConfig?.docs;
+        const devtools = resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production");
+        const [docsRuntime, docsSearchRuntime, devtoolsClientRuntime] = await Promise.all([
+          docs?.enabled ? loadFarmDocsDevRuntime() : null,
+          docs?.enabled ? loadFarmDocsSearchDevRuntime() : null,
+          devtools.enabled ? loadFarmDevtoolsClientRuntime() : null,
+        ]);
+        const docsSearchEnabled = docsSearchRuntime?.isFarmDocsSearchEnabled(docs) ?? false;
+        const generatedDocsSearchRuntime = docsSearchRuntime
+          ? docsSearchRuntime.generateFarmDocsSearchClientRuntime(
+              docsSearchEnabled,
+              docsSearchEnabled
+                ? docsSearchRuntime.resolveFarmDocsSearchClientModule(root)
+                : undefined,
+            )
+          : EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME;
+        const generatedDevtoolsClientRuntime = devtoolsClientRuntime
+          ? devtoolsClientRuntime.generateFarmDevtoolsClientRuntime(devtools)
+          : "";
 
         return generateClientCode(
           getIntegrationProviders(integrations),
           [
             ...getIntegrationDocumentNavigationMatchers(integrations),
-            ...getFarmDocsDocumentNavigationMatchers(resolvedConfig?.docs),
+            ...(docsRuntime?.getFarmDocsDocumentNavigationMatchers(docs) ?? []),
           ],
-          isFarmDocsSearchEnabled(resolvedConfig?.docs),
-          resolveFarmDocsSearchClientModule(
-            resolvedConfig?.root || server?.config.root || process.cwd(),
-          ),
-          resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production"),
+          generatedDocsSearchRuntime,
+          generatedDevtoolsClientRuntime,
           resolvedConfig?.plugins || [],
-          resolvedConfig?.root || server?.config.root || process.cwd(),
+          root,
         );
       }
 
@@ -2683,9 +2740,8 @@ function generateClientCode(
     props?: Record<string, unknown>;
   }> = [],
   documentNavigationMatchers: string[] = [],
-  docsSearchEnabled = false,
-  docsSearchModuleId?: string,
-  devtools = resolveFarmDevtoolsConfig(false, "production"),
+  docsSearchClientRuntime = EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME,
+  devtoolsClientRuntime = "",
   plugins: readonly FarmPlugin[] = [],
   root = process.cwd(),
 ): string {
@@ -2708,8 +2764,8 @@ import {
 } from '@farmjs/core/deployment'
 ${providerImportBlock}
 ${clientPluginEntry.imports}
-${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
-${generateFarmDevtoolsClientRuntime(devtools)}
+${docsSearchClientRuntime}
+${devtoolsClientRuntime}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
 // Uses manifest-based chunk loading - NO HTML fetching!

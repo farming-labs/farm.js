@@ -71,7 +71,6 @@ export const farmPackageBuildOptions = {
     /^@farming-labs\/orm/,
   ],
   sourcemap: true,
-  splitting: false,
   treeshake: false,
   esbuildOptions(options) {
     options.keepNames = true;
