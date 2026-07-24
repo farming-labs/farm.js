@@ -60,6 +60,7 @@ import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
 type NitroEsbuildOptions = NonNullable<NonNullable<NitroConfig["esbuild"]>["options"]>;
+type FarmNitroRuntime = typeof import("nitro");
 type UniversalPageRoute = {
   pattern: string;
   modulePath: string;
@@ -93,6 +94,13 @@ type UniversalMiddlewareRoute = {
   path: string;
   filePath: string;
 };
+
+function preloadFarmNitroRuntime(): Promise<PromiseSettledResult<FarmNitroRuntime>> {
+  return import("nitro").then(
+    (value) => ({ status: "fulfilled", value }),
+    (reason) => ({ status: "rejected", reason }),
+  );
+}
 
 // Get __dirname equivalent for ESM
 const _filename = typeof import.meta.url !== "undefined" ? fileURLToPath(import.meta.url) : "";
@@ -582,6 +590,10 @@ export async function buildUniversal(
   const productionViteResultPromise = Promise.allSettled([
     Promise.resolve(options.productionVite ?? loadFarmProductionVite()),
   ]);
+  // Nitro is guaranteed to be needed for every universal production build.
+  // Start resolving it while route metadata and the client/SSR bundles are
+  // prepared, then consume the settled result at the adapter stage.
+  const nitroRuntimeResultPromise = preloadFarmNitroRuntime();
 
   logger.info(`🚜 Building Farm.js application (universal) with preset: ${preset}...`);
 
@@ -733,6 +745,7 @@ export async function buildUniversal(
       clientOutputDir,
       routeRuntimeManifest,
       configuredHeaderRoutes,
+      nitroRuntimeResultPromise,
       lifecyclePluginManager,
     );
 
@@ -5146,12 +5159,18 @@ async function buildNitroUniversal(
   clientOutputDir: string,
   routeRuntimeManifest: FarmRouteRuntimeManifest,
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
+  nitroRuntimeResultPromise: Promise<PromiseSettledResult<FarmNitroRuntime>>,
   pluginManager?: PluginManager,
 ) {
   // Nitro is only needed while producing the deployment artifact. Keeping the
   // import lazy prevents this build-only dependency from leaking into an
   // application's standalone server bundle through @farmjs/core's root entry.
-  const [fs, nitro] = await Promise.all([import("fs/promises"), import("nitro")]);
+  const [fs, nitroRuntimeResult] = await Promise.all([
+    import("fs/promises"),
+    nitroRuntimeResultPromise,
+  ]);
+  if (nitroRuntimeResult.status === "rejected") throw nitroRuntimeResult.reason;
+  const nitro = nitroRuntimeResult.value;
 
   const isVercel = preset === "vercel" || preset === "vercel-edge";
   const isCloudflareWorker = preset === "cloudflare-module";
