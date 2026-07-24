@@ -37,7 +37,7 @@ program
   .option("--cron", "Run configured cron routes in-process during development")
   .action(async (options) => {
     try {
-      const { startDevServer, startFarmCronScheduler } = require("../dist/index.js");
+      const { startDevServer } = require("../dist/dev.js");
       const server = await startDevServer(
         {
           root: options.root,
@@ -45,6 +45,7 @@ program
         parseInt(options.port),
       );
       if (options.cron) {
+        const { startFarmCronScheduler } = require("../dist/index.js");
         const address = server.httpServer?.address();
         const port = typeof address === "object" && address ? address.port : parseInt(options.port);
         const scheduler = await startFarmCronScheduler({
@@ -148,8 +149,16 @@ program
   .option("-p, --port <port>", "Port of the running local app")
   .option("--host <host>", "Host of the running local app", "localhost")
   .option("--url <url>", "Full local URL to expose")
-  .option("--gateway <url>", "Advanced: override the hosted Farm Preview gateway URL", process.env.FARM_PREVIEW_GATEWAY_URL)
-  .option("--provider <provider>", "Advanced: preview provider to use (farm, local)", process.env.FARM_PREVIEW_PROVIDER)
+  .option(
+    "--gateway <url>",
+    "Advanced: override the hosted Farm Preview gateway URL",
+    process.env.FARM_PREVIEW_GATEWAY_URL,
+  )
+  .option(
+    "--provider <provider>",
+    "Advanced: preview provider to use (farm, local)",
+    process.env.FARM_PREVIEW_PROVIDER,
+  )
   .option("--name <name>", "Readable preview URL name")
   .option("--dry-run", "Validate target detection and print the preview plan without opening it")
   .option("--no-probe", "Skip local reachability check when --port is provided")
@@ -181,7 +190,10 @@ program
   .option("-c, --config <config>", "Path to farm config file")
   .option("--command <command>", "Migration command to run; can be repeated", collectOption, [])
   .option("--dry-run", "Print migration commands without running them")
-  .option("--write", "Apply framework migration changes; framework migrations are dry-run by default")
+  .option(
+    "--write",
+    "Apply framework migration changes; framework migrations are dry-run by default",
+  )
   .option("--force", "Overwrite existing files during framework migrations")
   .action(async (source, options) => {
     try {

@@ -3,6 +3,7 @@ import { defineConfig } from "tsdown";
 export default defineConfig({
   entry: {
     index: "src/index.ts",
+    dev: "src/dev.ts",
     build: "src/build.ts",
     "add-integration": "src/add-integration.ts",
   },
