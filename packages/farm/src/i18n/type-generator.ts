@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import {
   readFarmI18nCatalogs,
@@ -6,6 +6,7 @@ import {
   type FarmI18nMessageSignature,
 } from "./catalog";
 import type { ResolvedFarmI18nConfig } from "./types";
+import { writeFileIfChanged } from "../write-file-if-changed";
 
 export interface GenerateFarmI18nTypesOptions {
   root: string;
@@ -26,7 +27,7 @@ export async function generateFarmI18nTypes(
   const content = renderFarmI18nTypes(options.config.locales, signatures);
 
   mkdirSync(dirname(outFile), { recursive: true });
-  writeFileSync(outFile, content, "utf8");
+  writeFileIfChanged(outFile, content);
   return outFile;
 }
 

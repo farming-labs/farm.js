@@ -17,6 +17,7 @@ describe("APITypeGenerator", () => {
       },
     ]);
 
+    expect(content).not.toContain("Generated at:");
     expect(content).toContain('"storage-demo": {');
     expect(content).toContain("get: typeof GET_storagedemo;");
     expect(content).toContain("post: typeof POST_storagedemo;");
