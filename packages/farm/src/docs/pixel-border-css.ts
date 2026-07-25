@@ -191,6 +191,17 @@ code:not(pre code) {
   color: var(--color-fd-foreground);
 }
 
+.sidebar-brand-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-brand-suffix {
+  opacity: 0.52;
+}
+
 .sidebar-brand > span {
   flex: 0 0 auto;
   margin-left: auto;
