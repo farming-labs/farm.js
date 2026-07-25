@@ -4,6 +4,7 @@ import { parseRoutePath } from "../utils";
 import type { ParsedRoute } from "../types";
 import { discoverProgrammaticRoutePaths } from "../routes.server";
 import type { FarmSourceRoot } from "../layers";
+import { writeFileIfChanged } from "../write-file-if-changed";
 
 function routeSegmentsToTsTypeLiteral(segments: string[]): string {
   if (segments.length === 0) return '"/"';
@@ -162,7 +163,7 @@ export type RoutePattern = ${routePatternType};${augmentationBlock}
 `;
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, content, "utf8");
+  writeFileIfChanged(outPath, content);
 
   return outPath;
 }

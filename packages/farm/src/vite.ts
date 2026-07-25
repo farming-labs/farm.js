@@ -9,7 +9,7 @@ import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
-import { generateFarmTypeArtifacts } from "./type-artifacts";
+import { generateFarmTypeArtifacts, type GenerateFarmTypeArtifactsOptions } from "./type-artifacts";
 import {
   isProgrammaticRoutesFileName,
   parseProgrammaticRouteModuleId,
@@ -60,6 +60,27 @@ interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
 }
+
+type TypeArtifactSelection = Pick<
+  GenerateFarmTypeArtifactsOptions,
+  "routes" | "api" | "env" | "images" | "i18n"
+>;
+
+const ALL_TYPE_ARTIFACTS: TypeArtifactSelection = {
+  routes: true,
+  api: true,
+  env: true,
+  images: true,
+  i18n: true,
+};
+
+const createEmptyTypeArtifactSelection = (): TypeArtifactSelection => ({
+  routes: false,
+  api: false,
+  env: false,
+  images: false,
+  i18n: false,
+});
 
 const FARM_I18N_CLIENT_BRIDGE_ID = "\0farm-i18n-client-bridge";
 const EMPTY_FARM_DOCS_SEARCH_CLIENT_RUNTIME = `
@@ -554,7 +575,11 @@ export function farmPlugin(
       const appDirSlugs = sourceRoots.map((source) =>
         path.join(source.root, source.srcDir, "app").replace(/\\/g, "/"),
       );
-      const generateTypeArtifacts = async (reason: string, log = false) => {
+      const generateTypeArtifacts = async (
+        reason: string,
+        selection: TypeArtifactSelection = ALL_TYPE_ARTIFACTS,
+        log = false,
+      ) => {
         try {
           const result = await generateFarmTypeArtifacts({
             root: farmConfig.root,
@@ -563,11 +588,23 @@ export function farmPlugin(
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
             i18nConfig: farmConfig.i18n,
+            ...selection,
           });
           if (log) {
+            const refreshed = [
+              selection.routes !== false && "route",
+              selection.api !== false && "API",
+              selection.env !== false && "env",
+              selection.images !== false && "image",
+              selection.i18n !== false && farmConfig.i18n.enabled && "i18n",
+            ].filter(Boolean);
             logUpdate(
               "TYPE",
-              `${reason} - regenerated route, API, env, image, and i18n types (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`,
+              `${reason} - refreshed ${refreshed.join(", ")} types${
+                selection.api !== false
+                  ? ` (${result.apiRoutes.length} API route${result.apiRoutes.length === 1 ? "" : "s"})`
+                  : ""
+              }`,
             );
           }
           if (openAPIManager) {
@@ -637,28 +674,52 @@ export function farmPlugin(
         file
           .replace(/\\/g, "/")
           .startsWith(farmConfig.i18n.messages.replace(/\\/g, "/").replace("{locale}", ""));
-      const isTypeAffectingFile = (file: string, event: string) =>
-        isPageFile(file) ||
-        isApiRouteFile(file) ||
-        isFarmConfigFile(file, farmConfig.root) ||
-        layerConfigFiles.has(file.replace(/\\/g, "/")) ||
-        isProgrammaticRouteFile(file) ||
-        (isProgrammaticRouteSourceFile(file) &&
-          (event === "unlink" || fileContainsProgrammaticPageRoute(file))) ||
-        isI18nCatalogFile(file);
       let typeArtifactGenScheduled: ReturnType<typeof setTimeout> | null = null;
+      let pendingTypeArtifacts = createEmptyTypeArtifactSelection();
+      let pendingTypeArtifactReason = "";
       let routeRefreshScheduled: ReturnType<typeof setTimeout> | null = null;
-      const scheduleTypeArtifactGen = (file: string, event: string) => {
+      const scheduleTypeArtifactGen = (
+        file: string,
+        event: string,
+        selection: TypeArtifactSelection,
+      ) => {
+        for (const [artifact, enabled] of Object.entries(selection)) {
+          if (enabled) {
+            pendingTypeArtifacts[artifact as keyof TypeArtifactSelection] = true;
+          }
+        }
+        pendingTypeArtifactReason ||= `${event} ${file.split("/app/")[1] || file}`;
         if (typeArtifactGenScheduled) return;
         typeArtifactGenScheduled = setTimeout(() => {
           typeArtifactGenScheduled = null;
-          const shortPath = file.split("/app/")[1] || file;
-          generateTypeArtifacts(`${event} ${shortPath}`, true).catch(() => {});
+          const artifacts = pendingTypeArtifacts;
+          const reason = pendingTypeArtifactReason;
+          pendingTypeArtifacts = createEmptyTypeArtifactSelection();
+          pendingTypeArtifactReason = "";
+          generateTypeArtifacts(reason, artifacts, true).catch(() => {});
         }, 100);
       };
       ["add", "change", "unlink"].forEach((ev) => {
         server.watcher.on(ev as "add", (file: string) => {
-          if (isTypeAffectingFile(file, ev)) scheduleTypeArtifactGen(file, ev);
+          const normalizedFile = file.replace(/\\/g, "/");
+          const configChanged =
+            isFarmConfigFile(file, farmConfig.root) || layerConfigFiles.has(normalizedFile);
+          const programmaticRouteChanged =
+            isProgrammaticRouteFile(file) ||
+            (isProgrammaticRouteSourceFile(file) &&
+              (ev === "unlink" || fileContainsProgrammaticPageRoute(file)));
+          const typeArtifacts: TypeArtifactSelection = configChanged
+            ? ALL_TYPE_ARTIFACTS
+            : {
+                routes: (ev !== "change" && isPageFile(file)) || programmaticRouteChanged,
+                api: isApiRouteFile(file) || programmaticRouteChanged,
+                env: false,
+                images: false,
+                i18n: isI18nCatalogFile(file),
+              };
+          if (Object.values(typeArtifacts).some(Boolean)) {
+            scheduleTypeArtifactGen(file, ev, typeArtifacts);
+          }
           if (isI18nCatalogFile(file)) {
             farmApp
               ?.getI18nRuntime()

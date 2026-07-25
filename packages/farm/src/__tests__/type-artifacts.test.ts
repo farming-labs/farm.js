@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  statSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -144,5 +152,52 @@ describe("generateFarmTypeArtifacts", () => {
     expect(envTypes).toContain('FarmConfig0 from "../layers/commerce/farm.config"');
     expect(envTypes).toContain('FarmConfig1 from "../farm.config"');
     expect(envTypes).toContain("type FarmMergedEnv1");
+  });
+
+  it("preserves unchanged outputs and refreshes changed API types", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-incremental-type-artifacts-"));
+    const apiRoutePath = path.join(root, "src", "app", "api", "hello", "route.ts");
+    mkdirSync(path.dirname(apiRoutePath), { recursive: true });
+    writeFileSync(apiRoutePath, "export const POST = async () => Response.json({ ok: true });\n");
+
+    const first = await generateFarmTypeArtifacts({ root });
+    const outputPaths = [
+      first.routeTypesPath,
+      first.apiTypesPath,
+      first.envTypesPath,
+      first.imageTypesPath,
+    ].filter((filePath): filePath is string => Boolean(filePath));
+    const historicalTime = new Date("2000-01-01T00:00:00.000Z");
+
+    for (const filePath of outputPaths) {
+      utimesSync(filePath, historicalTime, historicalTime);
+    }
+    const preservedMtimes = new Map(
+      outputPaths.map((filePath) => [filePath, statSync(filePath).mtimeMs]),
+    );
+
+    await generateFarmTypeArtifacts({ root });
+
+    for (const filePath of outputPaths) {
+      expect(statSync(filePath).mtimeMs).toBe(preservedMtimes.get(filePath));
+    }
+
+    writeFileSync(
+      apiRoutePath,
+      [
+        "export const GET = async () => Response.json({ ok: true });",
+        "export const POST = async () => Response.json({ ok: true });",
+        "",
+      ].join("\n"),
+    );
+    await generateFarmTypeArtifacts({ root });
+
+    expect(readFileSync(first.apiTypesPath!, "utf8")).toContain("get: typeof GET_hello;");
+    expect(statSync(first.apiTypesPath!).mtimeMs).toBeGreaterThan(
+      preservedMtimes.get(first.apiTypesPath!)!,
+    );
+    for (const filePath of outputPaths.filter((filePath) => filePath !== first.apiTypesPath)) {
+      expect(statSync(filePath).mtimeMs).toBe(preservedMtimes.get(filePath));
+    }
   });
 });

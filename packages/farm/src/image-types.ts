@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import path from "node:path";
+import { writeFileIfChanged } from "./write-file-if-changed";
 
 export const FARM_STATIC_IMAGE_EXTENSIONS = ["avif", "gif", "jpeg", "jpg", "png", "webp"] as const;
 
@@ -14,7 +15,7 @@ export function generateFarmImageTypes(options: GenerateFarmImageTypesOptions): 
     ? path.resolve(options.root, options.outFile)
     : path.join(options.root, options.srcDir || "src", "farm-images.d.ts");
   mkdirSync(path.dirname(outputPath), { recursive: true });
-  writeFileSync(outputPath, createFarmImageTypeDeclarations(), "utf8");
+  writeFileIfChanged(outputPath, createFarmImageTypeDeclarations());
   return outputPath;
 }
 

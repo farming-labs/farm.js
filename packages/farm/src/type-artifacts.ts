@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "fs";
+import { mkdirSync } from "fs";
 import { dirname, join, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
 import { generateRouteTypes, type GenerateRouteTypesOptions } from "./routing/generate-route-types";
@@ -7,6 +7,7 @@ import { generateFarmImageTypes } from "./image-types";
 import { generateFarmI18nTypes } from "./i18n/type-generator";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { getFarmAppDirectories, getFarmSourceRoots, type ResolvedFarmLayer } from "./layers";
+import { writeFileIfChanged } from "./write-file-if-changed";
 
 export { generateFarmI18nTypes };
 
@@ -80,7 +81,7 @@ export async function generateFarmTypeArtifacts(
     const content = generator.generateAPIRouter(apiRoutes, { outFile: apiTypesPath });
 
     mkdirSync(dirname(apiTypesPath), { recursive: true });
-    writeFileSync(apiTypesPath, content, "utf-8");
+    writeFileIfChanged(apiTypesPath, content);
 
     result.apiTypesPath = apiTypesPath;
     result.apiRoutes = apiRoutes;

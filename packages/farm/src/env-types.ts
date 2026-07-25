@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { writeFileIfChanged } from "./write-file-if-changed";
 
 export interface GenerateEnvTypesOptions {
   root: string;
@@ -47,7 +48,7 @@ export async function generateEnvTypes(options: GenerateEnvTypesOptions): Promis
         : createEmptyEnvTypes();
 
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, content, "utf8");
+  writeFileIfChanged(outPath, content);
 
   return outPath;
 }
