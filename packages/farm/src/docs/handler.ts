@@ -119,6 +119,17 @@ function renderFarmDocsBrandMark(): string {
   </svg>`;
 }
 
+function renderFarmDocsBrandTitle(navTitle: string): string {
+  const suffix = navTitle.match(/\.js$/i)?.[0];
+
+  if (!suffix) {
+    return `<span class="sidebar-brand-title">${escapeHtml(navTitle)}</span>`;
+  }
+
+  const productName = navTitle.slice(0, -suffix.length);
+  return `<span class="sidebar-brand-title">${escapeHtml(productName)}<span class="sidebar-brand-suffix">${escapeHtml(suffix)}</span></span>`;
+}
+
 function isSafeSegment(segment: string): boolean {
   return segment !== ".." && !segment.includes("/") && !segment.includes("\\");
 }
@@ -1669,6 +1680,8 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--fd-nav-height, 44px); margin: 0 calc(-1 * var(--fd-sidebar-edge)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 var(--fd-sidebar-edge); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .sidebar-brand a { display: inline-flex; min-width: 0; align-items: center; gap: 8px; overflow: hidden; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
     .sidebar-brand-logo { width: 16px; height: 16px; flex: 0 0 16px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
+    .sidebar-brand-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-brand-suffix { opacity: 0.52; }
     .sidebar-scroll { margin: 0 calc(-1 * var(--fd-sidebar-edge)); overflow: visible; }
     .sidebar-tree { margin-top: 0 !important; }
     .sidebar-tree > a[data-active], .sidebar-folder { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
@@ -1858,7 +1871,7 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     <div class="sidebar-backdrop" data-sidebar-backdrop></div>
     <aside id="nd-sidebar">
       <div class="sidebar-brand">
-        <a href="/">${renderFarmDocsBrandMark()}<span>${escapeHtml(navTitle)}</span></a>
+        <a href="/">${renderFarmDocsBrandMark()}${renderFarmDocsBrandTitle(navTitle)}</a>
         <span>/ docs</span>
       </div>
       ${renderPixelNavItems(pages, page.href, docs)}

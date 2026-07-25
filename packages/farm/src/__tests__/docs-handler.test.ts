@@ -268,7 +268,8 @@ describe("createFarmDocsHandler", () => {
     );
     expect(sidebarBrand).not.toContain('data-search-full=""');
     expect(sidebarBrand).toContain('class="sidebar-brand-logo"');
-    expect(sidebarBrand).toContain("<span>Docs</span>");
+    expect(sidebarBrand).toContain('<span class="sidebar-brand-title">Docs</span>');
+    expect(sidebarBrand).not.toContain("sidebar-brand-suffix");
     expect(html).toContain("--fd-nav-height: 44px");
     expect(html).toContain("--omni-content-top: 1rem");
     expect(html).toContain("max-height: calc(100vh - 2rem)");
@@ -648,6 +649,28 @@ describe("createFarmDocsHandler", () => {
     const handler = createFarmDocsHandler({ ...docs, enabled: false }, { root, srcDir: "src" });
 
     await expect(handler(new Request("http://farm.test/docs"))).resolves.toBeNull();
+  });
+
+  it("softens a trailing .js in the sidebar brand title", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(
+      {
+        ...docs,
+        config: {
+          ...docs.config,
+          nav: { title: "Farm.js" },
+        },
+      },
+      { root, srcDir: "src" },
+    );
+
+    const response = await handler(new Request("http://farm.test/docs"));
+    const html = await response?.text();
+
+    expect(html).toContain(
+      '<span class="sidebar-brand-title">Farm<span class="sidebar-brand-suffix">.js</span></span>',
+    );
+    expect(html).toContain(".sidebar-brand-suffix { opacity: 0.52; }");
   });
 });
 
