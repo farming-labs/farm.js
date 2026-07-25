@@ -209,7 +209,9 @@ describe("createFarmDocsHandler", () => {
     expect(response?.headers.get("content-type")).toContain("text/html");
     const html = await response?.text();
     const htmlText = html || "";
-    expect(html).toContain('<link rel="icon" href="/favicon.svg">');
+    expect(html).toContain(
+      '<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">',
+    );
     expect(html).toContain('data-docs-theme="farm-docs"');
     expect(html).toContain('id="nd-docs-layout"');
     expect(html).toContain('id="nd-toc"');
@@ -257,12 +259,16 @@ describe("createFarmDocsHandler", () => {
     );
     expect(topbar).toContain('data-search-full=""');
     expect(topbar).not.toContain("<svg");
+    expect(topbar).not.toContain(">Farm.js</a>");
     expect(mobileTopbar).toContain("<svg");
+    expect(mobileTopbar).not.toContain("mobile-topbar-brand");
     expect(topbar.indexOf('data-search-full=""')).toBeLessThan(topbar.indexOf('href="/llms.txt"'));
     expect(mobileTopbar.indexOf('data-search-full=""')).toBeLessThan(
       mobileTopbar.indexOf('href="/llms.txt"'),
     );
     expect(sidebarBrand).not.toContain('data-search-full=""');
+    expect(sidebarBrand).toContain('class="sidebar-brand-logo"');
+    expect(sidebarBrand).toContain("<span>Docs</span>");
     expect(html).toContain("--fd-nav-height: 44px");
     expect(html).toContain("--omni-content-top: 1rem");
     expect(html).toContain("max-height: calc(100vh - 2rem)");
@@ -406,6 +412,25 @@ describe("createFarmDocsHandler", () => {
     const html = await response?.text();
 
     expect(html).toContain('<link rel="icon" href="data:image/svg+xml,');
+    expect(html).toContain('sizes="any" type="image/svg+xml"');
+  });
+
+  it("uses an explicitly configured favicon without reading the deployment filesystem", async () => {
+    const { root, docs } = await createDocsFixture();
+    await fs.unlink(path.join(root, "public", "favicon.svg"));
+    docs.config.favicon = "/favicon.svg";
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+
+    const response = await handler(
+      new Request("http://farm.test/docs", {
+        headers: { accept: "text/html" },
+      }),
+    );
+    const html = await response?.text();
+
+    expect(html).toContain(
+      '<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">',
+    );
   });
 
   it("hides the search interface and shortcut when docs search is disabled", async () => {

@@ -16,6 +16,11 @@ export interface FarmDocsNavigationConfig {
 
 export type FarmDocsRuntimeConfig = Partial<DocsConfig> & {
   /**
+   * Public favicon URL used by the standalone docs renderer.
+   * Set this explicitly when docs should share the host application's icon.
+   */
+  favicon?: string;
+  /**
    * Optional serializable navigation tree used by Farm's docs runtime.
    * Icon values reference keys from `icons`.
    */
