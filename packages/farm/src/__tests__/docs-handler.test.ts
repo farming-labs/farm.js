@@ -264,18 +264,16 @@ describe("createFarmDocsHandler", () => {
     );
     expect(sidebarBrand).not.toContain('data-search-full=""');
     expect(html).toContain("--fd-nav-height: 44px");
-    expect(html).toContain(
-      "var(--fd-mobile-nav-height, 56px) + max(10px, env(safe-area-inset-top))",
-    );
-    expect(html).toContain("max(10px, env(safe-area-inset-bottom))");
+    expect(html).toContain("--omni-content-top: 1rem");
+    expect(html).toContain("max-height: calc(100vh - 2rem)");
     expect(html).toContain("width: 56px");
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
-    expect(html).toContain("width: min(720px, calc(100vw - 32px))");
-    expect(html).toContain("width: calc(100vw - 16px)");
+    expect(html).toContain("width: min(720px, calc(100% - 1rem))");
+    expect(html).toContain("width: calc(100% - 1rem)");
     expect(html).toContain(".omni-overlay {\n  position: fixed;");
     expect(html).toContain(".omni-content {\n  --omni-content-top:");
     expect(html).toContain(".omni-footer-hints {");
-    expect(html).toContain("font-size: 16px");
+    expect(html).toContain("font-size: 1.125rem");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
