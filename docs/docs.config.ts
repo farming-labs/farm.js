@@ -3,6 +3,7 @@ import { pixelBorder } from "@farming-labs/theme/pixel-border";
 import type { FarmDocsSidebarItem } from "@farmjs/core";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
+  favicon?: string;
   icons?: Record<string, string>;
   navigation?: {
     sidebar?: FarmDocsSidebarItem[];
@@ -277,6 +278,7 @@ const config = {
   metadata: {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
+  favicon: "/favicon.svg",
   nav: {
     title: "Farm.js",
     url: "/",
@@ -320,5 +322,6 @@ const config = {
 
 export default {
   ...defineDocs(config),
+  favicon: config.favicon,
   navigation: config.navigation,
 } satisfies FarmDocsSerializableConfig;

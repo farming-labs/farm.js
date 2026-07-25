@@ -71,7 +71,15 @@ function normalizeSlug(value: string): string {
   return trimSlashes(decodeURIComponent(value)).replace(/\.(mdx?|markdown)$/i, "");
 }
 
-function resolveFarmDocsFavicon(options: FarmDocsHandlerOptions): string {
+function resolveFarmDocsFavicon(
+  docs: FarmDocsResolvedConfig | undefined,
+  options: FarmDocsHandlerOptions,
+): string {
+  const configuredFavicon = docs?.config.favicon;
+  if (typeof configuredFavicon === "string" && configuredFavicon.trim()) {
+    return configuredFavicon.trim();
+  }
+
   const publicDir = path.join(path.resolve(options.root), "public");
 
   for (const fileName of FARM_DOCS_FAVICON_FILES) {
@@ -82,6 +90,33 @@ function resolveFarmDocsFavicon(options: FarmDocsHandlerOptions): string {
   }
 
   return FARM_DOCS_FALLBACK_FAVICON;
+}
+
+function renderFarmDocsFaviconLink(faviconHref: string): string {
+  const normalizedHref = faviconHref.split(/[?#]/, 1)[0]?.toLowerCase() || "";
+  const type =
+    normalizedHref.endsWith(".svg") || faviconHref.startsWith("data:image/svg+xml")
+      ? "image/svg+xml"
+      : normalizedHref.endsWith(".png")
+        ? "image/png"
+        : normalizedHref.endsWith(".ico")
+          ? "image/x-icon"
+          : undefined;
+  const metadata =
+    type === "image/svg+xml" ? ' sizes="any" type="image/svg+xml"' : type ? ` type="${type}"` : "";
+
+  return `<link rel="icon" href="${escapeAttribute(faviconHref)}"${metadata}>`;
+}
+
+function renderFarmDocsBrandMark(): string {
+  return `<svg class="sidebar-brand-logo" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect x="2" y="2" width="5" height="5" rx="0.75" fill="currentColor"></rect>
+    <path d="M9.75 2h11.5c.41 0 .75.34.75.75v3.5c0 .41-.34.75-.75.75H9.75A.75.75 0 0 1 9 6.25v-3.5c0-.41.34-.75.75-.75Zm9.75 1.62a.38.38 0 0 0-.38.38v1c0 .21.17.38.38.38h.75c.21 0 .38-.17.38-.38V4a.38.38 0 0 0-.38-.38h-.75Z" fill="currentColor"></path>
+    <rect x="2" y="9.5" width="5" height="5" rx="0.75" fill="currentColor" opacity="0.64"></rect>
+    <rect x="9" y="9.5" width="13" height="5" rx="0.75" fill="currentColor" opacity="0.64"></rect>
+    <rect x="2" y="17" width="5" height="5" rx="0.75" fill="currentColor" opacity="0.34"></rect>
+    <rect x="9" y="17" width="7.5" height="5" rx="0.75" fill="currentColor" opacity="0.34"></rect>
+  </svg>`;
 }
 
 function isSafeSegment(segment: string): boolean {
@@ -1600,7 +1635,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template: "sidebar header header" var(--fd-nav-height, 44px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
     #nd-docs-layout.grid { grid-template: "sidebar header header" var(--fd-nav-height, 44px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; }
     #nd-docs-layout, #nd-docs-layout * { border-radius: 0 !important; }
-    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 44px); display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0 0 0 22px; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
+    .topbar { position: sticky; top: 0; z-index: 20; grid-area: header; height: var(--fd-nav-height, 44px); display: flex; align-items: center; justify-content: flex-end; gap: 16px; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 92%, transparent); backdrop-filter: blur(12px); padding: 0; font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     .topbar-actions, .mobile-topbar-actions { display: flex; height: 100%; min-width: 0; align-items: stretch; margin-left: auto; }
@@ -1609,8 +1644,7 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     .sidebar-backdrop { display: none; }
     .fd-mobile-nav-btn { display: inline-flex; width: var(--fd-mobile-nav-height, 56px); height: 100%; flex: 0 0 var(--fd-mobile-nav-height, 56px); align-items: center; justify-content: center; border: 0; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); cursor: pointer; padding: 0; appearance: none; }
     .fd-mobile-nav-btn svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-    .mobile-topbar-brand, .mobile-topbar-link { display: inline-flex; height: 100%; min-width: 0; align-items: center; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-decoration: none; text-transform: uppercase; }
-    .mobile-topbar-brand { padding: 0 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mobile-topbar-link { display: inline-flex; height: 100%; min-width: 0; align-items: center; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-decoration: none; text-transform: uppercase; }
     .mobile-topbar-link { border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 14px; }
     #nd-docs-layout .fd-toc { position: sticky; top: var(--fd-docs-row-1); grid-area: toc; display: flex; width: var(--fd-toc-width); height: calc(var(--fd-docs-height) - var(--fd-docs-row-1)); max-height: calc(100vh - var(--fd-docs-row-1)); flex-direction: column; align-self: start; overflow: hidden; padding: 48px 16px 8px 0; }
     #nd-docs-layout .fd-toc-inner { display: flex; min-width: 0; min-height: 0; flex: 1 1 auto; flex-direction: column; }
@@ -1633,7 +1667,8 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
     aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
     aside#nd-sidebar > * { position: relative; z-index: 1; }
     .sidebar-brand { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: var(--fd-nav-height, 44px); margin: 0 calc(-1 * var(--fd-sidebar-edge)) 18px; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; padding: 0 var(--fd-sidebar-edge); font-family: var(--fd-docs-font-mono); font-size: 12px; letter-spacing: 0.03em; text-transform: uppercase; }
-    .sidebar-brand a { text-decoration: none; }
+    .sidebar-brand a { display: inline-flex; min-width: 0; align-items: center; gap: 8px; overflow: hidden; text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+    .sidebar-brand-logo { width: 16px; height: 16px; flex: 0 0 16px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     .sidebar-scroll { margin: 0 calc(-1 * var(--fd-sidebar-edge)); overflow: visible; }
     .sidebar-tree { margin-top: 0 !important; }
     .sidebar-tree > a[data-active], .sidebar-folder { border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
@@ -1801,7 +1836,7 @@ function renderPixelDocsHtml(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
-  <link rel="icon" href="${escapeAttribute(faviconHref)}">
+  ${renderFarmDocsFaviconLink(faviconHref)}
   <link rel="preload" href="${GEIST_SANS_FONT_URL}" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="${GEIST_MONO_FONT_URL}" as="font" type="font/woff2" crossorigin>
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
@@ -1815,7 +1850,6 @@ ${renderFarmDocsBridgeCss(docs)}</style>
       <button class="fd-mobile-nav-btn" type="button" data-sidebar-toggle aria-controls="nd-sidebar" aria-expanded="false" aria-label="Open menu">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
       </button>
-      <a class="mobile-topbar-brand" href="/">Farm.js</a>
       <div class="mobile-topbar-actions">
         ${searchEnabled ? renderDocsSearchTrigger() : ""}
         <a class="mobile-topbar-link" href="/llms.txt">llms.txt</a>
@@ -1824,13 +1858,12 @@ ${renderFarmDocsBridgeCss(docs)}</style>
     <div class="sidebar-backdrop" data-sidebar-backdrop></div>
     <aside id="nd-sidebar">
       <div class="sidebar-brand">
-        <a href="/">${escapeHtml(navTitle)}</a>
+        <a href="/">${renderFarmDocsBrandMark()}<span>${escapeHtml(navTitle)}</span></a>
         <span>/ docs</span>
       </div>
       ${renderPixelNavItems(pages, page.href, docs)}
     </aside>
     <header class="topbar">
-      <a href="/">Farm.js</a>
       <div class="topbar-actions">
         ${searchEnabled ? renderDocsSearchTrigger(false) : ""}
         <a class="topbar-llms-link" href="/llms.txt">llms.txt</a>
@@ -1863,7 +1896,7 @@ export function createFarmDocsHandler(
   docs: FarmDocsResolvedConfig | undefined,
   options: FarmDocsHandlerOptions,
 ) {
-  const faviconHref = resolveFarmDocsFavicon(options);
+  const faviconHref = resolveFarmDocsFavicon(docs, options);
 
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;

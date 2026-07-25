@@ -151,7 +151,6 @@ code:not(pre code) {
   stroke-width: 2;
 }
 
-.mobile-topbar-brand,
 .mobile-topbar-link {
   display: inline-flex;
   height: 100%;
@@ -165,13 +164,6 @@ code:not(pre code) {
   text-transform: uppercase;
 }
 
-.mobile-topbar-brand {
-  overflow: hidden;
-  padding: 0 14px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .mobile-topbar-link {
   border-left: 1px solid var(--color-fd-border);
   padding: 0 14px;
@@ -182,11 +174,21 @@ code:not(pre code) {
 }
 
 .sidebar-brand > a {
+  display: inline-flex;
   min-width: 0;
+  align-items: center;
+  gap: 8px;
   overflow: hidden;
   flex: 0 0 auto;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sidebar-brand-logo {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: var(--color-fd-foreground);
 }
 
 .sidebar-brand > span {
