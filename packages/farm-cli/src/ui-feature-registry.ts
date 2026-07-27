@@ -244,14 +244,21 @@ export function clerkAuthUIFeature(): UIFeatureDefinition {
 }
 
 export function betterAuthUIFeature(): UIFeatureDefinition {
-  return authRouteShellUIFeature({
-    provider: "better-auth",
-    label: "Better Auth",
-    componentName: "BetterAuthPanel",
-    signInHref: "/api/auth/sign-in",
-    signUpHref: "/api/auth/sign-up",
-    sessionHref: "/api/auth/session",
-  });
+  return {
+    name: "better-auth-auth",
+    description: "Better Auth email and password UI",
+    components: ["badge", "button", "card", "input", "label"],
+    needsApiClient: false,
+    notes: ['Open "/integrations/better-auth" to try the generated auth UI.'],
+    files: () => [
+      {
+        path: path.join("src", "lib", "auth-client.ts"),
+        source: betterAuthClientTemplate(),
+      },
+      componentFile("better-auth-panel.tsx", betterAuthPanelTemplate()),
+      integrationPageFile("better-auth", "BetterAuthPanel"),
+    ],
+  };
 }
 
 export function authjsUIFeature(): UIFeatureDefinition {
@@ -392,6 +399,7 @@ async function writeGeneratedFile(input: {
 }) {
   const absolutePath = path.join(input.root, input.relativePath);
   const exists = existsSync(absolutePath);
+  const source = resolveGeneratedAliases(input.source, input.relativePath);
   input.result.ui?.files.push(absolutePath);
 
   if (exists && !input.force) {
@@ -401,10 +409,23 @@ async function writeGeneratedFile(input: {
 
   if (!input.dryRun) {
     await mkdir(path.dirname(absolutePath), { recursive: true });
-    await writeFile(absolutePath, input.source, "utf8");
+    await writeFile(absolutePath, source, "utf8");
   }
 
   pushResultPath(exists ? input.result.updated : input.result.created, absolutePath);
+}
+
+function resolveGeneratedAliases(source: string, relativePath: string) {
+  const sourceDirectory = path.dirname(relativePath);
+
+  return source.replace(/(["'])@\/([^"']+)\1/g, (_match, quote: string, target: string) => {
+    const relativeTarget = path
+      .relative(sourceDirectory, path.join("src", target))
+      .split(path.sep)
+      .join("/");
+    const importPath = relativeTarget.startsWith(".") ? relativeTarget : `./${relativeTarget}`;
+    return `${quote}${importPath}${quote}`;
+  });
 }
 
 async function ensureComponentsJson(input: {
@@ -469,15 +490,21 @@ ${SHADCN_THEME_CSS}
   }
 
   const source = await readFile(globalsPath, "utf8");
-  if (source.includes("--color-background") || source.includes("--background:")) {
+  const hasTailwindImport = source.includes('@import "tailwindcss"');
+  const hasTheme = source.includes("--color-background") || source.includes("--background:");
+  if (hasTailwindImport && hasTheme) {
     pushResultPath(input.result.skipped, globalsPath);
     return;
   }
 
-  const nextSource = `${source.trimEnd()}
+  const nextSource = `${hasTailwindImport ? "" : '@import "tailwindcss";\n\n'}${source.trimEnd()}${
+    hasTheme
+      ? "\n"
+      : `
 
 ${SHADCN_THEME_CSS}
-`;
+`
+  }`;
   if (!input.dryRun) {
     await writeFile(globalsPath, nextSource, "utf8");
   }
@@ -589,6 +616,7 @@ const UI_DEPENDENCIES = {
   "class-variance-authority": "^0.7.1",
   clsx: "^2.1.1",
   "tailwind-merge": "^3.3.1",
+  tailwindcss: "^4.1.18",
 } as const;
 
 const SHADCN_THEME_CSS = `@custom-variant dark (&:is(.dark *));
@@ -1423,6 +1451,186 @@ export function ${input.componentName}() {
             <Button type="button" onClick={() => window.location.assign("${input.signInHref}")}>Sign in</Button>
             <Button type="button" variant="outline" onClick={() => window.location.assign("${input.signUpHref}")}>Sign up</Button>
             <Button type="button" variant="ghost" onClick={() => window.location.assign("${input.sessionHref}")}>Session</Button>
+          </CardContent>
+        </Card>
+      </section>
+    </main>
+  );
+}
+`;
+}
+
+function betterAuthClientTemplate() {
+  return `import { createAuthClient } from "better-auth/react";
+
+export const authClient = createAuthClient({
+  baseURL: "",
+});
+`;
+}
+
+function betterAuthPanelTemplate() {
+  return `"use client";
+
+import * as React from "react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { authClient } from "@/lib/auth-client";
+
+type Mode = "sign-in" | "sign-up";
+
+export function BetterAuthPanel() {
+  const [mode, setMode] = React.useState<Mode>("sign-in");
+  const [pending, setPending] = React.useState(false);
+  const [message, setMessage] = React.useState("Ready");
+  const [sessionEmail, setSessionEmail] = React.useState<string | null>(null);
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true);
+    setMessage(mode === "sign-in" ? "Signing in…" : "Creating account…");
+
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") || "");
+    const password = String(form.get("password") || "");
+    const name = String(form.get("name") || "");
+    try {
+      const response =
+        mode === "sign-in"
+          ? await authClient.signIn.email({ email, password })
+          : await authClient.signUp.email({ email, password, name });
+
+      if (response.error) {
+        setMessage(response.error.message || "Authentication failed.");
+        return;
+      }
+
+      setSessionEmail(email);
+      setMessage(mode === "sign-in" ? "Signed in." : "Account created.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Could not reach the auth server.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function refreshSession() {
+    setPending(true);
+    try {
+      const response = await authClient.getSession();
+      setSessionEmail(response.data?.user.email || null);
+      setMessage(response.error?.message || (response.data ? "Session active." : "No active session."));
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Could not read the session.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function signOut() {
+    setPending(true);
+    try {
+      const response = await authClient.signOut();
+      if (response.error) {
+        setMessage(response.error.message || "Could not sign out.");
+        return;
+      }
+      setSessionEmail(null);
+      setMessage("Signed out.");
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Could not reach the auth server.");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  return (
+    <main className="min-h-screen bg-background px-5 py-12 text-foreground sm:px-8">
+      <section className="mx-auto grid w-full max-w-5xl gap-8 lg:grid-cols-[1fr_420px] lg:items-start">
+        <div className="space-y-5 py-4">
+          <Badge variant="secondary">Better Auth × Farm.js</Badge>
+          <div className="space-y-3">
+            <h1 className="max-w-xl text-4xl font-semibold tracking-tight sm:text-5xl">
+              Authentication that starts ready.
+            </h1>
+            <p className="max-w-xl text-base leading-7 text-muted-foreground">
+              Test account creation, email sign-in, session reads, and sign-out through Farm’s
+              generated Better Auth integration.
+            </p>
+          </div>
+          <div aria-live="polite" className="border-l-2 border-primary pl-4 text-sm">
+            <p className="font-medium">{message}</p>
+            <p className="mt-1 text-muted-foreground">
+              {sessionEmail ? \`Signed in as \${sessionEmail}\` : "No authenticated user"}
+            </p>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>{mode === "sign-in" ? "Welcome back" : "Create an account"}</CardTitle>
+            <CardDescription>
+              {mode === "sign-in"
+                ? "Enter your credentials to start a secure session."
+                : "Use an email and password to create your local account."}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form className="space-y-4" onSubmit={submit}>
+              {mode === "sign-up" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="name">Name</Label>
+                  <Input autoComplete="name" id="name" name="name" required />
+                </div>
+              ) : null}
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input autoComplete="email" id="email" name="email" required type="email" />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  autoComplete={mode === "sign-in" ? "current-password" : "new-password"}
+                  id="password"
+                  minLength={8}
+                  name="password"
+                  required
+                  type="password"
+                />
+              </div>
+              <Button className="w-full" disabled={pending} type="submit">
+                {pending ? "Working…" : mode === "sign-in" ? "Sign in" : "Create account"}
+              </Button>
+            </form>
+
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              <Button
+                disabled={pending}
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setMode(mode === "sign-in" ? "sign-up" : "sign-in");
+                  setMessage("Ready");
+                }}
+              >
+                {mode === "sign-in" ? "Create account" : "Use sign in"}
+              </Button>
+              <Button disabled={pending} type="button" variant="outline" onClick={() => void refreshSession()}>
+                Check session
+              </Button>
+            </div>
+            <Button
+              className="mt-2 w-full"
+              disabled={pending || !sessionEmail}
+              type="button"
+              variant="ghost"
+              onClick={() => void signOut()}
+            >
+              Sign out
+            </Button>
           </CardContent>
         </Card>
       </section>

@@ -16,7 +16,9 @@ Use Better Auth when the app should own its auth database, methods, plugins, and
 farm add integration better-auth --ui
 ```
 
-Install `better-auth` plus the database driver or adapter selected by the application.
+The command adds `better-auth` and its SQLite driver, creates a local SQLite-backed server instance, writes
+`.env.example`, and, with `--ui`, adds a working sign-up, sign-in, session, and sign-out screen at
+`/integrations/better-auth`.
 
 ## Create the server instance
 
@@ -24,17 +26,26 @@ Install `better-auth` plus the database driver or adapter selected by the applic
 
 ```ts
 import { betterAuth } from "better-auth";
+import Database from "better-sqlite3";
+import { getMigrations } from "better-auth/db/migration";
 
 export const auth = betterAuth({
+  database: new Database(process.env.BETTER_AUTH_DATABASE_PATH || "better-auth.sqlite"),
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
   emailAndPassword: {
     enabled: true,
   },
 });
+
+const migrations = await getMigrations(auth.options);
+await migrations.runMigrations();
 ```
 
-Configure the production database, social providers, plugins, and callbacks in this object. They are not duplicated in Farm config.
+The generated SQLite setup is designed to work immediately in local development. Configure a
+persistent production database, managed migrations, social providers, plugins, and callbacks
+before deploying. These settings remain in Better Auth rather than being duplicated in Farm
+config.
 
 ## Register it
 
