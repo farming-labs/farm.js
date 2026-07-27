@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 const { addFarmIntegration, listFarmIntegrationProviders } = require("../dist/add-integration.js");
+const ts = require("typescript");
 const execFileAsync = promisify(execFile);
 const testDir = path.dirname(fileURLToPath(import.meta.url));
 const cliBin = path.resolve(testDir, "../bin/farm.js");
@@ -177,6 +178,8 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
   });
 
   try {
+    await mkdir(path.join(root, "src/app"), { recursive: true });
+    await writeFile(path.join(root, "src/app/globals.css"), "body { margin: 0; }\n", "utf8");
     const result = await addFarmIntegration({
       root,
       provider: "stripe",
@@ -204,17 +207,20 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
     assert.equal(packageJson.dependencies["class-variance-authority"], "^0.7.1");
     assert.equal(packageJson.dependencies.clsx, "^2.1.1");
     assert.equal(packageJson.dependencies["tailwind-merge"], "^3.3.1");
+    assert.equal(packageJson.dependencies.tailwindcss, "^4.1.18");
     assert.equal(componentsJson.aliases.ui, "@/components/ui");
     assert.equal(componentsJson.registries.farm.url, "https://farmjs.dev/r/{name}.json");
     assert.deepEqual(tsconfig.compilerOptions.paths["@/*"], ["./src/*"]);
     assert.match(globals, /--color-background/);
+    assert.match(globals, /^@import "tailwindcss";/);
+    assert.match(globals, /body \{ margin: 0; \}/);
     assert.match(api, /createIntegrations<AppIntegrations>/);
     assert.match(pricing, /apiClient\.billing\.products/);
     assert.match(pricing, /apiClient\.billing\.checkout/);
-    assert.match(pricing, /from "@\/components\/ui\/button"/);
+    assert.match(pricing, /from "\.\.\/ui\/button"/);
     assert.match(button, /class-variance-authority/);
-    assert.match(button, /from "@\/lib\/utils"/);
-    assert.match(page, /from "@\/components\/farm\/stripe-billing"/);
+    assert.match(button, /from "\.\.\/\.\.\/lib\/utils"/);
+    assert.match(page, /from "\.\.\/\.\.\/\.\.\/components\/farm\/stripe-billing"/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -249,6 +255,109 @@ test("prepares UI files for every built-in integration provider", async () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  }
+});
+
+test("writes syntactically valid integration and UI files for every provider", async () => {
+  for (const provider of listFarmIntegrationProviders()) {
+    const root = await createTempProject({
+      packageJson: {
+        type: "module",
+        dependencies: {
+          "@farmjs/core": "workspace:*",
+        },
+      },
+    });
+
+    try {
+      const result = await addFarmIntegration({
+        root,
+        provider: provider.name,
+        ui: true,
+      });
+      const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+
+      assert.equal(
+        packageJson.dependencies["@farmjs/integrations"],
+        "workspace:*",
+        `${provider.name} should install @farmjs/integrations`,
+      );
+
+      for (const file of result.created.filter((file) => /\.[cm]?[jt]sx?$/.test(file))) {
+        const source = await readFile(file, "utf8");
+        assertTypeScriptSyntax(source, file);
+        assert.doesNotMatch(source, /(["'])@\//, `${file} should use portable relative imports`);
+      }
+
+      if (result.mode === "integration") {
+        assert.match(
+          await readFile(result.registryFile, "utf8"),
+          new RegExp(`${result.key}:`),
+          `${provider.name} should register its integration`,
+        );
+        assert.match(
+          await readFile(result.configFile, "utf8"),
+          /integrations: appIntegrations/,
+          `${provider.name} should wire farm.config`,
+        );
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("scaffolds a working Better Auth starter with its UI dependencies", async () => {
+  const root = await createTempProject({
+    packageJson: {
+      type: "module",
+      dependencies: {
+        "@farmjs/core": "workspace:*",
+      },
+    },
+  });
+
+  try {
+    await writeFile(path.join(root, ".env.example"), "EXISTING_VALUE=kept\n", "utf8");
+    await writeFile(path.join(root, ".gitignore"), "node_modules\n", "utf8");
+    const result = await addFarmIntegration({
+      root,
+      provider: "better-auth",
+      ui: true,
+    });
+    const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    const auth = await readFile(path.join(root, "src/lib/auth.ts"), "utf8");
+    const authClient = await readFile(path.join(root, "src/lib/auth-client.ts"), "utf8");
+    const panel = await readFile(
+      path.join(root, "src/components/farm/better-auth-panel.tsx"),
+      "utf8",
+    );
+    const env = await readFile(path.join(root, ".env.example"), "utf8");
+    const gitignore = await readFile(path.join(root, ".gitignore"), "utf8");
+
+    assert.equal(packageJson.dependencies["better-auth"], "^1.5.5");
+    assert.equal(packageJson.dependencies["better-sqlite3"], "^12.6.2");
+    assert.equal(packageJson.devDependencies["@types/better-sqlite3"], "^7.6.13");
+    assert.match(auth, /emailAndPassword:/);
+    assert.match(auth, /BETTER_AUTH_SECRET/);
+    assert.match(auth, /getMigrations/);
+    assert.match(auth, /runMigrations/);
+    assert.match(authClient, /createAuthClient/);
+    assert.match(panel, /authClient\.signIn\.email/);
+    assert.match(panel, /authClient\.signUp\.email/);
+    assert.match(panel, /authClient\.getSession/);
+    assert.match(panel, /authClient\.signOut/);
+    assert.match(env, /BETTER_AUTH_SECRET=/);
+    assert.match(env, /EXISTING_VALUE=kept/);
+    assert.match(gitignore, /node_modules/);
+    assert.match(gitignore, /better-auth\.sqlite/);
+    assert.deepEqual(result.env, [
+      "BETTER_AUTH_SECRET",
+      "BETTER_AUTH_URL",
+      "BETTER_AUTH_DATABASE_PATH",
+    ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 
@@ -362,4 +471,25 @@ async function createTempProject(input) {
     "utf8",
   );
   return root;
+}
+
+function assertTypeScriptSyntax(source, fileName) {
+  const result = ts.transpileModule(source, {
+    compilerOptions: {
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.ESNext,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName,
+    reportDiagnostics: true,
+  });
+  const errors = (result.diagnostics || []).filter(
+    (diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+  );
+
+  assert.deepEqual(
+    errors.map((diagnostic) => ts.flattenDiagnosticMessageText(diagnostic.messageText, "\n")),
+    [],
+    `${fileName} should contain valid TypeScript`,
+  );
 }

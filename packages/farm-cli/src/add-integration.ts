@@ -84,6 +84,13 @@ interface IntegrationProviderDefinition {
   exportName: string;
   description: string;
   env: readonly string[];
+  dependencies?: Readonly<Record<string, string>>;
+  devDependencies?: Readonly<Record<string, string>>;
+  setupFiles?: readonly {
+    path: string;
+    merge?: "lines";
+    source(): string;
+  }[];
   notes?: readonly string[];
   ui?: UIFeatureDefinition;
   template(): string;
@@ -396,8 +403,57 @@ export const autumnIntegration = autumn({
     fileName: "better-auth",
     exportName: "betterAuthIntegration",
     description: "Better Auth route adapter",
-    env: [],
-    notes: ["This template expects src/lib/auth.ts to export a Better Auth instance named auth."],
+    env: ["BETTER_AUTH_SECRET", "BETTER_AUTH_URL", "BETTER_AUTH_DATABASE_PATH"],
+    dependencies: {
+      "better-auth": "^1.5.5",
+      "better-sqlite3": "^12.6.2",
+    },
+    devDependencies: {
+      "@types/better-sqlite3": "^7.6.13",
+    },
+    notes: [
+      "The generated SQLite database is intended for local development. Configure a persistent production database before deploying.",
+      "Set BETTER_AUTH_SECRET to a high-entropy value of at least 32 characters.",
+    ],
+    setupFiles: [
+      {
+        path: "src/lib/auth.ts",
+        source: () => `import Database from "better-sqlite3";
+import { betterAuth as createBetterAuth } from "better-auth";
+import { getMigrations } from "better-auth/db/migration";
+
+const baseURL = process.env.BETTER_AUTH_URL || "http://localhost:3000";
+export const auth = createBetterAuth({
+  database: new Database(process.env.BETTER_AUTH_DATABASE_PATH || "better-auth.sqlite"),
+  secret: process.env.BETTER_AUTH_SECRET,
+  baseURL,
+  trustedOrigins: [baseURL],
+  emailAndPassword: {
+    enabled: true,
+  },
+});
+
+const migrations = await getMigrations(auth.options);
+await migrations.runMigrations();
+`,
+      },
+      {
+        path: ".env.example",
+        merge: "lines",
+        source: () => `BETTER_AUTH_SECRET=replace-with-at-least-32-random-characters
+BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_DATABASE_PATH=better-auth.sqlite
+`,
+      },
+      {
+        path: ".gitignore",
+        merge: "lines",
+        source: () => `better-auth.sqlite
+better-auth.sqlite-shm
+better-auth.sqlite-wal
+`,
+      },
+    ],
     ui: betterAuthUIFeature(),
     template: () => `import { betterAuth } from "@farmjs/integrations/better-auth";
 import { auth } from "../auth.ts";
@@ -522,6 +578,13 @@ export async function addFarmIntegration(
     dryRun: options.dryRun,
     result,
   });
+  await writeIntegrationSetupFiles({
+    root,
+    definition,
+    force: options.force,
+    dryRun: options.dryRun,
+    result,
+  });
   await writeIntegrationRegistry({
     path: registryFile,
     integrationFile,
@@ -534,6 +597,7 @@ export async function addFarmIntegration(
   if (!options.skipPackageJson) {
     await updatePackageJson({
       root,
+      definition,
       dryRun: options.dryRun,
       result,
     });
@@ -602,6 +666,7 @@ async function addAIRouteIntegration(input: {
   if (!input.skipPackageJson) {
     await updatePackageJson({
       root: input.root,
+      definition: input.definition,
       dryRun: input.dryRun,
       result,
     });
@@ -757,8 +822,51 @@ export type AppIntegrations = typeof appIntegrations;
   });
 }
 
+async function writeIntegrationSetupFiles(input: {
+  root: string;
+  definition: IntegrationProviderDefinition;
+  force?: boolean;
+  dryRun?: boolean;
+  result: AddFarmIntegrationResult;
+}) {
+  for (const file of input.definition.setupFiles || []) {
+    const absolutePath = path.join(input.root, file.path);
+    const exists = existsSync(absolutePath);
+    if (exists && !input.force) {
+      if (file.merge === "lines") {
+        const source = await readFile(absolutePath, "utf8");
+        const additions = file
+          .source()
+          .split(/\r?\n/)
+          .filter((line) => line && !source.split(/\r?\n/).includes(line));
+        if (!additions.length) {
+          input.result.skipped.push(absolutePath);
+          continue;
+        }
+
+        if (!input.dryRun) {
+          await writeFile(absolutePath, `${source.trimEnd()}\n${additions.join("\n")}\n`, "utf8");
+        }
+        input.result.updated.push(absolutePath);
+        continue;
+      }
+
+      input.result.skipped.push(absolutePath);
+      continue;
+    }
+
+    if (!input.dryRun) {
+      await mkdir(path.dirname(absolutePath), { recursive: true });
+      await writeFile(absolutePath, file.source(), "utf8");
+    }
+
+    input.result[exists ? "updated" : "created"].push(absolutePath);
+  }
+}
+
 async function updatePackageJson(input: {
   root: string;
+  definition: IntegrationProviderDefinition;
   dryRun?: boolean;
   result: AddFarmIntegrationResult;
 }) {
@@ -771,23 +879,44 @@ async function updatePackageJson(input: {
   const source = await readFile(packageJsonPath, "utf8");
   const manifest = JSON.parse(source) as PackageManifest;
 
-  if (hasPackageDependency(manifest, "@farmjs/integrations")) {
+  const dependencies = missingDependencies(manifest, input.definition.dependencies);
+  const devDependencies = missingDependencies(manifest, input.definition.devDependencies);
+  manifest.dependencies = {
+    ...manifest.dependencies,
+    ...(hasPackageDependency(manifest, "@farmjs/integrations")
+      ? {}
+      : { "@farmjs/integrations": getFarmIntegrationsVersion(manifest) }),
+    ...dependencies,
+  };
+  if (Object.keys(devDependencies).length) {
+    manifest.devDependencies = {
+      ...manifest.devDependencies,
+      ...devDependencies,
+    };
+  }
+
+  const nextSource = `${JSON.stringify(manifest, null, 2)}\n`;
+  if (source === nextSource) {
     input.result.packageJson = packageJsonPath;
     input.result.skipped.push(packageJsonPath);
     return;
   }
 
-  manifest.dependencies = {
-    ...manifest.dependencies,
-    "@farmjs/integrations": getFarmIntegrationsVersion(manifest),
-  };
-
   if (!input.dryRun) {
-    await writeFile(packageJsonPath, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+    await writeFile(packageJsonPath, nextSource, "utf8");
   }
 
   input.result.packageJson = packageJsonPath;
   input.result.updated.push(packageJsonPath);
+}
+
+function missingDependencies(
+  manifest: PackageManifest,
+  dependencies: Readonly<Record<string, string>> | undefined,
+) {
+  return Object.fromEntries(
+    Object.entries(dependencies || {}).filter(([name]) => !hasPackageDependency(manifest, name)),
+  );
 }
 
 async function updateFarmConfig(input: {
