@@ -943,12 +943,12 @@ function TerminalVisual() {
                 <span aria-hidden className="farm-terminal-command-cursor inline-block" />
               </span>
               <span className="farm-terminal-output mt-1.5 block space-y-1.5">
-                <span className="block text-white">
-                  <span className="font-semibold text-white">[bench]</span> first rendered page{" "}
-                  <span className="text-white/88">
-                    {formatBenchmarkDuration(farmBenchmark.metrics.devFirstPageMs.median)}
-                  </span>{" "}
-                  <span className="text-white/34">median</span>
+                <span className="block whitespace-nowrap">
+                  <span className="font-semibold text-green-400">Farm.js</span>{" "}
+                  <span className="text-white/34">v1.0.0</span>{" "}
+                  <span className="text-white/34">
+                    ready in {formatBenchmarkDuration(farmBenchmark.metrics.devFirstPageMs.median)}
+                  </span>
                 </span>
                 <span className="block whitespace-nowrap text-white/58">
                   <span className="inline-block w-[4.5rem] text-white/82">➜ Local:</span>
