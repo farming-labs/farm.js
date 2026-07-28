@@ -21,6 +21,10 @@
       "types": "./dist/rsc/index.d.ts",
       "import": "./dist/rsc/index.js"
     },
+    "./rsc/optimized-boundary": {
+      "types": "./dist/rsc/optimized-boundary.d.ts",
+      "import": "./dist/rsc/optimized-boundary.js"
+    },
     "./rsc/vite-plugin-nitro": {
       "types": "./dist/rsc/vite-plugin-nitro.d.ts",
       "import": "./dist/rsc/vite-plugin-nitro.js"
@@ -50,6 +54,7 @@
   },
   "dependencies": {
     "@farmjs/core": "workspace:*",
+    "@farming-labs/strata": "0.1.2",
     "better-call": "^1.0.19",
     "es-module-lexer": "2.0.0",
     "nitro": "3.0.1-alpha.0",

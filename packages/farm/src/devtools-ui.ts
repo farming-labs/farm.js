@@ -270,6 +270,7 @@ function renderFeatureMatrix(snapshot: FarmDevtoolsSnapshot): string {
     ["Markdown", snapshot.features.markdown],
     ["Server components", snapshot.features.serverComponents],
     ["Server actions", snapshot.features.serverActions],
+    ["Optimized boundary", snapshot.features.optimizedBoundary],
     ["Observability", snapshot.features.observability],
   ] as const;
   return `<div class="feature-matrix">${features
@@ -326,10 +327,7 @@ type InspectorEntry = {
 
 function renderPropertyList(entries: Array<[label: string, value: string]>): string {
   return `<dl class="property-list">${entries
-    .map(
-      ([label, value]) =>
-        `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`,
-    )
+    .map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${value}</dd></div>`)
     .join("")}</dl>`;
 }
 
@@ -373,7 +371,10 @@ function renderInspector(
       <div class="pane-scroll inspector-list" data-filter-rows="${escapeAttribute(scope)}">
         ${entries
           .map(
-            (entry, index) => `<button type="button" class="inspector-row" data-detail-trigger="${escapeAttribute(
+            (
+              entry,
+              index,
+            ) => `<button type="button" class="inspector-row" data-detail-trigger="${escapeAttribute(
               scope,
             )}" data-detail-id="${escapeAttribute(entry.id)}" data-search-value="${escapeAttribute(
               entry.searchValue || `${entry.label} ${entry.description}`,
@@ -732,10 +733,7 @@ function renderRawInspector(snapshot: FarmDevtoolsSnapshot): string {
   ]);
 }
 
-function renderNavigationItem(
-  view: string,
-  label: string,
-): string {
+function renderNavigationItem(view: string, label: string): string {
   return `<button type="button" class="nav-item" data-view-trigger="${view}" aria-selected="false">
     <span>${escapeHtml(label)}</span>
   </button>`;

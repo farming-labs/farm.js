@@ -75,6 +75,10 @@ describe("farm devtools", () => {
         },
         docs: { enabled: true, entry: "/docs" },
         openapi: { enabled: true },
+        experimental: {
+          serverComponents: true,
+          optimizedBoundary: true,
+        },
         deploy: { target: "vercel", preset: "vercel" },
         storage: {
           driver: "memory",
@@ -157,6 +161,7 @@ describe("farm devtools", () => {
       entry: "/docs",
     });
     expect(snapshot.features.openapi).toBe(true);
+    expect(snapshot.features.optimizedBoundary).toBe(true);
   });
 
   it("renders the floating, navigable devtools inspector", async () => {

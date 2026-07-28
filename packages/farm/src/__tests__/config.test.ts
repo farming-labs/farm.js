@@ -177,6 +177,25 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it("keeps optimized boundaries disabled by default and preserves explicit opt-in", async () => {
+    const defaults = await resolveConfig({}, "production");
+    const configured = await resolveConfig(
+      {
+        experimental: {
+          serverComponents: true,
+          optimizedBoundary: true,
+        },
+      },
+      "production",
+    );
+
+    expect(defaults.experimental.optimizedBoundary).toBeUndefined();
+    expect(configured.experimental).toMatchObject({
+      serverComponents: true,
+      optimizedBoundary: true,
+    });
+  });
+
   it("enables DevTools by default only in development", async () => {
     const development = await resolveConfig({}, "development");
     const production = await resolveConfig({}, "production");

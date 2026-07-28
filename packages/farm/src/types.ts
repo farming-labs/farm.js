@@ -136,6 +136,15 @@ export interface FarmConfig {
   experimental?: {
     serverComponents?: boolean;
     serverActions?: boolean;
+    /**
+     * Enable server-only optimized boundaries for host-only content. Boundary
+     * interiors cannot contain Client Components, event handlers, or
+     * independently updating React state.
+     *
+     * @experimental
+     * @default false
+     */
+    optimizedBoundary?: boolean;
   };
   vite?: any;
 }

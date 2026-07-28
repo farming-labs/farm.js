@@ -5,6 +5,7 @@
  */
 
 import path from "path";
+import { createRequire } from "node:module";
 import {
   writeFileSync,
   readFileSync,
@@ -21,6 +22,110 @@ const MANIFEST_FILENAME = "__vite_rsc_assets_manifest.js";
 const MIN_MANIFEST_BYTES = 100; // real manifest is ~500+, stub is 64
 const POLL_INTERVAL_MS = 50;
 const POLL_TIMEOUT_MS = 15_000;
+const BUNDLED_RSC_RUNTIMES = ["@farming-labs/strata"] as const;
+const runtimeRequire = createRequire(import.meta.url);
+const runtimePackagesByRoot = new Map<string, Map<string, string>>();
+
+/**
+ * Register a server runtime owned by the Farm plugin so production output is
+ * self-contained even when the application does not install it directly.
+ */
+export function registerRscNitroRuntimePackage(
+  root: string,
+  packageName: string,
+  packageRoot: string,
+): void {
+  const resolvedRoot = path.resolve(root);
+  const packages = runtimePackagesByRoot.get(resolvedRoot) ?? new Map<string, string>();
+  packages.set(packageName, path.resolve(packageRoot));
+  runtimePackagesByRoot.set(resolvedRoot, packages);
+}
+
+function copyDir(src: string, dest: string, ignoredNames = new Set<string>()): void {
+  if (!existsSync(src)) return;
+  mkdirSync(dest, { recursive: true });
+  for (const name of readdirSync(src)) {
+    if (ignoredNames.has(name)) continue;
+    const srcPath = path.join(src, name);
+    const destPath = path.join(dest, name);
+    if (statSync(srcPath).isDirectory()) copyDir(srcPath, destPath, ignoredNames);
+    else copyFileSync(srcPath, destPath);
+  }
+}
+
+function detectBundledRscRuntimes(rendererPath: string): Map<string, string> {
+  const packages = new Map<string, string>();
+  const rendererDir = path.dirname(path.resolve(rendererPath));
+  const files: string[] = [];
+  const collectJavaScript = (dir: string) => {
+    if (!existsSync(dir)) return;
+    for (const name of readdirSync(dir)) {
+      const candidate = path.join(dir, name);
+      if (statSync(candidate).isDirectory()) collectJavaScript(candidate);
+      else if (/\.(?:c|m)?js$/.test(name)) files.push(candidate);
+    }
+  };
+  collectJavaScript(rendererDir);
+
+  const source = files.map((file) => readFileSync(file, "utf-8")).join("\n");
+  for (const packageName of BUNDLED_RSC_RUNTIMES) {
+    if (!source.includes(packageName)) continue;
+    try {
+      const manifestPath = runtimeRequire.resolve(`${packageName}/package.json`);
+      packages.set(packageName, path.dirname(manifestPath));
+    } catch {
+      throw new Error(
+        `[Farm.js] The RSC bundle uses ${packageName}, but Farm could not locate its bundled runtime.`,
+      );
+    }
+  }
+  return packages;
+}
+
+function copyRuntimePackages(serverDir: string, packages: ReadonlyMap<string, string>): void {
+  if (packages.size === 0) return;
+
+  const outputPackagePath = path.join(serverDir, "package.json");
+  const outputPackage = JSON.parse(readFileSync(outputPackagePath, "utf-8")) as {
+    dependencies?: Record<string, string>;
+  };
+  outputPackage.dependencies ??= {};
+
+  const copiedPackages = new Set<string>();
+  const copyPackage = (packageName: string, packageRoot: string) => {
+    if (copiedPackages.has(packageName)) return;
+    const manifestPath = path.join(packageRoot, "package.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf-8")) as {
+      version?: string;
+      optionalDependencies?: Record<string, string>;
+    };
+
+    copyDir(
+      packageRoot,
+      path.join(serverDir, "node_modules", ...packageName.split("/")),
+      new Set(["node_modules"]),
+    );
+    outputPackage.dependencies![packageName] = manifest.version ?? "0.0.0";
+    copiedPackages.add(packageName);
+
+    const packageRequire = createRequire(manifestPath);
+    for (const optionalDependency of Object.keys(manifest.optionalDependencies ?? {})) {
+      try {
+        const optionalManifestPath = packageRequire.resolve(`${optionalDependency}/package.json`);
+        copyPackage(optionalDependency, path.dirname(optionalManifestPath));
+      } catch {
+        // Package managers only install optional dependencies for the current
+        // build platform. Missing platform packages are expected.
+      }
+    }
+  };
+
+  for (const [packageName, packageRoot] of packages) {
+    copyPackage(packageName, packageRoot);
+  }
+
+  writeFileSync(outputPackagePath, JSON.stringify(outputPackage, null, 2), "utf-8");
+}
 
 /**
  * Wait for the RSC plugin to write the assets manifest to dist/rsc (it may run after closeBundle(ssr)).
@@ -190,6 +295,10 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   const publicOutDir = path.join(outputDir, "public");
 
   const entryPath = writeRscEntryFile(buildDir, rendererPath, ssrPath);
+  const registeredRuntimePackages = new Map(runtimePackagesByRoot.get(path.resolve(root)) ?? []);
+  for (const [packageName, packageRoot] of detectBundledRscRuntimes(rendererPath)) {
+    registeredRuntimePackages.set(packageName, packageRoot);
+  }
 
   const publicAssets: NitroConfig["publicAssets"] = [
     { dir: publicDir, baseURL: "/", maxAge: 31536000 },
@@ -235,22 +344,13 @@ export async function buildRscNitro(options: BuildRscNitroOptions): Promise<void
   await copyPublicAssets(nitro);
   await build(nitro);
   await nitro.close();
+  copyRuntimePackages(serverDir, registeredRuntimePackages);
 
   // Copy dist into server so runtime relative imports resolve. Handle missing dir (e.g. buildApp order).
   const serverDistDir = path.join(serverDir, "dist");
   const rscSrc = path.dirname(path.resolve(rendererPath));
   const ssrSrc = ssrPath ? path.dirname(path.resolve(ssrPath)) : null;
   mkdirSync(serverDistDir, { recursive: true });
-  const copyDir = (src: string, dest: string) => {
-    if (!existsSync(src)) return;
-    mkdirSync(dest, { recursive: true });
-    for (const name of readdirSync(src)) {
-      const srcPath = path.join(src, name);
-      const destPath = path.join(dest, name);
-      if (statSync(srcPath).isDirectory()) copyDir(srcPath, destPath);
-      else copyFileSync(srcPath, destPath);
-    }
-  };
   copyDir(rscSrc, path.join(serverDistDir, "rsc"));
   if (ssrSrc) copyDir(ssrSrc, path.join(serverDistDir, "ssr"));
   // Stub manifest if missing (RSC plugin may write it after our hook runs)

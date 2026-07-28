@@ -1,0 +1,19 @@
+{
+  "name": "farm-rsc-transport-benchmark",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:browser": "vite build",
+    "benchmark:server": "NODE_ENV=production node --conditions react-server run.mjs",
+    "serve": "NODE_ENV=production node --conditions react-server server.mjs"
+  },
+  "dependencies": {
+    "@farming-labs/strata": "0.1.2",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-server-dom-webpack": "19.2.4"
+  },
+  "devDependencies": {
+    "vite": "6.4.1"
+  }
+}

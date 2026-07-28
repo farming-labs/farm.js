@@ -10,7 +10,7 @@ export default defineConfig([
     outDir: "dist",
   },
   {
-    entry: ["src/rsc/index.ts"],
+    entry: ["src/rsc/index.ts", "src/rsc/optimized-boundary.ts"],
     format: ["cjs", "esm"],
     dts: true,
     sourcemap: true,
@@ -29,6 +29,8 @@ export default defineConfig([
       "rsc-html-stream",
       "rsc-html-stream/server",
       "rsc-html-stream/client",
+      "@farming-labs/strata",
+      "@farming-labs/strata/react-server",
     ],
   },
 ]);

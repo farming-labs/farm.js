@@ -12,6 +12,9 @@ export default defineConfig({
   outDir: "dist",
   port: 3000,
   debug: false,
+  experimental: {
+    optimizedBoundary: true,
+  },
   // RSC/Server Actions are opt-in.
   // Set experimental.serverComponents/serverActions in farm config when using core runtime.
   plugins: [

@@ -60,10 +60,15 @@ describe("RSC Nitro production build", () => {
       writeFileSync(
         path.join(rscDir, "index.js"),
         `import colors from "picocolors";
+import { render } from "@farming-labs/strata";
 export default {
   async fetch() {
     const ssr = await globalThis.__VITE_RSC_LOAD_SSR__();
-    return new Response(colors.green(ssr.render()));
+    const fragment = render({
+      type: "document",
+      children: [{ type: "element", tag: "strong", children: [{ type: "text", value: "native" }] }],
+    });
+    return new Response(colors.green(ssr.render()) + ":" + fragment.html);
   },
 };`,
       );
@@ -100,6 +105,7 @@ export function render() {
         readFileSync(path.join(outputDir, "server", "package.json"), "utf-8"),
       ) as { dependencies?: Record<string, string> };
       expect(outputPackage.dependencies).toMatchObject({
+        "@farming-labs/strata": expect.any(String),
         picocolors: expect.any(String),
         "rsc-html-stream": expect.any(String),
       });
@@ -140,7 +146,7 @@ export function render() {
 
       expect(response, logs).toBeDefined();
       expect(response?.status, logs).toBe(200);
-      await expect(response?.text()).resolves.toBe("standalone-rsc");
+      await expect(response?.text()).resolves.toBe("standalone-rsc:<strong>native</strong>");
     } finally {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });

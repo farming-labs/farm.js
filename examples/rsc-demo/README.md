@@ -2,6 +2,34 @@
 
 Demo app for Farm.js with RSC, deployed via Nitro to Vercel.
 
+## Experimental optimized boundary
+
+The `/static-content` route compares a normal React host-element tree with the same typed document
+rendered inside one optimized boundary. Farm includes the
+[Strata](https://github.com/farming-labs/strata) native runtime and handles its server packaging. The
+experiment is explicitly enabled in `vite.config.ts`:
+
+```ts
+experimental: {
+  optimizedBoundary: true,
+}
+```
+
+Server Components can then import the adapter:
+
+```tsx
+import { OptimizedBoundary } from "@farmjs/plugin/rsc/optimized-boundary";
+
+return <OptimizedBoundary as="article" document={document} />;
+```
+
+No app-level Strata installation or manual renderer call is required. After the flag is enabled, Farm
+handles dependency validation, server-only enforcement, native externalization and production
+packaging. React owns the boundary and the surrounding application. It does not reconcile nodes
+inside the boundary, so Client Components, event handlers, refs, effects and independently updating
+state must stay outside it. The current runtime uses a native Node binding; edge and Cloudflare
+worker targets need a future Wasm or JavaScript fallback before enabling this experiment.
+
 ## Develop
 
 ```bash
