@@ -160,7 +160,7 @@ export function createFarmMarkdownRouteModule(
         ...props,
         components: {
           ...components,
-          ...(props?.components || {}),
+          ...props?.components,
         },
       }),
     );

@@ -116,20 +116,16 @@ export function render() {
 
       const port = await availablePort();
       let logs = "";
-      child = spawn(
-        process.execPath,
-        [path.join(isolatedOutput, "server", "index.mjs")],
-        {
-          cwd: isolatedRoot,
-          env: {
-            ...process.env,
-            HOST: "127.0.0.1",
-            PORT: String(port),
-            NODE_ENV: "production",
-          },
-          stdio: ["ignore", "pipe", "pipe"],
+      child = spawn(process.execPath, [path.join(isolatedOutput, "server", "index.mjs")], {
+        cwd: isolatedRoot,
+        env: {
+          ...process.env,
+          HOST: "127.0.0.1",
+          PORT: String(port),
+          NODE_ENV: "production",
         },
-      );
+        stdio: ["ignore", "pipe", "pipe"],
+      });
       child.stdout?.on("data", (chunk) => {
         logs += chunk.toString();
       });
@@ -151,9 +147,7 @@ export function render() {
       expect(response, logs).toBeDefined();
       expect(response?.status, logs).toBe(200);
       const body = await response?.text();
-      expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toBe(
-        "standalone-rsc:<strong>native</strong>",
-      );
+      expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toBe("standalone-rsc:<strong>native</strong>");
     } finally {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });

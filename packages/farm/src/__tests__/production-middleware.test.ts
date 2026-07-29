@@ -30,7 +30,7 @@ describe("production middleware runtime", () => {
 
     try {
       const userConfig = await loadConfig(root, undefined, "production");
-      const config = await resolveConfig({ ...(userConfig || {}), root }, "production");
+      const config = await resolveConfig({ ...userConfig, root }, "production");
       await build(config, { root, preset: "vercel" });
 
       const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");

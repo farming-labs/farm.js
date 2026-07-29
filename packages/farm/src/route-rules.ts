@@ -70,7 +70,7 @@ export function routeRulesToHeaders(routeRules: FarmRouteRules): HeaderConfig[] 
   for (const [source, rule] of Object.entries(routeRules)) {
     const headers = {
       ...normalizeCorsHeaders(rule.cors),
-      ...(rule.headers || {}),
+      ...rule.headers,
     };
 
     const entries = Object.entries(headers);
@@ -108,7 +108,7 @@ export function routeRulesToNitroRouteRules(routeRules: FarmRouteRules): Record<
       nitroRule.cors = true;
       nitroRule.headers = {
         ...normalizeCorsHeaders(rule.cors),
-        ...(rule.headers || {}),
+        ...rule.headers,
       };
     }
 
