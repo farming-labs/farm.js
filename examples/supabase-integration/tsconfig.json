@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -13,18 +17,34 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "@farm.js/core": ["../../packages/farm/dist/index.d.ts"],
-      "@farm.js/core/client": ["../../packages/farm/types/client.d.ts"],
-      "@farm.js/integrations": ["../../packages/farm-integrations/dist/index.d.ts"],
-      "@farm.js/integrations/supabase": ["../../packages/farm-integrations/dist/supabase/index.d.ts"],
-      "@farm.js/integrations/supabase/client": ["../../packages/farm-integrations/dist/supabase/client.d.ts"]
+      "@farm.js/core": [
+        "../../packages/farm/dist/index.d.ts"
+      ],
+      "@farm.js/core/client": [
+        "../../packages/farm/types/client.d.ts"
+      ],
+      "@farm.js/supabase": [
+        "../../packages/farm-supabase/dist/index.d.ts"
+      ],
+      "@farm.js/supabase/*": [
+        "../../packages/farm-supabase/dist/*"
+      ],
+      "@farm.js/supabase/client": [
+        "../../packages/farm-integrations/dist/supabase/client.d.ts"
+      ]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"]
+    "types": [
+      "vite/client",
+      "node"
+    ]
   },
-  "include": ["src", "farm.config.ts"]
+  "include": [
+    "src",
+    "farm.config.ts"
+  ]
 }

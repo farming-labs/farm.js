@@ -1,4 +1,4 @@
-import type { StripeSessionResult } from "@farm.js/integrations/stripe/client";
+import type { StripeSessionResult } from "@farm.js/stripe/client";
 
 export interface BillingHistoryEntry {
   email: string;

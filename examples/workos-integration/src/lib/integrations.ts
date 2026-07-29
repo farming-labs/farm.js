@@ -1,4 +1,4 @@
-import { workos } from "@farm.js/integrations";
+import { workos } from "@farm.js/workos";
 
 export const appIntegrations = {
   auth: workos({

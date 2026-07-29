@@ -10,8 +10,9 @@
     "generate": "farm generate"
   },
   "dependencies": {
+    "@farm.js/better-auth": "workspace:*",
     "@farm.js/core": "workspace:*",
-    "@farm.js/integrations": "workspace:*",
+    "@farm.js/polar": "workspace:*",
     "better-auth": "^1.5.5",
     "better-sqlite3": "^12.8.0",
     "react": "^19.0.0",

@@ -1,9 +1,9 @@
-import { betterAuth as farmBetterAuth } from "@farm.js/integrations/better-auth";
+import { betterAuth as farmBetterAuth } from "@farm.js/better-auth";
 import {
   polar,
   type PolarBillingUsageProperties,
   type PolarWebhookEvent,
-} from "@farm.js/integrations/polar";
+} from "@farm.js/polar";
 import { auth } from "./auth.ts";
 import { resolveOrganizationBillingOwner } from "./organization-server.ts";
 import { polarPlans, polarProducts } from "./polar-catalog.ts";

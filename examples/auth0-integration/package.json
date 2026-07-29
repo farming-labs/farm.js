@@ -9,8 +9,8 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
+    "@farm.js/auth0": "workspace:*",
     "@farm.js/core": "workspace:*",
-    "@farm.js/integrations": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -1,6 +1,6 @@
 # Stripe Integration Example
 
-Config-first Stripe setup through `@farm.js/integrations/stripe`.
+Config-first Stripe setup through `@farm.js/stripe`.
 
 This example is wired for a real Stripe test account and uses hosted Stripe Checkout plus
 the Stripe Billing Portal.

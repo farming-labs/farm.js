@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import type { FarmIntegrationLogEvent } from "@farm.js/core";
-import { betterAuth as farmBetterAuth } from "@farm.js/integrations/better-auth";
-import { stripe, type StripeWebhookEvent } from "@farm.js/integrations/stripe";
+import { betterAuth as farmBetterAuth } from "@farm.js/better-auth";
+import { stripe, type StripeWebhookEvent } from "@farm.js/stripe";
 import { auth } from "./auth.ts";
 import { getExampleEnv, requireExampleEnv } from "./env.ts";
 import { stripeProducts } from "./stripe-catalog.ts";

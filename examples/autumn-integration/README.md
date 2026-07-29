@@ -24,7 +24,7 @@ It demonstrates:
 4. Run:
 
 ```bash
-pnpm --filter @farm.js/integrations build
+pnpm build
 pnpm --dir examples/autumn-integration install
 pnpm --dir examples/autumn-integration generate
 pnpm --dir examples/autumn-integration dev

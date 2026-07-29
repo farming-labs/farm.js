@@ -3,25 +3,39 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "lib": ["ES2022", "DOM"],
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
     "strict": true,
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@farm.js/core": ["../../../packages/farm/dist/index.d.ts"],
-      "@farm.js/core/client": ["../../../packages/farm/types/client.d.ts"],
-      "@farm.js/integrations": ["../../../packages/farm-integrations/dist/index.d.ts"],
-      "@farm.js/integrations/email/schedule": [
-        "../../../packages/farm-integrations/dist/email/schedule.d.ts"
+      "@farm.js/core": [
+        "../../../packages/farm/dist/index.d.ts"
       ],
-      "@farm.js/integrations/*": [
-        "../../../packages/farm-integrations/dist/*.d.ts",
-        "../../../packages/farm-integrations/dist/*/index.d.ts"
+      "@farm.js/core/client": [
+        "../../../packages/farm/types/client.d.ts"
+      ],
+      "@farm.js/email": [
+        "../../../packages/farm-email/dist/index.d.ts"
+      ],
+      "@farm.js/email/*": [
+        "../../../packages/farm-email/dist/*"
+      ],
+      "@farm.js/email/schedule": [
+        "../../../packages/farm-integrations/dist/email/schedule.d.ts"
       ]
     },
     "allowImportingTsExtensions": true,
-    "types": ["vite/client", "node"],
+    "types": [
+      "vite/client",
+      "node"
+    ],
     "skipLibCheck": true
   },
-  "include": ["src", "farm.config.ts"]
+  "include": [
+    "src",
+    "farm.config.ts"
+  ]
 }

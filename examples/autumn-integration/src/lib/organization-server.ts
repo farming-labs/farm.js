@@ -1,5 +1,5 @@
 import type { FarmIntegrationHandlerContext } from "@farm.js/core";
-import type { AutumnBillingOwner } from "@farm.js/integrations";
+import type { AutumnBillingOwner } from "@farm.js/autumn";
 import { auth } from "./auth.ts";
 
 export interface DemoSessionUser {

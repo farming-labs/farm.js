@@ -1,9 +1,5 @@
-import {
-  autumn,
-  betterAuth as farmBetterAuth,
-  type AutumnBillingUsageProperties,
-  type AutumnWebhookEvent,
-} from "@farm.js/integrations";
+import { betterAuth as farmBetterAuth } from "@farm.js/better-auth";
+import { autumn, type AutumnBillingUsageProperties, type AutumnWebhookEvent } from "@farm.js/autumn";
 import { auth } from "./auth.ts";
 import { resolveOrganizationBillingOwner } from "./organization-server.ts";
 import { autumnPlans, autumnProducts } from "./autumn-catalog.ts";

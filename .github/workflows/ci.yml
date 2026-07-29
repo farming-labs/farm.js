@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
@@ -13,7 +14,15 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18, 20]
+        include:
+          - node-version: 18
+            test_args: --skip-incompatible
+          - node-version: 20
+            test_args: --skip-incompatible
+          - node-version: 22
+            test_args: --skip-incompatible --only-with-node-engine
+          - node-version: 24
+            test_args: --skip-incompatible --only-with-node-engine
 
     steps:
       - name: Checkout
@@ -49,7 +58,7 @@ jobs:
         run: pnpm build
 
       - name: Run tests
-        run: pnpm test
+        run: pnpm test -- ${{ matrix.test_args }}
 
       - name: Type check
         run: pnpm type-check
@@ -83,6 +92,13 @@ jobs:
   build-examples:
     name: Build Examples
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - node-version: 22
+            build_args: --skip-incompatible
+          - node-version: 24
+            build_args: --skip-incompatible --only-with-node-engine
 
     steps:
       - name: Checkout
@@ -91,7 +107,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -104,10 +120,8 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      - name: Build playground
-        run: |
-          cd playground
-          pnpm build
+      - name: Build examples
+        run: pnpm build:examples -- ${{ matrix.build_args }}
 
   framework-e2e:
     name: Framework E2E

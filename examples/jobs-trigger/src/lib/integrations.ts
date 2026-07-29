@@ -1,4 +1,4 @@
-import { jobs, trigger } from "@farm.js/integrations";
+import { jobs, trigger } from "@farm.js/jobs";
 import { triggerTasks } from "./jobs.ts";
 
 export const appIntegrations = {

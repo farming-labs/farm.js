@@ -1,5 +1,5 @@
 import type { FarmIntegrationHandlerContext } from "@farm.js/core";
-import type { PolarBillingOwner } from "@farm.js/integrations/polar";
+import type { PolarBillingOwner } from "@farm.js/polar";
 import { auth } from "./auth.ts";
 
 export interface DemoSessionUser {

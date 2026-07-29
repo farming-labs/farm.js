@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
-    "@farm.js/integrations": "workspace:*",
+    "@farm.js/email": "workspace:*",
     "@react-email/components": "^1.0.12",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

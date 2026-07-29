@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { StripeBillingStatusResult } from "@farm.js/integrations/stripe/client";
+import type { StripeBillingStatusResult } from "@farm.js/stripe/client";
 import { authClient } from "../../lib/auth-client";
 import { readBillingHistory, type BillingHistoryEntry } from "../../lib/billing-history";
 import { apiClient } from "../../lib/api";

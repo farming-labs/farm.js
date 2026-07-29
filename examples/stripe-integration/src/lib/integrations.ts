@@ -1,6 +1,6 @@
 import Stripe from "stripe";
 import type { FarmIntegrationLogEvent } from "@farm.js/core";
-import { stripe, type StripeWebhookEvent } from "@farm.js/integrations/stripe";
+import { stripe, type StripeWebhookEvent } from "@farm.js/stripe";
 import { stripeCatalog } from "./stripe-catalog.ts";
 
 const stripeSecretKey = process.env.STRIPE_SECRET_KEY;

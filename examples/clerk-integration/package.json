@@ -11,8 +11,8 @@
   "dependencies": {
     "@clerk/backend": "^3.2.0",
     "@clerk/react": "^6.1.0",
+    "@farm.js/clerk": "workspace:*",
     "@farm.js/core": "workspace:*",
-    "@farm.js/integrations": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

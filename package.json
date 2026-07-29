@@ -12,7 +12,7 @@
   "scripts": {
     "build": "pnpm -r --filter \"./packages/*\" build",
     "dev": "turbo --filter \"./packages/*\" dev",
-    "test": "pnpm -r --filter \"./packages/*\" test",
+    "test": "node scripts/test-packages.js",
     "test:farm": "pnpm --filter @farm.js/core test",
     "test:ci": "node scripts/run-tests.js",
     "test:e2e": "playwright test",
@@ -28,6 +28,7 @@
     "test:e2e:list": "playwright test --list",
     "docs:dev": "pnpm --filter @farm.js/core build && pnpm --filter farmjs-docs dev",
     "docs:build": "pnpm --filter farmjs-docs build",
+    "build:examples": "node scripts/build-examples.js",
     "benchmark:frameworks": "node benchmarks/frameworks/run.mjs",
     "lint": "oxlint . && oxfmt --check .",
     "format": "oxlint --fix . && oxfmt .",
