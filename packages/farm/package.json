@@ -30,6 +30,9 @@
         "./types/middleware.d.ts",
         "./dist/middleware.d.ts"
       ],
+      "version": [
+        "./dist/version.d.ts"
+      ],
       "router": [
         "./dist/router.d.ts"
       ],
@@ -181,6 +184,11 @@
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs",
       "default": "./dist/index.mjs"
+    },
+    "./version": {
+      "types": "./dist/version.d.ts",
+      "import": "./dist/version.mjs",
+      "require": "./dist/version.cjs"
     },
     "./config": {
       "types": "./dist/config.d.ts",

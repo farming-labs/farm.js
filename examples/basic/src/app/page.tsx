@@ -2,6 +2,7 @@ import React from 'react'
 import type { PageProps, Metadata } from '@farm.js/core'
 import { Link } from '@farm.js/core/client'
 import type { ResolvedRouteHref } from '@farm.js/core/client'
+import { FARM_VERSION } from '@farm.js/core/version'
 
 // Note: This page uses Link components which require hydration
 // SSG is better suited for pages without client-side interactivity
@@ -18,7 +19,7 @@ export default function HomePage({ params, searchParams }: PageProps) {
     <div className="space-y-8">
       <div className="text-center">
         <h1 className="text-5xl font-bold bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent mb-4">
-          Welcome to Farm.js 0.1.0-beta.2
+          Welcome to Farm.js v{FARM_VERSION}
         </h1>
         
         <p className="text-xl text-gray-600 max-w-2xl mx-auto">
