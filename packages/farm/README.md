@@ -1,6 +1,6 @@
 # @farm.js/core
 
-Core Farm.js framework - A modern React meta-framework
+Core Farm.js framework for modern integrated apps
 
 Farm.js is currently in beta.
 
