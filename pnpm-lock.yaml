@@ -1360,6 +1360,9 @@ importers:
 
   packages/farmjs-plugin:
     dependencies:
+      '@farming-labs/strata':
+        specifier: 0.1.2
+        version: 0.1.2(react@19.2.4)
       '@farmjs/core':
         specifier: workspace:*
         version: link:../farm
@@ -4244,6 +4247,99 @@ packages:
 
   /@farming-labs/orm@0.0.62:
     resolution: {integrity: sha512-L36KN/y7UVdlbxQYVBqtPebKjfYfRuVDyzhCBnOM64HnhkmmWtUAt2HNvx6/jvv9ixe2uXS1aLj6o8cn+QOU7w==}
+    dev: false
+
+  /@farming-labs/strata-darwin-arm64@0.1.2:
+    resolution: {integrity: sha512-qIl6lZbFATKg/pj0PxEmdSgIjVjXteya78k7UwiULjOdoU96Pi1iKnqTRL/esgxBqMug/afU18IvQUAhvHuh0A==}
+    engines: {node: '>=20.17.0'}
+    cpu: [arm64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-darwin-x64@0.1.2:
+    resolution: {integrity: sha512-BidwCObbCh0GcKBeglbiBakrUfDDqoSd5jaW3HX4Ge1bqQv0c5lKBRIV4labzhFHukficL3Vdz0Q5gqjteP3IA==}
+    engines: {node: '>=20.17.0'}
+    cpu: [x64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-linux-arm64-gnu@0.1.2:
+    resolution: {integrity: sha512-gx9ByQC7I8LldT/NLMBMfsS5rISG6CyphR/RdotDPoRqPSKc60p2PCvq+jZnBdH5HOf+EQDtjD0MNtLEeIk8vg==}
+    engines: {node: '>=20.17.0'}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-linux-arm64-musl@0.1.2:
+    resolution: {integrity: sha512-TRNFHLioj9WfDS1AT7OJ7FnkZYGLK1hLw5HX+1WMdUmGA7cHuBmv3rNItQFesw+PGEww0H6D8IfiYghMMERsag==}
+    engines: {node: '>=20.17.0'}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-linux-x64-gnu@0.1.2:
+    resolution: {integrity: sha512-zBHJIoymF0o06CA8KtD/yuJrUw4khWe+M59O6VwgHIR4L3XAb/3rA8G0PQgMPGIjBWHmeia+ftFn8LhXpI9cJQ==}
+    engines: {node: '>=20.17.0'}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-linux-x64-musl@0.1.2:
+    resolution: {integrity: sha512-Xw04MG9S1JLxSNJhcXMEX/DbU/f5uLXL1cDXUGcoahmZKmEjxLA6xjuvlb/36pPrkNG6MaKnPxCz6LCCw8E5Hg==}
+    engines: {node: '>=20.17.0'}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-win32-arm64-msvc@0.1.2:
+    resolution: {integrity: sha512-rR3Bn3C8bo34Shj/0wQEg2EDGTVYtQcM8vrw11k7cTrsAD0FZYPOsJ9MRYqW2UBxIgbw4CRxb+VsaTljhNFr0w==}
+    engines: {node: '>=20.17.0'}
+    cpu: [arm64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata-win32-x64-msvc@0.1.2:
+    resolution: {integrity: sha512-N9D5GmBL2CMaJq68sPC5UIwAbCl+NhG5APqzkMs7h0KCRLWhKdStmTHSOtarXHbH9E9aHhy6j88C0wcbSFoO1w==}
+    engines: {node: '>=20.17.0'}
+    cpu: [x64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farming-labs/strata@0.1.2(react@19.2.4):
+    resolution: {integrity: sha512-3aedtp19SMokPIdwwKgQgFUTT1czevL6cIGooA+a04MOv0sx/sN2AR2t6yiosE2fK2KUEFatVIokAzkvJiNYsg==}
+    engines: {node: '>=20.17.0'}
+    peerDependencies:
+      react: '>=19.0.0'
+    peerDependenciesMeta:
+      react:
+        optional: true
+    dependencies:
+      react: 19.2.4
+    optionalDependencies:
+      '@farming-labs/strata-darwin-arm64': 0.1.2
+      '@farming-labs/strata-darwin-x64': 0.1.2
+      '@farming-labs/strata-linux-arm64-gnu': 0.1.2
+      '@farming-labs/strata-linux-arm64-musl': 0.1.2
+      '@farming-labs/strata-linux-x64-gnu': 0.1.2
+      '@farming-labs/strata-linux-x64-musl': 0.1.2
+      '@farming-labs/strata-win32-arm64-msvc': 0.1.2
+      '@farming-labs/strata-win32-x64-msvc': 0.1.2
     dev: false
 
   /@farming-labs/theme@0.2.44(@farming-labs/docs@0.2.44)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(tailwindcss@3.4.18):

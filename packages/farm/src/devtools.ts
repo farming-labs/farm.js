@@ -167,6 +167,7 @@ export type FarmDevtoolsSnapshot = {
     markdown: boolean;
     serverComponents: boolean;
     serverActions: boolean;
+    optimizedBoundary: boolean;
     observability: boolean;
   };
   diagnostics: FarmDevtoolsDiagnostic[];
@@ -551,6 +552,7 @@ export async function createFarmDevtoolsSnapshot(
       markdown: featureEnabled(config.md),
       serverComponents: Boolean(config.experimental?.serverComponents),
       serverActions: Boolean(config.experimental?.serverActions),
+      optimizedBoundary: Boolean(config.experimental?.optimizedBoundary),
       observability: featureEnabled(config.observability),
     },
     diagnostics,

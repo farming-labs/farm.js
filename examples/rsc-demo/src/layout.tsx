@@ -58,6 +58,12 @@ export default function RootLayout({
               >
                 Queries
               </a>
+              <a
+                href="/static-content"
+                className="text-slate-300 hover:text-white transition-colors"
+              >
+                Optimized
+              </a>
             </div>
           </div>
         </div>

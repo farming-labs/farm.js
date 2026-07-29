@@ -54,6 +54,7 @@ const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
+import { registerRscNitroRuntimePackage } from "./nitro-build.js";
 export type { BuildRscNitroOptions } from "./nitro-build.js";
 export { default as nitro } from "./vite-plugin-nitro.js";
 export type { NitroPluginOptions } from "./vite-plugin-nitro.js";
@@ -69,6 +70,14 @@ export interface FarmRscConfig {
   experimental?: {
     serverComponents?: boolean;
     serverActions?: boolean;
+    /**
+     * Enable server-only optimized boundaries through
+     * `@farmjs/plugin/rsc/optimized-boundary`.
+     *
+     * @experimental
+     * @default false
+     */
+    optimizedBoundary?: boolean;
   };
   debug?: boolean;
   encryptActions?: boolean;
@@ -98,6 +107,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     experimental: {
       serverComponents: config.experimental?.serverComponents ?? true,
       serverActions: config.experimental?.serverActions ?? true,
+      optimizedBoundary: config.experimental?.optimizedBoundary ?? false,
     },
     srcDir: config.srcDir ?? "src",
     extends: config.extends,
@@ -206,7 +216,28 @@ const VIRTUAL_RSC_ENTRY = "virtual:@farmjs/rsc/entry-rsc";
 const VIRTUAL_SSR_ENTRY = "virtual:@farmjs/rsc/entry-ssr";
 const VIRTUAL_CLIENT_ENTRY = "virtual:@farmjs/rsc/entry-client";
 const VIRTUAL_HYDRATE_ENTRY = "virtual:@farmjs/rsc/hydrate";
+const OPTIMIZED_BOUNDARY_ADAPTER = "@farmjs/plugin/rsc/optimized-boundary";
+const STRATA_PACKAGE = "@farming-labs/strata";
 const FARM_CORE_PACKAGE_ROOT = path.resolve(path.dirname(require_.resolve("@farmjs/core")), "..");
+
+function isOptimizedBoundaryModule(id: string): boolean {
+  return (
+    id === OPTIMIZED_BOUNDARY_ADAPTER ||
+    id === STRATA_PACKAGE ||
+    id.startsWith(`${STRATA_PACKAGE}/`)
+  );
+}
+
+function resolveOptimizedBoundaryRuntimeRoot(): string {
+  try {
+    return path.dirname(require_.resolve(`${STRATA_PACKAGE}/package.json`));
+  } catch {
+    throw new Error(
+      `[Farm.js] experimental.optimizedBoundary requires the bundled ${STRATA_PACKAGE} runtime. ` +
+        "Reinstall @farmjs/plugin for a supported Node platform.",
+    );
+  }
+}
 
 // Exact-root imports in RSC application code are rewritten to focused public
 // runtime subpaths. The root barrel itself also exports config/build/plugin
@@ -443,6 +474,7 @@ async function rewriteCoreRuntimeImports(code: string, id: string): Promise<stri
 export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   let rscEnabled = false;
   let actionsEnabled = false;
+  let optimizedBoundaryEnabled = false;
 
   // Context passed to entry generators
   let entryContext: EntryContext;
@@ -559,6 +591,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           experimental?: {
             serverComponents?: boolean;
             serverActions?: boolean;
+            optimizedBoundary?: boolean;
           };
           srcDir?: string;
           outDir?: string;
@@ -573,9 +606,17 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         // Check if user enabled RSC in their config
         rscEnabled = c.experimental?.serverComponents === true;
         actionsEnabled = c.experimental?.serverActions === true;
+        optimizedBoundaryEnabled = c.experimental?.optimizedBoundary === true;
 
         logInfo(`RSC enabled: ${rscEnabled}`);
         logInfo(`Actions enabled: ${actionsEnabled}`);
+        logInfo(`Optimized boundary enabled: ${optimizedBoundaryEnabled}`);
+
+        if (optimizedBoundaryEnabled && !rscEnabled) {
+          throw new Error(
+            "[Farm.js] experimental.optimizedBoundary requires experimental.serverComponents.",
+          );
+        }
 
         // If RSC not enabled, don't add environment config
         if (!rscEnabled) {
@@ -583,6 +624,13 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         }
 
         const root = c.root ?? process.cwd();
+        if (optimizedBoundaryEnabled) {
+          registerRscNitroRuntimePackage(
+            root,
+            STRATA_PACKAGE,
+            resolveOptimizedBoundaryRuntimeRoot(),
+          );
+        }
         if (c.extends?.length) {
           const layerResolution = await resolveFarmLayers(c, {
             root,
@@ -696,8 +744,18 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               "react-dom/server",
               "react/jsx-runtime",
               "react/jsx-dev-runtime",
+              ...(optimizedBoundaryEnabled
+                ? [STRATA_PACKAGE, `${STRATA_PACKAGE}/react-server`]
+                : []),
             ],
           },
+          ...(optimizedBoundaryEnabled
+            ? {
+                optimizeDeps: {
+                  exclude: [STRATA_PACKAGE, `${STRATA_PACKAGE}/react-server`],
+                },
+              }
+            : {}),
           resolve: {
             dedupe: ["react", "react-dom"],
             alias: [
@@ -782,6 +840,39 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
             },
           },
         };
+      },
+    },
+    {
+      name: "@farmjs/plugin/rsc:optimized-boundary",
+      enforce: "pre",
+
+      resolveId(id, importer, options) {
+        if (!isOptimizedBoundaryModule(id)) return null;
+
+        if (!optimizedBoundaryEnabled) {
+          throw new Error(
+            `[Farm.js] ${id} was imported by ${importer || "an unknown module"}, but ` +
+              "experimental.optimizedBoundary is disabled.",
+          );
+        }
+
+        const environmentName = (this as { environment?: { name?: string } }).environment?.name;
+        const isServerEnvironment =
+          options?.ssr || environmentName === "rsc" || environmentName === "ssr";
+        if (!isServerEnvironment) {
+          throw new Error(
+            `[Farm.js] ${id} is server-only and cannot be imported into the client environment.`,
+          );
+        }
+
+        // Strata's published entry points are native CommonJS loaders. Keep
+        // them outside Vite's RSC dependency scan and let Node resolve the
+        // platform package at runtime.
+        if (id === STRATA_PACKAGE || id.startsWith(`${STRATA_PACKAGE}/`)) {
+          return { id, external: true };
+        }
+
+        return null;
       },
     },
 

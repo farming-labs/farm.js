@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Farm RSC transport benchmark</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: system-ui, sans-serif;
+      }
+
+      #flight-target,
+      #content-target {
+        contain: layout style;
+      }
+
+      .benchmark-hidden {
+        display: none;
+      }
+
+      #benchmark-controls {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        padding: 12px;
+        border-bottom: 1px solid #ddd;
+        background: white;
+      }
+    </style>
+  </head>
+  <body>
+    <section id="benchmark-controls">
+      <button data-testid="run-benchmark" type="button">Run browser benchmark</button>
+      <output data-testid="benchmark-status">Ready</output>
+    </section>
+    <main>
+      <div id="flight-target"></div>
+      <div id="content-target"></div>
+    </main>
+    <script src="/webpack-shim.js"></script>
+    <script type="module" src="/src/browser.mjs"></script>
+  </body>
+</html>
