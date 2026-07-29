@@ -302,7 +302,7 @@ Visit [farm.js.dev](https://farm.js.dev) for comprehensive documentation, guides
 ### Setup
 
 ```bash
-git clone https://github.com/farm-js/farm.js.git
+git clone https://github.com/Kinfe123/farm.js.git
 cd farm.js
 ./scripts/setup.sh
 ```
@@ -363,8 +363,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 1. Fork the repository
 2. Create a feature branch: `git checkout -b feature/amazing-feature`
 3. Make your changes and add tests
-4. Create a changeset: `pnpm changeset`
-5. Push and create a Pull Request
+4. Push and create a Pull Request
 
 ## 🌟 Examples
 

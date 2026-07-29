@@ -85,13 +85,7 @@ cd examples/basic
 pnpm dev
 ```
 
-4. **Create a changeset**
-
-```bash
-pnpm changeset
-```
-
-Follow the prompts to describe your changes.
+4. **Describe the user-facing impact** in your pull request.
 
 ### Code Style
 
@@ -136,18 +130,15 @@ git push origin feature/your-feature-name
 
 ## Release Process
 
-Farm.js uses [Changesets](https://github.com/changesets/changesets) for version management:
-
-1. **Create changeset** for your changes
-2. **Maintainers review** and merge PR
-3. **Release PR** is automatically created
-4. **Maintainers merge** release PR to publish
+Maintainers use Bumpp to align package versions, verify the workspace, create the release
+commit and tag, and publish the packages to npm. See [RELEASING.md](./RELEASING.md) for the
+commands and recovery steps.
 
 ## Getting Help
 
 - **Documentation**: Check the [docs](./docs) first
-- **Issues**: Search existing [GitHub issues](https://github.com/farm-js/farm.js/issues)
-- **Discussions**: Use [GitHub Discussions](https://github.com/farm-js/farm.js/discussions)
+- **Issues**: Search existing [GitHub issues](https://github.com/Kinfe123/farm.js/issues)
+- **Discussions**: Use [GitHub Discussions](https://github.com/Kinfe123/farm.js/discussions)
 - **Discord**: Join our community Discord (link coming soon)
 
 ## Code of Conduct

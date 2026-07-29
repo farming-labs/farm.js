@@ -5,7 +5,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farm-js/farm.js",
+    "url": "https://github.com/Kinfe123/farm.js",
     "directory": "packages/farm-email"
   },
   "files": [
@@ -28,6 +28,9 @@
       "types": "./dist/schedule.d.ts",
       "import": "./dist/schedule.js"
     }
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
     "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",

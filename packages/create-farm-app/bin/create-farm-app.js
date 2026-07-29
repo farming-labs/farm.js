@@ -2,11 +2,12 @@
 
 const { program } = require("commander");
 const { createApp } = require("../dist/index.js");
+const { version } = require("../package.json");
 
 program
   .name("create-farm-app")
   .description("Create a new Farm.js application")
-  .version("0.1.0")
+  .version(version)
   .argument("[project-name]", "Name of the project")
   .option("-t, --template <template>", "Template to use")
   .option("--typescript", "Use TypeScript template")

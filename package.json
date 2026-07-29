@@ -38,13 +38,15 @@
     "clean": "turbo clean",
     "bump": "bumpp",
     "version-packages": "pnpm run bump",
+    "release:check": "pnpm build && pnpm test -- --skip-incompatible",
     "release": "pnpm run release:latest",
     "release:latest": "bumpp && pnpm run publish:latest",
     "release:beta": "bumpp --preid beta && pnpm run publish:beta",
     "release:canary": "bumpp --preid canary && pnpm run publish:canary",
-    "publish:latest": "pnpm -r --filter \"./packages/*\" publish --access public --tag latest --no-git-checks",
-    "publish:beta": "pnpm -r --filter \"./packages/*\" publish --access public --tag beta --no-git-checks",
-    "publish:canary": "pnpm -r --filter \"./packages/*\" publish --access public --tag canary --no-git-checks"
+    "publish:dry-run": "pnpm -r --filter \"./packages/*\" publish --dry-run --access public --tag beta --publish-branch main",
+    "publish:latest": "pnpm -r --filter \"./packages/*\" publish --access public --tag latest --publish-branch main",
+    "publish:beta": "pnpm -r --filter \"./packages/*\" publish --access public --tag beta --publish-branch main",
+    "publish:canary": "pnpm -r --filter \"./packages/*\" publish --access public --tag canary --publish-branch main"
   },
   "dependencies": {
     "@rollup/plugin-terser": "^0.4.4",

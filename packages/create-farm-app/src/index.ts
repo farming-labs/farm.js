@@ -220,15 +220,21 @@ async function getAvailableTemplates(): Promise<string[]> {
 
 async function updatePackageJson(projectPath: string, projectName: string) {
   const packageJsonPath = path.join(projectPath, "package.json");
+  const createAppPackageJsonPath = path.join(__dirname, "..", "package.json");
 
   try {
-    const content = await fs.readFile(packageJsonPath, "utf-8");
+    const [content, createAppContent] = await Promise.all([
+      fs.readFile(packageJsonPath, "utf-8"),
+      fs.readFile(createAppPackageJsonPath, "utf-8"),
+    ]);
     const packageJson = JSON.parse(content);
+    const createAppPackageJson = JSON.parse(createAppContent);
 
     packageJson.name = projectName;
+    packageJson.dependencies["@farm.js/core"] = createAppPackageJson.version;
 
     await fs.writeFile(packageJsonPath, JSON.stringify(packageJson, null, 2));
   } catch (error) {
-    logger.warn("Could not update package.json name");
+    logger.warn("Could not update package.json");
   }
 }

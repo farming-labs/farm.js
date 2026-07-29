@@ -6,7 +6,7 @@
   "author": "Farm.js Team",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farm-js/farm.js",
+    "url": "https://github.com/Kinfe123/farm.js",
     "directory": "packages/farmjs-plugin"
   },
   "files": [
@@ -51,8 +51,11 @@
       "import": "./dist/context/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc && node scripts/build.js",
+    "build": "node scripts/clean.js && tsc && node scripts/build.js",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

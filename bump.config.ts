@@ -28,5 +28,5 @@ export default defineConfig({
     "packages/farm-workos/package.json",
     "packages/farmjs-plugin/package.json",
   ],
-  execute: "pnpm build",
+  execute: "node scripts/sync-release-versions.js && pnpm run release:check",
 });

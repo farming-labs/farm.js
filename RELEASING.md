@@ -53,3 +53,13 @@ pnpm publish:canary
 
 Before releasing, authenticate with npm and confirm that your account can publish public
 packages under the `@farm.js` scope.
+
+Run the release verification and package dry-run before starting Bumpp:
+
+```bash
+pnpm release:check
+pnpm publish:dry-run
+```
+
+The release commands require a clean `main` branch. They preserve pnpm's Git checks instead
+of bypassing them.

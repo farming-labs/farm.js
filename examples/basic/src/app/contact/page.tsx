@@ -19,7 +19,7 @@ export default function ContactPage() {
         <ContactCard
           title="GitHub"
           description="Report issues, contribute code, or browse the source"
-          link="https://github.com/farm-js/farm.js"
+          link="https://github.com/Kinfe123/farm.js"
           icon="📦"
         />
 

@@ -11,7 +11,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/farm-js/farm.js",
+    "url": "https://github.com/Kinfe123/farm.js",
     "directory": "packages/farm-cli"
   },
   "bin": {
@@ -22,6 +22,9 @@
     "bin"
   ],
   "main": "./dist/index.js",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "dev": "tsdown --watch",
