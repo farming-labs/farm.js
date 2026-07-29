@@ -31,7 +31,7 @@ The integration owns:
 - `/auth/logout`
 - `/auth/profile`
 
-The example also exposes shared callers in [api.ts](/Users/mac/oss/farm.js/examples/auth0-integration/src/lib/api.ts):
+The example also exposes shared callers in [api.ts](./src/lib/api.ts):
 
 - `api` for server-side calls that dispatch directly to the registered integration handler
 - `apiClient` for browser calls that go through the integration-owned routes

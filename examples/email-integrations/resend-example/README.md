@@ -24,12 +24,12 @@ The integration owns:
 - `/api/email/templates`
 - `/api/email/webhook`
 
-The shared callers are exposed in [api.ts](/Users/mac/oss/farm.js/examples/email-integrations/resend-example/src/lib/api.ts):
+The shared callers are exposed in [api.ts](./src/lib/api.ts):
 
 - `api` for server-side direct dispatch
 - `apiClient` for browser calls through integration-owned routes
 
-The app config lives in [integrations.ts](/Users/mac/oss/farm.js/examples/email-integrations/resend-example/src/lib/integrations.ts).
+The app config lives in [integrations.ts](./src/lib/integrations.ts).
 
 For scheduling, pass an ISO 8601 string in `when`. The integration maps that to Resend's
 `scheduledAt`, and the live provider currently rejects values more than 30 days ahead.

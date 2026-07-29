@@ -365,7 +365,7 @@ For the monthly paid products:
   usage resolver
 
 The current guard configuration in
-[integrations.ts](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma-org/src/lib/integrations.ts)
+[integrations.ts](./src/lib/integrations.ts)
 is:
 
 - `tokensMonthly`
@@ -436,8 +436,8 @@ The billing snapshot now stores two seat-specific nullable fields:
 
 In Prisma they map to:
 
-- [seatQuantity](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma-org/prisma/schema.prisma#L25)
-- [seatAllowanceOverride](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma-org/prisma/schema.prisma#L26)
+- [seatQuantity](./prisma/schema.prisma#L25)
+- [seatAllowanceOverride](./prisma/schema.prisma#L26)
 
 These sit alongside the existing plan, product, status, and trial fields in the `billing_account` snapshot table.
 

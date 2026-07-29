@@ -28,7 +28,7 @@ The integration owns:
 - `/billing/session`
 - `/billing/webhook`
 
-The shared callers are exposed in [api.ts](/Users/mac/oss/farm.js/examples/stripe-integration/src/lib/api.ts):
+The shared callers are exposed in [api.ts](./src/lib/api.ts):
 
 - `api` for server-side calls that dispatch directly to the integration handler
 - `apiClient` for browser calls that go through the integration-owned routes

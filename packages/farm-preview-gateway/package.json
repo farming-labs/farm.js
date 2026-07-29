@@ -2,8 +2,16 @@
   "name": "@farm.js/preview-gateway",
   "version": "0.0.1",
   "description": "Farm.js preview gateway for Vercel-hosted instant preview URLs",
-  "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-preview-gateway"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,9 +22,6 @@
       "default": "./dist/index.js"
     }
   },
-  "files": [
-    "dist"
-  ],
   "scripts": {
     "build": "tsdown && node scripts/normalize-dts.mjs",
     "test": "tsdown && node scripts/normalize-dts.mjs && node --test test/*.test.mjs",

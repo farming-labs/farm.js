@@ -106,11 +106,6 @@ async function defaultHandler({
   const sr = serverRenderer || managers.serverRenderer;
   const activeDeploymentId = deploymentId || managers.deploymentId;
 
-  // Debug logging for page-data endpoint
-  if (pathname.includes("__farm")) {
-    console.log("[Farm.js] [DEBUG] page-data request:", pathname, "rm:", !!rm);
-  }
-
   const redirectMatch = rm?.matchRedirect(pathname);
   if (redirectMatch) {
     return new Response(`Redirecting to ${redirectMatch.destination}`, {

@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "Autumn billing integration for Farm.js",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-autumn"
+  },
   "files": [
     "dist"
   ],
