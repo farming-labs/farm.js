@@ -1,0 +1,29 @@
+{
+  "name": "@farm.js/authjs",
+  "version": "0.0.1",
+  "description": "Auth.js integration for Farm.js",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "echo 'No tests in this package'"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/integration-utils": "workspace:*"
+  }
+}
