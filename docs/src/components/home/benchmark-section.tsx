@@ -4,20 +4,13 @@ import nextIconUrl from "simple-icons/icons/nextdotjs.svg?url";
 import nuxtIconUrl from "simple-icons/icons/nuxt.svg?url";
 import svelteIconUrl from "simple-icons/icons/svelte.svg?url";
 import tanstackIconUrl from "simple-icons/icons/tanstack.svg?url";
-import {
-  benchmarkReport,
-  formatBenchmarkDuration,
-} from "../../lib/framework-benchmark";
+import { benchmarkReport, formatBenchmarkDuration } from "../../lib/framework-benchmark";
 
 type FrameworkResult = (typeof benchmarkReport.frameworks)[number];
 type MetricKey = keyof FrameworkResult["metrics"];
 
-const farmResult = benchmarkReport.frameworks.find(
-  (framework) => framework.id === "farm",
-);
-const competitorResults = benchmarkReport.frameworks.filter(
-  (framework) => framework.id !== "farm",
-);
+const farmResult = benchmarkReport.frameworks.find((framework) => framework.id === "farm");
+const competitorResults = benchmarkReport.frameworks.filter((framework) => framework.id !== "farm");
 const frameworkIconUrls = {
   farm: "/favicon.svg",
   next: nextIconUrl,
@@ -48,15 +41,11 @@ const chartInsetX = 42;
 const chartTopY = 250;
 
 function formatByteCount(bytes: number) {
-  return bytes >= 1024
-    ? (bytes / 1024).toFixed(1) + " KB"
-    : Math.round(bytes) + " B";
+  return bytes >= 1024 ? (bytes / 1024).toFixed(1) + " KB" : Math.round(bytes) + " B";
 }
 
 function formatMetricValue(key: MetricKey, value: number) {
-  return key === "responseBytes"
-    ? formatByteCount(value)
-    : formatBenchmarkDuration(value);
+  return key === "responseBytes" ? formatByteCount(value) : formatBenchmarkDuration(value);
 }
 
 function formatRatio(value: number) {
@@ -64,17 +53,11 @@ function formatRatio(value: number) {
 }
 
 function getMetricMinimum(key: MetricKey) {
-  return Math.min(
-    ...benchmarkReport.frameworks.map(
-      (framework) => framework.metrics[key].median,
-    ),
-  );
+  return Math.min(...benchmarkReport.frameworks.map((framework) => framework.metrics[key].median));
 }
 
 function getMetricExtent(key: MetricKey) {
-  const values = benchmarkReport.frameworks.map(
-    (framework) => framework.metrics[key].median,
-  );
+  const values = benchmarkReport.frameworks.map((framework) => framework.metrics[key].median);
 
   return {
     maximum: Math.max(...values),
@@ -88,10 +71,7 @@ function getBestCompetitor(key: MetricKey) {
   );
 }
 
-function getAdvantageAgainst(
-  framework: FrameworkResult | undefined,
-  key: MetricKey,
-) {
+function getAdvantageAgainst(framework: FrameworkResult | undefined, key: MetricKey) {
   if (!farmResult || !framework) {
     return 0;
   }
@@ -107,11 +87,7 @@ type ChartPoint = {
   y: number;
 };
 
-function getChartPoints(
-  framework: FrameworkResult,
-  width: number,
-  height: number,
-) {
+function getChartPoints(framework: FrameworkResult, width: number, height: number) {
   const insetX = chartInsetX;
   const insetTop = chartTopY;
   const insetBottom = 96;
@@ -120,8 +96,7 @@ function getChartPoints(
   return chartMetrics.map(([metric, label], index) => {
     const { maximum, minimum } = getMetricExtent(metric);
     const rawValue = framework.metrics[metric].median;
-    const rank =
-      maximum === minimum ? 0 : (rawValue - minimum) / (maximum - minimum);
+    const rank = maximum === minimum ? 0 : (rawValue - minimum) / (maximum - minimum);
     const x = insetX + index * step;
     const clamped = Math.max(0, Math.min(1, rank));
     const y = insetTop + (1 - clamped) * (height - insetTop - insetBottom);
@@ -147,11 +122,7 @@ function buildStepBeforePath(points: readonly ChartPoint[]) {
   );
 }
 
-function closeAreaPath(
-  path: string,
-  points: readonly ChartPoint[],
-  baselineY: number,
-) {
+function closeAreaPath(path: string, points: readonly ChartPoint[], baselineY: number) {
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
 
@@ -160,11 +131,7 @@ function closeAreaPath(
     : path;
 }
 
-function closeCeilingPath(
-  path: string,
-  points: readonly ChartPoint[],
-  ceilingY: number,
-) {
+function closeCeilingPath(path: string, points: readonly ChartPoint[], ceilingY: number) {
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
 
@@ -214,29 +181,18 @@ function ComparisonPanel({
       <h3 className="mt-4 max-w-xl text-2xl font-medium leading-tight tracking-normal text-white sm:mt-5 sm:text-3xl">
         {title}
       </h3>
-      <p className="mt-3 max-w-md text-sm leading-6 text-white/42">
-        {description}
-      </p>
+      <p className="mt-3 max-w-md text-sm leading-6 text-white/42">{description}</p>
     </article>
   );
 }
 
-function AnimatedComparisonTitle({
-  lead,
-  metric,
-}: {
-  lead: string;
-  metric: MetricKey;
-}) {
+function AnimatedComparisonTitle({ lead, metric }: { lead: string; metric: MetricKey }) {
   const comparisons = competitorResults.map((framework) => ({
     framework,
     ratio: getAdvantageAgainst(framework, metric),
   }));
   const accessibleComparison = comparisons
-    .map(
-      ({ framework, ratio }) =>
-        `${formatRatio(ratio)} faster than ${framework.label}`,
-    )
+    .map(({ framework, ratio }) => `${formatRatio(ratio)} faster than ${framework.label}`)
     .join("; ");
 
   return (
@@ -253,10 +209,7 @@ function AnimatedComparisonTitle({
       >
         <span className="benchmark-comparison-rotator block h-[1.25em] w-[3.75ch] shrink-0 overflow-hidden">
           {comparisons.map(({ framework, ratio }) => (
-            <span
-              key={framework.id}
-              className="benchmark-comparison-item block"
-            >
+            <span key={framework.id} className="benchmark-comparison-item block">
               {formatRatio(ratio)}
             </span>
           ))}
@@ -264,10 +217,7 @@ function AnimatedComparisonTitle({
         <span className="whitespace-nowrap">faster than</span>
         <span className="benchmark-comparison-rotator col-span-2 block h-[1.25em] w-full overflow-hidden sm:w-[14rem] sm:flex-none">
           {comparisons.map(({ framework }) => (
-            <span
-              key={framework.id}
-              className="benchmark-comparison-item block"
-            >
+            <span key={framework.id} className="benchmark-comparison-item block">
               {framework.label}.
             </span>
           ))}
@@ -291,44 +241,13 @@ function StartupIllustration() {
         viewBox="0 0 520 300"
       >
         <g className="benchmark-startup-stack">
-          <path
-            d="M106 145L260 227L414 145"
-            stroke="currentColor"
-            strokeOpacity="0.2"
-          />
-          <path
-            d="M106 145V165L260 247L414 165V145"
-            stroke="currentColor"
-            strokeOpacity="0.2"
-          />
-          <path
-            d="M106 185L260 267L414 185"
-            stroke="currentColor"
-            strokeOpacity="0.11"
-          />
-          <path
-            d="M106 185V205L260 287L414 205V185"
-            stroke="currentColor"
-            strokeOpacity="0.11"
-          />
-          <path
-            d="M106 126V185"
-            stroke="currentColor"
-            strokeDasharray="2 7"
-            strokeOpacity="0.13"
-          />
-          <path
-            d="M414 126V185"
-            stroke="currentColor"
-            strokeDasharray="2 7"
-            strokeOpacity="0.13"
-          />
-          <path
-            d="M260 208V267"
-            stroke="currentColor"
-            strokeDasharray="2 7"
-            strokeOpacity="0.1"
-          />
+          <path d="M106 145L260 227L414 145" stroke="currentColor" strokeOpacity="0.2" />
+          <path d="M106 145V165L260 247L414 165V145" stroke="currentColor" strokeOpacity="0.2" />
+          <path d="M106 185L260 267L414 185" stroke="currentColor" strokeOpacity="0.11" />
+          <path d="M106 185V205L260 287L414 205V185" stroke="currentColor" strokeOpacity="0.11" />
+          <path d="M106 126V185" stroke="currentColor" strokeDasharray="2 7" strokeOpacity="0.13" />
+          <path d="M414 126V185" stroke="currentColor" strokeDasharray="2 7" strokeOpacity="0.13" />
+          <path d="M260 208V267" stroke="currentColor" strokeDasharray="2 7" strokeOpacity="0.1" />
         </g>
 
         <g className="benchmark-startup-top">
@@ -355,33 +274,11 @@ function StartupIllustration() {
               stroke="currentColor"
               strokeOpacity="0.34"
             />
-            <path
-              d="M190 104L260 67L330 104"
-              stroke="currentColor"
-              strokeOpacity="0.24"
-            />
-            <path
-              d="M208 108L260 81L312 108"
-              stroke="currentColor"
-              strokeOpacity="0.32"
-            />
-            <path
-              d="M222 116L260 96L298 116"
-              stroke="currentColor"
-              strokeOpacity="0.19"
-            />
-            <path
-              d="M238 124L260 113L282 124"
-              stroke="currentColor"
-              strokeOpacity="0.11"
-            />
-            <circle
-              cx="260"
-              cy="104"
-              fill="currentColor"
-              fillOpacity="0.66"
-              r="2.5"
-            />
+            <path d="M190 104L260 67L330 104" stroke="currentColor" strokeOpacity="0.24" />
+            <path d="M208 108L260 81L312 108" stroke="currentColor" strokeOpacity="0.32" />
+            <path d="M222 116L260 96L298 116" stroke="currentColor" strokeOpacity="0.19" />
+            <path d="M238 124L260 113L282 124" stroke="currentColor" strokeOpacity="0.11" />
+            <circle cx="260" cy="104" fill="currentColor" fillOpacity="0.66" r="2.5" />
           </g>
         </g>
       </svg>
@@ -410,11 +307,7 @@ function BuildIllustration() {
             stroke="currentColor"
             strokeOpacity="0.24"
           />
-          <path
-            d="M194 72V125L260 160L326 125V72"
-            stroke="currentColor"
-            strokeOpacity="0.17"
-          />
+          <path d="M194 72V125L260 160L326 125V72" stroke="currentColor" strokeOpacity="0.17" />
         </g>
 
         <g className="benchmark-build-module benchmark-build-module--left">
@@ -425,16 +318,8 @@ function BuildIllustration() {
             stroke="currentColor"
             strokeOpacity="0.36"
           />
-          <path
-            d="M78 139V198L149 236L220 198V139"
-            stroke="currentColor"
-            strokeOpacity="0.25"
-          />
-          <path
-            d="M123 139L149 125L175 139"
-            stroke="currentColor"
-            strokeOpacity="0.18"
-          />
+          <path d="M78 139V198L149 236L220 198V139" stroke="currentColor" strokeOpacity="0.25" />
+          <path d="M123 139L149 125L175 139" stroke="currentColor" strokeOpacity="0.18" />
         </g>
 
         <g className="benchmark-build-module benchmark-build-module--right">
@@ -445,11 +330,7 @@ function BuildIllustration() {
             stroke="currentColor"
             strokeOpacity="0.3"
           />
-          <path
-            d="M300 139V198L371 236L442 198V139"
-            stroke="currentColor"
-            strokeOpacity="0.2"
-          />
+          <path d="M300 139V198L371 236L442 198V139" stroke="currentColor" strokeOpacity="0.2" />
         </g>
 
         <g className="benchmark-build-output">
@@ -470,23 +351,9 @@ function BuildIllustration() {
             strokeWidth="1.2"
           />
           <path d="M260 227V279" stroke="currentColor" strokeOpacity="0.28" />
-          <path
-            d="M218 190L260 168L302 190"
-            stroke="currentColor"
-            strokeOpacity="0.32"
-          />
-          <path
-            d="M231 198L260 183L289 198"
-            stroke="currentColor"
-            strokeOpacity="0.17"
-          />
-          <circle
-            cx="260"
-            cy="190"
-            fill="currentColor"
-            fillOpacity="0.68"
-            r="2.5"
-          />
+          <path d="M218 190L260 168L302 190" stroke="currentColor" strokeOpacity="0.32" />
+          <path d="M231 198L260 183L289 198" stroke="currentColor" strokeOpacity="0.17" />
+          <circle cx="260" cy="190" fill="currentColor" fillOpacity="0.68" r="2.5" />
         </g>
       </svg>
     </div>
@@ -652,13 +519,7 @@ function BenchmarkAreaChart() {
               <stop offset="48%" stopColor="currentColor" stopOpacity="0.016" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
             </linearGradient>
-            <linearGradient
-              id="tanstackBenchmarkFill"
-              x1="0"
-              x2="0"
-              y1="0"
-              y2="1"
-            >
+            <linearGradient id="tanstackBenchmarkFill" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="currentColor" stopOpacity="0.045" />
               <stop offset="55%" stopColor="currentColor" stopOpacity="0.014" />
               <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
@@ -694,15 +555,10 @@ function BenchmarkAreaChart() {
           {chartMetrics.map(([metric, label], index) => {
             const x =
               chartInsetX +
-              (index * (width - chartInsetX * 2)) /
-                Math.max(1, chartMetrics.length - 1);
+              (index * (width - chartInsetX * 2)) / Math.max(1, chartMetrics.length - 1);
             const { maximum, minimum } = getMetricExtent(metric);
             const textAnchor =
-              index === 0
-                ? "start"
-                : index === chartMetrics.length - 1
-                  ? "end"
-                  : "middle";
+              index === 0 ? "start" : index === chartMetrics.length - 1 ? "end" : "middle";
 
             return (
               <g key={label}>
@@ -754,11 +610,7 @@ function BenchmarkAreaChart() {
             ))}
           {farmSeries ? (
             <path
-              d={closeCeilingPath(
-                farmSeries.path,
-                farmSeries.points,
-                chartTopY,
-              )}
+              d={closeCeilingPath(farmSeries.path, farmSeries.points, chartTopY)}
               fill="url(#farmBenchmarkFill)"
               pointerEvents="none"
             />
@@ -779,17 +631,9 @@ function BenchmarkAreaChart() {
                   d={path}
                   fill="none"
                   stroke="white"
-                  strokeDasharray={
-                    !isFarm && framework.id !== "tanstack" ? "8 8" : undefined
-                  }
+                  strokeDasharray={!isFarm && framework.id !== "tanstack" ? "8 8" : undefined}
                   strokeOpacity={seriesOpacity[framework.id]}
-                  strokeWidth={
-                    isFarm
-                      ? "1.45"
-                      : framework.id === "tanstack"
-                        ? "1.2"
-                        : "0.8"
-                  }
+                  strokeWidth={isFarm ? "1.45" : framework.id === "tanstack" ? "1.2" : "0.8"}
                   vectorEffect="non-scaling-stroke"
                 />
                 <path
@@ -829,17 +673,9 @@ function BenchmarkAreaChart() {
                       cy={point.y}
                       fill="black"
                       fillOpacity={isFarm ? "0.82" : "0.74"}
-                      r={
-                        isFarm
-                          ? "3.3"
-                          : framework.id === "tanstack"
-                            ? "2.6"
-                            : "2.1"
-                      }
+                      r={isFarm ? "3.3" : framework.id === "tanstack" ? "2.6" : "2.1"}
                       stroke="white"
-                      strokeOpacity={
-                        isFarm ? "0.88" : seriesOpacity[framework.id]
-                      }
+                      strokeOpacity={isFarm ? "0.88" : seriesOpacity[framework.id]}
                       strokeWidth={isFarm ? "1.2" : "1"}
                     />
                     <circle
@@ -862,9 +698,7 @@ function BenchmarkAreaChart() {
                         y={tooltipY}
                       />
                       <image
-                        filter={
-                          isFarm ? undefined : "url(#benchmarkIconInvert)"
-                        }
+                        filter={isFarm ? undefined : "url(#benchmarkIconInvert)"}
                         height="12"
                         href={iconUrl}
                         opacity={isFarm ? "0.9" : "0.82"}
@@ -985,12 +819,7 @@ export function BenchmarkSection() {
             icon={TimerReset}
             illustration={<BuildIllustration />}
             label="Production build"
-            title={
-              <AnimatedComparisonTitle
-                lead="Farm builds the same fixture"
-                metric="buildMs"
-              />
-            }
+            title={<AnimatedComparisonTitle lead="Farm builds the same fixture" metric="buildMs" />}
           />
         </div>
 

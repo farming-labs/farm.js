@@ -150,7 +150,9 @@ export async function resolvePreviewTarget(
     }
   }
 
-  const hint = explicitPort ? createLocalUrl(host, explicitPort) : candidates.map((port) => port).join(", ");
+  const hint = explicitPort
+    ? createLocalUrl(host, explicitPort)
+    : candidates.map((port) => port).join(", ");
   throw new Error(
     `No running Farm app was found (${hint}). Start "farm dev" first, or pass --port/--url to the running app.`,
   );
@@ -160,8 +162,11 @@ export function createPreviewTunnelPlan(
   target: PreviewTarget,
   options: Pick<PreviewFarmOptions, "name"> = {},
 ): PreviewTunnelPlan {
-  const requestedName = sanitizePreviewName(options.name || process.env.FARM_PREVIEW_NAME) || randomPreviewName();
-  const domain = normalizePreviewDomain(process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev");
+  const requestedName =
+    sanitizePreviewName(options.name || process.env.FARM_PREVIEW_NAME) || randomPreviewName();
+  const domain = normalizePreviewDomain(
+    process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev",
+  );
   const requestedHostname = `${requestedName}.${domain}`;
   const template = process.env.FARM_PREVIEW_TUNNEL_COMMAND;
 
@@ -210,7 +215,10 @@ export function createPreviewTunnelPlan(
   );
 }
 
-export function parsePreviewPublicUrl(output: string, preferredHostname?: string): string | undefined {
+export function parsePreviewPublicUrl(
+  output: string,
+  preferredHostname?: string,
+): string | undefined {
   const matches = output.match(PREVIEW_URL_PATTERN) || [];
   const urls = matches.filter((value) => {
     try {
@@ -370,11 +378,16 @@ function expandTunnelTemplate(
   requestedHostname: string,
 ) {
   return template
-    .replaceAll("{url}", shellQuote(target.localUrl))
-    .replaceAll("{port}", shellQuote(String(target.port)))
-    .replaceAll("{host}", shellQuote(target.host))
-    .replaceAll("{name}", shellQuote(requestedName))
-    .replaceAll("{hostname}", shellQuote(requestedHostname));
+    .split("{url}")
+    .join(shellQuote(target.localUrl))
+    .split("{port}")
+    .join(shellQuote(String(target.port)))
+    .split("{host}")
+    .join(shellQuote(target.host))
+    .split("{name}")
+    .join(shellQuote(requestedName))
+    .split("{hostname}")
+    .join(shellQuote(requestedHostname));
 }
 
 function shellQuote(value: string) {
@@ -418,5 +431,8 @@ function randomPreviewName() {
 }
 
 function normalizePreviewDomain(value: string) {
-  return value.replace(/^https?:\/\//, "").replace(/^\.*/, "").replace(/\/*$/, "");
+  return value
+    .replace(/^https?:\/\//, "")
+    .replace(/^\.*/, "")
+    .replace(/\/*$/, "");
 }

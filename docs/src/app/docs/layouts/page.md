@@ -72,13 +72,7 @@ Error boundaries should be client components because they need to recover in the
 ```tsx
 "use client";
 
-export default function DashboardError({
-  error,
-  reset,
-}: {
-  error: Error;
-  reset: () => void;
-}) {
+export default function DashboardError({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <section>
       <h2>Dashboard failed to load</h2>

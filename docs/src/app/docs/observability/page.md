@@ -24,17 +24,17 @@ onFarmEvent((event) => {
 
 ## Event families
 
-| Family | Examples |
-| --- | --- |
-| Server | server.start, server.ready, server.shutdown |
-| Routing | route.discovered, route.matched, route.notFound, route.redirect |
-| Rendering | render.start, render.complete, render.stream.shellReady, render.error |
-| Cache | cache.hit, cache.miss, cache.set, cache.revalidateTag |
-| PPR | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated |
-| Middleware | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
-| Integrations | integration.ready, integration.api.call.start, integration.webhook.verified |
-| Storage | storage.query.start, storage.schema.ready |
-| Build | build.start, routes.generated, types.generated, manifest.generated |
+| Family       | Examples                                                                         |
+| ------------ | -------------------------------------------------------------------------------- |
+| Server       | server.start, server.ready, server.shutdown                                      |
+| Routing      | route.discovered, route.matched, route.notFound, route.redirect                  |
+| Rendering    | render.start, render.complete, render.stream.shellReady, render.error            |
+| Cache        | cache.hit, cache.miss, cache.set, cache.revalidateTag                            |
+| PPR          | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated                           |
+| Middleware   | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
+| Integrations | integration.ready, integration.api.call.start, integration.webhook.verified      |
+| Storage      | storage.query.start, storage.schema.ready                                        |
+| Build        | build.start, routes.generated, types.generated, manifest.generated               |
 
 ## Configure in farm.config.ts
 
@@ -76,14 +76,14 @@ unsubscribe();
 
 ## Useful event types
 
-| Area | Events |
-| --- | --- |
-| Cache | `cache.hit`, `cache.miss`, `cache.set`, `cache.stale`, `cache.bypass`, `cache.invalidated`, `cache.revalidatePath`, `cache.revalidateTag`, `cache.updateTag`, `cache.error` |
-| PPR | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error` |
-| API | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error` |
+| Area         | Events                                                                                                                                                                                                                             |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cache        | `cache.hit`, `cache.miss`, `cache.set`, `cache.stale`, `cache.bypass`, `cache.invalidated`, `cache.revalidatePath`, `cache.revalidateTag`, `cache.updateTag`, `cache.error`                                                        |
+| PPR          | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error`                                  |
+| API          | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error`                                                                                                                                                  |
 | Integrations | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
-| Middleware | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error` |
-| Storage | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error` |
+| Middleware   | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error`                                                                                                                                           |
+| Storage      | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error`                                                                                                             |
 
 Middleware events include the matched middleware route, request pathname, middleware file/config name, duration for completes, status for short circuits, and the thrown error for failures.
 
@@ -91,12 +91,12 @@ Middleware events include the matched middleware route, request pathname, middle
 
 Middleware events are emitted for both `farm.config.ts` middleware entries and `src/app/**/middleware.ts` files in development and production.
 
-| Event | Payload |
-| --- | --- |
-| `middleware.start` | `route`, `pathname`, `name` |
-| `middleware.complete` | `route`, `pathname`, `name`, `durationMs` |
-| `middleware.shortCircuit` | `route`, `pathname`, `name`, `status` |
-| `middleware.error` | `route`, `pathname`, `name`, `error` |
+| Event                     | Payload                                   |
+| ------------------------- | ----------------------------------------- |
+| `middleware.start`        | `route`, `pathname`, `name`               |
+| `middleware.complete`     | `route`, `pathname`, `name`, `durationMs` |
+| `middleware.shortCircuit` | `route`, `pathname`, `name`, `status`     |
+| `middleware.error`        | `route`, `pathname`, `name`, `error`      |
 
 ```ts
 import { defineConfig } from "@farm.js/core";

@@ -75,8 +75,8 @@ export class FarmI18nRuntime {
       cookie: this.config.cookie,
       direction: getFarmLocaleDirection(resolution.locale, this.config.direction),
       messages: {
-        ...(this.catalogs[this.config.fallbackLocale] || {}),
-        ...(this.catalogs[resolution.locale] || {}),
+        ...this.catalogs[this.config.fallbackLocale],
+        ...this.catalogs[resolution.locale],
       },
     };
   }

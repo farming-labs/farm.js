@@ -302,6 +302,7 @@ export interface ResolvedFarmConfig extends Required<
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
+  routeRules: FarmRouteRules;
 }
 
 export function hasCustomFarmRouteContext(config: ResolvedFarmConfig): boolean {

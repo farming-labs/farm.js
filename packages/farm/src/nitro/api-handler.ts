@@ -1,5 +1,5 @@
 import type { APIRouteManager } from "../api/route-manager";
-import { defineEventHandler, getHeaders, readBody, sendWebResponse, setResponseStatus } from "h3";
+import { defineEventHandler, sendWebResponse, setResponseStatus } from "h3";
 import type { H3Event } from "h3";
 
 /**
@@ -8,9 +8,7 @@ import type { H3Event } from "h3";
  */
 export function createNitroAPIHandler(apiRouteManager: APIRouteManager) {
   return defineEventHandler(async (event: H3Event) => {
-    const url = event.node.req.url || "/";
-    const host = event.node.req.headers.host || "localhost";
-    const pathname = new URL(url, `http://${host}`).pathname;
+    const pathname = event.url.pathname;
 
     // Only handle API routes
     if (!apiRouteManager.matchRoute(pathname)) {
@@ -18,36 +16,6 @@ export function createNitroAPIHandler(apiRouteManager: APIRouteManager) {
     }
 
     try {
-      // Convert H3 event to Web Request
-      const protocol = event.node.req.headers["x-forwarded-proto"] || "http";
-      const fullUrl = `${protocol}://${host}${url}`;
-
-      const headers = new Headers();
-      const h3Headers = getHeaders(event);
-
-      for (const [key, value] of Object.entries(h3Headers)) {
-        if (value) {
-          headers.set(key, Array.isArray(value) ? value.join(", ") : String(value));
-        }
-      }
-
-      // Get body
-      let body: string | undefined;
-      const method = event.node.req.method || "GET";
-      if (method !== "GET" && method !== "HEAD") {
-        const bodyData = await readBody(event).catch(() => undefined);
-        if (bodyData) {
-          body = typeof bodyData === "string" ? bodyData : JSON.stringify(bodyData);
-        }
-      }
-
-      // Create Web Request
-      const request = new Request(fullUrl, {
-        method,
-        headers,
-        body: body || undefined,
-      });
-
       // Call better-call handler
       const betterCallHandler = apiRouteManager.getHandler();
       if (!betterCallHandler) {
@@ -55,7 +23,7 @@ export function createNitroAPIHandler(apiRouteManager: APIRouteManager) {
         return { error: "API handler not found" };
       }
 
-      const response = await betterCallHandler(request);
+      const response = await betterCallHandler(event.req);
 
       return sendWebResponse(response);
     } catch (error: any) {

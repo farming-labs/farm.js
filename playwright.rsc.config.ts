@@ -15,8 +15,7 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   webServer: {
-    command:
-      "NODE_ENV=production PORT=4174 corepack pnpm --dir examples/rsc-demo run preview",
+    command: "NODE_ENV=production PORT=4174 corepack pnpm --dir examples/rsc-demo run preview",
     url: "http://localhost:4174",
     reuseExistingServer: false,
     timeout: 120_000,

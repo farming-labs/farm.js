@@ -70,7 +70,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     throw new Error("No Farm config found. Please create farm.config.ts or config.ts.");
   }
 
-  const resolvedConfig = await resolveConfig({ root, ...(userConfig || {}) }, "development");
+  const resolvedConfig = await resolveConfig({ root, ...userConfig }, "development");
   const extraRoutes = [
     ...(resolvedConfig.openapi?.enabled && resolvedConfig.openapi.route
       ? [resolvedConfig.openapi.route]

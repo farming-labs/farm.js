@@ -316,7 +316,10 @@ export function unkeyApiKeysUIFeature(): UIFeatureDefinition {
   };
 }
 
-function billingUIFeature(input: { provider: "stripe" | "polar" | "autumn"; label: string }) {
+function billingUIFeature(input: {
+  provider: "stripe" | "polar" | "autumn";
+  label: string;
+}): UIFeatureDefinition {
   return {
     name: `${input.provider}-billing`,
     description: `${input.label} pricing and checkout UI`,

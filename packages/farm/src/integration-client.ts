@@ -406,7 +406,7 @@ function mergeIntegrationClientData(
     }
 
     merged = {
-      ...(merged || {}),
+      ...merged,
       ...data,
     };
   }

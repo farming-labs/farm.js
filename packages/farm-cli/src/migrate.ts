@@ -253,12 +253,18 @@ async function planNextMigration(
 ) {
   const rootAppDir = path.join(root, "app");
   const srcAppDir = path.join(root, "src", "app");
-  const sourceAppDir = existsSync(rootAppDir) ? rootAppDir : existsSync(srcAppDir) ? srcAppDir : null;
+  const sourceAppDir = existsSync(rootAppDir)
+    ? rootAppDir
+    : existsSync(srcAppDir)
+      ? srcAppDir
+      : null;
 
   if (!sourceAppDir) {
     plan.warnings.push("No Next App Router directory found at app/ or src/app/.");
     if (existsSync(path.join(root, "pages"))) {
-      plan.manual.push("Pages Router files in pages/ need manual conversion to src/app/**/page.tsx.");
+      plan.manual.push(
+        "Pages Router files in pages/ need manual conversion to src/app/**/page.tsx.",
+      );
     }
     return;
   }
@@ -312,8 +318,13 @@ async function planNextMigration(
     );
   }
 
-  if (existsSync(path.join(root, "next.config.js")) || existsSync(path.join(root, "next.config.mjs"))) {
-    plan.manual.push("Review next.config.* and move equivalent settings into farm.config.ts or Vite config.");
+  if (
+    existsSync(path.join(root, "next.config.js")) ||
+    existsSync(path.join(root, "next.config.mjs"))
+  ) {
+    plan.manual.push(
+      "Review next.config.* and move equivalent settings into farm.config.ts or Vite config.",
+    );
   }
 
   if (packageJson) {
@@ -350,7 +361,9 @@ async function planTanStackMigration(
   for (const file of files) {
     const target = getTanStackTargetPath(routesDir, file, appDir);
     if (!target) {
-      plan.manual.push(`Review ${toPosix(path.relative(root, file))}; root routes and route trees are not copied automatically.`);
+      plan.manual.push(
+        `Review ${toPosix(path.relative(root, file))}; root routes and route trees are not copied automatically.`,
+      );
       continue;
     }
 
@@ -480,7 +493,9 @@ function addPackageOperation(
 async function applyFrameworkMigrationPlan(plan: FrameworkMigrationPlan) {
   for (const operation of plan.operations) {
     if (operation.skipped) {
-      logger.warn(`Skipped ${toPosix(path.relative(plan.root, operation.path))}: ${operation.reason}`);
+      logger.warn(
+        `Skipped ${toPosix(path.relative(plan.root, operation.path))}: ${operation.reason}`,
+      );
       continue;
     }
 
@@ -565,7 +580,10 @@ function detectNext(root: string, packageJson: any): FrameworkDetection {
     confidence += 25;
     evidence.push("src/app/ directory exists");
   }
-  if (existsSync(path.join(root, "next.config.js")) || existsSync(path.join(root, "next.config.mjs"))) {
+  if (
+    existsSync(path.join(root, "next.config.js")) ||
+    existsSync(path.join(root, "next.config.mjs"))
+  ) {
     confidence += 15;
     evidence.push("next.config.* exists");
   }
@@ -622,25 +640,27 @@ async function collectFiles(dir: string): Promise<string[]> {
 
 function transformNextContent(content: string) {
   return content
-    .replace(
-      /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/link["'];?/g,
-      (_match, localName) =>
-        localName === "Link"
-          ? `import { Link } from "@farm.js/core/client";`
-          : `import { Link as ${localName} } from "@farm.js/core/client";`,
+    .replace(/import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/link["'];?/g, (_match, localName) =>
+      localName === "Link"
+        ? `import { Link } from "@farm.js/core/client";`
+        : `import { Link as ${localName} } from "@farm.js/core/client";`,
     )
     .replace(/from\s+["']next\/navigation["']/g, `from "@farm.js/core/navigation"`)
     .replace(/from\s+["']next\/headers["']/g, `from "@farm.js/core/headers"`);
 }
 
 function collectNextManualNotes(relative: string, content: string, plan: FrameworkMigrationPlan) {
-  const imports = Array.from(content.matchAll(/from\s+["'](next\/[^"']+)["']/g)).map((match) => match[1]);
+  const imports = Array.from(content.matchAll(/from\s+["'](next\/[^"']+)["']/g)).map(
+    (match) => match[1],
+  );
   for (const importId of imports) {
     plan.manual.push(`Review ${toPosix(relative)}; it still imports ${importId}.`);
   }
 
   if (/getServerSideProps|getStaticProps|getInitialProps/.test(content)) {
-    plan.manual.push(`Review ${toPosix(relative)}; Pages Router data functions need manual App Router/Farm conversion.`);
+    plan.manual.push(
+      `Review ${toPosix(relative)}; Pages Router data functions need manual App Router/Farm conversion.`,
+    );
   }
 }
 
@@ -670,7 +690,11 @@ function convertTanStackSegment(segment: string) {
   return segment;
 }
 
-function transformTanStackContent(content: string, relativeFile: string, plan: FrameworkMigrationPlan) {
+function transformTanStackContent(
+  content: string,
+  relativeFile: string,
+  plan: FrameworkMigrationPlan,
+) {
   if (/Route\.use[A-Z]/.test(content) || /useLoaderData|beforeLoad|loader:/.test(content)) {
     plan.manual.push(`Review ${toPosix(relativeFile)}; it uses TanStack route runtime APIs.`);
   }
@@ -679,7 +703,9 @@ function transformTanStackContent(content: string, relativeFile: string, plan: F
 
   const componentName = content.match(/component\s*:\s*([A-Za-z_$][\w$]*)/)?.[1];
   if (!componentName) {
-    plan.manual.push(`Add a default export to ${toPosix(relativeFile)}; no component: Identifier was found.`);
+    plan.manual.push(
+      `Add a default export to ${toPosix(relativeFile)}; no component: Identifier was found.`,
+    );
     return content;
   }
 
@@ -740,8 +766,8 @@ async function readPackageJson(root: string) {
 function hasPackage(packageJson: any, packageName: string) {
   return Boolean(
     packageJson?.dependencies?.[packageName] ||
-      packageJson?.devDependencies?.[packageName] ||
-      packageJson?.peerDependencies?.[packageName],
+    packageJson?.devDependencies?.[packageName] ||
+    packageJson?.peerDependencies?.[packageName],
   );
 }
 

@@ -45,14 +45,14 @@ await apiClient.email.send.post({
 
 ## What Resend adds
 
-| Area | Details |
-| --- | --- |
-| Templates | Typed React Email templates with subjects, preview text, defaults, and preview props. |
-| Send | A typed `send` route for transactional messages. |
-| Schedule | A typed route for future delivery. |
-| Preview | HTML and text rendering for local previews or admin tools. |
-| Templates index | A route that lists configured templates and preview metadata. |
-| Webhooks | Optional Resend webhook receivers for delivery events. |
+| Area            | Details                                                                               |
+| --------------- | ------------------------------------------------------------------------------------- |
+| Templates       | Typed React Email templates with subjects, preview text, defaults, and preview props. |
+| Send            | A typed `send` route for transactional messages.                                      |
+| Schedule        | A typed route for future delivery.                                                    |
+| Preview         | HTML and text rendering for local previews or admin tools.                            |
+| Templates index | A route that lists configured templates and preview metadata.                         |
+| Webhooks        | Optional Resend webhook receivers for delivery events.                                |
 
 ## Preview before sending
 

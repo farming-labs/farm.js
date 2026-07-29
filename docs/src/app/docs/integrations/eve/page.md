@@ -122,17 +122,17 @@ agent: eve({
 
 ## Options
 
-| Option | Purpose |
-| --- | --- |
-| `root` | Eve application root relative to `farm.config.ts`. Defaults to the Farm root. |
-| `origin` | Existing Eve server URL for external or self-hosted runtimes. |
-| `dev: false` | Disable the managed Eve development process. |
-| `dev.name` | Development agent label passed to Eve. |
-| `dev.logs` | Forward Eve output through the Farm logger. Defaults to `true`. |
-| `dev.timeoutMs` | Maximum startup wait. Defaults to 180 seconds. |
-| `vercel: false` | Disable automatic Vercel composition. |
-| `vercel.servicePrefix` | Internal Vercel service mount. Public routes remain unchanged. |
-| `vercel.buildCommand` | Override the command used to build the Eve service. |
+| Option                 | Purpose                                                                       |
+| ---------------------- | ----------------------------------------------------------------------------- |
+| `root`                 | Eve application root relative to `farm.config.ts`. Defaults to the Farm root. |
+| `origin`               | Existing Eve server URL for external or self-hosted runtimes.                 |
+| `dev: false`           | Disable the managed Eve development process.                                  |
+| `dev.name`             | Development agent label passed to Eve.                                        |
+| `dev.logs`             | Forward Eve output through the Farm logger. Defaults to `true`.               |
+| `dev.timeoutMs`        | Maximum startup wait. Defaults to 180 seconds.                                |
+| `vercel: false`        | Disable automatic Vercel composition.                                         |
+| `vercel.servicePrefix` | Internal Vercel service mount. Public routes remain unchanged.                |
+| `vercel.buildCommand`  | Override the command used to build the Eve service.                           |
 
 ## Production checklist
 

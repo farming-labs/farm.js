@@ -7,7 +7,6 @@ description: "The complete Farm.js framework guide, powered by @farming-labs/doc
 
 Farm.js docs are served from the Farm docs runtime. The same markdown files power human pages, markdown routes, llms.txt, sitemap output, search, and agent discovery through `/api/docs`.
 
-
 ### Start
 
 Create an app and learn the files that matter.

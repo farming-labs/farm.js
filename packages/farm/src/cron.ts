@@ -448,9 +448,11 @@ function readEnvironmentValue(name: string): string | undefined {
 }
 
 function getFarmRuntimeBindings(): Record<string, unknown> | undefined {
-  const runtimeBindings = (globalThis as typeof globalThis & {
-    __env__?: Record<string, unknown>;
-  }).__env__;
+  const runtimeBindings = (
+    globalThis as typeof globalThis & {
+      __env__?: Record<string, unknown>;
+    }
+  ).__env__;
   return runtimeBindings && typeof runtimeBindings === "object" ? runtimeBindings : undefined;
 }
 

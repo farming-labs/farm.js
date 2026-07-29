@@ -145,7 +145,10 @@ export function createPreviewGatewayHandler(options: PreviewGatewayOptions = {})
       if (error instanceof GatewayHttpError) {
         return text(error.message, error.status);
       }
-      return text(error instanceof Error ? error.message : "Unexpected preview gateway error.", 500);
+      return text(
+        error instanceof Error ? error.message : "Unexpected preview gateway error.",
+        500,
+      );
     }
   };
 }
@@ -229,7 +232,10 @@ export class MemoryPreviewGatewayStore implements PreviewGatewayStore {
     this.responses.set(responseKey(sessionId, requestId), response);
   }
 
-  async getResponse(sessionId: string, requestId: string): Promise<PreviewGatewayResponse | undefined> {
+  async getResponse(
+    sessionId: string,
+    requestId: string,
+  ): Promise<PreviewGatewayResponse | undefined> {
     return this.responses.get(responseKey(sessionId, requestId));
   }
 
@@ -268,18 +274,32 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
       ...session,
       expiresAt: Date.now() + ttlMs,
     };
-    await this.command("SET", this.sessionKey(session.id), JSON.stringify(nextSession), "PX", ttlMs);
+    await this.command(
+      "SET",
+      this.sessionKey(session.id),
+      JSON.stringify(nextSession),
+      "PX",
+      ttlMs,
+    );
     await this.command("SET", this.nameKey(session.name), session.id, "PX", ttlMs);
     await this.command("EXPIRE", this.queueKey(session.id), Math.ceil(ttlMs / 1000));
   }
 
-  async enqueueRequest(sessionId: string, request: PreviewGatewayRequest, ttlMs: number): Promise<void> {
+  async enqueueRequest(
+    sessionId: string,
+    request: PreviewGatewayRequest,
+    ttlMs: number,
+  ): Promise<void> {
     await this.command("RPUSH", this.queueKey(sessionId), JSON.stringify(request));
     await this.command("EXPIRE", this.queueKey(sessionId), Math.ceil(ttlMs / 1000));
   }
 
   async takeRequests(sessionId: string, limit: number): Promise<PreviewGatewayRequest[]> {
-    const values = await this.command<string[] | string | null>("LPOP", this.queueKey(sessionId), limit);
+    const values = await this.command<string[] | string | null>(
+      "LPOP",
+      this.queueKey(sessionId),
+      limit,
+    );
     if (!values) return [];
     const list = Array.isArray(values) ? values : [values];
     return list.map((value) => JSON.parse(value));
@@ -291,10 +311,19 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
     response: PreviewGatewayResponse,
     ttlMs: number,
   ): Promise<void> {
-    await this.command("SET", this.responseKey(sessionId, requestId), JSON.stringify(response), "PX", ttlMs);
+    await this.command(
+      "SET",
+      this.responseKey(sessionId, requestId),
+      JSON.stringify(response),
+      "PX",
+      ttlMs,
+    );
   }
 
-  async getResponse(sessionId: string, requestId: string): Promise<PreviewGatewayResponse | undefined> {
+  async getResponse(
+    sessionId: string,
+    requestId: string,
+  ): Promise<PreviewGatewayResponse | undefined> {
     const value = await this.command<string | null>("GET", this.responseKey(sessionId, requestId));
     return value ? JSON.parse(value) : undefined;
   }
@@ -323,7 +352,9 @@ export class RedisRestPreviewGatewayStore implements PreviewGatewayStore {
     });
 
     if (!response.ok) {
-      throw new Error(`Preview gateway Redis command failed (${response.status}): ${await response.text()}`);
+      throw new Error(
+        `Preview gateway Redis command failed (${response.status}): ${await response.text()}`,
+      );
     }
 
     const data = (await response.json()) as { result?: T; error?: string };
@@ -461,7 +492,12 @@ async function proxyPublicRequest(
     return text(`No active Farm preview is running for "${route.name}".`, 404);
   }
 
-  const previewRequest = await serializePreviewRequest(request, url, route.path, config.maxBodyBytes);
+  const previewRequest = await serializePreviewRequest(
+    request,
+    url,
+    route.path,
+    config.maxBodyBytes,
+  );
   await store.enqueueRequest(session.id, previewRequest, config.sessionTtlMs);
   await store.touchSession(session, config.sessionTtlMs);
 
@@ -484,7 +520,9 @@ async function proxyPublicRequest(
   headers.set("x-farm-preview", session.name);
 
   return new Response(
-    response.body ? Buffer.from(response.body, response.encoding === "base64" ? "base64" : "utf8") : null,
+    response.body
+      ? Buffer.from(response.body, response.encoding === "base64" ? "base64" : "utf8")
+      : null,
     {
       status: response.status || 200,
       headers,
@@ -582,11 +620,7 @@ async function serializePreviewRequest(
   };
 }
 
-async function requireSession(
-  store: PreviewGatewayStore,
-  sessionId: string,
-  token: string | null,
-) {
+async function requireSession(store: PreviewGatewayStore, sessionId: string, token: string | null) {
   const session = await store.getSessionById(sessionId);
   if (!session || !token || token !== session.token) {
     throw new GatewayHttpError(401, "Invalid preview gateway session.");
@@ -629,7 +663,8 @@ function matchSessionRoute(pathname: string) {
 function nodeRequestToWebRequest(req: IncomingMessage) {
   const host = headerValue(req.headers, "host") || "localhost";
   const protocol =
-    headerValue(req.headers, "x-forwarded-proto") || (isLocalHost(host.split(":")[0]) ? "http" : "https");
+    headerValue(req.headers, "x-forwarded-proto") ||
+    (isLocalHost(host.split(":")[0]) ? "http" : "https");
   const url = `${protocol}://${host}${req.url || "/"}`;
   const headers = nodeHeadersToWebHeaders(req.headers);
   const method = req.method || "GET";
@@ -718,7 +753,10 @@ function randomId(prefix: string) {
 }
 
 function normalizeDomain(value: string) {
-  return value.replace(/^https?:\/\//, "").replace(/^\.*/, "").replace(/\/*$/, "");
+  return value
+    .replace(/^https?:\/\//, "")
+    .replace(/^\.*/, "")
+    .replace(/\/*$/, "");
 }
 
 function responseKey(sessionId: string, requestId: string) {

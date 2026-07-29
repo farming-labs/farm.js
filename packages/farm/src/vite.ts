@@ -332,7 +332,7 @@ function isPotentialProgrammaticRouteSourceFile(
   return (
     normalizedFile.startsWith(`${srcDirSlug}/`) &&
     /\.(ts|tsx|js|jsx)$/.test(normalizedFile) &&
-    !/\.d\.ts$/.test(normalizedFile) &&
+    !normalizedFile.endsWith(".d.ts") &&
     !normalizedFile.endsWith("/farm-routes.d.ts") &&
     !normalizedFile.endsWith("/farm-env.d.ts") &&
     !normalizedFile.endsWith("/lib/api.generated.ts")

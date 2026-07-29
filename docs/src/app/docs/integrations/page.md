@@ -83,19 +83,19 @@ for side-by-side examples.
 
 Other integration fields are independent of that HTTP choice:
 
-| Surface | What it is for |
-| --- | --- |
-| `middleware` | Integration-owned request behavior for matchers outside a single endpoint. |
-| `providers` | React provider metadata and optional wrapper components. |
-| `schema` | Storage models used by `ctx.args.db` through the ORM layer. |
-| `config` | Schema-validated config from defaults, env, input, and resolver output. |
-| `validate` | Early checks before the integration starts. |
-| `setup` | Bootstrapping work such as storage checks or webhook registration. |
-| `ready` | Post-start work once the app is ready. |
-| `dispose` | Shutdown cleanup. |
-| `log` | Runtime events for registration, request start, request end, request error, and lifecycle messages. |
-| `plugins` | Extra Farm plugins that ship with the integration. |
-| `documentNavigations` | Route matchers that tell docs/navigation systems where the integration owns pages. |
+| Surface               | What it is for                                                                                      |
+| --------------------- | --------------------------------------------------------------------------------------------------- |
+| `middleware`          | Integration-owned request behavior for matchers outside a single endpoint.                          |
+| `providers`           | React provider metadata and optional wrapper components.                                            |
+| `schema`              | Storage models used by `ctx.args.db` through the ORM layer.                                         |
+| `config`              | Schema-validated config from defaults, env, input, and resolver output.                             |
+| `validate`            | Early checks before the integration starts.                                                         |
+| `setup`               | Bootstrapping work such as storage checks or webhook registration.                                  |
+| `ready`               | Post-start work once the app is ready.                                                              |
+| `dispose`             | Shutdown cleanup.                                                                                   |
+| `log`                 | Runtime events for registration, request start, request end, request error, and lifecycle messages. |
+| `plugins`             | Extra Farm plugins that ship with the integration.                                                  |
+| `documentNavigations` | Route matchers that tell docs/navigation systems where the integration owns pages.                  |
 
 ## Route ownership
 
@@ -219,9 +219,9 @@ export default defineConfig({
 
 `agent` is a conventional namespace, not a reserved key. Agent runtime routes do not generate `api` or `apiClient` callers because streaming and WebSocket protocols are handled by the provider SDK.
 
-| Runtime | Farm manages | Application uses |
-| --- | --- | --- |
-| [Eve](/docs/integrations/eve) | Eve development process, `/eve` and workflow routes, Vercel build composition. | `agent/` files and `useEveAgent()`. |
+| Runtime                                          | Farm manages                                                                                             | Application uses                                                        |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [Eve](/docs/integrations/eve)                    | Eve development process, `/eve` and workflow routes, Vercel build composition.                           | `agent/` files and `useEveAgent()`.                                     |
 | [Cloudflare Agents](/docs/integrations/cf-agent) | Wrangler development process, `/agents` WebSocket proxy, combined Worker output and deployment metadata. | Agent classes, Durable Object bindings, `useAgent()`, and callable RPC. |
 
 Same-origin routing is not an authorization boundary. Authenticate agent HTTP and WebSocket requests in application middleware or provider routing hooks, and authorize every sensitive tool or callable method on the server.
@@ -256,16 +256,16 @@ The route reads that value from `ctx.data`. Browser-provided data is client cont
 
 ## Built-in groups
 
-| Group | Built-ins |
-| --- | --- |
-| Payment | Stripe, Autumn, and Polar expose checkout, subscription, portal, webhook, entitlement, and billing snapshot patterns. |
-| Auth | Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase expose routes, providers, session helpers, and auth middleware. |
-| Messaging | Resend sends transactional mail, previews templates, and receives provider webhooks. |
-| Workflows | Trigger.dev and Inngest expose trigger, schedule, batch, status, and cancel APIs. |
-| Agents | Eve and Cloudflare Agents run beside Farm in development and compose with supported deployment targets. |
-| API Keys | Unkey can create, verify, revoke, update, and delete customer or service keys. |
-| Interface | UI registry entries scaffold shadcn-style integration screens when `--ui` is enabled. |
-| Storage | ORM storage gives schema-backed integrations a provider-neutral `ctx.args.db`. |
+| Group     | Built-ins                                                                                                                |
+| --------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Payment   | Stripe, Autumn, and Polar expose checkout, subscription, portal, webhook, entitlement, and billing snapshot patterns.    |
+| Auth      | Better Auth, Auth.js, Clerk, Auth0, WorkOS, and Supabase expose routes, providers, session helpers, and auth middleware. |
+| Messaging | Resend sends transactional mail, previews templates, and receives provider webhooks.                                     |
+| Workflows | Trigger.dev and Inngest expose trigger, schedule, batch, status, and cancel APIs.                                        |
+| Agents    | Eve and Cloudflare Agents run beside Farm in development and compose with supported deployment targets.                  |
+| API Keys  | Unkey can create, verify, revoke, update, and delete customer or service keys.                                           |
+| Interface | UI registry entries scaffold shadcn-style integration screens when `--ui` is enabled.                                    |
+| Storage   | ORM storage gives schema-backed integrations a provider-neutral `ctx.args.db`.                                           |
 
 ## When to build your own
 

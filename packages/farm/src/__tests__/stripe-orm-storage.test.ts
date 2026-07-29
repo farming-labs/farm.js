@@ -15,6 +15,8 @@ type SqliteDatabase = {
 
 const requireModule = createRequire(import.meta.url);
 const tempDirs = new Set<string>();
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+const supportsNodeSqlite = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 5);
 
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
@@ -95,12 +97,14 @@ describe("stripe ORM-backed storage", () => {
     );
   });
 
-  it("uses farm.config storage.client as billing storage through the integration route", async () => {
-    const dir = await createTempDir("farm-stripe-orm-storage-");
-    const db = await createSqliteDatabase(path.join(dir, "stripe.sqlite"));
+  it.skipIf(!supportsNodeSqlite)(
+    "uses farm.config storage.client as billing storage through the integration route",
+    async () => {
+      const dir = await createTempDir("farm-stripe-orm-storage-");
+      const db = await createSqliteDatabase(path.join(dir, "stripe.sqlite"));
 
-    try {
-      db.exec(`
+      try {
+        db.exec(`
         CREATE TABLE billing_account (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL,
@@ -154,127 +158,128 @@ describe("stripe ORM-backed storage", () => {
         );
       `);
 
-      const owner = {
-        kind: "user" as const,
-        id: "user_orm_1",
-        email: "owner@example.com",
-      };
-      let ownerArgsClient: unknown;
-      let ownerArgsOrmStatus: unknown;
-      const integration = stripe({
-        instance: {
-          async createCheckoutSession() {
-            return {
-              id: "cs_unused",
-              url: "https://example.com/checkout/cs_unused",
-            };
-          },
-          async createPortalSession() {
-            return {
-              url: "https://example.com/portal",
-            };
-          },
-          async retrieveCheckoutSession() {
-            throw new Error("retrieveCheckoutSession should not be called by this test.");
-          },
-          async constructWebhookEvent() {
-            throw new Error("constructWebhookEvent should not be called by this test.");
-          },
-        },
-        billing: {
-          async resolveOwner(_context, args) {
-            if (!args) {
-              throw new Error("Expected Stripe billing args.");
-            }
-
-            ownerArgsClient = await args.storage.getClient();
-            const orm = (await args.storage.getOrm()) as {
-              billingAccount: {
-                findFirst(args: {
-                  where: Record<string, unknown>;
-                }): Promise<Record<string, unknown> | null>;
-              };
-            };
-            const account = await orm.billingAccount.findFirst({
-              where: {
-                ownerId: owner.id,
-              },
-            });
-            ownerArgsOrmStatus = account?.status;
-            return owner;
-          },
-          plans: {
-            free: {
-              public: true,
-            },
-            pro: {
-              public: true,
-              features: {
-                teams: true,
-              },
-              limits: {
-                seats: 5,
-              },
-            },
-          },
-          products: {
-            proMonthly: {
-              public: true,
-              kind: "subscription",
-              planId: "pro",
-              name: "Pro Monthly",
-              currency: "usd",
-              unitAmount: 1200,
-              interval: "month",
-            },
-          },
-        },
-      });
-      const route = integration.routes.find(
-        (candidate) => candidate.path === "/billing/status" && candidate.method === "GET",
-      );
-      expect(route).toBeTruthy();
-
-      const request = new Request("http://example.com/billing/status", {
-        method: "GET",
-      });
-      const response = await route!.handler(
-        request,
-        createContext(request, "GET", "/billing/status", integration.instance, {
-          storage: {
-            client: db,
-          },
-        }),
-      );
-      const json = JSON.parse(await response.text()) as Record<string, unknown>;
-
-      expect(response.status).toBe(200);
-      expect(ownerArgsClient).toBe(db);
-      expect(ownerArgsOrmStatus).toBe("active");
-      expect(json).toMatchObject({
-        owner: {
-          kind: "user",
+        const owner = {
+          kind: "user" as const,
           id: "user_orm_1",
-        },
-        planId: "pro",
-        productId: "proMonthly",
-        status: "active",
-        stripeCustomerId: "cus_orm_1",
-        stripeSubscriptionId: "sub_orm_1",
-        currentPeriodEnd: "2026-01-02T03:04:05.000Z",
-        cancelAtPeriodEnd: true,
-        trialUsedAt: "2025-12-20T00:00:00.000Z",
-        seatQuantity: 4,
-        seatAllowanceOverride: 8,
-        features: {
-          teams: true,
-        },
-        limits: {
-          seats: 8,
-        },
-      });
-    } finally {
-      db.close();
-    }
-  });
+          email: "owner@example.com",
+        };
+        let ownerArgsClient: unknown;
+        let ownerArgsOrmStatus: unknown;
+        const integration = stripe({
+          instance: {
+            async createCheckoutSession() {
+              return {
+                id: "cs_unused",
+                url: "https://example.com/checkout/cs_unused",
+              };
+            },
+            async createPortalSession() {
+              return {
+                url: "https://example.com/portal",
+              };
+            },
+            async retrieveCheckoutSession() {
+              throw new Error("retrieveCheckoutSession should not be called by this test.");
+            },
+            async constructWebhookEvent() {
+              throw new Error("constructWebhookEvent should not be called by this test.");
+            },
+          },
+          billing: {
+            async resolveOwner(_context, args) {
+              if (!args) {
+                throw new Error("Expected Stripe billing args.");
+              }
+
+              ownerArgsClient = await args.storage.getClient();
+              const orm = (await args.storage.getOrm()) as {
+                billingAccount: {
+                  findFirst(args: {
+                    where: Record<string, unknown>;
+                  }): Promise<Record<string, unknown> | null>;
+                };
+              };
+              const account = await orm.billingAccount.findFirst({
+                where: {
+                  ownerId: owner.id,
+                },
+              });
+              ownerArgsOrmStatus = account?.status;
+              return owner;
+            },
+            plans: {
+              free: {
+                public: true,
+              },
+              pro: {
+                public: true,
+                features: {
+                  teams: true,
+                },
+                limits: {
+                  seats: 5,
+                },
+              },
+            },
+            products: {
+              proMonthly: {
+                public: true,
+                kind: "subscription",
+                planId: "pro",
+                name: "Pro Monthly",
+                currency: "usd",
+                unitAmount: 1200,
+                interval: "month",
+              },
+            },
+          },
+        });
+        const route = integration.routes.find(
+          (candidate) => candidate.path === "/billing/status" && candidate.method === "GET",
+        );
+        expect(route).toBeTruthy();
+
+        const request = new Request("http://example.com/billing/status", {
+          method: "GET",
+        });
+        const response = await route!.handler(
+          request,
+          createContext(request, "GET", "/billing/status", integration.instance, {
+            storage: {
+              client: db,
+            },
+          }),
+        );
+        const json = JSON.parse(await response.text()) as Record<string, unknown>;
+
+        expect(response.status).toBe(200);
+        expect(ownerArgsClient).toBe(db);
+        expect(ownerArgsOrmStatus).toBe("active");
+        expect(json).toMatchObject({
+          owner: {
+            kind: "user",
+            id: "user_orm_1",
+          },
+          planId: "pro",
+          productId: "proMonthly",
+          status: "active",
+          stripeCustomerId: "cus_orm_1",
+          stripeSubscriptionId: "sub_orm_1",
+          currentPeriodEnd: "2026-01-02T03:04:05.000Z",
+          cancelAtPeriodEnd: true,
+          trialUsedAt: "2025-12-20T00:00:00.000Z",
+          seatQuantity: 4,
+          seatAllowanceOverride: 8,
+          features: {
+            teams: true,
+          },
+          limits: {
+            seats: 8,
+          },
+        });
+      } finally {
+        db.close();
+      }
+    },
+  );
 });

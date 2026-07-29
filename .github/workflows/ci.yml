@@ -13,10 +13,9 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - node-version: 18
-            test_args: --skip-incompatible
           - node-version: 20
             test_args: --skip-incompatible
           - node-version: 22
@@ -35,8 +34,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 8
 
       - name: Get pnpm store directory
         shell: bash
@@ -56,12 +53,16 @@ jobs:
 
       - name: Build packages
         run: pnpm build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Run tests
         run: pnpm test -- ${{ matrix.test_args }}
 
       - name: Type check
         run: pnpm type-check
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
   lint:
     name: Lint
@@ -78,8 +79,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 8
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -93,6 +92,7 @@ jobs:
     name: Build Examples
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - node-version: 22
@@ -111,14 +111,14 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 8
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build packages
         run: pnpm build
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Build examples
         run: pnpm build:examples -- ${{ matrix.build_args }}
@@ -139,8 +139,6 @@ jobs:
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 8
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -150,6 +148,8 @@ jobs:
 
       - name: Verify framework features
         run: pnpm test:e2e:framework
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
 
       - name: Upload Playwright failure artifacts
         if: ${{ failure() }}

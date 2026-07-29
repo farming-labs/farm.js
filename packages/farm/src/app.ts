@@ -18,10 +18,7 @@ import { ServerRenderer } from "./server/renderer";
 import { findProgrammaticRouteFiles } from "./routes.server";
 import path from "path";
 import type { ViteDevServer } from "vite";
-import {
-  resolveFarmDevtoolsConfig,
-  type ResolvedFarmDevtoolsConfig,
-} from "./devtools-config";
+import { resolveFarmDevtoolsConfig, type ResolvedFarmDevtoolsConfig } from "./devtools-config";
 import { resolveFarmI18nConfig } from "./i18n/config";
 import {
   createFarmI18nRuntime,
@@ -71,11 +68,7 @@ export class FarmApp {
     _setDefaultFarmI18nRuntime(this.i18nRuntime);
     this.viteServer = viteServer;
     this.routeManager = new RouteManager(this.config, viteServer);
-    this.serverRenderer = new ServerRenderer(
-      this.config,
-      this.routeManager,
-      this.i18nRuntime,
-    );
+    this.serverRenderer = new ServerRenderer(this.config, this.routeManager, this.i18nRuntime);
   }
 
   async initialize(): Promise<void> {

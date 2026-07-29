@@ -122,15 +122,14 @@ function readManifest(contentDir: string): FarmDocsLastModifiedManifest | null {
   if (!existsSync(manifestPath)) return null;
 
   try {
-    const parsed = JSON.parse(readFileSync(manifestPath, "utf8")) as Partial<
-      FarmDocsLastModifiedManifest
-    >;
+    const parsed = JSON.parse(
+      readFileSync(manifestPath, "utf8"),
+    ) as Partial<FarmDocsLastModifiedManifest>;
     if (parsed.version !== 1 || !parsed.pages || typeof parsed.pages !== "object") return null;
 
     const pages = Object.fromEntries(
       Object.entries(parsed.pages).filter(
-        (entry): entry is [string, string] =>
-          typeof entry[1] === "string" && entry[1].length > 0,
+        (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1].length > 0,
       ),
     );
     return { version: 1, pages };

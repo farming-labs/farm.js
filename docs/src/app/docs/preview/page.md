@@ -73,15 +73,15 @@ When no target is passed, Farm tries to detect a running app from the current pr
 
 ## Options
 
-| Option | Purpose |
-| --- | --- |
-| `--port <port>` | Expose a specific local port. |
-| `--host <host>` | Expose a specific local host. Defaults to `localhost`. |
-| `--url <url>` | Expose a full local URL. |
-| `--name <name>` | Request a readable preview URL name. |
-| `--dry-run` | Validate target detection and print the preview plan without opening a session. |
-| `--no-probe` | Skip the local reachability check when `--port` is provided. |
-| `--gateway <url>` | Advanced: use a different Farm Preview gateway. |
+| Option                  | Purpose                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------- |
+| `--port <port>`         | Expose a specific local port.                                                       |
+| `--host <host>`         | Expose a specific local host. Defaults to `localhost`.                              |
+| `--url <url>`           | Expose a full local URL.                                                            |
+| `--name <name>`         | Request a readable preview URL name.                                                |
+| `--dry-run`             | Validate target detection and print the preview plan without opening a session.     |
+| `--no-probe`            | Skip the local reachability check when `--port` is provided.                        |
+| `--gateway <url>`       | Advanced: use a different Farm Preview gateway.                                     |
 | `--provider <provider>` | Advanced: use `farm` for the hosted gateway or `local` for a custom local provider. |
 
 ## Readable URLs
@@ -257,25 +257,25 @@ Use this path only when the hosted Farm gateway is not appropriate for your envi
 
 ## Environment Variables
 
-| Variable | Purpose |
-| --- | --- |
-| `FARM_PREVIEW_GATEWAY_URL` | Override the hosted gateway URL. |
-| `FARM_PREVIEW_DOMAIN` | Override the preview domain used for generated hostnames. |
-| `FARM_PREVIEW_NAME` | Provide a default readable preview name. |
-| `FARM_PREVIEW_PROVIDER` | Select `farm` or `local`. |
-| `FARM_PREVIEW_TUNNEL_COMMAND` | Command template for a custom local tunnel provider. |
+| Variable                      | Purpose                                                   |
+| ----------------------------- | --------------------------------------------------------- |
+| `FARM_PREVIEW_GATEWAY_URL`    | Override the hosted gateway URL.                          |
+| `FARM_PREVIEW_DOMAIN`         | Override the preview domain used for generated hostnames. |
+| `FARM_PREVIEW_NAME`           | Provide a default readable preview name.                  |
+| `FARM_PREVIEW_PROVIDER`       | Select `farm` or `local`.                                 |
+| `FARM_PREVIEW_TUNNEL_COMMAND` | Command template for a custom local tunnel provider.      |
 
 ## Troubleshooting
 
-| Symptom | Check |
-| --- | --- |
-| `No active Farm preview is running` | The CLI session stopped, expired, or the local app exited. Restart `farm preview`. |
-| `The local Farm preview did not respond before the gateway timed out` | Confirm `farm dev` is still running and the local route is not hanging. |
-| Public page loads, but clicks feel delayed | Wait for the first hydration pass. Dev-mode Vite modules are forwarded through the tunnel. Early button clicks are queued and replayed. |
-| No traffic appears in the preview terminal | The browser may still be loading modules, the URL may be stale, or the request may be blocked before reaching the gateway. |
-| Traffic appears in preview terminal but not `farm dev` | The local target may be wrong. Re-run with `--port` or `--url`. |
-| HMR websocket errors appear in the browser console | The hosted preview currently forwards HTTP traffic. Vite HMR websocket forwarding is not part of the hosted gateway yet. |
-| Webhook provider receives a non-2xx response | Check the local dev terminal for the actual Farm API route error. |
+| Symptom                                                               | Check                                                                                                                                   |
+| --------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `No active Farm preview is running`                                   | The CLI session stopped, expired, or the local app exited. Restart `farm preview`.                                                      |
+| `The local Farm preview did not respond before the gateway timed out` | Confirm `farm dev` is still running and the local route is not hanging.                                                                 |
+| Public page loads, but clicks feel delayed                            | Wait for the first hydration pass. Dev-mode Vite modules are forwarded through the tunnel. Early button clicks are queued and replayed. |
+| No traffic appears in the preview terminal                            | The browser may still be loading modules, the URL may be stale, or the request may be blocked before reaching the gateway.              |
+| Traffic appears in preview terminal but not `farm dev`                | The local target may be wrong. Re-run with `--port` or `--url`.                                                                         |
+| HMR websocket errors appear in the browser console                    | The hosted preview currently forwards HTTP traffic. Vite HMR websocket forwarding is not part of the hosted gateway yet.                |
+| Webhook provider receives a non-2xx response                          | Check the local dev terminal for the actual Farm API route error.                                                                       |
 
 ## Security
 

@@ -188,17 +188,17 @@ agent: cfAgent({
 
 ## Options
 
-| Option | Purpose |
-| --- | --- |
-| `config` | Wrangler config relative to `farm.config.ts`. Defaults to `wrangler.jsonc`. |
-| `routePrefix` | Same-origin Agent route. Defaults to `/agents`. |
-| `origin` | Existing Cloudflare Worker origin. |
-| `environment` | Wrangler environment used by development and deployment. |
-| `dev: false` | Disable the managed Wrangler development process. |
-| `dev.port` | Fixed local Wrangler port. Farm selects an available port by default. |
-| `dev.remote` | Use Wrangler remote development. |
-| `dev.logs` | Forward Wrangler output through the Farm logger. Defaults to `true`. |
-| `dev.timeoutMs` | Maximum startup wait. Defaults to 60 seconds. |
+| Option          | Purpose                                                                     |
+| --------------- | --------------------------------------------------------------------------- |
+| `config`        | Wrangler config relative to `farm.config.ts`. Defaults to `wrangler.jsonc`. |
+| `routePrefix`   | Same-origin Agent route. Defaults to `/agents`.                             |
+| `origin`        | Existing Cloudflare Worker origin.                                          |
+| `environment`   | Wrangler environment used by development and deployment.                    |
+| `dev: false`    | Disable the managed Wrangler development process.                           |
+| `dev.port`      | Fixed local Wrangler port. Farm selects an available port by default.       |
+| `dev.remote`    | Use Wrangler remote development.                                            |
+| `dev.logs`      | Forward Wrangler output through the Farm logger. Defaults to `true`.        |
+| `dev.timeoutMs` | Maximum startup wait. Defaults to 60 seconds.                               |
 
 ## Secure Agent routes
 

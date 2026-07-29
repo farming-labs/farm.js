@@ -21,16 +21,7 @@ function parseShortcut(shortcut: string): ParsedShortcut | null {
     .filter(Boolean);
   const key = tokens.find(
     (token) =>
-      ![
-        "alt",
-        "ctrl",
-        "control",
-        "meta",
-        "cmd",
-        "command",
-        "mod",
-        "shift",
-      ].includes(token),
+      !["alt", "ctrl", "control", "meta", "cmd", "command", "mod", "shift"].includes(token),
   );
 
   if (!key) {
@@ -41,18 +32,13 @@ function parseShortcut(shortcut: string): ParsedShortcut | null {
     key,
     alt: tokens.includes("alt"),
     ctrl: tokens.includes("ctrl") || tokens.includes("control"),
-    meta:
-      tokens.includes("meta") ||
-      tokens.includes("cmd") ||
-      tokens.includes("command"),
+    meta: tokens.includes("meta") || tokens.includes("cmd") || tokens.includes("command"),
     mod: tokens.includes("mod"),
     shift: tokens.includes("shift"),
   };
 }
 
-export function generateFarmDevtoolsClientRuntime(
-  config: ResolvedFarmDevtoolsConfig,
-): string {
+export function generateFarmDevtoolsClientRuntime(config: ResolvedFarmDevtoolsConfig): string {
   if (!config.enabled) {
     return "";
   }

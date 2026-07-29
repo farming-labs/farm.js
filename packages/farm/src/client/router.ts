@@ -24,9 +24,7 @@ export interface UseRouterOptions {
 export interface UseBlockerOptions {
   when: boolean | ((context: FarmNavigationBlockerContext) => boolean);
   message?: string;
-  shouldBlock?: (
-    context: FarmNavigationBlockerContext,
-  ) => boolean | Promise<boolean>;
+  shouldBlock?: (context: FarmNavigationBlockerContext) => boolean | Promise<boolean>;
 }
 
 export interface UseBlockerReturn {
@@ -77,12 +75,12 @@ export function useRouter(options: UseRouterOptions = {}) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
 
-  const pushState = <TState,>(pageState: TState, href?: string) => {
+  const pushState = <TState>(pageState: TState, href?: string) => {
     if (typeof window === "undefined") return;
     getSPARouter().pushState(pageState, resolveClientHref(href, basePath));
   };
 
-  const replaceState = <TState,>(pageState: TState, href?: string) => {
+  const replaceState = <TState>(pageState: TState, href?: string) => {
     if (typeof window === "undefined") return;
     getSPARouter().replaceState(pageState, resolveClientHref(href, basePath));
   };
@@ -153,8 +151,7 @@ export function useBlocker(options: UseBlockerOptions): UseBlockerReturn {
 
     return getSPARouter().addBlocker(async (context) => {
       const current = optionsRef.current;
-      const when =
-        typeof current.when === "function" ? current.when(context) : current.when;
+      const when = typeof current.when === "function" ? current.when(context) : current.when;
 
       if (!when) return false;
 

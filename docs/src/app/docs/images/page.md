@@ -130,19 +130,19 @@ export default defineConfig({
 });
 ```
 
-| Option | Behavior |
-| --- | --- |
-| `provider` | `auto` uses Sharp on Node, Vercel, and Netlify, and Cloudflare Images on Cloudflare. Use `none` to disable optimization. |
-| `path` | Public optimizer endpoint used by `Image` and the server runtime. |
-| `deviceSizes` | Responsive viewport widths accepted by the endpoint. |
-| `imageSizes` | Smaller fixed image widths accepted by the endpoint. |
-| `qualities` | Quality allowlist. `Image` selects the nearest configured value. |
-| `formats` | Preferred modern output formats, negotiated through the request `Accept` header. |
-| `minimumCacheTTL` | Browser and in-process transformed-image cache lifetime in seconds. |
-| `maximumResponseBody` | Maximum source and transformed body size. Accepts bytes or values such as `"10mb"`. |
-| `maximumRedirects` | Maximum remote redirects; every destination is checked again. |
-| `localPatterns` | Allowed same-origin paths. The default is `/**`. |
-| `remotePatterns` | Allowed remote protocols, hostnames, ports, paths, and queries. |
+| Option                | Behavior                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `provider`            | `auto` uses Sharp on Node, Vercel, and Netlify, and Cloudflare Images on Cloudflare. Use `none` to disable optimization. |
+| `path`                | Public optimizer endpoint used by `Image` and the server runtime.                                                        |
+| `deviceSizes`         | Responsive viewport widths accepted by the endpoint.                                                                     |
+| `imageSizes`          | Smaller fixed image widths accepted by the endpoint.                                                                     |
+| `qualities`           | Quality allowlist. `Image` selects the nearest configured value.                                                         |
+| `formats`             | Preferred modern output formats, negotiated through the request `Accept` header.                                         |
+| `minimumCacheTTL`     | Browser and in-process transformed-image cache lifetime in seconds.                                                      |
+| `maximumResponseBody` | Maximum source and transformed body size. Accepts bytes or values such as `"10mb"`.                                      |
+| `maximumRedirects`    | Maximum remote redirects; every destination is checked again.                                                            |
+| `localPatterns`       | Allowed same-origin paths. The default is `/**`.                                                                         |
+| `remotePatterns`      | Allowed remote protocols, hostnames, ports, paths, and queries.                                                          |
 
 Pass a `loader` prop when an application already uses an image CDN. The loader receives `src`, `width`, and the configured `quality` and must return the final URL.
 

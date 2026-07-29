@@ -158,7 +158,9 @@ describe("Farm workflows", () => {
     });
 
     const response = await handler(
-      new Request("https://example.com/api/_farm/workflows/sync-users?secret=test-secret&cursor=abc"),
+      new Request(
+        "https://example.com/api/_farm/workflows/sync-users?secret=test-secret&cursor=abc",
+      ),
     );
 
     expect(response?.status).toBe(200);

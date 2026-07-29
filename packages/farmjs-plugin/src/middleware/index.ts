@@ -543,38 +543,40 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
 
       // Add middleware to handle requests
       return () => {
-        server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
-          const url = req.url || "/";
-          const pathname = url.split("?")[0];
+        server.middlewares.use(
+          _withAfterNodeMiddleware(async (req, res, next) => {
+            const url = req.url || "/";
+            const pathname = url.split("?")[0];
 
-          // Skip Vite internal requests
-          if (
-            pathname.startsWith("/@") ||
-            pathname.startsWith("/__") ||
-            pathname.startsWith("/node_modules") ||
-            (pathname.includes(".") && !pathname.endsWith("/"))
-          ) {
-            return next();
-          }
-
-          try {
-            // Execute middleware
-            const middlewareData = new Map<string, any>();
-            const handled = await executeMiddleware(
-              req as IncomingMessage,
-              res as ServerResponse,
-              pathname,
-              middlewareData,
-            );
-            if (handled) {
-              return;
+            // Skip Vite internal requests
+            if (
+              pathname.startsWith("/@") ||
+              pathname.startsWith("/__") ||
+              pathname.startsWith("/node_modules") ||
+              (pathname.includes(".") && !pathname.endsWith("/"))
+            ) {
+              return next();
             }
-          } catch (e) {
-            console.error("[FARM] Middleware error:", e);
-          }
 
-          next();
-        }));
+            try {
+              // Execute middleware
+              const middlewareData = new Map<string, any>();
+              const handled = await executeMiddleware(
+                req as IncomingMessage,
+                res as ServerResponse,
+                pathname,
+                middlewareData,
+              );
+              if (handled) {
+                return;
+              }
+            } catch (e) {
+              console.error("[FARM] Middleware error:", e);
+            }
+
+            next();
+          }),
+        );
       };
     },
 

@@ -185,7 +185,9 @@ async function watchLocalPreviewTarget(
 
     const reachable = await isLocalPreviewTargetReachable(target.localUrl, options.timeoutMs);
     if (!reachable && !controller.signal.aborted) {
-      logger.warn(`Local preview target ${target.localUrl} is no longer reachable. Closing preview session.`);
+      logger.warn(
+        `Local preview target ${target.localUrl} is no longer reachable. Closing preview session.`,
+      );
       controller.abort(new Error("Local preview target is no longer reachable."));
       return;
     }
@@ -224,7 +226,9 @@ export async function createGatewaySession(
   });
 
   if (!response.ok) {
-    throw new Error(`Preview gateway rejected the session (${response.status}): ${await response.text()}`);
+    throw new Error(
+      `Preview gateway rejected the session (${response.status}): ${await response.text()}`,
+    );
   }
 
   const session = (await response.json()) as PreviewGatewaySession;
@@ -255,7 +259,9 @@ export async function forwardGatewayRequest(
   const response = await fetch(`${target.localUrl}${request.path}`, {
     method,
     headers,
-    body: hasBody ? Buffer.from(request.body || "", request.encoding === "base64" ? "base64" : "utf8") : undefined,
+    body: hasBody
+      ? Buffer.from(request.body || "", request.encoding === "base64" ? "base64" : "utf8")
+      : undefined,
   });
 
   const responseHeaders: Record<string, string> = {};
@@ -329,7 +335,9 @@ async function sendGatewayResponse(
   );
 
   if (!response.ok) {
-    throw new Error(`Preview gateway response upload failed (${response.status}): ${await response.text()}`);
+    throw new Error(
+      `Preview gateway response upload failed (${response.status}): ${await response.text()}`,
+    );
   }
 }
 
@@ -363,7 +371,10 @@ function normalizeGatewayUrl(value: string) {
 }
 
 function normalizePreviewDomain(value: string) {
-  return value.replace(/^https?:\/\//, "").replace(/^\.*/, "").replace(/\/*$/, "");
+  return value
+    .replace(/^https?:\/\//, "")
+    .replace(/^\.*/, "")
+    .replace(/\/*$/, "");
 }
 
 function sanitizePreviewName(value: string | undefined) {
