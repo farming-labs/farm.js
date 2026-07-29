@@ -1,7 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const docsPort = process.env.FARM_DOCS_PRODUCTION_E2E_PORT || "4176";
-const demoPort = process.env.FARM_SSR_SSG_PRODUCTION_E2E_PORT || "4177";
+const docsPort = process.env.FARM_DOCS_PRODUCTION_E2E_PORT || "4276";
+const demoPort = process.env.FARM_SSR_SSG_PRODUCTION_E2E_PORT || "4277";
 const docsBaseURL = `http://127.0.0.1:${docsPort}`;
 const demoBaseURL = `http://127.0.0.1:${demoPort}`;
 
@@ -15,7 +15,8 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   use: {
-    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    trace: "retain-on-failure",
   },
   webServer: [
     {

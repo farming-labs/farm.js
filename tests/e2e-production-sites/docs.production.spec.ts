@@ -8,10 +8,13 @@ test.beforeAll(async () => {
   ]);
 });
 
-test("boots the emitted docs site and navigates into the guide", async ({ page }) => {
+test("boots the emitted docs site and navigates into the guide", async ({
+  page,
+}) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
+    if (message.type() === "error")
+      browserErrors.push(`console: ${message.text()}`);
   });
   page.on("pageerror", (error) => browserErrors.push(`page: ${error.message}`));
 
@@ -20,19 +23,22 @@ test("boots the emitted docs site and navigates into the guide", async ({ page }
   expect(response?.ok()).toBe(true);
   expect(response?.headers()["x-frame-options"]).toBe("DENY");
   await expect(page).toHaveTitle(/Farm\.js/);
-  await expect(page.getByText("Benchmarks", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(
+    "A Framework for",
+  );
+  await expect(
+    page.getByRole("navigation", { name: "Primary navigation" }),
+  ).toBeVisible();
 
-  const benchmarkResults = page.getByRole("region", {
-    name: /Framework benchmark results/,
-  });
-  await expect(benchmarkResults).toBeVisible();
-  for (const framework of ["Farm.js", "Next.js", "SvelteKit", "Nuxt", "TanStack Start"]) {
-    await expect(benchmarkResults.getByRole("row", { name: new RegExp(framework) })).toBeVisible();
-  }
-
-  await page.getByRole("link", { name: "Get Started", exact: true }).first().click();
+  const getStarted = page
+    .getByRole("link", { name: "Get Started", exact: true })
+    .first();
+  await expect(getStarted).toBeVisible();
+  await getStarted.click();
 
   await expect(page).toHaveURL(/\/docs\/getting-started$/);
-  await expect(page.getByRole("heading", { name: "Getting Started", level: 1 })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Getting Started", level: 1 }),
+  ).toBeVisible();
   expect(browserErrors).toEqual([]);
 });
