@@ -480,7 +480,7 @@ export class MiddlewareManager {
       return { matched: false };
     }
 
-    const params = { ...(nestedMatch.params || {}) };
+    const params = { ...nestedMatch.params };
     delete params.__farmRest;
     return {
       matched: true,

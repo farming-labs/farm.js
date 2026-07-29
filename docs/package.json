@@ -11,9 +11,9 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
+    "@farm.js/core": "workspace:*",
     "@farming-labs/docs": "^0.2.44",
     "@farming-labs/theme": "^0.2.44",
-    "@farm.js/core": "workspace:*",
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",
     "lucide-react": "1.23.0",

@@ -47,9 +47,7 @@ export function isChunkLoadError(errorLike: unknown): boolean {
   return Boolean(targetUrl && /\.(?:m?js|css)(?:[?#].*)?$/i.test(targetUrl));
 }
 
-export function installChunkErrorRecovery(
-  options: FarmChunkRecoveryOptions = {},
-): () => void {
+export function installChunkErrorRecovery(options: FarmChunkRecoveryOptions = {}): () => void {
   if (typeof window === "undefined") {
     return () => {};
   }

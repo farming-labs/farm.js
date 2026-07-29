@@ -52,15 +52,16 @@ describe("SPA router client plugin lifecycle", () => {
 
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () =>
-        new Response(
-          JSON.stringify({
-            props: {},
-            modulePath: "/src/app/to/page.tsx",
-            isClientComponent: true,
-          }),
-          { headers: { "content-type": "application/json" } },
-        ),
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              props: {},
+              modulePath: "/src/app/to/page.tsx",
+              isClientComponent: true,
+            }),
+            { headers: { "content-type": "application/json" } },
+          ),
       ),
     );
 

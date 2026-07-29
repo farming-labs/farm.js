@@ -9,10 +9,7 @@ import {
   type FarmRouterPathParams,
 } from "../router";
 import type { FarmViewTransitionMode } from "./spa-router";
-import {
-  isFarmLocaleChangeHref,
-  localizeActiveFarmHref,
-} from "../i18n/client-runtime";
+import { isFarmLocaleChangeHref, localizeActiveFarmHref } from "../i18n/client-runtime";
 import type { FarmI18nLocale } from "../i18n/types";
 
 /**

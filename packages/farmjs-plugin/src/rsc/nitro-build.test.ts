@@ -146,7 +146,8 @@ export function render() {
 
       expect(response, logs).toBeDefined();
       expect(response?.status, logs).toBe(200);
-      await expect(response?.text()).resolves.toBe("standalone-rsc:<strong>native</strong>");
+      const body = await response?.text();
+      expect(body?.replace(/\u001b\[[0-9;]*m/g, "")).toBe("standalone-rsc:<strong>native</strong>");
     } finally {
       if (child) await stopProcess(child);
       rmSync(fixtureRoot, { recursive: true, force: true });

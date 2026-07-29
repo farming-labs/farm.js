@@ -890,7 +890,7 @@ export default function DashboardPage() {
                             <div>
                               <strong>
                                 {line.label} ·{" "}
-                                {formatMoney(line.amount, billingState.currentCharges.currency)}
+                                {formatMoney(line.amount, billingState.currentCharges?.currency)}
                               </strong>
                               <div className="muted-line">
                                 {line.kind === "metered_usage"
@@ -904,7 +904,7 @@ export default function DashboardPage() {
                                       line.unitAmountDecimal
                                         ? ` × ${formatUnitAmount(
                                             line.unitAmountDecimal,
-                                            billingState.currentCharges.currency,
+                                            billingState.currentCharges?.currency,
                                             line.billingUnits,
                                             "tokens",
                                           )}`

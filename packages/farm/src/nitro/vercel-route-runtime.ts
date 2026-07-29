@@ -152,8 +152,8 @@ function getPatternSpecificity(pattern: string): number {
     .split("/")
     .filter(Boolean)
     .reduce((score, segment) => {
-      if (segment === "**" || /^\[\[\.\.\./.test(segment)) return score + 1;
-      if (segment === "*" || /^\[\.\.\./.test(segment)) return score + 10;
+      if (segment === "**" || segment.startsWith("[[...")) return score + 1;
+      if (segment === "*" || segment.startsWith("[...")) return score + 10;
       if (/^\[.+\]$/.test(segment)) return score + 50;
       return score + 100;
     }, 0);

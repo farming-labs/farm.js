@@ -5876,8 +5876,8 @@ async function copySharpRuntime(
     await fs.mkdir(path.dirname(targetDir), { recursive: true });
     const packageRequire = createRequire(packageJsonPath);
     const dependencies = {
-      ...(packageJson.dependencies || {}),
-      ...(packageJson.optionalDependencies || {}),
+      ...packageJson.dependencies,
+      ...packageJson.optionalDependencies,
     };
     await Promise.all([
       fs.cp(packageDir, targetDir, {

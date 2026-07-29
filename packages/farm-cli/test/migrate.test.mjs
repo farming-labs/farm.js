@@ -165,10 +165,7 @@ test("generates typed i18n declarations", async () => {
 
     await generateFarmArtifacts({ root });
 
-    const i18nTypes = await readFile(
-      path.join(root, "src", "farm-i18n.d.ts"),
-      "utf8",
-    );
+    const i18nTypes = await readFile(path.join(root, "src", "farm-i18n.d.ts"), "utf8");
     assert.ok(i18nTypes.includes('"fr": true'));
     assert.ok(i18nTypes.includes('"home.welcome": { "name": string }'));
     assert.ok(i18nTypes.includes('"home.items": { "count": number }'));
@@ -275,8 +272,12 @@ export default function AboutPage() {
     );
 
     const dryRunPlan = await createFrameworkMigrationPlan(root, "next");
-    assert.ok(dryRunPlan.operations.some((operation) => operation.description.includes("Copy Next")));
-    await assert.rejects(() => readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8"));
+    assert.ok(
+      dryRunPlan.operations.some((operation) => operation.description.includes("Copy Next")),
+    );
+    await assert.rejects(() =>
+      readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8"),
+    );
 
     await migrateFarm({ root, source: "next", write: true });
 
@@ -332,7 +333,10 @@ function PostPage() {
 
     await migrateFarm({ root, source: "tanstack", write: true });
 
-    const page = await readFile(path.join(root, "src", "app", "posts", "[postId]", "page.tsx"), "utf8");
+    const page = await readFile(
+      path.join(root, "src", "app", "posts", "[postId]", "page.tsx"),
+      "utf8",
+    );
     assert.match(page, /export default PostPage;/);
 
     const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));

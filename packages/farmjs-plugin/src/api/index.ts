@@ -412,92 +412,94 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
 
       // Add middleware to handle API requests
       return () => {
-        server.middlewares.use(_withAfterNodeMiddleware(async (req, res, next) => {
-          const url = req.url || "/";
-          const pathname = url.split("?")[0];
-          const method = req.method || "GET";
+        server.middlewares.use(
+          _withAfterNodeMiddleware(async (req, res, next) => {
+            const url = req.url || "/";
+            const pathname = url.split("?")[0];
+            const method = req.method || "GET";
 
-          // Only handle /api/ routes
-          if (!pathname.startsWith("/api/")) {
-            return next();
-          }
-
-          // Wait for discovery
-          if (discoveryPromise && !discoveryComplete) {
-            await discoveryPromise;
-          }
-
-          if (!apiRouterHandler) {
-            return next();
-          }
-
-          const startTime = Date.now();
-
-          try {
-            // Execute middleware if available
-            const farmMiddleware = (server as any).__farmMiddleware__;
-            if (farmMiddleware) {
-              await farmMiddleware.waitForDiscovery?.();
-              const middlewareData = new Map<string, any>();
-              const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
-              if (handled) {
-                const duration = Date.now() - startTime;
-                logResponse(method, pathname, res.statusCode || 200, duration);
-                return;
-              }
+            // Only handle /api/ routes
+            if (!pathname.startsWith("/api/")) {
+              return next();
             }
 
-            // Convert Node request to Web Request
-            const fullUrl = `http://${req.headers.host || "localhost:3000"}${url}`;
-            const headers = new Headers();
-            for (const [key, value] of Object.entries(req.headers)) {
-              if (value) {
-                headers.set(key, Array.isArray(value) ? value.join(", ") : value);
-              }
+            // Wait for discovery
+            if (discoveryPromise && !discoveryComplete) {
+              await discoveryPromise;
             }
 
-            // Get body for non-GET requests
-            let body: string | undefined;
-            if (method !== "GET" && method !== "HEAD") {
-              body = await new Promise<string>((resolve) => {
-                let data = "";
-                req.on("data", (chunk: any) => {
-                  data += chunk;
+            if (!apiRouterHandler) {
+              return next();
+            }
+
+            const startTime = Date.now();
+
+            try {
+              // Execute middleware if available
+              const farmMiddleware = (server as any).__farmMiddleware__;
+              if (farmMiddleware) {
+                await farmMiddleware.waitForDiscovery?.();
+                const middlewareData = new Map<string, any>();
+                const handled = await farmMiddleware.execute(req, res, pathname, middlewareData);
+                if (handled) {
+                  const duration = Date.now() - startTime;
+                  logResponse(method, pathname, res.statusCode || 200, duration);
+                  return;
+                }
+              }
+
+              // Convert Node request to Web Request
+              const fullUrl = `http://${req.headers.host || "localhost:3000"}${url}`;
+              const headers = new Headers();
+              for (const [key, value] of Object.entries(req.headers)) {
+                if (value) {
+                  headers.set(key, Array.isArray(value) ? value.join(", ") : value);
+                }
+              }
+
+              // Get body for non-GET requests
+              let body: string | undefined;
+              if (method !== "GET" && method !== "HEAD") {
+                body = await new Promise<string>((resolve) => {
+                  let data = "";
+                  req.on("data", (chunk: any) => {
+                    data += chunk;
+                  });
+                  req.on("end", () => {
+                    resolve(data);
+                  });
                 });
-                req.on("end", () => {
-                  resolve(data);
-                });
+              }
+
+              const request = new Request(fullUrl, {
+                method,
+                headers,
+                body: body || undefined,
               });
+
+              const response = await apiRouterHandler(request);
+
+              const duration = Date.now() - startTime;
+              logResponse(method, pathname, response.status, duration);
+
+              // Send response
+              res.statusCode = response.status;
+              response.headers.forEach((value, key) => {
+                res.setHeader(key, value);
+              });
+
+              const responseBody = await response.text();
+              res.end(responseBody);
+            } catch (error: any) {
+              const duration = Date.now() - startTime;
+              logResponse(method, pathname, 500, duration);
+              console.error("[FARM] API error:", error);
+              res.statusCode = 500;
+              res.setHeader("Content-Type", "application/json");
+              res.end(JSON.stringify({ error: "Internal server error" }));
             }
-
-            const request = new Request(fullUrl, {
-              method,
-              headers,
-              body: body || undefined,
-            });
-
-            const response = await apiRouterHandler(request);
-
-            const duration = Date.now() - startTime;
-            logResponse(method, pathname, response.status, duration);
-
-            // Send response
-            res.statusCode = response.status;
-            response.headers.forEach((value, key) => {
-              res.setHeader(key, value);
-            });
-
-            const responseBody = await response.text();
-            res.end(responseBody);
-          } catch (error: any) {
-            const duration = Date.now() - startTime;
-            logResponse(method, pathname, 500, duration);
-            console.error("[FARM] API error:", error);
-            res.statusCode = 500;
-            res.setHeader("Content-Type", "application/json");
-            res.end(JSON.stringify({ error: "Internal server error" }));
-          }
-        }));
+          }),
+        );
       };
     },
 

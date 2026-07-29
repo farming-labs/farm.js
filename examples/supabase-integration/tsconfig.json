@@ -30,7 +30,7 @@
         "../../packages/farm-supabase/dist/*"
       ],
       "@farm.js/supabase/client": [
-        "../../packages/farm-integrations/dist/supabase/client.d.ts"
+        "../../packages/farm-supabase/dist/client.d.ts"
       ]
     },
     "allowImportingTsExtensions": true,

@@ -102,16 +102,16 @@ export default async function UserPage({ params }: PageProps) {
 
 ## Parser reference
 
-| Parser | Reads |
-| --- | --- |
-| `asString` | Plain strings. |
-| `asInteger` | Integer values for pagination and limits. |
-| `asFloat` | Decimal numbers. |
-| `asBoolean` | Boolean flags. |
+| Parser              | Reads                                              |
+| ------------------- | -------------------------------------------------- |
+| `asString`          | Plain strings.                                     |
+| `asInteger`         | Integer values for pagination and limits.          |
+| `asFloat`           | Decimal numbers.                                   |
+| `asBoolean`         | Boolean flags.                                     |
 | `asArrayOf(parser)` | Repeated values serialized through another parser. |
-| `asJson` | Structured JSON encoded in the URL. |
-| `asIsoDate` | Date strings. |
-| `asIsoDateTime` | Date-time strings. |
+| `asJson`            | Structured JSON encoded in the URL.                |
+| `asIsoDate`         | Date strings.                                      |
+| `asIsoDateTime`     | Date-time strings.                                 |
 
 ## Production notes
 

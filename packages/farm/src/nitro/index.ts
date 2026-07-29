@@ -589,16 +589,14 @@ export default defineEventHandler(async (event: H3Event) => {
           cloudflare: cloudflareCronConfig,
         }
       : {}),
-    handlers: [
-      ...(farmWorkflows.handlerPath
-        ? [
-            {
-              route: `${config.workflows.route}/**`,
-              handler: farmWorkflows.handlerPath,
-            },
-          ]
-        : []),
-    ],
+    handlers: farmWorkflows.handlerPath
+      ? [
+          {
+            route: `${config.workflows.route}/**`,
+            handler: farmWorkflows.handlerPath,
+          },
+        ]
+      : [],
     // Route rules for Vercel
     routeRules: {
       "/api/**": {

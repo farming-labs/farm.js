@@ -8,13 +8,10 @@ test.beforeAll(async () => {
   ]);
 });
 
-test("boots the emitted docs site and navigates into the guide", async ({
-  page,
-}) => {
+test("boots the emitted docs site and navigates into the guide", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {
-    if (message.type() === "error")
-      browserErrors.push(`console: ${message.text()}`);
+    if (message.type() === "error") browserErrors.push(`console: ${message.text()}`);
   });
   page.on("pageerror", (error) => browserErrors.push(`page: ${error.message}`));
 
@@ -23,22 +20,14 @@ test("boots the emitted docs site and navigates into the guide", async ({
   expect(response?.ok()).toBe(true);
   expect(response?.headers()["x-frame-options"]).toBe("DENY");
   await expect(page).toHaveTitle(/Farm\.js/);
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(
-    "A Framework for",
-  );
-  await expect(
-    page.getByRole("navigation", { name: "Primary navigation" }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("A Framework for");
+  await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
 
-  const getStarted = page
-    .getByRole("link", { name: "Get Started", exact: true })
-    .first();
+  const getStarted = page.getByRole("link", { name: "Get Started", exact: true }).first();
   await expect(getStarted).toBeVisible();
   await getStarted.click();
 
   await expect(page).toHaveURL(/\/docs\/getting-started$/);
-  await expect(
-    page.getByRole("heading", { name: "Getting Started", level: 1 }),
-  ).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Getting Started", level: 1 })).toBeVisible();
   expect(browserErrors).toEqual([]);
 });

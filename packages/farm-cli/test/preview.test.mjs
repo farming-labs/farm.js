@@ -234,15 +234,7 @@ test("runs farm preview dry-run through the CLI", async () => {
   try {
     const { stdout } = await execFileAsync(
       process.execPath,
-      [
-        cliBin,
-        "preview",
-        "--port",
-        String(server.port),
-        "--name",
-        "checkout-test",
-        "--dry-run",
-      ],
+      [cliBin, "preview", "--port", String(server.port), "--name", "checkout-test", "--dry-run"],
       {
         env: {
           ...process.env,
@@ -263,10 +255,13 @@ test("runs farm preview dry-run through the CLI", async () => {
 });
 
 async function createTestServer(handler) {
-  const server = createServer(handler || ((_req, res) => {
-    res.statusCode = 200;
-    res.end("ok");
-  }));
+  const server = createServer(
+    handler ||
+      ((_req, res) => {
+        res.statusCode = 200;
+        res.end("ok");
+      }),
+  );
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);

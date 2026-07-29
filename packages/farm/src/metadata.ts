@@ -41,7 +41,7 @@ export function addMetadataImageReference(
   reference: FarmMetadataImageReference,
 ): MetadataRecord {
   if (reference.kind === "opengraph") {
-    const openGraph = { ...(metadata.openGraph || {}) };
+    const openGraph = { ...metadata.openGraph };
     if (!hasMetadataImages(openGraph.images) && !hasMetadataImages((openGraph as any).image)) {
       openGraph.images = [
         {
@@ -60,7 +60,7 @@ export function addMetadataImageReference(
     };
   }
 
-  const twitter = { ...(metadata.twitter || {}) };
+  const twitter = { ...metadata.twitter };
   if (!hasMetadataImages(twitter.images)) {
     twitter.images = [reference.href];
     twitter.card = twitter.card || "summary_large_image";
