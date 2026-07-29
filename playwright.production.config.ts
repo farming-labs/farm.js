@@ -17,7 +17,8 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL,
-    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    trace: "retain-on-failure",
   },
   webServer: externalBaseURL
     ? undefined

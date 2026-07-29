@@ -1,23 +1,31 @@
 # Farm end-to-end tests
 
-Run the complete browser suite with:
-
-```sh
-pnpm test:e2e
-```
-
-Run the complete general framework browser suite, including the required framework build, with:
+Run the complete framework end-to-end suite with:
 
 ```sh
 pnpm test:e2e:framework
 ```
 
-This is the CI entry point for every spec under `tests/e2e`. It exercises framework routing,
-rendering, hydration, navigation, route boundaries, prefetch controls, and global state against
-`examples/basic`. Specialized production, internationalization, and RSC suites remain separate so
-their failures are reported independently.
+This is the single CI entry point for framework behavior. It builds the required packages and
+verifies:
 
-Run the production internationalization suite with:
+- development and production rendering, routing, hydration, navigation, route boundaries,
+  prefetch controls, and global state
+- emitted docs and SSR/SSG production servers
+- internationalization routing, persistence, hydration, and localized API context
+- React Server Components, server actions, middleware, server queries, and optimized boundaries
+
+Focused commands remain available while developing an individual area:
+
+```sh
+pnpm test:e2e
+pnpm test:e2e:production
+pnpm test:e2e:production:sites
+pnpm test:e2e:i18n
+pnpm test:e2e:rsc
+```
+
+For example, run only the production internationalization coverage with:
 
 ```sh
 pnpm test:e2e:i18n
@@ -27,7 +35,7 @@ The i18n suite builds the framework and `examples/i18n`, starts the Nitro produc
 verifies locale signal precedence, canonical redirects, cache boundaries, localized API context,
 hydration, client locale switching, cookie persistence, and RTL rendering.
 
-Run the emitted docs and SSR/SSG production smoke suite with:
+Run only the emitted docs and SSR/SSG production smoke coverage with:
 
 ```sh
 pnpm test:e2e:production:sites
@@ -37,7 +45,7 @@ This builds both sites with the Node production preset, boots only their emitted
 and verifies docs navigation, SSR responses, middleware-covered SSG routes, client hydration, and
 API handlers. CI can use `test:e2e:production:sites:run` after the framework packages are built.
 
-Run the emitted React Server Components suite with:
+Run only the emitted React Server Components coverage with:
 
 ```sh
 pnpm test:e2e:rsc
