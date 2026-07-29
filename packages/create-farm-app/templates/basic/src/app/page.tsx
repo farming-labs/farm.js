@@ -1,4 +1,5 @@
 import { Link } from "@farm.js/core/client";
+import { FARM_VERSION } from "@farm.js/core/version";
 
 export default function HomePage() {
   return (
@@ -7,7 +8,7 @@ export default function HomePage() {
         <div>
           <h1 className="text-6xl font-bold mb-4">
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              🚜 Welcome to Farm.js
+              🚜 Welcome to Farm.js v{FARM_VERSION}
             </span>
           </h1>
 

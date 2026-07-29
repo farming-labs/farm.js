@@ -3,6 +3,7 @@ import { defineConfig, type Options } from "tsup";
 export const farmPackageBuildOptions = {
   entry: {
     index: "src/index.ts",
+    version: "src/version.ts",
     server: "src/server.ts",
     client: "src/client.ts",
     vite: "src/vite.ts",
