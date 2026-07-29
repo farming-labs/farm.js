@@ -24,7 +24,7 @@
         "../../packages/farm-autumn/dist/*"
       ],
       "@farm.js/autumn/client": [
-        "../../packages/farm-integrations/dist/autumn/client.d.ts"
+        "../../packages/farm-autumn/dist/client.d.ts"
       ],
       "@farm.js/better-auth": [
         "../../packages/farm-better-auth/dist/index.d.ts"

@@ -8,8 +8,8 @@ function mergeNoExternal(
 ): ViteNoExternal {
   if (farmValue === true || userValue === true) return true;
 
-  const normalize = (value: ViteNoExternal | undefined) =>
-    value == null ? [] : Array.isArray(value) ? value : [value];
+  const normalize = (value: ViteNoExternal | undefined): Array<string | RegExp> =>
+    value == null || value === true ? [] : Array.isArray(value) ? value : [value];
 
   return Array.from(new Set([...normalize(farmValue), ...normalize(userValue)]));
 }

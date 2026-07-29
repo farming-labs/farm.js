@@ -378,11 +378,16 @@ function expandTunnelTemplate(
   requestedHostname: string,
 ) {
   return template
-    .replaceAll("{url}", shellQuote(target.localUrl))
-    .replaceAll("{port}", shellQuote(String(target.port)))
-    .replaceAll("{host}", shellQuote(target.host))
-    .replaceAll("{name}", shellQuote(requestedName))
-    .replaceAll("{hostname}", shellQuote(requestedHostname));
+    .split("{url}")
+    .join(shellQuote(target.localUrl))
+    .split("{port}")
+    .join(shellQuote(String(target.port)))
+    .split("{host}")
+    .join(shellQuote(target.host))
+    .split("{name}")
+    .join(shellQuote(requestedName))
+    .split("{hostname}")
+    .join(shellQuote(requestedHostname));
 }
 
 function shellQuote(value: string) {

@@ -144,6 +144,12 @@ async function defaultHandler({
       }
 
       const { route, params, layouts } = match;
+      if (!route) {
+        return new Response(JSON.stringify({ error: "Route not found" }), {
+          status: 404,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
 
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
