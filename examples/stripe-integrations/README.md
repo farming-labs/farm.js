@@ -4,10 +4,10 @@ This folder groups Stripe integration examples by ORM or dialect so each setup c
 
 Available examples:
 
-- [Prisma](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma)
-- [Drizzle](/Users/mac/oss/farm.js/examples/stripe-integrations/drizzle)
-- [SQLite SQL](/Users/mac/oss/farm.js/examples/stripe-integrations/sqlite)
-- [Prisma Org Billing](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma-org)
+- [Prisma](./prisma)
+- [Drizzle](./drizzle)
+- [SQLite SQL](./sqlite)
+- [Prisma Org Billing](./prisma-org)
 
 Each example uses:
 

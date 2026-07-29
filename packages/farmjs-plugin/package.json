@@ -4,6 +4,11 @@
   "description": "Official plugins for Farm.js framework",
   "license": "MIT",
   "author": "Farm.js Team",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farmjs-plugin"
+  },
   "files": [
     "dist",
     "scripts"

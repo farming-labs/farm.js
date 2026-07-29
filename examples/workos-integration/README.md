@@ -16,7 +16,7 @@ WORKOS_API_KEY=sk_test_...
 
 Farm loads env files automatically during config resolution. In development, the integration falls back to a local cookie password if `WORKOS_COOKIE_PASSWORD` is not set.
 
-The example also exposes shared callers in [api.ts](/Users/mac/oss/farm.js/examples/workos-integration/src/lib/api.ts):
+The example also exposes shared callers in [api.ts](./src/lib/api.ts):
 
 - `api` for server-side calls that dispatch directly to the registered integration handler
 - `apiClient` for browser calls that hit the integration-owned routes

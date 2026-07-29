@@ -32,12 +32,12 @@ STRIPE_SECRET_KEY=sk_test_your_key_here
 ```
 
 Add `STRIPE_WEBHOOK_SECRET` as well if you want signed webhook verification.
-The example now reads its own `.env.local` from [examples/stripe-integrations/prisma/.env.local](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma/.env.local), even if you start it from the repo root with a workspace filter.
+The example now reads its own `.env.local` from [examples/stripe-integrations/prisma/.env.local](.env.local), even if you start it from the repo root with a workspace filter.
 
 ## Generated target
 
 This example is Prisma-first:
 
-- `farm generate` patches [prisma/schema.prisma](/Users/mac/oss/farm.js/examples/stripe-integrations/prisma/prisma/schema.prisma)
+- `farm generate` patches [prisma/schema.prisma](./prisma/schema.prisma)
 - the Stripe integration schema comes from the configured Stripe integration itself
 - Better Auth uses a local SQLite file and auto-runs its migrations on startup in this demo app

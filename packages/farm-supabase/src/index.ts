@@ -1273,7 +1273,6 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
         path: sessionPath,
         methods: ["GET"],
         async handler(_request: Request, context: FarmIntegrationHandlerContext) {
-          console.log({ context });
           const { supabase, setCookies } = createSupabaseHandler(context, env);
           const { data, error } = await supabase.auth.getUser();
 

@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "Compatibility package that re-exports official Farm.js integrations",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-integrations"
+  },
   "files": [
     "dist"
   ],

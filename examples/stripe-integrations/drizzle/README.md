@@ -32,12 +32,12 @@ STRIPE_SECRET_KEY=sk_test_your_key_here
 ```
 
 Add `STRIPE_WEBHOOK_SECRET` as well if you want signed webhook verification.
-The example now reads its own `.env.local` from [examples/stripe-integrations/drizzle/.env.local](/Users/mac/oss/farm.js/examples/stripe-integrations/drizzle/.env.local), even if you start it from the repo root with a workspace filter.
+The example now reads its own `.env.local` from [examples/stripe-integrations/drizzle/.env.local](.env.local), even if you start it from the repo root with a workspace filter.
 
 ## Generated target
 
 This example is Drizzle-first:
 
-- `farm generate` writes [farm-integrations.generated.ts](/Users/mac/oss/farm.js/examples/stripe-integrations/drizzle/farm-integrations.generated.ts)
+- `farm generate` writes [farm-integrations.generated.ts](./farm-integrations.generated.ts)
 - the Stripe integration schema comes from the configured Stripe integration itself
 - Better Auth uses a local SQLite file and auto-runs its migrations on startup in this demo app

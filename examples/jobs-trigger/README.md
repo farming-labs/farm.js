@@ -14,10 +14,10 @@ For the current example flow, `TRIGGER_SECRET_KEY` is the credential used to enq
 `TRIGGER_PROJECT_REF` is forwarded as request context metadata, and `TRIGGER_WEBHOOK_SECRET`
 is reserved for future callback/webhook support.
 
-The integration config lives in [integrations.ts](/Users/mac/oss/farm.js/examples/jobs-trigger/src/lib/integrations.ts),
-the task definitions live in [jobs.ts](/Users/mac/oss/farm.js/examples/jobs-trigger/src/lib/jobs.ts),
-and the callers are split between [api.server.ts](/Users/mac/oss/farm.js/examples/jobs-trigger/src/lib/api.server.ts)
-and [api.client.ts](/Users/mac/oss/farm.js/examples/jobs-trigger/src/lib/api.client.ts).
+The integration config lives in [integrations.ts](./src/lib/integrations.ts),
+the task definitions live in [jobs.ts](./src/lib/jobs.ts),
+and the callers are split between [api.server.ts](./src/lib/api.server.ts)
+and [api.client.ts](./src/lib/api.client.ts).
 
 The page includes a small client probe that:
 

@@ -6,7 +6,7 @@ This example shows the new `jobs({...})` integration with two runtime helpers:
 - `runtime: inngest({ ... })` for Inngest
 
 Set `JOBS_RUNTIME=trigger` or `JOBS_RUNTIME=inngest` in `.env.local` to switch which one
-is mounted by [integrations.ts](/Users/mac/oss/farm.js/examples/jobs-integration/src/lib/integrations.ts).
+is mounted by [integrations.ts](./src/lib/integrations.ts).
 
 Trigger.dev env:
 
@@ -26,8 +26,8 @@ INNGEST_EVENT_KEY=evt_...
 INNGEST_SIGNING_KEY=signkey_...
 ```
 
-The task definitions live in [jobs.ts](/Users/mac/oss/farm.js/examples/jobs-integration/src/lib/jobs.ts),
-and the server caller lives in [api.server.ts](/Users/mac/oss/farm.js/examples/jobs-integration/src/lib/api.server.ts).
+The task definitions live in [jobs.ts](./src/lib/jobs.ts),
+and the server caller lives in [api.server.ts](./src/lib/api.server.ts).
 
 Typical server-side usage:
 

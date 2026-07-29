@@ -3,6 +3,11 @@
   "version": "0.0.1",
   "description": "Farm.js AI route helpers",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farm-js/farm.js",
+    "directory": "packages/farm-ai"
+  },
   "files": [
     "dist"
   ],
