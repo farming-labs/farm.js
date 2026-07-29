@@ -35,23 +35,25 @@
     "format:check": "oxfmt --check .",
     "type-check": "turbo type-check",
     "clean": "turbo clean",
-    "release:beta:farm": "turbo --filter \"./packages/*\" build && pnpm publish -r --filter \"./packages/*\" --access public --tag beta --no-git-checks",
-    "version-packages": "changeset version",
-    "release:beta": "turbo --filter \"./packages/*\" build && bumpp \"packages/*/package.json\" && pnpm -r --filter ./packages/* publish --access public --tag beta --no-git-checks",
-    "release:no-build": "bumpp && pnpm -r publish --access public --no-git-checks --tag next",
-    "release:canary": "turbo --filter \"./packages/*\" build && bumpp && pnpm -r publish --access public --tag canary --no-git-checks",
-    "bump": "bumpp"
+    "bump": "bumpp",
+    "version-packages": "pnpm run bump",
+    "release": "pnpm run release:latest",
+    "release:latest": "bumpp && pnpm run publish:latest",
+    "release:beta": "bumpp --preid beta && pnpm run publish:beta",
+    "release:canary": "bumpp --preid canary && pnpm run publish:canary",
+    "publish:latest": "pnpm -r --filter \"./packages/*\" publish --access public --tag latest --no-git-checks",
+    "publish:beta": "pnpm -r --filter \"./packages/*\" publish --access public --tag beta --no-git-checks",
+    "publish:canary": "pnpm -r --filter \"./packages/*\" publish --access public --tag canary --no-git-checks"
   },
   "dependencies": {
     "@rollup/plugin-terser": "^0.4.4",
-    "bumpp": "^10.3.1",
+    "bumpp": "^10.4.1",
     "h3": "2.0.1-rc.5",
     "nitro": "3.0.0",
     "oxfmt": "^0.27.0",
     "oxlint": "^1.42.0"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.27.1",
     "@playwright/test": "^1.52.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.10.5",
