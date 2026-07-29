@@ -33,6 +33,7 @@ import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
+import { assertRscPackageCompatibility } from "./compatibility.js";
 import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "node:url";
@@ -68,7 +69,15 @@ export interface FarmRscConfig {
   basePath?: string;
   port?: number;
   experimental?: {
+    /**
+     * Enable React Server Components rendering.
+     * @default true
+     */
     serverComponents?: boolean;
+    /**
+     * Enable React Server Actions and their public POST decoder.
+     * @default false
+     */
     serverActions?: boolean;
     /**
      * Enable server-only optimized boundaries through
@@ -106,7 +115,7 @@ export function defineConfig(config: FarmRscConfig = {}): UserConfig {
     // Core Farm RSC settings
     experimental: {
       serverComponents: config.experimental?.serverComponents ?? true,
-      serverActions: config.experimental?.serverActions ?? true,
+      serverActions: config.experimental?.serverActions ?? false,
       optimizedBoundary: config.experimental?.optimizedBoundary ?? false,
     },
     srcDir: config.srcDir ?? "src",
@@ -624,6 +633,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         }
 
         const root = c.root ?? process.cwd();
+        assertRscPackageCompatibility(root);
         if (optimizedBoundaryEnabled) {
           registerRscNitroRuntimePackage(
             root,
@@ -757,7 +767,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               }
             : {}),
           resolve: {
-            dedupe: ["react", "react-dom"],
+            dedupe: ["react", "react-dom", "react-server-dom-webpack"],
             alias: [
               ...Object.entries(layerAliases).map(([find, replacement]) => ({
                 find,

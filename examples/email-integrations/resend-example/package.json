@@ -12,8 +12,8 @@
     "@farm.js/core": "0.1.0-beta.2",
     "@farm.js/email": "0.1.0-beta.2",
     "@react-email/components": "^1.0.12",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@farm.js/cli": "0.1.0-beta.2",

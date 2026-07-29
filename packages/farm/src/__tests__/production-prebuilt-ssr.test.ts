@@ -53,27 +53,21 @@ export default function Page() {
 }
 
 async function linkReact18(root: string): Promise<void> {
-  const pnpmStore = path.resolve(packageRoot, "../../node_modules/.pnpm");
-  const entries = await fs.readdir(pnpmStore);
-  const reactEntry = entries.find((entry) => /^react@18\.\d+\.\d+$/.test(entry));
-  const reactDOMEntry = entries.find((entry) =>
-    /^react-dom@18\.\d+\.\d+_react@18\.\d+\.\d+$/.test(entry),
-  );
+  const fixtureModules = path.resolve(packageRoot, "../../examples/simple-demo/node_modules");
+  let reactPath: string;
+  let reactDOMPath: string;
 
-  if (!reactEntry || !reactDOMEntry) {
-    throw new Error("React 18 test dependencies are missing from the pnpm store");
+  try {
+    [reactPath, reactDOMPath] = await Promise.all([
+      fs.realpath(path.join(fixtureModules, "react")),
+      fs.realpath(path.join(fixtureModules, "react-dom")),
+    ]);
+  } catch {
+    throw new Error("React 18 compatibility fixture dependencies are missing");
   }
 
-  await fs.symlink(
-    path.join(pnpmStore, reactEntry, "node_modules", "react"),
-    path.join(root, "node_modules", "react"),
-    "dir",
-  );
-  await fs.symlink(
-    path.join(pnpmStore, reactDOMEntry, "node_modules", "react-dom"),
-    path.join(root, "node_modules", "react-dom"),
-    "dir",
-  );
+  await fs.symlink(reactPath, path.join(root, "node_modules", "react"), "dir");
+  await fs.symlink(reactDOMPath, path.join(root, "node_modules", "react-dom"), "dir");
 }
 
 async function getAvailablePort(): Promise<number> {

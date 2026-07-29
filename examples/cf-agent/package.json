@@ -18,8 +18,8 @@
     "@farm.js/cf-agent": "0.1.0-beta.2",
     "@farm.js/core": "0.1.0-beta.2",
     "agents": "0.17.4",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260710.1",

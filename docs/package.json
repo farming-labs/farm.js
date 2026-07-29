@@ -17,8 +17,8 @@
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",
     "lucide-react": "1.23.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
     "simple-icons": "16.25.0",
     "sugar-high": "0.9.5",
     "zod": "^4.3.6"

@@ -2,6 +2,32 @@
 
 Demo app for Farm.js with RSC, deployed via Nitro to Vercel.
 
+## RSC package compatibility
+
+Farm pins React's framework-level RSC APIs to one tested combination:
+
+```text
+react                        19.2.8
+react-dom                    19.2.8
+react-server-dom-webpack     19.2.8
+@vitejs/plugin-rsc           0.5.32
+```
+
+The RSC plugin stops startup with an actionable error when an application resolves a missing or
+different version. This prevents React, its Flight renderer/decoder and the Vite integration from
+silently drifting apart.
+
+RSC rendering does not enable Server Actions by itself. This demo opts in because `/form` exercises
+the action protocol:
+
+```ts
+experimental: {
+  serverActions: true,
+}
+```
+
+Keep Server Actions disabled when an RSC application does not need client-callable React actions.
+
 ## Experimental optimized boundary
 
 The `/static-content` route compares a normal React host-element tree with the same typed document
