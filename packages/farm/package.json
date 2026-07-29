@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.0.3-beta.3",
+  "version": "0.1.0-beta.0",
   "description": "Core Farm.js framework - A modern React meta-framework",
   "keywords": [
     "@farm.js/core",
