@@ -1,7 +1,6 @@
 # Releasing Farm.js
 
-Farm.js releases all eight packages through one Bumpp flow. Bumpp updates every package
-manifest to the selected version, builds the workspace, creates the release commit and Git
+Farm.js releases every public package under `packages/*` through one Bumpp flow. Bumpp updates every package manifest to the selected version, builds the workspace, creates the release commit and Git
 tag, and pushes them before pnpm publishes the packages to npm. The first release through
 this flow also aligns any currently different package versions.
 
