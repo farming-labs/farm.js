@@ -19,6 +19,7 @@ const buildEnv = {
   AUTH0_CLIENT_ID: process.env.AUTH0_CLIENT_ID || "ci-auth0-client-id",
   AUTH0_CLIENT_SECRET: process.env.AUTH0_CLIENT_SECRET || "ci-auth0-client-secret",
   AUTH0_DOMAIN: process.env.AUTH0_DOMAIN || "ci.example.auth0.com",
+  AUTH0_SECRET: process.env.AUTH0_SECRET || "ci-auth0-session-secret-at-least-32-characters",
   AUTUMN_SECRET_KEY: process.env.AUTUMN_SECRET_KEY || "am_sk_ci",
   BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || "ci-better-auth-secret",
   CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY || "sk_test_ci",

@@ -13,10 +13,9 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - node-version: 18
-            test_args: --skip-incompatible
           - node-version: 20
             test_args: --skip-incompatible
           - node-version: 22
@@ -91,6 +90,7 @@ jobs:
     name: Build Examples
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - node-version: 22
