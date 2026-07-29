@@ -6,11 +6,16 @@ Run the complete browser suite with:
 pnpm test:e2e
 ```
 
-Run the framework feature integration suite, including the required framework build, with:
+Run the complete general framework browser suite, including the required framework build, with:
 
 ```sh
 pnpm test:e2e:framework
 ```
+
+This is the CI entry point for every spec under `tests/e2e`. It exercises framework routing,
+rendering, hydration, navigation, route boundaries, prefetch controls, and global state against
+`examples/basic`. Specialized production, internationalization, and RSC suites remain separate so
+their failures are reported independently.
 
 Run the production internationalization suite with:
 

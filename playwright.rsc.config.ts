@@ -11,10 +11,12 @@ export default defineConfig({
   retries: 0,
   use: {
     baseURL: "http://localhost:4174",
-    trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    trace: "retain-on-failure",
   },
   webServer: {
-    command: "NODE_ENV=production PORT=4174 corepack pnpm --dir examples/rsc-demo run preview",
+    command:
+      "NODE_ENV=production PORT=4174 corepack pnpm --dir examples/rsc-demo run preview",
     url: "http://localhost:4174",
     reuseExistingServer: false,
     timeout: 120_000,
