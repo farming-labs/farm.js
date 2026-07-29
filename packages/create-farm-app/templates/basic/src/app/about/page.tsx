@@ -1,8 +1,6 @@
-import React from "react";
-import type { PageProps } from "@farm.js/core";
-import { Link } from "farm/client";
+import { Link } from "@farm.js/core/client";
 
-export default function AboutPage({ params, searchParams }: PageProps) {
+export default function AboutPage() {
   return (
     <div className="min-h-screen p-8">
       <div className="max-w-4xl mx-auto space-y-8">

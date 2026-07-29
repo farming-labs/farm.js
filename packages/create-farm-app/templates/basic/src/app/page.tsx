@@ -1,8 +1,6 @@
-import React from "react";
-import type { PageProps } from "@farm.js/core";
-import { Link } from "farm/client";
+import { Link } from "@farm.js/core/client";
 
-export default function HomePage({ params, searchParams }: PageProps) {
+export default function HomePage() {
   return (
     <div className="min-h-screen flex items-center justify-center p-8">
       <div className="max-w-4xl mx-auto text-center space-y-8">

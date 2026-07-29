@@ -28,6 +28,8 @@ export default defineConfig({
     "packages/farm-unkey/package.json",
     "packages/farm-workos/package.json",
     "packages/farmjs-plugin/package.json",
+    "packages/farmjs-plugin/src/index.ts",
+    "examples/basic/src/app/page.tsx",
   ],
   execute: "pnpm run release:prepare",
 });

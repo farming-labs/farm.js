@@ -1,4 +1,3 @@
-import React from "react";
 import type { LayoutProps, Metadata } from "@farm.js/core";
 import "./globals.css";
 

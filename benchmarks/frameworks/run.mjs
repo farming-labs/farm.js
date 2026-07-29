@@ -11,6 +11,12 @@ import { fileURLToPath } from "node:url";
 
 const benchmarkDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(benchmarkDir, "../..");
+const farmCorePackage = JSON.parse(
+  await fs.readFile(path.join(repoRoot, "packages/farm/package.json"), "utf8"),
+);
+const farmCliPackage = JSON.parse(
+  await fs.readFile(path.join(repoRoot, "packages/farm-cli/package.json"), "utf8"),
+);
 const appsRoot = path.join(benchmarkDir, "apps");
 const resultsDir = path.join(benchmarkDir, "results");
 const benchmarkGitPath = path.relative(repoRoot, benchmarkDir).split(path.sep).join("/");
@@ -92,13 +98,13 @@ const frameworks = [
   {
     id: "farm",
     label: "Farm.js",
-    version: "0.0.3-beta.3",
+    version: farmCorePackage.version,
     stack: "React 19.2.4 · Vite 5.4.20 dev · Vite 8.1.5 (Rolldown) build",
     directory: "farm",
     devHost: "localhost",
     installedPackages: [
-      { name: "@farm.js/core", version: "0.0.3-beta.3" },
-      { name: "@farm.js/cli", version: "0.0.1" },
+      { name: "@farm.js/core", version: farmCorePackage.version },
+      { name: "@farm.js/cli", version: farmCliPackage.version },
       { name: "react", version: "19.2.4" },
       { name: "react-dom", version: "19.2.4" },
       { name: "sharp", version: "0.34.5" },
