@@ -10,8 +10,8 @@ A compact map of the main package exports and where to learn more.
 
 ## Core exports
 
-| Export area                | What it covers                                                                       |
-| -------------------------- | ------------------------------------------------------------------------------------ |
+| Export area                 | What it covers                                                                       |
+| --------------------------- | ------------------------------------------------------------------------------------ |
 | @farm.js/core               | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
 | @farm.js/core/client        | Link, router helpers, API client, integration client.                                |
 | @farm.js/core/plugin/client | Advanced browser lifecycle manager and client plugin event types.                    |
@@ -35,8 +35,8 @@ A compact map of the main package exports and where to learn more.
 
 ## Integration exports
 
-| Package                         | Exports                                                                                                    |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Package                          | Exports                                                                                                    |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `@farm.js/core`                  | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`.        |
 | `@farm.js/core/cron`             | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                        |
 | `@farm.js/core/workflows`        | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |

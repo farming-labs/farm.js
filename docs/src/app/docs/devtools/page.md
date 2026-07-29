@@ -56,13 +56,13 @@ export default defineConfig({
 
 ## What the dashboard shows
 
-| View | What Farm reports |
-| --- | --- |
-| Overview | Route, API, middleware, integration, schedule, and diagnostic totals. |
-| Routes | Pages, layouts, loading boundaries, error boundaries, source files, and effective runtime controls. |
-| API | Registered methods, paths, source modules, runtime, regions, and maximum duration. |
-| Systems | Integration routes and middleware, React providers, schema models, request middleware, and storage mounts. |
-| Runtime | Deployment target, Nitro preset, output directory, cron routes, workflows, layers, feature flags, and environment key names. |
+| View     | What Farm reports                                                                                                            |
+| -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Overview | Route, API, middleware, integration, schedule, and diagnostic totals.                                                        |
+| Routes   | Pages, layouts, loading boundaries, error boundaries, source files, and effective runtime controls.                          |
+| API      | Registered methods, paths, source modules, runtime, regions, and maximum duration.                                           |
+| Systems  | Integration routes and middleware, React providers, schema models, request middleware, and storage mounts.                   |
+| Runtime  | Deployment target, Nitro preset, output directory, cron routes, workflows, layers, feature flags, and environment key names. |
 
 Use the view navigation to move between surfaces. Routes and API endpoints can be filtered by path, method, or source file. Press `/` while one of those views is active to focus its filter. The **Raw** view contains the complete machine-readable snapshot.
 
@@ -179,11 +179,11 @@ A report includes `source`, `health`, project and target metadata, status totals
 
 Doctor uses these health rules:
 
-| Result | Exit behavior |
-| --- | --- |
-| `ready` | No failed or warning checks; exits 0. |
-| `attention` | At least one warning; exits 0. |
-| `error` | At least one failed check; exits non-zero. |
+| Result      | Exit behavior                              |
+| ----------- | ------------------------------------------ |
+| `ready`     | No failed or warning checks; exits 0.      |
+| `attention` | At least one warning; exits 0.             |
+| `error`     | At least one failed check; exits non-zero. |
 
 This makes a basic CI check straightforward:
 
@@ -198,15 +198,15 @@ Use `farm doctor --offline --json` when CI should store or process the report. K
 
 Common diagnostic codes include:
 
-| Code | Meaning |
-| --- | --- |
-| `NO_PAGE_ROUTES` | Farm found no page modules or programmatic page router. |
-| `ROOT_LAYOUT_MISSING` | The app has no shared root layout. |
-| `CRON_ROUTE_MISSING` | A configured schedule targets an API route Farm cannot find. |
-| `CRON_SECRET_NOT_SET` | Scheduled production requests do not yet have `CRON_SECRET`. |
-| `EPHEMERAL_PRODUCTION_STORAGE` | A serverless deployment uses in-memory root storage. |
-| `ROUTE_RUNTIME_UNRESOLVED` | Farm could not resolve a page's inherited runtime controls. |
-| `LIVE_RUNTIME_UNREACHABLE` | An explicitly selected running app did not answer the probe. |
+| Code                           | Meaning                                                      |
+| ------------------------------ | ------------------------------------------------------------ |
+| `NO_PAGE_ROUTES`               | Farm found no page modules or programmatic page router.      |
+| `ROOT_LAYOUT_MISSING`          | The app has no shared root layout.                           |
+| `CRON_ROUTE_MISSING`           | A configured schedule targets an API route Farm cannot find. |
+| `CRON_SECRET_NOT_SET`          | Scheduled production requests do not yet have `CRON_SECRET`. |
+| `EPHEMERAL_PRODUCTION_STORAGE` | A serverless deployment uses in-memory root storage.         |
+| `ROUTE_RUNTIME_UNRESOLVED`     | Farm could not resolve a page's inherited runtime controls.  |
+| `LIVE_RUNTIME_UNREACHABLE`     | An explicitly selected running app did not answer the probe. |
 
 Warnings identify behavior that can be valid locally but needs attention before production. Failures mean the project cannot satisfy a basic framework contract.
 

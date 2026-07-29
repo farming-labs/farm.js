@@ -394,12 +394,12 @@ export const acme = defineIntegration({
 
 Lifecycle hooks receive the same base context plus the parsed `integrationConfig`, a `log` helper, and cleanup support.
 
-| Hook | When it runs | Use it for |
-| --- | --- | --- |
-| `validate(ctx)` | During integration init | Check API keys, required URLs, config combinations, and app prerequisites. |
-| `setup(ctx)` | During integration init after validation | Prepare storage, register webhooks, create queues, warm clients, or schedule cleanup. |
-| `ready(ctx)` | When the app/plugin manager is ready | Emit ready logs or start background listeners. |
-| `dispose(ctx)` | During shutdown | Close clients, flush buffers, unregister listeners, or stop workers. |
+| Hook            | When it runs                             | Use it for                                                                            |
+| --------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
+| `validate(ctx)` | During integration init                  | Check API keys, required URLs, config combinations, and app prerequisites.            |
+| `setup(ctx)`    | During integration init after validation | Prepare storage, register webhooks, create queues, warm clients, or schedule cleanup. |
+| `ready(ctx)`    | When the app/plugin manager is ready     | Emit ready logs or start background listeners.                                        |
+| `dispose(ctx)`  | During shutdown                          | Close clients, flush buffers, unregister listeners, or stop workers.                  |
 
 ```ts
 export const acme = defineIntegration({
@@ -498,28 +498,24 @@ export const billing = defineIntegration({
   type: "acme-billing",
   instance: {},
   endpoints: ({ endpoint }) => ({
-    checkout: endpoint.post<
+    checkout: endpoint.post<"/api/billing/checkout", { priceId: string }, { url: string }>(
       "/api/billing/checkout",
-      { priceId: string },
-      { url: string }
-    >("/api/billing/checkout", {
-      body: checkoutBody,
-      handler(_request, ctx) {
-        return Response.json({
-          url: `https://checkout.example/${ctx.input.body?.priceId}`,
-        });
-      },
-    }),
-    status: endpoint.get<"/api/billing/status", { active: boolean }>(
-      "/api/billing/status",
       {
-        handler() {
+        body: checkoutBody,
+        handler(_request, ctx) {
           return Response.json({
-            active: true,
+            url: `https://checkout.example/${ctx.input.body?.priceId}`,
           });
         },
       },
     ),
+    status: endpoint.get<"/api/billing/status", { active: boolean }>("/api/billing/status", {
+      handler() {
+        return Response.json({
+          active: true,
+        });
+      },
+    }),
   }),
 });
 ```
@@ -641,25 +637,25 @@ Use top-level middleware for auth gates, tenant loading, rewrites, rate-limit ch
 
 Route handlers, route middleware, and route hooks receive `ctx` with these fields:
 
-| Field | What it contains |
-| --- | --- |
-| `request` | The web `Request` passed to the handler. |
-| `requestId` | Request ID from headers or Farm-generated fallback. |
-| `url` | Parsed `URL`. |
-| `pathname` | Current pathname. |
-| `method` | HTTP method. |
-| `params` | Dynamic route params, including catch-all arrays. |
-| `input.body` | Parsed and validated body, if a body schema exists. |
-| `input.query` | Parsed and validated query, if a query schema exists. |
-| `args.db` | Lazy ORM client for the integration schema. |
-| `args.getDb()` | Promise-based ORM client resolver. |
-| `args.storage.getClient()` | Raw `storage.client`, if configured. |
-| `data` | Small sanitized metadata from `createIntegrations({ data })` and per-call data. |
-| `integration` | Category, type, slot alias, and original `instance`. |
-| `route` | Route kind, path, and methods. |
-| `req` | Request-scoped key/value store shared with plugins and hooks. |
-| `config` | Resolved Farm config. |
-| `isDev` / `isProd` | Runtime mode flags. |
+| Field                      | What it contains                                                                |
+| -------------------------- | ------------------------------------------------------------------------------- |
+| `request`                  | The web `Request` passed to the handler.                                        |
+| `requestId`                | Request ID from headers or Farm-generated fallback.                             |
+| `url`                      | Parsed `URL`.                                                                   |
+| `pathname`                 | Current pathname.                                                               |
+| `method`                   | HTTP method.                                                                    |
+| `params`                   | Dynamic route params, including catch-all arrays.                               |
+| `input.body`               | Parsed and validated body, if a body schema exists.                             |
+| `input.query`              | Parsed and validated query, if a query schema exists.                           |
+| `args.db`                  | Lazy ORM client for the integration schema.                                     |
+| `args.getDb()`             | Promise-based ORM client resolver.                                              |
+| `args.storage.getClient()` | Raw `storage.client`, if configured.                                            |
+| `data`                     | Small sanitized metadata from `createIntegrations({ data })` and per-call data. |
+| `integration`              | Category, type, slot alias, and original `instance`.                            |
+| `route`                    | Route kind, path, and methods.                                                  |
+| `req`                      | Request-scoped key/value store shared with plugins and hooks.                   |
+| `config`                   | Resolved Farm config.                                                           |
+| `isDev` / `isProd`         | Runtime mode flags.                                                             |
 
 `ctx.req.set(key, value, { exposeToPage: true })` can expose values to page props. Avoid exposing secrets.
 `ctx.requestContext` remains as a deprecated compatibility alias for existing integrations.

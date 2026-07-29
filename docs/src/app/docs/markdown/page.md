@@ -72,11 +72,11 @@ export default defineConfig({
 
 ## Routes
 
-| Page | Markdown mirror |
-| --- | --- |
-| / | /index.md |
-| /pricing | /pricing.md |
-| /docs | /docs.md |
+| Page     | Markdown mirror |
+| -------- | --------------- |
+| /        | /index.md       |
+| /pricing | /pricing.md     |
+| /docs    | /docs.md        |
 
 ## Use cases
 

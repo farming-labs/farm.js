@@ -10,22 +10,22 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 
 ## Common commands
 
-| Command | Purpose |
-| --- | --- |
-| farm dev | Start the dev server. |
-| farm build | Build the app for the configured target. |
-| farm doctor | Inspect a running app, or fall back to project configuration checks. |
-| farm doctor --offline | Check project files and config without probing a dev server. |
-| farm preview | Create a public URL for a running local app. |
-| farm generate | Generate route/API types and integration schema artifacts. |
-| farm migrate inspect | Detect supported framework migration sources. |
-| farm migrate next --write | Apply a deterministic Next.js App Router migration. |
-| farm migrate tanstack --write | Apply a deterministic TanStack Router file-route migration. |
-| farm migrate | Run one-shot schema or provider migration commands. |
-| farm add integration stripe --ui | Add integration wiring and optional UI. |
-| farm cron list | List configured UTC schedules and target routes. |
-| farm cron run dailyCleanup | Invoke one cron route on a running app. |
-| farm dev --cron | Start the dev server with the opt-in in-memory cron scheduler. |
+| Command                          | Purpose                                                              |
+| -------------------------------- | -------------------------------------------------------------------- |
+| farm dev                         | Start the dev server.                                                |
+| farm build                       | Build the app for the configured target.                             |
+| farm doctor                      | Inspect a running app, or fall back to project configuration checks. |
+| farm doctor --offline            | Check project files and config without probing a dev server.         |
+| farm preview                     | Create a public URL for a running local app.                         |
+| farm generate                    | Generate route/API types and integration schema artifacts.           |
+| farm migrate inspect             | Detect supported framework migration sources.                        |
+| farm migrate next --write        | Apply a deterministic Next.js App Router migration.                  |
+| farm migrate tanstack --write    | Apply a deterministic TanStack Router file-route migration.          |
+| farm migrate                     | Run one-shot schema or provider migration commands.                  |
+| farm add integration stripe --ui | Add integration wiring and optional UI.                              |
+| farm cron list                   | List configured UTC schedules and target routes.                     |
+| farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |
+| farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.       |
 
 ## Provider names
 

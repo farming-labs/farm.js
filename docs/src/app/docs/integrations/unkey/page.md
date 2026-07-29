@@ -54,13 +54,13 @@ const verified = await api.keys.verify.post({
 
 ## What Unkey adds
 
-| Area | Details |
-| --- | --- |
-| Create | Server-only route for creating customer or service keys. |
-| Verify | Server-only route for checking validity, permissions, credits, and rate limits. |
-| Update | Server-only route for changing metadata, roles, permissions, credits, and limits. |
-| Revoke | Server-only route for disabling a key without deleting its record. |
-| Delete | Server-only route for deleting a key when the app no longer needs it. |
+| Area       | Details                                                                           |
+| ---------- | --------------------------------------------------------------------------------- |
+| Create     | Server-only route for creating customer or service keys.                          |
+| Verify     | Server-only route for checking validity, permissions, credits, and rate limits.   |
+| Update     | Server-only route for changing metadata, roles, permissions, credits, and limits. |
+| Revoke     | Server-only route for disabling a key without deleting its record.                |
+| Delete     | Server-only route for deleting a key when the app no longer needs it.             |
 | Middleware | Optional protected route matcher that verifies request keys before app code runs. |
 
 ## Server-only callers

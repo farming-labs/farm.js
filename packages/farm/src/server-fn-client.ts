@@ -15,11 +15,7 @@ export type ServerFnOptimisticContext<TInput, TResult> = {
   current: TResult | null;
 };
 
-export type UseServerFnOptions<
-  TResult,
-  TError extends Error = Error,
-  TInput = unknown,
-> = {
+export type UseServerFnOptions<TResult, TError extends Error = Error, TInput = unknown> = {
   initialResult?: TResult | null;
   resetOnSubmit?: boolean;
   throwOnFormError?: boolean;
@@ -71,9 +67,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
     (
       value:
         | ServerFnActionState<TResult, TError>
-        | ((
-            current: ServerFnActionState<TResult, TError>,
-          ) => ServerFnActionState<TResult, TError>),
+        | ((current: ServerFnActionState<TResult, TError>) => ServerFnActionState<TResult, TError>),
     ) => {
       setState((current) => {
         const next = typeof value === "function" ? value(current) : value;
@@ -106,11 +100,7 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
       setActionState((current) => ({
         pendingCount: current.pendingCount + 1,
         status: "pending",
-        result: hasOptimisticResult
-          ? optimisticResult
-          : resetOnSubmit
-            ? null
-            : current.result,
+        result: hasOptimisticResult ? optimisticResult : resetOnSubmit ? null : current.result,
         error: null,
       }));
 

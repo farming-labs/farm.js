@@ -51,14 +51,14 @@ Polar callbacks can read and write through ctx.args.db, so webhook snapshots, su
 
 ## What Polar adds
 
-| Area | Details |
-| --- | --- |
-| Products | Public product metadata for pricing and account screens. |
-| Checkout | Polar checkout sessions for one-time and subscription products. |
-| Portal | Customer sessions for billing management. |
+| Area           | Details                                                             |
+| -------------- | ------------------------------------------------------------------- |
+| Products       | Public product metadata for pricing and account screens.            |
+| Checkout       | Polar checkout sessions for one-time and subscription products.     |
+| Portal         | Customer sessions for billing management.                           |
 | Billing status | Current customer, plan, features, limits, and active product state. |
-| Usage | Meter and entitlement helpers for usage-aware products. |
-| Webhooks | Subscription and order events that update local billing state. |
+| Usage          | Meter and entitlement helpers for usage-aware products.             |
+| Webhooks       | Subscription and order events that update local billing state.      |
 
 ## Common callers
 

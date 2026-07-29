@@ -36,12 +36,12 @@ export default defineConfig({
 
 Each entry has one job:
 
-| Option | Required | Purpose |
-| --- | --- | --- |
-| `schedule` | yes | One portable five-field cron expression, or an array of expressions. |
-| `path` | yes | Application pathname for an ordinary GET API route. |
-| `description` | no | Human-readable purpose shown by CLI output and the build manifest. |
-| `enabled` | no | Set to `false` to keep an entry in config without scheduling it. |
+| Option        | Required | Purpose                                                              |
+| ------------- | -------- | -------------------------------------------------------------------- |
+| `schedule`    | yes      | One portable five-field cron expression, or an array of expressions. |
+| `path`        | yes      | Application pathname for an ordinary GET API route.                  |
+| `description` | no       | Human-readable purpose shown by CLI output and the build manifest.   |
+| `enabled`     | no       | Set to `false` to keep an entry in config without scheduling it.     |
 
 Use an array when the same route should run at more than one time:
 
@@ -132,13 +132,13 @@ Farm accepts the portable numeric five-field subset shared by its first-class de
 
 Examples:
 
-| Expression | Runs |
-| --- | --- |
-| `*/5 * * * *` | Every five minutes. |
-| `0 * * * *` | At the start of every hour. |
-| `0 2 * * *` | Every day at 02:00 UTC. |
-| `30 8 * * 1-5` | Weekdays at 08:30 UTC. |
-| `0 0 1 * *` | At midnight UTC on the first day of each month. |
+| Expression     | Runs                                            |
+| -------------- | ----------------------------------------------- |
+| `*/5 * * * *`  | Every five minutes.                             |
+| `0 * * * *`    | At the start of every hour.                     |
+| `0 2 * * *`    | Every day at 02:00 UTC.                         |
+| `30 8 * * 1-5` | Weekdays at 08:30 UTC.                          |
+| `0 0 1 * *`    | At midnight UTC on the first day of each month. |
 
 Month and weekday names, six-field expressions, and provider-only extensions are rejected. For portability, an expression cannot constrain both day-of-month and day-of-week. All schedules run in UTC.
 
@@ -146,13 +146,13 @@ Month and weekday names, six-field expressions, and provider-only extensions are
 
 `farm build` validates the config, generates adapter tasks, and writes `.farm/cron-manifest.json`.
 
-| Target | Production behavior |
-| --- | --- |
-| Vercel | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route. |
+| Target            | Production behavior                                                                                                                |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Vercel            | Farm writes each configured path and schedule to Build Output API `crons`. Vercel sends an HTTP GET to the route.                  |
 | Cloudflare Worker | With `deploy.preset: "cloudflare-module"`, Farm writes Wrangler Cron Triggers and dispatches the matching route inside the Worker. |
-| Cloudflare Pages | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler. |
-| Node, Bun, Deno | Nitro runs schedules in the long-lived server process and internally calls the route. |
-| Other targets | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth. |
+| Cloudflare Pages  | Pages output does not install Cron Triggers. Use `cloudflare-module` or call the route from an external scheduler.                 |
+| Node, Bun, Deno   | Nitro runs schedules in the long-lived server process and internally calls the route.                                              |
+| Other targets     | Use the generated manifest to configure the provider's scheduler to call the route with GET and bearer auth.                       |
 
 Cloudflare Cron Triggers require Worker output:
 
@@ -221,10 +221,10 @@ Farm's local `--cron` runner prevents overlap inside one development process. Th
 
 ## Cron, Jobs, and Post-response Work
 
-| Need | Use |
-| --- | --- |
-| Run one API operation on a UTC schedule | Framework Cron |
-| Run short best-effort work after an HTTP response | [`after()`](/docs/after) |
+| Need                                                                             | Use                                         |
+| -------------------------------------------------------------------------------- | ------------------------------------------- |
+| Run one API operation on a UTC schedule                                          | Framework Cron                              |
+| Run short best-effort work after an HTTP response                                | [`after()`](/docs/after)                    |
 | Durable retries, long-running steps, queues, status, cancellation, or dashboards | [Jobs Integration](/docs/integrations/jobs) |
 
 The older `defineCron()` workflow-module API remains available for compatibility. New applications should use `cron` config plus an ordinary API route so local, deployment, security, and testing behavior share one model.

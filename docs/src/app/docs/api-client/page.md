@@ -92,10 +92,7 @@ const createProduct = api.products.post(
           products.key,
           (current) => ({
             ...current,
-            products: [
-              { id: "optimistic", name, category },
-              ...(current?.products ?? []),
-            ],
+            products: [{ id: "optimistic", name, category }, ...(current?.products ?? [])],
           }),
         ],
       ],

@@ -25,13 +25,13 @@ farm migrate tanstack --write
 
 The Next.js migrator focuses on the App Router path because Farm uses the same route-file shape for pages, layouts, loading states, errors, not-found pages, and API route handlers.
 
-| Source | Farm output |
-| --- | --- |
-| app/page.tsx | src/app/page.tsx |
-| app/about/page.tsx | src/app/about/page.tsx |
-| app/api/hello/route.ts | src/app/api/hello/route.ts |
-| middleware.ts | src/app/middleware.ts |
-| package scripts | farm dev, farm build, node .output/server/index.mjs |
+| Source                 | Farm output                                         |
+| ---------------------- | --------------------------------------------------- |
+| app/page.tsx           | src/app/page.tsx                                    |
+| app/about/page.tsx     | src/app/about/page.tsx                              |
+| app/api/hello/route.ts | src/app/api/hello/route.ts                          |
+| middleware.ts          | src/app/middleware.ts                               |
+| package scripts        | farm dev, farm build, node .output/server/index.mjs |
 
 The migrator also creates `farm.config.ts`, creates a minimal root layout when one is missing, adds `@farm.js/core` and `@farm.js/cli`, and rewrites supported Next imports to Farm compatibility entries.
 
@@ -48,11 +48,11 @@ export default function Page() {
 
 Supported rewrites include:
 
-| Next import | Farm import |
-| --- | --- |
-| next/link | @farm.js/core/client |
+| Next import     | Farm import              |
+| --------------- | ------------------------ |
+| next/link       | @farm.js/core/client     |
 | next/navigation | @farm.js/core/navigation |
-| next/headers | @farm.js/core/headers |
+| next/headers    | @farm.js/core/headers    |
 
 Some Next.js APIs still need review because they are framework-specific. The migration report calls out `next/image`, `next/font`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
 
@@ -60,16 +60,16 @@ Some Next.js APIs still need review because they are framework-specific. The mig
 
 Farm keeps the compatibility layer intentionally small. It covers common App Router APIs that map cleanly onto Farm's runtime:
 
-| API | Runtime |
-| --- | --- |
-| `redirect()` | Throws a redirect signal that Farm turns into a redirect response. |
-| `permanentRedirect()` | Same redirect signal with status 308. |
-| `notFound()` | Throws a not-found signal that Farm turns into a 404. |
-| `useRouter()` | Client hook backed by Farm's lightweight router. |
-| `usePathname()` | Client hook for the current pathname. |
-| `useSearchParams()` | Client hook for current URL search params. |
-| `headers()` | Server helper that reads the current request headers. |
-| `cookies()` | Server helper that reads current request cookies. |
+| API                   | Runtime                                                            |
+| --------------------- | ------------------------------------------------------------------ |
+| `redirect()`          | Throws a redirect signal that Farm turns into a redirect response. |
+| `permanentRedirect()` | Same redirect signal with status 308.                              |
+| `notFound()`          | Throws a not-found signal that Farm turns into a 404.              |
+| `useRouter()`         | Client hook backed by Farm's lightweight router.                   |
+| `usePathname()`       | Client hook for the current pathname.                              |
+| `useSearchParams()`   | Client hook for current URL search params.                         |
+| `headers()`           | Server helper that reads the current request headers.              |
+| `cookies()`           | Server helper that reads current request cookies.                  |
 
 This is not a full Next.js clone. APIs such as image optimization, fonts, server actions, route segment config edge cases, and platform-specific middleware behavior stay explicit migration review items until Farm has native equivalents.
 
@@ -77,12 +77,12 @@ This is not a full Next.js clone. APIs such as image optimization, fonts, server
 
 The TanStack Router migrator targets file-based routes in `src/routes` or `routes`.
 
-| Source | Farm output |
-| --- | --- |
-| src/routes/index.tsx | src/app/page.tsx |
-| src/routes/about.tsx | src/app/about/page.tsx |
-| src/routes/posts.$postId.tsx | src/app/posts/[postId]/page.tsx |
-| src/routes/docs.$.tsx | src/app/docs/[...splat]/page.tsx |
+| Source                       | Farm output                      |
+| ---------------------------- | -------------------------------- |
+| src/routes/index.tsx         | src/app/page.tsx                 |
+| src/routes/about.tsx         | src/app/about/page.tsx           |
+| src/routes/posts.$postId.tsx | src/app/posts/[postId]/page.tsx  |
+| src/routes/docs.$.tsx        | src/app/docs/[...splat]/page.tsx |
 
 For simple route files that use `component: ComponentName`, the migrator appends a default export so Farm can render the page module.
 

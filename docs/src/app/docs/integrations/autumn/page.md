@@ -51,14 +51,14 @@ The integration can persist customer, plan, entitlement, and usage snapshots thr
 
 ## What Autumn adds
 
-| Area | Details |
-| --- | --- |
-| Products | Public products for pricing pages. |
-| Status | Current plan, subscription, trial, features, limits, and entitlements. |
+| Area     | Details                                                                               |
+| -------- | ------------------------------------------------------------------------------------- |
+| Products | Public products for pricing pages.                                                    |
+| Status   | Current plan, subscription, trial, features, limits, and entitlements.                |
 | Checkout | Attach an Autumn product and redirect users when payment or confirmation is required. |
-| Portal | Open the customer portal from a typed caller. |
-| Usage | Meter usage, report usage, check balance, and read current charges. |
-| Webhooks | Verify Autumn events and keep local billing state in sync. |
+| Portal   | Open the customer portal from a typed caller.                                         |
+| Usage    | Meter usage, report usage, check balance, and read current charges.                   |
+| Webhooks | Verify Autumn events and keep local billing state in sync.                            |
 
 ## Common callers
 

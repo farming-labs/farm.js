@@ -62,15 +62,15 @@ The Stripe integration can use Farm's integration ORM layer through ctx.args.db,
 
 ## What Stripe adds
 
-| Area | Details |
-| --- | --- |
-| Catalog | Public product and price metadata for pricing pages. |
-| Checkout | A typed checkout route that can return JSON for callers or redirect for browser navigation. |
-| Customer portal | A typed route for opening Stripe's billing portal. |
-| Billing status | Subscription, trial, seats, cancellation, and plan state. |
-| Entitlements | Feature, limit, usage, meter, and billing checks. |
-| Webhooks | Event verification and snapshot updates for checkout and subscription events. |
-| Storage | Schema-backed billing account snapshots through `ctx.args.db`. |
+| Area            | Details                                                                                     |
+| --------------- | ------------------------------------------------------------------------------------------- |
+| Catalog         | Public product and price metadata for pricing pages.                                        |
+| Checkout        | A typed checkout route that can return JSON for callers or redirect for browser navigation. |
+| Customer portal | A typed route for opening Stripe's billing portal.                                          |
+| Billing status  | Subscription, trial, seats, cancellation, and plan state.                                   |
+| Entitlements    | Feature, limit, usage, meter, and billing checks.                                           |
+| Webhooks        | Event verification and snapshot updates for checkout and subscription events.               |
+| Storage         | Schema-backed billing account snapshots through `ctx.args.db`.                              |
 
 ## Common callers
 

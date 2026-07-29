@@ -56,9 +56,7 @@ type AppIntegrations = {
   localDemo: {
     message: {
       get: ReturnType<typeof endpoint.get<{ ok: boolean; source: string }>>;
-      post: ReturnType<
-        typeof endpoint.post<{ message: string }, { ok: boolean; source: string }>
-      >;
+      post: ReturnType<typeof endpoint.post<{ message: string }, { ok: boolean; source: string }>>;
     };
   };
 };
@@ -180,9 +178,7 @@ describe("createAPIClient typing", () => {
       });
 
       expectTypeOf(routeResult.data?.message).toEqualTypeOf<string | undefined>();
-      expectTypeOf(integrationGet.data).toEqualTypeOf<
-        { ok: boolean; source: string } | null
-      >();
+      expectTypeOf(integrationGet.data).toEqualTypeOf<{ ok: boolean; source: string } | null>();
       expectTypeOf(integrationPost.data?.source).toEqualTypeOf<string | undefined>();
 
       // @ts-expect-error integration body schemas require the body wrapper.

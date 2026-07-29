@@ -50,8 +50,10 @@ export interface FarmWorkflowDefinition<TPayload = unknown, TResult = unknown> {
   run: (ctx: FarmWorkflowRunContext<TPayload>) => TResult | Promise<TResult>;
 }
 
-export interface FarmCronDefinition<TPayload = unknown, TResult = unknown>
-  extends FarmWorkflowDefinition<TPayload, TResult> {
+export interface FarmCronDefinition<
+  TPayload = unknown,
+  TResult = unknown,
+> extends FarmWorkflowDefinition<TPayload, TResult> {
   schedule: FarmWorkflowSchedule;
 }
 
@@ -134,7 +136,10 @@ export function resolveWorkflowsConfig(
 }
 
 export async function discoverFarmWorkflows(
-  config: { root?: string; workflows?: FarmWorkflowsResolvedConfig | FarmWorkflowsUserConfig | boolean },
+  config: {
+    root?: string;
+    workflows?: FarmWorkflowsResolvedConfig | FarmWorkflowsUserConfig | boolean;
+  },
   options: {
     loadModule?: (filePath: string) => Promise<Record<string, any>>;
   } = {},
@@ -254,9 +259,11 @@ export async function runFarmWorkflowModule(
   });
 }
 
-export async function prepareFarmWorkflowsForNitro(
-  config: { root?: string; distDir?: string; workflows?: FarmWorkflowsResolvedConfig | FarmWorkflowsUserConfig | boolean },
-): Promise<PreparedFarmWorkflows> {
+export async function prepareFarmWorkflowsForNitro(config: {
+  root?: string;
+  distDir?: string;
+  workflows?: FarmWorkflowsResolvedConfig | FarmWorkflowsUserConfig | boolean;
+}): Promise<PreparedFarmWorkflows> {
   const workflowConfig = isResolvedWorkflowConfig(config.workflows)
     ? config.workflows
     : resolveWorkflowsConfig(config.workflows);
@@ -293,7 +300,11 @@ export async function prepareFarmWorkflowsForNitro(
   }
 
   const handlerPath = path.join(generatedDir, "http-handler.mjs");
-  await fs.writeFile(handlerPath, createNitroWorkflowHTTPHandler(workflowConfig, workflows), "utf8");
+  await fs.writeFile(
+    handlerPath,
+    createNitroWorkflowHTTPHandler(workflowConfig, workflows),
+    "utf8",
+  );
 
   const manifestPath = path.join(generatedDir, "manifest.json");
   await fs.writeFile(
@@ -367,7 +378,9 @@ function isResolvedWorkflowConfig(value: unknown): value is FarmWorkflowsResolve
 }
 
 function normalizeWorkflowDirs(options: FarmWorkflowsUserConfig): string[] {
-  const rawDirs = options.dirs || (Array.isArray(options.dir) ? options.dir : options.dir ? [options.dir] : undefined);
+  const rawDirs =
+    options.dirs ||
+    (Array.isArray(options.dir) ? options.dir : options.dir ? [options.dir] : undefined);
   const dirs = rawDirs && rawDirs.length > 0 ? rawDirs : DEFAULT_FARM_WORKFLOW_DIRS;
   return [...new Set(dirs.map((dir) => trimSlashes(dir)).filter(Boolean))];
 }
@@ -391,19 +404,15 @@ function normalizeWorkflowId(id: string): string {
 
 function normalizeSchedule(schedule: FarmWorkflowSchedule | undefined): string[] {
   if (!schedule) return [];
-  return (Array.isArray(schedule) ? schedule : [schedule]).map((value) => value.trim()).filter(Boolean);
+  return (Array.isArray(schedule) ? schedule : [schedule])
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function resolveWorkflowDefinition(
   module: Record<string, any>,
 ): FarmWorkflowDefinition | FarmCronDefinition | null {
-  const candidates = [
-    module.default,
-    module.workflow,
-    module.cron,
-    module.task,
-    module.job,
-  ];
+  const candidates = [module.default, module.workflow, module.cron, module.task, module.job];
   for (const candidate of candidates) {
     if (candidate && typeof candidate === "object" && typeof candidate.run === "function") {
       return candidate as FarmWorkflowDefinition;
@@ -496,13 +505,13 @@ function workflowIdFromFile(root: string, filePath: string): string {
     ? normalizedFile.slice(normalizedRoot.length + 1)
     : normalizedFile;
   return normalizeWorkflowId(
-    relative
-      .replace(/^src\/(?:jobs|workflows|cron)\//, "")
-      .replace(/\.(tsx?|jsx?|mjs|cjs)$/, ""),
+    relative.replace(/^src\/(?:jobs|workflows|cron)\//, "").replace(/\.(tsx?|jsx?|mjs|cjs)$/, ""),
   );
 }
 
-function createScheduledTasks(workflows: FarmDiscoveredWorkflow[]): Record<string, string | string[]> {
+function createScheduledTasks(
+  workflows: FarmDiscoveredWorkflow[],
+): Record<string, string | string[]> {
   const scheduleMap = new Map<string, string[]>();
   for (const workflow of workflows) {
     for (const schedule of workflow.schedule) {
@@ -683,7 +692,10 @@ function verifyWorkflowSecret(
 }
 
 function joinRoute(...parts: string[]): string {
-  return `/${parts.map((part) => trimSlashes(part)).filter(Boolean).join("/")}`;
+  return `/${parts
+    .map((part) => trimSlashes(part))
+    .filter(Boolean)
+    .join("/")}`;
 }
 
 function trimSlashes(value: string): string {

@@ -192,10 +192,7 @@ await api.products.post(
           products.key,
           (current) => ({
             ...current,
-            products: [
-              { ...draft, id: "optimistic" },
-              ...(current?.products ?? []),
-            ],
+            products: [{ ...draft, id: "optimistic" }, ...(current?.products ?? [])],
           }),
         ],
       ],
