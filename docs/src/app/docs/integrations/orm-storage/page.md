@@ -15,7 +15,7 @@ This keeps integration code storage agnostic. A Stripe, auth, jobs, email, or cu
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { DatabaseSync } from "node:sqlite";
 import { billing } from "./src/integrations/billing";
 
@@ -38,7 +38,7 @@ export default defineConfig({
 **src/integrations/billing.ts**
 
 ```ts
-import { defineIntegrationSchema } from "@farmjs/core";
+import { defineIntegrationSchema } from "@farm.js/core";
 
 export const billingSchema = defineIntegrationSchema({
   models: {
@@ -91,7 +91,7 @@ export const billingSchema = defineIntegrationSchema({
 **src/integrations/billing.ts**
 
 ```ts
-import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
 import { billingSchema } from "./billing-schema";
 
 export const billing = defineIntegration({
@@ -134,7 +134,7 @@ export const billing = defineIntegration({
 For SQLite, create the database client in app code and pass the instance through `storage.client`.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { DatabaseSync } from "node:sqlite";
 
 const sqlite = new DatabaseSync("farm.sqlite");

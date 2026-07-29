@@ -1,4 +1,4 @@
-import { inngest, jobs, trigger } from "@farmjs/integrations";
+import { inngest, jobs, trigger } from "@farm.js/integrations";
 import { inngestTasks, triggerTasks } from "./jobs.ts";
 
 export const selectedJobsRuntime =

@@ -15,7 +15,7 @@ API route modules export HTTP methods. Farm discovers them, runs the route pipel
 **src/app/api/hello/route.ts**
 
 ```ts
-import { createEndpoint } from "@farmjs/core/api";
+import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
 
 export const POST = createEndpoint(
@@ -90,7 +90,7 @@ Put plain async functions in `middleware`. There is no middleware factory and no
 **src/app/api/projects/[id]/route.ts**
 
 ```ts
-import { createEndpoint, type EndpointMiddlewareContext } from "@farmjs/core/api";
+import { createEndpoint, type EndpointMiddlewareContext } from "@farm.js/core/api";
 import { z } from "zod";
 
 type Session = {

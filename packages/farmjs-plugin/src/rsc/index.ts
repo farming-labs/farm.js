@@ -10,7 +10,7 @@
  *
  * @example
  * ```ts
- * import { defineConfig } from '@farmjs/plugin/rsc'
+ * import { defineConfig } from '@farm.js/plugin/rsc'
  *
  * export default defineConfig({
  *   srcDir: 'src',
@@ -25,9 +25,9 @@
 import { parseAst, type ConfigEnv, type Plugin, type UserConfig } from "vite";
 import { init as initModuleLexer, parse as parseModuleImports } from "es-module-lexer";
 import type { FarmRscPluginOptions, EntryContext } from "./types.js";
-import type { FarmServerActionsConfig } from "@farmjs/core/server-action-security";
-import type { FarmLayerEntry, ResolvedFarmLayer } from "@farmjs/core/server";
-import { farmEnvironmentFunctionsPlugin } from "@farmjs/core/environment/vite";
+import type { FarmServerActionsConfig } from "@farm.js/core/server-action-security";
+import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
+import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
@@ -37,20 +37,20 @@ import fs from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-// Use API and middleware plugins from @farmjs/core (require so CJS build resolves when ESM .mjs is missing)
+// Use API and middleware plugins from @farm.js/core (require so CJS build resolves when ESM .mjs is missing)
 const require_ = createRequire(import.meta.url);
 const { farmApiPlugin, farmMiddlewarePlugin } = require_(
-  "@farmjs/core",
-) as typeof import("@farmjs/core");
+  "@farm.js/core",
+) as typeof import("@farm.js/core");
 const { resolveServerActionsConfig } = require_(
-  "@farmjs/core/server-action-security",
-) as typeof import("@farmjs/core/server-action-security");
+  "@farm.js/core/server-action-security",
+) as typeof import("@farm.js/core/server-action-security");
 const { normalizeFarmDeploymentId } = require_(
-  "@farmjs/core/deployment",
-) as typeof import("@farmjs/core/deployment");
+  "@farm.js/core/deployment",
+) as typeof import("@farm.js/core/deployment");
 const { getFarmLayerAliases, getFarmSourceRoots, resolveFarmLayers } = require_(
-  "@farmjs/core/server",
-) as typeof import("@farmjs/core/server");
+  "@farm.js/core/server",
+) as typeof import("@farm.js/core/server");
 
 export type { FarmRscPluginOptions, EntryContext };
 export { buildRscNitro, waitForRscManifest, waitForRscOutputs } from "./nitro-build.js";
@@ -72,7 +72,7 @@ export interface FarmRscConfig {
     serverActions?: boolean;
     /**
      * Enable server-only optimized boundaries through
-     * `@farmjs/plugin/rsc/optimized-boundary`.
+     * `@farm.js/plugin/rsc/optimized-boundary`.
      *
      * @experimental
      * @default false
@@ -212,13 +212,13 @@ function createFarmLogger(port: number, debug: boolean) {
 }
 
 const VIRTUAL_PREFIX = "\0";
-const VIRTUAL_RSC_ENTRY = "virtual:@farmjs/rsc/entry-rsc";
-const VIRTUAL_SSR_ENTRY = "virtual:@farmjs/rsc/entry-ssr";
-const VIRTUAL_CLIENT_ENTRY = "virtual:@farmjs/rsc/entry-client";
-const VIRTUAL_HYDRATE_ENTRY = "virtual:@farmjs/rsc/hydrate";
-const OPTIMIZED_BOUNDARY_ADAPTER = "@farmjs/plugin/rsc/optimized-boundary";
+const VIRTUAL_RSC_ENTRY = "virtual:@farm.js/rsc/entry-rsc";
+const VIRTUAL_SSR_ENTRY = "virtual:@farm.js/rsc/entry-ssr";
+const VIRTUAL_CLIENT_ENTRY = "virtual:@farm.js/rsc/entry-client";
+const VIRTUAL_HYDRATE_ENTRY = "virtual:@farm.js/rsc/hydrate";
+const OPTIMIZED_BOUNDARY_ADAPTER = "@farm.js/plugin/rsc/optimized-boundary";
 const STRATA_PACKAGE = "@farming-labs/strata";
-const FARM_CORE_PACKAGE_ROOT = path.resolve(path.dirname(require_.resolve("@farmjs/core")), "..");
+const FARM_CORE_PACKAGE_ROOT = path.resolve(path.dirname(require_.resolve("@farm.js/core")), "..");
 
 function isOptimizedBoundaryModule(id: string): boolean {
   return (
@@ -234,7 +234,7 @@ function resolveOptimizedBoundaryRuntimeRoot(): string {
   } catch {
     throw new Error(
       `[Farm.js] experimental.optimizedBoundary requires the bundled ${STRATA_PACKAGE} runtime. ` +
-        "Reinstall @farmjs/plugin for a supported Node platform.",
+        "Reinstall @farm.js/plugin for a supported Node platform.",
     );
   }
 }
@@ -335,7 +335,7 @@ async function getCoreRuntimeExportSources(): Promise<CoreRuntimeExportSources> 
       exports: Record<string, { import?: string }>;
     };
     const rootEntry = manifest.exports["."]?.import;
-    if (!rootEntry) throw new Error("@farmjs/core has no ESM root export");
+    if (!rootEntry) throw new Error("@farm.js/core has no ESM root export");
 
     const rootExports = collectEsmExportNames(
       await fs.readFile(path.resolve(FARM_CORE_PACKAGE_ROOT, rootEntry), "utf8"),
@@ -381,20 +381,20 @@ async function getCoreRuntimeExportSources(): Promise<CoreRuntimeExportSources> 
 
 function unsupportedStandaloneSubpathError(subpath: string, id: string): Error {
   return new Error(
-    `[Farm.js] @farmjs/core/${subpath} is not supported in the standalone RSC runtime (${id}). ` +
+    `[Farm.js] @farm.js/core/${subpath} is not supported in the standalone RSC runtime (${id}). ` +
       "Its external runtime dependencies are not copied into the isolated server output yet. " +
       "Importing it would create a production build that boots but fails when the module is used.",
   );
 }
 
-const CORE_ROOT_NAMED_IMPORT_RE = /^import\s*\{([\s\S]*?)\}\s*from\s*(["'])@farmjs\/core\2\s*$/;
+const CORE_ROOT_NAMED_IMPORT_RE = /^import\s*\{([\s\S]*?)\}\s*from\s*(["'])@farm.js\/core\2\s*$/;
 
 async function rewriteCoreRuntimeImports(code: string, id: string): Promise<string | null> {
-  if (!code.includes("@farmjs/core")) return null;
+  if (!code.includes("@farm.js/core")) return null;
   await initModuleLexer;
   const [moduleImports] = parseModuleImports(code, id);
   const rootImports = moduleImports.filter(
-    (moduleImport) => moduleImport.n === "@farmjs/core" && moduleImport.d === -1,
+    (moduleImport) => moduleImport.n === "@farm.js/core" && moduleImport.d === -1,
   );
   if (rootImports.length === 0) return null;
 
@@ -409,7 +409,7 @@ async function rewriteCoreRuntimeImports(code: string, id: string): Promise<stri
     const namedImport = CORE_ROOT_NAMED_IMPORT_RE.exec(statement);
     if (!namedImport) {
       throw new Error(
-        `[Farm.js] Unsupported @farmjs/core import syntax in ${id}. ` +
+        `[Farm.js] Unsupported @farm.js/core import syntax in ${id}. ` +
           "Standalone RSC request modules must use named imports from the root or a supported focused public subpath.",
       );
     }
@@ -427,7 +427,7 @@ async function rewriteCoreRuntimeImports(code: string, id: string): Promise<stri
       if (specifier.startsWith("type ")) continue;
       const match = /^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/.exec(specifier);
       if (!match) {
-        throw new Error(`[Farm.js] Unsupported @farmjs/core import syntax in ${id}: ${specifier}`);
+        throw new Error(`[Farm.js] Unsupported @farm.js/core import syntax in ${id}: ${specifier}`);
       }
       const [, imported, local = imported] = match;
       const unsupportedSubpath = unsupportedSources.get(imported);
@@ -437,7 +437,7 @@ async function rewriteCoreRuntimeImports(code: string, id: string): Promise<stri
       const subpath = exportSources.get(imported);
       if (!subpath) {
         throw new Error(
-          `[Farm.js] The @farmjs/core root export "${imported}" is not available in the standalone RSC runtime. ` +
+          `[Farm.js] The @farm.js/core root export "${imported}" is not available in the standalone RSC runtime. ` +
             "Config, plugin, Vite, build, code-generation, and framework-bootstrap APIs must stay outside application request modules.",
         );
       }
@@ -448,7 +448,7 @@ async function rewriteCoreRuntimeImports(code: string, id: string): Promise<stri
 
     const replacement = Array.from(
       grouped,
-      ([subpath, imports]) => `import { ${imports.join(", ")} } from "@farmjs/core/${subpath}";`,
+      ([subpath, imports]) => `import { ${imports.join(", ")} } from "@farm.js/core/${subpath}";`,
     ).join("\n");
     const end = code[rootImport.se] === ";" ? rootImport.se + 1 : rootImport.se;
     replacements.push({ start: rootImport.ss, end, code: replacement });
@@ -550,7 +550,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
   return [
     farmEnvironmentFunctionsPlugin() as unknown as Plugin,
     {
-      name: "@farmjs/plugin/rsc:core-runtime",
+      name: "@farm.js/plugin/rsc:core-runtime",
       // Run after Vite/esbuild has lowered TS/JSX. es-module-lexer deliberately
       // parses JavaScript module syntax and rejects raw JSX expression text.
       enforce: "post",
@@ -570,12 +570,12 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         const environmentName = (this as { environment?: { name?: string } }).environment?.name;
         const isServerEnvironment =
           options?.ssr || environmentName === "rsc" || environmentName === "ssr";
-        if (isServerEnvironment && id === "@farmjs/core/storage") {
+        if (isServerEnvironment && id === "@farm.js/core/storage") {
           throw unsupportedStandaloneSubpathError("storage", _importer || "unknown importer");
         }
-        if (isServerEnvironment && id === "@farmjs/core") {
+        if (isServerEnvironment && id === "@farm.js/core") {
           throw new Error(
-            "[Farm.js] Standalone RSC runtime modules must use named @farmjs/core imports. " +
+            "[Farm.js] Standalone RSC runtime modules must use named @farm.js/core imports. " +
               "Namespace/default imports and build-only root exports cannot be bundled safely; use a focused public subpath.",
           );
         }
@@ -583,7 +583,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       },
     },
     {
-      name: "@farmjs/plugin/rsc:config",
+      name: "@farm.js/plugin/rsc:config",
       enforce: "pre",
 
       async config(config: UserConfig, env: ConfigEnv) {
@@ -716,18 +716,18 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         const entrySsr = "./.farm/rsc-entries/entry.ssr.tsx";
         const entryClient = "./.farm/rsc-entries/entry.browser.tsx";
 
-        // Resolve @farmjs/core so Vite (and rsc/ssr envs) can load it when app code imports it (fixes "Failed to resolve entry" in dev).
+        // Resolve @farm.js/core so Vite (and rsc/ssr envs) can load it when app code imports it (fixes "Failed to resolve entry" in dev).
         let farmCorePath: string | null = null;
         try {
-          farmCorePath = path.dirname(require_.resolve("@farmjs/core/package.json"));
+          farmCorePath = path.dirname(require_.resolve("@farm.js/core/package.json"));
         } catch {
           try {
             farmCorePath = path.resolve(
-              path.dirname(require_.resolve("@farmjs/core/server")),
+              path.dirname(require_.resolve("@farm.js/core/server")),
               "..",
             );
           } catch {
-            // @farmjs/core not installed or not built; core aliases are not added
+            // @farm.js/core not installed or not built; core aliases are not added
           }
         }
         const layerAliases = getFarmLayerAliases(c.layers);
@@ -766,33 +766,33 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
               ...(farmCorePath
                 ? [
                     {
-                      find: /^@farmjs\/core\/middleware$/,
+                      find: /^@farm.js\/core\/middleware$/,
                       replacement: path.join(farmCorePath, "dist/middleware.mjs"),
                     },
                     {
-                      find: /^@farmjs\/core\/api$/,
+                      find: /^@farm.js\/core\/api$/,
                       replacement: path.join(farmCorePath, "dist/api.mjs"),
                     },
                     {
-                      find: /^@farmjs\/core\/server-fn$/,
+                      find: /^@farm.js\/core\/server-fn$/,
                       replacement: path.join(farmCorePath, "dist/server-fn.mjs"),
                     },
                     {
-                      find: /^@farmjs\/core\/server-action-security$/,
+                      find: /^@farm.js\/core\/server-action-security$/,
                       replacement: path.join(farmCorePath, "dist/server-action-security.mjs"),
                     },
                     {
-                      find: /^@farmjs\/core\/environment$/,
+                      find: /^@farm.js\/core\/environment$/,
                       replacement: path.join(farmCorePath, "dist/environment.mjs"),
                     },
                     {
-                      find: /^@farmjs\/core\/headers$/,
+                      find: /^@farm.js\/core\/headers$/,
                       replacement: path.join(farmCorePath, "dist/headers.mjs"),
                     },
                     ...(env.command === "serve"
                       ? [
                           {
-                            find: /^@farmjs\/core$/,
+                            find: /^@farm.js\/core$/,
                             replacement: path.join(farmCorePath, "dist/index.mjs"),
                           },
                         ]
@@ -843,7 +843,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
       },
     },
     {
-      name: "@farmjs/plugin/rsc:optimized-boundary",
+      name: "@farm.js/plugin/rsc:optimized-boundary",
       enforce: "pre",
 
       resolveId(id, importer, options) {
@@ -877,7 +877,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     },
 
     {
-      name: "@farmjs/plugin/rsc:server-fn-actions",
+      name: "@farm.js/plugin/rsc:server-fn-actions",
       enforce: "pre",
 
       transform(code, id) {
@@ -896,7 +896,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     // Nitro: run after all environments (like @hiogawa/vite-plugin-nitro). If the runtime supports
     // plugin buildApp order "post", this runs automatically; else use build script (see comment below).
     {
-      name: "@farmjs/plugin/rsc:nitro-build",
+      name: "@farm.js/plugin/rsc:nitro-build",
       apply: "build",
       buildApp: {
         order: "post",
@@ -936,7 +936,7 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
     // Generates entry files dynamically based on user's project structure
     // ────────────────────────────────────────────────────────
     {
-      name: "@farmjs/plugin/rsc:virtual-entries",
+      name: "@farm.js/plugin/rsc:virtual-entries",
       enforce: "pre",
 
       resolveId(source: string) {
@@ -1007,7 +1007,7 @@ import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
-} from '@farmjs/core/deployment';
+} from '@farm.js/core/deployment';
 const farmDeploymentId = ${JSON.stringify(entryContext.deploymentId)};
 setServerCallback(async (id, args) => {
   const refs = createTemporaryReferenceSet();
@@ -1077,7 +1077,7 @@ if (document.readyState === 'loading') {
     // Middleware and API routes are handled by standalone plugins
     // ────────────────────────────────────────────────────────
     {
-      name: "@farmjs/plugin/rsc:dev-server",
+      name: "@farm.js/plugin/rsc:dev-server",
 
       configureServer(server) {
         if (!rscEnabled) {
@@ -1545,7 +1545,7 @@ import '/@vite/client';
     // virtual modules (e.g. virtual:vite-rsc/client-references) run in all environments.
     // ────────────────────────────────────────────────────────
     {
-      name: "@farmjs/plugin/rsc:core-loader",
+      name: "@farm.js/plugin/rsc:core-loader",
       enforce: "pre",
     },
 
@@ -1554,7 +1554,7 @@ import '/@vite/client';
     // Sends HMR updates when server components, middleware, or API routes change
     // ────────────────────────────────────────────────────────
     {
-      name: "@farmjs/plugin/rsc:hmr",
+      name: "@farm.js/plugin/rsc:hmr",
 
       handleHotUpdate({ file, server, modules }) {
         if (!rscEnabled) {

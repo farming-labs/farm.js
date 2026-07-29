@@ -1,4 +1,4 @@
-import type { PageProps } from '@farmjs/core';
+import type { PageProps } from '@farm.js/core';
 
 export async function generateMetadata({ params }: PageProps) {
   return {

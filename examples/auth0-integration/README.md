@@ -1,6 +1,6 @@
 # Auth0 Integration Example
 
-Config-only Auth0 setup through `@farmjs/integrations/auth0`.
+Config-only Auth0 setup through `@farm.js/integrations/auth0`.
 
 The example passes the callback URL directly in `farm.config.ts`:
 

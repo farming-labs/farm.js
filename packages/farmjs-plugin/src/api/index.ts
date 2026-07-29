@@ -14,7 +14,7 @@
  *
  * @example
  * ```ts
- * import { farmApi } from '@farmjs/plugin/api'
+ * import { farmApi } from '@farm.js/plugin/api'
  *
  * export default defineConfig({
  *   plugins: [farmApi({ srcDir: 'src' })],
@@ -23,7 +23,7 @@
  */
 
 import type { Plugin, ViteDevServer } from "vite";
-import { _withAfterNodeMiddleware } from "@farmjs/core/after";
+import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 
 export interface FarmApiOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -264,7 +264,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
   };
 
   return {
-    name: "@farmjs/plugin/api",
+    name: "@farm.js/plugin/api",
     enforce: "pre",
 
     configureServer(server: ViteDevServer) {

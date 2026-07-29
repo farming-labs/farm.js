@@ -1,4 +1,4 @@
-import type { FarmIntegrationLogger } from "@farmjs/core";
+import type { FarmIntegrationLogger } from "@farm.js/core";
 import { createAuthRouteIntegration, methodNotAllowed } from "../utils/index.js";
 
 type AuthJsMethod = "GET" | "POST";

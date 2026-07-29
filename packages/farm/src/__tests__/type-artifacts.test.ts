@@ -22,7 +22,7 @@ describe("generateFarmTypeArtifacts", () => {
     writeFileSync(
       path.join(root, "farm.config.ts"),
       [
-        'import { defineConfig } from "@farmjs/core";',
+        'import { defineConfig } from "@farm.js/core";',
         "export default defineConfig({",
         "  env: {",
         "    server: { DATABASE_URL: { parse: (value: unknown) => String(value) } },",
@@ -72,10 +72,10 @@ describe("generateFarmTypeArtifacts", () => {
     expect(readFileSync(envTypesPath, "utf8")).toContain(
       'import type FarmConfig from "../farm.config"',
     );
-    expect(readFileSync(envTypesPath, "utf8")).toContain('declare module "@farmjs/core/env"');
+    expect(readFileSync(envTypesPath, "utf8")).toContain('declare module "@farm.js/core/env"');
     expect(readFileSync(imageTypesPath, "utf8")).toContain('declare module "*.png"');
     expect(readFileSync(imageTypesPath, "utf8")).toContain(
-      'import("@farmjs/core/image").StaticImageData',
+      'import("@farm.js/core/image").StaticImageData',
     );
     expect(readFileSync(imageTypesPath, "utf8")).toContain('declare module "*?url"');
   });

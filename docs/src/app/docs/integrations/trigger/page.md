@@ -23,7 +23,7 @@ farm add integration jobs-trigger --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { jobs, trigger } from "@farmjs/integrations/jobs";
+import { jobs, trigger } from "@farm.js/integrations/jobs";
 import { tasks } from "./jobs";
 
 export const appIntegrations = {
@@ -53,7 +53,7 @@ export const appIntegrations = {
 **src/lib/jobs.ts**
 
 ```ts
-import { defineTasks, task } from "@farmjs/integrations/jobs";
+import { defineTasks, task } from "@farm.js/integrations/jobs";
 
 export const tasks = defineTasks({
   sendWelcomeEmail: task({

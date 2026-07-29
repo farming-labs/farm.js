@@ -1,4 +1,4 @@
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   srcDir: "src",

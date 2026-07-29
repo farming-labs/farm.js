@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Link } from '@farmjs/core/client';
+import { Link } from '@farm.js/core/client';
 import { api } from '../../lib/api-client';
 
 type HelloResponse = NonNullable<Awaited<ReturnType<typeof api.hello.get>>['data']>;

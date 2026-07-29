@@ -145,7 +145,7 @@ export default function ApiDemoPage() {
         <h2 className="text-xl font-bold text-gray-900 mb-4">API Route Code</h2>
         <pre className="bg-gray-100 rounded p-4 text-sm overflow-x-auto">
 {`// src/app/api/hello/route.ts
-import { createEndpoint } from "@farmjs/core/api";
+import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
 
 export const GET = createEndpoint(

@@ -9,7 +9,7 @@ import {
   resolveConfig,
   resolveDeployConfig,
   resolveDeployOutputPath,
-} from "@farmjs/core";
+} from "@farm.js/core";
 import { buildFarm } from "./build";
 
 export interface DeployFarmOptions {
@@ -340,7 +340,7 @@ async function deployCloudflare(root: string, outputDir: string, projectName?: s
   }
 }
 
-/** Read the trusted Workers deployment handoff emitted by @farmjs/cf-agent. */
+/** Read the trusted Workers deployment handoff emitted by @farm.js/cf-agent. */
 export function resolveCloudflareAgentDeployPlan(
   root: string,
 ): CloudflareAgentDeployPlan | undefined {

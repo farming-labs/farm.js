@@ -1,7 +1,7 @@
 import tailwindcss from "@tailwindcss/vite";
 import rsc from "@vitejs/plugin-rsc";
 import react from "@vitejs/plugin-react";
-import { defineConfig, nitro } from "@farmjs/plugin/rsc";
+import { defineConfig, nitro } from "@farm.js/plugin/rsc";
 
 // Preset: "vercel" (default) | "cloudflare_pages" | "cloudflare_module" (set NITRO_PRESET for Cloudflare).
 const nitroPreset = process.env.NITRO_PRESET || "vercel";

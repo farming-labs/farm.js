@@ -5,11 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "vercel dev",
-    "build": "corepack pnpm --filter @farmjs/preview-gateway build",
+    "build": "corepack pnpm --filter @farm.js/preview-gateway build",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farmjs/preview-gateway": "workspace:*",
+    "@farm.js/preview-gateway": "workspace:*",
     "@vercel/blob": "^2.6.1"
   },
   "devDependencies": {

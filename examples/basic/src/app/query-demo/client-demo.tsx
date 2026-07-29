@@ -14,7 +14,7 @@ import {
   createParser,
   usePagination,
   useSearchFilters,
-} from '@farmjs/core/query/client';
+} from '@farm.js/core/query/client';
 
 const parseAsColor = createParser({
   parse: (value: string) => {

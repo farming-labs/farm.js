@@ -1,6 +1,6 @@
 import React from 'react'
-import type { PageProps, Metadata } from "@farmjs/core"
-import { Link } from "@farmjs/core/client"
+import type { PageProps, Metadata } from "@farm.js/core"
+import { Link } from "@farm.js/core/client"
 
 // Note: This page uses Link components which require client-side hydration
 // SSG for pages with client components needs proper hydration support

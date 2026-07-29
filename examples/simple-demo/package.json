@@ -7,7 +7,7 @@
     "dev": "node server.js"
   },
   "dependencies": {
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   }

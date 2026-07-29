@@ -1,4 +1,4 @@
-import type { FarmIntegrationLogger } from "@farmjs/core";
+import type { FarmIntegrationLogger } from "@farm.js/core";
 import { createAuthRouteIntegration } from "../utils/index.js";
 
 export interface BetterAuthInstance {

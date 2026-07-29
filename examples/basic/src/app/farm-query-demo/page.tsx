@@ -7,7 +7,7 @@ import {
   asArrayOf ,
   asInteger,
   asBoolean,
-} from '@farmjs/core/query/client';
+} from '@farm.js/core/query/client';
 
 function FarmClientQueryDemo() {
   // For search input: Use replaceState to update URL immediately without cluttering history

@@ -15,7 +15,7 @@ Farm integrations are declared with `defineIntegration`. They are registered in 
 **src/integrations/acme.ts**
 
 ```ts
-import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
 
 export const acme = defineIntegration({
   category: "custom",
@@ -36,7 +36,7 @@ export const acme = defineIntegration({
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { acme } from "./src/integrations/acme";
 
 export default defineConfig({
@@ -80,7 +80,7 @@ Register the integration once. The `billing` key becomes the first segment after
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { billing } from "./src/integrations/billing";
 
 export default defineConfig({
@@ -95,7 +95,7 @@ Create the browser and server callers once as well:
 **src/lib/integrations.ts**
 
 ```ts
-import { createIntegrations } from "@farmjs/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import type { billing } from "../integrations/billing";
 
 type AppIntegrations = {
@@ -117,7 +117,7 @@ the recommended default.
 **src/integrations/billing.ts**
 
 ```ts
-import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
 import { z } from "zod";
 
 export const billing = defineIntegration({
@@ -185,7 +185,7 @@ than a flat list.
 **src/integrations/billing.ts**
 
 ```ts
-import { defineIntegration } from "@farmjs/core";
+import { defineIntegration } from "@farm.js/core";
 import { z } from "zod";
 
 export const billing = defineIntegration({
@@ -255,7 +255,7 @@ names that do not follow route URLs.
 **src/integrations/billing.ts**
 
 ```ts
-import { defineIntegration, endpoint } from "@farmjs/core";
+import { defineIntegration, endpoint } from "@farm.js/core";
 
 export const billing = defineIntegration({
   category: "payment",
@@ -357,7 +357,7 @@ Use `config` when an integration needs secrets or user options. Farm resolves co
 **src/integrations/acme.ts**
 
 ```ts
-import { defineIntegration } from "@farmjs/core";
+import { defineIntegration } from "@farm.js/core";
 import { z } from "zod";
 
 const acmeConfigSchema = z.object({
@@ -446,7 +446,7 @@ export const acme = defineIntegration({
 `integrationRoute` is the route factory. It supports `get`, `post`, `put`, `patch`, `delete`, `options`, and `head`.
 
 ```ts
-import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
 import { z } from "zod";
 
 const createCheckoutBody = z.object({
@@ -535,7 +535,7 @@ when you intentionally want caller names that do not follow the URLs. An `api` o
 registers an HTTP handler.
 
 ```ts
-import { defineIntegration, endpoint } from "@farmjs/core";
+import { defineIntegration, endpoint } from "@farm.js/core";
 
 export const acme = defineIntegration({
   category: "custom",
@@ -669,7 +669,7 @@ Route handlers, route middleware, and route hooks receive `ctx` with these field
 Declare `schema` when an integration owns data. Farm maps that schema to the integration ORM so route handlers and lifecycle hooks can use `ctx.args.db`.
 
 ```ts
-import { defineIntegration, defineIntegrationSchema, integrationRoute } from "@farmjs/core";
+import { defineIntegration, defineIntegrationSchema, integrationRoute } from "@farm.js/core";
 
 const billingSchema = defineIntegrationSchema({
   models: {
@@ -740,7 +740,7 @@ The app supplies the storage client once:
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { DatabaseSync } from "node:sqlite";
 import { billing } from "./src/integrations/billing";
 
@@ -763,7 +763,7 @@ The integration code still uses `ctx.args.db`, not SQLite-specific APIs. If the 
 Use `providers` for client SDKs, context providers, or integration metadata that the app shell can compose.
 
 ```tsx
-import type { FarmIntegrationProviderProps } from "@farmjs/core";
+import type { FarmIntegrationProviderProps } from "@farm.js/core";
 
 function AcmeProvider({ children }: FarmIntegrationProviderProps) {
   return <>{children}</>;
@@ -814,7 +814,7 @@ Common phases are `registered`, `validate`, `setup`, `ready`, `dispose`, `reques
 Automatic callers read the registered integration API manifest in the browser and the registered runtime on the server.
 
 ```ts
-import { createIntegrations } from "@farmjs/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import type { acme } from "../integrations/acme";
 
 type AppIntegrations = {

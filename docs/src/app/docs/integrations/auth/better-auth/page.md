@@ -52,7 +52,7 @@ config.
 **src/lib/integrations.ts**
 
 ```ts
-import { betterAuth } from "@farmjs/integrations/better-auth";
+import { betterAuth } from "@farm.js/integrations/better-auth";
 import { auth } from "./auth";
 
 export const appIntegrations = {

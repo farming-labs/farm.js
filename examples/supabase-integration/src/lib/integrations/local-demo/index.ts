@@ -4,7 +4,7 @@ import {
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
   integrationRoute,
-} from "@farmjs/core";
+} from "@farm.js/core";
 
 export interface LocalDemoIntegrationOptions {
   greeting?: string;

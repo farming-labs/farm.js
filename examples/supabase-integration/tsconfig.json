@@ -13,11 +13,11 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "@farmjs/core": ["../../packages/farm/dist/index.d.ts"],
-      "@farmjs/core/client": ["../../packages/farm/types/client.d.ts"],
-      "@farmjs/integrations": ["../../packages/farm-integrations/dist/index.d.ts"],
-      "@farmjs/integrations/supabase": ["../../packages/farm-integrations/dist/supabase/index.d.ts"],
-      "@farmjs/integrations/supabase/client": ["../../packages/farm-integrations/dist/supabase/client.d.ts"]
+      "@farm.js/core": ["../../packages/farm/dist/index.d.ts"],
+      "@farm.js/core/client": ["../../packages/farm/types/client.d.ts"],
+      "@farm.js/integrations": ["../../packages/farm-integrations/dist/index.d.ts"],
+      "@farm.js/integrations/supabase": ["../../packages/farm-integrations/dist/supabase/index.d.ts"],
+      "@farm.js/integrations/supabase/client": ["../../packages/farm-integrations/dist/supabase/client.d.ts"]
     },
     "allowImportingTsExtensions": true,
     "resolveJsonModule": true,

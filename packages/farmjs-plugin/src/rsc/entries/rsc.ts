@@ -46,16 +46,16 @@ import {
   createFarmDeploymentCookie,
   createFarmDeploymentMismatchResponse,
   getFarmDeploymentMismatch,
-} from '@farmjs/core/deployment';
+} from '@farm.js/core/deployment';
 import {
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
   applyProductionMiddlewareHeaders,
   createProductionMiddlewareRunner,
-} from '@farmjs/core/middleware';
-import { invokeAPIRouteEndpoint, matchAPIRoute } from '@farmjs/core/api/runtime';
-import { _runWithAfterRequest } from '@farmjs/core/after';
-import { _runWithCurrentRequest } from '@farmjs/core/internal/production-runtime';
+} from '@farm.js/core/middleware';
+import { invokeAPIRouteEndpoint, matchAPIRoute } from '@farm.js/core/api/runtime';
+import { _runWithAfterRequest } from '@farm.js/core/after';
+import { _runWithCurrentRequest } from '@farm.js/core/internal/production-runtime';
 
 const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
 `;
@@ -67,7 +67,7 @@ const farmDeploymentId = ${JSON.stringify(ctx.deploymentId)};
   runWithServerActionRequest,
   sanitizeServerActionError,
   validateServerActionRequest,
-} from '@farmjs/core/server-action-security';
+} from '@farm.js/core/server-action-security';
 
 const serverActionSecurity = ${JSON.stringify(ctx.serverActions)};
 `;

@@ -1,4 +1,4 @@
-import type { PolarBillingPlan, PolarBillingProduct } from "@farmjs/integrations/polar";
+import type { PolarBillingPlan, PolarBillingProduct } from "@farm.js/integrations/polar";
 
 export const polarPlans: Record<string, PolarBillingPlan> = {
   free: {

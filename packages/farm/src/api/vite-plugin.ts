@@ -7,7 +7,7 @@
  *
  * @example
  * ```ts
- * import { farmApiPlugin } from '@farmjs/core'
+ * import { farmApiPlugin } from '@farm.js/core'
  *
  * export default defineConfig({
  *   plugins: [farmApiPlugin({ srcDir: 'src' })],
@@ -146,7 +146,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   };
 
   return {
-    name: "@farmjs/core:api",
+    name: "@farm.js/core:api",
     enforce: "pre",
 
     configureServer(server: ViteDevServer) {

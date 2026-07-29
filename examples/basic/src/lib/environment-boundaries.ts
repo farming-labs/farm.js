@@ -2,8 +2,8 @@ import {
   createClientOnlyFn,
   createIsomorphicFn,
   createServerOnlyFn,
-} from '@farmjs/core/environment';
-import { getEnv, getPublicEnv } from '@farmjs/core/env';
+} from '@farm.js/core/environment';
+import { getEnv, getPublicEnv } from '@farm.js/core/env';
 
 export const readServerBoundary = createServerOnlyFn(() => {
   return `server:${getEnv('FARM_API_URL')}:FARM_SERVER_BOUNDARY_SENTINEL`;

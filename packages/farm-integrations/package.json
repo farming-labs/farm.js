@@ -1,5 +1,5 @@
 {
-  "name": "@farmjs/integrations",
+  "name": "@farm.js/integrations",
   "version": "0.0.1",
   "description": "Official integration adapters for Farm.js",
   "license": "MIT",
@@ -111,7 +111,7 @@
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "@polar-sh/sdk": "^0.47.0",
     "@react-email/render": "2.0.6",
     "@supabase/ssr": "^0.9.0",

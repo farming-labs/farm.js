@@ -1,4 +1,4 @@
-import { createServerFn, createServerMiddleware } from "@farmjs/core/server-fn";
+import { createServerFn, createServerMiddleware } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
 const sessionMiddleware = createServerMiddleware({

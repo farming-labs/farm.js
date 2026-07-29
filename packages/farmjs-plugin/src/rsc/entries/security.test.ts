@@ -38,7 +38,7 @@ describe("generated server action security", () => {
   it("validates and bounds requests before decoding or executing actions", () => {
     const entry = generateRscEntry(context);
 
-    expect(entry).toContain("from '@farmjs/core/server-action-security'");
+    expect(entry).toContain("from '@farm.js/core/server-action-security'");
     expect(entry).toContain(
       'const serverActionSecurity = {"allowedOrigins":["https://proxy.example.com"],"bodySizeLimit":500000};',
     );
@@ -113,7 +113,7 @@ describe("generated server action security", () => {
       'import.meta.glob("/src/app/api/**/route.{tsx,jsx,ts,js}", { eager: true })',
     );
     expect(entry).toContain("getProgrammaticApiRoutes(routeModule)");
-    expect(entry).toContain("from '@farmjs/core/api/runtime'");
+    expect(entry).toContain("from '@farm.js/core/api/runtime'");
     expect(entry).toContain("invokeAPIRouteEndpoint(endpoint, request, match.params)");
     expect(entry).toContain("error: 'Internal Server Error'");
     expect(entry).not.toContain("error?.message || 'Internal Server Error'");

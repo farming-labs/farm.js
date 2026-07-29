@@ -13,7 +13,7 @@ Wrap routes with root and nested layouts, then use loading, error, and not-found
 **src/app/layout.tsx**
 
 ```tsx
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 import "./globals.css";
 
 export default function RootLayout({ children }: LayoutProps) {
@@ -33,7 +33,7 @@ A layout file wraps every page below its folder. Use this for dashboards, docs, 
 **src/app/dashboard/layout.tsx**
 
 ```tsx
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 
 export default function DashboardLayout({ children }: LayoutProps) {
   return (
@@ -96,7 +96,7 @@ Use `not-found.tsx` for segment-specific missing states. A docs page might show 
 **src/app/docs/not-found.tsx**
 
 ```tsx
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farm.js/core/client";
 
 export default function DocsNotFound() {
   return (

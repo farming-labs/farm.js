@@ -14,7 +14,7 @@ import {
   type FarmIntegrationAPI,
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
-} from "@farmjs/core";
+} from "@farm.js/core";
 import {
   integrationConfig,
   normalizeWebhookConfig,

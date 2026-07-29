@@ -1,6 +1,6 @@
 'use client';
 
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farm.js/core/client";
 import { StoragePlayground } from "./storage-playground";
 
 type HelperSnippet = {
@@ -13,7 +13,7 @@ const helperSnippets: HelperSnippet[] = [
   {
     title: "postgresStorage",
     note: "Programmatic Postgres client you can use directly or mount in farm.config.",
-    code: `import { postgresStorage } from "@farmjs/core/storage";
+    code: `import { postgresStorage } from "@farm.js/core/storage";
 
 export const pg = postgresStorage({
   url: process.env.DATABASE_URL!,
@@ -23,7 +23,7 @@ export const pg = postgresStorage({
   {
     title: "mysqlStorage",
     note: "MySQL helper backed by db0 + unstorage db0 driver.",
-    code: `import { mysqlStorage } from "@farmjs/core/storage";
+    code: `import { mysqlStorage } from "@farm.js/core/storage";
 
 export const mysql = mysqlStorage({
   host: process.env.MYSQL_HOST!,
@@ -36,7 +36,7 @@ export const mysql = mysqlStorage({
   {
     title: "redisStorage",
     note: "Redis helper for rate limits, cache, and short-lived state.",
-    code: `import { redisStorage } from "@farmjs/core/storage";
+    code: `import { redisStorage } from "@farm.js/core/storage";
 
 export const redis = redisStorage({
   url: process.env.REDIS_URL!,
@@ -45,7 +45,7 @@ export const redis = redisStorage({
   {
     title: "mongodbStorage",
     note: "MongoDB helper using the unstorage mongodb driver.",
-    code: `import { mongodbStorage } from "@farmjs/core/storage";
+    code: `import { mongodbStorage } from "@farm.js/core/storage";
 
 export const mongo = mongodbStorage({
   connectionString: process.env.MONGO_URL!,
@@ -56,7 +56,7 @@ export const mongo = mongodbStorage({
   {
     title: "s3Storage",
     note: "S3 helper for bucket-backed key-value storage.",
-    code: `import { s3Storage } from "@farmjs/core/storage";
+    code: `import { s3Storage } from "@farm.js/core/storage";
 
 export const s3 = s3Storage({
   bucket: process.env.S3_BUCKET!,
@@ -68,7 +68,7 @@ export const s3 = s3Storage({
   {
     title: "upstashStorage / vercelKVStorage",
     note: "Edge-friendly hosted key-value helpers.",
-    code: `import { upstashStorage, vercelKVStorage } from "@farmjs/core/storage";
+    code: `import { upstashStorage, vercelKVStorage } from "@farm.js/core/storage";
 
 export const upstash = upstashStorage({
   url: process.env.UPSTASH_REDIS_REST_URL!,
@@ -100,7 +100,7 @@ export default function StorageDemoPage() {
           them and also pass the same instances into <code>farm.config.ts</code>.
         </p>
         <pre className="mt-6 overflow-x-auto rounded-xl bg-slate-950 p-4 text-sm text-slate-100">
-{`import { sqliteStorage, redisStorage } from "@farmjs/core/storage";
+{`import { sqliteStorage, redisStorage } from "@farm.js/core/storage";
 
 export const sqlite = sqliteStorage({
   path: "./.farm/app.sqlite",

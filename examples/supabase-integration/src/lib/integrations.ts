@@ -1,4 +1,4 @@
-import { supabase } from "@farmjs/integrations";
+import { supabase } from "@farm.js/integrations";
 import { localDemo } from "./integrations/local-demo/index.ts";
 
 export const appIntegrations = {

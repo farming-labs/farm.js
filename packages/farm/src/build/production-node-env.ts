@@ -1,4 +1,4 @@
-const productionNodeEnvStateKey = Symbol.for("@farmjs/core/production-node-env-state");
+const productionNodeEnvStateKey = Symbol.for("@farm.js/core/production-node-env-state");
 
 interface ProductionNodeEnvState {
   depth: number;

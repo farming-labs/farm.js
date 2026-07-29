@@ -20,7 +20,7 @@ Use mounts for values such as settings, feature flags, cache entries, rate-limit
 **src/lib/storage.ts**
 
 ```ts
-import { redisStorage, sqliteStorage } from "@farmjs/core/storage";
+import { redisStorage, sqliteStorage } from "@farm.js/core/storage";
 
 export const appStorage = sqliteStorage({
   path: "./.farm/storage/app.sqlite",
@@ -39,7 +39,7 @@ Storage helpers return ready-to-use clients, so application code can import and 
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { appStorage, rateLimitStorage } from "./src/lib/storage";
 
 export default defineConfig({
@@ -71,8 +71,8 @@ It is not limited to API routes. You can call it from any module that executes o
 **src/app/api/settings/route.ts**
 
 ```ts
-import { createEndpoint } from "@farmjs/core/api";
-import { getStorage } from "@farmjs/core/storage";
+import { createEndpoint } from "@farm.js/core/api";
+import { getStorage } from "@farm.js/core/storage";
 import { z } from "zod";
 
 type AppSettings = {
@@ -158,7 +158,7 @@ The `ratelimit` name is recognized by Farm's built-in rate-limit middleware. Onc
 **src/app/api/middleware.ts**
 
 ```ts
-import { middleware } from "@farmjs/core/middleware";
+import { middleware } from "@farm.js/core/middleware";
 
 export default middleware().rateLimit({
   requests: 100,
@@ -215,7 +215,7 @@ The root store and every mount can use a different supported driver.
 
 ### Farm storage helpers
 
-Import these helpers from `@farmjs/core/storage`:
+Import these helpers from `@farm.js/core/storage`:
 
 | Helper                                        | Driver                   | Common use                                                                        |
 | --------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------- |
@@ -246,7 +246,7 @@ Helpers and direct configuration produce the same Farm storage client behavior. 
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   storage: {
@@ -338,7 +338,7 @@ Most remote and platform drivers load an optional provider SDK. Install the pack
 Use `driverStorage()` when a compatible driver already exists:
 
 ```ts
-import { driverStorage } from "@farmjs/core/storage";
+import { driverStorage } from "@farm.js/core/storage";
 import createCustomDriver from "my-unstorage-driver";
 
 export const customStorage = driverStorage(() =>
@@ -358,7 +358,7 @@ The wrapped driver can be mounted or used as the root Farm storage client just l
 - Another database, ORM, or provider object becomes the runtime client for schema-backed integrations. That object is not returned by `getStorage(name)`.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { DatabaseSync } from "node:sqlite";
 
 const db = new DatabaseSync("farm.sqlite");
@@ -385,7 +385,7 @@ Farm can generate integration schema artifacts with `farm generate`, then run yo
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   storage: {

@@ -1,5 +1,5 @@
-import { defineConfig, definePlugin, type FarmPlugin } from '@farmjs/core';
-import { createLoggerPlugin, createEnvPlugin } from '@farmjs/core/plugin/server';
+import { defineConfig, definePlugin, type FarmPlugin } from '@farm.js/core';
+import { createLoggerPlugin, createEnvPlugin } from '@farm.js/core/plugin/server';
 import { z } from 'zod';
 import { storageDemoClients, STORAGE_DEMO_MOUNTS } from './src/lib/storage-demo.ts';
 import { integrationLab } from './src/lib/integration-lab.ts';

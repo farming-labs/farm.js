@@ -3,9 +3,9 @@ import {
   defineIntegrationAPI,
   integrationRoute,
   type FarmIntegrationLogger,
-} from "@farmjs/core";
-import { api } from "@farmjs/core/client";
-import type { FarmIntegrationAPIOperation } from "@farmjs/core/client";
+} from "@farm.js/core";
+import { api } from "@farm.js/core/client";
+import type { FarmIntegrationAPIOperation } from "@farm.js/core/client";
 import { integrationConfig } from "../utils/index.js";
 
 export type JobsRuntimeKind = "trigger" | "inngest";

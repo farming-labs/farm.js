@@ -33,12 +33,12 @@ The Next.js migrator focuses on the App Router path because Farm uses the same r
 | middleware.ts | src/app/middleware.ts |
 | package scripts | farm dev, farm build, node .output/server/index.mjs |
 
-The migrator also creates `farm.config.ts`, creates a minimal root layout when one is missing, adds `@farmjs/core` and `@farmjs/cli`, and rewrites supported Next imports to Farm compatibility entries.
+The migrator also creates `farm.config.ts`, creates a minimal root layout when one is missing, adds `@farm.js/core` and `@farm.js/cli`, and rewrites supported Next imports to Farm compatibility entries.
 
 ```tsx
-import { Link } from "@farmjs/core/client";
-import { redirect } from "@farmjs/core/navigation";
-import { cookies } from "@farmjs/core/headers";
+import { Link } from "@farm.js/core/client";
+import { redirect } from "@farm.js/core/navigation";
+import { cookies } from "@farm.js/core/headers";
 
 export default function Page() {
   if (!cookies().has("session")) redirect("/sign-in");
@@ -50,9 +50,9 @@ Supported rewrites include:
 
 | Next import | Farm import |
 | --- | --- |
-| next/link | @farmjs/core/client |
-| next/navigation | @farmjs/core/navigation |
-| next/headers | @farmjs/core/headers |
+| next/link | @farm.js/core/client |
+| next/navigation | @farm.js/core/navigation |
+| next/headers | @farm.js/core/headers |
 
 Some Next.js APIs still need review because they are framework-specific. The migration report calls out `next/image`, `next/font`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
 
@@ -105,7 +105,7 @@ The migration report flags loaders, `beforeLoad`, search params, and `Route.use*
 `farm migrate` without a framework source still runs one-shot commands from `migrations.commands` in `farm.config.ts`.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   migrations: {

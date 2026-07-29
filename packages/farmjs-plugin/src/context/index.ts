@@ -59,7 +59,7 @@ function getHeader(req: RequestLike, name: string): string | undefined {
  *
  * @example
  * ```ts
- * import { contextPlugin } from "@farmjs/plugin/context";
+ * import { contextPlugin } from "@farm.js/plugin/context";
  *
  * export default defineConfig({
  *   plugins: [contextPlugin()],
@@ -83,7 +83,7 @@ export function contextPlugin(options: ContextPluginOptions = {}): ContextPlugin
   const afterResponseCb = options.afterResponse;
 
   return {
-    name: "@farmjs/plugin-context",
+    name: "@farm.js/plugin-context",
     enforce: "pre",
     beforeRequest(req, _res, context) {
       const pathname = req.url || "/";

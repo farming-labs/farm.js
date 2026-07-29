@@ -31,7 +31,7 @@ Middleware can live near the routes it protects. Use it for auth, request metada
 **src/app/dashboard/middleware.ts**
 
 ```ts
-import { middleware } from "@farmjs/core/middleware";
+import { middleware } from "@farm.js/core/middleware";
 
 export default middleware().use(async (ctx, next) => {
   ctx.data.set("request.startedAt", Date.now());
@@ -46,7 +46,7 @@ Farm also supports the request-first named export style familiar from Next middl
 **src/app/dashboard/middleware.ts**
 
 ```ts
-import type { RequestMiddlewareContext } from "@farmjs/core/middleware";
+import type { RequestMiddlewareContext } from "@farm.js/core/middleware";
 import { getSession } from "../../session";
 
 export interface DashboardMiddlewareContext {
@@ -81,7 +81,7 @@ Values written with `context.set()` are request-scoped and server-only. A siblin
 **src/app/dashboard/user-menu.tsx**
 
 ```tsx
-import { getMiddlewareContext } from "@farmjs/core/middleware";
+import { getMiddlewareContext } from "@farm.js/core/middleware";
 import type { DashboardMiddlewareContext } from "./middleware";
 
 export function UserMenu() {
@@ -106,7 +106,7 @@ Dynamic route segments from the middleware file path are available on `ctx.param
 **src/app/users/[id]/middleware.ts**
 
 ```ts
-import { middleware } from "@farmjs/core/middleware";
+import { middleware } from "@farm.js/core/middleware";
 
 export default middleware().use(async (ctx, next) => {
   ctx.data.set("user.id", ctx.params.id);
@@ -130,7 +130,7 @@ Config-defined handlers run before discovered route middleware. Data placed in `
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   middleware: [
@@ -148,7 +148,7 @@ export default defineConfig({
 Multiple config middleware entries can match the same request. They run in array order before file middleware.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   middleware: [
@@ -186,7 +186,7 @@ Matchers can be strings, regular expressions, or functions. String matchers supp
 When a matcher has params, the handler can read them from `ctx.params`.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   middleware: [
@@ -206,7 +206,7 @@ export default defineConfig({
 Use a matcher-only config when you want every discovered middleware file to run only inside a route area.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   middleware: {
@@ -224,7 +224,7 @@ Middleware can short-circuit with a redirect or response before the page/API han
 **src/app/dashboard/middleware.ts**
 
 ```ts
-import { middleware } from "@farmjs/core/middleware";
+import { middleware } from "@farm.js/core/middleware";
 
 export default middleware().use(async (ctx, next) => {
   const session = await readSession(ctx.request);
@@ -243,7 +243,7 @@ export default middleware().use(async (ctx, next) => {
 The same protection can live in config when the rule should be managed globally.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   middleware: [
@@ -268,7 +268,7 @@ export default defineConfig({
 Middleware handlers can also return a Web `Response`. Returned responses stop the middleware chain and are sent directly.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   middleware: [
@@ -301,7 +301,7 @@ export default async function dashboardMiddleware(ctx: any, next: () => Promise<
 **src/app/dashboard/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export default function DashboardPage(props: PageProps) {
   const userId = props.middleware?.data.get("user.id");
@@ -311,7 +311,7 @@ export default function DashboardPage(props: PageProps) {
 
 ## Observability events
 
-Middleware emits observability events in development and production. Subscribe with `observability.onEvent` in `farm.config.ts` or `onFarmEvent` from `@farmjs/core/observability`.
+Middleware emits observability events in development and production. Subscribe with `observability.onEvent` in `farm.config.ts` or `onFarmEvent` from `@farm.js/core/observability`.
 
 | Event                     | Emitted when                                                   | Useful fields                             |
 | ------------------------- | -------------------------------------------------------------- | ----------------------------------------- |
@@ -321,7 +321,7 @@ Middleware emits observability events in development and production. Subscribe w
 | `middleware.error`        | A handler throws.                                              | `route`, `pathname`, `name`, `error`      |
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   observability: {

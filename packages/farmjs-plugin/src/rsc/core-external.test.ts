@@ -63,7 +63,7 @@ describe("RSC core runtime bundling", () => {
 
   it("rewrites root runtime imports to focused standalone subpaths", async () => {
     const plugin = farmRsc().find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:core-runtime",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:core-runtime",
     );
 
     expect(plugin?.apply).toBe("build");
@@ -86,19 +86,19 @@ describe("RSC core runtime bundling", () => {
         notFound,
         redirect,
         unstable_cache,
-      } from "@farmjs/core";`,
+      } from "@farm.js/core";`,
       "/app/src/routes.ts",
       { ssr: false },
     );
 
-    expect(transformed?.code).toContain('from "@farmjs/core/api"');
-    expect(transformed?.code).toContain('from "@farmjs/core/routes"');
-    expect(transformed?.code).toContain('from "@farmjs/core/request"');
-    expect(transformed?.code).toContain('from "@farmjs/core/navigation"');
-    expect(transformed?.code).toContain('from "@farmjs/core/cache"');
-    expect(transformed?.code).toContain('from "@farmjs/core/query"');
-    expect(transformed?.code).toContain('from "@farmjs/core/workflows"');
-    expect(transformed?.code).not.toContain('from "@farmjs/core"');
+    expect(transformed?.code).toContain('from "@farm.js/core/api"');
+    expect(transformed?.code).toContain('from "@farm.js/core/routes"');
+    expect(transformed?.code).toContain('from "@farm.js/core/request"');
+    expect(transformed?.code).toContain('from "@farm.js/core/navigation"');
+    expect(transformed?.code).toContain('from "@farm.js/core/cache"');
+    expect(transformed?.code).toContain('from "@farm.js/core/query"');
+    expect(transformed?.code).toContain('from "@farm.js/core/workflows"');
+    expect(transformed?.code).not.toContain('from "@farm.js/core"');
 
     const resolveId = plugin?.resolveId as (
       id: string,
@@ -108,13 +108,13 @@ describe("RSC core runtime bundling", () => {
     expect(
       resolveId.call(
         { environment: { name: "ssr" } },
-        "@farmjs/core/api/runtime",
+        "@farm.js/core/api/runtime",
         "/app/entry.rsc.tsx",
         { ssr: true },
       ),
     ).toBeNull();
     expect(
-      resolveId.call({ environment: { name: "client" } }, "@farmjs/core", "/app/client.tsx", {
+      resolveId.call({ environment: { name: "client" } }, "@farm.js/core", "/app/client.tsx", {
         ssr: false,
       }),
     ).toBeNull();
@@ -122,7 +122,7 @@ describe("RSC core runtime bundling", () => {
 
   it("rewrites only the bounded core import after another named import", async () => {
     const plugin = farmRsc().find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:core-runtime",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:core-runtime",
     );
     const transform = plugin?.transform as (
       code: string,
@@ -133,7 +133,7 @@ describe("RSC core runtime bundling", () => {
 import {
   redirect as go,
   type FarmConfig,
-} from "@farmjs/core";
+} from "@farm.js/core";
 
 export const schema = z.string();`;
 
@@ -147,15 +147,15 @@ export const schema = z.string();`;
     expect(transformed?.code).toContain('import { z } from "zod";');
     expect(transformed?.code.match(/from "zod"/g)).toHaveLength(1);
     expect(transformed?.code).toContain(
-      'import { redirect as go } from "@farmjs/core/navigation";',
+      'import { redirect as go } from "@farm.js/core/navigation";',
     );
-    expect(transformed?.code).not.toContain('from "@farmjs/core"');
+    expect(transformed?.code).not.toContain('from "@farm.js/core"');
     expect(transformed?.code).toContain("export const schema = z.string();");
   });
 
   it("rejects storage imports that cannot run from isolated RSC output", async () => {
     const plugin = farmRsc().find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:core-runtime",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:core-runtime",
     );
     const transform = plugin?.transform as (
       code: string,
@@ -167,11 +167,11 @@ export const schema = z.string();`;
     await expect(
       transform.call(
         context,
-        'import { memoryStorage } from "@farmjs/core";',
+        'import { memoryStorage } from "@farm.js/core";',
         "/app/src/storage.ts",
         { ssr: false },
       ),
-    ).rejects.toThrow(/@farmjs\/core\/storage is not supported.*isolated server output/s);
+    ).rejects.toThrow(/@farm.js\/core\/storage is not supported.*isolated server output/s);
 
     const resolveId = plugin?.resolveId as (
       id: string,
@@ -179,8 +179,8 @@ export const schema = z.string();`;
       options: { ssr?: boolean },
     ) => unknown;
     expect(() =>
-      resolveId.call(context, "@farmjs/core/storage", "/app/src/storage.ts", { ssr: false }),
-    ).toThrow(/@farmjs\/core\/storage is not supported.*isolated server output/s);
+      resolveId.call(context, "@farm.js/core/storage", "/app/src/storage.ts", { ssr: false }),
+    ).toThrow(/@farm.js\/core\/storage is not supported.*isolated server output/s);
   });
 
   it("builds and boots a real RSC app with exact-root runtime imports outside the workspace", async () => {
@@ -202,7 +202,7 @@ export const schema = z.string();`;
       );
       const fixtureModules = path.join(fixtureRoot, "node_modules");
       for (const packageName of [
-        "@farmjs/core",
+        "@farm.js/core",
         "@vitejs/plugin-rsc",
         "better-call",
         "react",
@@ -250,7 +250,7 @@ export const schema = z.string();`;
   unstable_cache,
   asString,
   defineWorkflow,
-} from "@farmjs/core";
+} from "@farm.js/core";
 
 const representativeRoute = createRoute("/root-public-api", {
   component: () => null,
@@ -301,7 +301,7 @@ export const rootRuntime = createEndpoint("/api/root-runtime", {
       );
 
       const plugins = farmRsc({ routesDir: "" }).filter(
-        (plugin) => plugin.name !== "@farmjs/plugin/rsc:nitro-build",
+        (plugin) => plugin.name !== "@farm.js/plugin/rsc:nitro-build",
       );
       plugins.push(
         ...viteRsc({
@@ -329,7 +329,7 @@ export const rootRuntime = createEndpoint("/api/root-runtime", {
       const ssrPath = path.join(fixtureRoot, "dist", "ssr", "index.js");
       const clientDir = path.join(fixtureRoot, "dist", "client");
       const rscCode = readFileSync(rscPath, "utf-8");
-      expect(rscCode).not.toMatch(/from\s*["']@farmjs\/core["']/);
+      expect(rscCode).not.toMatch(/from\s*["']@farm.js\/core["']/);
 
       const outputDir = path.join(fixtureRoot, ".output");
       await buildRscNitro({
@@ -344,14 +344,14 @@ export const rootRuntime = createEndpoint("/api/root-runtime", {
       const outputPackage = JSON.parse(
         readFileSync(path.join(outputDir, "server", "package.json"), "utf-8"),
       ) as { dependencies?: Record<string, string> };
-      expect(outputPackage.dependencies).not.toHaveProperty("@farmjs/core");
+      expect(outputPackage.dependencies).not.toHaveProperty("@farm.js/core");
       for (const buildOnlyPackage of ["vite", "nitro", "rollup", "rolldown", "esbuild"]) {
         expect(outputPackage.dependencies).not.toHaveProperty(buildOnlyPackage);
         expect(existsSync(path.join(outputDir, "server", "node_modules", buildOnlyPackage))).toBe(
           false,
         );
       }
-      expect(existsSync(path.join(outputDir, "server", "node_modules", "@farmjs", "core"))).toBe(
+      expect(existsSync(path.join(outputDir, "server", "node_modules", "@farm.js", "core"))).toBe(
         false,
       );
 

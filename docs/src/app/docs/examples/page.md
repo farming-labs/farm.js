@@ -30,7 +30,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 **Terminal**
 
 ```bash
-pnpm --filter @farmjs/core build
+pnpm --filter @farm.js/core build
 pnpm --dir examples/basic install
 pnpm --dir examples/basic dev
 ```

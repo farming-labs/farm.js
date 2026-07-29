@@ -43,9 +43,9 @@ describe("generateRouteTypes", () => {
     expect(content).toContain('"/about"');
     expect(content).toContain('"/content"');
     expect(content).toContain("LinkDefaultRoute");
-    expect(content).toContain('declare module "@farmjs/core/client"');
-    expect(content).toContain('declare module "@farmjs/core"');
-    expect(content).toContain('declare module "@farmjs/core/dist/client.js"');
+    expect(content).toContain('declare module "@farm.js/core/client"');
+    expect(content).toContain('declare module "@farm.js/core"');
+    expect(content).toContain('declare module "@farm.js/core/dist/client.js"');
     expect(content).toContain('_: import("./farm-routes").RoutePath');
     expect(content).toContain('pattern: import("./farm-routes").RoutePattern');
   });
@@ -114,7 +114,7 @@ describe("generateRouteTypes", () => {
     await fs.promises.writeFile(
       path.join(tmpDir, "src", "farm.routes.ts"),
       `
-import { defineRoutes } from "@farmjs/core/routes";
+import { defineRoutes } from "@farm.js/core/routes";
 import { MarketingPage } from "./marketing-page";
 
 export default defineRoutes(({ page }) => [
@@ -136,7 +136,7 @@ export default defineRoutes(({ page }) => [
     await fs.promises.writeFile(
       productRouteFile,
       `
-import { createRoute } from "@farmjs/core/routes";
+import { createRoute } from "@farm.js/core/routes";
 
 function ProductPage() {
   return null;

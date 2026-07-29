@@ -1,4 +1,4 @@
-import { auth0 } from "@farmjs/integrations";
+import { auth0 } from "@farm.js/integrations";
 
 export const appIntegrations = {
   auth: auth0({

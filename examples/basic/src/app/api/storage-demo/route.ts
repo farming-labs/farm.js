@@ -1,4 +1,4 @@
-import { createEndpoint, getStorage } from '@farmjs/core';
+import { createEndpoint, getStorage } from '@farm.js/core';
 import path from 'node:path';
 import { z } from 'zod';
 

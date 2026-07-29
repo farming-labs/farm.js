@@ -31,16 +31,16 @@ import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
-} from '@farmjs/core/deployment';
+} from '@farm.js/core/deployment';
 `;
 
   if (ctx.actionsEnabled) {
     imports += `import { setServerCallback, encodeReply, createTemporaryReferenceSet } from '@vitejs/plugin-rsc/browser';
-import { applyFarmCacheInvalidations } from '@farmjs/core/cache';
+import { applyFarmCacheInvalidations } from '@farm.js/core/cache';
 import {
   beginFarmServerQueryAction,
   completeFarmServerQueryAction,
-} from '@farmjs/core/server-query/client';
+} from '@farm.js/core/server-query/client';
 `;
   }
 

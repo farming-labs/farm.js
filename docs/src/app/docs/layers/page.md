@@ -13,7 +13,7 @@ A layer does not call a special registration function. The consuming application
 ## Consume layers
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   extends: ["@company/farm-base", "@company/admin-layer", "./layers/commerce"],
@@ -46,7 +46,7 @@ layers/commerce/
 `farm.config.ts` is optional. When present, it exports a plain object:
 
 ```ts
-import type { FarmLayerConfig } from "@farmjs/core";
+import type { FarmLayerConfig } from "@farm.js/core";
 import { commercePlugin } from "./src/plugin";
 
 export default {

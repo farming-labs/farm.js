@@ -997,28 +997,28 @@ async function buildClient(
       },
       plugins: [
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
-        // Plugin to redirect @farmjs/core imports to client-only exports
+        // Plugin to redirect @farm.js/core imports to client-only exports
         {
           name: "farm-client-only-imports",
           enforce: "pre" as const,
           resolveId(id) {
-            // Redirect @farmjs/core to just export client-safe parts
-            // Don't redirect @farmjs/core/client - that's already client-safe
-            if (id === "@farmjs/core") {
+            // Redirect @farm.js/core to just export client-safe parts
+            // Don't redirect @farm.js/core/client - that's already client-safe
+            if (id === "@farm.js/core") {
               return { id: "\0farm-client-exports", external: false };
             }
-            if (id === "@farmjs/core/i18n/server") {
+            if (id === "@farm.js/core/i18n/server") {
               return { id: "\0farm-i18n-client-bridge", external: false };
             }
             // Block server-only imports completely
             if (
-              id === "@farmjs/core/server" ||
-              id === "@farmjs/core/api" ||
-              id === "@farmjs/core/middleware" ||
-              id === "@farmjs/core/headers" ||
-              id === "@farmjs/core/config" ||
-              id.includes("@farmjs/core/middleware") ||
-              id.includes("@farmjs/core/query/server")
+              id === "@farm.js/core/server" ||
+              id === "@farm.js/core/api" ||
+              id === "@farm.js/core/middleware" ||
+              id === "@farm.js/core/headers" ||
+              id === "@farm.js/core/config" ||
+              id.includes("@farm.js/core/middleware") ||
+              id.includes("@farm.js/core/query/server")
             ) {
               return { id: "\0empty-module", external: false };
             }
@@ -1053,16 +1053,16 @@ async function buildClient(
               return "export const GET = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export default {};";
             }
             if (id === "\0farm-i18n-client-bridge") {
-              return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farmjs/core/i18n/client";';
+              return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
             }
             if (id === "\0farm-client-exports") {
               // Only export client-safe parts (no type exports - they're erased at compile time)
               return [
                 "// Farm.js Client Exports - Safe for browser bundling",
-                'export { Link } from "@farmjs/core/client";',
-                'export { useRouter } from "@farmjs/core/client";',
-                'export { usePathname, useSearchParams } from "@farmjs/core/navigation";',
-                'export { createAPIClient } from "@farmjs/core/client";',
+                'export { Link } from "@farm.js/core/client";',
+                'export { useRouter } from "@farm.js/core/client";',
+                'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
+                'export { createAPIClient } from "@farm.js/core/client";',
               ].join("\n");
             }
             return null;
@@ -1084,10 +1084,10 @@ async function buildClient(
       // Optimize dependencies - exclude server-side code from client bundle
       optimizeDeps: {
         exclude: [
-          "@farmjs/core/server",
-          "@farmjs/core/api",
-          "@farmjs/core/middleware",
-          "@farmjs/core/headers",
+          "@farm.js/core/server",
+          "@farm.js/core/api",
+          "@farm.js/core/middleware",
+          "@farm.js/core/headers",
         ],
       },
     });
@@ -1337,8 +1337,8 @@ function generateClientHydrationEntry(
   };
   const i18nClientRuntime = i18nConfig.enabled
     ? `
-import { stripFarmLocaleFromPathname } from "@farmjs/core/i18n";
-import { _setFarmI18nClientSnapshot } from "@farmjs/core/i18n/client";
+import { stripFarmLocaleFromPathname } from "@farm.js/core/i18n";
+import { _setFarmI18nClientSnapshot } from "@farm.js/core/i18n/client";
 
 const farmI18nConfig = ${JSON.stringify(i18nRoutingConfig)};
 if (window.__FARM_I18N__) {
@@ -1371,7 +1371,7 @@ function isFarmLocaleDocumentChange() {
 // Farm.js Client Runtime (no client components)
 ${cssImport}
 ${layoutImports}
-import { createClientPluginManager, installChunkErrorRecovery } from "@farmjs/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery } from "@farm.js/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
@@ -1632,8 +1632,8 @@ ${cssImport}
 ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
-import { createClientPluginManager, installChunkErrorRecovery } from "@farmjs/core/internal/client-runtime";
-import { matchFarmRoute } from "@farmjs/core/router";
+import { createClientPluginManager, installChunkErrorRecovery } from "@farm.js/core/internal/client-runtime";
+import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 
@@ -2354,8 +2354,8 @@ async function buildSSRInMemory(
         // Don't externalize these - bundle them into the SSR output
         // Keep this list minimal for faster builds
         noExternal: [
-          "@farmjs/core",
-          "@farmjs/core/image",
+          "@farm.js/core",
+          "@farm.js/core/image",
           "better-call",
           ...(preset === "cloudflare-module" ? [] : ["react", "react-dom", "react-dom/server"]),
         ],
@@ -2430,7 +2430,7 @@ async function buildSSRInMemory(
         alias: {
           "@": path.resolve(root, "src"),
         },
-        // Programmatic route wrappers are created inside @farmjs/core. Resolve
+        // Programmatic route wrappers are created inside @farm.js/core. Resolve
         // their React imports from the application so React 18/19 elements and
         // the selected server renderer always share the same runtime instance.
         dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
@@ -2605,7 +2605,7 @@ function generateVirtualEntryCode(
   const notFoundImport = notFoundPath ? `import * as CustomNotFound from "${notFoundPath}";` : "";
   const apiRouteHelpersImport =
     apiRoutes.length > 0
-      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "@farmjs/core/api/runtime";`
+      ? `import { invokeAPIRouteEndpoint, matchAPIRoute } from "@farm.js/core/api/runtime";`
       : "";
   const productionRuntimeImport = `import {
   _runWithAfterRequest,
@@ -2632,15 +2632,15 @@ function generateVirtualEntryCode(
   resolveFarmRouteContext,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
-} from "@farmjs/core/internal/production-runtime";`;
+} from "@farm.js/core/internal/production-runtime";`;
   const pluginRuntimeImport = hasPluginRuntime
-    ? `import { PluginManager } from "@farmjs/core/plugin";`
+    ? `import { PluginManager } from "@farm.js/core/plugin";`
     : "";
   const i18nServerImport = config.i18n.enabled
-    ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "@farmjs/core/i18n/server";`
+    ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "@farm.js/core/i18n/server";`
     : "";
   const docsHandlerImport = config.docs?.enabled
-    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farmjs/core/docs";`
+    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farm.js/core/docs";`
     : "";
   const docsRuntimeImport = config.docs?.enabled
     ? `import { existsSync as farmDocsExistsSync } from "node:fs";
@@ -2648,10 +2648,10 @@ import { dirname as farmDocsDirname, join as farmDocsJoin } from "node:path";
 import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     : "";
   const markdownHandlerImport = config.md?.enabled
-    ? `import { createMarkdownMirrorResponse } from "@farmjs/core/markdown";`
+    ? `import { createMarkdownMirrorResponse } from "@farm.js/core/markdown";`
     : "";
   const appMarkdownImport = hasMarkdownPages
-    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farmjs/core/app-markdown";`
+    ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/app-markdown";`
     : "const createFarmMarkdownSourceResponse = null;";
   const mdxComponentsPath =
     typeof config.mdx?.components === "string"
@@ -2687,7 +2687,7 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     ]),
   );
   const integrationRuntimeImport = integrationRuntimeExports.length
-    ? `import { ${integrationRuntimeExports.join(", ")} } from "@farmjs/core/integrations";`
+    ? `import { ${integrationRuntimeExports.join(", ")} } from "@farm.js/core/integrations";`
     : "";
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
@@ -2698,10 +2698,10 @@ ${integrationRuntimeImport}
   const imageRuntimeImport =
     imageRuntime === "none"
       ? ""
-      : `import { createCloudflareImageTransformer, createFarmImageHandler } from "@farmjs/core/image/server";`;
+      : `import { createCloudflareImageTransformer, createFarmImageHandler } from "@farm.js/core/image/server";`;
   const imageNodeRuntimeImport =
     imageRuntime === "node"
-      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "@farmjs/core/image/sharp";`
+      ? `import { createNodeImageUrlValidator, createSharpImageTransformer } from "@farm.js/core/image/sharp";`
       : "";
   const apiHandlerCode =
     apiRoutes.length > 0
@@ -5164,7 +5164,7 @@ async function buildNitroUniversal(
 ) {
   // Nitro is only needed while producing the deployment artifact. Keeping the
   // import lazy prevents this build-only dependency from leaking into an
-  // application's standalone server bundle through @farmjs/core's root entry.
+  // application's standalone server bundle through @farm.js/core's root entry.
   const [fs, nitroRuntimeResult] = await Promise.all([
     import("fs/promises"),
     nitroRuntimeResultPromise,
@@ -5844,7 +5844,7 @@ async function copySharpRuntime(
       // Applications are not required to depend on Sharp directly. Resolve
       // Farm's optional dependency from the installed framework entry when the
       // project dependency tree does not expose it.
-      sharpRequire = createRequire(projectRequire.resolve("@farmjs/core"));
+      sharpRequire = createRequire(projectRequire.resolve("@farm.js/core"));
     } catch {
       // The existing missing-Sharp diagnostic below remains authoritative.
     }

@@ -1,4 +1,4 @@
-import { defineTasks, task } from "@farmjs/integrations";
+import { defineTasks, task } from "@farm.js/integrations";
 
 export const triggerTasks = defineTasks({
   sendWelcomeEmail: task({

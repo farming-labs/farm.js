@@ -1,10 +1,10 @@
 /**
- * Type declarations for @farmjs/core/api
+ * Type declarations for @farm.js/core/api
  *
  * These provide stable type definitions that don't depend on build hashes.
  */
 
-declare module "@farmjs/core/api" {
+declare module "@farm.js/core/api" {
   import type { z } from "zod";
 
   /**

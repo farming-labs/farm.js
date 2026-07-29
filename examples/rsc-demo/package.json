@@ -17,7 +17,7 @@
     "deploy:cloudflare": "pnpm run build:cloudflare && npx wrangler pages deploy .output/public --project-name=farm-rsc-demo"
   },
   "dependencies": {
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "picocolors": "^1.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -25,7 +25,7 @@
     "zod": "^4.1.0"
   },
   "devDependencies": {
-    "@farmjs/plugin": "workspace:*",
+    "@farm.js/plugin": "workspace:*",
     "@tailwindcss/vite": "^4.1.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

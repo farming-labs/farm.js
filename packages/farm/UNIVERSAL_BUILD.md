@@ -101,7 +101,7 @@ Farm.js now supports a universal build pattern inspired by TanStack Start, which
 The universal build is now the **default** build method:
 
 ```typescript
-import { build } from "@farmjs/core/build";
+import { build } from "@farm.js/core/build";
 
 await build(config, {
   preset: "vercel", // or 'netlify', 'node-server', etc.

@@ -8,10 +8,10 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 export async function createMiddlewareProductionFixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-middleware-"));
 
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), {
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
   });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
 
   await fs.mkdir(path.join(root, "src", "app", "dashboard", "settings"), {
     recursive: true,
@@ -95,7 +95,7 @@ export default {
     path.join(root, "src", "app", "rewrite-target", "page.tsx"),
     `
 import React from "react";
-import { getCurrentRequest } from "@farmjs/core/request";
+import { getCurrentRequest } from "@farm.js/core/request";
 
 export default function RewriteTargetPage() {
   return React.createElement("main", null, "current request: " + new URL(getCurrentRequest().url).pathname);
@@ -151,7 +151,7 @@ export default function ContextPPRPage() {
   await fs.writeFile(
     path.join(root, "src", "farm.routes.tsx"),
     `
-import { createRoute, defineRoutes } from "@farmjs/core/routes";
+import { createRoute, defineRoutes } from "@farm.js/core/routes";
 
 export const ProgrammaticRoute = createRoute("/programmatic/[id]", {
   component({ params }: { params: { id: string } }) {
@@ -241,7 +241,7 @@ export default function MetadataPage({ params }: any) {
     path.join(root, "src", "app", "dashboard", "settings", "page.tsx"),
     `
 import React from "react";
-import Image from "@farmjs/core/image";
+import Image from "@farm.js/core/image";
 import { DashboardIdentity } from "../dashboard-identity";
 import productImage from "./product.png";
 
@@ -287,7 +287,7 @@ export default function ExplicitImagePage() {
     path.join(root, "src", "app", "dashboard", "dashboard-identity.tsx"),
     `
 import React from "react";
-import { getMiddlewareContext } from "@farmjs/core/middleware";
+import { getMiddlewareContext } from "@farm.js/core/middleware";
 import type { DashboardContext } from "./middleware";
 
 export function DashboardIdentity() {
@@ -306,7 +306,7 @@ export function DashboardIdentity() {
   await fs.writeFile(
     path.join(root, "src", "app", "dashboard", "middleware.ts"),
     `
-import type { RequestMiddlewareContext } from "@farmjs/core/middleware";
+import type { RequestMiddlewareContext } from "@farm.js/core/middleware";
 
 export interface DashboardContext {
   session: { userId: string; secret: string };
@@ -354,7 +354,7 @@ export default async function userMiddleware(ctx: any, next: () => Promise<void>
     path.join(root, "src", "app", "users", "[id]", "settings", "page.tsx"),
     `
 import React from "react";
-import { getMiddlewareContext } from "@farmjs/core/middleware";
+import { getMiddlewareContext } from "@farm.js/core/middleware";
 
 export default function UserSettingsPage(props: any) {
   const context = getMiddlewareContext<{ "file.userId": string }>();

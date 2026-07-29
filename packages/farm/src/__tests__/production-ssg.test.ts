@@ -15,8 +15,8 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 async function createFixture(externalRewriteOrigin?: string): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-ssg-"));
 
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), { recursive: true });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
   await fs.mkdir(path.join(root, "src", "app", "static"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "refreshing"), { recursive: true });
   await fs.mkdir(path.join(root, "src", "app", "blog", "[slug]"), { recursive: true });
@@ -37,7 +37,7 @@ async function createFixture(externalRewriteOrigin?: string): Promise<string> {
   await fs.writeFile(
     path.join(root, "farm.config.ts"),
     `
-import { getCurrentRequest } from "@farmjs/core/request";
+import { getCurrentRequest } from "@farm.js/core/request";
 
 export default {
   srcDir: "src",
@@ -188,8 +188,8 @@ export default function SafeRulePage() {
 
 async function createRuntimeSensitiveFixture(kind: "context" | "plugin" | "i18n"): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, `.tmp-production-ssg-${kind}-`));
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), { recursive: true });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), { recursive: true });
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
   await fs.mkdir(path.join(root, "src", "app", "sensitive"), { recursive: true });
   if (kind === "i18n") {
     await fs.mkdir(path.join(root, "src", "messages"), { recursive: true });

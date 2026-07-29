@@ -1,4 +1,4 @@
-import { createEndpoint } from '@farmjs/core';
+import { createEndpoint } from '@farm.js/core';
 
 /**
  * Slow API for loading-boundary demo. Waits 2s then returns.

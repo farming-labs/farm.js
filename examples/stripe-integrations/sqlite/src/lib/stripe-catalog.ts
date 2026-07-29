@@ -1,7 +1,7 @@
 import type {
   StripeBillingPlan,
   StripeBillingProduct,
-} from "@farmjs/integrations/stripe";
+} from "@farm.js/integrations/stripe";
 
 export const stripePlans: Record<string, StripeBillingPlan> = {
   free: {

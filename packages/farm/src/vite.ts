@@ -126,14 +126,14 @@ export function farmI18nClientBridgePlugin(): Plugin {
     name: "farm:i18n-client-bridge",
     enforce: "pre",
     resolveId(id, _importer, options) {
-      if (id === "@farmjs/core/i18n/server" && !options?.ssr) {
+      if (id === "@farm.js/core/i18n/server" && !options?.ssr) {
         return FARM_I18N_CLIENT_BRIDGE_ID;
       }
       return null;
     },
     load(id) {
       if (id !== FARM_I18N_CLIENT_BRIDGE_ID) return null;
-      return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farmjs/core/i18n/client";';
+      return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
     },
   };
 }
@@ -2443,7 +2443,7 @@ import { createElement as __farmCreateElement } from "react";
 import {
   createLayoutModuleFromProgrammaticLayout as __farmCreateLayoutRouteModule,
   createRouteModuleFromProgrammaticPage as __farmCreatePageRouteModule,
-} from "@farmjs/core/routes";
+} from "@farm.js/core/routes";
 import * as __farmRoutesModule from ${JSON.stringify(routeFile)};
 
 const __farmIsRouteDefinition = (value) => (
@@ -2815,14 +2815,14 @@ function generateClientCode(
   return `
 import React from 'react'
 import { hydrateRoot, createRoot } from 'react-dom/client'
-import { installChunkErrorRecovery, SPARouter } from '@farmjs/core/client'
-import { createClientPluginManager } from '@farmjs/core/plugin/client'
-import { reviveDeferredData } from '@farmjs/core/deferred'
+import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
+import { createClientPluginManager } from '@farm.js/core/plugin/client'
+import { reviveDeferredData } from '@farm.js/core/deferred'
 import {
   createFarmDeploymentMismatchError,
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
-} from '@farmjs/core/deployment'
+} from '@farm.js/core/deployment'
 ${providerImportBlock}
 ${clientPluginEntry.imports}
 ${docsSearchClientRuntime}
@@ -4049,10 +4049,10 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       ],
       // Exclude server-side packages from browser bundling
       exclude: [
-        "@farmjs/core/server",
-        "@farmjs/core/api",
-        "@farmjs/core/middleware",
-        "@farmjs/core/config",
+        "@farm.js/core/server",
+        "@farm.js/core/api",
+        "@farm.js/core/middleware",
+        "@farm.js/core/config",
         "nitro",
         "h3",
         "vite",
@@ -4071,7 +4071,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       ],
     },
     ssr: {
-      noExternal: ["farm", "@farmjs/core"],
+      noExternal: ["farm", "@farm.js/core"],
       // Externalize React to prevent multiple instances during SSR
       external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
     },

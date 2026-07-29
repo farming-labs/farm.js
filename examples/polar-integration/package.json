@@ -10,15 +10,15 @@
     "generate": "farm generate"
   },
   "dependencies": {
-    "@farmjs/core": "workspace:*",
-    "@farmjs/integrations": "workspace:*",
+    "@farm.js/core": "workspace:*",
+    "@farm.js/integrations": "workspace:*",
     "better-auth": "^1.5.5",
     "better-sqlite3": "^12.8.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farmjs/cli": "workspace:*",
+    "@farm.js/cli": "workspace:*",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "typescript": "^5.3.3",

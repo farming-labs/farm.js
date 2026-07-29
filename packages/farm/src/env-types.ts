@@ -85,7 +85,7 @@ type FarmResolvedEnv${index} = [FarmConfigEnv${index}] extends [never]
  * Regenerated on dev start, build, and farm generate.
  */
 ${imports}
-import type { InferEnv } from "@farmjs/core/env";
+import type { InferEnv } from "@farm.js/core/env";
 
 type MergeFarmEnv<TBase, TOverride> = {
   server: Omit<TBase extends { server: infer T } ? T : {}, keyof (TOverride extends { server: infer T } ? T : {})> &
@@ -98,14 +98,14 @@ ${mergedTypes}
 
 type FarmResolvedEnv = ${finalType};
 
-declare module "@farmjs/core/env" {
+declare module "@farm.js/core/env" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];
   }
 }
 
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];
@@ -140,21 +140,21 @@ function createConfigBackedEnvTypes(outPath: string, configPath: string): string
  * Regenerated on dev start, build, and farm generate.
  */
 import type FarmConfig from ${JSON.stringify(configImportPath)};
-import type { InferEnv } from "@farmjs/core/env";
+import type { InferEnv } from "@farm.js/core/env";
 
 type FarmConfigEnv = typeof FarmConfig extends { env?: infer TEnv } ? NonNullable<TEnv> : never;
 type FarmResolvedEnv = [FarmConfigEnv] extends [never]
   ? { server: {}; public: {} }
   : InferEnv<FarmConfigEnv>;
 
-declare module "@farmjs/core/env" {
+declare module "@farm.js/core/env" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];
   }
 }
 
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];
@@ -170,14 +170,14 @@ function createEmptyEnvTypes(): string {
  * Auto-generated env types from farm.config.
  * Regenerated on dev start, build, and farm generate.
  */
-declare module "@farmjs/core/env" {
+declare module "@farm.js/core/env" {
   interface FarmEnvTypes {
     server: {};
     public: {};
   }
 }
 
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   interface FarmEnvTypes {
     server: {};
     public: {};

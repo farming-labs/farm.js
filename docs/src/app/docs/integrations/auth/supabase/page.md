@@ -23,7 +23,7 @@ farm add integration supabase --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { supabase } from "@farmjs/integrations/supabase";
+import { supabase } from "@farm.js/integrations/supabase";
 
 export const appIntegrations = {
   auth: supabase({

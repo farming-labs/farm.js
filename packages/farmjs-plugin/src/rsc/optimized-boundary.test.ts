@@ -22,7 +22,7 @@ afterEach(() => {
 describe("experimental optimized boundary", () => {
   it("requires the explicit experimental flag", () => {
     const plugin = farmRsc().find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:optimized-boundary",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:optimized-boundary",
     );
     const resolveId = plugin?.resolveId as (
       id: string,
@@ -33,7 +33,7 @@ describe("experimental optimized boundary", () => {
     expect(() =>
       resolveId.call(
         { environment: { name: "rsc" } },
-        "@farmjs/plugin/rsc/optimized-boundary",
+        "@farm.js/plugin/rsc/optimized-boundary",
         "/app/src/page.tsx",
         { ssr: true },
       ),
@@ -44,7 +44,7 @@ describe("experimental optimized boundary", () => {
     const root = createFixture();
     const plugins = farmRsc();
     const configPlugin = plugins.find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:config",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
     );
     const configHook = configPlugin?.config as (
       config: Record<string, unknown>,
@@ -71,7 +71,7 @@ describe("experimental optimized boundary", () => {
     );
 
     const staticPlugin = plugins.find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:optimized-boundary",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:optimized-boundary",
     );
     const resolveId = staticPlugin?.resolveId as (
       id: string,
@@ -82,7 +82,7 @@ describe("experimental optimized boundary", () => {
     expect(
       resolveId.call(
         { environment: { name: "rsc" } },
-        "@farmjs/plugin/rsc/optimized-boundary",
+        "@farm.js/plugin/rsc/optimized-boundary",
         "/app/src/page.tsx",
         { ssr: true },
       ),
@@ -91,7 +91,7 @@ describe("experimental optimized boundary", () => {
       resolveId.call(
         { environment: { name: "rsc" } },
         "@farming-labs/strata",
-        "@farmjs/plugin/rsc/optimized-boundary",
+        "@farm.js/plugin/rsc/optimized-boundary",
         { ssr: true },
       ),
     ).toEqual({
@@ -102,7 +102,7 @@ describe("experimental optimized boundary", () => {
       resolveId.call(
         { environment: { name: "rsc" } },
         "@farming-labs/strata/react-server",
-        "@farmjs/plugin/rsc/optimized-boundary",
+        "@farm.js/plugin/rsc/optimized-boundary",
         { ssr: true },
       ),
     ).toEqual({
@@ -112,7 +112,7 @@ describe("experimental optimized boundary", () => {
     expect(() =>
       resolveId.call(
         { environment: { name: "client" } },
-        "@farmjs/plugin/rsc/optimized-boundary",
+        "@farm.js/plugin/rsc/optimized-boundary",
         "/app/src/client.tsx",
         { ssr: false },
       ),
@@ -121,7 +121,7 @@ describe("experimental optimized boundary", () => {
 
   it("rejects optimized boundaries when server components are disabled", async () => {
     const configPlugin = farmRsc().find(
-      (candidate) => candidate.name === "@farmjs/plugin/rsc:config",
+      (candidate) => candidate.name === "@farm.js/plugin/rsc:config",
     );
     const configHook = configPlugin?.config as (
       config: Record<string, unknown>,

@@ -19,7 +19,7 @@ describe("Farm config helper import fast path", () => {
     await writeFile(
       path.join(root, "farm.config.ts"),
       [
-        'import { defineConfig, type FarmUserConfig } from "@farmjs/core";',
+        'import { defineConfig, type FarmUserConfig } from "@farm.js/core";',
         "const config = { srcDir: 'app' } satisfies FarmUserConfig;",
         "export default defineConfig(config);",
       ].join("\n"),
@@ -39,7 +39,7 @@ describe("Farm config helper import fast path", () => {
         "import {",
         "  type FarmUserConfig,",
         "  defineFarmConfig as configure,",
-        '} from "@farmjs/core";',
+        '} from "@farm.js/core";',
         "const config = { distDir: '.output' } satisfies FarmUserConfig;",
         "export default configure(config);",
       ].join("\n"),
@@ -56,8 +56,8 @@ describe("Farm config helper import fast path", () => {
     await writeFile(
       path.join(root, "farm.config.ts"),
       [
-        'import { defineConfig } from "@farmjs/core";',
-        'import { runtimeValue } from "@farmjs/core";',
+        'import { defineConfig } from "@farm.js/core";',
+        'import { runtimeValue } from "@farm.js/core";',
         "export default defineConfig({ runtimeValue });",
       ].join("\n"),
     );
@@ -73,7 +73,7 @@ describe("Farm config helper import fast path", () => {
     await writeFile(
       path.join(root, "shared-config.ts"),
       [
-        'import { defineConfig } from "@farmjs/core";',
+        'import { defineConfig } from "@farm.js/core";',
         "export const sharedConfig = defineConfig({ extends: ['./base'] });",
       ].join("\n"),
     );
@@ -95,12 +95,12 @@ async function createProject(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "farm-config-loader-"));
   temporaryRoots.add(root);
 
-  const packageRoot = path.join(root, "node_modules", "@farmjs", "core");
+  const packageRoot = path.join(root, "node_modules", "@farm.js", "core");
   await mkdir(packageRoot, { recursive: true });
   await writeFile(
     path.join(packageRoot, "package.json"),
     JSON.stringify({
-      name: "@farmjs/core",
+      name: "@farm.js/core",
       version: "0.0.0-test",
       type: "module",
       exports: {

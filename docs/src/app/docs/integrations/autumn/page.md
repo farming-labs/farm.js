@@ -21,7 +21,7 @@ farm add integration autumn --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { autumn } from "@farmjs/integrations/autumn";
+import { autumn } from "@farm.js/integrations/autumn";
 
 export const integrations = {
   billing: autumn({

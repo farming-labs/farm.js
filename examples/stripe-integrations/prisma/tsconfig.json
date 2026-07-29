@@ -13,10 +13,10 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "@farmjs/core": ["../../../packages/farm/dist/index.d.ts"],
-      "@farmjs/core/client": ["../../../packages/farm/types/client.d.ts"],
-      "@farmjs/integrations": ["../../../packages/farm-integrations/dist/index.d.ts"],
-      "@farmjs/integrations/*": [
+      "@farm.js/core": ["../../../packages/farm/dist/index.d.ts"],
+      "@farm.js/core/client": ["../../../packages/farm/types/client.d.ts"],
+      "@farm.js/integrations": ["../../../packages/farm-integrations/dist/index.d.ts"],
+      "@farm.js/integrations/*": [
         "../../../packages/farm-integrations/dist/*.d.ts",
         "../../../packages/farm-integrations/dist/*/index.d.ts"
       ]

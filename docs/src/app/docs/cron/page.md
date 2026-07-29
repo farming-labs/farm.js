@@ -21,7 +21,7 @@ Cron is intentionally not a workflow engine. It does not add durable steps, pers
 Add named entries under `cron` in `farm.config.ts`.
 
 ```ts title="farm.config.ts"
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   cron: {
@@ -59,7 +59,7 @@ cron: {
 The target is a normal route under `src/app/api`. It can use storage, integrations, cache invalidation, and other server APIs just like any other GET handler.
 
 ```ts title="src/app/api/maintenance/cleanup/route.ts"
-import { cronRoute } from "@farmjs/core/cron";
+import { cronRoute } from "@farm.js/core/cron";
 
 export const GET = cronRoute(async () => {
   const deleted = await deleteExpiredSessions();

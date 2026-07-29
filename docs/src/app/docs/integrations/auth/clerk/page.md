@@ -23,7 +23,7 @@ farm add integration clerk --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { clerk } from "@farmjs/integrations/clerk";
+import { clerk } from "@farm.js/integrations/clerk";
 
 export const appIntegrations = {
   auth: clerk({

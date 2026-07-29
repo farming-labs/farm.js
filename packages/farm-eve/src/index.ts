@@ -4,7 +4,7 @@ import {
   resolveProjectPackageBin,
   startManagedAgentRuntime,
   type FarmAgentRuntimeInstance,
-} from "@farmjs/core/agent-runtime";
+} from "@farm.js/core/agent-runtime";
 import { writeEveVercelOutput } from "./vercel";
 
 const EVE_ROUTE_PREFIX = "/eve";

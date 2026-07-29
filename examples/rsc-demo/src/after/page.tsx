@@ -1,7 +1,7 @@
 import { writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { after } from "@farmjs/core/after";
+import { after } from "@farm.js/core/after";
 
 interface AfterPageProps {
   searchParams: Record<string, string | undefined>;

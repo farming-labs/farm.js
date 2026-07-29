@@ -46,7 +46,7 @@ A plugin can cover several lifecycle phases, but focused plugins are easier to o
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { requestTracingPlugin } from "./src/plugins/request-tracing";
 
 export default defineConfig({
@@ -59,7 +59,7 @@ export default defineConfig({
 `definePlugin()` infers private setup state and request context across the plugin.
 
 ```ts
-import { definePlugin } from "@farmjs/core";
+import { definePlugin } from "@farm.js/core";
 
 export const frameworkPlugin = definePlugin({
   name: "framework-plugin",
@@ -308,7 +308,7 @@ Farm runs `pre` plugins first, normal plugins second, and `post` plugins last. H
 Plugins can be local to one repository, published as packages, bundled by a [Farm layer](/docs/layers), or contributed internally by an integration. They all enter the same ordered lifecycle.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { securityPlugin } from "@acme/farm-plugin-security";
 import { tracingPlugin } from "@acme/farm-plugin-tracing";
 import { routePolicyPlugin } from "./src/plugins/route-policy";
@@ -326,7 +326,7 @@ Each plugin owns its private `state`. At runtime, `ctx` is the read-only aggrega
 
 ## Built-in plugins
 
-Farm includes plugins for logging, compression, redirects, rewrites, headers, and environment helpers. Register them from `@farmjs/core/plugin/server`.
+Farm includes plugins for logging, compression, redirects, rewrites, headers, and environment helpers. Register them from `@farm.js/core/plugin/server`.
 
 ## Legacy hooks
 

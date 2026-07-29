@@ -1,7 +1,7 @@
 import React from 'react'
-import type { PageProps, Metadata } from '@farmjs/core'
-import { Link } from '@farmjs/core/client'
-import type { ResolvedRouteHref } from '@farmjs/core/client'
+import type { PageProps, Metadata } from '@farm.js/core'
+import { Link } from '@farm.js/core/client'
+import type { ResolvedRouteHref } from '@farm.js/core/client'
 
 // Note: This page uses Link components which require hydration
 // SSG is better suited for pages without client-side interactivity

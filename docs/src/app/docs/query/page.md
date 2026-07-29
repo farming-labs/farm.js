@@ -13,8 +13,8 @@ Parse search params and route params with typed helpers on the server and synchr
 **src/app/search/page.tsx**
 
 ```tsx
-import type { PagePropsSafe } from "@farmjs/core/query";
-import { asInteger, asString, loadSearchParams } from "@farmjs/core/query/server";
+import type { PagePropsSafe } from "@farm.js/core/query";
+import { asInteger, asString, loadSearchParams } from "@farm.js/core/query/server";
 
 export default async function SearchPage({ searchParams }: PagePropsSafe) {
   const query = await loadSearchParams(searchParams, {
@@ -33,7 +33,7 @@ export default async function SearchPage({ searchParams }: PagePropsSafe) {
 ```tsx
 "use client";
 
-import { asString, useQueryState } from "@farmjs/core/query/client";
+import { asString, useQueryState } from "@farm.js/core/query/client";
 
 export function SearchControls() {
   const [q, setQ] = useQueryState("q", asString.withDefault!(""));
@@ -50,7 +50,7 @@ Use `useQueryStates` when several controls should update together. This keeps th
 ```tsx
 "use client";
 
-import { asInteger, asString, useQueryStates } from "@farmjs/core/query/client";
+import { asInteger, asString, useQueryStates } from "@farm.js/core/query/client";
 
 export function ProductFilters() {
   const [filters, setFilters] = useQueryStates(
@@ -88,8 +88,8 @@ Use route param parsers when dynamic segments should be typed before they hit yo
 **src/app/users/[id]/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
-import { asString, loadRouteParams } from "@farmjs/core/query/server";
+import type { PageProps } from "@farm.js/core";
+import { asString, loadRouteParams } from "@farm.js/core/query/server";
 
 export default async function UserPage({ params }: PageProps) {
   const { id } = await loadRouteParams(params, {

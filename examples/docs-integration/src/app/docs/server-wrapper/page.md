@@ -8,7 +8,7 @@ description: How Farm registers the docs API while keeping a Next-style override
 Farm registers the docs API automatically from `farm.config.ts`:
 
 ```ts
-import { defineConfig } from '@farmjs/core';
+import { defineConfig } from '@farm.js/core';
 
 export default defineConfig({
   docs: {
@@ -24,7 +24,7 @@ When you need to customize the server behavior, add a route file and Farm will u
 the default for that matched path:
 
 ```ts
-import { createDocsAPI } from '@farmjs/core/docs';
+import { createDocsAPI } from '@farm.js/core/docs';
 
 export const { GET, POST } = createDocsAPI();
 export const revalidate = false;

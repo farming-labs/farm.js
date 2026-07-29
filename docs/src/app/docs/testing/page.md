@@ -6,7 +6,7 @@ section: "Reference"
 
 # Testing
 
-Farm provides runner-agnostic helpers from `@farmjs/core/testing`. They use Web `Request` and `Response` objects and call the same route data, API endpoint, and server-function runtimes used by the application.
+Farm provides runner-agnostic helpers from `@farm.js/core/testing`. They use Web `Request` and `Response` objects and call the same route data, API endpoint, and server-function runtimes used by the application.
 
 ## Create a harness
 
@@ -14,7 +14,7 @@ Set request defaults once for a test file. The `context` callback has the same i
 
 ```ts
 import { afterEach } from "vitest";
-import { createFarmTestHarness } from "@farmjs/core/testing";
+import { createFarmTestHarness } from "@farm.js/core/testing";
 import { getSession } from "../src/session";
 
 export const farm = createFarmTestHarness({
@@ -154,7 +154,7 @@ await expect(farm.serverFn(signup, input, { signal: controller.signal })).reject
 Use `createTestRequest` without a harness, or `farm.request` when you want harness defaults.
 
 ```ts
-import { createTestRequest } from "@farmjs/core/testing";
+import { createTestRequest } from "@farm.js/core/testing";
 
 const request = createTestRequest("/api/search", {
   origin: "https://app.example.test",

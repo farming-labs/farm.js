@@ -18,12 +18,12 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farmjs/cli": "workspace:*",
+    "@farm.js/cli": "workspace:*",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "typescript": "^5.3.3",

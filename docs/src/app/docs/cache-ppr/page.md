@@ -13,7 +13,7 @@ Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation,
 **server data**
 
 ```ts
-import { createFarmCacheKey, getFarmDataCache } from "@farmjs/core/cache";
+import { createFarmCacheKey, getFarmDataCache } from "@farm.js/core/cache";
 
 const cache = getFarmDataCache();
 const key = createFarmCacheKey(["products", "featured"]);
@@ -30,7 +30,7 @@ const products = await cache.getOrSet(key, () => fetchProducts(), {
 **server action or route handler**
 
 ```ts
-import { revalidatePath, revalidateTag } from "@farmjs/core/cache";
+import { revalidatePath, revalidateTag } from "@farm.js/core/cache";
 
 revalidateTag("products");
 revalidatePath("/pricing");
@@ -72,7 +72,7 @@ For structured route data and [`createServerQuery`](/docs/server-queries) entrie
 **src/app/api/products/route.ts**
 
 ```ts
-import { revalidatePath, revalidateTag } from "@farmjs/core/cache";
+import { revalidatePath, revalidateTag } from "@farm.js/core/cache";
 
 export async function POST(request: Request) {
   const input = await request.json();

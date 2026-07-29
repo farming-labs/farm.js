@@ -111,7 +111,7 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
       "No farm.config integration wiring is required for this route.",
     ],
     ui: aiChatUIFeature(),
-    template: () => `import { aiChatRoute } from "@farmjs/integrations/ai";
+    template: () => `import { aiChatRoute } from "@farm.js/integrations/ai";
 
 export const POST = aiChatRoute({
   model: "openai/gpt-4o-mini",
@@ -127,7 +127,7 @@ export const POST = aiChatRoute({
     exportName: "stripeIntegration",
     description: "Stripe billing and checkout routes",
     env: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
-    template: () => `import { stripe } from "@farmjs/integrations/stripe";
+    template: () => `import { stripe } from "@farm.js/integrations/stripe";
 
 export const stripeIntegration = stripe({
   secretKey: process.env.STRIPE_SECRET_KEY,
@@ -149,7 +149,7 @@ export const stripeIntegration = stripe({
     description: "Supabase auth routes and middleware",
     env: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "APP_BASE_URL"],
     ui: supabaseAuthUIFeature(),
-    template: () => `import { supabase } from "@farmjs/integrations/supabase";
+    template: () => `import { supabase } from "@farm.js/integrations/supabase";
 
 export const supabaseIntegration = supabase({
   callbackUrl: \`\${process.env.APP_BASE_URL || "http://localhost:3000"}/auth/callback\`,
@@ -173,7 +173,7 @@ export const supabaseIntegration = supabase({
     description: "WorkOS auth routes and protected route middleware",
     env: ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"],
     ui: workosAuthUIFeature(),
-    template: () => `import { workos } from "@farmjs/integrations/workos";
+    template: () => `import { workos } from "@farm.js/integrations/workos";
 
 export const workosIntegration = workos({
   protectedRoutes: ["/dashboard(.*)"],
@@ -192,7 +192,7 @@ export const workosIntegration = workos({
     description: "Auth0 login, callback, logout, and profile routes",
     env: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET", "AUTH0_SECRET"],
     ui: auth0AuthUIFeature(),
-    template: () => `import { auth0 } from "@farmjs/integrations/auth0";
+    template: () => `import { auth0 } from "@farm.js/integrations/auth0";
 
 export const auth0Integration = auth0({
   callbackUrl: \`\${process.env.APP_BASE_URL || "http://localhost:3000"}/auth/callback\`,
@@ -212,7 +212,7 @@ export const auth0Integration = auth0({
     description: "Clerk auth provider and protected route middleware",
     env: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
     ui: clerkAuthUIFeature(),
-    template: () => `import { clerk } from "@farmjs/integrations/clerk";
+    template: () => `import { clerk } from "@farm.js/integrations/clerk";
 
 export const clerkIntegration = clerk({
   signInUrl: "/sign-in",
@@ -234,7 +234,7 @@ export const clerkIntegration = clerk({
     env: ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_WEBHOOK_SECRET"],
     ui: resendEmailUIFeature(),
     template: () => `import { createElement } from "react";
-import { resend, template } from "@farmjs/integrations/email";
+import { resend, template } from "@farm.js/integrations/email";
 
 function WelcomeEmail(props: { name: string }) {
   return createElement("div", null, \`Welcome \${props.name}\`);
@@ -279,7 +279,7 @@ export const resendIntegration = resend({
     env: ["INNGEST_APP_ID", "INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"],
     notes: ["Add tasks to jobTasks before using the generated jobs API."],
     ui: jobsUIFeature("inngest"),
-    template: () => `import { defineTasks, inngest, jobs } from "@farmjs/integrations/jobs";
+    template: () => `import { defineTasks, inngest, jobs } from "@farm.js/integrations/jobs";
 
 export const jobTasks = defineTasks({});
 
@@ -306,7 +306,7 @@ export const jobsIntegration = jobs({
     env: ["TRIGGER_PROJECT_REF", "TRIGGER_SECRET_KEY", "TRIGGER_WEBHOOK_SECRET"],
     notes: ["Add tasks to jobTasks before using the generated jobs API."],
     ui: jobsUIFeature("trigger"),
-    template: () => `import { defineTasks, jobs, trigger } from "@farmjs/integrations/jobs";
+    template: () => `import { defineTasks, jobs, trigger } from "@farm.js/integrations/jobs";
 
 export const jobTasks = defineTasks({});
 
@@ -333,8 +333,8 @@ export const jobsIntegration = jobs({
     env: ["POLAR_ACCESS_TOKEN", "POLAR_WEBHOOK_SECRET", "APP_BASE_URL"],
     notes: ["Replace resolveBillingOwner with your app user or organization lookup."],
     ui: polarBillingUIFeature(),
-    template: () => `import type { FarmIntegrationHandlerContext } from "@farmjs/core";
-import { polar } from "@farmjs/integrations/polar";
+    template: () => `import type { FarmIntegrationHandlerContext } from "@farm.js/core";
+import { polar } from "@farm.js/integrations/polar";
 
 async function resolveBillingOwner(_context: FarmIntegrationHandlerContext) {
   throw new Error("Configure Polar billing owner resolution for your app.");
@@ -370,8 +370,8 @@ export const polarIntegration = polar({
     env: ["AUTUMN_SECRET_KEY", "AUTUMN_WEBHOOK_SECRET", "APP_BASE_URL"],
     notes: ["Replace resolveBillingOwner with your app user or organization lookup."],
     ui: autumnBillingUIFeature(),
-    template: () => `import type { FarmIntegrationHandlerContext } from "@farmjs/core";
-import { autumn } from "@farmjs/integrations/autumn";
+    template: () => `import type { FarmIntegrationHandlerContext } from "@farm.js/core";
+import { autumn } from "@farm.js/integrations/autumn";
 
 async function resolveBillingOwner(_context: FarmIntegrationHandlerContext) {
   throw new Error("Configure Autumn billing owner resolution for your app.");
@@ -455,7 +455,7 @@ better-auth.sqlite-wal
       },
     ],
     ui: betterAuthUIFeature(),
-    template: () => `import { betterAuth } from "@farmjs/integrations/better-auth";
+    template: () => `import { betterAuth } from "@farm.js/integrations/better-auth";
 import { auth } from "../auth.ts";
 
 export const betterAuthIntegration = betterAuth({
@@ -476,7 +476,7 @@ export const betterAuthIntegration = betterAuth({
     env: [],
     notes: ["This template expects src/lib/auth.ts to export an Auth.js instance named auth."],
     ui: authjsUIFeature(),
-    template: () => `import { authjs } from "@farmjs/integrations/authjs";
+    template: () => `import { authjs } from "@farm.js/integrations/authjs";
 import { auth } from "../auth.ts";
 
 export const authjsIntegration = authjs({
@@ -496,7 +496,7 @@ export const authjsIntegration = authjs({
     description: "Unkey API key creation, verification, and route protection",
     env: ["UNKEY_ROOT_KEY", "UNKEY_API_ID", "UNKEY_BASE_URL"],
     ui: unkeyApiKeysUIFeature(),
-    template: () => `import { unkey } from "@farmjs/integrations/unkey";
+    template: () => `import { unkey } from "@farm.js/integrations/unkey";
 
 export const unkeyIntegration = unkey({
   rootKey: process.env.UNKEY_ROOT_KEY,
@@ -883,9 +883,9 @@ async function updatePackageJson(input: {
   const devDependencies = missingDependencies(manifest, input.definition.devDependencies);
   manifest.dependencies = {
     ...manifest.dependencies,
-    ...(hasPackageDependency(manifest, "@farmjs/integrations")
+    ...(hasPackageDependency(manifest, "@farm.js/integrations")
       ? {}
-      : { "@farmjs/integrations": getFarmIntegrationsVersion(manifest) }),
+      : { "@farm.js/integrations": getFarmIntegrationsVersion(manifest) }),
     ...dependencies,
   };
   if (Object.keys(devDependencies).length) {
@@ -930,7 +930,7 @@ async function updateFarmConfig(input: {
   if (!configFile) {
     const newConfigFile = path.join(input.root, "farm.config.ts");
     const importPath = toImportPath(path.relative(input.root, input.registryFile));
-    const source = `import { defineConfig } from "@farmjs/core";
+    const source = `import { defineConfig } from "@farm.js/core";
 import { appIntegrations } from "${importPath}";
 
 export default defineConfig({
@@ -1026,10 +1026,10 @@ function hasPackageDependency(manifest: PackageManifest, dependency: string) {
 
 function getFarmIntegrationsVersion(manifest: PackageManifest) {
   const farmCoreVersion =
-    manifest.dependencies?.["@farmjs/core"] ??
-    manifest.devDependencies?.["@farmjs/core"] ??
-    manifest.peerDependencies?.["@farmjs/core"] ??
-    manifest.optionalDependencies?.["@farmjs/core"];
+    manifest.dependencies?.["@farm.js/core"] ??
+    manifest.devDependencies?.["@farm.js/core"] ??
+    manifest.peerDependencies?.["@farm.js/core"] ??
+    manifest.optionalDependencies?.["@farm.js/core"];
 
   return farmCoreVersion?.startsWith("workspace:") ? "workspace:*" : "latest";
 }

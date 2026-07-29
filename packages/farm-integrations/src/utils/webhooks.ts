@@ -1,4 +1,4 @@
-import type { FarmIntegrationHandlerContext } from "@farmjs/core";
+import type { FarmIntegrationHandlerContext } from "@farm.js/core";
 
 export interface FarmWebhookEvent<
   TProvider extends string = string,

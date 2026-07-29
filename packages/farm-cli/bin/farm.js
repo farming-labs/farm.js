@@ -289,7 +289,7 @@ addCommand
   .option("--dry-run", "Show what would be added without writing files")
   .option("--route-file <file>", "Route file path for route-based integrations")
   .option("--ui", "Also install the provider's shadcn-based Farm UI feature pack")
-  .option("--skip-package-json", "Do not add @farmjs/integrations to package.json")
+  .option("--skip-package-json", "Do not add @farm.js/integrations to package.json")
   .option("--skip-config", "Do not create or update farm.config")
   .option("-l, --list", "List supported integration providers")
   .action(async (provider, options) => {

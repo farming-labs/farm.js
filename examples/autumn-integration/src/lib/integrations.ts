@@ -3,7 +3,7 @@ import {
   betterAuth as farmBetterAuth,
   type AutumnBillingUsageProperties,
   type AutumnWebhookEvent,
-} from "@farmjs/integrations";
+} from "@farm.js/integrations";
 import { auth } from "./auth.ts";
 import { resolveOrganizationBillingOwner } from "./organization-server.ts";
 import { autumnPlans, autumnProducts } from "./autumn-catalog.ts";

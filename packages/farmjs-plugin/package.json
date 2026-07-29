@@ -1,5 +1,5 @@
 {
-  "name": "@farmjs/plugin",
+  "name": "@farm.js/plugin",
   "version": "0.0.1",
   "description": "Official plugins for Farm.js framework",
   "license": "MIT",
@@ -53,7 +53,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "@farming-labs/strata": "0.1.2",
     "better-call": "^1.0.19",
     "es-module-lexer": "2.0.0",
@@ -72,7 +72,7 @@
     "vitest": "^1.1.0"
   },
   "peerDependencies": {
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "@vitejs/plugin-rsc": ">=0.5.0",
     "react": ">=19.0.0",
     "react-dom": ">=19.0.0",

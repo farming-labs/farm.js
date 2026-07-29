@@ -4,7 +4,7 @@
 // Forms can call server actions directly without needing an API route!
 
 import React from "react";
-import { useServerFn } from "@farmjs/core/server-fn/client";
+import { useServerFn } from "@farm.js/core/server-fn/client";
 import { submitMessage } from "../actions/user";
 
 export function MessageForm() {

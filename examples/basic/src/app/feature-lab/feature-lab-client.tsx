@@ -7,8 +7,8 @@ import {
   useNavigation,
   usePageState,
   useRouter,
-} from '@farmjs/core/client';
-import { getPublicEnv } from '@farmjs/core/env';
+} from '@farm.js/core/client';
+import { getPublicEnv } from '@farm.js/core/env';
 import {
   readClientBoundary,
   readRuntimeBoundary,

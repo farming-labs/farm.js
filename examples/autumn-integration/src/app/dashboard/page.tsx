@@ -8,7 +8,7 @@ import type {
   AutumnBillingStatusResult,
   AutumnBillingUsageResult,
   AutumnCatalogProduct,
-} from "@farmjs/integrations";
+} from "@farm.js/integrations";
 import { apiClient } from "../../lib/api";
 import {
   authOrganizationClient,

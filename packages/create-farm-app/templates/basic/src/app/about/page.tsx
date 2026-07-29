@@ -1,5 +1,5 @@
 import React from "react";
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 import { Link } from "farm/client";
 
 export default function AboutPage({ params, searchParams }: PageProps) {

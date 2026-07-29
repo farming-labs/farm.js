@@ -4,8 +4,8 @@ import {
   logger,
   resolveConfig,
   resolveDeployConfig,
-} from "@farmjs/core/internal/config-runtime";
-import { withProductionNodeEnv } from "@farmjs/core/internal/production-node-env";
+} from "@farm.js/core/internal/config-runtime";
+import { withProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 
 export { withProductionNodeEnv };
 
@@ -29,7 +29,7 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
           productionVitePromise.then((runtime) =>
             loadConfig(root, undefined, mode, runtime.loadEnv),
           ),
-          import("@farmjs/core/internal/build-runtime"),
+          import("@farm.js/core/internal/build-runtime"),
           productionVitePromise,
         ],
       );

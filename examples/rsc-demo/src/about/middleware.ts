@@ -2,7 +2,7 @@
  * About page middleware
  * Demonstrates page-specific middleware and data sharing
  */
-import { middleware } from '@farmjs/core/middleware';
+import { middleware } from '@farm.js/core/middleware';
 
 export default middleware()
   .use(async (ctx, next) => {

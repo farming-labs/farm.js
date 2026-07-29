@@ -3,8 +3,8 @@ import {
   defineIntegration,
   type FarmIntegrationHandlerContext,
   type FarmIntegrationLogger,
-} from "@farmjs/core";
-import { api as clientApi } from "@farmjs/core/client";
+} from "@farm.js/core";
+import { api as clientApi } from "@farm.js/core/client";
 import {
   createPathInferredClientApi,
   createDocumentNavigationMatchers,

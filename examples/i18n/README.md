@@ -14,7 +14,7 @@ This example verifies the complete internationalization path:
 From the repository root:
 
 ```bash
-pnpm --filter @farmjs/core build
+pnpm --filter @farm.js/core build
 pnpm --filter farm-i18n-example dev
 ```
 

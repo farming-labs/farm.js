@@ -1,4 +1,4 @@
-import type { FarmIntegrationConfigDefinition } from "@farmjs/core";
+import type { FarmIntegrationConfigDefinition } from "@farm.js/core";
 
 type ConfigKey<TConfig> = Extract<keyof TConfig, string>;
 

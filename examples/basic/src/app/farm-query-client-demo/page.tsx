@@ -7,7 +7,7 @@ import {
   asInteger,
   asBoolean,
   asArrayOf,
-} from '@farmjs/core/query/client';
+} from '@farm.js/core/query/client';
 export default function FarmClientQueryDemo() {
   const [search, setSearch] = useQueryState('search', asString);
   const [page, setPage] = useQueryState('page', asInteger.withDefault!(1));

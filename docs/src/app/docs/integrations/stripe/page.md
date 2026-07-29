@@ -21,7 +21,7 @@ farm add integration stripe --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { stripe } from "@farmjs/integrations/stripe";
+import { stripe } from "@farm.js/integrations/stripe";
 
 export const integrations = {
   billing: stripe({

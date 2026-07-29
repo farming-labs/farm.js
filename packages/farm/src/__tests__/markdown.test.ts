@@ -158,7 +158,7 @@ describe("htmlToMarkdown", () => {
           "<html><head><title>Guide</title></head><body>",
           "<article>",
           "<h2>Install</h2>",
-          "<p>Run <code>pnpm add @farmjs/core</code>.</p>",
+          "<p>Run <code>pnpm add @farm.js/core</code>.</p>",
           '<p><a href="/docs">Read docs</a></p>',
           "</article>",
           "</body></html>",

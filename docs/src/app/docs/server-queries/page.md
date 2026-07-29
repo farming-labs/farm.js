@@ -18,7 +18,7 @@ generated server references; it does not install or wrap TanStack Query.
 **src/features/products/queries.ts**
 
 ```ts
-import { createServerQuery } from "@farmjs/core/server-query";
+import { createServerQuery } from "@farm.js/core/server-query";
 import { z } from "zod";
 
 const Product = z.object({
@@ -63,7 +63,7 @@ Matching calls in one render request share the same in-flight promise. The handl
 ```tsx
 "use client";
 
-import { prefetchServerQuery } from "@farmjs/core/server-query/client";
+import { prefetchServerQuery } from "@farm.js/core/server-query/client";
 import { productQuery } from "@/features/products/queries";
 
 export function ProductLink({ id }: { id: string }) {
@@ -82,7 +82,7 @@ Concurrent prefetches and mounted consumers use one browser request. A successfu
 ```tsx
 "use client";
 
-import { useServerQuery } from "@farmjs/core/server-query/client";
+import { useServerQuery } from "@farm.js/core/server-query/client";
 import { productQuery } from "@/features/products/queries";
 
 export function ProductPrice({ id }: { id: string }) {
@@ -109,8 +109,8 @@ Use `fetchServerQuery(productQuery, input)` for an imperative browser read that 
 ## Invalidate after a mutation
 
 ```ts
-import { invalidate } from "@farmjs/core/cache";
-import { createServerFn } from "@farmjs/core/server-fn";
+import { invalidate } from "@farm.js/core/cache";
+import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
 export const updateProduct = createServerFn({

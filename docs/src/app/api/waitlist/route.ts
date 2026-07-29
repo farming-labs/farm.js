@@ -1,4 +1,4 @@
-import { createEndpoint } from "@farmjs/core/api";
+import { createEndpoint } from "@farm.js/core/api";
 import type { PrismaClient as PrismaClientType } from "@prisma/client";
 import { z } from "zod";
 

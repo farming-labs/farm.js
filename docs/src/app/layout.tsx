@@ -1,4 +1,4 @@
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 import geistMonoUrl from "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2?url";
 import geistPixelUrl from "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2?url";
 import geistSansUrl from "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2?url";

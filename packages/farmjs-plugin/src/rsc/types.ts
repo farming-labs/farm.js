@@ -1,7 +1,7 @@
 import type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
-} from "@farmjs/core/server-action-security";
+} from "@farm.js/core/server-action-security";
 
 /**
  * Configuration options for the Farm.js RSC plugin.

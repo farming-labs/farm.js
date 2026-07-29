@@ -5,7 +5,7 @@ import {
   resolveProjectPackageBin,
   startManagedAgentRuntime,
   type FarmAgentRuntimeInstance,
-} from "@farmjs/core/agent-runtime";
+} from "@farm.js/core/agent-runtime";
 import { writeCloudflareAgentOutput } from "./output";
 
 const DEFAULT_CONFIG = "wrangler.jsonc";
@@ -108,7 +108,7 @@ export function cfAgent(options: CloudflareAgentOptions = {}): CloudflareAgentIn
           async afterBuild(context) {
             if (context.preset !== "cloudflare-module") {
               throw new Error(
-                "@farmjs/cf-agent requires deploy.preset to be cloudflare-module so Farm and Durable Objects can share one Worker.",
+                "@farm.js/cf-agent requires deploy.preset to be cloudflare-module so Farm and Durable Objects can share one Worker.",
               );
             }
             if (!context.outputDir) {

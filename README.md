@@ -41,17 +41,17 @@ Your app will be running at `http://localhost:3000`!
 ### Manual Installation
 
 ```bash
-npm install @farmjs/core react react-dom
+npm install @farm.js/core react react-dom
 # or
-pnpm add @farmjs/core react react-dom
+pnpm add @farm.js/core react react-dom
 # or
-yarn add @farmjs/core react react-dom
+yarn add @farm.js/core react react-dom
 ```
 
 Create a `farm.config.ts`:
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   srcDir: "src",
@@ -80,7 +80,7 @@ export default function HomePage() {
 Add a root layout in `src/app/layout.tsx`:
 
 ```tsx
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
@@ -120,7 +120,7 @@ my-farm-app/
 Farm.js supports a powerful configuration system via `farm.config.ts`:
 
 ```typescript
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   experimental: {
@@ -182,7 +182,7 @@ src/app/
 Required config:
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   experimental: {
@@ -225,7 +225,7 @@ export default function DashboardPage() {
 Extend Farm.js with powerful plugins:
 
 ```typescript
-import { definePlugin } from "@farmjs/core";
+import { definePlugin } from "@farm.js/core";
 
 export const myPlugin = definePlugin({
   name: "my-plugin",
@@ -316,10 +316,10 @@ pnpm install
 # Build all packages
 pnpm build
 
-# Run tests (from root: runs tests in all packages; @farmjs/core runs Vitest)
+# Run tests (from root: runs tests in all packages; @farm.js/core runs Vitest)
 pnpm test
 
-# Run only @farmjs/core tests
+# Run only @farm.js/core tests
 pnpm run test:farm
 
 # Run tests and save output to test-run.log
@@ -342,7 +342,7 @@ cd examples/basic && pnpm dev
 farm.js/
 ├── packages/
 │   ├── farm/              # Core framework
-│   ├── farm-cli/          # @farmjs/cli tools
+│   ├── farm-cli/          # @farm.js/cli tools
 │   ├── create-farm-app/   # App creation tool
 │   └── farm-types/        # TypeScript definitions
 ├── examples/

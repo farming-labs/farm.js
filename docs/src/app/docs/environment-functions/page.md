@@ -15,7 +15,7 @@ import {
   createClientOnlyFn,
   createIsomorphicFn,
   createServerOnlyFn,
-} from "@farmjs/core/environment";
+} from "@farm.js/core/environment";
 ```
 
 ## Server-only functions
@@ -23,8 +23,8 @@ import {
 Use `createServerOnlyFn` for code that reads private environment variables, databases, the filesystem, or other server resources:
 
 ```ts
-import { createServerOnlyFn } from "@farmjs/core/environment";
-import { getEnv } from "@farmjs/core/env";
+import { createServerOnlyFn } from "@farm.js/core/environment";
+import { getEnv } from "@farm.js/core/env";
 
 export const readDatabaseUrl = createServerOnlyFn(() => {
   return getEnv("DATABASE_URL");
@@ -46,7 +46,7 @@ export const findInvoice = createServerOnlyFn(async (invoiceId: string) => {
 Use `createClientOnlyFn` around browser APIs that cannot run during SSR:
 
 ```ts
-import { createClientOnlyFn } from "@farmjs/core/environment";
+import { createClientOnlyFn } from "@farm.js/core/environment";
 
 export const readTheme = createClientOnlyFn(() => {
   return localStorage.getItem("theme") ?? "system";
@@ -60,8 +60,8 @@ Calling `readTheme()` during SSR throws a descriptive environment mismatch inste
 Use `createIsomorphicFn` when one operation needs different server and browser implementations:
 
 ```ts
-import { createIsomorphicFn } from "@farmjs/core/environment";
-import { getEnv } from "@farmjs/core/env";
+import { createIsomorphicFn } from "@farm.js/core/environment";
+import { getEnv } from "@farm.js/core/env";
 
 export const getApplicationOrigin = createIsomorphicFn({
   server: () => getEnv("APP_ORIGIN"),
@@ -101,4 +101,4 @@ Farm applies the same transform in development, production, static client builds
 - Imported implementation modules should be free of top-level side effects. JavaScript imports execute before a function is created, so wrapping a function does not sandbox its module.
 - Never return a secret from a server-only function to client code. The implementation boundary protects source code and dependencies, not values that your application deliberately serializes.
 - Treat environment functions as bundle boundaries, not authorization. Server functions and API routes still need authentication and authorization.
-- Prefer `@farmjs/core/environment` over the broad root entry when a module only needs these helpers.
+- Prefer `@farm.js/core/environment` over the broad root entry when a module only needs these helpers.

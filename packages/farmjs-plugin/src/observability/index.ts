@@ -577,7 +577,7 @@ export function observabilityPlugin(options: ObservabilityPluginOptions = {}): O
   };
 
   return {
-    name: "@farmjs/plugin-observability",
+    name: "@farm.js/plugin-observability",
     enforce: "post",
 
     init() {

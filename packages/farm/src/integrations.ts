@@ -471,7 +471,7 @@ export interface FarmIntegration<
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any> | undefined>;
 
 const FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME = Symbol.for(
-  "@farmjs/core/integration-plugin-server-runtime",
+  "@farm.js/core/integration-plugin-server-runtime",
 );
 
 /** @internal Identifies lifecycle plugins owned by platform-managed integrations. */

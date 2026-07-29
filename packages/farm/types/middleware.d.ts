@@ -1,10 +1,10 @@
 /**
- * Type declarations for @farmjs/core/middleware
+ * Type declarations for @farm.js/core/middleware
  *
  * These provide stable type definitions that don't depend on build hashes.
  */
 
-declare module "@farmjs/core/middleware" {
+declare module "@farm.js/core/middleware" {
   /**
    * Next function to call the next middleware in the chain
    */

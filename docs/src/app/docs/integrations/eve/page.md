@@ -6,14 +6,14 @@ section: "Integrations"
 
 # Eve Integration
 
-`@farmjs/eve` connects an [Eve](https://www.eve.dev/) agent to the Farm application lifecycle. Eve keeps ownership of the agent runtime, durable conversations, tools, and React client. Farm manages local startup, same-origin routing, shutdown, and Vercel build composition.
+`@farm.js/eve` connects an [Eve](https://www.eve.dev/) agent to the Farm application lifecycle. Eve keeps ownership of the agent runtime, durable conversations, tools, and React client. Farm manages local startup, same-origin routing, shutdown, and Vercel build composition.
 
 ## Install
 
 Eve requires Node.js 24 or newer.
 
 ```bash
-pnpm add @farmjs/eve eve
+pnpm add @farm.js/eve eve
 ```
 
 ## Register the runtime
@@ -21,8 +21,8 @@ pnpm add @farmjs/eve eve
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
-import { eve } from "@farmjs/eve";
+import { defineConfig } from "@farm.js/core";
+import { eve } from "@farm.js/eve";
 
 export default defineConfig({
   integrations: {
@@ -108,7 +108,7 @@ farm build
 farm deploy --vercel
 ```
 
-For the `vercel` and `vercel-edge` presets, `@farmjs/eve` builds the Eve service and adds its functions, routes, and assets to Farm's Vercel output. The application and agent ship from one project and keep the same public `/eve` routes.
+For the `vercel` and `vercel-edge` presets, `@farm.js/eve` builds the Eve service and adds its functions, routes, and assets to Farm's Vercel output. The application and agent ship from one project and keep the same public `/eve` routes.
 
 To run Eve as an independently deployed service, set an origin instead. Farm will proxy the same public routes to it and skip managed Vercel composition.
 

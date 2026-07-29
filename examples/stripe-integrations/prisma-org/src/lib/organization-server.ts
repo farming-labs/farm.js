@@ -1,5 +1,5 @@
-import type { FarmIntegrationHandlerContext } from "@farmjs/core";
-import type { StripeBillingOwner } from "@farmjs/integrations/stripe";
+import type { FarmIntegrationHandlerContext } from "@farm.js/core";
+import type { StripeBillingOwner } from "@farm.js/integrations/stripe";
 import { auth, authDatabase } from "./auth.ts";
 import { prisma } from "./prisma.ts";
 

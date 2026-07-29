@@ -9,7 +9,7 @@ This page is loaded from `src/app/docs/page.md` through the Farm docs integratio
 machine API route is registered automatically when docs are enabled in `farm.config.ts`:
 
 ```ts
-import { defineConfig } from '@farmjs/core';
+import { defineConfig } from '@farm.js/core';
 
 export default defineConfig({
   docs: {

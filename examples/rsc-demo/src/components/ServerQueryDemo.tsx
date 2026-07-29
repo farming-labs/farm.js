@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { useServerFn } from "@farmjs/core/server-fn/client";
+import { useServerFn } from "@farm.js/core/server-fn/client";
 import {
   prefetchServerQuery,
   useServerQuery,
-} from "@farmjs/core/server-query/client";
+} from "@farm.js/core/server-query/client";
 import { productQuery, updateProduct } from "../actions/server-query";
 
 const input = { id: "123" } as const;

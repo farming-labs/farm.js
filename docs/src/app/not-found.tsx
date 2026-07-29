@@ -1,4 +1,4 @@
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farm.js/core/client";
 
 interface NotFoundProps {
   pathname?: string;

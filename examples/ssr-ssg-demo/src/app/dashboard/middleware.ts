@@ -2,7 +2,7 @@
  * Dashboard-specific middleware
  * Demonstrates route-level middleware for authentication simulation
  */
-import { middleware } from '@farmjs/core/middleware';
+import { middleware } from '@farm.js/core/middleware';
 
 export default middleware()
   // Simulate authentication check

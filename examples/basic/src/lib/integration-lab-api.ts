@@ -1,4 +1,4 @@
-import { createIntegrations } from '@farmjs/core/client';
+import { createIntegrations } from '@farm.js/core/client';
 import type { integrationLab } from './integration-lab.ts';
 
 export const {

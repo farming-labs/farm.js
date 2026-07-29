@@ -4,7 +4,7 @@ import { transformFarmServerFns } from "./server-fn-transform";
 describe("Farm server function transform", () => {
   it("transforms createServerFn and createServerQuery exports", () => {
     const result = transformFarmServerFns(
-      `import { createServerFn, createServerQuery } from "@farmjs/core";
+      `import { createServerFn, createServerQuery } from "@farm.js/core";
 export const save = createServerFn({ handler: async () => true });
 export const product = createServerQuery({
   key: ({ input }) => ["product", input.id],
@@ -22,7 +22,7 @@ export const product = createServerQuery({
 
   it("supports aliased createServerQuery imports from the explicit entry", () => {
     const result = transformFarmServerFns(
-      `import { createServerQuery as query } from "@farmjs/core/server-query";
+      `import { createServerQuery as query } from "@farm.js/core/server-query";
 export const product = query({ key: () => ["product"], handler: async () => true });`,
       "/app/src/product.ts",
     );
@@ -33,9 +33,9 @@ export const product = query({ key: () => ["product"], handler: async () => true
 
   it("does not let adjacent core imports consume server function imports", () => {
     const result = transformFarmServerFns(
-      `import { invalidate } from "@farmjs/core/cache";
-import { createServerFn } from "@farmjs/core/server-fn";
-import { createServerQuery } from "@farmjs/core/server-query";
+      `import { invalidate } from "@farm.js/core/cache";
+import { createServerFn } from "@farm.js/core/server-fn";
+import { createServerQuery } from "@farm.js/core/server-query";
 export const product = createServerQuery({ key: () => ["product"], handler: async () => true });
 export const update = createServerFn({ handler: async () => { invalidate(["product"]); } });`,
       "/app/src/product.ts",
@@ -49,7 +49,7 @@ export const update = createServerFn({ handler: async () => { invalidate(["produ
     expect(() =>
       transformFarmServerFns(
         `'use client';
-import { createServerQuery } from "@farmjs/core";
+import { createServerQuery } from "@farm.js/core";
 export const product = createServerQuery({ key: () => ["product"], handler: async () => true });`,
         "/app/src/product.tsx",
       ),

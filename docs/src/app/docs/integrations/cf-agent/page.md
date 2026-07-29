@@ -6,14 +6,14 @@ section: "Integrations"
 
 # Cloudflare Agents Integration
 
-`@farmjs/cf-agent` joins a Farm application and [Cloudflare Agents](https://developers.cloudflare.com/agents/) without replacing the Agents SDK. Farm manages Wrangler in development, proxies Agent WebSockets at the application origin, and composes both builds into one Worker for production.
+`@farm.js/cf-agent` joins a Farm application and [Cloudflare Agents](https://developers.cloudflare.com/agents/) without replacing the Agents SDK. Farm manages Wrangler in development, proxies Agent WebSockets at the application origin, and composes both builds into one Worker for production.
 
 ## Install
 
 Cloudflare Agents and Wrangler require Node.js 22 or newer.
 
 ```bash
-pnpm add @farmjs/cf-agent agents
+pnpm add @farm.js/cf-agent agents
 pnpm add -D wrangler
 pnpm add -D @cloudflare/workers-types
 ```
@@ -91,8 +91,8 @@ Create a new migration entry when adding, renaming, or deleting a Durable Object
 **farm.config.ts**
 
 ```ts
-import { cfAgent } from "@farmjs/cf-agent";
-import { defineConfig } from "@farmjs/core";
+import { cfAgent } from "@farm.js/cf-agent";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   integrations: {
