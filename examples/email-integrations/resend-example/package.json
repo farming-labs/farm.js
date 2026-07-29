@@ -9,14 +9,15 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
-    "@farm.js/email": "workspace:*",
+    "@farm.js/core": "0.1.0-beta.2",
+    "@farm.js/email": "0.1.0-beta.2",
     "@react-email/components": "^1.0.12",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farm.js/cli": "workspace:*",
+    "@farm.js/cli": "0.1.0-beta.2",
+    "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "typescript": "^5.3.3",

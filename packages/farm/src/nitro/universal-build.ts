@@ -5259,14 +5259,14 @@ async function buildNitroUniversal(
     await fs.writeFile(filePath, output.type === "chunk" ? output.code : output.source);
   }
 
-  // Create entry that wraps the SSR handler with h3's fromWebHandler
+  // Create the Nitro event handler adapter. Nitro accepts plain event handler
+  // functions, so keep this entry dependency-free for standalone output.
   const nitroEntryPath = path.join(ssrOutputDir, "nitro-entry.mjs");
 
   const nitroEntryCode = `
 // Farm.js Nitro Entry
-// This file imports h3 and the SSR handler, wrapping it for Nitro
+// This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
-import { defineEventHandler } from 'h3'
 import handler from './${ssrEntryFile}'
 
 function mergeVaryHeaders(target, source) {
@@ -5304,8 +5304,8 @@ function createResponseFinishedHook(event) {
   }
 }
 
-// Export the wrapped handler for Nitro
-export default defineEventHandler(async (event) => {
+// Export the event handler for Nitro
+export default async function farmNitroEventHandler(event) {
   const response = await handler.fetch(event.req, {
     waitUntil: (promise) => event.waitUntil(promise),
     onResponseFinished: createResponseFinishedHook(event),
@@ -5316,7 +5316,7 @@ export default defineEventHandler(async (event) => {
   const farmVary = response.headers.get('Vary')
   if (farmVary) mergeVaryHeaders(event.res.headers, farmVary)
   return response
-})
+}
   `.trim();
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
