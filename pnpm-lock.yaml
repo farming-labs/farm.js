@@ -115,12 +115,12 @@ importers:
 
   examples/auth0-integration:
     dependencies:
+      '@farm.js/auth0':
+        specifier: workspace:*
+        version: link:../../packages/farm-auth0
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
-        specifier: workspace:*
-        version: link:../../packages/farm-integrations
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -146,12 +146,12 @@ importers:
 
   examples/authjs-integration:
     dependencies:
+      '@farm.js/authjs':
+        specifier: workspace:*
+        version: link:../../packages/farm-authjs
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
-        specifier: workspace:*
-        version: link:../../packages/farm-integrations
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -177,12 +177,15 @@ importers:
 
   examples/autumn-integration:
     dependencies:
+      '@farm.js/autumn':
+        specifier: workspace:*
+        version: link:../../packages/farm-autumn
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
-        specifier: workspace:*
-        version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.5.5
         version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
@@ -254,12 +257,12 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
-        specifier: workspace:*
-        version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.3.1
         version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
@@ -340,12 +343,12 @@ importers:
       '@clerk/react':
         specifier: ^6.1.0
         version: 6.1.0(react-dom@19.2.4)(react@19.2.4)
+      '@farm.js/clerk':
+        specifier: workspace:*
+        version: link:../../packages/farm-clerk
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
-        specifier: workspace:*
-        version: link:../../packages/farm-integrations
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -430,9 +433,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/email':
         specifier: workspace:*
-        version: link:../../../packages/farm-integrations
+        version: link:../../../packages/farm-email
       '@react-email/components':
         specifier: ^1.0.12
         version: 1.0.12(react-dom@19.2.4)(react@19.2.4)
@@ -529,9 +532,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/jobs':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-jobs
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -560,9 +563,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/jobs':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-jobs
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -591,9 +594,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/jobs':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-jobs
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -619,12 +622,15 @@ importers:
 
   examples/polar-integration:
     dependencies:
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/polar':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-polar
       better-auth:
         specifier: ^1.5.5
         version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
@@ -776,9 +782,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/stripe':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-stripe
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -810,12 +816,15 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/stripe':
         specifier: workspace:*
-        version: link:../../../packages/farm-integrations
+        version: link:../../../packages/farm-stripe
       better-auth:
         specifier: ^1.3.1
         version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
@@ -859,12 +868,15 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/stripe':
         specifier: workspace:*
-        version: link:../../../packages/farm-integrations
+        version: link:../../../packages/farm-stripe
       '@prisma/client':
         specifier: ^6.7.0
         version: 6.19.2(prisma@6.19.2)(typescript@5.9.3)
@@ -908,12 +920,15 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/stripe':
         specifier: workspace:*
-        version: link:../../../packages/farm-integrations
+        version: link:../../../packages/farm-stripe
       '@prisma/client':
         specifier: ^6.7.0
         version: 6.19.2(prisma@6.19.2)(typescript@5.9.3)
@@ -957,12 +972,15 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../../../packages/farm-better-auth
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/stripe':
         specifier: workspace:*
-        version: link:../../../packages/farm-integrations
+        version: link:../../../packages/farm-stripe
       better-auth:
         specifier: ^1.3.1
         version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
@@ -1000,9 +1018,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/supabase':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-supabase
       react:
         specifier: ^19.0.0
         version: 19.2.4
@@ -1031,9 +1049,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farm.js/integrations':
+      '@farm.js/workos':
         specifier: workspace:*
-        version: link:../../packages/farm-integrations
+        version: link:../../packages/farm-workos
       react:
         specifier: ^19.0.0
         version: 19.2.4

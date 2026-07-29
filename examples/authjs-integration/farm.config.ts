@@ -1,5 +1,5 @@
 import { defineConfig } from "@farm.js/core";
-import { authjs } from "@farm.js/integrations/authjs";
+import { authjs } from "@farm.js/authjs";
 import { nextAuth } from "./auth.ts";
 
 export default defineConfig({

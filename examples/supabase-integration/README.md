@@ -1,6 +1,6 @@
 # Supabase Integration Example
 
-Config-only Supabase auth through `@farm.js/integrations/supabase`.
+Config-only Supabase auth through `@farm.js/supabase`.
 
 The example uses:
 

@@ -7,7 +7,7 @@ import type {
   PolarBillingStatusResult,
   PolarBillingUsageResult,
   PolarCatalogProduct,
-} from "@farm.js/integrations/polar/client";
+} from "@farm.js/polar/client";
 import { apiClient } from "../../lib/api";
 import {
   authOrganizationClient,

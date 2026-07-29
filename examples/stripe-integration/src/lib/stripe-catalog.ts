@@ -1,4 +1,4 @@
-import type { StripeIntegrationProduct } from "@farm.js/integrations/stripe/client";
+import type { StripeIntegrationProduct } from "@farm.js/stripe/client";
 
 export const stripeCatalog: StripeIntegrationProduct[] = [
   {

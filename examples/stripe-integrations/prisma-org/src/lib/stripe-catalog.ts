@@ -1,7 +1,7 @@
 import type {
   StripeBillingPlan,
   StripeBillingProduct,
-} from "@farm.js/integrations/stripe";
+} from "@farm.js/stripe";
 import { getExampleEnv } from "./env.ts";
 
 const proMonthlyMeterPriceIds = Object.fromEntries(

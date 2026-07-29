@@ -1,5 +1,5 @@
 import { defineConfig } from "@farm.js/core";
-import { clerk } from "@farm.js/integrations/clerk";
+import { clerk } from "@farm.js/clerk";
 
 export default defineConfig({
   experimental: {

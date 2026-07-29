@@ -1,4 +1,4 @@
-import { defineTasks, task } from "@farm.js/integrations";
+import { defineTasks, task } from "@farm.js/jobs";
 
 export const inngestTasks = defineTasks({
   importCsv: task({

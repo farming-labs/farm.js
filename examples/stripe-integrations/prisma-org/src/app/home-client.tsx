@@ -6,7 +6,7 @@ import type {
   StripeBillingSeatLimitSource,
   StripeBillingStatusResult,
   StripeCatalogProduct,
-} from "@farm.js/integrations/stripe/client";
+} from "@farm.js/stripe/client";
 import { apiClient } from "../lib/api";
 import { authClient } from "../lib/auth-client";
 import { authOrganizationClient } from "../lib/auth-organization-client";

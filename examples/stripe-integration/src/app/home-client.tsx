@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { StripeCatalogProduct } from "@farm.js/integrations/stripe/client";
+import type { StripeCatalogProduct } from "@farm.js/stripe/client";
 import { apiClient } from "../lib/api";
 
 type ProductState =

@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2020",
     "useDefineForClassFields": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ES2020",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "esModuleInterop": true,
@@ -13,12 +17,23 @@
     "moduleResolution": "Bundler",
     "baseUrl": ".",
     "paths": {
-      "@farm.js/core": ["../../packages/farm/dist/index.d.ts"],
-      "@farm.js/core/client": ["../../packages/farm/types/client.d.ts"],
-      "@farm.js/integrations": ["../../packages/farm-integrations/dist/index.d.ts"],
-      "@farm.js/integrations/*": [
-        "../../packages/farm-integrations/dist/*.d.ts",
-        "../../packages/farm-integrations/dist/*/index.d.ts"
+      "@farm.js/better-auth": [
+        "../../packages/farm-better-auth/dist/index.d.ts"
+      ],
+      "@farm.js/better-auth/*": [
+        "../../packages/farm-better-auth/dist/*"
+      ],
+      "@farm.js/core": [
+        "../../packages/farm/dist/index.d.ts"
+      ],
+      "@farm.js/core/client": [
+        "../../packages/farm/types/client.d.ts"
+      ],
+      "@farm.js/polar": [
+        "../../packages/farm-polar/dist/index.d.ts"
+      ],
+      "@farm.js/polar/*": [
+        "../../packages/farm-polar/dist/*"
       ]
     },
     "allowImportingTsExtensions": true,
@@ -26,7 +41,13 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "types": ["vite/client", "node"]
+    "types": [
+      "vite/client",
+      "node"
+    ]
   },
-  "include": ["src", "farm.config.ts"]
+  "include": [
+    "src",
+    "farm.config.ts"
+  ]
 }

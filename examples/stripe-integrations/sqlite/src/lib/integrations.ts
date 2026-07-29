@@ -1,12 +1,12 @@
 import Stripe from "stripe";
 import type { FarmIntegrationHandlerContext, FarmIntegrationLogEvent } from "@farm.js/core";
-import { betterAuth as farmBetterAuth } from "@farm.js/integrations/better-auth";
+import { betterAuth as farmBetterAuth } from "@farm.js/better-auth";
 import {
   stripe,
   type StripeBillingHooks,
   type StripeBillingOptions,
   type StripeWebhookEvent,
-} from "@farm.js/integrations/stripe";
+} from "@farm.js/stripe";
 import { auth } from "./auth.ts";
 import {
   getBillingSnapshotByCustomerId,

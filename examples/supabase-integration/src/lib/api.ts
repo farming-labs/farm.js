@@ -1,5 +1,5 @@
 import { createIntegrations } from "@farm.js/core/client";
-import { supabaseClient } from "@farm.js/integrations/supabase/client";
+import { supabaseClient } from "@farm.js/supabase/client";
 import type { InferIntegrationAPIFromRoutes } from "@farm.js/core";
 import type { localDemoRoutes } from "./integrations/local-demo/index.ts";
 
