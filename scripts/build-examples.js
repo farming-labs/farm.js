@@ -23,6 +23,7 @@ const buildEnv = {
   AUTUMN_SECRET_KEY: process.env.AUTUMN_SECRET_KEY || "am_sk_ci",
   BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET || "ci-better-auth-secret",
   CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY || "sk_test_ci",
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "pk_test_ci",
   INNGEST_APP_ID: process.env.INNGEST_APP_ID || "farm-ci",
   INNGEST_EVENT_KEY: process.env.INNGEST_EVENT_KEY || "ci-inngest-event-key",
   INNGEST_SIGNING_KEY: process.env.INNGEST_SIGNING_KEY || "ci-inngest-signing-key",
