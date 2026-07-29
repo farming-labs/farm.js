@@ -116,10 +116,10 @@ importers:
   examples/auth0-integration:
     dependencies:
       '@farm.js/auth0':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-auth0
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -129,8 +129,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -147,10 +150,10 @@ importers:
   examples/authjs-integration:
     dependencies:
       '@farm.js/authjs':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-authjs
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -160,8 +163,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -178,17 +184,17 @@ importers:
   examples/autumn-integration:
     dependencies:
       '@farm.js/autumn':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-autumn
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       better-auth:
         specifier: ^1.5.5
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -200,8 +206,14 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -218,7 +230,7 @@ importers:
   examples/basic:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       better-call:
         specifier: ^1.0.19
@@ -234,7 +246,7 @@ importers:
         version: 4.1.12
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^19.0.0
@@ -258,14 +270,14 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -277,8 +289,14 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -295,10 +313,10 @@ importers:
   examples/cf-agent:
     dependencies:
       '@farm.js/cf-agent':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cf-agent
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       agents:
         specifier: 0.17.4
@@ -314,7 +332,7 @@ importers:
         specifier: ^5.20260710.1
         version: 5.20260716.1
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -344,10 +362,10 @@ importers:
         specifier: ^6.1.0
         version: 6.1.0(react-dom@19.2.8)(react@19.2.8)
       '@farm.js/clerk':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-clerk
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -357,8 +375,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -375,7 +396,7 @@ importers:
   examples/deployment-presets:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -385,7 +406,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^18.2.45
@@ -403,7 +424,7 @@ importers:
   examples/docs-integration:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -413,7 +434,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^18.2.45
@@ -431,10 +452,10 @@ importers:
   examples/email-integrations/resend-example:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm
       '@farm.js/email':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-email
       '@react-email/components':
         specifier: ^1.0.12
@@ -447,8 +468,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -465,10 +489,10 @@ importers:
   examples/eve-agent:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/eve':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-eve
       ai:
         specifier: ^7.0.26
@@ -484,7 +508,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^19.0.0
@@ -502,7 +526,7 @@ importers:
   examples/i18n:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -512,7 +536,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^19.0.0
@@ -530,10 +554,10 @@ importers:
   examples/jobs-inngest:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/jobs':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-jobs
       react:
         specifier: 19.2.8
@@ -543,8 +567,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -561,10 +588,10 @@ importers:
   examples/jobs-integration:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/jobs':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-jobs
       react:
         specifier: 19.2.8
@@ -574,8 +601,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -592,10 +622,10 @@ importers:
   examples/jobs-trigger:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/jobs':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-jobs
       react:
         specifier: 19.2.8
@@ -605,8 +635,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -623,17 +656,17 @@ importers:
   examples/polar-integration:
     dependencies:
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/polar':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-polar
       better-auth:
         specifier: ^1.5.5
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -645,8 +678,14 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -663,7 +702,7 @@ importers:
   examples/preview-gateway:
     dependencies:
       '@farm.js/preview-gateway':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-preview-gateway
       '@vercel/blob':
         specifier: ^2.6.1
@@ -679,7 +718,7 @@ importers:
   examples/rsc-demo:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       picocolors:
         specifier: ^1.0.0
@@ -698,8 +737,11 @@ importers:
         version: 4.1.12
     devDependencies:
       '@farm.js/plugin':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farmjs-plugin
+      '@rollup/plugin-terser':
+        specifier: ^0.4.4
+        version: 0.4.4
       '@tailwindcss/vite':
         specifier: ^4.1.0
         version: 4.1.18(vite@6.4.1)
@@ -731,19 +773,23 @@ importers:
   examples/simple-demo:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       react:
-        specifier: ^18.2.0
-        version: 18.3.1
+        specifier: ^19.0.0
+        version: 19.2.4
       react-dom:
-        specifier: ^18.2.0
-        version: 18.3.1(react@18.3.1)
+        specifier: ^19.0.0
+        version: 19.2.4(react@19.2.4)
+    devDependencies:
+      tailwindcss:
+        specifier: ^4.0.0
+        version: 4.1.18
 
   examples/ssr-ssg-demo:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       better-call:
         specifier: ^1.0.19
@@ -759,7 +805,7 @@ importers:
         version: 3.24.1
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^18.2.45
@@ -780,10 +826,10 @@ importers:
   examples/stripe-integration:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/stripe':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-stripe
       react:
         specifier: 19.2.8
@@ -796,8 +842,11 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -817,17 +866,17 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-stripe
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@6.21.0)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -845,8 +894,14 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -869,20 +924,20 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-stripe
       '@prisma/client':
         specifier: ^6.7.0
         version: 6.19.2(prisma@6.19.2)(typescript@5.9.3)
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -897,8 +952,14 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -921,20 +982,20 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-stripe
       '@prisma/client':
         specifier: ^6.7.0
         version: 6.19.2(prisma@6.19.2)(typescript@5.9.3)
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -949,8 +1010,14 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -973,17 +1040,17 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-stripe
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -998,8 +1065,14 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../../packages/farm-cli
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -1016,10 +1089,10 @@ importers:
   examples/supabase-integration:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/supabase':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-supabase
       react:
         specifier: 19.2.8
@@ -1029,8 +1102,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -1047,10 +1123,10 @@ importers:
   examples/workos-integration:
     dependencies:
       '@farm.js/core':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm
       '@farm.js/workos':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-workos
       react:
         specifier: 19.2.8
@@ -1060,8 +1136,11 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: workspace:*
+        specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
       '@types/react':
         specifier: ^18.2.45
         version: 18.3.26
@@ -1311,10 +1390,10 @@ importers:
     dependencies:
       '@clerk/backend':
         specifier: ^3.2.0
-        version: 3.2.0(react-dom@18.3.1)(react@19.2.4)
+        version: 3.2.0(react-dom@19.2.8)(react@19.2.4)
       '@clerk/react':
         specifier: ^6.1.0
-        version: 6.1.0(react-dom@18.3.1)(react@19.2.4)
+        version: 6.1.0(react-dom@19.2.8)(react@19.2.4)
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
@@ -1360,7 +1439,7 @@ importers:
         version: link:../farm-integration-utils
       '@react-email/render':
         specifier: 2.0.6
-        version: 2.0.6(react-dom@18.3.1)(react@19.2.4)
+        version: 2.0.6(react-dom@19.2.8)(react@19.2.4)
       react:
         specifier: ^18.2.0 || ^19.0.0
         version: 19.2.4
@@ -2310,7 +2389,7 @@ packages:
       '@better-auth/utils': 0.3.1
     dev: false
 
-  /@better-auth/mongo-adapter@1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(mongodb@7.1.0):
+  /@better-auth/mongo-adapter@1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(mongodb@6.21.0):
     resolution: {integrity: sha512-P1J9ljL5X5k740I8Rx1esPWNgWYPdJR5hf2CY7BwDSrQFPUHuzeCg0YhtEEP55niNateTXhBqGAcy0fVOeamZg==}
     peerDependencies:
       '@better-auth/core': 1.5.5
@@ -2319,7 +2398,7 @@ packages:
     dependencies:
       '@better-auth/core': 1.5.5(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-call@1.3.2)(jose@6.2.1)(kysely@0.28.12)(nanostores@1.2.0)
       '@better-auth/utils': 0.3.1
-      mongodb: 7.1.0
+      mongodb: 6.21.0
     dev: false
 
   /@better-auth/passkey@1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0):
@@ -2337,7 +2416,7 @@ packages:
       '@better-fetch/fetch': 1.1.21
       '@simplewebauthn/browser': 13.3.0
       '@simplewebauthn/server': 13.3.0
-      better-auth: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8)
+      better-auth: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
       better-call: 1.3.2(zod@4.3.6)
       nanostores: 1.2.0
       zod: 4.3.6
@@ -2406,11 +2485,11 @@ packages:
       sisteransi: 1.0.5
     dev: false
 
-  /@clerk/backend@3.2.0(react-dom@18.3.1)(react@19.2.4):
+  /@clerk/backend@3.2.0(react-dom@19.2.8)(react@19.2.4):
     resolution: {integrity: sha512-3APNJ5jt5Db9f441FPVTjgzvPxjLhekygomkMOhsvPpItRNNEHgFZM/bGXYetgcOtUrO6vWcuhf1rlNSTRelhg==}
     engines: {node: '>=20.9.0'}
     dependencies:
-      '@clerk/shared': 4.3.0(react-dom@18.3.1)(react@19.2.4)
+      '@clerk/shared': 4.3.0(react-dom@19.2.8)(react@19.2.4)
       standardwebhooks: 1.0.0
       tslib: 2.8.1
     transitivePeerDependencies:
@@ -2430,16 +2509,16 @@ packages:
       - react-dom
     dev: false
 
-  /@clerk/react@6.1.0(react-dom@18.3.1)(react@19.2.4):
+  /@clerk/react@6.1.0(react-dom@19.2.8)(react@19.2.4):
     resolution: {integrity: sha512-xHFvpQGBZGuuAp/d7+n2LAPoaeqPsqrG5ValR0//Ol6gRGCttnjJ0CVk806dlIzs7JZNLO68+i/MZanowCjEMw==}
     engines: {node: '>=20.9.0'}
     peerDependencies:
       react: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
       react-dom: ^18.0.0 || ~19.0.3 || ~19.1.4 || ~19.2.3 || ~19.3.0-0
     dependencies:
-      '@clerk/shared': 4.3.0(react-dom@18.3.1)(react@19.2.4)
+      '@clerk/shared': 4.3.0(react-dom@19.2.8)(react@19.2.4)
       react: 19.2.4
-      react-dom: 18.3.1(react@19.2.4)
+      react-dom: 19.2.8(react@19.2.4)
       tslib: 2.8.1
     dev: false
 
@@ -2455,7 +2534,7 @@ packages:
       react-dom: 19.2.8(react@19.2.8)
       tslib: 2.8.1
 
-  /@clerk/shared@4.3.0(react-dom@18.3.1)(react@19.2.4):
+  /@clerk/shared@4.3.0(react-dom@19.2.8)(react@19.2.4):
     resolution: {integrity: sha512-Ydt8YGohNXEs6aBBLnti80OJT551yYWVTugFTO8Ee+uIZpStyqXF+ufBtJleuhfxs1D5KjtpIxc+hTqkZtqMyQ==}
     engines: {node: '>=20.9.0'}
     requiresBuild: true
@@ -2473,7 +2552,7 @@ packages:
       glob-to-regexp: 0.4.1
       js-cookie: 3.0.5
       react: 19.2.4
-      react-dom: 18.3.1(react@19.2.4)
+      react-dom: 19.2.8(react@19.2.4)
       std-env: 3.9.0
     dev: false
 
@@ -2842,14 +2921,6 @@ packages:
       '@esbuild-kit/core-utils': 3.3.2
       get-tsconfig: 4.12.0
 
-  /@esbuild/aix-ppc64@0.19.12:
-    resolution: {integrity: sha512-bmoCYyWdEL3wDQIVbcyzRyeKLgk2WtWLTWz1ZIAZF/EGbNOwSA6ew3PftJ1PqMiOOGu0OyFMzG53L0zqIpPeNA==}
-    engines: {node: '>=12'}
-    cpu: [ppc64]
-    os: [aix]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/aix-ppc64@0.21.5:
     resolution: {integrity: sha512-1SDgH6ZSPTlggy1yI6+Dbkiz8xzpHJEVAlF/AM1tHPLsf5STom9rwtjE4hKAF20FfXXNTFqEYXyJNWh1GiZedQ==}
     engines: {node: '>=12'}
@@ -2884,14 +2955,6 @@ packages:
 
   /@esbuild/android-arm64@0.18.20:
     resolution: {integrity: sha512-Nz4rJcchGDtENV0eMKUNa6L12zz2zBDXuhj/Vjh18zGqB44Bi7MBMSXjgunJgjRhCmKOjnPuZp4Mb6OKqtMHLQ==}
-    engines: {node: '>=12'}
-    cpu: [arm64]
-    os: [android]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/android-arm64@0.19.12:
-    resolution: {integrity: sha512-P0UVNGIienjZv3f5zq0DP3Nt2IE/3plFzuaS96vihvD0Hd6H/q4WXUGpCxD/E8YrSXfNyRPbpTq+T8ZQioSuPA==}
     engines: {node: '>=12'}
     cpu: [arm64]
     os: [android]
@@ -2938,14 +3001,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/android-arm@0.19.12:
-    resolution: {integrity: sha512-qg/Lj1mu3CdQlDEEiWrlC4eaPZ1KztwGJ9B6J+/6G+/4ewxJg7gqj8eVYWvao1bXrqGiW2rsBZFSX3q2lcW05w==}
-    engines: {node: '>=12'}
-    cpu: [arm]
-    os: [android]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/android-arm@0.21.5:
     resolution: {integrity: sha512-vCPvzSjpPHEi1siZdlvAlsPxXl7WbOVUBBAowWug4rJHb68Ox8KualB+1ocNvT5fjv6wpkX6o/iEpbDrf68zcg==}
     engines: {node: '>=12'}
@@ -2980,14 +3035,6 @@ packages:
 
   /@esbuild/android-x64@0.18.20:
     resolution: {integrity: sha512-8GDdlePJA8D6zlZYJV/jnrRAi6rOiNaCC/JclcXpB+KIuvfBN4owLtgzY2bsxnx666XjJx2kDPUmnTtR8qKQUg==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [android]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/android-x64@0.19.12:
-    resolution: {integrity: sha512-3k7ZoUW6Q6YqhdhIaq/WZ7HwBpnFBlW905Fa4s4qWJyiNOgT1dOqDiVAQFwBH7gBRZr17gLrlFCRzF6jFh7Kew==}
     engines: {node: '>=12'}
     cpu: [x64]
     os: [android]
@@ -3034,14 +3081,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/darwin-arm64@0.19.12:
-    resolution: {integrity: sha512-B6IeSgZgtEzGC42jsI+YYu9Z3HKRxp8ZT3cqhvliEHovq8HSX2YX8lNocDn79gCKJXOSaEot9MVYky7AKjCs8g==}
-    engines: {node: '>=12'}
-    cpu: [arm64]
-    os: [darwin]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/darwin-arm64@0.21.5:
     resolution: {integrity: sha512-DwqXqZyuk5AiWWf3UfLiRDJ5EDd49zg6O9wclZ7kUMv2WRFr4HKjXp/5t8JZ11QbQfUS6/cRCKGwYhtNAY88kQ==}
     engines: {node: '>=12'}
@@ -3076,14 +3115,6 @@ packages:
 
   /@esbuild/darwin-x64@0.18.20:
     resolution: {integrity: sha512-pc5gxlMDxzm513qPGbCbDukOdsGtKhfxD1zJKXjCCcU7ju50O7MeAZ8c4krSJcOIJGFR+qx21yMMVYwiQvyTyQ==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [darwin]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/darwin-x64@0.19.12:
-    resolution: {integrity: sha512-hKoVkKzFiToTgn+41qGhsUJXFlIjxI/jSYeZf3ugemDYZldIXIxhvwN6erJGlX4t5h417iFuheZ7l+YVn05N3A==}
     engines: {node: '>=12'}
     cpu: [x64]
     os: [darwin]
@@ -3130,14 +3161,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/freebsd-arm64@0.19.12:
-    resolution: {integrity: sha512-4aRvFIXmwAcDBw9AueDQ2YnGmz5L6obe5kmPT8Vd+/+x/JMVKCgdcRwH6APrbpNXsPz+K653Qg8HB/oXvXVukA==}
-    engines: {node: '>=12'}
-    cpu: [arm64]
-    os: [freebsd]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/freebsd-arm64@0.21.5:
     resolution: {integrity: sha512-5JcRxxRDUJLX8JXp/wcBCy3pENnCgBR9bN6JsY4OmhfUtIHe3ZW0mawA7+RDAcMLrMIZaf03NlQiX9DGyB8h4g==}
     engines: {node: '>=12'}
@@ -3172,14 +3195,6 @@ packages:
 
   /@esbuild/freebsd-x64@0.18.20:
     resolution: {integrity: sha512-tgWRPPuQsd3RmBZwarGVHZQvtzfEBOreNuxEMKFcd5DaDn2PbBxfwLcj4+aenoh7ctXcbXmOQIn8HI6mCSw5MQ==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [freebsd]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/freebsd-x64@0.19.12:
-    resolution: {integrity: sha512-EYoXZ4d8xtBoVN7CEwWY2IN4ho76xjYXqSXMNccFSx2lgqOG/1TBPW0yPx1bJZk94qu3tX0fycJeeQsKovA8gg==}
     engines: {node: '>=12'}
     cpu: [x64]
     os: [freebsd]
@@ -3226,14 +3241,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/linux-arm64@0.19.12:
-    resolution: {integrity: sha512-EoTjyYyLuVPfdPLsGVVVC8a0p1BFFvtpQDB/YLEhaXyf/5bczaGeN15QkR+O4S5LeJ92Tqotve7i1jn35qwvdA==}
-    engines: {node: '>=12'}
-    cpu: [arm64]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/linux-arm64@0.21.5:
     resolution: {integrity: sha512-ibKvmyYzKsBeX8d8I7MH/TMfWDXBF3db4qM6sy+7re0YXya+K1cem3on9XgdT2EQGMu4hQyZhan7TeQ8XkGp4Q==}
     engines: {node: '>=12'}
@@ -3268,14 +3275,6 @@ packages:
 
   /@esbuild/linux-arm@0.18.20:
     resolution: {integrity: sha512-/5bHkMWnq1EgKr1V+Ybz3s1hWXok7mDFUMQ4cG10AfW3wL02PSZi5kFpYKrptDsgb2WAJIvRcDm+qIvXf/apvg==}
-    engines: {node: '>=12'}
-    cpu: [arm]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/linux-arm@0.19.12:
-    resolution: {integrity: sha512-J5jPms//KhSNv+LO1S1TX1UWp1ucM6N6XuL6ITdKWElCu8wXP72l9MM0zDTzzeikVyqFE6U8YAV9/tFyj0ti+w==}
     engines: {node: '>=12'}
     cpu: [arm]
     os: [linux]
@@ -3322,14 +3321,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/linux-ia32@0.19.12:
-    resolution: {integrity: sha512-Thsa42rrP1+UIGaWz47uydHSBOgTUnwBwNq59khgIwktK6x60Hivfbux9iNR0eHCHzOLjLMLfUMLCypBkZXMHA==}
-    engines: {node: '>=12'}
-    cpu: [ia32]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/linux-ia32@0.21.5:
     resolution: {integrity: sha512-YvjXDqLRqPDl2dvRODYmmhz4rPeVKYvppfGYKSNGdyZkA01046pLWyRKKI3ax8fbJoK5QbxblURkwK/MWY18Tg==}
     engines: {node: '>=12'}
@@ -3364,14 +3355,6 @@ packages:
 
   /@esbuild/linux-loong64@0.18.20:
     resolution: {integrity: sha512-nXW8nqBTrOpDLPgPY9uV+/1DjxoQ7DoB2N8eocyq8I9XuqJ7BiAMDMf9n1xZM9TgW0J8zrquIb/A7s3BJv7rjg==}
-    engines: {node: '>=12'}
-    cpu: [loong64]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/linux-loong64@0.19.12:
-    resolution: {integrity: sha512-LiXdXA0s3IqRRjm6rV6XaWATScKAXjI4R4LoDlvO7+yQqFdlr1Bax62sRwkVvRIrwXxvtYEHHI4dm50jAXkuAA==}
     engines: {node: '>=12'}
     cpu: [loong64]
     os: [linux]
@@ -3418,14 +3401,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/linux-mips64el@0.19.12:
-    resolution: {integrity: sha512-fEnAuj5VGTanfJ07ff0gOA6IPsvrVHLVb6Lyd1g2/ed67oU1eFzL0r9WL7ZzscD+/N6i3dWumGE1Un4f7Amf+w==}
-    engines: {node: '>=12'}
-    cpu: [mips64el]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/linux-mips64el@0.21.5:
     resolution: {integrity: sha512-IajOmO+KJK23bj52dFSNCMsz1QP1DqM6cwLUv3W1QwyxkyIWecfafnI555fvSGqEKwjMXVLokcV5ygHW5b3Jbg==}
     engines: {node: '>=12'}
@@ -3460,14 +3435,6 @@ packages:
 
   /@esbuild/linux-ppc64@0.18.20:
     resolution: {integrity: sha512-WHPyeScRNcmANnLQkq6AfyXRFr5D6N2sKgkFo2FqguP44Nw2eyDlbTdZwd9GYk98DZG9QItIiTlFLHJHjxP3FA==}
-    engines: {node: '>=12'}
-    cpu: [ppc64]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/linux-ppc64@0.19.12:
-    resolution: {integrity: sha512-nYJA2/QPimDQOh1rKWedNOe3Gfc8PabU7HT3iXWtNUbRzXS9+vgB0Fjaqr//XNbd82mCxHzik2qotuI89cfixg==}
     engines: {node: '>=12'}
     cpu: [ppc64]
     os: [linux]
@@ -3514,14 +3481,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/linux-riscv64@0.19.12:
-    resolution: {integrity: sha512-2MueBrlPQCw5dVJJpQdUYgeqIzDQgw3QtiAHUC4RBz9FXPrskyyU3VI1hw7C0BSKB9OduwSJ79FTCqtGMWqJHg==}
-    engines: {node: '>=12'}
-    cpu: [riscv64]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/linux-riscv64@0.21.5:
     resolution: {integrity: sha512-2HdXDMd9GMgTGrPWnJzP2ALSokE/0O5HhTUvWIbD3YdjME8JwvSCnNGBnTThKGEB91OZhzrJ4qIIxk/SBmyDDA==}
     engines: {node: '>=12'}
@@ -3562,14 +3521,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/linux-s390x@0.19.12:
-    resolution: {integrity: sha512-+Pil1Nv3Umes4m3AZKqA2anfhJiVmNCYkPchwFJNEJN5QxmTs1uzyy4TvmDrCRNT2ApwSari7ZIgrPeUx4UZDg==}
-    engines: {node: '>=12'}
-    cpu: [s390x]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/linux-s390x@0.21.5:
     resolution: {integrity: sha512-zus5sxzqBJD3eXxwvjN1yQkRepANgxE9lgOW2qLnmr8ikMTphkjgXu1HR01K4FJg8h1kEEDAqDcZQtbrRnB41A==}
     engines: {node: '>=12'}
@@ -3604,14 +3555,6 @@ packages:
 
   /@esbuild/linux-x64@0.18.20:
     resolution: {integrity: sha512-UYqiqemphJcNsFEskc73jQ7B9jgwjWrSayxawS6UVFZGWrAAtkzjxSqnoclCXxWtfwLdzU+vTpcNYhpn43uP1w==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [linux]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/linux-x64@0.19.12:
-    resolution: {integrity: sha512-B71g1QpxfwBvNrfyJdVDexenDIt1CiDN1TIXLbhOw0KhJzE78KIFGX6OJ9MrtC0oOqMWf+0xop4qEU8JrJTwCg==}
     engines: {node: '>=12'}
     cpu: [x64]
     os: [linux]
@@ -3682,14 +3625,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/netbsd-x64@0.19.12:
-    resolution: {integrity: sha512-3ltjQ7n1owJgFbuC61Oj++XhtzmymoCihNFgT84UAmJnxJfm4sYCiSLTXZtE00VWYpPMYc+ZQmB6xbSdVh0JWA==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [netbsd]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/netbsd-x64@0.21.5:
     resolution: {integrity: sha512-Woi2MXzXjMULccIwMnLciyZH4nCIMpWQAs049KEeMvOcNADVxo0UBIQPfSmxB3CWKedngg7sWZdLvLczpe0tLg==}
     engines: {node: '>=12'}
@@ -3748,14 +3683,6 @@ packages:
 
   /@esbuild/openbsd-x64@0.18.20:
     resolution: {integrity: sha512-e5e4YSsuQfX4cxcygw/UCPIEP6wbIL+se3sxPdCiMbFLBWu0eiZOJ7WoD+ptCLrmjZBK1Wk7I6D/I3NglUGOxg==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [openbsd]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/openbsd-x64@0.19.12:
-    resolution: {integrity: sha512-RbrfTB9SWsr0kWmb9srfF+L933uMDdu9BIzdA7os2t0TXhCRjrQyCeOt6wVxr79CKD4c+p+YhCj31HBkYcXebw==}
     engines: {node: '>=12'}
     cpu: [x64]
     os: [openbsd]
@@ -3826,14 +3753,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/sunos-x64@0.19.12:
-    resolution: {integrity: sha512-HKjJwRrW8uWtCQnQOz9qcU3mUZhTUQvi56Q8DPTLLB+DawoiQdjsYq+j+D3s9I8VFtDr+F9CjgXKKC4ss89IeA==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [sunos]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/sunos-x64@0.21.5:
     resolution: {integrity: sha512-6+gjmFpfy0BHU5Tpptkuh8+uw3mnrvgs+dSPQXQOv3ekbordwnzTVEb4qnIvQcYXq6gzkyTnoZ9dZG+D4garKg==}
     engines: {node: '>=12'}
@@ -3868,14 +3787,6 @@ packages:
 
   /@esbuild/win32-arm64@0.18.20:
     resolution: {integrity: sha512-ddYFR6ItYgoaq4v4JmQQaAI5s7npztfV4Ag6NrhiaW0RrnOXqBkgwZLofVTlq1daVTQNhtI5oieTvkRPfZrePg==}
-    engines: {node: '>=12'}
-    cpu: [arm64]
-    os: [win32]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/win32-arm64@0.19.12:
-    resolution: {integrity: sha512-URgtR1dJnmGvX864pn1B2YUYNzjmXkuJOIqG2HdU62MVS4EHpU2946OZoTMnRUHklGtJdJZ33QfzdjGACXhn1A==}
     engines: {node: '>=12'}
     cpu: [arm64]
     os: [win32]
@@ -3922,14 +3833,6 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@esbuild/win32-ia32@0.19.12:
-    resolution: {integrity: sha512-+ZOE6pUkMOJfmxmBZElNOx72NKpIa/HFOMGzu8fqzQJ5kgf6aTGrcJaFsNiVMH4JKpMipyK+7k0n2UXN7a8YKQ==}
-    engines: {node: '>=12'}
-    cpu: [ia32]
-    os: [win32]
-    requiresBuild: true
-    optional: true
-
   /@esbuild/win32-ia32@0.21.5:
     resolution: {integrity: sha512-SWXFF1CL2RVNMaVs+BBClwtfZSvDgtL//G/smwAc5oVK/UPu2Gu9tIaRgFmYFFKrmg3SyAjSrElf0TiJ1v8fYA==}
     engines: {node: '>=12'}
@@ -3964,14 +3867,6 @@ packages:
 
   /@esbuild/win32-x64@0.18.20:
     resolution: {integrity: sha512-kTdfRcSiDfQca/y9QIkng02avJ+NCaQvrMejlsB3RRv5sE9rRoeBPISaZpKxHELzRxZyLvNts1P27W3wV+8geQ==}
-    engines: {node: '>=12'}
-    cpu: [x64]
-    os: [win32]
-    requiresBuild: true
-    optional: true
-
-  /@esbuild/win32-x64@0.19.12:
-    resolution: {integrity: sha512-T1QyPSDCyMXaO3pzBkF96E8xMkiRYbUEZADd29SyPGabqxMViNoii+NcK7eWJAEoU6RZyEm5lVSIjTmcdoB9HA==}
     engines: {node: '>=12'}
     cpu: [x64]
     os: [win32]
@@ -5487,8 +5382,8 @@ packages:
   /@prisma/config@6.7.0(supports-color@10.2.2):
     resolution: {integrity: sha512-di8QDdvSz7DLUi3OOcCHSwxRNeW7jtGRUD2+Z3SdNE3A+pPiNT8WgUJoUyOwJmUr5t+JA2W15P78C/N+8RXrOA==}
     dependencies:
-      esbuild: 0.19.12
-      esbuild-register: 3.6.0(esbuild@0.19.12)(supports-color@10.2.2)
+      esbuild: 0.28.1
+      esbuild-register: 3.6.0(esbuild@0.28.1)(supports-color@10.2.2)
     transitivePeerDependencies:
       - supports-color
 
@@ -6345,7 +6240,7 @@ packages:
       react: 19.2.8
     dev: false
 
-  /@react-email/render@2.0.6(react-dom@18.3.1)(react@19.2.4):
+  /@react-email/render@2.0.6(react-dom@19.2.8)(react@19.2.4):
     resolution: {integrity: sha512-xOzaYkH3jLZKqN5MqrTXYnmqBYUnZSVbkxdb5PGGmDcK6sKDVMliaDiSwfXajRC9JtSHTcGc2tmGLHWuCgVpog==}
     engines: {node: '>=20.0.0'}
     peerDependencies:
@@ -6355,7 +6250,7 @@ packages:
       html-to-text: 9.0.5
       prettier: 3.8.2
       react: 19.2.4
-      react-dom: 18.3.1(react@19.2.4)
+      react-dom: 19.2.8(react@19.2.4)
     dev: false
 
   /@react-email/render@2.0.6(react-dom@19.2.8)(react@19.2.8):
@@ -6871,7 +6766,6 @@ packages:
       serialize-javascript: 6.0.2
       smob: 1.5.0
       terser: 5.44.0
-    dev: false
 
   /@rollup/rollup-android-arm-eabi@4.52.4:
     resolution: {integrity: sha512-BTm2qKNnWIQ5auf4deoetINJm2JzvihvGb9R6K/ETwKLql/Bb3Eg2H1FBp1gUb4YGbydMA3jcmQTR73q7J+GAA==}
@@ -8057,12 +7951,6 @@ packages:
       '@types/webidl-conversions': 7.0.3
     dev: false
 
-  /@types/whatwg-url@13.0.0:
-    resolution: {integrity: sha512-N8WXpbE6Wgri7KUSvrmQcqrMllKZ9uxkYWMt+mCSGwNc0Hsw9VQTW7ApqI4XNrx6/SaM2QQJCzMPDEXE058s+Q==}
-    dependencies:
-      '@types/webidl-conversions': 7.0.3
-    dev: false
-
   /@types/ws@8.18.1:
     resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
     dependencies:
@@ -8986,7 +8874,7 @@ packages:
     resolution: {integrity: sha512-OMu3BGQ4E7P1ErFsIPpbJh0qvDudM/UuJeHgkAvfWe+0HFJCXh+t/l8L6fVLR55RI/UbKrVLnAXZSVwd9ysWYw==}
     hasBin: true
 
-  /better-auth@1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8):
+  /better-auth@1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8):
     resolution: {integrity: sha512-GpVPaV1eqr3mOovKfghJXXk6QvlcVeFbS3z+n+FPDid5rK/2PchnDtiaVCzWyXA9jH2KkirOfl+JhAUvnja0Eg==}
     peerDependencies:
       '@lynx-js/react': '*'
@@ -9052,7 +8940,7 @@ packages:
       '@better-auth/drizzle-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(drizzle-orm@0.44.7)
       '@better-auth/kysely-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(kysely@0.28.12)
       '@better-auth/memory-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)
-      '@better-auth/mongo-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(mongodb@7.1.0)
+      '@better-auth/mongo-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(mongodb@6.21.0)
       '@better-auth/prisma-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@prisma/client@6.19.2)(prisma@6.19.2)
       '@better-auth/telemetry': 1.5.5(@better-auth/core@1.5.5)
       '@better-auth/utils': 0.3.1
@@ -9065,7 +8953,7 @@ packages:
       defu: 6.1.4
       jose: 6.2.1
       kysely: 0.28.12
-      mongodb: 7.1.0
+      mongodb: 6.21.0
       nanostores: 1.2.0
       prisma: 6.19.2(typescript@5.9.3)
       react: 19.2.8
@@ -9075,7 +8963,7 @@ packages:
       - '@cloudflare/workers-types'
     dev: false
 
-  /better-auth@1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.8)(react@19.2.8):
+  /better-auth@1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@6.21.0)(react-dom@19.2.8)(react@19.2.8):
     resolution: {integrity: sha512-GpVPaV1eqr3mOovKfghJXXk6QvlcVeFbS3z+n+FPDid5rK/2PchnDtiaVCzWyXA9jH2KkirOfl+JhAUvnja0Eg==}
     peerDependencies:
       '@lynx-js/react': '*'
@@ -9141,7 +9029,7 @@ packages:
       '@better-auth/drizzle-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(drizzle-orm@0.44.7)
       '@better-auth/kysely-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(kysely@0.28.12)
       '@better-auth/memory-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)
-      '@better-auth/mongo-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(mongodb@7.1.0)
+      '@better-auth/mongo-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(mongodb@6.21.0)
       '@better-auth/prisma-adapter': 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@prisma/client@6.19.2)(prisma@6.19.2)
       '@better-auth/telemetry': 1.5.5(@better-auth/core@1.5.5)
       '@better-auth/utils': 0.3.1
@@ -9155,7 +9043,7 @@ packages:
       drizzle-orm: 0.44.7(@types/better-sqlite3@7.6.13)(better-sqlite3@12.8.0)(kysely@0.28.12)
       jose: 6.2.1
       kysely: 0.28.12
-      mongodb: 7.1.0
+      mongodb: 6.21.0
       nanostores: 1.2.0
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -9276,11 +9164,6 @@ packages:
   /bson@6.10.4:
     resolution: {integrity: sha512-WIsKqkSC0ABoBJuT1LEX+2HEvNmNKKgnTAyd0fL8qzK4SH2i9NXg+t08YtdZp/V9IZ33cxe3iV4yM0qg8lMQng==}
     engines: {node: '>=16.20.1'}
-    dev: false
-
-  /bson@7.2.0:
-    resolution: {integrity: sha512-YCEo7KjMlbNlyHhz7zAZNDpIpQbd+wOEHJYezv0nMYTn4x31eIUM2yomNNubclAt63dObUzKHWsBLJ9QcZNSnQ==}
-    engines: {node: '>=20.19.0'}
     dev: false
 
   /buffer-from@1.1.2:
@@ -10291,13 +10174,13 @@ packages:
       vfile-message: 4.0.3
     dev: false
 
-  /esbuild-register@3.6.0(esbuild@0.19.12)(supports-color@10.2.2):
+  /esbuild-register@3.6.0(esbuild@0.28.1)(supports-color@10.2.2):
     resolution: {integrity: sha512-H2/S7Pm8a9CL1uhp9OvjwrBh5Pvx0H8qVOxNu8Wed9Y7qv56MPtq+GGM8RJpq6glYJn9Wspr8uw7l55uyinNeg==}
     peerDependencies:
       esbuild: '>=0.12 <1'
     dependencies:
       debug: 4.4.3(supports-color@10.2.2)
-      esbuild: 0.19.12
+      esbuild: 0.28.1
     transitivePeerDependencies:
       - supports-color
 
@@ -10329,36 +10212,6 @@ packages:
       '@esbuild/win32-arm64': 0.18.20
       '@esbuild/win32-ia32': 0.18.20
       '@esbuild/win32-x64': 0.18.20
-
-  /esbuild@0.19.12:
-    resolution: {integrity: sha512-aARqgq8roFBj054KvQr5f1sFu0D65G+miZRCuJyJ0G13Zwx7vRar5Zhn2tkQNzIXcBrNVsv/8stehpj+GAjgbg==}
-    engines: {node: '>=12'}
-    hasBin: true
-    requiresBuild: true
-    optionalDependencies:
-      '@esbuild/aix-ppc64': 0.19.12
-      '@esbuild/android-arm': 0.19.12
-      '@esbuild/android-arm64': 0.19.12
-      '@esbuild/android-x64': 0.19.12
-      '@esbuild/darwin-arm64': 0.19.12
-      '@esbuild/darwin-x64': 0.19.12
-      '@esbuild/freebsd-arm64': 0.19.12
-      '@esbuild/freebsd-x64': 0.19.12
-      '@esbuild/linux-arm': 0.19.12
-      '@esbuild/linux-arm64': 0.19.12
-      '@esbuild/linux-ia32': 0.19.12
-      '@esbuild/linux-loong64': 0.19.12
-      '@esbuild/linux-mips64el': 0.19.12
-      '@esbuild/linux-ppc64': 0.19.12
-      '@esbuild/linux-riscv64': 0.19.12
-      '@esbuild/linux-s390x': 0.19.12
-      '@esbuild/linux-x64': 0.19.12
-      '@esbuild/netbsd-x64': 0.19.12
-      '@esbuild/openbsd-x64': 0.19.12
-      '@esbuild/sunos-x64': 0.19.12
-      '@esbuild/win32-arm64': 0.19.12
-      '@esbuild/win32-ia32': 0.19.12
-      '@esbuild/win32-x64': 0.19.12
 
   /esbuild@0.21.5:
     resolution: {integrity: sha512-mg3OPMV4hXywwpoDxu3Qda5xCKQi+vCTZq8S9J/EpkhB2HzKXq4SNFZE3+NK93JYxc8VMSep+lOUSC/RVKaBqw==}
@@ -12316,13 +12169,6 @@ packages:
     resolution: {integrity: sha512-9Ri+o0JYgehTaVBBDoMqIl8GXtbWg711O3srftcHhZ0dqnETqLaoIK0x17fUw9rFSlK/0NlsKe0Ahhyl5pXE2g==}
     dev: false
 
-  /loose-envify@1.4.0:
-    resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
-    hasBin: true
-    dependencies:
-      js-tokens: 4.0.0
-    dev: false
-
   /loupe@2.3.7:
     resolution: {integrity: sha512-zSMINGVYkdpYSOBmLi0D1Uo7JU9nVdQKrHxC8eYlV+9YKK9WePqAlL7lSlorG/U2Fw1w0hTBmaa/jrQ3UbPHtA==}
     dependencies:
@@ -13081,14 +12927,6 @@ packages:
       whatwg-url: 14.2.0
     dev: false
 
-  /mongodb-connection-string-url@7.0.1:
-    resolution: {integrity: sha512-h0AZ9A7IDVwwHyMxmdMXKy+9oNlF0zFoahHiX3vQ8e3KFcSP3VmsmfvtRSuLPxmyv2vjIDxqty8smTgie/SNRQ==}
-    engines: {node: '>=20.19.0'}
-    dependencies:
-      '@types/whatwg-url': 13.0.0
-      whatwg-url: 14.2.0
-    dev: false
-
   /mongodb@6.20.0:
     resolution: {integrity: sha512-Tl6MEIU3K4Rq3TSHd+sZQqRBoGlFsOgNrH5ltAcFBV62Re3Fd+FcaVf8uSEQFOJ51SDowDVttBTONMfoYWrWlQ==}
     engines: {node: '>=16.20.1'}
@@ -13151,38 +12989,6 @@ packages:
       '@mongodb-js/saslprep': 1.4.6
       bson: 6.10.4
       mongodb-connection-string-url: 3.0.2
-    dev: false
-
-  /mongodb@7.1.0:
-    resolution: {integrity: sha512-kMfnKunbolQYwCIyrkxNJFB4Ypy91pYqua5NargS/f8ODNSJxT03ZU3n1JqL4mCzbSih8tvmMEMLpKTT7x5gCg==}
-    engines: {node: '>=20.19.0'}
-    peerDependencies:
-      '@aws-sdk/credential-providers': ^3.806.0
-      '@mongodb-js/zstd': ^7.0.0
-      gcp-metadata: ^7.0.1
-      kerberos: ^7.0.0
-      mongodb-client-encryption: '>=7.0.0 <7.1.0'
-      snappy: ^7.3.2
-      socks: ^2.8.6
-    peerDependenciesMeta:
-      '@aws-sdk/credential-providers':
-        optional: true
-      '@mongodb-js/zstd':
-        optional: true
-      gcp-metadata:
-        optional: true
-      kerberos:
-        optional: true
-      mongodb-client-encryption:
-        optional: true
-      snappy:
-        optional: true
-      socks:
-        optional: true
-    dependencies:
-      '@mongodb-js/saslprep': 1.4.6
-      bson: 7.2.0
-      mongodb-connection-string-url: 7.0.1
     dev: false
 
   /mongoose@8.24.1(supports-color@10.2.2):
@@ -14389,24 +14195,22 @@ packages:
       strip-json-comments: 2.0.1
     dev: false
 
-  /react-dom@18.3.1(react@18.3.1):
-    resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
+  /react-dom@19.2.4(react@19.2.4):
+    resolution: {integrity: sha512-AXJdLo8kgMbimY95O2aKQqsz2iWi9jMgKJhRBAxECE4IFxfcazB2LmzloIoibJI3C12IlY20+KFaLv+71bUJeQ==}
     peerDependencies:
-      react: ^18.3.1
+      react: ^19.2.4
     dependencies:
-      loose-envify: 1.4.0
-      react: 18.3.1
-      scheduler: 0.23.2
+      react: 19.2.4
+      scheduler: 0.27.0
     dev: false
 
-  /react-dom@18.3.1(react@19.2.4):
-    resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
+  /react-dom@19.2.8(react@19.2.4):
+    resolution: {integrity: sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==}
     peerDependencies:
-      react: ^18.3.1
+      react: ^19.2.8
     dependencies:
-      loose-envify: 1.4.0
       react: 19.2.4
-      scheduler: 0.23.2
+      scheduler: 0.27.0
     dev: false
 
   /react-dom@19.2.8(react@19.2.8):
@@ -14489,13 +14293,6 @@ packages:
       get-nonce: 1.0.1
       react: 19.2.8
       tslib: 2.8.1
-    dev: false
-
-  /react@18.3.1:
-    resolution: {integrity: sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==}
-    engines: {node: '>=0.10.0'}
-    dependencies:
-      loose-envify: 1.4.0
     dev: false
 
   /react@19.2.4:
@@ -14742,7 +14539,7 @@ packages:
       '@react-email/render':
         optional: true
     dependencies:
-      '@react-email/render': 2.0.6(react-dom@18.3.1)(react@19.2.4)
+      '@react-email/render': 2.0.6(react-dom@19.2.8)(react@19.2.4)
       postal-mime: 2.7.4
       svix: 1.88.0
     dev: false
@@ -14974,12 +14771,6 @@ packages:
     dependencies:
       xmlchars: 2.2.0
     dev: true
-
-  /scheduler@0.23.2:
-    resolution: {integrity: sha512-UOShsPwz7NrMUqhR6t0hWjFduvOzbtv7toDH1/hIrfRNIDBnnBWd0CwJTGvTpngVlmwGCdP9/Zl/tVrDqcuYzQ==}
-    dependencies:
-      loose-envify: 1.4.0
-    dev: false
 
   /scheduler@0.27.0:
     resolution: {integrity: sha512-eNv+WrVbKu1f3vbYJT/xtiF5syA5HPIMtf9IgY/nKg0sWqzAUEvqY/xm7OcZc/qafLx/iO9FgOmeSAp4v5ti/Q==}
@@ -15295,7 +15086,6 @@ packages:
 
   /smob@1.5.0:
     resolution: {integrity: sha512-g6T+p7QO8npa+/hNx9ohv1E5pVCmWrVCUzUXJyLdMmftX6ER0oiWY/w9knEonLpnOp6b6FenKnMfR8gqwWdwig==}
-    dev: false
 
   /source-map-js@1.2.1:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}

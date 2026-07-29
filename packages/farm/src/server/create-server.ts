@@ -15,6 +15,7 @@ import {
   createLoggerPlugin,
 } from "../plugins";
 import { mergeFarmViteConfig } from "./vite-config";
+import { FARM_VERSION } from "../version";
 
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
@@ -58,7 +59,7 @@ function createBrandingPlugin() {
           const pc = getColors();
           console.log("");
           console.log(
-            `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`,
+            `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim(`v${FARM_VERSION}`)} ${pc.dim(`ready in ${elapsed}ms`)}`,
           );
           console.log("");
           console.log(

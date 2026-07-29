@@ -1,6 +1,6 @@
 import React from 'react'
 
-export default function RootLayout({ children }) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return React.createElement('html', { lang: 'en' },
     React.createElement('head', null,
       React.createElement('meta', { charSet: 'utf-8' }),
@@ -53,4 +53,3 @@ export default function RootLayout({ children }) {
     React.createElement('body', null, children)
   )
 }
-

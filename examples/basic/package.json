@@ -15,14 +15,14 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
+    "@farm.js/core": "0.1.0-beta.2",
     "better-call": "^1.0.19",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@farm.js/cli": "workspace:*",
+    "@farm.js/cli": "0.1.0-beta.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",

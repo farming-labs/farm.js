@@ -603,6 +603,7 @@ export default function DashboardPage() {
       (meterPrice: AutumnCatalogProduct["meterPrices"][number]) => meterPrice.key === "seats",
     ) ?? null;
   const currentOrganizationSeats = activeOrganization?.members.length ?? 0;
+  const currentCharges = billingState.currentCharges;
 
   return (
     <main className="page-shell">
@@ -842,7 +843,7 @@ export default function DashboardPage() {
             <section className="card">
               <h2>Current Cycle Charges</h2>
               {activeOrganization ? (
-                billingState.currentCharges ? (
+                currentCharges ? (
                   <>
                     <p>
                       This is the pending Autumn bill for the active cycle. It combines the base
@@ -852,12 +853,12 @@ export default function DashboardPage() {
                       <div className="session-line">
                         <strong>Billing Period</strong>
                         <span>
-                          {billingState.currentCharges.currentPeriodStart &&
-                          billingState.currentCharges.currentPeriodEnd
+                          {currentCharges.currentPeriodStart &&
+                          currentCharges.currentPeriodEnd
                             ? `${new Date(
-                                billingState.currentCharges.currentPeriodStart,
+                                currentCharges.currentPeriodStart,
                               ).toLocaleDateString()} - ${new Date(
-                                billingState.currentCharges.currentPeriodEnd,
+                                currentCharges.currentPeriodEnd,
                               ).toLocaleDateString()}`
                             : "n/a"}
                         </span>
@@ -866,8 +867,8 @@ export default function DashboardPage() {
                         <strong>Pending Meter Charge</strong>
                         <span>
                           {formatMoney(
-                            billingState.currentCharges.pendingMeterChargeAmount,
-                            billingState.currentCharges.currency,
+                            currentCharges.pendingMeterChargeAmount,
+                            currentCharges.currency,
                           )}
                         </span>
                       </div>
@@ -875,22 +876,22 @@ export default function DashboardPage() {
                         <strong>Estimated Total At Renewal</strong>
                         <span>
                           {formatMoney(
-                            billingState.currentCharges.estimatedTotalAmount,
-                            billingState.currentCharges.currency,
+                            currentCharges.estimatedTotalAmount,
+                            currentCharges.currency,
                           )}
                         </span>
                       </div>
                     </div>
 
-                    {billingState.currentCharges.lineItems.length ? (
+                    {currentCharges.lineItems.length ? (
                       <div className="list-stack">
-                        {billingState.currentCharges.lineItems.map(
+                        {currentCharges.lineItems.map(
                           (line: AutumnBillingCurrentChargesResult["lineItems"][number]) => (
                           <div className="list-item" key={`${line.kind}:${line.key ?? line.label}`}>
                             <div>
                               <strong>
                                 {line.label} ·{" "}
-                                {formatMoney(line.amount, billingState.currentCharges?.currency)}
+                                {formatMoney(line.amount, currentCharges.currency)}
                               </strong>
                               <div className="muted-line">
                                 {line.kind === "metered_usage"
@@ -904,7 +905,7 @@ export default function DashboardPage() {
                                       line.unitAmountDecimal
                                         ? ` × ${formatUnitAmount(
                                             line.unitAmountDecimal,
-                                            billingState.currentCharges?.currency,
+                                            currentCharges.currency,
                                             line.billingUnits,
                                             "tokens",
                                           )}`

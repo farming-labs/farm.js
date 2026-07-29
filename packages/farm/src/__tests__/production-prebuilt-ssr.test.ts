@@ -271,6 +271,7 @@ export default function Page() {
 
   it("boots standalone Node output through the package import mapping", async () => {
     const root = await createProductionFixture();
+    const isolatedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-standalone-prebuilt-"));
 
     try {
       const staticPageDir = path.join(root, "src", "app", "static-page");
@@ -348,7 +349,11 @@ export default function DynamicPage({ params }) {
       expect(clientBundle).toContain("Minified React error");
       expect(clientBundle).not.toContain("Download the React DevTools");
 
-      const serverDir = path.join(root, ".farm", ".output", "server");
+      const isolatedOutput = path.join(isolatedRoot, "output");
+      await fs.cp(path.join(root, ".farm", ".output"), isolatedOutput, {
+        recursive: true,
+      });
+      const serverDir = path.join(isolatedOutput, "server");
       const serverPackage = JSON.parse(
         await fs.readFile(path.join(serverDir, "package.json"), "utf8"),
       );
@@ -422,6 +427,7 @@ export default function DynamicPage({ params }) {
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
+      await fs.rm(isolatedRoot, { recursive: true, force: true });
     }
   }, 120_000);
 

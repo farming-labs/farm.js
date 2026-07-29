@@ -42,6 +42,7 @@ import * as path from "path";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
+import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
 import {
@@ -3996,7 +3997,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
 
           console.log("");
           console.log(
-            `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim("v1.0.0")} ${pc.dim(`ready in ${elapsed}ms`)}`,
+            `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim(`v${FARM_VERSION}`)} ${pc.dim(`ready in ${elapsed}ms`)}`,
           );
           console.log("");
           console.log(
