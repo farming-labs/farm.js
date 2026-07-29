@@ -26,6 +26,8 @@ import {
 import type { MiddlewareContext } from "../middleware/types";
 
 const tempDirs = new Set<string>();
+const [nodeMajor, nodeMinor] = process.versions.node.split(".").map(Number);
+const supportsNodeSqlite = nodeMajor > 22 || (nodeMajor === 22 && nodeMinor >= 5);
 
 async function createTempDir(prefix: string): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), prefix));
@@ -146,40 +148,46 @@ describe("Storage", () => {
     expect(await getStorage().getItem("root")).toEqual({ ok: true });
   });
 
-  it("supports sqlite storage with a simple path-based config", async () => {
-    const dir = await createTempDir("farm-storage-sqlite-");
-    const dbPath = path.join(dir, "app.sqlite");
-    const sqliteClient = sqliteStorage({
-      path: dbPath,
-      tableName: "farm_storage_test",
-    });
+  it.skipIf(!supportsNodeSqlite)(
+    "supports sqlite storage with a simple path-based config",
+    async () => {
+      const dir = await createTempDir("farm-storage-sqlite-");
+      const dbPath = path.join(dir, "app.sqlite");
+      const sqliteClient = sqliteStorage({
+        path: dbPath,
+        tableName: "farm_storage_test",
+      });
 
-    const storage = await createFarmStorage(sqliteClient);
+      const storage = await createFarmStorage(sqliteClient);
 
-    await storage.setItem("user", { name: "Ada", role: "admin" });
+      await storage.setItem("user", { name: "Ada", role: "admin" });
 
-    expect(await storage.getItem("user")).toEqual({
-      name: "Ada",
-      role: "admin",
-    });
+      expect(await storage.getItem("user")).toEqual({
+        name: "Ada",
+        role: "admin",
+      });
 
-    await storage.dispose();
-    expect(await readdir(dir)).not.toHaveLength(0);
-  });
+      await storage.dispose();
+      expect(await readdir(dir)).not.toHaveLength(0);
+    },
+  );
 
-  it("lets helper-created clients act like ready storage instances", async () => {
-    const dir = await createTempDir("farm-storage-ready-");
-    const sqlite = sqliteStorage({
-      path: path.join(dir, "ready.sqlite"),
-      tableName: "ready_store",
-    });
+  it.skipIf(!supportsNodeSqlite)(
+    "lets helper-created clients act like ready storage instances",
+    async () => {
+      const dir = await createTempDir("farm-storage-ready-");
+      const sqlite = sqliteStorage({
+        path: path.join(dir, "ready.sqlite"),
+        tableName: "ready_store",
+      });
 
-    await sqlite.setItem("project", { name: "farm" });
+      await sqlite.setItem("project", { name: "farm" });
 
-    expect(await sqlite.getItem("project")).toEqual({ name: "farm" });
+      expect(await sqlite.getItem("project")).toEqual({ name: "farm" });
 
-    await sqlite.dispose();
-  });
+      await sqlite.dispose();
+    },
+  );
 
   it("preserves storage.client for helper-created Farm storage clients", async () => {
     const backing = createStorageClient({
@@ -214,37 +222,40 @@ describe("Storage", () => {
     await storage.dispose();
   });
 
-  it("persists sqlite data across recreated instances and supports delete/clear", async () => {
-    const dir = await createTempDir("farm-storage-persist-");
-    const dbPath = path.join(dir, "persist.sqlite");
+  it.skipIf(!supportsNodeSqlite)(
+    "persists sqlite data across recreated instances and supports delete/clear",
+    async () => {
+      const dir = await createTempDir("farm-storage-persist-");
+      const dbPath = path.join(dir, "persist.sqlite");
 
-    const first = sqliteStorage({
-      path: dbPath,
-      tableName: "persist_store",
-    });
+      const first = sqliteStorage({
+        path: dbPath,
+        tableName: "persist_store",
+      });
 
-    await first.setItems([
-      { key: "item:1", value: { label: "one" } },
-      { key: "item:2", value: { label: "two" } },
-    ]);
-    await first.dispose();
+      await first.setItems([
+        { key: "item:1", value: { label: "one" } },
+        { key: "item:2", value: { label: "two" } },
+      ]);
+      await first.dispose();
 
-    const second = sqliteStorage({
-      path: dbPath,
-      tableName: "persist_store",
-    });
+      const second = sqliteStorage({
+        path: dbPath,
+        tableName: "persist_store",
+      });
 
-    expect(await second.getItem("item:1")).toEqual({ label: "one" });
-    expect(await second.getItem("item:2")).toEqual({ label: "two" });
+      expect(await second.getItem("item:1")).toEqual({ label: "one" });
+      expect(await second.getItem("item:2")).toEqual({ label: "two" });
 
-    await second.removeItem("item:1");
-    expect(await second.getItem("item:1")).toBeNull();
+      await second.removeItem("item:1");
+      expect(await second.getItem("item:1")).toBeNull();
 
-    await second.clear();
-    expect(await second.getKeys()).toEqual([]);
+      await second.clear();
+      expect(await second.getKeys()).toEqual([]);
 
-    await second.dispose();
-  });
+      await second.dispose();
+    },
+  );
 
   it("uses the configured ratelimit namespace for default rate limiting", async () => {
     const dir = await createTempDir("farm-storage-ratelimit-");
@@ -277,34 +288,37 @@ describe("Storage", () => {
     expect(await readdir(dir)).not.toHaveLength(0);
   });
 
-  it("supports reusable created clients in config mounts and root client config", async () => {
-    const rootDir = await createTempDir("farm-storage-root-");
-    const sessionDir = await createTempDir("farm-storage-session-");
+  it.skipIf(!supportsNodeSqlite)(
+    "supports reusable created clients in config mounts and root client config",
+    async () => {
+      const rootDir = await createTempDir("farm-storage-root-");
+      const sessionDir = await createTempDir("farm-storage-session-");
 
-    const rootClient = sqliteStorage({
-      path: path.join(rootDir, "root.sqlite"),
-      tableName: "root_store",
-    });
-    const sessionClient = createStorageClient({
-      driver: "local",
-      base: sessionDir,
-    });
+      const rootClient = sqliteStorage({
+        path: path.join(rootDir, "root.sqlite"),
+        tableName: "root_store",
+      });
+      const sessionClient = createStorageClient({
+        driver: "local",
+        base: sessionDir,
+      });
 
-    await initStorage({
-      client: rootClient,
-      mounts: {
-        sessions: sessionClient,
-      },
-    });
+      await initStorage({
+        client: rootClient,
+        mounts: {
+          sessions: sessionClient,
+        },
+      });
 
-    await getStorage().setItem("app", { healthy: true });
-    await getStorage("sessions").setItem("user:1", { id: 1 });
+      await getStorage().setItem("app", { healthy: true });
+      await getStorage("sessions").setItem("user:1", { id: 1 });
 
-    expect(await getStorage().getItem("app")).toEqual({ healthy: true });
-    expect(await getStorage("sessions").getItem("user:1")).toEqual({ id: 1 });
-    expect(await readdir(rootDir)).not.toHaveLength(0);
-    expect(await readdir(sessionDir)).not.toHaveLength(0);
-  });
+      expect(await getStorage().getItem("app")).toEqual({ healthy: true });
+      expect(await getStorage("sessions").getItem("user:1")).toEqual({ id: 1 });
+      expect(await readdir(rootDir)).not.toHaveLength(0);
+      expect(await readdir(sessionDir)).not.toHaveLength(0);
+    },
+  );
 
   it("creates ready helper clients for common remote backends", async () => {
     const redis = redisStorage({ url: "redis://localhost:6379" });
