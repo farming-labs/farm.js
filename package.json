@@ -20,7 +20,7 @@
     "test:e2e:production:run": "playwright test --config playwright.production.config.ts",
     "test:e2e:production:sites": "corepack pnpm --filter @farmjs/core build && corepack pnpm --filter @farmjs/cli build && corepack pnpm test:e2e:production:sites:run",
     "test:e2e:production:sites:run": "corepack pnpm --dir docs run prisma:generate && FARM_VITE_BUILDER=rolldown corepack pnpm --dir docs exec farm build --preset node-server && FARM_VITE_BUILDER=rolldown corepack pnpm --dir examples/ssr-ssg-demo exec farm build --preset node-server && playwright test --config playwright.production-sites.config.ts",
-    "test:e2e:framework": "corepack pnpm --filter @farmjs/core build && playwright test tests/e2e/framework-features.spec.ts",
+    "test:e2e:framework": "corepack pnpm --filter @farmjs/core build && playwright test --config playwright.config.ts",
     "test:e2e:i18n": "corepack pnpm --filter @farmjs/core build && corepack pnpm --filter @farmjs/cli build && corepack pnpm --filter farm-i18n-example build && playwright test --config playwright.i18n.config.ts",
     "test:e2e:rsc": "corepack pnpm --filter @farmjs/core build && corepack pnpm --filter @farmjs/plugin build && FARM_SKIP_NPM_INSTALL=1 NITRO_PRESET=node-server corepack pnpm --filter farm-rsc-demo build && playwright test --config playwright.rsc.config.ts",
     "test:e2e:list": "playwright test --list",
