@@ -13,15 +13,15 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "workspace:*",
-    "@farm.js/eve": "workspace:*",
+    "@farm.js/core": "0.1.0-beta.2",
+    "@farm.js/eve": "0.1.0-beta.2",
     "ai": "^7.0.26",
     "eve": "0.24.6",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
-    "@farm.js/cli": "workspace:*",
+    "@farm.js/cli": "0.1.0-beta.2",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.3.3",

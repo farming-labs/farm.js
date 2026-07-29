@@ -24,7 +24,7 @@
         "../../../packages/farm-email/dist/*"
       ],
       "@farm.js/email/schedule": [
-        "../../../packages/farm-integrations/dist/email/schedule.d.ts"
+        "../../../packages/farm-email/dist/schedule.d.ts"
       ]
     },
     "allowImportingTsExtensions": true,
