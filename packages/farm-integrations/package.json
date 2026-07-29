@@ -1,7 +1,7 @@
 {
   "name": "@farm.js/integrations",
   "version": "0.0.1",
-  "description": "Official integration adapters for Farm.js",
+  "description": "Compatibility package that re-exports official Farm.js integrations",
   "license": "MIT",
   "files": [
     "dist"
@@ -111,27 +111,20 @@
     "test": "echo 'No tests in this package'"
   },
   "dependencies": {
+    "@farm.js/ai": "workspace:*",
+    "@farm.js/auth0": "workspace:*",
+    "@farm.js/authjs": "workspace:*",
+    "@farm.js/autumn": "workspace:*",
+    "@farm.js/better-auth": "workspace:*",
+    "@farm.js/clerk": "workspace:*",
     "@farm.js/core": "workspace:*",
-    "@polar-sh/sdk": "^0.47.0",
-    "@react-email/render": "2.0.6",
-    "@supabase/ssr": "^0.9.0",
-    "@supabase/supabase-js": "^2.99.2",
-    "@workos-inc/node": "^8.9.0",
-    "ai": "^7.0.11",
-    "autumn-js": "^1.2.7",
-    "resend": "6.10.0",
-    "standardwebhooks": "^1.0.0",
-    "stripe": "^20.4.1"
-  },
-  "devDependencies": {
-    "@clerk/backend": "^3.2.0",
-    "@types/react": "^19.0.0",
-    "typescript": "^5.3.3"
-  },
-  "peerDependencies": {
-    "@clerk/backend": "^3.2.0",
-    "@clerk/react": "^6.1.0",
-    "react": "^18.2.0 || ^19.0.0",
-    "react-dom": "^18.2.0 || ^19.0.0"
+    "@farm.js/email": "workspace:*",
+    "@farm.js/integration-utils": "workspace:*",
+    "@farm.js/jobs": "workspace:*",
+    "@farm.js/polar": "workspace:*",
+    "@farm.js/stripe": "workspace:*",
+    "@farm.js/supabase": "workspace:*",
+    "@farm.js/unkey": "workspace:*",
+    "@farm.js/workos": "workspace:*"
   }
 }

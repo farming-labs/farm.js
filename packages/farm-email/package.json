@@ -1,0 +1,45 @@
+{
+  "name": "@farm.js/email",
+  "version": "0.0.1",
+  "description": "Email and Resend integration for Farm.js",
+  "license": "MIT",
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./schedule": {
+      "types": "./dist/schedule.d.ts",
+      "import": "./dist/schedule.js"
+    }
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc",
+    "dev": "tsc --watch",
+    "type-check": "tsc --noEmit",
+    "test": "echo 'No tests in this package'"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/integration-utils": "workspace:*",
+    "@react-email/render": "2.0.6",
+    "resend": "6.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.13"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0 || ^19.0.0"
+  }
+}

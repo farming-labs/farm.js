@@ -185,7 +185,7 @@ importers:
         version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.5.5
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -262,7 +262,7 @@ importers:
         version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -627,7 +627,7 @@ importers:
         version: link:../../packages/farm-integrations
       better-auth:
         specifier: ^1.5.5
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -965,7 +965,7 @@ importers:
         version: link:../../../packages/farm-integrations
       better-auth:
         specifier: ^1.3.1
-        version: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
       better-sqlite3:
         specifier: ^12.6.2
         version: 12.8.0
@@ -1213,6 +1213,57 @@ importers:
         specifier: ^1.1.0
         version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
+  packages/farm-ai:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      ai:
+        specifier: ^7.0.11
+        version: 7.0.30(zod@4.3.6)
+
+  packages/farm-auth0:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+
+  packages/farm-authjs:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+
+  packages/farm-autumn:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      autumn-js:
+        specifier: ^1.2.7
+        version: 1.2.7
+      standardwebhooks:
+        specifier: ^1.0.0
+        version: 1.0.0
+
+  packages/farm-better-auth:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+
   packages/farm-cf-agent:
     dependencies:
       '@farm.js/core':
@@ -1241,6 +1292,24 @@ importers:
         specifier: 4.111.0
         version: 4.111.0(@cloudflare/workers-types@4.20260702.1)
 
+  packages/farm-clerk:
+    dependencies:
+      '@clerk/backend':
+        specifier: ^3.2.0
+        version: 3.2.0(react-dom@19.2.4)(react@19.2.4)
+      '@clerk/react':
+        specifier: ^6.1.0
+        version: 6.1.0(react-dom@19.2.4)(react@19.2.4)
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      react:
+        specifier: ^18.2.0 || ^19.0.0
+        version: 19.2.4
+
   packages/farm-cli:
     dependencies:
       '@farm.js/core':
@@ -1266,6 +1335,28 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  packages/farm-email:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      '@react-email/render':
+        specifier: 2.0.6
+        version: 2.0.6(react-dom@19.2.4)(react@19.2.4)
+      react:
+        specifier: ^18.2.0 || ^19.0.0
+        version: 19.2.4
+      resend:
+        specifier: 6.10.0
+        version: 6.10.0(@react-email/render@2.0.6)
+    devDependencies:
+      '@types/react':
+        specifier: 19.2.13
+        version: 19.2.13
+
   packages/farm-eve:
     dependencies:
       '@farm.js/core':
@@ -1288,60 +1379,80 @@ importers:
         specifier: ^1.6.1
         version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
-  packages/farm-integrations:
+  packages/farm-integration-utils:
     dependencies:
-      '@clerk/react':
-        specifier: ^6.1.0
-        version: 6.1.0(react-dom@19.2.4)(react@19.2.4)
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+
+  packages/farm-integrations:
+    dependencies:
+      '@farm.js/ai':
+        specifier: workspace:*
+        version: link:../farm-ai
+      '@farm.js/auth0':
+        specifier: workspace:*
+        version: link:../farm-auth0
+      '@farm.js/authjs':
+        specifier: workspace:*
+        version: link:../farm-authjs
+      '@farm.js/autumn':
+        specifier: workspace:*
+        version: link:../farm-autumn
+      '@farm.js/better-auth':
+        specifier: workspace:*
+        version: link:../farm-better-auth
+      '@farm.js/clerk':
+        specifier: workspace:*
+        version: link:../farm-clerk
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/email':
+        specifier: workspace:*
+        version: link:../farm-email
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      '@farm.js/jobs':
+        specifier: workspace:*
+        version: link:../farm-jobs
+      '@farm.js/polar':
+        specifier: workspace:*
+        version: link:../farm-polar
+      '@farm.js/stripe':
+        specifier: workspace:*
+        version: link:../farm-stripe
+      '@farm.js/supabase':
+        specifier: workspace:*
+        version: link:../farm-supabase
+      '@farm.js/unkey':
+        specifier: workspace:*
+        version: link:../farm-unkey
+      '@farm.js/workos':
+        specifier: workspace:*
+        version: link:../farm-workos
+
+  packages/farm-jobs:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+
+  packages/farm-polar:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
       '@polar-sh/sdk':
         specifier: ^0.47.0
         version: 0.47.0
-      '@react-email/render':
-        specifier: 2.0.6
-        version: 2.0.6(react-dom@19.2.4)(react@19.2.4)
-      '@supabase/ssr':
-        specifier: ^0.9.0
-        version: 0.9.0(@supabase/supabase-js@2.99.2)
-      '@supabase/supabase-js':
-        specifier: ^2.99.2
-        version: 2.99.2
-      '@workos-inc/node':
-        specifier: ^8.9.0
-        version: 8.9.0
-      ai:
-        specifier: ^7.0.11
-        version: 7.0.11(zod@4.3.6)
-      autumn-js:
-        specifier: ^1.2.7
-        version: 1.2.7(react@19.2.4)
-      react:
-        specifier: ^18.2.0 || ^19.0.0
-        version: 19.2.4
-      react-dom:
-        specifier: ^18.2.0 || ^19.0.0
-        version: 19.2.4(react@19.2.4)
-      resend:
-        specifier: 6.10.0
-        version: 6.10.0(@react-email/render@2.0.6)
-      standardwebhooks:
-        specifier: ^1.0.0
-        version: 1.0.0
-      stripe:
-        specifier: ^20.4.1
-        version: 20.4.1(@types/node@20.19.21)
-    devDependencies:
-      '@clerk/backend':
-        specifier: ^3.2.0
-        version: 3.2.0(react-dom@19.2.4)(react@19.2.4)
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.13
-      typescript:
-        specifier: ^5.3.3
-        version: 5.9.3
 
   packages/farm-preview-gateway:
     devDependencies:
@@ -1354,6 +1465,54 @@ importers:
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
+
+  packages/farm-stripe:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      stripe:
+        specifier: ^20.4.1
+        version: 20.4.1(@types/node@20.19.21)
+
+  packages/farm-supabase:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      '@supabase/ssr':
+        specifier: ^0.9.0
+        version: 0.9.0(@supabase/supabase-js@2.99.2)
+      '@supabase/supabase-js':
+        specifier: ^2.99.2
+        version: 2.99.2
+
+  packages/farm-unkey:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+
+  packages/farm-workos:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@farm.js/integration-utils':
+        specifier: workspace:*
+        version: link:../farm-integration-utils
+      '@workos-inc/node':
+        specifier: ^8.9.0
+        version: 8.9.0
 
   packages/farmjs-plugin:
     dependencies:
@@ -1423,18 +1582,6 @@ packages:
       '@vercel/oidc': 3.2.0
       zod: 4.3.6
 
-  /@ai-sdk/gateway@4.0.8(zod@4.3.6):
-    resolution: {integrity: sha512-esHzojMp+LllqOnEu6sYa6NKOmPcE5UObPV61LE6L2QAzCH6WHMgTS+Q/HF5HU3lVUWsHtkDzN7TNqMfv/ecCg==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-    dependencies:
-      '@ai-sdk/provider': 4.0.1
-      '@ai-sdk/provider-utils': 5.0.3(zod@4.3.6)
-      '@vercel/oidc': 3.2.0
-      zod: 4.3.6
-    dev: false
-
   /@ai-sdk/provider-utils@5.0.10(zod@4.3.6):
     resolution: {integrity: sha512-uPyec0+85dwxZYXtb8qe8gCjhjDfxP4LCDo/uRQS/iG+FIgYbHPRhr/ys281udG90bTaE18+5cxWraYaf8oHCw==}
     engines: {node: '>=22'}
@@ -1446,26 +1593,6 @@ packages:
       '@workflow/serde': 4.1.0
       eventsource-parser: 3.1.0
       zod: 4.3.6
-
-  /@ai-sdk/provider-utils@5.0.3(zod@4.3.6):
-    resolution: {integrity: sha512-El0JOXXGcHFe6+owJ1UV0VgB9XtdivP8vcZni+rUIt6lt+cBHCnUdddaA6LE2avJGJ5AD0uXSY+uAvRL2tSvgw==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-    dependencies:
-      '@ai-sdk/provider': 4.0.1
-      '@standard-schema/spec': 1.1.0
-      '@workflow/serde': 4.1.0
-      eventsource-parser: 3.1.0
-      zod: 4.3.6
-    dev: false
-
-  /@ai-sdk/provider@4.0.1:
-    resolution: {integrity: sha512-6p3C/vGqVIjcptBu1DnVd/BZJ2wWmV9TUv9192vT6ZvT9KNED8EwRTqyqFpoQZKgSbMDSvBSq3dqR524Nt/Crw==}
-    engines: {node: '>=22'}
-    dependencies:
-      json-schema: 0.4.0
-    dev: false
 
   /@ai-sdk/provider@4.0.3:
     resolution: {integrity: sha512-e0CpNWJUY7OxAFAnCZkw+ri9QOHWwTs1tXP42782KFGCU07qt8NiXCrCVowyCB5dP2r5/Uls+g2oPd8kOJn9dw==}
@@ -2192,7 +2319,7 @@ packages:
       '@better-fetch/fetch': 1.1.21
       '@simplewebauthn/browser': 13.3.0
       '@simplewebauthn/server': 13.3.0
-      better-auth: 1.5.5(better-sqlite3@12.8.0)(drizzle-kit@0.31.10)(drizzle-orm@0.44.7)(mongodb@7.1.0)(react-dom@19.2.4)(react@19.2.4)
+      better-auth: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@7.1.0)(prisma@6.19.2)(react-dom@19.2.4)(react@19.2.4)
       better-call: 1.3.2(zod@4.3.6)
       nanostores: 1.2.0
       zod: 4.3.6
@@ -2271,6 +2398,7 @@ packages:
     transitivePeerDependencies:
       - react
       - react-dom
+    dev: false
 
   /@clerk/react@6.1.0(react-dom@19.2.4)(react@19.2.4):
     resolution: {integrity: sha512-xHFvpQGBZGuuAp/d7+n2LAPoaeqPsqrG5ValR0//Ol6gRGCttnjJ0CVk806dlIzs7JZNLO68+i/MZanowCjEMw==}
@@ -7243,6 +7371,7 @@ packages:
 
   /@stablelib/base64@1.0.1:
     resolution: {integrity: sha512-1bnPQqSxSuc3Ii6MhBysoWCg58j97aUjuCSZrGSmDxNqtytIi0k8utUenAwTZN4V5mXXYGsVUI9zeBqy+jBOSQ==}
+    dev: false
 
   /@standard-schema/spec@1.1.0:
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -7275,7 +7404,7 @@ packages:
       '@types/phoenix': 1.6.7
       '@types/ws': 8.18.1
       tslib: 2.8.1
-      ws: 8.19.0
+      ws: 8.21.0
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
@@ -8383,18 +8512,6 @@ packages:
       - supports-color
     dev: false
 
-  /ai@7.0.11(zod@4.3.6):
-    resolution: {integrity: sha512-ecCtume1NKJG/8oIkV8G26KL9jmFJRx6+Gjx2260FcDZqIUGPiF1uBoNeGy4S1vxbHmFxUul4D7axqiXZZ1XuA==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
-    dependencies:
-      '@ai-sdk/gateway': 4.0.8(zod@4.3.6)
-      '@ai-sdk/provider': 4.0.1
-      '@ai-sdk/provider-utils': 5.0.3(zod@4.3.6)
-      zod: 4.3.6
-    dev: false
-
   /ai@7.0.30(zod@4.3.6):
     resolution: {integrity: sha512-tm0gTAHSWBdDfW4P2mj+LlglGCUQTSA9ktyS2PsPgVhxNO9gYWTSnRAehiJ3h1lYsJBp1Zgbz3RH2lezJXagiw==}
     engines: {node: '>=22'}
@@ -8567,7 +8684,7 @@ packages:
       postcss-value-parser: 4.2.0
     dev: true
 
-  /autumn-js@1.2.7(react@19.2.4):
+  /autumn-js@1.2.7:
     resolution: {integrity: sha512-EXm6IxxsZ1ZUFI/fy0pbwugLuOB8BMMlJn2RjcwomjAXc6Gjdh+3yE2siYyz7ip0BmwZ43L9NIFVjNYOFlgCzw==}
     peerDependencies:
       better-auth: ^1.3.17
@@ -8591,7 +8708,6 @@ packages:
         optional: true
     dependencies:
       query-string: 9.3.1
-      react: 19.2.4
       rou3: 0.6.3
       zod: 4.3.6
     dev: false
@@ -10446,6 +10562,7 @@ packages:
 
   /fast-sha256@1.3.0:
     resolution: {integrity: sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ==}
+    dev: false
 
   /fast-uri@3.1.0:
     resolution: {integrity: sha512-iPeeDKJSWf4IEOasVVrknXpaBV0IApz/gp7S2bb7Z4Lljbl2MGJRqInZiUrQwV16cpzw/D3S5j5Julj/gT52AA==}
@@ -15015,6 +15132,7 @@ packages:
     dependencies:
       '@stablelib/base64': 1.0.1
       fast-sha256: 1.3.0
+    dev: false
 
   /statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
@@ -16308,6 +16426,7 @@ packages:
 
   /uuid@10.0.0:
     resolution: {integrity: sha512-8XkAphELsDnEGrDxUOHB3RGvXz6TeuYSGEZBOjtTtPm2lwhGBjLgOzLHB63IUWfBpNucQjND6d3AOudO+H3RWQ==}
+    deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
     dev: false
 
@@ -16910,6 +17029,7 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
+    dev: true
 
   /ws@8.21.0:
     resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
@@ -16922,7 +17042,6 @@ packages:
         optional: true
       utf-8-validate:
         optional: true
-    dev: true
 
   /xdg-app-paths@5.1.0:
     resolution: {integrity: sha512-RAQ3WkPf4KTU1A8RtFx3gWywzVKe00tfOPFfl2NDGqbIFENQO4kqAJp7mhQjNj/33W5x5hiWWUdyfPq/5SU3QA==}
