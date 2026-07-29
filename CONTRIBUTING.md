@@ -137,8 +137,8 @@ commands and recovery steps.
 ## Getting Help
 
 - **Documentation**: Check the [docs](./docs) first
-- **Issues**: Search existing [GitHub issues](https://github.com/Kinfe123/farm.js/issues)
-- **Discussions**: Use [GitHub Discussions](https://github.com/Kinfe123/farm.js/discussions)
+- **Issues**: Search existing [GitHub issues](https://github.com/farming-labs/farm.js/issues)
+- **Discussions**: Use [GitHub Discussions](https://github.com/farming-labs/farm.js/discussions)
 - **Discord**: Join our community Discord (link coming soon)
 
 ## Code of Conduct

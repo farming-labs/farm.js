@@ -318,8 +318,8 @@ const footerGroups = [
     title: "Open source",
     icon: GitFork,
     brand: githubIconUrl,
-    action: ["View source", "https://github.com/Kinfe123/farm.js"],
-    links: [["GitHub", "https://github.com/Kinfe123/farm.js"]],
+    action: ["View source", "https://github.com/farming-labs/farm.js"],
+    links: [["GitHub", "https://github.com/farming-labs/farm.js"]],
   },
 ] as const;
 
@@ -675,7 +675,7 @@ function AnnouncementBar() {
     <a
       aria-label="Farm.js is open source and in beta. View on GitHub."
       className="farm-announcement flex h-5 items-center justify-center gap-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-      href="https://github.com/Kinfe123/farm.js"
+      href="https://github.com/farming-labs/farm.js"
     >
       <GithubIcon className="size-3 opacity-55" />
       <span className="text-white/52">Open source</span>
@@ -714,7 +714,7 @@ function Header() {
           <a
             aria-label="Open Farm.js on GitHub"
             className="grid size-11 place-items-center border-l border-white/12 text-white/52 transition-colors duration-150 hover:bg-white/[0.035] hover:text-white focus-visible:z-10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
-            href="https://github.com/Kinfe123/farm.js"
+            href="https://github.com/farming-labs/farm.js"
             title="GitHub"
           >
             <GithubIcon className="size-4" />

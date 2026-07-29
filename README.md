@@ -302,7 +302,7 @@ Visit [farm.js.dev](https://farm.js.dev) for comprehensive documentation, guides
 ### Setup
 
 ```bash
-git clone https://github.com/Kinfe123/farm.js.git
+git clone https://github.com/farming-labs/farm.js.git
 cd farm.js
 ./scripts/setup.sh
 ```

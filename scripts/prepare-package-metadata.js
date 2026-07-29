@@ -3,7 +3,7 @@ const path = require("node:path");
 
 const workspaceRoot = path.resolve(__dirname, "..");
 const packagesRoot = path.join(workspaceRoot, "packages");
-const repositoryUrl = "https://github.com/Kinfe123/farm.js";
+const repositoryUrl = "https://github.com/farming-labs/farm.js";
 
 for (const directoryName of fs.readdirSync(packagesRoot).sort()) {
   const packageDirectory = path.join(packagesRoot, directoryName);
