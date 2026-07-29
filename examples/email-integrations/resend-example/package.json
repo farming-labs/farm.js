@@ -12,8 +12,8 @@
     "@farm.js/core": "workspace:*",
     "@farm.js/email": "workspace:*",
     "@react-email/components": "^1.0.12",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",

@@ -11,8 +11,8 @@
   "dependencies": {
     "@farm.js/authjs": "workspace:*",
     "@farm.js/core": "workspace:*",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",

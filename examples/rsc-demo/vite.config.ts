@@ -13,10 +13,10 @@ export default defineConfig({
   port: 3000,
   debug: false,
   experimental: {
+    // Server Actions are a separate, explicit opt-in from RSC rendering.
+    serverActions: true,
     optimizedBoundary: true,
   },
-  // RSC/Server Actions are opt-in.
-  // Set experimental.serverComponents/serverActions in farm config when using core runtime.
   plugins: [
     tailwindcss(),
     rsc({
