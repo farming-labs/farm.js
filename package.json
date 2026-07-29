@@ -39,6 +39,7 @@
     "bump": "bumpp",
     "version-packages": "pnpm run bump",
     "release:check": "pnpm build && pnpm test -- --skip-incompatible",
+    "release:prepare": "node scripts/sync-release-versions.js && pnpm run release:check",
     "release": "pnpm run release:latest",
     "release:latest": "bumpp && pnpm run publish:latest",
     "release:beta": "bumpp --preid beta && pnpm run publish:beta",

@@ -1,6 +1,7 @@
 import { defineConfig } from "bumpp";
 
 export default defineConfig({
+  all: true,
   commit: "chore: release v%s",
   tag: "v%s",
   push: true,
@@ -28,5 +29,5 @@ export default defineConfig({
     "packages/farm-workos/package.json",
     "packages/farmjs-plugin/package.json",
   ],
-  execute: "node scripts/sync-release-versions.js && pnpm run release:check",
+  execute: "pnpm run release:prepare",
 });
