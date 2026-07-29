@@ -29,6 +29,7 @@ const buildEnv = {
   INNGEST_SIGNING_KEY: process.env.INNGEST_SIGNING_KEY || "ci-inngest-signing-key",
   POLAR_ACCESS_TOKEN: process.env.POLAR_ACCESS_TOKEN || "polar_ci",
   RESEND_API_KEY: process.env.RESEND_API_KEY || "re_ci",
+  RESEND_FROM_EMAIL: process.env.RESEND_FROM_EMAIL || "Farm CI <ci@example.com>",
   STRIPE_SECRET_KEY: process.env.STRIPE_SECRET_KEY || "sk_test_ci",
   SUPABASE_ANON_KEY: process.env.SUPABASE_ANON_KEY || "ci-supabase-anon-key",
   SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY || "ci-supabase-service-key",
