@@ -1,4 +1,4 @@
-import { format, getLocale, t } from "@farmjs/core/i18n/server";
+import { format, getLocale, t } from "@farm.js/core/i18n/server";
 import { LocaleSwitcher } from "./locale-switcher";
 
 export const ssg = true;

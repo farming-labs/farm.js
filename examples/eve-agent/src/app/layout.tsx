@@ -1,4 +1,4 @@
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 import "./globals.css";
 
 export default function Layout({ children }: LayoutProps) {

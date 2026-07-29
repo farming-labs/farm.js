@@ -31,10 +31,10 @@ The production Vercel artifact is written to `.vercel/output`.
 
 ### Runtime-only core build
 
-The documentation-site build opts into `@farmjs/core`'s runtime-only package build:
+The documentation-site build opts into `@farm.js/core`'s runtime-only package build:
 
 ```bash
-pnpm --filter @farmjs/core build:runtime
+pnpm --filter @farm.js/core build:runtime
 ```
 
 This builds the same ESM, CJS, and source-map artifacts as the default core build, but skips
@@ -45,7 +45,7 @@ documentation routes.
 The regular package and release build remains the default and continues to generate declarations:
 
 ```bash
-pnpm --filter @farmjs/core build
+pnpm --filter @farm.js/core build
 ```
 
 Use `build:runtime` only for application deployments that need executable runtime artifacts. Do not

@@ -15,7 +15,7 @@ Import PNG, JPEG, GIF, WebP, or AVIF files and pass the import directly to `Imag
 **src/app/products/page.tsx**
 
 ```tsx
-import Image from "@farmjs/core/image";
+import Image from "@farm.js/core/image";
 import jacket from "./jacket.png";
 
 export default function ProductsPage() {
@@ -41,7 +41,7 @@ import jacketUrl from "./jacket.png?url";
 A string source cannot provide dimensions at build time, so pass `width` and `height` explicitly. These values reserve layout space; the optimizer never enlarges the source image.
 
 ```tsx
-import { Image } from "@farmjs/core/image";
+import { Image } from "@farm.js/core/image";
 
 export function Avatar() {
   return (
@@ -61,7 +61,7 @@ Remote images are denied until their origin matches `remotePatterns` or the lega
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   images: {
@@ -112,7 +112,7 @@ Images are lazy-loaded and asynchronously decoded by default. Set `preload` only
 ## Configuration
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   images: {

@@ -22,7 +22,7 @@ export function generateFarmImageTypes(options: GenerateFarmImageTypesOptions): 
 export function createFarmImageTypeDeclarations(): string {
   const modules = FARM_STATIC_IMAGE_EXTENSIONS.map(
     (extension) => `declare module "*.${extension}" {
-  const image: import("@farmjs/core/image").StaticImageData;
+  const image: import("@farm.js/core/image").StaticImageData;
   export const src: string;
   export const width: number;
   export const height: number;

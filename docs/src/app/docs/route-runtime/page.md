@@ -52,7 +52,7 @@ A layout sets defaults for pages below its segment. The complete layout tree exe
 **src/app/admin/layout.tsx**
 
 ```tsx
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 
 export const runtime = "node";
 export const regions = ["fra1"];
@@ -102,7 +102,7 @@ The same fields are typed on every programmatic primitive.
 **src/farm.routes.tsx**
 
 ```tsx
-import { defineRoutes } from "@farmjs/core";
+import { defineRoutes } from "@farm.js/core";
 import { ReportsPage } from "./features/reports/page";
 
 export default defineRoutes(({ page, layout, api }) => [
@@ -133,7 +133,7 @@ Use route rules when deployment policy belongs to a URL group rather than one so
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   routeRules: {

@@ -1,5 +1,5 @@
 import React from 'react'
-import { Link } from '@farmjs/core/client'
+import { Link } from '@farm.js/core/client'
 
 export const metadata = {
   title: "Contact | Farm.js",

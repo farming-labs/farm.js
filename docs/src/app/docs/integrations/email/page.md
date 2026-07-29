@@ -13,7 +13,7 @@ Render React Email templates, send with Resend, schedule messages, preview templ
 **src/lib/email.ts**
 
 ```tsx
-import { resend, template } from "@farmjs/integrations/email";
+import { resend, template } from "@farm.js/integrations/email";
 
 const templates = {
   welcome: template({

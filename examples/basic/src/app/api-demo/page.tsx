@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { Link } from '@farmjs/core/client';
+import { Link } from '@farm.js/core/client';
 import { GET as helloGet } from "../api/hello/route"
 export default async function APIDemo() {
   const baseURL = 'http://localhost:3000';

@@ -1,6 +1,6 @@
 "use client";
 
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farm.js/core/client";
 import { useEffect, useMemo, useState } from "react";
 
 type PrefetchLog = {

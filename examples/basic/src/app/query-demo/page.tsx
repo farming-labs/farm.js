@@ -63,7 +63,7 @@ export default function QueryDemoPage() {
               </h4>
               <pre className="bg-gray-100 p-4 rounded text-xs overflow-x-auto">
 {`'use client';
-import { useQueryState, asString, asInteger } from '@farmjs/core/query/client';
+import { useQueryState, asString, asInteger } from '@farm.js/core/query/client';
 
 export default function Page() {
   const [search, setSearch] = useQueryState('search', asString);

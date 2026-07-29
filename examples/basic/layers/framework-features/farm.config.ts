@@ -1,4 +1,4 @@
-import { defineConfig, definePlugin } from '@farmjs/core';
+import { defineConfig, definePlugin } from '@farm.js/core';
 
 const layerRuntimePlugin = definePlugin({
   name: 'framework-features:runtime',

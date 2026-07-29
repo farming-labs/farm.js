@@ -15,9 +15,9 @@ Farm treats every integration as a small server plugin. That means an integratio
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
-import { stripe } from "@farmjs/integrations/stripe";
-import { betterAuth } from "@farmjs/integrations/better-auth";
+import { defineConfig } from "@farm.js/core";
+import { stripe } from "@farm.js/integrations/stripe";
+import { betterAuth } from "@farm.js/integrations/better-auth";
 
 export default defineConfig({
   integrations: {
@@ -40,7 +40,7 @@ The object key is the application namespace. If you register Stripe as `billing`
 **src/lib/api.ts**
 
 ```ts
-import { createIntegrations } from "@farmjs/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import type { AppIntegrations } from "./integrations";
 
 export const { api, apiClient } = createIntegrations<AppIntegrations>({
@@ -106,7 +106,7 @@ input, request metadata, shared request context, integration metadata, and `args
 **src/integrations/local-demo.ts**
 
 ```ts
-import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
 import { z } from "zod";
 
 export const localDemo = defineIntegration({
@@ -147,7 +147,7 @@ Typed routes derive their caller tree from their path, so this integration does 
 **src/lib/api.ts**
 
 ```ts
-import { createIntegrations } from "@farmjs/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import { localDemo } from "../integrations/local-demo";
 
 export const { api, apiClient } = createIntegrations({
@@ -207,8 +207,8 @@ On the server, Farm first tries to dispatch to the registered integration runtim
 Agent integrations connect a provider runtime to the Farm lifecycle without replacing that provider's SDK. Farm starts the runtime beside the app in development, owns its same-origin route prefixes, and composes supported production output. The client still uses the provider-native hooks and typed RPC APIs.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
-import { eve } from "@farmjs/eve";
+import { defineConfig } from "@farm.js/core";
+import { eve } from "@farm.js/eve";
 
 export default defineConfig({
   integrations: {

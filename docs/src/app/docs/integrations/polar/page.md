@@ -21,7 +21,7 @@ farm add integration polar --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { polar } from "@farmjs/integrations/polar";
+import { polar } from "@farm.js/integrations/polar";
 
 export const integrations = {
   billing: polar({

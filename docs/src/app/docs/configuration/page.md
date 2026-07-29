@@ -13,7 +13,7 @@ Use farm.config.ts as the single project control plane for source paths, integra
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   srcDir: "src",
@@ -40,7 +40,7 @@ export default defineConfig({
 Configure the docs runtime directly in `farm.config.ts`:
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   docs: {
@@ -104,7 +104,7 @@ mount, and shortcut together.
 Farm optimizes local and allowlisted remote images through the same runtime on development and production deployments.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   images: {
@@ -141,7 +141,7 @@ A layer may contain an optional plain `farm.config.ts` plus its own `src/app`, c
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   experimental: {
@@ -194,7 +194,7 @@ export default async function BlogPage() {
 Use `routeRules` when behavior belongs to a URL pattern instead of one page file. Rules are normalized into Farm redirects/headers and passed to Nitro route rules for production adapters.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   routeRules: {
@@ -259,9 +259,9 @@ See [Cron](/docs/cron) for route protection, local commands, UTC syntax, deploym
 ## Integrations in config
 
 ```ts
-import { defineConfig } from "@farmjs/core";
-import { stripe } from "@farmjs/integrations/stripe";
-import { supabase } from "@farmjs/integrations/supabase";
+import { defineConfig } from "@farm.js/core";
+import { stripe } from "@farm.js/integrations/stripe";
+import { supabase } from "@farm.js/integrations/supabase";
 
 export default defineConfig({
   integrations: {
@@ -283,7 +283,7 @@ The keys become typed namespaces. `billing` becomes `api.billing`, and `auth` be
 Use `migrations.commands` when the app needs a predictable command before build or deploy. This keeps schema setup close to the storage and integration config without turning the framework into a migration engine.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   migrations: {

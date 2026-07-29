@@ -1,4 +1,4 @@
-import { createEndpoint } from '@farmjs/core';
+import { createEndpoint } from '@farm.js/core';
 import { integrationApi } from '../../../../lib/integration-lab-api.ts';
 
 export const GET = createEndpoint(

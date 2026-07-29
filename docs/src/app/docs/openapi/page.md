@@ -34,7 +34,7 @@ Farm scans API route files and generates an OpenAPI 3.0.3 spec from the discover
 **src/app/api/users/route.ts**
 
 ```ts
-import { createEndpoint } from "@farmjs/core/api";
+import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
 
 export const GET = createEndpoint(

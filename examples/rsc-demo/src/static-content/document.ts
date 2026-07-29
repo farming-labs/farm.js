@@ -3,7 +3,7 @@ import type {
   StrataElement,
   StrataNode,
   StrataTag,
-} from "@farmjs/plugin/rsc/optimized-boundary";
+} from "@farm.js/plugin/rsc/optimized-boundary";
 
 const concepts = [
   "streaming",

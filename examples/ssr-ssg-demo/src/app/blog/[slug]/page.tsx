@@ -10,7 +10,7 @@
  * - You know all possible paths at build time
  */
 
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export const ssg = true;
 

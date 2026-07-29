@@ -1,5 +1,5 @@
 {
-  "name": "@farmjs/preview-gateway",
+  "name": "@farm.js/preview-gateway",
   "version": "0.0.1",
   "description": "Farm.js preview gateway for Vercel-hosted instant preview URLs",
   "type": "module",

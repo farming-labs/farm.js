@@ -6,7 +6,7 @@ entry and `/api/docs/*` machine routes.
 
 ```ts
 // farm.config.ts
-import { defineConfig } from '@farmjs/core';
+import { defineConfig } from '@farm.js/core';
 
 export default defineConfig({
   docs: {
@@ -42,7 +42,7 @@ You only need app route wrappers when you want to override the default handler:
 
 ```ts
 // src/app/api/docs/route.ts
-import { createDocsAPI } from '@farmjs/core/docs';
+import { createDocsAPI } from '@farm.js/core/docs';
 
 export const { GET, POST } = createDocsAPI();
 export const revalidate = false;

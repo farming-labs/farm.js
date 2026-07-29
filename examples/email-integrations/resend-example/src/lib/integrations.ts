@@ -1,5 +1,5 @@
 import type { ComponentProps } from "react";
-import { resend, type EmailTemplate } from "@farmjs/integrations/email";
+import { resend, type EmailTemplate } from "@farm.js/integrations/email";
 import { InviteUserEmail } from "./emails/invite-user.tsx";
 import { ResetPasswordEmail } from "./emails/reset-password.tsx";
 

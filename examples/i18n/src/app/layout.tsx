@@ -1,4 +1,4 @@
-import type { LayoutProps, Metadata } from "@farmjs/core";
+import type { LayoutProps, Metadata } from "@farm.js/core";
 import "./globals.css";
 
 export const metadata: Metadata = {

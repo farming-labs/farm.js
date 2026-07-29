@@ -19,10 +19,10 @@ const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "
 async function createProductionFixture(): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-prebuilt-ssr-"));
 
-  await fs.mkdir(path.join(root, "node_modules", "@farmjs"), {
+  await fs.mkdir(path.join(root, "node_modules", "@farm.js"), {
     recursive: true,
   });
-  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farmjs", "core"), "dir");
+  await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
   await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
   await fs.writeFile(
     path.join(root, "package.json"),
@@ -446,7 +446,7 @@ export async function GET() {
         path.join(afterApiDir, "route.ts"),
         `
 import { writeFile } from "node:fs/promises";
-import { after } from "@farmjs/core";
+import { after } from "@farm.js/core";
 
 export async function GET() {
   after(() => writeFile(${JSON.stringify(afterMarkerPath)}, "finished"));
@@ -592,7 +592,7 @@ export default function FailureBoundary({ error, path }) {
         await fs.writeFile(
           path.join(root, "src", "farm.routes.tsx"),
           `
-import { createRoute, defineRoutes, notFound, redirect } from "@farmjs/core";
+import { createRoute, defineRoutes, notFound, redirect } from "@farm.js/core";
 
 function ProgrammaticPending() {
   return <p data-programmatic-pending="true">programmatic-data-pending</p>;
@@ -799,7 +799,7 @@ export default defineRoutes(() => [
       await fs.writeFile(
         path.join(apiDir, "route.ts"),
         `
-import { createEndpoint } from "@farmjs/core";
+import { createEndpoint } from "@farm.js/core";
 
 export const GET = createEndpoint(
   "/api/runtime",
@@ -905,7 +905,7 @@ export const GET = createEndpoint(
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
         `
-import { getCurrentRequest } from "@farmjs/core/request";
+import { getCurrentRequest } from "@farm.js/core/request";
 
 export default function Page() {
   return <main data-plugin-request={getCurrentRequest().headers.get("x-plugin-request")}>plugin request context</main>;
@@ -1292,7 +1292,7 @@ export default function Page() {
       await fs.writeFile(
         path.join(root, "farm.config.ts"),
         `
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   runtimeMarker: ${JSON.stringify(runtimeMarker)},

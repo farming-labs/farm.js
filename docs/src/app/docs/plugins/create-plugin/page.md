@@ -15,7 +15,7 @@ This plugin creates typed private state, derives typed context for every request
 **src/plugins/request-tracing.ts**
 
 ```ts
-import { definePlugin } from "@farmjs/core";
+import { definePlugin } from "@farm.js/core";
 import { randomUUID } from "node:crypto";
 
 type RequestTracingOptions = {
@@ -75,7 +75,7 @@ export function requestTracingPlugin(options: RequestTracingOptions = {}) {
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { requestTracingPlugin } from "./src/plugins/request-tracing";
 
 export default defineConfig({
@@ -141,7 +141,7 @@ A published plugin should expose an options factory and keep its setup state pri
 **packages/farm-plugin-security/src/index.ts**
 
 ```ts
-import { definePlugin } from "@farmjs/core";
+import { definePlugin } from "@farm.js/core";
 
 export interface SecurityPluginOptions {
   frameAncestors?: string;

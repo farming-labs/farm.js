@@ -1,5 +1,5 @@
-import { defineConfig } from "@farmjs/core";
-import { eve } from "@farmjs/eve";
+import { defineConfig } from "@farm.js/core";
+import { eve } from "@farm.js/eve";
 
 export default defineConfig({
   integrations: {

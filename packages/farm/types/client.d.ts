@@ -1,5 +1,5 @@
 /**
- * Type declarations for @farmjs/core/client
+ * Type declarations for @farm.js/core/client
  *
  * Provides stable exports for Link, useRouter, and API client so TypeScript
  * and IDEs resolve them even when the build output omits them. The generated
@@ -14,7 +14,7 @@ import type {
   RefAttributes,
 } from "react";
 
-declare module "@farmjs/core/client" {
+declare module "@farm.js/core/client" {
   export interface MiddlewareProps {
     data: Map<string, any>;
   }

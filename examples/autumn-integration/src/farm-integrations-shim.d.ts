@@ -1,4 +1,4 @@
-declare module "@farmjs/integrations" {
+declare module "@farm.js/integrations" {
   export { autumn, betterAuth } from "../../../packages/farm-integrations/src/index";
   export type {
     AutumnBillingCurrentChargesResult,

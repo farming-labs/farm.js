@@ -1,5 +1,5 @@
-import { defineIntegration, integrationRoute } from "@farmjs/core";
-import { api as clientApi } from "@farmjs/core/client";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
+import { api as clientApi } from "@farm.js/core/client";
 import {
   getAuthSession,
   insertDemoProject,

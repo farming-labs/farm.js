@@ -1,5 +1,5 @@
 import type Stripe from "stripe";
-import type { FarmIntegrationHandlerContext } from "@farmjs/core";
+import type { FarmIntegrationHandlerContext } from "@farm.js/core";
 
 export type StripeBillingOwner = {
   kind: "user" | "organization";

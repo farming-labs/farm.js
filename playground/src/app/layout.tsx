@@ -1,5 +1,5 @@
 import React from "react";
-import type { LayoutProps, Metadata } from "@farmjs/core";
+import type { LayoutProps, Metadata } from "@farm.js/core";
 
 export const metadata: Metadata = {
   title: "Farm.js Playground",

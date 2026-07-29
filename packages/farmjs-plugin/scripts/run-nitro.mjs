@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Run Nitro after Vite build. Use in package.json: "build": "vite build && node node_modules/@farmjs/plugin/scripts/run-nitro.mjs"
+ * Run Nitro after Vite build. Use in package.json: "build": "vite build && node node_modules/@farm.js/plugin/scripts/run-nitro.mjs"
  * Resolves from project root (cwd) so dist/ and .output are in the right place.
  */
 import path from "node:path";

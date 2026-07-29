@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "corepack pnpm --filter @farmjs/preview-gateway build",
+  "buildCommand": "corepack pnpm --filter @farm.js/preview-gateway build",
   "regions": ["iad1"],
   "functions": {
     "api/index.ts": {

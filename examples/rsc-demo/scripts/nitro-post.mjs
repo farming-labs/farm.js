@@ -9,7 +9,7 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
-import { buildRscNitro } from "@farmjs/plugin/rsc";
+import { buildRscNitro } from "@farm.js/plugin/rsc";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const root = path.resolve(__dirname, "..");

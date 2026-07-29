@@ -18,7 +18,7 @@ experimental: {
 Server Components can then import the adapter:
 
 ```tsx
-import { OptimizedBoundary } from "@farmjs/plugin/rsc/optimized-boundary";
+import { OptimizedBoundary } from "@farm.js/plugin/rsc/optimized-boundary";
 
 return <OptimizedBoundary as="article" document={document} />;
 ```
@@ -36,9 +36,9 @@ worker targets need a future Wasm or JavaScript fallback before enabling this ex
 pnpm dev
 ```
 
-If you run from the Farm.js monorepo and see errors resolving `@farmjs/core`, build the workspace first: from the repo root run `pnpm build --filter @farmjs/core` (then `cd examples/rsc-demo && pnpm dev`).
+If you run from the Farm.js monorepo and see errors resolving `@farm.js/core`, build the workspace first: from the repo root run `pnpm build --filter @farm.js/core` (then `cd examples/rsc-demo && pnpm dev`).
 
-**Form / server actions:** If the form on `/form` shows “__viteRscCallServer is not a function”, do a hard refresh (e.g. Cmd+Shift+R / Ctrl+Shift+R) so the client entry loads the latest bundle. After changing `@farmjs/plugin` code, rebuild the plugin (`cd packages/farmjs-plugin && pnpm run build`) and restart `pnpm dev` in this example.
+**Form / server actions:** If the form on `/form` shows “__viteRscCallServer is not a function”, do a hard refresh (e.g. Cmd+Shift+R / Ctrl+Shift+R) so the client entry loads the latest bundle. After changing `@farm.js/plugin` code, rebuild the plugin (`cd packages/farmjs-plugin && pnpm run build`) and restart `pnpm dev` in this example.
 
 ## Build
 

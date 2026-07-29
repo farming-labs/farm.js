@@ -1,4 +1,4 @@
-import { createEndpoint } from '@farmjs/core';
+import { createEndpoint } from '@farm.js/core';
 import { z } from 'zod';
 
 // POST /api/auth/login - Login endpoint

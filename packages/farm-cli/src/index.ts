@@ -1,4 +1,4 @@
-export { startDevServer, createServer } from "@farmjs/core/server";
+export { startDevServer, createServer } from "@farm.js/core/server";
 export {
   addFarmIntegration,
   listFarmIntegrationProviders,

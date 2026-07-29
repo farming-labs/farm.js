@@ -1,4 +1,4 @@
-import type { AutumnBillingPlan, AutumnBillingProduct } from "@farmjs/integrations";
+import type { AutumnBillingPlan, AutumnBillingProduct } from "@farm.js/integrations";
 
 export const autumnPlans: Record<string, AutumnBillingPlan> = {
   free: {

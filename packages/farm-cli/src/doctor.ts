@@ -4,7 +4,7 @@ import {
   resolveConfig,
   type FarmCronJob,
   type ResolvedFarmConfig,
-} from "@farmjs/core";
+} from "@farm.js/core";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
@@ -360,21 +360,21 @@ function collectPackageCheck(root: string, checks: FarmDoctorCheck[]): void {
       ...asRecord(manifest.devDependencies),
       ...asRecord(manifest.peerDependencies),
     };
-    const version = dependencies["@farmjs/core"];
+    const version = dependencies["@farm.js/core"];
     checks.push(
       typeof version === "string"
         ? {
             status: "pass",
             code: "CORE_INSTALLED",
             title: "Farm core is installed",
-            message: `@farmjs/core ${version}`,
+            message: `@farm.js/core ${version}`,
           }
         : {
             status: "fail",
             code: "CORE_MISSING",
             title: "Farm core is not declared",
-            message: "@farmjs/core is missing from package.json.",
-            action: "Install @farmjs/core and add it to the application dependencies.",
+            message: "@farm.js/core is missing from package.json.",
+            action: "Install @farm.js/core and add it to the application dependencies.",
           },
     );
   } catch (error) {

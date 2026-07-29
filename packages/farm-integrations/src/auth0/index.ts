@@ -1,5 +1,5 @@
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farmjs/core";
+import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import {
   clearRequestCookie,
   createPathInferredClientApi,

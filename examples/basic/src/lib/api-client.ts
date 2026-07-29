@@ -6,7 +6,7 @@
  * Run `pnpm generate-api-types` to update
  */
 
-import { createAPIClient } from '@farmjs/core/client';
+import { createAPIClient } from '@farm.js/core/client';
 import type { APIRouter } from './api.generated';
 
 export const api = createAPIClient<APIRouter>();

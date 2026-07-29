@@ -1,5 +1,5 @@
 import React from "react";
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export default function BlogPostPage({ params, searchParams }: PageProps) {
   const { slug } = params;

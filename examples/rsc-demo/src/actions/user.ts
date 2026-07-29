@@ -1,4 +1,4 @@
-import { createServerFn } from "@farmjs/core/server-fn";
+import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
 // Server functions run on the server but can be called from forms and client components.

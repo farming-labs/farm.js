@@ -11,7 +11,7 @@ Use `after()` for short server work that should start once Farm has finished the
 Import it from the server-only entry:
 
 ```ts
-import { after } from "@farmjs/core/after";
+import { after } from "@farm.js/core/after";
 ```
 
 ## Use it in a page
@@ -19,7 +19,7 @@ import { after } from "@farmjs/core/after";
 `after()` does not add its callback to the page's response time.
 
 ```tsx
-import { after } from "@farmjs/core/after";
+import { after } from "@farm.js/core/after";
 import { recordPageView } from "@/lib/analytics";
 
 export default async function ProductPage({ params }) {
@@ -40,8 +40,8 @@ Farm waits for a streamed response body to finish before starting the callback. 
 Keep work required for correctness in the handler. Schedule only the follow-up work that may happen after the client receives success.
 
 ```ts
-import { after } from "@farmjs/core/after";
-import { createEndpoint } from "@farmjs/core/api";
+import { after } from "@farm.js/core/after";
+import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
 
 export const POST = createEndpoint(

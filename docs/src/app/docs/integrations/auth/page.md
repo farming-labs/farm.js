@@ -31,7 +31,7 @@ Keep the integration object in a shared server module so `farm.config.ts` and ty
 **src/lib/integrations.ts**
 
 ```ts
-import { supabase } from "@farmjs/integrations/supabase";
+import { supabase } from "@farm.js/integrations/supabase";
 
 export const appIntegrations = {
   auth: supabase({
@@ -47,7 +47,7 @@ export type AppIntegrations = typeof appIntegrations;
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { appIntegrations } from "./src/lib/integrations";
 
 export default defineConfig({
@@ -64,7 +64,7 @@ Auth0, WorkOS, and Supabase expose typed operations for their Farm-owned routes.
 **src/lib/api.ts**
 
 ```ts
-import { createIntegrations } from "@farmjs/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import type { AppIntegrations } from "./integrations";
 
 export const { api, apiClient } = createIntegrations<AppIntegrations>();

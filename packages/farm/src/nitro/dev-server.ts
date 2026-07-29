@@ -104,7 +104,7 @@ export function devServerPlugin(): PluginOption {
             const actualPath = join(
               viteDevServer.config.root,
               "node_modules",
-              "@farmjs",
+              "@farm.js",
               "core",
               "src",
               "nitro",

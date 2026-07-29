@@ -13,7 +13,7 @@ Farm internationalization connects locale configuration to routing, rendering, n
 Configure the supported locales in `farm.config.ts`:
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   i18n: {
@@ -63,7 +63,7 @@ Farm flattens nested objects into keys such as `home.title` and `cart.items`. Du
 Use the server entry from pages, layouts, API routes, server functions, middleware handlers, and other server-only code that runs inside a request:
 
 ```tsx
-import { format, getLocale, getLocaleSource, t } from "@farmjs/core/i18n/server";
+import { format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/server";
 
 export default function HomePage() {
   return (
@@ -85,7 +85,7 @@ export default function HomePage() {
 Request-bound functions throw outside a request context. For background work or code that must translate a known locale, create a translator explicitly:
 
 ```ts
-import { createTranslator, runWithLocale } from "@farmjs/core/i18n/server";
+import { createTranslator, runWithLocale } from "@farm.js/core/i18n/server";
 
 const t = createTranslator("fr");
 const subject = t("home.welcome", { name: "Amina" });
@@ -102,7 +102,7 @@ Use the client entry in components with hooks or browser interaction:
 ```tsx
 "use client";
 
-import { useLocale, useTranslations } from "@farmjs/core/i18n/client";
+import { useLocale, useTranslations } from "@farm.js/core/i18n/client";
 
 export function LocaleMenu() {
   const { locale, locales, direction, setLocale } = useLocale();
@@ -131,7 +131,7 @@ export function LocaleMenu() {
 Imperative client APIs are also available:
 
 ```ts
-import { format, getLocale, setLocale, t } from "@farmjs/core/i18n/client";
+import { format, getLocale, setLocale, t } from "@farm.js/core/i18n/client";
 
 const locale = getLocale();
 const total = format.currency(49, "USD");
@@ -153,7 +153,7 @@ Farm canonicalizes locale paths. With `prefix-except-default`, a request for `/e
 `Link` preserves the active locale automatically:
 
 ```tsx
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farm.js/core/client";
 
 export function ProductLinks() {
   return (
@@ -201,7 +201,7 @@ API paths are not redirected to locale-prefixed URLs. Read the request locale fr
 **src/app/api/summary/route.ts**
 
 ```ts
-import { getLocale, getLocaleSource, t } from "@farmjs/core/i18n/server";
+import { getLocale, getLocaleSource, t } from "@farm.js/core/i18n/server";
 
 export function GET() {
   return Response.json({
@@ -266,7 +266,7 @@ Each helper uses the active locale and the platform `Intl` implementation. Pass 
 
 ## Generated types and validation
 
-The generated `src/farm-i18n.d.ts` augments `@farmjs/core/i18n` with exact locale names, message keys, and ICU variables:
+The generated `src/farm-i18n.d.ts` augments `@farm.js/core/i18n` with exact locale names, message keys, and ICU variables:
 
 ```ts
 t("home.title"); // valid
@@ -285,8 +285,8 @@ Production mode enables strict validation by default. Set it explicitly in share
 Farm includes the active locale in `unstable_cache()` keys automatically:
 
 ```ts
-import { unstable_cache } from "@farmjs/core/cache";
-import { getLocale } from "@farmjs/core/i18n/server";
+import { unstable_cache } from "@farm.js/core/cache";
+import { getLocale } from "@farm.js/core/i18n/server";
 
 const getNavigation = unstable_cache(async () => loadNavigation(getLocale()), ["navigation"], {
   revalidate: 300,
@@ -324,7 +324,7 @@ Use logical CSS properties such as `margin-inline-start`, `padding-inline`, and 
 ## Full configuration
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   i18n: {

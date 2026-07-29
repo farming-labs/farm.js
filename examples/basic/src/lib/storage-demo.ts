@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { localStorage, postgresStorage, sqliteStorage } from '@farmjs/core/storage';
+import { localStorage, postgresStorage, sqliteStorage } from '@farm.js/core/storage';
 
 export const STORAGE_DEMO_POSTGRES_URL =
   process.env.DATABASE_URL ??

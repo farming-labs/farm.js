@@ -9,13 +9,13 @@
     "start": "node .farm/.output/server/index.mjs"
   },
   "dependencies": {
-    "@farmjs/core": "link:../../../../packages/farm",
+    "@farm.js/core": "link:../../../../packages/farm",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "sharp": "0.34.5"
   },
   "devDependencies": {
-    "@farmjs/cli": "link:../../../../packages/farm-cli",
+    "@farm.js/cli": "link:../../../../packages/farm-cli",
     "@types/react": "19.2.9",
     "@types/react-dom": "19.2.3",
     "typescript": "5.9.3"

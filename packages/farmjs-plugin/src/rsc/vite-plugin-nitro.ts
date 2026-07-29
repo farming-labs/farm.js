@@ -8,7 +8,7 @@
  *
  * @example
  * ```ts
- * import nitro from '@farmjs/plugin/rsc/vite-plugin-nitro'
+ * import nitro from '@farm.js/plugin/rsc/vite-plugin-nitro'
  * export default defineConfig({
  *   plugins: [rsc(), react(), nitro({ server: { environmentName: 'rsc' }, config: { preset: 'vercel' } })],
  * })

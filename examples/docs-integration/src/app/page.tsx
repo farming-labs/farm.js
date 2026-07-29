@@ -1,4 +1,4 @@
-import { Link } from '@farmjs/core';
+import { Link } from '@farm.js/core';
 
 export default function Page() {
   return (

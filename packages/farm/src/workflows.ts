@@ -476,7 +476,7 @@ async function loadWorkflowModule(filePath: string, root: string): Promise<Recor
     platform: "node",
     target: `node${process.versions.node.split(".")[0]}`,
     packages: "external",
-    external: ["@farmjs/core", "@farmjs/core/*", "nitro", "nitro/*"],
+    external: ["@farm.js/core", "@farm.js/core/*", "nitro", "nitro/*"],
     jsx: "automatic",
     logLevel: "silent",
     sourcemap: "inline",
@@ -524,7 +524,7 @@ function createNitroTaskWrapper(workflow: FarmDiscoveredWorkflow): string {
   const normalizedPath = workflow.filePath.replace(/\\/g, "/");
   return `
 import { defineTask } from "nitro/runtime";
-import { runFarmWorkflowModule } from "@farmjs/core/workflows";
+import { runFarmWorkflowModule } from "@farm.js/core/workflows";
 import * as workflowModule from ${JSON.stringify(normalizedPath)};
 
 export default defineTask({

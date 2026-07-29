@@ -13,7 +13,7 @@ Listen to Farm runtime events for server lifecycle, route matching, rendering, A
 **farm.config.ts**
 
 ```ts
-import { onFarmEvent } from "@farmjs/core/observability";
+import { onFarmEvent } from "@farm.js/core/observability";
 
 onFarmEvent((event) => {
   if (event.level === "error") {
@@ -41,7 +41,7 @@ onFarmEvent((event) => {
 Use config-level observability when an app should log or forward events from startup.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   observability: {
@@ -63,7 +63,7 @@ export default defineConfig({
 Use `onFarmEvent` for tests, local debugging, or integration packages that want to register listeners without owning app config.
 
 ```ts
-import { onFarmEvent } from "@farmjs/core/observability";
+import { onFarmEvent } from "@farm.js/core/observability";
 
 const unsubscribe = onFarmEvent((event) => {
   if (event.type === "integration.webhook.failed") {
@@ -99,7 +99,7 @@ Middleware events are emitted for both `farm.config.ts` middleware entries and `
 | `middleware.error` | `route`, `pathname`, `name`, `error` |
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   observability: {

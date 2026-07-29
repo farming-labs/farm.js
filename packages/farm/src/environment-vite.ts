@@ -33,9 +33,9 @@ export interface TransformEnvironmentFunctionsResult {
 }
 
 const ENVIRONMENT_IMPORTS = new Set([
-  "@farmjs/core",
-  "@farmjs/core/environment",
-  "@farmjs/core/server",
+  "@farm.js/core",
+  "@farm.js/core/environment",
+  "@farm.js/core/server",
 ]);
 const ENVIRONMENT_FUNCTIONS = new Set<EnvironmentFunctionKind>([
   "createServerOnlyFn",

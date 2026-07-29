@@ -121,7 +121,7 @@ export default async function AboutPage({ middlewareData = {} }: PageProps) {
         </h2>
         <pre className="bg-slate-900/50 rounded-lg p-4 overflow-x-auto text-sm">
           <code className="text-emerald-400">{`// farm.config.ts
-import rsc from '@farmjs/plugin/rsc'
+import rsc from '@farm.js/plugin/rsc'
 
 export default {
   experimental: {

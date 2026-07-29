@@ -12,7 +12,7 @@ import type {
   StripeBillingStatusResult,
   StripeCatalogProduct,
   StripeBillingUsageResult,
-} from "@farmjs/integrations/stripe/client";
+} from "@farm.js/integrations/stripe/client";
 import { apiClient } from "../../lib/api";
 import {
   authOrganizationClient,

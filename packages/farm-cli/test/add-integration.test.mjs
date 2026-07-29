@@ -38,7 +38,7 @@ test("adds a supabase integration to a new app", async () => {
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "workspace:*",
+        "@farm.js/core": "workspace:*",
       },
     },
   });
@@ -56,11 +56,11 @@ test("adds a supabase integration to a new app", async () => {
 
     assert.equal(result.provider, "supabase");
     assert.equal(result.key, "auth");
-    assert.equal(packageJson.dependencies["@farmjs/integrations"], "workspace:*");
+    assert.equal(packageJson.dependencies["@farm.js/integrations"], "workspace:*");
     assert.match(registry, /import \{ supabaseIntegration \}/);
     assert.match(registry, /auth: supabaseIntegration/);
     assert.match(component, /supabase\(\{/);
-    assert.match(config, /import \{ defineConfig \} from "@farmjs\/core"/);
+    assert.match(config, /import \{ defineConfig \} from "@farm.js\/core"/);
     assert.match(config, /export default defineConfig\(\{/);
     assert.match(config, /integrations: appIntegrations/);
   } finally {
@@ -73,7 +73,7 @@ test("adds a stripe integration to an existing registry and config", async () =>
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "^0.1.0",
+        "@farm.js/core": "^0.1.0",
       },
     },
   });
@@ -94,7 +94,7 @@ export type AppIntegrations = typeof appIntegrations;
     );
     await writeFile(
       path.join(root, "farm.config.ts"),
-      `import { defineConfig } from "@farmjs/core";
+      `import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   vite: {
@@ -118,7 +118,7 @@ export default defineConfig({
     const component = await readFile(path.join(root, "src/lib/integrations/stripe.ts"), "utf8");
     const config = await readFile(path.join(root, "farm.config.ts"), "utf8");
 
-    assert.equal(packageJson.dependencies["@farmjs/integrations"], "latest");
+    assert.equal(packageJson.dependencies["@farm.js/integrations"], "latest");
     assert.match(registry, /existing: existingIntegration/);
     assert.match(registry, /payments: stripeIntegration/);
     assert.match(component, /secretKey: process\.env\.STRIPE_SECRET_KEY/);
@@ -135,7 +135,7 @@ test("adds an integration to a config using defineConfig", async () => {
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "workspace:*",
+        "@farm.js/core": "workspace:*",
       },
     },
   });
@@ -143,7 +143,7 @@ test("adds an integration to a config using defineConfig", async () => {
   try {
     await writeFile(
       path.join(root, "farm.config.ts"),
-      `import { defineConfig } from "@farmjs/core";
+      `import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   srcDir: "src",
@@ -172,7 +172,7 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "workspace:*",
+        "@farm.js/core": "workspace:*",
       },
     },
   });
@@ -203,7 +203,7 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
       components: ["badge", "button", "card"],
       files: result.ui.files,
     });
-    assert.equal(packageJson.dependencies["@farmjs/integrations"], "workspace:*");
+    assert.equal(packageJson.dependencies["@farm.js/integrations"], "workspace:*");
     assert.equal(packageJson.dependencies["class-variance-authority"], "^0.7.1");
     assert.equal(packageJson.dependencies.clsx, "^2.1.1");
     assert.equal(packageJson.dependencies["tailwind-merge"], "^3.3.1");
@@ -232,7 +232,7 @@ test("prepares UI files for every built-in integration provider", async () => {
       packageJson: {
         type: "module",
         dependencies: {
-          "@farmjs/core": "workspace:*",
+          "@farm.js/core": "workspace:*",
         },
       },
     });
@@ -264,7 +264,7 @@ test("writes syntactically valid integration and UI files for every provider", a
       packageJson: {
         type: "module",
         dependencies: {
-          "@farmjs/core": "workspace:*",
+          "@farm.js/core": "workspace:*",
         },
       },
     });
@@ -278,9 +278,9 @@ test("writes syntactically valid integration and UI files for every provider", a
       const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
       assert.equal(
-        packageJson.dependencies["@farmjs/integrations"],
+        packageJson.dependencies["@farm.js/integrations"],
         "workspace:*",
-        `${provider.name} should install @farmjs/integrations`,
+        `${provider.name} should install @farm.js/integrations`,
       );
 
       for (const file of result.created.filter((file) => /\.[cm]?[jt]sx?$/.test(file))) {
@@ -312,7 +312,7 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "workspace:*",
+        "@farm.js/core": "workspace:*",
       },
     },
   });
@@ -366,7 +366,7 @@ test("runs farm add integration stripe --ui through the CLI", async () => {
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "workspace:*",
+        "@farm.js/core": "workspace:*",
       },
     },
   });
@@ -399,7 +399,7 @@ test("adds a Vercel AI SDK chat route template", async () => {
     packageJson: {
       type: "module",
       dependencies: {
-        "@farmjs/core": "workspace:*",
+        "@farm.js/core": "workspace:*",
       },
     },
   });
@@ -420,8 +420,8 @@ test("adds a Vercel AI SDK chat route template", async () => {
     assert.equal(result.routeFile, routeFile);
     assert.equal(result.routePath, "/api/chat");
     assert.deepEqual(result.env, ["AI_GATEWAY_API_KEY"]);
-    assert.equal(packageJson.dependencies["@farmjs/integrations"], "workspace:*");
-    assert.match(route, /import \{ aiChatRoute \} from "@farmjs\/integrations\/ai"/);
+    assert.equal(packageJson.dependencies["@farm.js/integrations"], "workspace:*");
+    assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/integrations\/ai"/);
     assert.match(route, /export const POST = aiChatRoute/);
     assert.match(route, /model: "openai\/gpt-4o-mini"/);
     await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));

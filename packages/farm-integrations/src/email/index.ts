@@ -1,5 +1,5 @@
 import { render, toPlainText } from "@react-email/render";
-import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farmjs/core";
+import { defineIntegration, integrationRoute, type FarmIntegrationLogger } from "@farm.js/core";
 import { integrationConfig, normalizeWebhookConfig } from "../utils/index.js";
 import type { FarmWebhookConfig, FarmWebhookEvent } from "../utils/webhooks.js";
 import {

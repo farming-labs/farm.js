@@ -4,7 +4,7 @@ import {
   type PreviewGatewayResponse,
   type PreviewGatewaySession,
   type PreviewGatewayStore,
-} from "@farmjs/preview-gateway";
+} from "@farm.js/preview-gateway";
 import { del, get, list, put } from "@vercel/blob";
 
 interface ExpiringValue<T> {

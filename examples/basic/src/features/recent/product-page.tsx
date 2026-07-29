@@ -4,7 +4,7 @@ import type {
   ProgrammaticRouteComponentProps,
   ProgrammaticRouteErrorComponentProps,
   ProgrammaticRoutePendingComponentProps,
-} from '@farmjs/core';
+} from '@farm.js/core';
 import type {
   FeatureProductData,
   FeatureProductParams,

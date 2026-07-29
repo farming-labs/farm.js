@@ -13,7 +13,7 @@ Call app API routes with api.hello.get style inference, cache policies, invalida
 **src/lib/api-client.ts**
 
 ```ts
-import { createAPIClient } from "@farmjs/core/client";
+import { createAPIClient } from "@farm.js/core/client";
 import type { APIRouter } from "./api.generated";
 
 export const api = createAPIClient<APIRouter>();
@@ -142,7 +142,7 @@ This makes client components easier to write because failed responses do not nee
 Use server callers when the operation needs cookies, request headers, server-only credentials, or internal integration dispatch.
 
 ```ts
-import { createServerAPIClient } from "@farmjs/core/client";
+import { createServerAPIClient } from "@farm.js/core/client";
 import type { APIRouter } from "./api.generated";
 
 export async function loader(request: Request) {
@@ -180,7 +180,7 @@ If an integration operation is marked server-only, call it from `api`, not `apiC
 **src/actions/todos.ts**
 
 ```ts
-import { createServerFn } from "@farmjs/core/server-fn";
+import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
 export const addTodo = createServerFn({
@@ -235,7 +235,7 @@ loading, authorization, transactions, rate limits, and auditing. Middleware can 
 middleware, and every context value is inferred by functions that install it.
 
 ```ts
-import { createServerFn, createServerMiddleware } from "@farmjs/core/server-fn";
+import { createServerFn, createServerMiddleware } from "@farm.js/core/server-fn";
 
 const withSession = createServerMiddleware({
   async handler({ request, next }) {
@@ -289,7 +289,7 @@ sanitized server-action error boundary as handler errors.
 ```tsx
 "use client";
 
-import { useServerFn } from "@farmjs/core/server-fn/client";
+import { useServerFn } from "@farm.js/core/server-fn/client";
 import { addTodo } from "../actions/todos";
 
 export function TodoForm() {

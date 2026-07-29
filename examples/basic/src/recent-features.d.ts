@@ -1,6 +1,6 @@
-import type {} from '@farmjs/core';
+import type {} from '@farm.js/core';
 
-declare module '@farmjs/core' {
+declare module '@farm.js/core' {
   interface FarmAppContext {
     tenant: {
       id: string;

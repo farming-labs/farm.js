@@ -1,4 +1,4 @@
-import { loadConfig, logger } from "@farmjs/core";
+import { loadConfig, logger } from "@farm.js/core";
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
@@ -308,7 +308,7 @@ async function planNextMigration(
       force: options.force,
     });
     plan.manual.push(
-      "Review migrated middleware for next/server APIs; Farm middleware uses @farmjs/core/middleware.",
+      "Review migrated middleware for next/server APIs; Farm middleware uses @farm.js/core/middleware.",
     );
   }
 
@@ -390,13 +390,13 @@ function addSharedFarmFiles(
   if (!farmConfigPath) {
     const output =
       source === "next"
-        ? `import { defineConfig } from "@farmjs/core";
+        ? `import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   srcDir: "src",
 });
 `
-        : `import { defineConfig } from "@farmjs/core";
+        : `import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   srcDir: "src",
@@ -418,7 +418,7 @@ export default defineConfig({
       kind: "write-file",
       path: layoutPath,
       description: "Create a minimal root layout",
-      content: `import type { LayoutProps } from "@farmjs/core";
+      content: `import type { LayoutProps } from "@farm.js/core";
 
 export default function Layout({ children }: LayoutProps) {
   return <>{children}</>;
@@ -429,7 +429,7 @@ export default function Layout({ children }: LayoutProps) {
   }
 
   if (!packageJson) {
-    plan.warnings.push("No package.json found; add @farmjs/core and @farmjs/cli manually.");
+    plan.warnings.push("No package.json found; add @farm.js/core and @farm.js/cli manually.");
   }
 }
 
@@ -626,11 +626,11 @@ function transformNextContent(content: string) {
       /import\s+([A-Za-z_$][\w$]*)\s+from\s+["']next\/link["'];?/g,
       (_match, localName) =>
         localName === "Link"
-          ? `import { Link } from "@farmjs/core/client";`
-          : `import { Link as ${localName} } from "@farmjs/core/client";`,
+          ? `import { Link } from "@farm.js/core/client";`
+          : `import { Link as ${localName} } from "@farm.js/core/client";`,
     )
-    .replace(/from\s+["']next\/navigation["']/g, `from "@farmjs/core/navigation"`)
-    .replace(/from\s+["']next\/headers["']/g, `from "@farmjs/core/headers"`);
+    .replace(/from\s+["']next\/navigation["']/g, `from "@farm.js/core/navigation"`)
+    .replace(/from\s+["']next\/headers["']/g, `from "@farm.js/core/headers"`);
 }
 
 function collectNextManualNotes(relative: string, content: string, plan: FrameworkMigrationPlan) {
@@ -717,15 +717,15 @@ function createMigratedPackageJson(packageJson: any, source: FarmFrameworkMigrat
   }
 
   nextPackageJson.dependencies = nextPackageJson.dependencies || {};
-  if (!nextPackageJson.dependencies["@farmjs/core"]) {
-    nextPackageJson.dependencies["@farmjs/core"] = "latest";
-    changes.push("dependencies.@farmjs/core -> latest");
+  if (!nextPackageJson.dependencies["@farm.js/core"]) {
+    nextPackageJson.dependencies["@farm.js/core"] = "latest";
+    changes.push("dependencies.@farm.js/core -> latest");
   }
 
   nextPackageJson.devDependencies = nextPackageJson.devDependencies || {};
-  if (!nextPackageJson.devDependencies["@farmjs/cli"]) {
-    nextPackageJson.devDependencies["@farmjs/cli"] = "latest";
-    changes.push("devDependencies.@farmjs/cli -> latest");
+  if (!nextPackageJson.devDependencies["@farm.js/cli"]) {
+    nextPackageJson.devDependencies["@farm.js/cli"] = "latest";
+    changes.push("devDependencies.@farm.js/cli -> latest");
   }
 
   return { packageJson: nextPackageJson, changes };

@@ -11,7 +11,7 @@ import {
   type FarmIntegrationSchema,
   type FarmIntegrationSchemaField,
   type FarmIntegrationSchemaModel,
-} from "@farmjs/core";
+} from "@farm.js/core";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";

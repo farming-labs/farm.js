@@ -1,4 +1,4 @@
-import { middleware, type MiddlewareContext, type NextFunction } from '@farmjs/core/middleware';
+import { middleware, type MiddlewareContext, type NextFunction } from '@farm.js/core/middleware';
 
 export default middleware()
   .use(async (_ctx: MiddlewareContext, next: NextFunction) => {

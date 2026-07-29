@@ -31,7 +31,7 @@ If the app uses another port, keep the same path on that origin. The launcher re
 DevTools is enabled by default during `farm dev`. Disable the client launcher and both internal runtime routes in `farm.config.ts`:
 
 ```ts title="farm.config.ts"
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   devtools: {
@@ -43,7 +43,7 @@ export default defineConfig({
 To keep the dashboard available while turning off only the keyboard shortcut, use `shortcut: false`. You can also assign another shortcut with modifier names joined by `+`:
 
 ```ts title="farm.config.ts"
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   devtools: {
@@ -156,7 +156,7 @@ farm doctor --offline
 Offline mode checks:
 
 - Node.js satisfies Farm's supported baseline.
-- `package.json` exists and declares `@farmjs/core`.
+- `package.json` exists and declares `@farm.js/core`.
 - Farm config loads and resolves for development.
 - The app directory or programmatic router contains page routes.
 - A root layout is available from the app or an extended layer.

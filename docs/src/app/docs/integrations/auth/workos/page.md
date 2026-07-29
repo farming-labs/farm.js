@@ -23,7 +23,7 @@ farm add integration workos --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { workos } from "@farmjs/integrations/workos";
+import { workos } from "@farm.js/integrations/workos";
 
 export const appIntegrations = {
   auth: workos({

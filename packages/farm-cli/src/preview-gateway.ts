@@ -1,5 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { logger } from "@farmjs/core";
+import { logger } from "@farm.js/core";
 import type { PreviewFarmOptions, PreviewTarget } from "./preview";
 
 export interface PreviewGatewayPlan {

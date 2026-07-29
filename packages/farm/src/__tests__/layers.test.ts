@@ -34,7 +34,7 @@ describe("Farm layers", () => {
     writeFileSync(
       path.join(root, "farm.config.ts"),
       `
-        import { defineConfig } from "@farmjs/core";
+        import { defineConfig } from "@farm.js/core";
         export default defineConfig({
           extends: ["./layers/commerce"],
           routeRules: { "/shop/checkout": { render: "dynamic" } }

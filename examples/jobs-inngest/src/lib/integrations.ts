@@ -1,4 +1,4 @@
-import { inngest, jobs } from "@farmjs/integrations";
+import { inngest, jobs } from "@farm.js/integrations";
 import { inngestTasks } from "./jobs.ts";
 
 export const appIntegrations = {

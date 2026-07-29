@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { betterAuth as farmBetterAuth } from "@farmjs/integrations/better-auth";
+import { betterAuth as farmBetterAuth } from "@farm.js/integrations/better-auth";
 import {
   prismaStorageAdapter,
   stripe,
@@ -7,7 +7,7 @@ import {
   type StripeBillingOwner,
   type StripeBillingSnapshot,
   type StripeWebhookEvent,
-} from "@farmjs/integrations/stripe";
+} from "@farm.js/integrations/stripe";
 import { auth } from "./auth.ts";
 import { getExampleEnv, requireExampleEnv } from "./env.ts";
 import { organizationToolsIntegration } from "./organization-tools.ts";

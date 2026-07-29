@@ -765,7 +765,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 function apiClientTemplate() {
-  return `import { createIntegrations } from "@farmjs/core/client";
+  return `import { createIntegrations } from "@farm.js/core/client";
 import type { AppIntegrations } from "./integrations";
 
 export const { api, apiClient } = createIntegrations<AppIntegrations>();

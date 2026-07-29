@@ -4,9 +4,9 @@
  * Use this file to define API routes with explicit paths.
  * This is useful for routes that don't follow the file-based convention.
  */
-import { createEndpoint } from '@farmjs/core/api';
-import { headers } from '@farmjs/core/headers';
-import { getCurrentRequest } from '@farmjs/core/request';
+import { createEndpoint } from '@farm.js/core/api';
+import { headers } from '@farm.js/core/headers';
+import { getCurrentRequest } from '@farm.js/core/request';
 import { z } from 'zod';
 
 // Custom route with explicit path

@@ -4,7 +4,7 @@ import {
   resolveConfig,
   type FarmCronJob,
   type FarmCronResolvedConfig,
-} from "@farmjs/core";
+} from "@farm.js/core";
 import { Cron } from "croner";
 import path from "node:path";
 

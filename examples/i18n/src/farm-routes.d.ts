@@ -5,24 +5,24 @@
  */
 export type RoutePath = "/";
 export type RoutePattern = "/";
-declare module "@farmjs/core/client" {
+declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
     pattern: import("./farm-routes").RoutePattern;
   }
 }
 
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
     pattern: import("./farm-routes").RoutePattern;
   }
-  // Ensure root import ("@farmjs/core") uses the same typed Link signature as client entry.
-  const Link: typeof import("@farmjs/core/client").Link;
+  // Ensure root import ("@farm.js/core") uses the same typed Link signature as client entry.
+  const Link: typeof import("@farm.js/core/client").Link;
 }
 
-// Internal declaration path used by @farmjs/core root type re-exports.
-declare module "@farmjs/core/dist/client.js" {
+// Internal declaration path used by @farm.js/core root type re-exports.
+declare module "@farm.js/core/dist/client.js" {
   interface LinkDefaultRoute {
     _: import("./farm-routes").RoutePath;
     pattern: import("./farm-routes").RoutePattern;

@@ -134,7 +134,7 @@ async function createTempProject(options = {}) {
     path.join(root, "package.json"),
     JSON.stringify({
       name: "doctor-fixture",
-      dependencies: { "@farmjs/core": "workspace:*" },
+      dependencies: { "@farm.js/core": "workspace:*" },
     }),
     "utf8",
   );

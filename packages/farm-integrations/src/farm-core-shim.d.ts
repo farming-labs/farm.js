@@ -1,4 +1,4 @@
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   export type FarmIntegrationCategory =
     | "auth"
     | "payment"

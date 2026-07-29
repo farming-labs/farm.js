@@ -9,7 +9,7 @@ import {
   type InferProgrammaticRouteData,
   type Deferred,
   type ProgrammaticPageRoute,
-} from '@farmjs/core';
+} from '@farm.js/core';
 import { z } from 'zod';
 import {
   readRuntimeBoundary,

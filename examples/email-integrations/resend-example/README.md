@@ -1,6 +1,6 @@
 # Resend Email Integration Example
 
-Config-first typed email delivery through `@farmjs/integrations/email`.
+Config-first typed email delivery through `@farm.js/integrations/email`.
 
 This example wires:
 
@@ -37,7 +37,7 @@ For scheduling, pass an ISO 8601 string in `when`. The integration maps that to 
 You can also use the helper presets:
 
 ```ts
-import { emailSchedule } from "@farmjs/integrations/email/schedule";
+import { emailSchedule } from "@farm.js/integrations/email/schedule";
 
 await apiClient.email.schedule({
   body: {
@@ -78,7 +78,7 @@ await apiClient.email.schedule({
 
 To run it:
 
-1. Build the package once: `pnpm --filter @farmjs/integrations build`
+1. Build the package once: `pnpm --filter @farm.js/integrations build`
 2. Start the example: `pnpm --dir examples/email-integrations/resend-example dev`
 3. Open [http://localhost:3005](http://localhost:3005)
 

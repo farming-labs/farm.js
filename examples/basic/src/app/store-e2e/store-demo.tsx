@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createStore } from "@farmjs/core/client";
+import { createStore } from "@farm.js/core/client";
 
 const demoStore = createStore(
   {

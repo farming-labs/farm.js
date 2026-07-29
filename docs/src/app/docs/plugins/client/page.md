@@ -15,7 +15,7 @@ Application code does not mount a provider, initialize a second registry, or for
 **farm.config.ts**
 
 ```ts
-import { defineConfig, definePlugin } from "@farmjs/core";
+import { defineConfig, definePlugin } from "@farm.js/core";
 
 const analytics = definePlugin({
   name: "acme:analytics",
@@ -195,7 +195,7 @@ The browser entry is an allowlisted extraction, not a serialization of the whole
 A package exposes one ordinary plugin factory:
 
 ```ts
-import { definePlugin } from "@farmjs/core";
+import { definePlugin } from "@farm.js/core";
 
 export function analyticsPlugin(projectId: string) {
   return definePlugin({

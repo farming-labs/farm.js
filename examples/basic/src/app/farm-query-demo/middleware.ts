@@ -1,7 +1,7 @@
 /**
  * Farm Query Demo middleware - demonstrates page-specific middleware
  */
-import { middleware } from '@farmjs/core/middleware';
+import { middleware } from '@farm.js/core/middleware';
 
 export default middleware()
   .use(async (ctx, next) => {

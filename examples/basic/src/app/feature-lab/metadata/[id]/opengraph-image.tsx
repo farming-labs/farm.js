@@ -1,4 +1,4 @@
-import type { PageProps } from '@farmjs/core';
+import type { PageProps } from '@farm.js/core';
 
 export const size = { width: 1200, height: 630 };
 export const alt = 'Feature metadata preview';

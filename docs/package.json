@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "pnpm --filter @farmjs/core build && pnpm --filter @farmjs/cli build && pnpm run prisma:generate && farm dev",
-    "build": "pnpm --filter @farmjs/core build:runtime && pnpm --filter @farmjs/cli build && pnpm run prisma:generate && farm build",
+    "dev": "pnpm --filter @farm.js/core build && pnpm --filter @farm.js/cli build && pnpm run prisma:generate && farm dev",
+    "build": "pnpm --filter @farm.js/core build:runtime && pnpm --filter @farm.js/cli build && pnpm run prisma:generate && farm build",
     "preview": "farm preview",
     "prisma:generate": "DATABASE_URL=${DATABASE_URL:-postgresql://user:password@localhost:5432/farmjs} prisma generate",
     "db:push": "prisma db push"
@@ -13,7 +13,7 @@
   "dependencies": {
     "@farming-labs/docs": "^0.2.44",
     "@farming-labs/theme": "^0.2.44",
-    "@farmjs/core": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",
     "lucide-react": "1.23.0",
@@ -24,7 +24,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@farmjs/cli": "workspace:*",
+    "@farm.js/cli": "workspace:*",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "autoprefixer": "^10.4.16",

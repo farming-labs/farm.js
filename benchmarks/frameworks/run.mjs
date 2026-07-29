@@ -97,15 +97,15 @@ const frameworks = [
     directory: "farm",
     devHost: "localhost",
     installedPackages: [
-      { name: "@farmjs/core", version: "0.0.3-beta.3" },
-      { name: "@farmjs/cli", version: "0.0.1" },
+      { name: "@farm.js/core", version: "0.0.3-beta.3" },
+      { name: "@farm.js/cli", version: "0.0.1" },
       { name: "react", version: "19.2.4" },
       { name: "react-dom", version: "19.2.4" },
       { name: "sharp", version: "0.34.5" },
-      { name: "vite", version: "5.4.20", from: "@farmjs/core" },
-      { name: "vite-rolldown", version: "8.1.5", from: "@farmjs/core" },
+      { name: "vite", version: "5.4.20", from: "@farm.js/core" },
+      { name: "vite-rolldown", version: "8.1.5", from: "@farm.js/core" },
     ],
-    cli: "node_modules/@farmjs/cli/bin/farm.js",
+    cli: "node_modules/@farm.js/cli/bin/farm.js",
     devArgs: (port) => ["dev", "--port", String(port)],
     buildArgs: () => ["build", "--preset", "node-server"],
     production: (port) => ({
@@ -854,10 +854,10 @@ async function assertInstalled(framework) {
 
 async function prepareFarm() {
   console.log("Preparing local Farm packages outside timed runs...");
-  await runCommand("corepack", ["pnpm", "--filter", "@farmjs/core", "build"], {
+  await runCommand("corepack", ["pnpm", "--filter", "@farm.js/core", "build"], {
     cwd: repoRoot,
   });
-  await runCommand("corepack", ["pnpm", "--filter", "@farmjs/cli", "build"], {
+  await runCommand("corepack", ["pnpm", "--filter", "@farm.js/cli", "build"], {
     cwd: repoRoot,
   });
 }

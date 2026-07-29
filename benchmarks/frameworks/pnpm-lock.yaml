@@ -10,7 +10,7 @@ importers:
 
   apps/farm:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: link:../../../../packages/farm
         version: link:../../../../packages/farm
       react:
@@ -23,7 +23,7 @@ importers:
         specifier: 0.34.5
         version: 0.34.5
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: link:../../../../packages/farm-cli
         version: link:../../../../packages/farm-cli
       '@types/react':

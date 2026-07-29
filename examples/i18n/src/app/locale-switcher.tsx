@@ -1,6 +1,6 @@
 "use client";
 
-import { useLocale, useTranslations } from "@farmjs/core/i18n/client";
+import { useLocale, useTranslations } from "@farm.js/core/i18n/client";
 
 const labels = {
   en: "locale.english",

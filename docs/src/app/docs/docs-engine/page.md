@@ -13,7 +13,7 @@ Serve a @farming-labs/docs-powered docs runtime from Farm config, including huma
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   docs: {
@@ -70,7 +70,7 @@ Keep docs configuration alongside the rest of the application in `farm.config.ts
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   docs: {
@@ -162,7 +162,7 @@ When `docs.entry` is enabled in `farm.config.ts`, Farm can mount docs pages and 
 
 ```ts
 // src/app/api/docs/route.ts
-import { createDocsAPI } from "@farmjs/core/docs";
+import { createDocsAPI } from "@farm.js/core/docs";
 
 export const { GET, POST } = createDocsAPI();
 ```

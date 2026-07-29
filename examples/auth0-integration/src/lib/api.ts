@@ -1,5 +1,5 @@
-import { createIntegrations } from "@farmjs/core/client";
-import { auth0Client } from "@farmjs/integrations/auth0/client";
+import { createIntegrations } from "@farm.js/core/client";
+import { auth0Client } from "@farm.js/integrations/auth0/client";
 
 const auth0Api = {
   login: {

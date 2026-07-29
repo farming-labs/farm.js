@@ -1,6 +1,6 @@
 # Supabase Integration Example
 
-Config-only Supabase auth through `@farmjs/integrations/supabase`.
+Config-only Supabase auth through `@farm.js/integrations/supabase`.
 
 The example uses:
 
@@ -45,7 +45,7 @@ The integration owns:
 Create the shared callers once and reuse them in your pages:
 
 ```ts
-import { createIntegrations } from "@farmjs/core/client";
+import { createIntegrations } from "@farm.js/core/client";
 import type { AppIntegrations } from "./src/lib/integrations";
 
 export const { api, apiClient } = createIntegrations<AppIntegrations>();
@@ -120,7 +120,7 @@ That works for any integration namespace, not just auth.
 For integration authors, the intended shape is now just a plain endpoint namespace:
 
 ```ts
-import { api } from "@farmjs/core/client";
+import { api } from "@farm.js/core/client";
 
 export const myIntegrationClient = {
   login: api.post<LoginBody, LoginResult>("/auth/login"),

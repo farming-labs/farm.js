@@ -1,6 +1,6 @@
-import { invalidate } from "@farmjs/core/cache";
-import { createServerFn } from "@farmjs/core/server-fn";
-import { createServerQuery } from "@farmjs/core/server-query";
+import { invalidate } from "@farm.js/core/cache";
+import { createServerFn } from "@farm.js/core/server-fn";
+import { createServerQuery } from "@farm.js/core/server-query";
 import { z } from "zod";
 
 let productVersion = 1;

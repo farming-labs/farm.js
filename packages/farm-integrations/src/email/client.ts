@@ -1,6 +1,6 @@
 import type { ComponentProps, ComponentType } from "react";
 import type { Attachment, Tag } from "resend";
-import { api } from "@farmjs/core/client";
+import { api } from "@farm.js/core/client";
 import {
   createPathInferredClientApi,
   type InferPathInferredClientAPI,

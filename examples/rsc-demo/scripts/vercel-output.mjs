@@ -33,8 +33,8 @@ const appPkgPath = path.join(root, "package.json");
 if (existsSync(appPkgPath)) {
   const appPkg = JSON.parse(readFileSync(appPkgPath, "utf-8"));
   const deps = { ...(appPkg.dependencies || {}), ...(appPkg.devDependencies || {}) };
-  delete deps["@farmjs/core"];
-  delete deps["@farmjs/plugin"];
+  delete deps["@farm.js/core"];
+  delete deps["@farm.js/plugin"];
   ["@tailwindcss/vite", "@types/react", "@types/react-dom", "@vitejs/plugin-react", "@vitejs/plugin-rsc", "tailwindcss", "typescript", "vite"].forEach((k) => delete deps[k]);
   const funcPkg = {
     name: "rsc-fallback",

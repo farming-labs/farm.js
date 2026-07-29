@@ -1,6 +1,6 @@
 import { defineDocs } from "@farming-labs/docs";
 import { pixelBorder } from "@farming-labs/theme/pixel-border";
-import type { FarmDocsSidebarItem } from "@farmjs/core";
+import type { FarmDocsSidebarItem } from "@farm.js/core";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
   favicon?: string;

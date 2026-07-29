@@ -20,7 +20,7 @@ describe("generated after lifecycle", () => {
   it("wraps the complete RSC request instead of individual route branches", () => {
     const entry = generateRscEntry(context);
 
-    expect(entry).toContain("import { _runWithAfterRequest } from '@farmjs/core/after'");
+    expect(entry).toContain("import { _runWithAfterRequest } from '@farm.js/core/after'");
     expect(entry).toContain("async function handleFarmRequest(request)");
     expect(entry).toContain("async function handler(request, context)");
     expect(entry).toContain(

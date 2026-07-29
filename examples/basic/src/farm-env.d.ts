@@ -4,7 +4,7 @@
  */
 import type FarmConfig0 from "../layers/framework-features/farm.config";
 import type FarmConfig1 from "../farm.config";
-import type { InferEnv } from "@farmjs/core/env";
+import type { InferEnv } from "@farm.js/core/env";
 
 type MergeFarmEnv<TBase, TOverride> = {
   server: Omit<TBase extends { server: infer T } ? T : {}, keyof (TOverride extends { server: infer T } ? T : {})> &
@@ -30,14 +30,14 @@ type FarmMergedEnv1 = MergeFarmEnv<FarmResolvedEnv0, FarmResolvedEnv1>;
 
 type FarmResolvedEnv = FarmMergedEnv1;
 
-declare module "@farmjs/core/env" {
+declare module "@farm.js/core/env" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];
   }
 }
 
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   interface FarmEnvTypes {
     server: FarmResolvedEnv["server"];
     public: FarmResolvedEnv["public"];

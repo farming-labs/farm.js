@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { parse, printParseErrorCode, type ParseError } from "jsonc-parser";
-import { normalizeAgentRoutePrefix } from "@farmjs/core/agent-runtime";
+import { normalizeAgentRoutePrefix } from "@farm.js/core/agent-runtime";
 
 const GENERATED_CONFIG_NAME = ".farm-cf-agent.wrangler.jsonc";
 
@@ -44,7 +44,7 @@ export async function writeCloudflareAgentOutput(
     throw new Error(`${configPath} must define a non-empty Wrangler main entry.`);
   }
   if (config.no_bundle === true) {
-    throw new Error("@farmjs/cf-agent requires Wrangler bundling; remove no_bundle: true.");
+    throw new Error("@farm.js/cf-agent requires Wrangler bundling; remove no_bundle: true.");
   }
 
   const agentEntry = resolve(configDirectory, agentEntryValue);

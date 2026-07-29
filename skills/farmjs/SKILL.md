@@ -45,8 +45,8 @@ src/app/
 Core imports:
 
 ```ts
-import type { PageProps, LayoutProps } from "@farmjs/core";
-import { Link, integrationClients } from "@farmjs/core/client";
+import type { PageProps, LayoutProps } from "@farm.js/core";
+import { Link, integrationClients } from "@farm.js/core/client";
 ```
 
 Use `"use client"` when a component uses React hooks, browser APIs, or client-only integration calls.
@@ -56,7 +56,7 @@ Use `"use client"` when a component uses React hooks, browser APIs, or client-on
 Farm apps use `defineConfig`. The older `defineFarmConfig` name remains available as a deprecated exact alias:
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { appIntegrations } from "./src/lib/integrations.ts";
 
 export default defineConfig({
@@ -98,7 +98,7 @@ Common config fields:
 Page shape:
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export default function UserPage({ params, searchParams }: PageProps) {
   return <div>User: {params?.id}</div>;
@@ -108,7 +108,7 @@ export default function UserPage({ params, searchParams }: PageProps) {
 Layout shape:
 
 ```tsx
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
@@ -138,21 +138,21 @@ export default defineConfig({
 Put nested JSON catalogs at `src/messages/<locale>.json`. Farm generates
 `src/farm-i18n.d.ts`, so message keys and ICU variables are checked by TypeScript.
 
-Server modules import from `@farmjs/core/i18n/server`:
+Server modules import from `@farm.js/core/i18n/server`:
 
 ```ts
-import { getLocale, t } from "@farmjs/core/i18n/server";
+import { getLocale, t } from "@farm.js/core/i18n/server";
 
 const locale = getLocale();
 const label = t("cart.items", { count: 3 });
 ```
 
-Client components import from `@farmjs/core/i18n/client`:
+Client components import from `@farm.js/core/i18n/client`:
 
 ```tsx
 "use client";
 
-import { useLocale, useTranslations } from "@farmjs/core/i18n/client";
+import { useLocale, useTranslations } from "@farm.js/core/i18n/client";
 
 const { locale, locales, setLocale } = useLocale();
 const t = useTranslations();
@@ -166,12 +166,12 @@ normal `/api/**` paths and can call the same server APIs. Read
 
 ## Typed API Client Spec
 
-For app API routes, use `createAPIClient` from `@farmjs/core/client`.
+For app API routes, use `createAPIClient` from `@farm.js/core/client`.
 
 For integration APIs, prefer `integrationClients<AppIntegrations>()`:
 
 ```ts
-import { integrationClients } from "@farmjs/core/client";
+import { integrationClients } from "@farm.js/core/client";
 import type { AppIntegrations } from "./integrations";
 
 export const { api, apiClient } = integrationClients<AppIntegrations>();
@@ -211,7 +211,7 @@ Available integration families in this repo include:
 - Email: Resend
 - Jobs: local jobs, trigger, Inngest
 
-When building a new integration, use core primitives from `@farmjs/core`:
+When building a new integration, use core primitives from `@farm.js/core`:
 
 - `defineIntegration`
 - `integrationRoute`
@@ -225,7 +225,7 @@ Integration routes can validate body and query input with Zod-compatible schemas
 
 ```ts
 import { z } from "zod";
-import { defineIntegration, integrationRoute } from "@farmjs/core";
+import { defineIntegration, integrationRoute } from "@farm.js/core";
 
 export const localDemo = defineIntegration({
   category: "custom",
@@ -263,7 +263,7 @@ farm add integration resend --file src/lib/integrations.ts
 
 The command creates or updates `src/lib/integrations.ts`, adds a provider component under
 `src/lib/integrations/`, wires `farm.config.ts` when it can do so safely, and adds
-`@farmjs/integrations` to `package.json`.
+`@farm.js/integrations` to `package.json`.
 
 ## Stripe Integration Spec
 
@@ -273,8 +273,8 @@ Server setup:
 
 ```ts
 import Stripe from "stripe";
-import type { FarmIntegrationLogEvent } from "@farmjs/core";
-import { stripe, type StripeWebhookEvent } from "@farmjs/integrations/stripe";
+import type { FarmIntegrationLogEvent } from "@farm.js/core";
+import { stripe, type StripeWebhookEvent } from "@farm.js/integrations/stripe";
 import { stripeCatalog } from "./stripe-catalog.ts";
 
 const stripeInstance = new Stripe(process.env.STRIPE_SECRET_KEY!);
@@ -297,7 +297,7 @@ export const appIntegrations = {
 Catalog shape:
 
 ```ts
-import type { StripeIntegrationProduct } from "@farmjs/integrations/stripe/client";
+import type { StripeIntegrationProduct } from "@farm.js/integrations/stripe/client";
 
 export const stripeCatalog: StripeIntegrationProduct[] = [
   {
@@ -373,7 +373,7 @@ import {
   sqliteStorageAdapter,
   prismaStorageAdapter,
   drizzleStorageAdapter,
-} from "@farmjs/integrations/stripe";
+} from "@farm.js/integrations/stripe";
 ```
 
 Stripe environment:
@@ -400,10 +400,10 @@ Auth integrations usually provide both server route registration and client API 
 
 ## Storage Spec
 
-Storage helpers live under `@farmjs/core/storage`:
+Storage helpers live under `@farm.js/core/storage`:
 
 ```ts
-import { getStorage, sqliteStorage, redisStorage } from "@farmjs/core/storage";
+import { getStorage, sqliteStorage, redisStorage } from "@farm.js/core/storage";
 
 const sqlite = sqliteStorage({
   path: "./.farm/storage/app.sqlite",
@@ -429,7 +429,7 @@ Known helpers include memory, local, sqlite, postgres, mysql, redis, mongodb, s3
 Framework Cron maps portable five-field UTC schedules to ordinary GET API routes. Keep timing in `farm.config.ts` and business logic in the route:
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   cron: {
@@ -442,7 +442,7 @@ export default defineConfig({
 ```
 
 ```ts
-import { cronRoute } from "@farmjs/core/cron";
+import { cronRoute } from "@farm.js/core/cron";
 
 export const GET = cronRoute(async () => {
   await deleteExpiredSessions();
@@ -459,7 +459,7 @@ Builds always emit `.farm/cron-manifest.json`. Vercel compiles entries to Build 
 Use `definePlugin` for custom behavior:
 
 ```ts
-import { definePlugin } from "@farmjs/core";
+import { definePlugin } from "@farm.js/core";
 
 export const plugin = definePlugin({
   name: "request-context-demo",
@@ -471,16 +471,16 @@ export const plugin = definePlugin({
 });
 ```
 
-Built-in server plugins are imported from `@farmjs/core/plugin/server`, including logger and compression helpers. Plugins run in order; use `enforce: "pre"` or `enforce: "post"` when order matters.
+Built-in server plugins are imported from `@farm.js/core/plugin/server`, including logger and compression helpers. Plugins run in order; use `enforce: "pre"` or `enforce: "post"` when order matters.
 
 ## Verification Commands
 
 Focused package checks:
 
 ```bash
-pnpm --filter @farmjs/core test
-pnpm --filter @farmjs/integrations type-check
-pnpm --filter @farmjs/integrations build
+pnpm --filter @farm.js/core test
+pnpm --filter @farm.js/integrations type-check
+pnpm --filter @farm.js/integrations build
 pnpm build
 pnpm lint
 ```
@@ -520,7 +520,7 @@ Expected with dummy keys: homepage returns `200`; `/billing/products` reaches St
 
 ## Common Pitfalls
 
-- Import `Link` and integration clients from `@farmjs/core/client` unless the local example uses the root export.
+- Import `Link` and integration clients from `@farm.js/core/client` unless the local example uses the root export.
 - Do not put server SDKs or secrets in `"use client"` modules.
 - Keep `AppIntegrations` exported from integration setup so `integrationClients<AppIntegrations>()` can infer types.
 - For Supabase/custom route APIs, method calls may be nested, for example `.login.post(...)`, not `.login(...)`.

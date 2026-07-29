@@ -23,7 +23,7 @@ Farm uses an app directory routing model with static routes, dynamic segments, c
 **src/app/users/[id]/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export default function UserPage({ params }: PageProps) {
   return <div>User: {params?.id}</div>;
@@ -37,7 +37,7 @@ Farm generates src/farm-routes.d.ts from your app tree. Link hrefs accept real r
 **Client navigation**
 
 ```tsx
-import { Link } from "@farmjs/core/client";
+import { Link } from "@farm.js/core/client";
 
 export function Nav() {
   return (
@@ -56,7 +56,7 @@ Use the lightweight router when client components, layouts, breadcrumbs, tabs, o
 **src/lib/router.ts**
 
 ```ts
-import { createFarmRouter } from "@farmjs/core/router";
+import { createFarmRouter } from "@farm.js/core/router";
 
 export const router = createFarmRouter(["/", "/dashboard", "/users/[id]", "/docs/[[...slug]]"]);
 ```
@@ -83,7 +83,7 @@ This returns `/docs/core/routing`. Optional catch-all params can be omitted, sta
 Client components can pass the same route list to `useRouter` when they want current route params:
 
 ```tsx
-import { useRouter } from "@farmjs/core/client";
+import { useRouter } from "@farm.js/core/client";
 
 export function CurrentUserTab() {
   const router = useRouter({
@@ -101,7 +101,7 @@ Use `useBlocker` when a client component needs to protect unsaved work before SP
 ```tsx
 "use client";
 
-import { useBlocker } from "@farmjs/core/client";
+import { useBlocker } from "@farm.js/core/client";
 
 export function ProductForm({ isDirty }: { isDirty: boolean }) {
   useBlocker({
@@ -122,7 +122,7 @@ Use page state for shallow UI state that belongs in browser history but should n
 ```tsx
 "use client";
 
-import { usePageState, useRouter } from "@farmjs/core/client";
+import { usePageState, useRouter } from "@farm.js/core/client";
 
 export function ProductToolbar() {
   const router = useRouter();
@@ -147,7 +147,7 @@ Farm restores window scroll during SPA navigation. Register nested scroll areas 
 ```tsx
 "use client";
 
-import { useScrollRestoration } from "@farmjs/core/client";
+import { useScrollRestoration } from "@farm.js/core/client";
 
 export function DocsSidebar() {
   const ref = useScrollRestoration<HTMLDivElement>("docs-sidebar");
@@ -162,7 +162,7 @@ Use stable keys per scroll container. If two elements share a key, the latest mo
 Programmatic routes can cache the value returned from `data.main`. This is useful for product pages, docs pages, dashboards, and other route data that should be reused during server rendering or prefetching.
 
 ```tsx
-import { createRoute, invalidate } from "@farmjs/core";
+import { createRoute, invalidate } from "@farm.js/core";
 import { z } from "zod";
 import { ProductPage } from "./page";
 
@@ -219,7 +219,7 @@ Use `defer()` for secondary data that should not delay the route shell. Farm ret
 
 ```tsx
 import { Suspense, use } from "react";
-import type { Deferred } from "@farmjs/core";
+import type { Deferred } from "@farm.js/core";
 
 export function ProductPage({ data }: ProductPageProps) {
   return (
@@ -241,7 +241,7 @@ function Reviews({ reviews }: { reviews: Deferred<Review[]> }) {
 **src/farm.routes.tsx**
 
 ```tsx
-import { createRoute, defer } from "@farmjs/core";
+import { createRoute, defer } from "@farm.js/core";
 import { ProductPage } from "./features/products/page";
 
 export const ProductRoute = createRoute("/products/[id]", {
@@ -273,7 +273,7 @@ Use `defer()` for independent secondary sections such as reviews, recommendation
 Programmatic routes can validate URL search params and define cleanup rules in one place. Use `search.schema` for typed route input, `stripDefaults` for clean URLs, `preserve` for params that should carry across links, and `temporary` for one-time UI params.
 
 ```tsx
-import { createRoute } from "@farmjs/core";
+import { createRoute } from "@farm.js/core";
 import { z } from "zod";
 
 export const ProductRoute = createRoute("/products/[id]", {
@@ -322,7 +322,7 @@ Use this for tab state, pagination defaults, locale/tenant preservation, preview
 Use `context` in `farm.config.ts` for request-scoped dependencies that guards and route data need: sessions, tenants, feature flags, or database clients. The value is available to programmatic route `guard`, `data.before`, `data.main`, cache key functions, and `data.after`.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { db } from "./src/db";
 import { getSession } from "./src/session";
 
@@ -340,7 +340,7 @@ Add a module augmentation when you want autocomplete in route files:
 import type { db } from "./src/db";
 import type { getSession } from "./src/session";
 
-declare module "@farmjs/core" {
+declare module "@farm.js/core" {
   interface FarmAppContext {
     session: Awaited<ReturnType<typeof getSession>>;
     db: typeof db;
@@ -355,7 +355,7 @@ Route context is server-only. Farm passes it to guards and data hooks without se
 Use `guard` when a route should be allowed or blocked before route data loads. Guards run after params/search validation and before `data.before` or `data.main`.
 
 ```tsx
-import { createRoute, redirect } from "@farmjs/core";
+import { createRoute, redirect } from "@farm.js/core";
 
 export const DashboardRoute = createRoute("/dashboard", {
   guard: async ({ context }) => {
@@ -381,7 +381,7 @@ Use `guard` for route flow: auth redirects, role gates, tenant checks, and early
 Programmatic routes can define local `pending`, `error`, and `notFound` components. `pending` is used as the Suspense fallback while route data resolves. `error` handles guard/data errors. `notFound` handles `notFound()` thrown from guard or data hooks.
 
 ```tsx
-import { notFound } from "@farmjs/core";
+import { notFound } from "@farm.js/core";
 
 export const ProductRoute = createRoute("/products/[id]", {
   data: {
@@ -445,7 +445,7 @@ Export `metadata` for static head tags or `generateMetadata` when the values dep
 **src/app/products/[id]/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export const metadata = {
   description: "Product details",
@@ -483,7 +483,7 @@ Place favicon files in `public/`, then declare them through the root layout meta
 **src/app/layout.tsx**
 
 ```tsx
-import type { Metadata } from "@farmjs/core";
+import type { Metadata } from "@farm.js/core";
 
 export const metadata: Metadata = {
   icons: "/favicon.svg",
@@ -493,7 +493,7 @@ export const metadata: Metadata = {
 Use the object form when you need multiple browser icons or an Apple touch icon:
 
 ```tsx
-import type { Metadata } from "@farmjs/core";
+import type { Metadata } from "@farm.js/core";
 
 export const metadata: Metadata = {
   icons: {
@@ -542,7 +542,7 @@ Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when 
 **src/app/products/[id]/opengraph-image.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export const size = { width: 1200, height: 630 };
 export const alt = "Product preview";
@@ -579,7 +579,7 @@ src/app/
 **src/app/dashboard/loading.tsx**
 
 ```tsx
-import type { LoadingProps } from "@farmjs/core";
+import type { LoadingProps } from "@farm.js/core";
 
 export default function DashboardLoading(props: LoadingProps) {
   return <p>Loading {props.path}</p>;
@@ -593,7 +593,7 @@ export default function DashboardLoading(props: LoadingProps) {
 ```tsx
 "use client";
 
-import type { ErrorProps } from "@farmjs/core";
+import type { ErrorProps } from "@farm.js/core";
 
 export default function DashboardError({ error, reset }: ErrorProps) {
   const message = error instanceof Error ? error.message : "Something went wrong";
@@ -617,7 +617,7 @@ Catch-all routes are useful for docs, CMS content, and nested marketing pages wh
 **src/app/docs/[...slug]/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export default function DocsPage({ params }: PageProps) {
   const slug = params.slug?.split("/") ?? [];
@@ -651,7 +651,7 @@ Use `useNavigation()` for global route-transition UI: top progress bars, disable
 ```tsx
 "use client";
 
-import { useNavigation } from "@farmjs/core/client";
+import { useNavigation } from "@farm.js/core/client";
 
 export function TopProgress() {
   const navigation = useNavigation();
@@ -667,7 +667,7 @@ export function TopProgress() {
 Pass `viewTransition` to `Link` or `navigateTo` when a navigation should use the browser View Transitions API. Farm starts the transition after route data is ready and falls back to normal SPA navigation when the browser does not support it.
 
 ```tsx
-import { Link, navigateTo } from "@farmjs/core/client";
+import { Link, navigateTo } from "@farm.js/core/client";
 
 export function GalleryLink() {
   return (

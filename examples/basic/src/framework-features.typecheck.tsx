@@ -1,5 +1,5 @@
-import { getEnv, getPublicEnv } from '@farmjs/core/env';
-import type { LinkProps, ResolvedRouteHref } from '@farmjs/core/client';
+import { getEnv, getPublicEnv } from '@farm.js/core/env';
+import type { LinkProps, ResolvedRouteHref } from '@farm.js/core/client';
 
 const serverUrl: string = getEnv('FARM_API_URL');
 const publicName: string = getPublicEnv('PUBLIC_APP_NAME');

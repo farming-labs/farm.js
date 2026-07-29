@@ -58,7 +58,7 @@ describe("environment function Vite transform", () => {
     writeFileSync(
       entry,
       `
-        import { createIsomorphicFn } from "@farmjs/core/environment";
+        import { createIsomorphicFn } from "@farm.js/core/environment";
         const implementations = { server: () => "server", client: () => "client" };
         export const target = createIsomorphicFn(implementations);
       `,
@@ -80,9 +80,9 @@ async function buildFixture(ssr: boolean): Promise<string> {
         createClientOnlyFn as clientOnly,
         createIsomorphicFn,
         createServerOnlyFn as serverOnly,
-      } from "@farmjs/core";
-      import * as environment from "@farmjs/core/environment";
-      import { createServerOnlyFn as serverEntryOnly } from "@farmjs/core/server";
+      } from "@farm.js/core";
+      import * as environment from "@farm.js/core/environment";
+      import { createServerOnlyFn as serverEntryOnly } from "@farm.js/core/server";
 
       export const serverValue = serverOnly(() => "SERVER_ONLY_SECRET");
       export const clientValue = clientOnly(() => "CLIENT_ONLY_VALUE");
@@ -134,7 +134,7 @@ async function buildEntry(root: string, entry: string, ssr: boolean): Promise<st
       target: "esnext",
       rollupOptions: {
         input: entry,
-        external: ["@farmjs/core", "@farmjs/core/environment", "@farmjs/core/server"],
+        external: ["@farm.js/core", "@farm.js/core/environment", "@farm.js/core/server"],
         preserveEntrySignatures: "strict",
         onwarn(warning, warn) {
           if (warning.code !== "UNUSED_EXTERNAL_IMPORT") warn(warning);

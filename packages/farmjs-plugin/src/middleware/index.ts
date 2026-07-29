@@ -6,7 +6,7 @@
  *
  * @example
  * ```ts
- * import { farmMiddleware } from '@farmjs/plugin/middleware'
+ * import { farmMiddleware } from '@farm.js/plugin/middleware'
  *
  * export default defineConfig({
  *   plugins: [farmMiddleware({ srcDir: 'src' })],
@@ -17,7 +17,7 @@
 import type { Plugin, ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "node:module";
-import { _withAfterNodeMiddleware } from "@farmjs/core/after";
+import { _withAfterNodeMiddleware } from "@farm.js/core/after";
 
 // Create require for ESM compatibility
 const require_ = createRequire(import.meta.url);
@@ -77,7 +77,7 @@ export interface CookieJar {
 }
 
 /**
- * Full middleware context - compatible with @farmjs/core/middleware
+ * Full middleware context - compatible with @farm.js/core/middleware
  */
 export interface MiddlewareContext {
   // Core request/response
@@ -366,7 +366,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
   };
 
   return {
-    name: "@farmjs/plugin/middleware",
+    name: "@farm.js/plugin/middleware",
     enforce: "pre",
 
     configureServer(server: ViteDevServer) {
@@ -454,7 +454,7 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
         const startTime = Date.now();
         const method = req.method || "GET";
 
-        // Log middleware execution in the same format as @farmjs/core
+        // Log middleware execution in the same format as @farm.js/core
         const pc = getColors();
         const logMsg = [
           pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useServerFn } from "@farmjs/core/server-fn/client";
+import { useServerFn } from "@farm.js/core/server-fn/client";
 import { inspectServerMiddleware } from "../actions/middleware";
 
 export function MiddlewareActions() {

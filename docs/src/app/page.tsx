@@ -1,4 +1,4 @@
-import type { Metadata, PageProps } from "@farmjs/core";
+import type { Metadata, PageProps } from "@farm.js/core";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -338,7 +338,7 @@ const integrationCodeTabs = [
     label: "src/lib/integrations.ts",
     language: "ts",
     highlightLines: [5, 6, 7, 8, 9],
-    code: `import { betterAuth, resend, stripe } from "@farmjs/integrations";
+    code: `import { betterAuth, resend, stripe } from "@farm.js/integrations";
 import { auth } from "./auth";
 import { emailTemplates } from "./email";
 export const integrations = {
@@ -355,7 +355,7 @@ export const integrations = {
     label: "farm.config.ts",
     language: "ts",
     highlightLines: [4],
-    code: `import { defineConfig } from "@farmjs/core";
+    code: `import { defineConfig } from "@farm.js/core";
 import { integrations } from "./src/lib/integrations";
 export default defineConfig({
     integrations,
@@ -363,7 +363,7 @@ export default defineConfig({
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
-const docsConfigCode = `import { defineConfig } from "@farmjs/core";
+const docsConfigCode = `import { defineConfig } from "@farm.js/core";
 export default defineConfig({
     docs: {
         enabled: true,
@@ -381,7 +381,7 @@ const layersConfigTabs = [
     id: "share",
     label: "Share / layer/farm.config.ts",
     language: "ts",
-    code: `import { defineConfig } from "@farmjs/core";
+    code: `import { defineConfig } from "@farm.js/core";
 export default defineConfig({
     routeRules: {
         "/products/**": { swr: 300 },
@@ -393,7 +393,7 @@ export default defineConfig({
     label: "Consume / app/farm.config.ts",
     language: "ts",
     highlightLines: [5],
-    code: `import { defineConfig } from "@farmjs/core";
+    code: `import { defineConfig } from "@farm.js/core";
 export default defineConfig({
     extends: [
         "@company/farm-base",
@@ -477,7 +477,7 @@ const agentRuntimeCodeTabs = [
     label: "Eve / farm.config.ts",
     language: "ts",
     highlightLines: [5, 8],
-    code: `import { eve } from "@farmjs/eve";
+    code: `import { eve } from "@farm.js/eve";
 
 export default defineConfig({
     integrations: {
@@ -493,7 +493,7 @@ export default defineConfig({
     label: "Cloudflare / farm.config.ts",
     language: "ts",
     highlightLines: [5, 8, 9],
-    code: `import { cfAgent } from "@farmjs/cf-agent";
+    code: `import { cfAgent } from "@farm.js/cf-agent";
 
 export default defineConfig({
     integrations: {

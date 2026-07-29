@@ -281,9 +281,9 @@ export default function AboutPage() {
     await migrateFarm({ root, source: "next", write: true });
 
     const page = await readFile(path.join(root, "src", "app", "about", "page.tsx"), "utf8");
-    assert.match(page, /import \{ Link as FarmLink \} from "@farmjs\/core\/client";/);
-    assert.match(page, /from "@farmjs\/core\/navigation";/);
-    assert.match(page, /from "@farmjs\/core\/headers";/);
+    assert.match(page, /import \{ Link as FarmLink \} from "@farm.js\/core\/client";/);
+    assert.match(page, /from "@farm.js\/core\/navigation";/);
+    assert.match(page, /from "@farm.js\/core\/headers";/);
     assert.doesNotMatch(page, /from "next\//);
     const farmConfig = await readFile(path.join(root, "farm.config.ts"), "utf8");
     assert.match(farmConfig, /defineConfig/);
@@ -293,8 +293,8 @@ export default function AboutPage() {
     assert.equal(packageJson.scripts.dev, "farm dev");
     assert.equal(packageJson.scripts.build, "farm build");
     assert.equal(packageJson.scripts.start, "node .output/server/index.mjs");
-    assert.equal(packageJson.dependencies["@farmjs/core"], "latest");
-    assert.equal(packageJson.devDependencies["@farmjs/cli"], "latest");
+    assert.equal(packageJson.dependencies["@farm.js/core"], "latest");
+    assert.equal(packageJson.devDependencies["@farm.js/cli"], "latest");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

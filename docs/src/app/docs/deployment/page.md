@@ -50,7 +50,7 @@ Use `deploy.target` when you want one config file to control the platform output
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 const target = process.env.FARM_DEPLOY_TARGET ?? "vercel";
 
@@ -110,7 +110,7 @@ Mutation requests are rejected before their action body is decoded or the handle
 Farm resolves the ID from explicit config, `FARM_DEPLOYMENT_ID`, `VERCEL_GIT_COMMIT_SHA`, or `CF_PAGES_COMMIT_SHA`. Otherwise, production uses `generateBuildId` and development uses `"development"`.
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   deploymentId: process.env.RELEASE_ID,
@@ -140,7 +140,7 @@ Use `target: "node"` when you want to run the app on your own server, VPS, conta
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   deploy: {
@@ -177,7 +177,7 @@ Farm can also build for any Nitro preset that Nitro can resolve. Use `deploy.pre
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   deploy: {
@@ -228,7 +228,7 @@ Farm reads deployment settings from `farm.config.ts`, so a minimal project does 
 **farm.config.ts**
 
 ```ts
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   deploy: {

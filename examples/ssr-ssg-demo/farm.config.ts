@@ -1,5 +1,5 @@
-import { defineConfig } from '@farmjs/core';
-import { createLoggerPlugin } from '@farmjs/core/plugin/server';
+import { defineConfig } from '@farm.js/core';
+import { createLoggerPlugin } from '@farm.js/core/plugin/server';
 
 export default defineConfig({
   srcDir: 'src',

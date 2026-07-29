@@ -108,8 +108,8 @@ export default defineConfig({
 If you change code in `packages/farm` or `packages/farmjs-plugin`, rebuild the workspace packages before restarting this example:
 
 ```bash
-pnpm --filter @farmjs/core build
-pnpm --filter @farmjs/plugin build
+pnpm --filter @farm.js/core build
+pnpm --filter @farm.js/plugin build
 cd examples/basic
 pnpm dev
 ```

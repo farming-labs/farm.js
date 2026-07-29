@@ -1,5 +1,5 @@
-import type { FarmPlugin, FarmUserConfig } from "@farmjs/core";
-import { createLoggerPlugin } from "@farmjs/core/plugin/server";
+import type { FarmPlugin, FarmUserConfig } from "@farm.js/core";
+import { createLoggerPlugin } from "@farm.js/core/plugin/server";
 import { randomUUID } from "crypto";
 
 function createDocsContextDemoPlugin(

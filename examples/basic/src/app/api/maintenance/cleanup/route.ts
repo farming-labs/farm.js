@@ -1,4 +1,4 @@
-import { cronRoute } from '@farmjs/core/cron';
+import { cronRoute } from '@farm.js/core/cron';
 
 export const GET = cronRoute(async (request) => {
   return Response.json({

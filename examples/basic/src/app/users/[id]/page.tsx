@@ -1,9 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from 'react'
-import { Link } from '@farmjs/core/client'
-import type { ResolvedRouteHref } from '@farmjs/core/client'
-import type { PageProps } from '@farmjs/core'
+import { Link } from '@farm.js/core/client'
+import type { ResolvedRouteHref } from '@farm.js/core/client'
+import type { PageProps } from '@farm.js/core'
 
 export default function UserPage({ params = {} }: PageProps) {
   const { id = '' } = params
@@ -68,7 +68,7 @@ export default function UserPage({ params = {} }: PageProps) {
           <div>
             <p className="font-semibold mb-2">1. Import the type:</p>
             <pre className="bg-white p-3 rounded-md text-sm overflow-auto border border-blue-200">
-        {`import type { PageProps } from '@farmjs/core'`}
+        {`import type { PageProps } from '@farm.js/core'`}
             </pre>
           </div>
 

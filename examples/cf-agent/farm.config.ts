@@ -1,5 +1,5 @@
-import { cfAgent } from "@farmjs/cf-agent";
-import { defineConfig } from "@farmjs/core";
+import { cfAgent } from "@farm.js/cf-agent";
+import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
   integrations: {

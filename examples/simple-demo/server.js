@@ -1,4 +1,4 @@
-import { startDevServer } from '@farmjs/core/server'
+import { startDevServer } from '@farm.js/core/server'
 
 startDevServer({
   root: process.cwd()

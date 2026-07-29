@@ -1,4 +1,4 @@
-import { defineConfig } from "@farmjs/core";
+import { defineConfig } from "@farm.js/core";
 import { appIntegrations } from "./src/lib/integrations.ts";
 
 export default defineConfig({

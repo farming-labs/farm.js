@@ -5,7 +5,7 @@ import type {
   AutumnBillingStatusResult,
   AutumnCatalogMeterPrice,
   AutumnCatalogProduct,
-} from "@farmjs/integrations";
+} from "@farm.js/integrations";
 import { apiClient } from "../lib/api";
 import { authClient } from "../lib/auth-client";
 import { authOrganizationClient } from "../lib/auth-organization-client";

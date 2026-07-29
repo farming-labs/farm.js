@@ -51,15 +51,15 @@ importers:
 
   docs:
     dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../packages/farm
       '@farming-labs/docs':
         specifier: ^0.2.44
         version: 0.2.44(react@19.2.4)(supports-color@10.2.2)
       '@farming-labs/theme':
         specifier: ^0.2.44
         version: 0.2.44(@farming-labs/docs@0.2.44)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.2.4)(react-dom@19.2.4)(react@19.2.4)(supports-color@10.2.2)(tailwindcss@3.4.18)
-      '@farmjs/core':
-        specifier: workspace:*
-        version: link:../packages/farm
       '@prisma/client':
         specifier: 6.7.0
         version: 6.7.0(prisma@6.7.0)(typescript@5.9.3)
@@ -85,7 +85,7 @@ importers:
         specifier: ^4.3.6
         version: 4.3.6
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../packages/farm-cli
       '@types/react':
@@ -118,10 +118,10 @@ importers:
 
   examples/auth0-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -131,7 +131,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -149,10 +149,10 @@ importers:
 
   examples/authjs-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -162,7 +162,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -180,10 +180,10 @@ importers:
 
   examples/autumn-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       better-auth:
@@ -199,7 +199,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -217,7 +217,7 @@ importers:
 
   examples/basic:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       better-call:
@@ -233,7 +233,7 @@ importers:
         specifier: ^4.1.12
         version: 4.1.12
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -257,10 +257,10 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       better-auth:
@@ -276,7 +276,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -294,10 +294,10 @@ importers:
 
   examples/cf-agent:
     dependencies:
-      '@farmjs/cf-agent':
+      '@farm.js/cf-agent':
         specifier: workspace:*
         version: link:../../packages/farm-cf-agent
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       agents:
@@ -313,7 +313,7 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^5.20260710.1
         version: 5.20260716.1
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
@@ -343,10 +343,10 @@ importers:
       '@clerk/react':
         specifier: ^6.1.0
         version: 6.1.0(react-dom@19.2.4)(react@19.2.4)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -356,7 +356,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -374,7 +374,7 @@ importers:
 
   examples/deployment-presets:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       react:
@@ -384,7 +384,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -402,7 +402,7 @@ importers:
 
   examples/docs-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       react:
@@ -412,7 +412,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -430,10 +430,10 @@ importers:
 
   examples/email-integrations/resend-example:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../../packages/farm-integrations
       '@react-email/components':
@@ -446,7 +446,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/react':
@@ -464,10 +464,10 @@ importers:
 
   examples/eve-agent:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/eve':
+      '@farm.js/eve':
         specifier: workspace:*
         version: link:../../packages/farm-eve
       ai:
@@ -483,7 +483,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -501,7 +501,7 @@ importers:
 
   examples/i18n:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       react:
@@ -511,7 +511,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -529,10 +529,10 @@ importers:
 
   examples/jobs-inngest:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -542,7 +542,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -560,10 +560,10 @@ importers:
 
   examples/jobs-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -573,7 +573,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -591,10 +591,10 @@ importers:
 
   examples/jobs-trigger:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -604,7 +604,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -622,10 +622,10 @@ importers:
 
   examples/polar-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       better-auth:
@@ -641,7 +641,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -659,7 +659,7 @@ importers:
 
   examples/preview-gateway:
     dependencies:
-      '@farmjs/preview-gateway':
+      '@farm.js/preview-gateway':
         specifier: workspace:*
         version: link:../../packages/farm-preview-gateway
       '@vercel/blob':
@@ -675,7 +675,7 @@ importers:
 
   examples/rsc-demo:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       picocolors:
@@ -694,7 +694,7 @@ importers:
         specifier: ^4.1.0
         version: 4.1.12
     devDependencies:
-      '@farmjs/plugin':
+      '@farm.js/plugin':
         specifier: workspace:*
         version: link:../../packages/farmjs-plugin
       '@tailwindcss/vite':
@@ -727,7 +727,7 @@ importers:
 
   examples/simple-demo:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       react:
@@ -739,7 +739,7 @@ importers:
 
   examples/ssr-ssg-demo:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
       better-call:
@@ -755,7 +755,7 @@ importers:
         specifier: ^3.22.4
         version: 3.24.1
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -776,10 +776,10 @@ importers:
 
   examples/stripe-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -792,7 +792,7 @@ importers:
         specifier: ^20.4.1
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -813,10 +813,10 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../../packages/farm-integrations
       better-auth:
@@ -838,7 +838,7 @@ importers:
         specifier: ^20.4.1
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/react':
@@ -862,10 +862,10 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../../packages/farm-integrations
       '@prisma/client':
@@ -887,7 +887,7 @@ importers:
         specifier: ^20.4.1
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/react':
@@ -911,10 +911,10 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../../packages/farm-integrations
       '@prisma/client':
@@ -936,7 +936,7 @@ importers:
         specifier: ^20.4.1
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/react':
@@ -960,10 +960,10 @@ importers:
       '@better-auth/passkey':
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../../packages/farm-integrations
       better-auth:
@@ -982,7 +982,7 @@ importers:
         specifier: ^20.4.1
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/react':
@@ -1000,10 +1000,10 @@ importers:
 
   examples/supabase-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -1013,7 +1013,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -1031,10 +1031,10 @@ importers:
 
   examples/workos-integration:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../../packages/farm
-      '@farmjs/integrations':
+      '@farm.js/integrations':
         specifier: workspace:*
         version: link:../../packages/farm-integrations
       react:
@@ -1044,7 +1044,7 @@ importers:
         specifier: ^19.0.0
         version: 19.2.4(react@19.2.4)
     devDependencies:
-      '@farmjs/cli':
+      '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
@@ -1218,7 +1218,7 @@ importers:
 
   packages/farm-cf-agent:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
       jsonc-parser:
@@ -1246,7 +1246,7 @@ importers:
 
   packages/farm-cli:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
       commander:
@@ -1271,7 +1271,7 @@ importers:
 
   packages/farm-eve:
     dependencies:
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
     devDependencies:
@@ -1296,7 +1296,7 @@ importers:
       '@clerk/react':
         specifier: ^6.1.0
         version: 6.1.0(react-dom@19.2.4)(react@19.2.4)
-      '@farmjs/core':
+      '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
       '@polar-sh/sdk':
@@ -1360,12 +1360,12 @@ importers:
 
   packages/farmjs-plugin:
     dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
       '@farming-labs/strata':
         specifier: 0.1.2
         version: 0.1.2(react@19.2.4)
-      '@farmjs/core':
-        specifier: workspace:*
-        version: link:../farm
       better-call:
         specifier: ^1.0.19
         version: 1.0.19

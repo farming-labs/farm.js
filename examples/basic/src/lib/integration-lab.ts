@@ -3,7 +3,7 @@ import {
   endpoint,
   integrationRoute,
   type FarmIntegrationHandlerContext,
-} from '@farmjs/core';
+} from '@farm.js/core';
 import { z } from 'zod';
 
 const messageBody = z.object({

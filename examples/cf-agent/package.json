@@ -15,15 +15,15 @@
     "verify:worker": "wrangler deploy --dry-run --config .farm-cf-agent.wrangler.jsonc --outdir .farm/cf-agent/wrangler"
   },
   "dependencies": {
-    "@farmjs/cf-agent": "workspace:*",
-    "@farmjs/core": "workspace:*",
+    "@farm.js/cf-agent": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "agents": "0.17.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20260710.1",
-    "@farmjs/cli": "workspace:*",
+    "@farm.js/cli": "workspace:*",
     "@types/node": "^20.10.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

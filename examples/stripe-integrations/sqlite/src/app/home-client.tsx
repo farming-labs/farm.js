@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type {
   StripeBillingStatusResult,
   StripeCatalogProduct,
-} from "@farmjs/integrations/stripe/client";
+} from "@farm.js/integrations/stripe/client";
 import { apiClient } from "../lib/api";
 import { authClient } from "../lib/auth-client";
 import { exampleMeta } from "../lib/example-meta";

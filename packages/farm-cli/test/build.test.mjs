@@ -7,7 +7,7 @@ import path from "node:path";
 import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
-import { withProductionNodeEnv as withCoreProductionNodeEnv } from "@farmjs/core/internal/production-node-env";
+import { withProductionNodeEnv as withCoreProductionNodeEnv } from "@farm.js/core/internal/production-node-env";
 
 const require = createRequire(import.meta.url);
 const { withProductionNodeEnv: withCliProductionNodeEnv } = require("../dist/build.js");

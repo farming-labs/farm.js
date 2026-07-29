@@ -24,7 +24,7 @@ interface AfterRequestState {
   tasks: AfterTask[];
 }
 
-const AFTER_STORAGE = Symbol.for("@farmjs/core/after-storage");
+const AFTER_STORAGE = Symbol.for("@farm.js/core/after-storage");
 
 function getAfterStorage(): AsyncLocalStorage<AfterRequestState> {
   const runtime = globalThis as typeof globalThis & Record<PropertyKey, unknown>;

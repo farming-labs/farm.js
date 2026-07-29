@@ -41,11 +41,11 @@ export interface FarmLayerResolution<TConfig extends Record<string, any>> {
   layers: ResolvedFarmLayer[];
 }
 
-const FARM_CORE_PACKAGE = "@farmjs/core";
-const FARM_CONFIG_ENTRY = "@farmjs/core/config";
-const FARM_CORE_REFERENCE_RE = /(["'])@farmjs\/core\1/g;
+const FARM_CORE_PACKAGE = "@farm.js/core";
+const FARM_CONFIG_ENTRY = "@farm.js/core/config";
+const FARM_CORE_REFERENCE_RE = /(["'])@farm.js\/core\1/g;
 const FARM_CONFIG_HELPER_IMPORT_RE =
-  /(?:^|\n)[\t ]*import[\t ]*\{([^{}]*)\}[\t ]*from[\t ]*(["'])@farmjs\/core\2[\t ]*;?[\t ]*(?:\n|$)/g;
+  /(?:^|\n)[\t ]*import[\t ]*\{([^{}]*)\}[\t ]*from[\t ]*(["'])@farm.js\/core\2[\t ]*;?[\t ]*(?:\n|$)/g;
 const FARM_CONFIG_HELPER_SPECIFIER_RE =
   /^(?:defineConfig|defineFarmConfig)(?:\s+as\s+[$A-Z_a-z][$\w]*)?$/;
 
@@ -242,7 +242,7 @@ export async function loadFarmConfigFile<TConfig = Record<string, any>>(
       {
         name: "farm-config-package-resolution",
         setup(pluginBuild) {
-          pluginBuild.onResolve({ filter: /^@farmjs\/core$/ }, async (args) => {
+          pluginBuild.onResolve({ filter: /^@farm.js\/core$/ }, async (args) => {
             if (
               args.pluginData?.farmConfigExternal ||
               args.kind !== "import-statement" ||

@@ -34,7 +34,7 @@ pnpm dev
 **src/app/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farmjs/core";
+import type { PageProps } from "@farm.js/core";
 
 export default function HomePage(_props: PageProps) {
   return <h1>Hello from Farm.js</h1>;
@@ -48,7 +48,7 @@ Every route can share chrome through `layout.tsx`. Start with a root layout, the
 **src/app/layout.tsx**
 
 ```tsx
-import type { LayoutProps } from "@farmjs/core";
+import type { LayoutProps } from "@farm.js/core";
 import "./globals.css";
 
 export default function RootLayout({ children }: LayoutProps) {
@@ -68,7 +68,7 @@ Farm API routes live beside pages and use the same route tree. Define an endpoin
 **src/app/api/hello/route.ts**
 
 ```ts
-import { createEndpoint } from "@farmjs/core/api";
+import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
 
 export const POST = createEndpoint(

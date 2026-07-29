@@ -3,7 +3,7 @@ import {
   OptimizedBoundary,
   type StrataDocument,
   type StrataNode,
-} from "@farmjs/plugin/rsc/optimized-boundary";
+} from "@farm.js/plugin/rsc/optimized-boundary";
 import { Counter } from "../components/Counter";
 import { createStaticContentDocument } from "./document";
 

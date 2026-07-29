@@ -47,8 +47,8 @@ pnpm test
 farm.js/
 ├── packages/
 │   ├── farm/              # Core framework
-│   ├── farm-cli/          # @farmjs/cli tools
-│   └── create-farm-app/   # @farmjs/create-farm-app tool
+│   ├── farm-cli/          # @farm.js/cli tools
+│   └── create-farm-app/   # @farm.js/create-farm-app tool
 ├── examples/              # Example applications
 ├── docs/                  # Documentation site
 ├── playground/            # Development testing

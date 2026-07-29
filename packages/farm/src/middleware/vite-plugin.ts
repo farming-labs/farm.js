@@ -34,7 +34,7 @@ export function farmMiddlewarePlugin(options: FarmMiddlewarePluginOptions = {}):
   };
 
   return {
-    name: "@farmjs/core:middleware",
+    name: "@farm.js/core:middleware",
     enforce: "pre",
 
     configureServer(server) {

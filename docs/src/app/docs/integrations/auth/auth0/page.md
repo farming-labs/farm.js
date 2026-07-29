@@ -23,7 +23,7 @@ farm add integration auth0 --ui
 **src/lib/integrations.ts**
 
 ```ts
-import { auth0 } from "@farmjs/integrations/auth0";
+import { auth0 } from "@farm.js/integrations/auth0";
 
 export const appIntegrations = {
   auth: auth0({
