@@ -378,6 +378,31 @@ declare module "@farm.js/core/client" {
     key: CacheKey<TData>;
   };
 
+  export class APIClientError<
+    TCode extends string = string,
+    TData = unknown,
+    TStatus extends number = number,
+  > extends Error {
+    readonly code: TCode;
+    readonly data: TData;
+    readonly status: TStatus;
+    readonly response?: Response;
+
+    constructor(
+      code: TCode,
+      data: TData,
+      options: {
+        status: TStatus;
+        message: string;
+        response?: Response;
+      },
+    );
+  }
+
+  export type APIClientSystemError =
+    | APIClientError<"http_error", unknown, number>
+    | APIClientError<"network_error", unknown, 0>;
+
   export type RequestEvent = {
     requestId: string;
     method: StatusEvent["method"];
@@ -516,6 +541,7 @@ declare module "@farm.js/core/client" {
       body: any;
       query: any;
       response: any;
+      errors?: any;
     };
   };
 
@@ -571,19 +597,38 @@ declare module "@farm.js/core/client" {
     ? R
     : any;
 
+  type InferEndpointError<T> = T extends {
+    __types: {
+      errors: infer TErrors;
+    };
+  }
+    ? keyof TErrors extends never
+      ? Error
+      :
+          | {
+              [TCode in keyof TErrors]: TErrors[TCode] extends {
+                data: infer TData;
+                status: infer TStatus extends number;
+              }
+                ? APIClientError<TCode & string, TData, TStatus>
+                : never;
+            }[keyof TErrors]
+          | APIClientSystemError
+    : Error;
+
   type EndpointMethod<T = any> = (<
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   >(
     ...args: HasRequiredKeys<InferEndpointInput<T>> extends true
       ? [
           options: InferEndpointInput<T>,
-          clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+          clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
         ]
       : [
           options?: InferEndpointInput<T>,
-          clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+          clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
         ]
-  ) => Promise<APIResult<InferEndpointOutput<T>, Error>>) &
+  ) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>) &
     RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
   type RouterToClient<T> = {

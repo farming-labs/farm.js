@@ -61,6 +61,38 @@ export type APIResult<TData = unknown, TError = Error> = {
   key: CacheKey<TData>;
 };
 
+export class APIClientError<
+  TCode extends string = string,
+  TData = unknown,
+  TStatus extends number = number,
+> extends Error {
+  readonly code: TCode;
+  readonly data: TData;
+  readonly status: TStatus;
+  readonly response?: Response;
+
+  constructor(
+    code: TCode,
+    data: TData,
+    options: {
+      status: TStatus;
+      message: string;
+      response?: Response;
+    },
+  ) {
+    super(options.message);
+    this.name = "APIClientError";
+    this.code = code;
+    this.data = data;
+    this.status = options.status;
+    this.response = options.response;
+  }
+}
+
+export type APIClientSystemError =
+  | APIClientError<"http_error", unknown, number>
+  | APIClientError<"network_error", unknown, 0>;
+
 export type RequestEvent = {
   requestId: string;
   method: StatusEvent["method"];
@@ -194,6 +226,7 @@ type TypedEndpointLike = {
     body: any;
     query: any;
     response: any;
+    errors?: any;
   };
 };
 
@@ -249,18 +282,37 @@ type InferEndpointOutput<T> = T extends {
   ? R
   : any;
 
+type InferEndpointError<T> = T extends {
+  __types: {
+    errors: infer TErrors;
+  };
+}
+  ? keyof TErrors extends never
+    ? Error
+    :
+        | {
+            [TCode in keyof TErrors]: TErrors[TCode] extends {
+              data: infer TData;
+              status: infer TStatus extends number;
+            }
+              ? APIClientError<TCode & string, TData, TStatus>
+              : never;
+          }[keyof TErrors]
+        | APIClientSystemError
+  : Error;
+
 // Type for a single endpoint method
 type EndpointMethod<T = any> = (<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]>(
   ...args: HasRequiredKeys<InferEndpointInput<T>> extends true
     ? [
         options: InferEndpointInput<T>,
-        clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+        clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
       ]
     : [
         options?: InferEndpointInput<T>,
-        clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+        clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
       ]
-) => Promise<APIResult<InferEndpointOutput<T>, Error>>) &
+) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>) &
   RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
 // Type for converting router structure to client structure
@@ -926,14 +978,54 @@ function resolveRouteMeta(meta: RouteMeta): { routePath: string; method: string 
 }
 
 function normalizeError(error: unknown): Error {
-  if (error instanceof Error) return error;
-  return new Error(typeof error === "string" ? error : "Unknown error");
+  if (error instanceof APIClientError) return error;
+
+  const normalized = new APIClientError("network_error", undefined, {
+    status: 0,
+    message:
+      error instanceof Error
+        ? error.message
+        : typeof error === "string"
+          ? error
+          : "Network request failed",
+  });
+  (normalized as Error & { cause?: unknown }).cause = error;
+  return normalized;
 }
 
 function createResponseError(response: Response, data: any): Error {
-  const error = new Error(`HTTP ${response.status}: ${response.statusText}`);
-  (error as any).status = response.status;
-  (error as any).response = response;
-  (error as any).data = data;
-  return error;
+  const expected = readEndpointErrorEnvelope(data);
+  if (expected) {
+    return new APIClientError(expected.code, expected.data, {
+      status: response.status,
+      message: expected.message,
+      response,
+    });
+  }
+
+  return new APIClientError("http_error", data, {
+    status: response.status,
+    message: `HTTP ${response.status}: ${response.statusText}`,
+    response,
+  });
+}
+
+function readEndpointErrorEnvelope(data: unknown): {
+  code: string;
+  message: string;
+  data: unknown;
+} | null {
+  if (!data || typeof data !== "object") return null;
+  const error = (data as { error?: unknown }).error;
+  if (!error || typeof error !== "object") return null;
+
+  const code = (error as { code?: unknown }).code;
+  const message = (error as { message?: unknown }).message;
+  if (typeof code !== "string" || typeof message !== "string") return null;
+
+  return {
+    code,
+    message,
+    data: (error as { data?: unknown }).data,
+  };
 }

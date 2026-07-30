@@ -161,6 +161,65 @@ Endpoint middleware is local to one `createEndpoint` declaration and can use its
 >
 > Derive users, roles, tenants, and rate-limit identities from the trusted `Request` or server state. Middleware context is created only on the server and is never accepted from client input. Keep resource-specific permission checks close to the resource query even when shared authentication runs in middleware.
 
+## Typed expected errors
+
+Declare failures that are part of an endpoint's public contract, then return them through the typed
+`fail` function:
+
+```ts
+export const POST = createEndpoint(
+  {
+    method: "POST",
+    body: z.object({
+      name: z.string().min(1),
+    }),
+    errors: {
+      duplicate: {
+        status: 409,
+        message: "A product with this name already exists",
+        schema: z.object({
+          existingId: z.string(),
+        }),
+      },
+      forbidden: {
+        status: 403,
+        schema: z.object({
+          permission: z.string(),
+        }),
+      },
+    },
+  },
+  async ({ body, fail }) => {
+    const existing = await findProductByName(body.name);
+    if (existing) {
+      return fail("duplicate", {
+        existingId: existing.id,
+      });
+    }
+
+    return createProduct(body);
+  },
+);
+```
+
+Error codes and payloads are checked in the handler and carried into the generated API client:
+
+```ts
+const result = await api.products.post({
+  body: { name },
+});
+
+if (result.error?.code === "duplicate") {
+  // existingId is inferred as string.
+  showExistingProduct(result.error.data.existingId);
+}
+```
+
+Farm validates the failure payload before returning a JSON error response. Declared messages and
+payloads are public, so do not include secrets. Undeclared exceptions remain unexpected server
+errors and are not converted into a declared failure. Endpoints without an `errors` declaration
+keep the existing `Error` client type.
+
 ## Client inference
 
 Routes become client namespaces from their path:

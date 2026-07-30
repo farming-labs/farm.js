@@ -1,7 +1,8 @@
-export { createAPIClient, createServerAPIClient } from "./api/client";
+export { APIClientError, createAPIClient, createServerAPIClient } from "./api/client";
 export type {
   APIClient,
   APIClientOptions,
+  APIClientSystemError,
   APIClientWithoutIntegrationsOptions,
   RouteAPIClient,
   ServerAPIClient,
