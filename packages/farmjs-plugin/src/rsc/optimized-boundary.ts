@@ -4,6 +4,7 @@ import {
   type StaticFragmentBoundary,
   type StaticFragmentProps,
 } from "@farming-labs/strata/react-server";
+import type { ReactElement } from "react";
 
 export type {
   RenderOptions,
@@ -29,7 +30,11 @@ export interface OptimizedBoundaryProps extends Omit<StaticFragmentProps, "conte
  *
  * Enable `experimental.optimizedBoundary` before importing this component.
  */
-export function OptimizedBoundary({ document, renderOptions, ...props }: OptimizedBoundaryProps) {
+export function OptimizedBoundary({
+  document,
+  renderOptions,
+  ...props
+}: OptimizedBoundaryProps): ReactElement {
   const content = render(document, renderOptions);
   return StaticFragment({
     ...props,

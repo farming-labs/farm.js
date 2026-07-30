@@ -172,7 +172,7 @@ export function useBlocker(options: UseBlockerOptions): UseBlockerReturn {
 
 export function useScrollRestoration<TElement extends HTMLElement = HTMLElement>(
   key: string,
-): RefObject<TElement> {
+): RefObject<TElement | null> {
   const ref = useRef<TElement>(null);
 
   useEffect(() => {

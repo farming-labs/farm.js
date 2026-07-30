@@ -149,7 +149,7 @@ export function useServerQuery<TInput, TData>(
   const key = createServerQueryCallKey(query, input);
   const inputRef = useRef(input);
   const optionsRef = useRef(options);
-  const mountedKeyRef = useRef<string>();
+  const mountedKeyRef = useRef<string | undefined>(undefined);
   inputRef.current = input;
   optionsRef.current = options;
 
