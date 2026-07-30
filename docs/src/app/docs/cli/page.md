@@ -14,6 +14,8 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 | -------------------------------- | -------------------------------------------------------------------- |
 | farm dev                         | Start the dev server.                                                |
 | farm build                       | Build the app for the configured target.                             |
+| farm upgrade --latest            | Upgrade installed Farm packages to the latest stable release.        |
+| farm upgrade --beta              | Upgrade installed Farm packages to the latest beta release.          |
 | farm doctor                      | Inspect a running app, or fall back to project configuration checks. |
 | farm doctor --offline            | Check project files and config without probing a dev server.         |
 | farm preview                     | Create a public URL for a running local app.                         |
@@ -26,6 +28,23 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 | farm cron list                   | List configured UTC schedules and target routes.                     |
 | farm cron run dailyCleanup       | Invoke one cron route on a running app.                              |
 | farm dev --cron                  | Start the dev server with the opt-in in-memory cron scheduler.       |
+
+## Upgrade Farm packages
+
+```bash
+farm upgrade --latest
+farm upgrade --beta
+farm upgrade --latest --dry-run
+```
+
+`--latest` selects the newest stable release published under npm's `latest` tag. `--beta` selects
+the newest prerelease published under the `beta` tag. Exactly one release channel is required.
+
+Farm reads the app's dependencies and upgrades every published `@farm.js/*` package together. It
+detects npm, pnpm, Yarn, or Bun from `packageManager` and lockfiles, preserves whether each package
+is a regular, development, optional, or peer dependency, and skips local `workspace:`, `file:`,
+`link:`, `portal:`, and `catalog:` references. Use `--dry-run` to inspect the commands without
+changing the project.
 
 ## Provider names
 
