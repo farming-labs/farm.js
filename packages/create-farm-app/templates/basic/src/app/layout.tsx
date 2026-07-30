@@ -4,6 +4,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Farm.js App",
   description: "A modern React meta-framework built on Vite",
+  icons: {
+    icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps) {
