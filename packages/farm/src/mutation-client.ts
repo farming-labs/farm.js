@@ -5,7 +5,7 @@ import { isAPIRouteRef, type APIResult, type ClientOptions } from "./api/client"
 
 export type MutationStatus = "idle" | "pending" | "success" | "error";
 
-type AnyMutationTarget = (...args: any[]) => Promise<any>;
+export type AnyMutationTarget = (...args: any[]) => Promise<any>;
 
 export type InferMutationVariables<TTarget extends AnyMutationTarget> =
   Parameters<TTarget> extends [] ? undefined : Parameters<TTarget>[0];

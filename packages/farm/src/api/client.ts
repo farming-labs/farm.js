@@ -19,8 +19,22 @@ import {
   FARM_CACHE_INVALIDATION_HEADER,
 } from "../cache-invalidation";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
+import {
+  isFarmAPIStream,
+  isJSONStreamResponse,
+  readJSONStream,
+  type FarmAPIStream,
+} from "./transport";
 
 export const FARM_API_ROUTE_REF_SYMBOL: unique symbol = Symbol.for("farm.api.route-ref") as any;
+export const FARM_API_ROUTE_META_SYMBOL: unique symbol = Symbol.for("farm.api.route-meta") as any;
+
+export type APIRouteRefMetadata = {
+  path: string;
+  method: string;
+  baseURL: string;
+  sameOrigin: boolean;
+};
 
 export type APIClientOptions = {
   baseURL?: string;
@@ -275,13 +289,26 @@ type QueryInputProp<TValue> =
 type HasRequiredKeys<T> = RequiredKeys<T> extends never ? false : true;
 
 // Type utilities to extract endpoint input/output types from TypedEndpoint
+type InferEndpointBody<T> = T extends {
+  __types: {
+    inputBody: infer TInputBody;
+  };
+}
+  ? TInputBody
+  : T extends {
+        __types: {
+          body: infer TBody;
+        };
+      }
+    ? TBody
+    : never;
+
 type InferEndpointInput<T> = T extends {
   __types: {
-    body: infer TBody;
     query: infer TQuery;
   };
 }
-  ? Simplify<BodyInputProp<TBody> & QueryInputProp<TQuery>>
+  ? Simplify<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
   : {};
 
 type InferEndpointOutput<T> = T extends {
@@ -289,7 +316,9 @@ type InferEndpointOutput<T> = T extends {
     response: infer R;
   };
 }
-  ? R
+  ? R extends { readonly __farmStreamItem: infer TItem }
+    ? FarmAPIStream<TItem>
+    : R
   : any;
 
 type InferEndpointError<T> = T extends {
@@ -432,18 +461,24 @@ export function createAPIClient<
     }
 
     // Prepare fetch options
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      ...options.headers,
+      ...requestOptions.headers,
+    };
     const fetchOptions: RequestInit = {
       method: requestOptions.method || "GET",
-      headers: {
-        "Content-Type": "application/json",
-        ...options.headers,
-        ...requestOptions.headers,
-      },
+      headers,
     };
 
     // Handle body
-    if (requestOptions.body) {
-      fetchOptions.body = JSON.stringify(requestOptions.body);
+    if (requestOptions.body !== undefined) {
+      if (isFormData(requestOptions.body)) {
+        deleteHeader(headers, "content-type");
+        fetchOptions.body = requestOptions.body;
+      } else {
+        fetchOptions.body = JSON.stringify(requestOptions.body);
+      }
     }
 
     const response = await fetch(url.toString(), fetchOptions);
@@ -452,7 +487,7 @@ export function createAPIClient<
     );
     let data: any = undefined;
     if (response.status !== 204 && response.status !== 205) {
-      data = await response.json();
+      data = isJSONStreamResponse(response) ? readJSONStream(response) : await response.json();
     }
 
     return { response, data };
@@ -657,7 +692,7 @@ export function createAPIClient<
       try {
         const result = await promise;
 
-        if (!result.error && isCacheEnabled) {
+        if (!result.error && isCacheEnabled && !isFarmAPIStream(result.data)) {
           const updatedAt = Date.now();
           cacheState.set(cacheKey, {
             data: result.data,
@@ -747,10 +782,14 @@ export function createAPIClient<
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy([], request, routeMeta, baseURL, rootAliases) as APIClient<
-    TRouter,
-    TIntegrations
-  >;
+  return createNestedProxy(
+    [],
+    request,
+    routeMeta,
+    baseURL,
+    options.baseURL === undefined,
+    rootAliases,
+  ) as APIClient<TRouter, TIntegrations>;
 }
 
 /**
@@ -772,6 +811,7 @@ function createNestedProxy(
   client: any,
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
   baseURL: string,
+  sameOrigin: boolean,
   rootAliases?: Record<string, unknown>,
 ): any {
   const target = () => {};
@@ -780,6 +820,15 @@ function createNestedProxy(
     get(_target, prop: string | symbol) {
       if (prop === FARM_API_ROUTE_REF_SYMBOL) {
         return path.length > 0;
+      }
+      if (prop === FARM_API_ROUTE_META_SYMBOL) {
+        const metadata = resolveRouteMeta({ path, baseURL });
+        return Object.freeze({
+          path: metadata.routePath,
+          method: metadata.method,
+          baseURL,
+          sameOrigin,
+        });
       }
 
       if (path.length === 0 && typeof prop === "string" && rootAliases && prop in rootAliases) {
@@ -791,7 +840,14 @@ function createNestedProxy(
       }
 
       // Add prop to path and return new proxy
-      return createNestedProxy([...path, prop], client, routeMeta, baseURL, rootAliases);
+      return createNestedProxy(
+        [...path, prop],
+        client,
+        routeMeta,
+        baseURL,
+        sameOrigin,
+        rootAliases,
+      );
     },
 
     // When calling as a function
@@ -834,6 +890,31 @@ export function isAPIRouteRef(value: unknown): value is CallableRouteRef {
     typeof value === "function" &&
     (value as { [FARM_API_ROUTE_REF_SYMBOL]?: unknown })[FARM_API_ROUTE_REF_SYMBOL] === true
   );
+}
+
+export function getAPIRouteRefMetadata(value: unknown): APIRouteRefMetadata | null {
+  if (!isAPIRouteRef(value)) return null;
+  const metadata = (value as { [FARM_API_ROUTE_META_SYMBOL]?: unknown })[
+    FARM_API_ROUTE_META_SYMBOL
+  ];
+  if (!metadata || typeof metadata !== "object") return null;
+
+  const candidate = metadata as Partial<APIRouteRefMetadata>;
+  if (
+    typeof candidate.path !== "string" ||
+    typeof candidate.method !== "string" ||
+    typeof candidate.baseURL !== "string" ||
+    typeof candidate.sameOrigin !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    path: candidate.path,
+    method: candidate.method,
+    baseURL: candidate.baseURL,
+    sameOrigin: candidate.sameOrigin,
+  };
 }
 
 /**
@@ -1022,6 +1103,23 @@ function normalizeError(error: unknown): Error {
   });
   (normalized as Error & { cause?: unknown }).cause = error;
   return normalized;
+}
+
+function isFormData(value: unknown): value is FormData {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    ((typeof FormData !== "undefined" && value instanceof FormData) ||
+      (Object.prototype.toString.call(value) === "[object FormData]" &&
+        typeof (value as { entries?: unknown }).entries === "function"))
+  );
+}
+
+function deleteHeader(headers: Record<string, string>, name: string): void {
+  const normalized = name.toLowerCase();
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === normalized) delete headers[key];
+  }
 }
 
 function createResponseError(response: Response, data: any): Error {

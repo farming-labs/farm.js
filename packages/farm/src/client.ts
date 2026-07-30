@@ -9,8 +9,10 @@ export type {
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "./api/client";
+export type { FarmAPIStream } from "./api/transport";
 export { useMutation } from "./mutation-client";
 export type {
+  AnyMutationTarget,
   InferMutationData,
   InferMutationError,
   InferMutationVariables,
@@ -21,6 +23,16 @@ export type {
   UseMutationOptions,
   UseMutationReturn,
 } from "./mutation-client";
+export { useFetcher } from "./fetcher-client";
+export type {
+  FetcherFormDataContext,
+  FetcherFormProps,
+  FetcherState,
+  FetcherSubmit,
+  FetcherSubmitAsync,
+  UseFetcherOptions,
+  UseFetcherReturn,
+} from "./fetcher-client";
 export { fetchServerQuery, prefetchServerQuery, useServerQuery } from "./server-query-client";
 export type {
   ServerQueryFetchOptions,

@@ -83,6 +83,46 @@ export const GET = createEndpoint(
 
 Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
 
+## Uploads and streaming results
+
+Use `multipart()` when an endpoint accepts files. Farm parses the request as `FormData`, preserves
+`Blob`/`File` values and repeated fields, then runs the same body-schema validation used for JSON:
+
+```ts
+import { createEndpoint, jsonStream, multipart } from "@farm.js/core/api";
+import { z } from "zod";
+
+const importBody = multipart(
+  z.object({
+    title: z.string().min(1),
+    file: z.custom<Blob>((value) => value instanceof Blob),
+  }),
+);
+
+type ImportEvent = { phase: "accepted"; bytes: number } | { phase: "complete"; imported: number };
+
+export const POST = createEndpoint(
+  {
+    method: "POST",
+    body: importBody,
+  },
+  async ({ body }) => {
+    async function* importEvents(): AsyncGenerator<ImportEvent> {
+      yield { phase: "accepted", bytes: body.file.size };
+      const imported = await importRows(body.file);
+      yield { phase: "complete", imported };
+    }
+
+    return jsonStream(importEvents());
+  },
+);
+```
+
+`jsonStream()` uses newline-delimited JSON (`application/x-ndjson`). It sends each typed event as
+soon as the source yields it, respects response backpressure, cancels the source when the reader
+disconnects, and defaults to `Cache-Control: no-store`. Use ordinary `Response` objects for binary
+downloads or protocols that are not JSON event streams.
+
 ## Endpoint middleware
 
 Put plain async functions in `middleware`. There is no middleware factory and no `next()` callback. Functions run in declaration order after endpoint input validation.

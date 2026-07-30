@@ -1,5 +1,6 @@
 import { createEndpoint as betterCallEndpoint } from "better-call";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "../cache";
+import { isMultipartSchema, type MultipartSchema, type TypedFormData } from "./transport";
 
 // Generic schema type that works with both Zod v3 and v4
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -19,6 +20,9 @@ type InferOutput<T> = T extends { _output: infer O }
   : T extends { parse: (data: unknown) => infer R }
     ? R
     : unknown;
+
+type InferBodyInput<T> =
+  T extends MultipartSchema<AnySchema> ? TypedFormData<InferOutput<T>> : InferOutput<T>;
 
 type InferHeadersOutput<T> = [T] extends [never]
   ? Record<string, string>
@@ -225,9 +229,11 @@ export type TypedEndpoint<
   TResponse = any,
   THeaders = Record<string, string>,
   TErrors = never,
+  TBodyInput = TBody,
 > = {
   __types: {
     body: TBody;
+    inputBody: TBodyInput;
     query: TQuery;
     headers: THeaders;
     response: TResponse;
@@ -248,7 +254,8 @@ type CreatedEndpoint<
   InferOutput<TQuery>,
   Awaited<TResponse>,
   InferHeadersOutput<THeaders>,
-  EndpointErrorContracts<TErrors>
+  EndpointErrorContracts<TErrors>,
+  InferBodyInput<TBody>
 >;
 
 type AnyEndpointOptions = EndpointOptions<
@@ -428,6 +435,7 @@ export function createEndpoint(
   // Store type information for inference
   endpoint.__types = {
     body: options.body,
+    inputBody: isMultipartSchema(options.body) ? "form-data" : options.body,
     query: options.query,
     headers: options.headers,
     response: null as any,

@@ -17,6 +17,7 @@ import type { GET as GET_storagedemo } from "../app/api/storage-demo/route";
 import type { POST as POST_storagedemo } from "../app/api/storage-demo/route";
 import type { DELETE as DELETE_storagedemo } from "../app/api/storage-demo/route";
 import type { GET as GET_test } from "../app/api/test/route";
+import type { POST as POST_transportlab } from "../app/api/transport-lab/route";
 import type { GET as GET_users } from "../app/api/users/route";
 import type { POST as POST_users } from "../app/api/users/route";
 import type { DELETE as DELETE_users } from "../app/api/users/route";
@@ -54,6 +55,9 @@ export type APIRouter = {
   };
   test: {
     get: typeof GET_test;
+  };
+  "transport-lab": {
+    post: typeof POST_transportlab;
   };
   users: {
     get: typeof GET_users;
