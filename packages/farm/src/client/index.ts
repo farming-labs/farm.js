@@ -44,6 +44,18 @@ export type {
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "../api/client";
+export { useMutation } from "../mutation-client";
+export type {
+  InferMutationData,
+  InferMutationError,
+  InferMutationVariables,
+  MutationAsync,
+  MutationOptimisticContext,
+  MutationStatus,
+  MutationTrigger,
+  UseMutationOptions,
+  UseMutationReturn,
+} from "../mutation-client";
 export {
   getRouter,
   navigateTo,

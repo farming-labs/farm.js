@@ -8,6 +8,18 @@ export type {
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "./api/client";
+export { useMutation } from "./mutation-client";
+export type {
+  InferMutationData,
+  InferMutationError,
+  InferMutationVariables,
+  MutationAsync,
+  MutationOptimisticContext,
+  MutationStatus,
+  MutationTrigger,
+  UseMutationOptions,
+  UseMutationReturn,
+} from "./mutation-client";
 export { fetchServerQuery, prefetchServerQuery, useServerQuery } from "./server-query-client";
 export type {
   ServerQueryFetchOptions,

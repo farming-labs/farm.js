@@ -586,6 +586,81 @@ declare module "@farm.js/core/client" {
   ) => Promise<APIResult<InferEndpointOutput<T>, Error>>) &
     RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
+  export type MutationStatus = "idle" | "pending" | "success" | "error";
+
+  type AnyMutationTarget = (...args: any[]) => Promise<any>;
+
+  export type InferMutationVariables<TTarget extends AnyMutationTarget> =
+    Parameters<TTarget> extends [] ? undefined : Parameters<TTarget>[0];
+
+  export type InferMutationData<TTarget extends AnyMutationTarget> = TTarget extends {
+    readonly __farmRouteData: infer TData;
+  }
+    ? TData
+    : Awaited<ReturnType<TTarget>>;
+
+  export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends (
+    ...args: any[]
+  ) => Promise<APIResult<any, infer TError>>
+    ? TError
+    : Error;
+
+  export type MutationOptimisticContext<TVariables, TData> = {
+    variables: TVariables | undefined;
+    current: TData | null;
+  };
+
+  export type UseMutationOptions<TVariables, TData, TError = Error> = {
+    initialData?: TData | null;
+    resetOnMutate?: boolean;
+    optimistic?: (
+      context: MutationOptimisticContext<TVariables, TData>,
+    ) => TData | null | undefined;
+    rollbackOnError?: boolean;
+    request?: ClientOptions<TData, TError>;
+    onSuccess?: (data: TData, variables: TVariables | undefined) => void;
+    onError?: (error: TError, variables: TVariables | undefined) => void;
+    onSettled?: (
+      data: TData | null,
+      error: TError | null,
+      variables: TVariables | undefined,
+    ) => void;
+  };
+
+  export type MutationAsync<TTarget extends AnyMutationTarget, TData = InferMutationData<TTarget>> =
+    [] extends Parameters<TTarget>
+      ? (variables?: InferMutationVariables<TTarget>) => Promise<TData>
+      : (variables: InferMutationVariables<TTarget>) => Promise<TData>;
+
+  export type MutationTrigger<TTarget extends AnyMutationTarget> =
+    [] extends Parameters<TTarget>
+      ? (variables?: InferMutationVariables<TTarget>) => void
+      : (variables: InferMutationVariables<TTarget>) => void;
+
+  export type UseMutationReturn<
+    TTarget extends AnyMutationTarget,
+    TData = InferMutationData<TTarget>,
+    TError = InferMutationError<TTarget>,
+  > = {
+    pending: boolean;
+    status: MutationStatus;
+    data: TData | null;
+    error: TError | null;
+    variables: InferMutationVariables<TTarget> | undefined;
+    mutate: MutationTrigger<TTarget>;
+    mutateAsync: MutationAsync<TTarget, TData>;
+    reset: () => void;
+  };
+
+  export function useMutation<TTarget extends AnyMutationTarget>(
+    target: TTarget,
+    options?: UseMutationOptions<
+      InferMutationVariables<TTarget>,
+      InferMutationData<TTarget>,
+      InferMutationError<TTarget>
+    >,
+  ): UseMutationReturn<TTarget>;
+
   type RouterToClient<T> = {
     [K in keyof T]: T[K] extends TypedEndpointLike
       ? EndpointMethod<T[K]>
