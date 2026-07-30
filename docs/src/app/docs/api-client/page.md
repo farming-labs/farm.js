@@ -116,6 +116,66 @@ existing API-client cache, retry, invalidation, and optimistic options through `
 `optimistic` state on `useMutation` is separate from an API cache update: it controls
 `mutation.data`, while `request.optimistic` updates shared cached queries.
 
+## Submit without navigation
+
+Use `useFetcher` when a button or form should run an operation without changing the current route.
+It accepts generated API methods, Farm server functions, and ordinary async functions:
+
+```tsx
+"use client";
+
+import { useFetcher } from "@farm.js/core/client";
+import { api } from "@/lib/api-client";
+
+export function CreateProductForm() {
+  const createProduct = useFetcher(api.products.post, {
+    request: {
+      invalidate: [[api.products.get]],
+    },
+  });
+
+  return (
+    <createProduct.Form>
+      <input name="name" required />
+      <input name="category" required />
+      <button disabled={createProduct.pending}>
+        {createProduct.pending ? "Creating..." : "Create product"}
+      </button>
+
+      {createProduct.error ? <p role="alert">{createProduct.error.message}</p> : null}
+      {createProduct.data ? <p>Created {createProduct.data.name}</p> : null}
+    </createProduct.Form>
+  );
+}
+```
+
+The fetcher exposes `state` (`idle` or `submitting`), `status`, `pending`, `data`, `error`,
+`variables`, the active `formData`, `submit`, `submitAsync`, `Form`, and `reset`. It uses the same
+optimistic updates, rollback, callbacks, typed errors, and API-client request options as
+`useMutation`.
+
+Generated API forms map fields to `{ body: ... }` by default, or `{ query: ... }` for GET routes.
+Use `mapFormData` when the validated input needs coercion or a different shape:
+
+```tsx
+const quantity = useFetcher(api.cart.post, {
+  mapFormData(formData) {
+    return {
+      body: {
+        productId: String(formData.get("productId")),
+        quantity: Number(formData.get("quantity")),
+      },
+    };
+  },
+});
+```
+
+After hydration, `<fetcher.Form>` prevents navigation and submits through the typed target. For a
+server function, the function itself remains the native form action, preserving React's
+progressive-enhancement path before JavaScript loads. Generated GET and POST API forms use the
+real endpoint URL as their native fallback; a native fallback navigates to the endpoint response,
+while the hydrated fetcher stays on the page.
+
 ## Client options
 
 - cache: choose cache-first, network-only, or stale-while-revalidate.

@@ -222,10 +222,12 @@ async function readRequestBody(request: Request): Promise<unknown> {
       return JSON.parse(text);
     }
 
-    // Preserve permissive JSON parsing for callers that omit content-type.
+    // Preserve the previous permissive behavior for callers that omit the
+    // content type but still send JSON.
     return JSON.parse(text);
   } catch {
-    // Validation below returns the route's typed 400 response when applicable.
+    // The body format is unsupported or malformed. Schema validation below
+    // will turn the missing value into a typed 400 response when applicable.
   }
 
   return undefined;

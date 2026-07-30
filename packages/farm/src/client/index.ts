@@ -48,6 +48,7 @@ export type {
 export type { FarmAPIStream } from "../api/transport";
 export { useMutation } from "../mutation-client";
 export type {
+  AnyMutationTarget,
   InferMutationData,
   InferMutationError,
   InferMutationVariables,
@@ -58,6 +59,16 @@ export type {
   UseMutationOptions,
   UseMutationReturn,
 } from "../mutation-client";
+export { useFetcher } from "../fetcher-client";
+export type {
+  FetcherFormDataContext,
+  FetcherFormProps,
+  FetcherState,
+  FetcherSubmit,
+  FetcherSubmitAsync,
+  UseFetcherOptions,
+  UseFetcherReturn,
+} from "../fetcher-client";
 export {
   getRouter,
   navigateTo,

@@ -4,11 +4,13 @@ import { useEffect, useState } from 'react';
 import {
   Link,
   useBlocker,
+  useFetcher,
   useNavigation,
   usePageState,
   useRouter,
 } from '@farm.js/core/client';
 import { getPublicEnv } from '@farm.js/core/env';
+import { api } from '../../lib/api-client';
 import {
   readClientBoundary,
   readRuntimeBoundary,
@@ -25,6 +27,7 @@ export default function FeatureLabClient() {
   const navigation = useNavigation();
   const pageState = usePageState<FeaturePageState>();
   const router = useRouter();
+  const createUser = useFetcher(api.users.post);
 
   useBlocker({
     when: dirty,
@@ -110,6 +113,27 @@ export default function FeatureLabClient() {
           Client view transition
         </Link>
       </nav>
+
+      <createUser.Form
+        className="grid gap-3 rounded-md border border-slate-200 bg-white p-5"
+        data-testid="fetcher-form"
+      >
+        <label className="grid gap-1">
+          Name
+          <input name="name" defaultValue="Fetcher user" />
+        </label>
+        <label className="grid gap-1">
+          Email
+          <input name="email" type="email" defaultValue="fetcher@example.com" />
+        </label>
+        <button type="submit" disabled={createUser.pending}>
+          {createUser.pending ? 'Creating user' : 'Create user without navigation'}
+        </button>
+        <output data-testid="fetcher-state">{createUser.state}</output>
+        {createUser.data ? (
+          <p data-testid="fetcher-result">{createUser.data.user.email}</p>
+        ) : null}
+      </createUser.Form>
     </section>
   );
 }
