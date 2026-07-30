@@ -218,6 +218,10 @@ export async function createServer(config: FarmConfig = {}) {
             port: DEFAULT_FARM_DEV_SERVER_PORT,
             strictPort: true,
           },
+          resolve: {
+            // Keep framework and application modules on one React runtime.
+            dedupe: ["react", "react-dom"],
+          },
           optimizeDeps: {
             // Avoid Vite scanning server/native-only deps from framework internals.
             noDiscovery: true,
