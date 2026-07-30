@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createFarmCacheKey,
   createRouteDataCacheTag,
+  defineCacheKey,
   getFarmDataCache,
   invalidate,
   invalidateRouteData,
@@ -30,6 +31,25 @@ describe("server cache primitives", () => {
 
   it("shares the cache across server module instances", () => {
     expect((globalThis as any)[Symbol.for("farm.dataCache")]).toBe(getFarmDataCache());
+  });
+
+  it("keeps defined cache keys runtime-compatible with structured arrays", () => {
+    const productKey = defineCacheKey<{ id: string; name: string }>()(
+      (id: string) => ["product", "detail", id] as const,
+    );
+
+    expect(productKey("123")).toEqual(["product", "detail", "123"]);
+    expect(createFarmCacheKey(productKey("123"))).toBe(
+      createFarmCacheKey(["product", "detail", "123"]),
+    );
+  });
+
+  it("rejects invalid values returned by defined cache key factories", () => {
+    const invalidKey = defineCacheKey<unknown>()((() => ({ scope: "product" })) as any);
+
+    expect(() => invalidKey()).toThrow(
+      "A defined cache key factory must return a string or structured array.",
+    );
   });
 
   it("caches unstable_cache results by key parts and arguments", async () => {
