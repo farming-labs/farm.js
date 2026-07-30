@@ -12,6 +12,50 @@ declare module "@farm.js/core/api" {
    */
   export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
+  export type MultipartField = string | number | boolean | bigint | Blob | Date | null | undefined;
+
+  export type MultipartValues = Record<string, MultipartField | readonly MultipartField[]>;
+
+  export type TypedFormData<TValues> = FormData & {
+    readonly __farmMultipartInput: TValues;
+  };
+
+  export type MultipartSchema<TSchema> = TSchema & {
+    readonly __farmMultipartSchema: true;
+  };
+
+  export type FarmStreamResponse<TItem> = Response & {
+    readonly __farmStreamItem: TItem;
+  };
+
+  export interface FarmAPIStream<TItem> extends AsyncIterable<TItem> {
+    readonly response: Response;
+    cancel(reason?: unknown): Promise<void>;
+  }
+
+  export function multipart<TSchema extends { parse(data: unknown): unknown }>(
+    schema: TSchema,
+  ): MultipartSchema<TSchema>;
+
+  export function isMultipartSchema(
+    value: unknown,
+  ): value is MultipartSchema<{ parse(data: unknown): unknown }>;
+
+  export function toFormData<TValues extends MultipartValues>(
+    values: TValues,
+  ): TypedFormData<TValues>;
+
+  export function jsonStream<TItem>(
+    source: AsyncIterable<TItem> | Iterable<TItem>,
+    init?: ResponseInit,
+  ): FarmStreamResponse<TItem>;
+
+  export function isJSONStreamResponse(response: {
+    headers?: Pick<Headers, "get"> | null;
+  }): boolean;
+  export function readJSONStream<TItem>(response: Response): FarmAPIStream<TItem>;
+  export function isFarmAPIStream(value: unknown): value is FarmAPIStream<unknown>;
+
   /**
    * API endpoint context
    */

@@ -209,6 +209,10 @@ async function readRequestBody(request: Request): Promise<unknown> {
   const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
 
   try {
+    if (contentType === "multipart/form-data") {
+      return formDataToObject(await request.clone().formData());
+    }
+
     const text = await request.clone().text();
     if (!text) return undefined;
     if (contentType === "application/x-www-form-urlencoded") {
@@ -229,9 +233,21 @@ async function readRequestBody(request: Request): Promise<unknown> {
   return undefined;
 }
 
+function formDataToObject(
+  formData: FormData,
+): Record<string, FormDataEntryValue | FormDataEntryValue[]> {
+  return entriesToObject(formData.entries());
+}
+
 function searchParamsToObject(searchParams: URLSearchParams): Record<string, string | string[]> {
-  const output: Record<string, string | string[]> = Object.create(null);
-  for (const [key, value] of searchParams) {
+  return entriesToObject(searchParams.entries());
+}
+
+function entriesToObject<TValue>(
+  entries: IterableIterator<[string, TValue]>,
+): Record<string, TValue | TValue[]> {
+  const output: Record<string, TValue | TValue[]> = Object.create(null);
+  for (const [key, value] of entries) {
     if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
     const current = output[key];
     if (current === undefined) {
