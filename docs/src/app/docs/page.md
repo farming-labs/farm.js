@@ -78,11 +78,20 @@ Plugin system and lifecycle hooks.
 - [Create a Plugin](/docs/plugins/create-plugin): Build a plugin with definePlugin when app behavior belongs in reusable framework lifecycle hooks.
 - [Client Plugins](/docs/plugins/client): Attach typed hydration, navigation, error, performance, and cleanup hooks through a browser-safe module.
 
+### Migrations
+
+Move an existing framework app to Farm with inspectable, dry-run-first migrations.
+
+- [Migration Overview](/docs/migrations): Choose a source framework, distinguish automated from manual migrations, and follow a safe migration workflow.
+- [Migrate from Next.js](/docs/migrations/nextjs): Move App Router files, common Next.js imports, middleware, scripts, and Farm setup.
+- [Migrate from SvelteKit](/docs/migrations/sveltekit): Map SvelteKit routes, layouts, load functions, endpoints, hooks, environment variables, and adapters into Farm.
+- [Migrate from Nuxt](/docs/migrations/nuxt): Map Nuxt pages, layouts, server routes, data composables, middleware, runtime configuration, and Nitro output into Farm.
+- [Migrate from TanStack Start](/docs/migrations/tanstack): Convert TanStack Router file routes, route paths, component exports, scripts, and Farm setup.
+
 ### Reference
 
-CLI, migrations, examples, and package map.
+CLI, testing, examples, and package map.
 
-- [Migrations](/docs/migrations): Move Next.js and TanStack Router apps with dry-run codemods, then run schema/provider commands.
 - [CLI](/docs/cli): Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and add integrations.
 - [Examples](/docs/examples): Use the examples folder as executable docs for routing, RSC, docs, markdown, auth, billing, email, jobs, and API keys.
 - [Reference](/docs/reference): A compact map of the main package exports and where to learn more.

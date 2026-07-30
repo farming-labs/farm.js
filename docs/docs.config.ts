@@ -260,10 +260,20 @@ const sidebar = [
     ],
   },
   {
+    label: "Migrations",
+    icon: "route",
+    children: [
+      { label: "Overview", slug: "migrations", icon: "route" },
+      { label: "Next.js", slug: "migrations/nextjs", icon: "route" },
+      { label: "SvelteKit", slug: "migrations/sveltekit", icon: "route" },
+      { label: "Nuxt", slug: "migrations/nuxt", icon: "route" },
+      { label: "TanStack Start", slug: "migrations/tanstack", icon: "route" },
+    ],
+  },
+  {
     label: "Reference",
     icon: "book",
     children: [
-      { label: "Migrations", slug: "migrations", icon: "route" },
       { label: "Testing", slug: "testing", icon: "terminal" },
       { label: "CLI", slug: "cli", icon: "terminal" },
       { label: "Examples", slug: "examples", icon: "box" },
