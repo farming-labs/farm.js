@@ -15,6 +15,8 @@ import {
 } from "../client-cache";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
 
+export const FARM_API_ROUTE_REF_SYMBOL: unique symbol = Symbol.for("farm.api.route-ref") as any;
+
 export type APIClientOptions = {
   baseURL?: string;
   headers?: Record<string, string>;
@@ -715,9 +717,17 @@ function createNestedProxy(
   const target = () => {};
   const proxy = new Proxy(target, {
     // When accessing a property (api.hello)
-    get(_target, prop: string) {
+    get(_target, prop: string | symbol) {
+      if (prop === FARM_API_ROUTE_REF_SYMBOL) {
+        return path.length > 0;
+      }
+
       if (path.length === 0 && typeof prop === "string" && rootAliases && prop in rootAliases) {
         return rootAliases[prop];
+      }
+
+      if (typeof prop !== "string") {
+        return Reflect.get(_target, prop);
       }
 
       // Add prop to path and return new proxy
@@ -757,6 +767,13 @@ function createNestedProxy(
 
   routeMeta.set(proxy, { path: [...path], baseURL });
   return proxy;
+}
+
+export function isAPIRouteRef(value: unknown): value is CallableRouteRef {
+  return (
+    typeof value === "function" &&
+    (value as { [FARM_API_ROUTE_REF_SYMBOL]?: unknown })[FARM_API_ROUTE_REF_SYMBOL] === true
+  );
 }
 
 /**

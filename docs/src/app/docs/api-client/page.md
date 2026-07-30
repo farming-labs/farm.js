@@ -35,6 +35,53 @@ if (result.error) {
 }
 ```
 
+## Track mutations in React
+
+`useMutation` gives generated API methods and Farm server functions the same pending, result, and
+error lifecycle. API methods keep using the typed HTTP client underneath; they are not converted
+into React Server Actions.
+
+```tsx
+"use client";
+
+import { useMutation } from "@farm.js/core/client";
+import { api } from "@/lib/api-client";
+
+export function CreateProductButton() {
+  const createProduct = useMutation(api.products.post, {
+    request: {
+      invalidate: [[api.products.get]],
+    },
+  });
+
+  return (
+    <button
+      disabled={createProduct.pending}
+      onClick={() =>
+        createProduct.mutate({
+          body: { name: "Strata", category: "tools" },
+        })
+      }
+    >
+      {createProduct.pending ? "Creating..." : "Create product"}
+    </button>
+  );
+}
+```
+
+Use `mutate` for event handlers and `mutateAsync` when later code needs the resolved value:
+
+```ts
+const product = await createProduct.mutateAsync({
+  body: { name, category },
+});
+```
+
+The return value includes `data`, `error`, `variables`, `status`, `pending`, and `reset`. Pass the
+existing API-client cache, retry, invalidation, and optimistic options through `request`. Local
+`optimistic` state on `useMutation` is separate from an API cache update: it controls
+`mutation.data`, while `request.optimistic` updates shared cached queries.
+
 ## Client options
 
 - cache: choose cache-first, network-only, or stale-while-revalidate.
