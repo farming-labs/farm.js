@@ -1,6 +1,7 @@
 import * as path from "path";
 import * as fs from "fs";
 import { parseRoutePath } from "../utils";
+import { parseRouteSlotFile } from "./route-slots";
 import type { ParsedRoute } from "../types";
 import { discoverProgrammaticRoutePaths } from "../routes.server";
 import type { FarmSourceRoot } from "../layers";
@@ -92,6 +93,7 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
       });
 
       for (const file of pageFiles) {
+        if (parseRouteSlotFile(file)) continue;
         const route = parseRoutePath(file);
         if (route.type === "page") {
           const pattern = createRoutePattern(route);
