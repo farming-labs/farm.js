@@ -8,6 +8,9 @@
 
 import type {
   AnchorHTMLAttributes,
+  ComponentType,
+  FormEvent,
+  FormHTMLAttributes,
   ReactElement,
   ReactNode,
   RefObject,
@@ -379,6 +382,11 @@ declare module "@farm.js/core/client" {
     key: CacheKey<TData>;
   };
 
+  export interface FarmAPIStream<TItem> extends AsyncIterable<TItem> {
+    readonly response: Response;
+    cancel(reason?: unknown): Promise<void>;
+  }
+
   export class APIClientError<
     TCode extends string = string,
     TData = unknown,
@@ -542,6 +550,7 @@ declare module "@farm.js/core/client" {
   type TypedEndpointLike = {
     __types: {
       body: any;
+      inputBody?: any;
       query: any;
       response: any;
       errors?: any;
@@ -583,13 +592,26 @@ declare module "@farm.js/core/client" {
   type HasRequiredKeys<T> = RequiredKeys<T> extends never ? false : true;
 
   // Type utilities to extract endpoint input/output types
+  type InferEndpointBody<T> = T extends {
+    __types: {
+      inputBody: infer TInputBody;
+    };
+  }
+    ? TInputBody
+    : T extends {
+          __types: {
+            body: infer TBody;
+          };
+        }
+      ? TBody
+      : never;
+
   type InferEndpointInput<T> = T extends {
     __types: {
-      body: infer TBody;
       query: infer TQuery;
     };
   }
-    ? SimplifyEndpointInput<BodyInputProp<TBody> & QueryInputProp<TQuery>>
+    ? SimplifyEndpointInput<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
     : {};
 
   type InferEndpointOutput<T> = T extends {
@@ -597,7 +619,9 @@ declare module "@farm.js/core/client" {
       response: infer R;
     };
   }
-    ? R
+    ? R extends { readonly __farmStreamItem: infer TItem }
+      ? FarmAPIStream<TItem>
+      : R
     : any;
 
   type InferEndpointError<T> = T extends {
@@ -636,7 +660,7 @@ declare module "@farm.js/core/client" {
 
   export type MutationStatus = "idle" | "pending" | "success" | "error";
 
-  type AnyMutationTarget = (...args: any[]) => Promise<any>;
+  export type AnyMutationTarget = (...args: any[]) => Promise<any>;
 
   export type InferMutationVariables<TTarget extends AnyMutationTarget> =
     Parameters<TTarget> extends [] ? undefined : Parameters<TTarget>[0];
@@ -708,6 +732,63 @@ declare module "@farm.js/core/client" {
       InferMutationError<TTarget>
     >,
   ): UseMutationReturn<TTarget>;
+
+  export type FetcherState = "idle" | "submitting";
+
+  export type FetcherFormDataContext = {
+    form: HTMLFormElement | null;
+    submitter: HTMLElement | null;
+  };
+
+  export type UseFetcherOptions<TTarget extends AnyMutationTarget> = UseMutationOptions<
+    InferMutationVariables<TTarget>,
+    InferMutationData<TTarget>,
+    InferMutationError<TTarget>
+  > & {
+    mapFormData?: (
+      formData: FormData,
+      context: FetcherFormDataContext,
+    ) => InferMutationVariables<TTarget>;
+  };
+
+  export type FetcherFormProps = Omit<
+    FormHTMLAttributes<HTMLFormElement>,
+    "action" | "onSubmit"
+  > & {
+    action?: string | ((formData: FormData) => void | Promise<void>);
+    onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  };
+
+  type FetcherInput<TTarget extends AnyMutationTarget> = InferMutationVariables<TTarget> | FormData;
+
+  export type FetcherSubmitAsync<TTarget extends AnyMutationTarget> =
+    [] extends Parameters<TTarget>
+      ? (input?: FetcherInput<TTarget>) => Promise<InferMutationData<TTarget>>
+      : (input: FetcherInput<TTarget>) => Promise<InferMutationData<TTarget>>;
+
+  export type FetcherSubmit<TTarget extends AnyMutationTarget> =
+    [] extends Parameters<TTarget>
+      ? (input?: FetcherInput<TTarget>) => void
+      : (input: FetcherInput<TTarget>) => void;
+
+  export type UseFetcherReturn<TTarget extends AnyMutationTarget> = {
+    state: FetcherState;
+    status: MutationStatus;
+    pending: boolean;
+    data: InferMutationData<TTarget> | null;
+    error: InferMutationError<TTarget> | null;
+    variables: InferMutationVariables<TTarget> | undefined;
+    formData: FormData | null;
+    submit: FetcherSubmit<TTarget>;
+    submitAsync: FetcherSubmitAsync<TTarget>;
+    Form: ComponentType<FetcherFormProps>;
+    reset: () => void;
+  };
+
+  export function useFetcher<TTarget extends AnyMutationTarget>(
+    target: TTarget,
+    options?: UseFetcherOptions<TTarget>,
+  ): UseFetcherReturn<TTarget>;
 
   type RouterToClient<T> = {
     [K in keyof T]: T[K] extends TypedEndpointLike

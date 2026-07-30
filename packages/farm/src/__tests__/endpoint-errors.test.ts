@@ -76,6 +76,25 @@ describe("typed endpoint errors", () => {
     });
   });
 
+  it("validates native urlencoded form submissions", async () => {
+    const response = await invokeAPIRouteEndpoint(
+      createProduct,
+      new Request("https://farm.test/api/products", {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+        },
+        body: "name=From+a+native+form",
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      id: "product-2",
+      name: "From a native form",
+    });
+  });
+
   it("preserves the typed failure when an endpoint is called directly", async () => {
     await expect(
       createProduct({
