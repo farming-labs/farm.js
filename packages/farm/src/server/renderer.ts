@@ -11,7 +11,7 @@ import type {
   RouteModule,
   SSGPage,
 } from "../types";
-import type { RouteManager } from "../routing/route-manager";
+import type { MatchedRouteSlot, RouteManager } from "../routing/route-manager";
 import { logger } from "../utils";
 import { getClientModuleMetadata } from "../utils/client-component";
 import { Writable } from "stream";
@@ -350,7 +350,9 @@ export class ServerRenderer {
   async runWithRequestContext<T>(request: Request, fn: () => T | Promise<T>): Promise<T> {
     return _runWithCurrentRequest(request, () =>
       this.i18nRuntime?.config.enabled
-        ? _runWithFarmI18nRequest(this.i18nRuntime, request, fn, { redirect: false })
+        ? _runWithFarmI18nRequest(this.i18nRuntime, request, fn, {
+            redirect: false,
+          })
         : fn(),
     );
   }
@@ -601,7 +603,10 @@ export class ServerRenderer {
       if (fs.existsSync(htmlPath)) {
         const stat = fs.statSync(htmlPath);
         const html = fs.readFileSync(htmlPath, "utf-8");
-        await this.cacheSSGPage(page, html, { document: true, createdAt: stat.mtimeMs });
+        await this.cacheSSGPage(page, html, {
+          document: true,
+          createdAt: stat.mtimeMs,
+        });
         const fileCacheEntry = await this.getCachedSSGPage(page.urlPath);
         if (fileCacheEntry && (await this.dataCache.isStaleAsync(fileCacheEntry))) {
           this.regenerateSSGPage(page);
@@ -654,7 +659,8 @@ export class ServerRenderer {
     const renderStartTime = Date.now();
     let pathname = "/";
     let params: Record<string, string> = {};
-    let layouts: Array<{ modulePath: string }> = [];
+    let layouts: Array<{ modulePath: string; pattern: string }> = [];
+    let routeSlots: MatchedRouteSlot[] = [];
     let searchParamsObject: Record<string, string | string[] | undefined> = {};
     let middlewareMap = new Map<string, any>();
     let middlewareContext = new Map<string, any>();
@@ -708,6 +714,7 @@ export class ServerRenderer {
       const route = match.route;
       params = match.params;
       layouts = match.layouts;
+      routeSlots = match.slots ?? [];
 
       if (!route) {
         emitFarmEvent({ type: "route.notFound", pathname });
@@ -728,7 +735,9 @@ export class ServerRenderer {
 
       middlewareMap = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_DATA__);
       middlewareContext = toMiddlewareMap((req as any).__FARM_MIDDLEWARE_CONTEXT__);
-      pluginExposedContext = getRequestContextSnapshot(req as object, { exposedOnly: true });
+      pluginExposedContext = getRequestContextSnapshot(req as object, {
+        exposedOnly: true,
+      });
       const currentRequest = createWebRequestFromFarmRequest(req);
       const routeContext = await this.resolveRouteContext({
         request: currentRequest,
@@ -817,8 +826,16 @@ export class ServerRenderer {
         : undefined;
 
       if (renderingConfig.ppr && pprBypassReason) {
-        emitFarmEvent({ type: "ppr.shell.bypass", route: pathname, reason: pprBypassReason });
-        emitFarmEvent({ type: "cache.bypass", route: pathname, reason: pprBypassReason });
+        emitFarmEvent({
+          type: "ppr.shell.bypass",
+          route: pathname,
+          reason: pprBypassReason,
+        });
+        emitFarmEvent({
+          type: "cache.bypass",
+          route: pathname,
+          reason: pprBypassReason,
+        });
 
         if (pprBypassReason === "refresh") {
           pprRefreshRoute = pathname;
@@ -830,12 +847,20 @@ export class ServerRenderer {
         const pprCacheKey = this.getPPRCacheKey(pathname, url.search);
         const cachedPPRShell = await this.getCachedPPRShell(pathname, url.search);
         if (cachedPPRShell) {
-          emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
+          emitFarmEvent({
+            type: "ppr.shell.hit",
+            route: pathname,
+            key: pprCacheKey,
+          });
           this.serveCachedPPRShell(res, cachedPPRShell.value, renderingConfig.revalidate);
           completeRender(res.statusCode || 200, pathname);
           return;
         }
-        emitFarmEvent({ type: "ppr.shell.miss", route: pathname, key: pprCacheKey });
+        emitFarmEvent({
+          type: "ppr.shell.miss",
+          route: pathname,
+          key: pprCacheKey,
+        });
       }
 
       let LoadingFallbackComponent: React.ComponentType<any> | null = null;
@@ -865,17 +890,86 @@ export class ServerRenderer {
       const moduleMetadata =
         routeManifestEntry || getClientModuleMetadata(route.modulePath, this.config.root);
       const isClientComponent = moduleMetadata.isClientComponent;
+      const renderedRouteSlots = await Promise.all(
+        routeSlots.map(async (slot) => {
+          const slotModule = await this.routeManager.loadRouteModule(slot.route.modulePath);
+          if (!slotModule.default) {
+            throw new Error(
+              `Route slot "${slot.name}" module ${slot.route.modulePath} does not export a default component`,
+            );
+          }
+
+          const slotContext = await this.resolveRouteContext({
+            request: currentRequest,
+            rawRequest: req,
+            params: slot.params,
+            search: searchParamsObject,
+            path: pathname,
+          });
+          const rawSlotProps = withFarmRouteContext(
+            {
+              params: slot.params,
+              searchParams: Promise.resolve(searchParamsObject),
+              path: pathname,
+              middleware: middlewareMap.size > 0 ? { data: middlewareMap } : undefined,
+              context: pluginExposedContext.size > 0 ? { data: pluginExposedContext } : undefined,
+            } as PageProps & { search: unknown },
+            slotContext,
+          );
+          const slotProps = await parseRouteModuleProps(slotModule, {
+            props: rawSlotProps,
+            search: searchParamsObject,
+            routePath: slot.route.pattern,
+          });
+          const metadata = getClientModuleMetadata(slot.route.modulePath, this.config.root);
+
+          return {
+            ...slot,
+            module: slotModule,
+            props: slotProps,
+            isClientComponent: metadata.isClientComponent,
+            shouldHydrate: metadata.shouldHydrate,
+          };
+        }),
+      );
       const shouldHydrate = moduleMetadata.shouldHydrate;
+      const hasHydratableRouteSlots = renderedRouteSlots.some(
+        (slot) => slot.isClientComponent || slot.shouldHydrate,
+      );
 
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
       (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate;
+      (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ = hasHydratableRouteSlots;
       (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
         ? loadingBoundaryEntry.modulePath.substring(
             loadingBoundaryEntry.modulePath.indexOf("/src/app/"),
           )
         : null;
+      (req as any).__FARM_ROUTE_SLOTS__ = renderedRouteSlots.map((slot) => ({
+        name: slot.name,
+        ownerPattern: slot.ownerPattern,
+        containerId: slot.containerId,
+        interception: slot.interception,
+        fallback: slot.fallback,
+        modulePath: slot.route.modulePath,
+        isClientComponent: slot.isClientComponent,
+        shouldHydrate: slot.shouldHydrate,
+        props: {
+          params: slot.props.params,
+          search: (slot.props as any).search,
+          searchParams: (slot.props as any).search,
+          ...("data" in slot.props ? { data: (slot.props as any).data } : {}),
+          ...((slot.props as any).__farmCanonicalPath
+            ? { __farmCanonicalPath: (slot.props as any).__farmCanonicalPath }
+            : {}),
+          ...((slot.props as any).__farmRoutePropsResolved
+            ? { __farmRoutePropsResolved: true }
+            : {}),
+          path: pathname,
+        },
+      }));
       // Store pageProps for client-side hydration (serializable version - no Promises)
       (req as any).__FARM_PROPS__ = {
         params: pageProps.params,
@@ -958,12 +1052,33 @@ export class ServerRenderer {
             let wrappedElement: React.ReactElement = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
+              const layoutEntry = layouts[i];
               const LayoutComponent = layoutModule.default;
+              const slotProps: Record<string, React.ReactElement> = {};
+              for (const slot of renderedRouteSlots) {
+                if (slot.ownerPattern !== layoutEntry.pattern) continue;
+
+                let slotElement = React.createElement(
+                  slot.module.default as React.ComponentType<unknown>,
+                  slot.props as React.Attributes,
+                );
+                slotElement = React.createElement(
+                  "div",
+                  {
+                    id: slot.containerId,
+                    "data-farm-route-slot": slot.name,
+                    "data-farm-slot-owner": slot.ownerPattern,
+                  },
+                  slotElement,
+                );
+                slotProps[slot.name] = slotElement;
+              }
               wrappedElement = React.createElement(
                 LayoutComponent as React.ComponentType<unknown>,
                 {
                   children: wrappedElement,
                   params,
+                  ...slotProps,
                 } as React.Attributes,
               );
             }
@@ -1007,7 +1122,11 @@ export class ServerRenderer {
                 captureStaticShell: Boolean(pprShellOptions),
                 observabilityRoute: pathname,
                 onSuspenseHoleDetected: pprShellOptions
-                  ? () => emitFarmEvent({ type: "ppr.suspense.holeDetected", route: pathname })
+                  ? () =>
+                      emitFarmEvent({
+                        type: "ppr.suspense.holeDetected",
+                        route: pathname,
+                      })
                   : undefined,
                 onComplete:
                   pprShellOptions && req.method !== "HEAD"
@@ -1064,7 +1183,11 @@ export class ServerRenderer {
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
       if (pprRefreshRoute) {
-        emitFarmEvent({ type: "ppr.refresh.error", route: pprRefreshRoute, error });
+        emitFarmEvent({
+          type: "ppr.refresh.error",
+          route: pprRefreshRoute,
+          error,
+        });
       }
       logger.error(`Error rendering page: ${error}`);
 
@@ -1134,7 +1257,9 @@ export class ServerRenderer {
       if (typeof layoutModule.generateMetadata === "function") {
         metadata = mergeMetadata(
           metadata,
-          await layoutModule.generateMetadata({ params: options.pageProps.params }),
+          await layoutModule.generateMetadata({
+            params: options.pageProps.params,
+          }),
         );
       }
     }
@@ -1463,7 +1588,13 @@ export class ServerRenderer {
         clientEntry: "/@farm/client.js",
         routes: {} as Record<string, any>,
         layouts: {} as Record<string, any>,
-        sharedAssets: [{ tag: "link", attrs: { rel: "stylesheet", href: "/src/app/globals.css" } }],
+        slots: [] as Array<Record<string, any>>,
+        sharedAssets: [
+          {
+            tag: "link",
+            attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
+          },
+        ],
       };
 
       // Convert routes array to object keyed by pattern
@@ -1490,11 +1621,32 @@ export class ServerRenderer {
         };
       }
 
+      for (const slotEntry of manifest.slots ?? []) {
+        clientManifest.slots.push({
+          ...slotEntry,
+          preloads: [slotEntry.modulePath],
+          assets: [],
+        });
+      }
+
       // Inject page props, component info, and MANIFEST for client-side SPA
       // __FARM_MANIFEST__ contains the full route manifest (TanStack Start pattern)
-      const deferredProps = prepareDeferredData((req as any).__FARM_PROPS__ || {});
+      const routeSlotPayload = ((req as any).__FARM_ROUTE_SLOTS__ || []).map(
+        (slot: Record<string, any>) => ({
+          ...slot,
+          modulePath:
+            typeof slot.modulePath === "string" && slot.modulePath.startsWith(this.config.root)
+              ? slot.modulePath.slice(this.config.root.length)
+              : slot.modulePath,
+        }),
+      );
+      const deferredProps = prepareDeferredData({
+        page: (req as any).__FARM_PROPS__ || {},
+        slots: routeSlotPayload,
+      });
       const propsScript = `<script>
-window.__FARM_PROPS__ = ${serializeInlineValue(deferredProps.data)};
+window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
+window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
@@ -1508,7 +1660,9 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
 </script>`;
       const hydrationClickQueueScript =
-        isClientComponent || (req as any).__FARM_SHOULD_HYDRATE__ === true
+        isClientComponent ||
+        (req as any).__FARM_SHOULD_HYDRATE__ === true ||
+        (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ === true
           ? createPreHydrationClickQueueScript()
           : "";
 
@@ -1638,7 +1792,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           didError = true;
           if (!isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
             logger.error(`SSR shell error: ${error}`);
-            emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
+            emitFarmEvent({
+              type: "render.error",
+              route: observabilityRoute,
+              error,
+            });
           }
 
           if (clearMiddlewareData) {
@@ -1651,7 +1809,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           didError = true;
           if (!isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
             logger.error(`SSR streaming error: ${error}`);
-            emitFarmEvent({ type: "render.error", route: observabilityRoute, error });
+            emitFarmEvent({
+              type: "render.error",
+              route: observabilityRoute,
+              error,
+            });
           }
         },
       });

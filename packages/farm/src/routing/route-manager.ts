@@ -59,6 +59,7 @@ import {
   stripFarmLocaleFromPathname,
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -66,6 +67,24 @@ interface RouteEntry {
   pattern: string;
   source?: "file" | "programmatic";
   sourceRoot: string;
+}
+
+export interface RouteSlotEntry extends RouteEntry {
+  name: string;
+  ownerPattern: string;
+  interception: boolean;
+  fallback: boolean;
+  containerId: string;
+}
+
+export interface MatchedRouteSlot {
+  name: string;
+  ownerPattern: string;
+  containerId: string;
+  interception: boolean;
+  fallback: boolean;
+  route: RouteSlotEntry;
+  params: Record<string, string>;
 }
 
 interface MetadataImageEntry extends RouteEntry {
@@ -96,6 +115,7 @@ export class RouteManager {
   private config: Required<FarmConfig>;
   private routes: Map<string, RouteEntry> = new Map();
   private layouts: Map<string, RouteEntry> = new Map();
+  private routeSlots: Map<string, RouteSlotEntry> = new Map();
   private loadings: Map<string, RouteEntry> = new Map();
   private errors: Map<string, RouteEntry> = new Map();
   private metadataImages: Map<string, MetadataImageEntry> = new Map();
@@ -115,6 +135,7 @@ export class RouteManager {
   async discoverRoutes(): Promise<void> {
     this.routes.clear();
     this.layouts.clear();
+    this.routeSlots.clear();
     this.loadings.clear();
     this.errors.clear();
     this.metadataImages.clear();
@@ -125,6 +146,14 @@ export class RouteManager {
     for (const source of getFarmSourceRoots(this.config)) {
       await this.discoverFileRoutes(source);
       await this.discoverProgrammaticRoutes(source);
+    }
+
+    for (const slot of this.routeSlots.values()) {
+      if (slot.interception && !this.routes.has(slot.pattern)) {
+        throw new Error(
+          `Intercepting route slot "${slot.name}" targets "${slot.pattern}", but no canonical page exists for that URL`,
+        );
+      }
     }
 
     this.routes = new Map(
@@ -146,10 +175,16 @@ export class RouteManager {
   /**
    * Find matching route for a given URL path
    */
-  matchRoute(pathname: string): {
+  matchRoute(
+    pathname: string,
+    options: {
+      interceptFrom?: string;
+    } = {},
+  ): {
     route: RouteEntry | null;
     params: Record<string, string>;
     layouts: RouteEntry[];
+    slots: MatchedRouteSlot[];
   } {
     // Remove trailing slash except for root
     const routePathname = this.toRoutePathname(pathname);
@@ -169,11 +204,13 @@ export class RouteManager {
 
     // Find all matching layouts (from root to specific)
     const layouts = this.findMatchingLayouts(normalizedPath);
+    const slots = this.findMatchingRouteSlots(normalizedPath, options.interceptFrom);
 
     return {
       route: matchedRoute,
       params,
       layouts,
+      slots,
     };
   }
 
@@ -189,6 +226,10 @@ export class RouteManager {
    */
   getLayouts(): Map<string, RouteEntry> {
     return new Map(this.layouts);
+  }
+
+  getRouteSlots(): Map<string, RouteSlotEntry> {
+    return new Map(this.routeSlots);
   }
 
   /** Resolve route rules, inherited layouts, and the page export in precedence order. */
@@ -385,6 +426,18 @@ export class RouteManager {
       pattern: string;
       modulePath: string;
     }>;
+    slots: Array<{
+      name: string;
+      ownerPattern: string;
+      pattern: string;
+      modulePath: string;
+      containerId: string;
+      interception: boolean;
+      fallback: boolean;
+      shouldHydrate: boolean;
+      isClientComponent: boolean;
+      segments: RouteEntry["route"]["segments"];
+    }>;
   } {
     const toUrlPath = (absolutePath: string) => {
       if (absolutePath === projectRoot || absolutePath.startsWith(`${projectRoot}${path.sep}`)) {
@@ -420,7 +473,23 @@ export class RouteManager {
       modulePath: toUrlPath(entry.modulePath),
     }));
 
-    return { routes, layouts };
+    const slots = Array.from(this.routeSlots.values()).map((entry) => {
+      const metadata = getClientModuleMetadata(entry.modulePath, projectRoot);
+      return {
+        name: entry.name,
+        ownerPattern: entry.ownerPattern,
+        pattern: entry.pattern,
+        modulePath: toUrlPath(entry.modulePath),
+        containerId: entry.containerId,
+        interception: entry.interception,
+        fallback: entry.fallback,
+        shouldHydrate: metadata.shouldHydrate,
+        isClientComponent: metadata.isClientComponent,
+        segments: entry.route.segments,
+      };
+    });
+
+    return { routes, layouts, slots };
   }
 
   /**
@@ -508,6 +577,7 @@ export class RouteManager {
   private async discoverFileRoutes(source: FarmSourceRoot): Promise<void> {
     const appDir = resolveAppPath(source.root, source.srcDir, "app");
     const pageFiles = await safeGlobFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
+    const slotDefaultFiles = await safeGlobFiles("**/@*/**/default.{ts,tsx,js,jsx}", appDir);
     const layoutFiles = await safeGlobFiles("**/layout.{ts,tsx,js,jsx}", appDir);
     const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
     const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
@@ -517,7 +587,7 @@ export class RouteManager {
     );
 
     for (const [kind, files, target] of [
-      ["page", pageFiles, this.routes],
+      ["page", pageFiles.filter((file) => parseRouteSlotFile(file) === null), this.routes],
       ["layout", layoutFiles, this.layouts],
       ["loading", loadingFiles, this.loadings],
       ["error", errorFiles, this.errors],
@@ -540,6 +610,37 @@ export class RouteManager {
           sourceRoot: source.root,
         });
       }
+    }
+
+    for (const file of [...pageFiles, ...slotDefaultFiles]) {
+      const slot = parseRouteSlotFile(file);
+      if (!slot) continue;
+
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(slot.route);
+      const ownerPattern = this.createRoutePattern(slot.ownerRoute);
+      const key = `${ownerPattern}:${slot.name}:${slot.interception ? "intercept" : "slot"}:${
+        slot.fallback ? "default" : pattern
+      }`;
+      const existing = this.routeSlots.get(key);
+      if (existing?.sourceRoot === source.root) {
+        throw new Error(
+          `Duplicate route slot "${slot.name}" for "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
+        );
+      }
+
+      this.routeSlots.set(key, {
+        route: slot.route,
+        modulePath,
+        pattern,
+        source: "file",
+        sourceRoot: source.root,
+        name: slot.name,
+        ownerPattern,
+        interception: slot.interception,
+        fallback: slot.fallback,
+        containerId: createRouteSlotContainerId(slot.name, ownerPattern),
+      });
     }
 
     for (const file of metadataImageFiles) {
@@ -681,6 +782,89 @@ export class RouteManager {
     }
 
     return matchingLayouts;
+  }
+
+  private findMatchingRouteSlots(pathname: string, interceptFrom?: string): MatchedRouteSlot[] {
+    const groups = new Map<string, RouteSlotEntry[]>();
+    for (const entry of this.routeSlots.values()) {
+      if (!this.matchesRoutePrefix(pathname, entry.ownerPattern)) continue;
+      const key = `${entry.ownerPattern}:${entry.name}`;
+      const entries = groups.get(key) ?? [];
+      entries.push(entry);
+      groups.set(key, entries);
+    }
+
+    const normalizedFrom = interceptFrom
+      ? this.toRoutePathname(new URL(interceptFrom, "http://farm.local").pathname)
+      : undefined;
+    const matches: MatchedRouteSlot[] = [];
+
+    for (const entries of groups.values()) {
+      const candidates = entries
+        .filter((entry) => !entry.fallback)
+        .filter(
+          (entry) =>
+            !entry.interception ||
+            (normalizedFrom !== undefined &&
+              this.matchesRoutePrefix(normalizedFrom, entry.ownerPattern)),
+        )
+        .map((entry) => ({
+          entry,
+          match: matchRoute(pathname, entry.route.segments),
+        }))
+        .filter((candidate) => candidate.match.matches)
+        .sort((left, right) => {
+          if (left.entry.interception !== right.entry.interception) {
+            return left.entry.interception ? -1 : 1;
+          }
+          return routeSpecificity(right.entry) - routeSpecificity(left.entry);
+        });
+
+      const selected = candidates[0];
+      if (selected) {
+        matches.push({
+          name: selected.entry.name,
+          ownerPattern: selected.entry.ownerPattern,
+          containerId: selected.entry.containerId,
+          interception: selected.entry.interception,
+          fallback: false,
+          route: selected.entry,
+          params: selected.match.params,
+        });
+        continue;
+      }
+
+      const fallback = entries.find((entry) => entry.fallback);
+      if (fallback) {
+        matches.push({
+          name: fallback.name,
+          ownerPattern: fallback.ownerPattern,
+          containerId: fallback.containerId,
+          interception: false,
+          fallback: true,
+          route: fallback,
+          params: {},
+        });
+      }
+    }
+
+    return matches.sort((left, right) => {
+      const ownerDifference = left.route.route.segments.length - right.route.route.segments.length;
+      return ownerDifference || left.name.localeCompare(right.name);
+    });
+  }
+
+  private matchesRoutePrefix(pathname: string, pattern: string): boolean {
+    if (pattern === "/") return true;
+    const patternSegments = parseRoutePath(`${pattern}/page.tsx`).segments;
+    const pathSegments = pathname.split("/").filter(Boolean);
+    if (patternSegments.length > pathSegments.length) return false;
+
+    for (let index = 0; index < patternSegments.length; index++) {
+      const segment = patternSegments[index]!;
+      if (!segment.isDynamic && segment.segment !== pathSegments[index]) return false;
+    }
+    return true;
   }
 
   private findNearestBoundary(

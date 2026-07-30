@@ -18,6 +18,61 @@ Farm uses an app directory routing model with static routes, dynamic segments, c
 | src/app/blog/[slug]/page.tsx    | /blog/:slug   |
 | src/app/docs/[...slug]/page.tsx | /docs/:slug\* |
 
+## Named slots and intercepted routes
+
+An `@name` directory gives its owning layout another React node alongside `children`. Use slots
+for independently composed areas such as activity panels, drawers, and modals. The slot name and
+interception marker never become part of the public URL.
+
+```text
+src/app/feed/
+├── layout.tsx
+├── page.tsx
+├── photo/[id]/page.tsx
+└── @modal/
+    ├── default.tsx
+    └── (.)photo/[id]/page.tsx
+```
+
+The layout receives the `@modal` result as `modal`:
+
+```tsx
+import type { ReactNode } from "react";
+
+export default function FeedLayout({
+  children,
+  modal,
+}: {
+  children: ReactNode;
+  modal?: ReactNode;
+}) {
+  return (
+    <main>
+      {children}
+      {modal}
+    </main>
+  );
+}
+```
+
+`default.tsx` renders when no page in that slot matches. A client-side navigation from `/feed` to
+`/feed/photo/42` selects `@modal/(.)photo/[id]/page.tsx`, places it in the existing modal slot, and
+keeps the surrounding feed state alive. A direct request or refresh at `/feed/photo/42` renders the
+canonical `photo/[id]/page.tsx` instead.
+
+Interception markers are relative to the slot's owning route:
+
+| Marker     | Target base            |
+| ---------- | ---------------------- |
+| `(.)`      | Same route level       |
+| `(..)`     | One route level above  |
+| `(..)(..)` | Two route levels above |
+| `(...)`    | App root               |
+
+Make an intercepting slot a Client Component when it needs event handlers such as closing a modal
+with `router.back()`. Farm falls back to canonical document navigation if it cannot safely mount the
+intercepted slot in the current page.
+
 ## Dynamic params
 
 **src/app/users/[id]/page.tsx**

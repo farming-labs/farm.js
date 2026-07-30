@@ -206,6 +206,35 @@ test.describe("Framework feature integration", () => {
     await expect(page.getByTestId("optional-catchall-slug")).toHaveText("base");
   });
 
+  test("renders named route slots and preserves background state during interception", async ({
+    page,
+    request,
+  }) => {
+    const direct = await request.get("/slot-lab/photo/42");
+    expect(direct.ok()).toBeTruthy();
+    const directHtml = await direct.text();
+    expect(directHtml).toContain('data-testid="canonical-photo"');
+    expect(directHtml).toContain("Canonical photo");
+
+    await page.goto("/slot-lab");
+    await expect(page.getByTestId("activity-slot")).toHaveText("Activity slot");
+
+    const count = page.getByRole("button", { name: "Background count: 0" });
+    await count.click();
+    await expect(page.getByRole("button", { name: "Background count: 1" })).toBeVisible();
+
+    await page.getByTestId("open-intercepted-photo").click();
+    await expect(page).toHaveURL(/\/slot-lab\/photo\/42$/);
+    await expect(page.getByTestId("intercepted-photo")).toContainText("Intercepted photo 42");
+    await expect(page.getByRole("button", { name: "Background count: 1" })).toBeVisible();
+    await expect(page.getByTestId("canonical-photo")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Close photo" }).click();
+    await expect(page).toHaveURL(/\/slot-lab$/);
+    await expect(page.getByTestId("intercepted-photo")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Background count: 1" })).toBeVisible();
+  });
+
   test("runs client plugins through hydration and SPA navigation", async ({ page }) => {
     await page.goto("/feature-lab");
 

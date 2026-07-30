@@ -661,7 +661,7 @@ export function farmPlugin(
         const normalized = file.replace(/\\/g, "/");
         return (
           appDirSlugs.some((appDir) => normalized.startsWith(`${appDir}/`)) &&
-          /\/(?:page|layout|loading|error|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
+          /\/(?:page|default|layout|loading|error|middleware|route)\.(?:ts|tsx|js|jsx|md|mdx)$|\/(?:opengraph-image|twitter-image)(?:\.(?:ts|tsx|js|jsx|png|jpg|jpeg|gif|webp)|\.alt\.txt)$/.test(
             normalized,
           )
         );
@@ -1516,7 +1516,11 @@ export function farmPlugin(
                     method: req.method || "GET",
                   });
                 }
-                const match = routeManager.matchRoute(targetPath);
+                const interceptFromHeader =
+                  request.headers.get("x-farm-intercept-from") || undefined;
+                const match = routeManager.matchRoute(targetRequestUrl.pathname, {
+                  interceptFrom: interceptFromHeader,
+                });
                 if (pm) {
                   await pm.runHookParallel("afterRouteMatch", {
                     pathname: targetPath,
@@ -1534,7 +1538,7 @@ export function farmPlugin(
                   return;
                 }
 
-                const { route, params, layouts } = match;
+                const { route, params, layouts, slots } = match;
 
                 // Check if route was found
                 if (!route) {
@@ -1600,6 +1604,59 @@ export function farmPlugin(
                   search: searchParams,
                   routePath: route.pattern,
                 });
+                const routeSlots = await Promise.all(
+                  slots.map(async (slot) => {
+                    const slotModule = await routeManager.loadRouteModule(slot.route.modulePath);
+                    const slotMetadata = getClientModuleMetadata(
+                      slot.route.modulePath,
+                      server.config.root,
+                    );
+                    const slotContext = await resolveFarmRouteContext(farmApp.getConfig(), {
+                      request,
+                      params: slot.params,
+                      search: searchParams,
+                      path: targetUrl.pathname,
+                    });
+                    const slotProps = await parseRouteModuleProps(slotModule as RouteModuleLike, {
+                      props: withFarmRouteContext(
+                        {
+                          params: slot.params,
+                          searchParams: Promise.resolve(searchParams),
+                          path: targetUrl.pathname,
+                        },
+                        slotContext,
+                      ),
+                      search: searchParams,
+                      routePath: slot.route.pattern,
+                    });
+
+                    return {
+                      name: slot.name,
+                      ownerPattern: slot.ownerPattern,
+                      containerId: slot.containerId,
+                      interception: slot.interception,
+                      fallback: slot.fallback,
+                      modulePath: slot.route.modulePath,
+                      isClientComponent: slotMetadata.isClientComponent,
+                      shouldHydrate: slotMetadata.shouldHydrate,
+                      props: {
+                        params: slotProps.params,
+                        search: (slotProps as any).search,
+                        searchParams: (slotProps as any).search,
+                        ...("data" in slotProps ? { data: (slotProps as any).data } : {}),
+                        ...((slotProps as any).__farmCanonicalPath
+                          ? {
+                              __farmCanonicalPath: (slotProps as any).__farmCanonicalPath,
+                            }
+                          : {}),
+                        ...((slotProps as any).__farmRoutePropsResolved
+                          ? { __farmRoutePropsResolved: true }
+                          : {}),
+                        path: targetUrl.pathname,
+                      },
+                    };
+                  }),
+                );
 
                 // Convert absolute paths to URL paths (relative to project root)
                 const projectRoot = server.config.root;
@@ -1628,13 +1685,27 @@ export function farmPlugin(
                   },
                   canonicalPath: (routeProps as any).__farmCanonicalPath,
                   modulePath: toUrlPath(route.modulePath),
-                  isClientComponent,
-                  shouldHydrate,
+                  isClientComponent: routeSlots.length > 0 ? false : isClientComponent,
+                  shouldHydrate:
+                    shouldHydrate ||
+                    routeSlots.some((slot) => slot.isClientComponent || slot.shouldHydrate),
                   metadata: {
                     title: mergedMetadata.title,
                     description: mergedMetadata.description,
                   },
                   layoutModules: layouts.map((l) => toUrlPath(l.modulePath)),
+                  routeSlots: routeSlots.map((slot) => ({
+                    ...slot,
+                    modulePath: toUrlPath(slot.modulePath),
+                  })),
+                  interception: routeSlots.some((slot) => slot.interception)
+                    ? {
+                        from: interceptFromHeader,
+                        slots: routeSlots
+                          .filter((slot) => slot.interception)
+                          .map((slot) => slot.name),
+                      }
+                    : undefined,
                   i18n: getFarmI18nClientSnapshot(),
                 };
 
@@ -2053,6 +2124,7 @@ export function farmPlugin(
 export const getManifest = () => ({
   routes: {},
   layouts: {},
+  slots: [],
   clientEntry: "/@farm/client.js",
   sharedAssets: []
 });
@@ -2066,6 +2138,7 @@ export const getManifest = () => ({
           clientEntry: "/@farm/client.js",
           routes: {} as Record<string, any>,
           layouts: {} as Record<string, any>,
+          slots: [] as Array<Record<string, any>>,
           sharedAssets: [
             {
               tag: "link",
@@ -2098,6 +2171,14 @@ export const getManifest = () => ({
             preloads: [layout.modulePath],
             assets: [],
           };
+        }
+
+        for (const slot of manifest.slots) {
+          fullManifest.slots.push({
+            ...slot,
+            preloads: [slot.modulePath],
+            assets: [],
+          });
         }
 
         return `
@@ -2872,7 +2953,7 @@ window.__FARM_WRAP_PROVIDERS__ = wrapWithIntegrationProviders;
 
 // Get manifest from window (inlined by server in HTML)
 // Fallback to empty manifest if not available yet
-const getManifest = () => window.__FARM_MANIFEST__ || { routes: {}, layouts: {}, clientEntry: '', sharedAssets: [] };
+const getManifest = () => window.__FARM_MANIFEST__ || { routes: {}, layouts: {}, slots: [], clientEntry: '', sharedAssets: [] };
 
 // ====== CLIENT-SIDE ROUTE MATCHING ======
 // Matches URL to route using manifest (no server request!)
@@ -3211,6 +3292,9 @@ let LayoutComponent = null;
 
 // Track if we've taken over rendering from SSR
 let hasClientTakenOver = false;
+const routeSlotRoots = new Map();
+const routeSlotDefinitions = new Map();
+let activeRouteInterception = null;
 
 function normalizeServerProps(rawProps) {
   const props = rawProps && typeof rawProps === 'object' ? { ...rawProps } : {};
@@ -3221,6 +3305,123 @@ function normalizeServerProps(rawProps) {
     props.context = { ...props.context, data: new Map(Object.entries(props.context.data)) };
   }
   return props;
+}
+
+function getRouteSlotKey(slot) {
+  return slot.ownerPattern + ':' + slot.name;
+}
+
+async function renderRouteSlot(slot, mode = 'render') {
+  const container = document.getElementById(slot.containerId);
+  if (!container || !slot.modulePath) return false;
+  if (mode === 'intercept' && !slot.isClientComponent && !slot.shouldHydrate) {
+    return false;
+  }
+
+  let slotModule = pageModuleCache.get(slot.modulePath);
+  if (!slotModule) {
+    slotModule = await import(/* @vite-ignore */ slot.modulePath);
+    pageModuleCache.set(slot.modulePath, slotModule);
+  }
+  const SlotComponent = slotModule?.default;
+  if (!SlotComponent) return false;
+
+  const props = reviveDeferredData(
+    normalizeServerProps(slot.props || {}),
+    window.__FARM_DEFERRED_DATA__ || {},
+  );
+  const element = wrapWithIntegrationProviders(
+    React.createElement(SlotComponent, props),
+  );
+  const key = getRouteSlotKey(slot);
+  const existingRoot = routeSlotRoots.get(key);
+
+  if (mode === 'hydrate') {
+    if (existingRoot) return true;
+    const root = hydrateRoot(container, element);
+    routeSlotRoots.set(key, root);
+  } else {
+    if (existingRoot) {
+      try { existingRoot.unmount(); } catch (error) {}
+    }
+    const root = createRoot(container);
+    root.render(element);
+    routeSlotRoots.set(key, root);
+  }
+
+  routeSlotDefinitions.set(key, slot);
+  return true;
+}
+
+async function hydrateInitialRouteSlots() {
+  const slots = Array.isArray(window.__FARM_ROUTE_SLOTS__)
+    ? window.__FARM_ROUTE_SLOTS__
+    : [];
+  let hydrated = false;
+
+  for (const slot of slots) {
+    routeSlotDefinitions.set(getRouteSlotKey(slot), slot);
+    if (!slot.isClientComponent && !slot.shouldHydrate) continue;
+    try {
+      hydrated = (await renderRouteSlot(slot, 'hydrate')) || hydrated;
+    } catch (error) {
+      console.warn('[Farm.js] Could not hydrate route slot:', slot.name, error);
+    }
+  }
+
+  return hydrated;
+}
+
+async function renderRouteInterception(pageData) {
+  const slots = Array.isArray(pageData.routeSlots)
+    ? pageData.routeSlots.filter((slot) => slot.interception)
+    : [];
+  if (!pageData.interception || slots.length === 0) return false;
+
+  const previous = new Map();
+  for (const slot of slots) {
+    const key = getRouteSlotKey(slot);
+    previous.set(key, routeSlotDefinitions.get(key) || null);
+    if (!(await renderRouteSlot(slot, 'intercept'))) {
+      return false;
+    }
+  }
+
+  activeRouteInterception = {
+    from: pageData.interception.from,
+    slots,
+    previous,
+  };
+  return true;
+}
+
+async function clearRouteInterception(destination) {
+  if (!activeRouteInterception) return false;
+  const active = activeRouteInterception;
+  activeRouteInterception = null;
+
+  for (const slot of active.slots) {
+    const key = getRouteSlotKey(slot);
+    const root = routeSlotRoots.get(key);
+    if (root) {
+      try { root.unmount(); } catch (error) {}
+      routeSlotRoots.delete(key);
+    }
+
+    const previous = active.previous.get(key);
+    if (previous && (previous.isClientComponent || previous.shouldHydrate)) {
+      await renderRouteSlot(previous, 'render');
+    } else {
+      const container = document.getElementById(slot.containerId);
+      if (container) container.replaceChildren();
+      if (previous) routeSlotDefinitions.set(key, previous);
+      else routeSlotDefinitions.delete(key);
+    }
+  }
+
+  if (!active.from) return false;
+  const background = new URL(active.from, window.location.origin);
+  return destination === background.pathname + background.search;
 }
 
 function applyCanonicalPathFromProps(props) {
@@ -3457,6 +3658,17 @@ async function tryHydrateImportedPage(
 async function renderPage(pageData) {
   const container = document.getElementById('root');
   if (!container) return;
+  const destination = window.location.pathname + window.location.search;
+
+  if (pageData.interception) {
+    if (await renderRouteInterception(pageData)) return;
+    window.location.assign(destination);
+    return;
+  }
+
+  if (await clearRouteInterception(destination)) {
+    return;
+  }
 
   const route = {
     modulePath: pageData.modulePath,
@@ -3685,7 +3897,9 @@ async function hydrate() {
       window.__FARM_SHOULD_HYDRATE__ === true ||
       isClientComponent ||
       await moduleLooksClient(modulePath);
+    const hydratedSlots = await hydrateInitialRouteSlots();
     if (!shouldHydrate) {
+      if (hydratedSlots) replayPreHydrationClicks();
       console.log('[Farm.js] Server component - SPA router ready')
       return
     }
