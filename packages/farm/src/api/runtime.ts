@@ -1,4 +1,9 @@
 import { _runWithCurrentRequest } from "../server/request";
+import {
+  decodeFarmCacheInvalidations,
+  encodeFarmCacheInvalidations,
+  FARM_CACHE_INVALIDATION_HEADER,
+} from "../cache-invalidation";
 import { isEndpointFailure, type EndpointFailure } from "./endpoint";
 
 export type APIRouteParamValue = string | string[];
@@ -89,16 +94,30 @@ async function invokeAPIRouteEndpointInContext(
     return headersValidation;
   }
 
-  let result: unknown;
+  const handlerContext = {
+    query: queryValidation,
+    body: bodyValidation,
+    headers: headersValidation,
+    request,
+    context: {},
+    params,
+  };
+  let execution: {
+    result: unknown;
+    context: unknown;
+    handlerExecuted: boolean;
+    invalidations: readonly string[];
+  };
   try {
-    result = await farmHandler({
-      query: queryValidation,
-      body: bodyValidation,
-      headers: headersValidation,
-      request,
-      context: {},
-      params,
-    });
+    execution =
+      typeof endpoint.__farmInvoke === "function"
+        ? await endpoint.__farmInvoke(handlerContext)
+        : {
+            result: await farmHandler(handlerContext),
+            context: handlerContext.context,
+            handlerExecuted: true,
+            invalidations: [],
+          };
   } catch (error) {
     if (isEndpointFailure(error)) {
       return createEndpointFailureResponse(error);
@@ -106,7 +125,8 @@ async function invokeAPIRouteEndpointInContext(
     throw error;
   }
 
-  return normalizeRouteResponse(result);
+  const response = normalizeRouteResponse(execution.result);
+  return attachEndpointInvalidations(response, execution.invalidations);
 }
 
 export function normalizeRouteResponse(result: unknown): Response {
@@ -133,6 +153,22 @@ export function isWebResponse(value: unknown): value is Response {
       "status" in value &&
       typeof (value as Response).arrayBuffer === "function")
   );
+}
+
+function attachEndpointInvalidations(response: Response, keys: readonly string[]): Response {
+  const existing = decodeFarmCacheInvalidations(
+    response.headers.get(FARM_CACHE_INVALIDATION_HEADER),
+  );
+  const encoded = encodeFarmCacheInvalidations([...existing, ...keys]);
+  if (!encoded) return response;
+
+  const headers = new Headers(response.headers);
+  headers.set(FARM_CACHE_INVALIDATION_HEADER, encoded);
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 }
 
 export function createEndpointFailureResponse(failure: EndpointFailure<string, unknown>): Response {

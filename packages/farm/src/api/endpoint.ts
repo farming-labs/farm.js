@@ -1,4 +1,10 @@
 import { createEndpoint as betterCallEndpoint } from "better-call";
+import {
+  createRouteDataCacheKey,
+  invalidate,
+  revalidatePath,
+  type RouteDataCacheKey,
+} from "../cache";
 
 // Generic schema type that works with both Zod v3 and v4
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -113,6 +119,35 @@ export type EndpointMiddleware<
 
 export type AnyEndpointMiddleware = (ctx: EndpointMiddlewareContext<any, any, any, any>) => unknown;
 
+export type EndpointInvalidationTarget =
+  | {
+      key: RouteDataCacheKey;
+    }
+  | {
+      path: string;
+    };
+
+export type EndpointInvalidationContext<
+  TContext extends object = {},
+  TBody = unknown,
+  TQuery = unknown,
+  THeaders = Record<string, string>,
+> = EndpointMiddlewareContext<TContext, TBody, TQuery, THeaders> & {
+  /** The raw value returned by the endpoint handler. */
+  result: unknown;
+};
+
+export type EndpointInvalidations<
+  TContext extends object = {},
+  TBody = unknown,
+  TQuery = unknown,
+  THeaders = Record<string, string>,
+> =
+  | readonly EndpointInvalidationTarget[]
+  | ((
+      context: EndpointInvalidationContext<TContext, TBody, TQuery, THeaders>,
+    ) => readonly EndpointInvalidationTarget[] | Promise<readonly EndpointInvalidationTarget[]>);
+
 type ValidateEndpointMiddlewares<TMiddlewares extends readonly AnyEndpointMiddleware[]> = {
   readonly [TIndex in keyof TMiddlewares]: TMiddlewares[TIndex] extends AnyEndpointMiddleware
     ? [Awaited<ReturnType<TMiddlewares[TIndex]>>] extends [EndpointMiddlewareResult<object>]
@@ -162,6 +197,16 @@ export type EndpointOptions<
   query?: TQuery;
   headers?: THeaders;
   middleware?: TMiddlewares;
+  /**
+   * Cache keys and route paths made stale after a successful handler result.
+   * The resolver receives validated input and middleware context.
+   */
+  invalidates?: EndpointInvalidations<
+    InferEndpointMiddlewareContext<TMiddlewares>,
+    InferOutput<TBody>,
+    InferOutput<TQuery>,
+    InferHeadersOutput<THeaders>
+  >;
   errors?: TErrors;
   /** @deprecated Use plain functions in `middleware` for Farm endpoint middleware. */
   use?: any[];
@@ -353,9 +398,22 @@ export function createEndpoint(
   const middleware = normalizeEndpointMiddleware(options.middleware);
   const errors = normalizeEndpointErrors(options.errors);
   const fail = createEndpointFail(errors);
-  const wrappedHandler = ((ctx: EndpointMiddlewareContext<any, any, any, any>) =>
-    runEndpointMiddleware(middleware, ctx, handler, fail)) as typeof handler;
-  const { middleware: _middleware, errors: _errors, ...betterCallOptions } = options;
+  const wrappedHandler = (async (ctx: EndpointMiddlewareContext<any, any, any, any>) => {
+    const execution = await runEndpointMiddleware(
+      middleware,
+      ctx,
+      handler,
+      fail,
+      options.invalidates,
+    );
+    return execution.result;
+  }) as typeof handler;
+  const {
+    middleware: _middleware,
+    errors: _errors,
+    invalidates: _invalidates,
+    ...betterCallOptions
+  } = options;
 
   // Create the endpoint - path will be set later by API plugin if not provided
   // We use a temporary path that will be replaced when the router is created
@@ -371,8 +429,11 @@ export function createEndpoint(
   endpoint.__method = options.method || "GET";
   endpoint.__autoPath = !path; // Flag to indicate path should be auto-inferred
   endpoint.__handler = wrappedHandler; // Used by Farm's route runtime.
+  endpoint.__farmInvoke = (ctx: EndpointMiddlewareContext<any, any, any, any>) =>
+    runEndpointMiddleware(middleware, ctx, handler, fail, options.invalidates);
   endpoint.__middleware = middleware;
   endpoint.__sourceHandler = handler;
+  endpoint.__invalidates = options.invalidates;
   endpoint.__errors = errors;
 
   // Store type information for inference
@@ -469,14 +530,34 @@ async function runEndpointMiddleware(
   handlerContext: EndpointMiddlewareContext<any, any, any, any>,
   handler: EndpointHandler<any, any, any, any, any, EndpointErrorDefinitions>,
   fail: EndpointFail<EndpointErrorDefinitions>,
-): Promise<unknown> {
+  invalidations: EndpointInvalidations<any, any, any, any> | undefined,
+): Promise<{
+  result: unknown;
+  context: Readonly<Record<string | symbol, unknown>>;
+  handlerExecuted: boolean;
+  invalidations: readonly string[];
+}> {
   let context = createInitialEndpointContext(handlerContext.context);
 
   for (let index = 0; index < middleware.length; index++) {
     const result = await middleware[index]({ ...handlerContext, context });
 
-    if (isEndpointResponse(result)) return result;
-    if (result === false) return forbiddenEndpointResponse();
+    if (isEndpointResponse(result)) {
+      return {
+        result,
+        context,
+        handlerExecuted: false,
+        invalidations: [],
+      };
+    }
+    if (result === false) {
+      return {
+        result: forbiddenEndpointResponse(),
+        context,
+        handlerExecuted: false,
+        invalidations: [],
+      };
+    }
     if (result === true) continue;
 
     if (!isPlainEndpointContext(result)) {
@@ -488,7 +569,70 @@ async function runEndpointMiddleware(
     context = mergeEndpointContext(context, result, index);
   }
 
-  return handler({ ...handlerContext, context, fail });
+  const result = await handler({ ...handlerContext, context, fail });
+  return {
+    result,
+    context,
+    handlerExecuted: true,
+    invalidations: await applyEndpointInvalidations(
+      invalidations,
+      {
+        ...handlerContext,
+        context,
+        result,
+      },
+      result,
+    ),
+  };
+}
+
+async function applyEndpointInvalidations(
+  declaration: EndpointInvalidations<any, any, any, any> | undefined,
+  context: EndpointInvalidationContext<any, any, any, any>,
+  result: unknown,
+): Promise<readonly string[]> {
+  if (!declaration || (isEndpointResponse(result) && result.status >= 400)) {
+    return [];
+  }
+
+  const targets = typeof declaration === "function" ? await declaration(context) : declaration;
+  if (!Array.isArray(targets)) {
+    throw new TypeError(
+      "Endpoint invalidates must resolve to an array of { key } or { path } targets",
+    );
+  }
+
+  const clientKeys: string[] = [];
+  for (const target of targets) {
+    assertEndpointInvalidationTarget(target);
+    if ("key" in target) {
+      invalidate(target.key);
+      clientKeys.push(createRouteDataCacheKey(target.key));
+    } else {
+      revalidatePath(target.path);
+    }
+  }
+
+  return Array.from(new Set(clientKeys));
+}
+
+function assertEndpointInvalidationTarget(
+  target: unknown,
+): asserts target is EndpointInvalidationTarget {
+  if (!target || typeof target !== "object") {
+    throw new TypeError("Endpoint invalidation targets must be { key } or { path } objects");
+  }
+
+  if ("key" in target) {
+    const key = (target as { key?: unknown }).key;
+    if (typeof key === "string" || Array.isArray(key)) return;
+  } else if ("path" in target && typeof (target as { path?: unknown }).path === "string") {
+    return;
+  }
+
+  throw new TypeError(
+    "Endpoint invalidation targets must contain a string/array key or a path string",
+  );
 }
 
 function createInitialEndpointContext(value: unknown) {
