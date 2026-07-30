@@ -34,16 +34,29 @@ export type {
   FarmRouterRoute,
   FarmRouterRouteInput,
 } from "../router";
-export { createAPIClient, createServerAPIClient } from "../api/client";
+export { APIClientError, createAPIClient, createServerAPIClient } from "../api/client";
 export type {
   APIClient,
   APIClientOptions,
+  APIClientSystemError,
   APIClientWithoutIntegrationsOptions,
   RouteAPIClient,
   ServerAPIClient,
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "../api/client";
+export { useMutation } from "../mutation-client";
+export type {
+  InferMutationData,
+  InferMutationError,
+  InferMutationVariables,
+  MutationAsync,
+  MutationOptimisticContext,
+  MutationStatus,
+  MutationTrigger,
+  UseMutationOptions,
+  UseMutationReturn,
+} from "../mutation-client";
 export {
   getRouter,
   navigateTo,

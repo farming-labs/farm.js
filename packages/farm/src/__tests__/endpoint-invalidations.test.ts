@@ -133,6 +133,44 @@ describe("endpoint invalidations", () => {
     expect(response.headers.get(FARM_CACHE_INVALIDATION_HEADER)).toBeNull();
   });
 
+  it("does not invalidate after a declared endpoint failure", async () => {
+    const key = ["products", "list"] as const;
+    const cacheKey = createFarmCacheKey(["route-data", key]);
+    const cache = getFarmDataCache();
+    cache.set(cacheKey, [{ id: "existing" }], {
+      tags: [createRouteDataCacheTag(key)],
+    });
+    const endpoint = createEndpoint(
+      {
+        method: "POST",
+        errors: {
+          conflict: {
+            status: 409,
+            schema: z.object({
+              existingId: z.string(),
+            }),
+          },
+        },
+        invalidates: [{ key }],
+      },
+      async ({ fail }) =>
+        fail("conflict", {
+          existingId: "existing",
+        }),
+    );
+
+    const response = await invokeAPIRouteEndpoint(
+      endpoint,
+      new Request("https://farm.test/api/products", {
+        method: "POST",
+      }),
+    );
+
+    expect(response.status).toBe(409);
+    expect(cache.getEntry(cacheKey)?.value).toEqual([{ id: "existing" }]);
+    expect(response.headers.get(FARM_CACHE_INVALIDATION_HEADER)).toBeNull();
+  });
+
   it("applies declared invalidations for direct server endpoint calls", async () => {
     const key = ["products", "list"] as const;
     const cacheKey = createFarmCacheKey(["route-data", key]);

@@ -13,6 +13,7 @@ import type {
   RefObject,
   RefAttributes,
 } from "react";
+import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
 
 declare module "@farm.js/core/client" {
   export interface MiddlewareProps {
@@ -378,6 +379,31 @@ declare module "@farm.js/core/client" {
     key: CacheKey<TData>;
   };
 
+  export class APIClientError<
+    TCode extends string = string,
+    TData = unknown,
+    TStatus extends number = number,
+  > extends Error {
+    readonly code: TCode;
+    readonly data: TData;
+    readonly status: TStatus;
+    readonly response?: Response;
+
+    constructor(
+      code: TCode,
+      data: TData,
+      options: {
+        status: TStatus;
+        message: string;
+        response?: Response;
+      },
+    );
+  }
+
+  export type APIClientSystemError =
+    | APIClientError<"http_error", unknown, number>
+    | APIClientError<"network_error", unknown, 0>;
+
   export type RequestEvent = {
     requestId: string;
     method: StatusEvent["method"];
@@ -406,7 +432,7 @@ declare module "@farm.js/core/client" {
   export type CachePolicy = "cache-first" | "network-only" | "stale-while-revalidate";
 
   export type CacheOptions = {
-    key?: string;
+    key?: RouteDataCacheKey;
     policy?: CachePolicy;
     staleTime?: number;
     gcTime?: number;
@@ -419,9 +445,9 @@ declare module "@farm.js/core/client" {
   };
 
   export type InvalidateTarget =
-    | string
+    | RouteDataCacheKey
     | {
-        key: string;
+        key: RouteDataCacheKey;
       }
     | {
         path: string;
@@ -439,7 +465,7 @@ declare module "@farm.js/core/client" {
 
   export type OptimisticUpdate =
     | [CallableRouteRef<any>, unknown, (prev: any) => any]
-    | [CacheKey<any> | string, (prev: any) => any];
+    | [CacheKey<any> | DefinedCacheKey<any> | string, (prev: any) => any];
 
   export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> =
     {
@@ -452,7 +478,7 @@ declare module "@farm.js/core/client" {
     TError = unknown,
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   > = {
-    key?: CacheKey<TData> | string;
+    key?: CacheKey<TData> | RouteDataCacheKey;
     cache?: CacheOptions;
     retry?: RetryOptions;
     invalidate?: InvalidateOptions;
@@ -496,11 +522,13 @@ declare module "@farm.js/core/client" {
         ]
       : never
     : TUpdate extends readonly [infer TKey, (prev: any) => any]
-      ? TKey extends CacheKey<infer TData>
-        ? [TKey, (prev: TData | undefined) => TData]
-        : TKey extends string
-          ? [TKey, (prev: unknown) => unknown]
-          : never
+      ? TKey extends DefinedCacheKey<any, RouteDataCacheKey>
+        ? [TKey, (prev: InferCacheKeyData<TKey> | undefined) => InferCacheKeyData<TKey>]
+        : TKey extends CacheKey<infer TData>
+          ? [TKey, (prev: TData | undefined) => TData]
+          : TKey extends string
+            ? [TKey, (prev: unknown) => unknown]
+            : never
       : never;
 
   type NormalizeOptimisticUpdates<TUpdates extends readonly unknown[]> = {
@@ -516,6 +544,7 @@ declare module "@farm.js/core/client" {
       body: any;
       query: any;
       response: any;
+      errors?: any;
     };
   };
 
@@ -571,20 +600,114 @@ declare module "@farm.js/core/client" {
     ? R
     : any;
 
+  type InferEndpointError<T> = T extends {
+    __types: {
+      errors: infer TErrors;
+    };
+  }
+    ? keyof TErrors extends never
+      ? Error
+      :
+          | {
+              [TCode in keyof TErrors]: TErrors[TCode] extends {
+                data: infer TData;
+                status: infer TStatus extends number;
+              }
+                ? APIClientError<TCode & string, TData, TStatus>
+                : never;
+            }[keyof TErrors]
+          | APIClientSystemError
+    : Error;
+
   type EndpointMethod<T = any> = (<
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   >(
     ...args: HasRequiredKeys<InferEndpointInput<T>> extends true
       ? [
           options: InferEndpointInput<T>,
-          clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+          clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
         ]
       : [
           options?: InferEndpointInput<T>,
-          clientOptions?: ClientOptions<InferEndpointOutput<T>, Error, TUpdates>,
+          clientOptions?: ClientOptions<InferEndpointOutput<T>, InferEndpointError<T>, TUpdates>,
         ]
-  ) => Promise<APIResult<InferEndpointOutput<T>, Error>>) &
+  ) => Promise<APIResult<InferEndpointOutput<T>, InferEndpointError<T>>>) &
     RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
+
+  export type MutationStatus = "idle" | "pending" | "success" | "error";
+
+  type AnyMutationTarget = (...args: any[]) => Promise<any>;
+
+  export type InferMutationVariables<TTarget extends AnyMutationTarget> =
+    Parameters<TTarget> extends [] ? undefined : Parameters<TTarget>[0];
+
+  export type InferMutationData<TTarget extends AnyMutationTarget> = TTarget extends {
+    readonly __farmRouteData: infer TData;
+  }
+    ? TData
+    : Awaited<ReturnType<TTarget>>;
+
+  export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends (
+    ...args: any[]
+  ) => Promise<APIResult<any, infer TError>>
+    ? TError
+    : Error;
+
+  export type MutationOptimisticContext<TVariables, TData> = {
+    variables: TVariables | undefined;
+    current: TData | null;
+  };
+
+  export type UseMutationOptions<TVariables, TData, TError = Error> = {
+    initialData?: TData | null;
+    resetOnMutate?: boolean;
+    optimistic?: (
+      context: MutationOptimisticContext<TVariables, TData>,
+    ) => TData | null | undefined;
+    rollbackOnError?: boolean;
+    request?: ClientOptions<TData, TError>;
+    onSuccess?: (data: TData, variables: TVariables | undefined) => void;
+    onError?: (error: TError, variables: TVariables | undefined) => void;
+    onSettled?: (
+      data: TData | null,
+      error: TError | null,
+      variables: TVariables | undefined,
+    ) => void;
+  };
+
+  export type MutationAsync<TTarget extends AnyMutationTarget, TData = InferMutationData<TTarget>> =
+    [] extends Parameters<TTarget>
+      ? (variables?: InferMutationVariables<TTarget>) => Promise<TData>
+      : (variables: InferMutationVariables<TTarget>) => Promise<TData>;
+
+  export type MutationTrigger<TTarget extends AnyMutationTarget> =
+    [] extends Parameters<TTarget>
+      ? (variables?: InferMutationVariables<TTarget>) => void
+      : (variables: InferMutationVariables<TTarget>) => void;
+
+  export type UseMutationReturn<
+    TTarget extends AnyMutationTarget,
+    TData = InferMutationData<TTarget>,
+    TError = InferMutationError<TTarget>,
+  > = {
+    pending: boolean;
+    status: MutationStatus;
+    data: TData | null;
+    error: TError | null;
+    variables: InferMutationVariables<TTarget> | undefined;
+    mutate: MutationTrigger<TTarget>;
+    mutateAsync: MutationAsync<TTarget, TData>;
+    reset: () => void;
+  };
+
+  export function useMutation<TTarget extends AnyMutationTarget>(
+    target: TTarget,
+    options?: UseMutationOptions<
+      InferMutationVariables<TTarget>,
+      InferMutationData<TTarget>,
+      InferMutationError<TTarget>
+    >,
+  ): UseMutationReturn<TTarget>;
 
   type RouterToClient<T> = {
     [K in keyof T]: T[K] extends TypedEndpointLike

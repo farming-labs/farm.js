@@ -4,6 +4,7 @@ import {
   encodeFarmCacheInvalidations,
   FARM_CACHE_INVALIDATION_HEADER,
 } from "../cache-invalidation";
+import { isEndpointFailure, type EndpointFailure } from "./endpoint";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -101,17 +102,30 @@ async function invokeAPIRouteEndpointInContext(
     context: {},
     params,
   };
-  const execution =
-    typeof endpoint.__farmInvoke === "function"
-      ? await endpoint.__farmInvoke(handlerContext)
-      : {
-          result: await farmHandler(handlerContext),
-          context: handlerContext.context,
-          handlerExecuted: true,
-          invalidations: [],
-        };
-  const response = normalizeRouteResponse(execution.result);
+  let execution: {
+    result: unknown;
+    context: unknown;
+    handlerExecuted: boolean;
+    invalidations: readonly string[];
+  };
+  try {
+    execution =
+      typeof endpoint.__farmInvoke === "function"
+        ? await endpoint.__farmInvoke(handlerContext)
+        : {
+            result: await farmHandler(handlerContext),
+            context: handlerContext.context,
+            handlerExecuted: true,
+            invalidations: [],
+          };
+  } catch (error) {
+    if (isEndpointFailure(error)) {
+      return createEndpointFailureResponse(error);
+    }
+    throw error;
+  }
 
+  const response = normalizeRouteResponse(execution.result);
   return attachEndpointInvalidations(response, execution.invalidations);
 }
 
@@ -155,6 +169,25 @@ function attachEndpointInvalidations(response: Response, keys: readonly string[]
     statusText: response.statusText,
     headers,
   });
+}
+
+export function createEndpointFailureResponse(failure: EndpointFailure<string, unknown>): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: failure.code,
+        message: failure.message,
+        data: failure.data,
+      },
+    }),
+    {
+      status: failure.status,
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/json",
+      },
+    },
+  );
 }
 
 function isFarmContextHandler(endpoint: unknown): boolean {

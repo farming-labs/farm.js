@@ -36,6 +36,54 @@ export interface FarmCacheSetOptions extends FarmCacheOptions {
 
 export type RouteDataCacheKey = string | readonly unknown[];
 
+declare const FARM_DEFINED_CACHE_KEY_DATA: unique symbol;
+
+/**
+ * A regular Farm cache key carrying the data shape stored under that key.
+ *
+ * The brand exists only in TypeScript. At runtime the value remains the
+ * original string or structured array, so all existing cache APIs continue to
+ * accept untyped keys.
+ */
+export type DefinedCacheKey<TData, TKey extends RouteDataCacheKey = RouteDataCacheKey> = TKey & {
+  readonly [FARM_DEFINED_CACHE_KEY_DATA]: TData;
+};
+
+export type CacheKeyFactory<
+  TData,
+  TArguments extends readonly unknown[],
+  TKey extends RouteDataCacheKey = RouteDataCacheKey,
+> = (...args: TArguments) => DefinedCacheKey<TData, TKey>;
+
+export type InferCacheKeyData<TKey> =
+  TKey extends DefinedCacheKey<infer TData, RouteDataCacheKey> ? TData : unknown;
+
+/**
+ * Optionally add a data type to an existing string/array cache-key factory.
+ *
+ * This helper does not introduce a new runtime key representation. Calling the
+ * returned factory produces the exact key returned by `factory`.
+ */
+export function defineCacheKey<TData>() {
+  return <const TArguments extends readonly unknown[], const TKey extends RouteDataCacheKey>(
+    factory: (...args: TArguments) => TKey,
+  ): CacheKeyFactory<TData, TArguments, TKey> => {
+    if (typeof factory !== "function") {
+      throw new TypeError("defineCacheKey expects a key factory function.");
+    }
+
+    return ((...args: TArguments) => {
+      const key = factory(...args);
+      if (typeof key !== "string" && !Array.isArray(key)) {
+        throw new TypeError(
+          "A defined cache key factory must return a string or structured array.",
+        );
+      }
+      return key as DefinedCacheKey<TData, TKey>;
+    }) as CacheKeyFactory<TData, TArguments, TKey>;
+  };
+}
+
 export interface FarmCacheEntry<T = unknown> {
   key: string;
   value: T;

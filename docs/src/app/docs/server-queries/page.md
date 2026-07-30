@@ -137,6 +137,27 @@ During a browser server-action call, Farm carries structured invalidations back 
 
 Server queries use the existing route-data cache namespace and tag. They do not create a separate server cache.
 
+For a key used in several features, keep its factory in a module that is safe to import from both
+the browser and server. Plain string and array keys remain the default and require no helper:
+
+```ts
+export const productKey = (id: string) => ["product", id] as const;
+```
+
+Use `defineCacheKey` only when you want TypeScript to carry the value stored under that key into
+optimistic cache updaters:
+
+```ts
+import { defineCacheKey } from "@farm.js/core/cache";
+import type { Product } from "./types";
+
+export const productKey = defineCacheKey<Product>()((id: string) => ["product", id] as const);
+```
+
+The helper adds no wrapper object or runtime cache format. `productKey("123")` is still the raw
+`["product", "123"]` array, so typed and untyped keys interoperate and existing applications do
+not need to migrate.
+
 Use the same structured key in programmatic route data:
 
 ```ts
