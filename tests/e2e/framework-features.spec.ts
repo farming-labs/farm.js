@@ -150,6 +150,16 @@ test.describe("Framework feature integration", () => {
     await expect(page.getByTestId("client-runtime-boundary")).toHaveText("runtime:client");
   });
 
+  test("submits fetcher forms without navigating", async ({ page }) => {
+    await page.goto("/feature-lab");
+
+    await page.getByRole("button", { name: "Create user without navigation" }).click();
+
+    await expect(page.getByTestId("fetcher-result")).toHaveText("fetcher@example.com");
+    await expect(page.getByTestId("fetcher-state")).toHaveText("idle");
+    await expect(page).toHaveURL(/\/feature-lab$/);
+  });
+
   test("hydrates and navigates optional catch-all routes", async ({ page }) => {
     await page.goto("/optional-catchall/one/two");
     await expect(page.getByTestId("optional-catchall-slug")).toHaveText("one/two");
