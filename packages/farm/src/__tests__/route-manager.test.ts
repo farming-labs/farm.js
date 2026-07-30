@@ -163,16 +163,47 @@ describe("RouteManager", () => {
       expect(routes.get("/docs")?.modulePath).toBe("/test/src/app/docs/page.mdx");
     });
 
-    it("should reject duplicate page files for one route segment", async () => {
+    it("uses page.md as the markdown representation beside page.tsx", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
         if (pattern.includes("page")) {
-          return ["about/page.tsx", "about/page.mdx"];
+          return ["about/page.tsx", "about/page.md"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(routeManager.getRoutes().get("/about")).toMatchObject({
+        modulePath: "/test/src/app/about/page.tsx",
+        markdownSourcePath: "/test/src/app/about/page.md",
+      });
+    });
+
+    it("rejects multiple component pages for one route segment", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["about/page.tsx", "about/page.jsx"];
         }
         return [];
       });
 
       await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/about"');
+    });
+
+    it("rejects ambiguous markdown representations for one page", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["about/page.tsx", "about/page.md", "about/page.mdx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        'Duplicate markdown representation for page route "/about"',
+      );
     });
 
     it("requires an intercepted URL to have a canonical page", async () => {

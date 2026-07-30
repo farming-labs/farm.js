@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveConfig } from "../config";
 import {
+  applyMarkdownNegotiationHeaders,
   createMarkdownMirrorResponse,
   htmlToMarkdown,
   resolveMarkdownConfig,
@@ -10,12 +11,19 @@ import {
 } from "../markdown";
 
 describe("resolveMarkdownConfig", () => {
-  it("keeps markdown mirrors disabled by default", () => {
+  it("exposes markdown mirrors automatically by default", () => {
     expect(resolveMarkdownConfig(undefined)).toMatchObject({
-      enabled: false,
-      expose: [],
+      enabled: true,
+      expose: true,
       cache: false,
       includeMetadata: true,
+    });
+  });
+
+  it("allows automatic markdown mirrors to be disabled", () => {
+    expect(resolveMarkdownConfig(false)).toMatchObject({
+      enabled: false,
+      expose: [],
     });
   });
 
@@ -38,6 +46,18 @@ describe("resolveMarkdownConfig", () => {
       expose: true,
     });
   });
+
+  it("keeps automatic exposure when only mirror options are configured", () => {
+    expect(
+      resolveMarkdownConfig({
+        cache: 60,
+      }),
+    ).toMatchObject({
+      enabled: true,
+      expose: true,
+      cache: 60,
+    });
+  });
 });
 
 describe("resolveMarkdownMirrorTarget", () => {
@@ -54,6 +74,42 @@ describe("resolveMarkdownMirrorTarget", () => {
       pathname: "/blog/farm",
       route: { route: "/blog/[slug]" },
     });
+  });
+
+  it("maps the root markdown alias to the index page", () => {
+    const config = resolveMarkdownConfig({
+      expose: ["/"],
+    });
+
+    expect(resolveMarkdownMirrorTarget(config, "/index.md")).toMatchObject({
+      pathname: "/",
+      route: { route: "/" },
+    });
+  });
+
+  it("negotiates markdown for an exposed page through the Accept header", () => {
+    const config = resolveMarkdownConfig({
+      expose: ["/pricing"],
+    });
+
+    expect(
+      resolveMarkdownMirrorTarget(config, "/pricing", {
+        accept: "text/markdown",
+      }),
+    ).toMatchObject({
+      pathname: "/pricing",
+      route: { route: "/pricing" },
+    });
+    expect(
+      resolveMarkdownMirrorTarget(config, "/pricing", {
+        accept: "text/markdown; q=0",
+      }),
+    ).toBeNull();
+    expect(
+      resolveMarkdownMirrorTarget(config, "/pricing", {
+        accept: "text/html",
+      }),
+    ).toBeNull();
   });
 
   it("ignores routes that are not exposed", () => {
@@ -111,6 +167,35 @@ describe("createMarkdownMirrorResponse", () => {
     expect(markdown).toContain("**plans**");
   });
 
+  it("returns markdown for content-negotiated page requests", async () => {
+    const config = resolveMarkdownConfig({
+      expose: ["/pricing"],
+    });
+
+    const response = await createMarkdownMirrorResponse({
+      request: new Request("http://farm.test/pricing", {
+        headers: {
+          Accept: "text/html, text/markdown;q=0.9",
+        },
+      }),
+      config,
+      routeExists: (pathname) => pathname === "/pricing",
+      renderPage: (request) => {
+        expect(request.headers.get("accept")).toBe("text/html");
+        return new Response("<html><body><main><h1>Pricing</h1></main></body></html>", {
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+          },
+        });
+      },
+    });
+
+    expect(response?.headers.get("content-type")).toContain("text/markdown");
+    expect(response?.headers.get("content-location")).toBe("/pricing.md");
+    expect(response?.headers.get("vary")).toBe("Accept");
+    await expect(response?.text()).resolves.toContain("# Pricing");
+  });
+
   it("returns null when the target page route does not exist", async () => {
     const config = resolveMarkdownConfig({
       expose: ["/pricing"],
@@ -147,6 +232,59 @@ describe("createMarkdownMirrorResponse", () => {
 
     expect(response?.headers.get("content-type")).toContain("text/markdown");
     await expect(response?.text()).resolves.toBe("");
+  });
+});
+
+describe("applyMarkdownNegotiationHeaders", () => {
+  it("advertises the alternate markdown representation on HTML responses", () => {
+    const response = applyMarkdownNegotiationHeaders(
+      new Response("<html><body>Farm</body></html>", {
+        headers: {
+          "content-type": "text/html",
+          vary: "Cookie",
+        },
+      }),
+      {
+        config: resolveMarkdownConfig({
+          expose: ["/"],
+        }),
+        pathname: "/",
+      },
+    );
+
+    expect(response.headers.get("vary")).toBe("Cookie, Accept");
+    expect(response.headers.get("link")).toContain(
+      '</index.md>; rel="alternate"; type="text/markdown"',
+    );
+  });
+
+  it("does not modify unexposed or non-HTML responses", () => {
+    const config = resolveMarkdownConfig({
+      expose: ["/pricing"],
+    });
+    const unexposed = new Response("<html><body>Private</body></html>", {
+      headers: {
+        "content-type": "text/html",
+      },
+    });
+    const json = new Response("{}", {
+      headers: {
+        "content-type": "application/json",
+      },
+    });
+
+    expect(
+      applyMarkdownNegotiationHeaders(unexposed, {
+        config,
+        pathname: "/account",
+      }),
+    ).toBe(unexposed);
+    expect(
+      applyMarkdownNegotiationHeaders(json, {
+        config,
+        pathname: "/pricing",
+      }),
+    ).toBe(json);
   });
 });
 

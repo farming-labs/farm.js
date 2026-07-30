@@ -3,6 +3,7 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "url";
 import type { Metadata, RouteModule } from "./types";
+import { requestAcceptsMarkdown } from "./markdown";
 
 export type FarmMdxComponent = React.ComponentType<any> | keyof React.JSX.IntrinsicElements;
 export type FarmMdxComponents = Record<string, FarmMdxComponent>;
@@ -232,7 +233,8 @@ export async function createFarmMarkdownSourceResponse(options: {
   }
 
   const url = new URL(options.request.url);
-  if (!url.pathname.endsWith(".md")) {
+  const hasMarkdownExtension = url.pathname.toLowerCase().endsWith(".md");
+  if (!hasMarkdownExtension && !requestAcceptsMarkdown(options.request.headers.get("accept"))) {
     return null;
   }
 
@@ -242,13 +244,19 @@ export async function createFarmMarkdownSourceResponse(options: {
     return null;
   }
 
+  const headers = new Headers({
+    "Content-Type": "text/markdown; charset=utf-8",
+    "Content-Location": targetPathname === "/" ? "/index.md" : `${targetPathname}.md`,
+    "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+    "X-Farm-Markdown-Route": targetPathname,
+    "X-Farm-Markdown-Source": source.filePath,
+  });
+  if (!hasMarkdownExtension) {
+    headers.set("Vary", "Accept");
+  }
+
   return new Response(options.request.method === "HEAD" ? null : source.source, {
     status: 200,
-    headers: {
-      "Content-Type": "text/markdown; charset=utf-8",
-      "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
-      "X-Farm-Markdown-Route": targetPathname,
-      "X-Farm-Markdown-Source": source.filePath,
-    },
+    headers,
   });
 }

@@ -7,8 +7,16 @@ export type FarmMarkdownRouteInput =
     };
 
 export interface FarmMarkdownUserConfig {
+  /**
+   * Enable generated markdown representations for React pages.
+   * @default true
+   */
   enabled?: boolean;
+  /**
+   * Routes that may expose generated markdown. Every page is exposed by default.
+   */
   expose?: boolean | FarmMarkdownRouteInput[];
+  /** @deprecated Use `expose`. */
   routes?: FarmMarkdownRouteInput[];
   cache?: number | false;
   includeMetadata?: boolean;
@@ -32,6 +40,10 @@ export interface FarmMarkdownMirrorTarget {
   route: FarmMarkdownResolvedRoute | null;
 }
 
+export interface ResolveMarkdownMirrorTargetOptions {
+  accept?: string | null;
+}
+
 export interface CreateMarkdownMirrorResponseOptions {
   request: Request;
   config?: FarmMarkdownResolvedConfig;
@@ -39,10 +51,15 @@ export interface CreateMarkdownMirrorResponseOptions {
   renderPage: (request: Request) => Response | Promise<Response>;
 }
 
+export interface ApplyMarkdownNegotiationHeadersOptions {
+  config?: FarmMarkdownResolvedConfig;
+  pathname: string;
+}
+
 export function resolveMarkdownConfig(
   config: FarmMarkdownUserConfig | boolean | undefined,
 ): FarmMarkdownResolvedConfig {
-  if (config === false || config === undefined) {
+  if (config === false) {
     return {
       enabled: false,
       expose: [],
@@ -51,7 +68,7 @@ export function resolveMarkdownConfig(
     };
   }
 
-  if (config === true) {
+  if (config === true || config === undefined) {
     return {
       enabled: true,
       expose: true,
@@ -60,7 +77,7 @@ export function resolveMarkdownConfig(
     };
   }
 
-  const exposeInput = config.expose ?? config.routes ?? [];
+  const exposeInput = config.expose ?? config.routes ?? true;
   const expose =
     exposeInput === true
       ? true
@@ -79,12 +96,16 @@ export function resolveMarkdownConfig(
 export function resolveMarkdownMirrorTarget(
   config: FarmMarkdownResolvedConfig | undefined,
   pathname: string,
+  options: ResolveMarkdownMirrorTargetOptions = {},
 ): FarmMarkdownMirrorTarget | null {
-  if (!config?.enabled || !pathname.endsWith(".md")) {
+  const hasMarkdownExtension = pathname.toLowerCase().endsWith(".md");
+  if (!config?.enabled || (!hasMarkdownExtension && !requestAcceptsMarkdown(options.accept))) {
     return null;
   }
 
-  const targetPathname = normalizeMarkdownRoute(pathname.slice(0, -".md".length) || "/");
+  const targetPathname = normalizeMarkdownRoute(
+    hasMarkdownExtension ? pathname.slice(0, -".md".length) || "/" : pathname,
+  );
   const route = findExposedMarkdownRoute(config, targetPathname);
   if (!route && config.expose !== true) {
     return null;
@@ -104,7 +125,10 @@ export async function createMarkdownMirrorResponse(
   }
 
   const requestUrl = new URL(options.request.url);
-  const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname);
+  const hasMarkdownExtension = requestUrl.pathname.toLowerCase().endsWith(".md");
+  const target = resolveMarkdownMirrorTarget(options.config, requestUrl.pathname, {
+    accept: options.request.headers.get("accept"),
+  });
   if (!target) {
     return null;
   }
@@ -137,14 +161,45 @@ export async function createMarkdownMirrorResponse(
   });
   const headersOut = new Headers({
     "Content-Type": "text/markdown; charset=utf-8",
+    "Content-Location": target.pathname === "/" ? "/index.md" : `${target.pathname}.md`,
     "X-Farm-Markdown-Route": target.pathname,
   });
+  if (!hasMarkdownExtension) {
+    headersOut.set("Vary", "Accept");
+  }
   const cache = target.route?.cache ?? options.config?.cache ?? false;
   headersOut.set("Cache-Control", createMarkdownCacheHeader(cache));
 
   return new Response(options.request.method === "HEAD" ? null : markdown, {
     status: pageResponse.status,
     headers: headersOut,
+  });
+}
+
+export function applyMarkdownNegotiationHeaders(
+  response: Response,
+  options: ApplyMarkdownNegotiationHeadersOptions,
+): Response {
+  if (!isHtmlResponse(response)) {
+    return response;
+  }
+
+  const target = resolveMarkdownMirrorTarget(options.config, options.pathname, {
+    accept: "text/markdown",
+  });
+  if (!target) {
+    return response;
+  }
+
+  const alternatePath = getMarkdownAlternatePath(target.pathname);
+  const headers = new Headers(response.headers);
+  appendHeaderToken(headers, "Vary", "Accept");
+  headers.append("Link", `<${alternatePath}>; rel="alternate"; type="text/markdown"`);
+
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
   });
 }
 
@@ -228,12 +283,49 @@ function normalizeMarkdownRouteInput(input: FarmMarkdownRouteInput): FarmMarkdow
 }
 
 function normalizeMarkdownRoute(route: string): string {
-  const withoutMarkdownExtension = route.endsWith(".md") ? route.slice(0, -3) : route;
+  const withoutMarkdownExtension = route.toLowerCase().endsWith(".md") ? route.slice(0, -3) : route;
   const withSlash = withoutMarkdownExtension.startsWith("/")
     ? withoutMarkdownExtension
     : `/${withoutMarkdownExtension}`;
   const normalized = withSlash.replace(/\/+/g, "/").replace(/\/$/g, "");
   return normalized === "" || normalized === "/index" ? "/" : normalized;
+}
+
+export function requestAcceptsMarkdown(accept: string | null | undefined): boolean {
+  if (!accept) {
+    return false;
+  }
+
+  return accept.split(",").some((entry) => {
+    const [mediaType, ...parameters] = entry
+      .trim()
+      .toLowerCase()
+      .split(";")
+      .map((part) => part.trim());
+    if (mediaType !== "text/markdown") {
+      return false;
+    }
+
+    const quality = parameters.find((parameter) => parameter.startsWith("q="));
+    return quality === undefined || Number(quality.slice(2)) > 0;
+  });
+}
+
+function getMarkdownAlternatePath(pathname: string): string {
+  return pathname === "/" ? "/index.md" : `${pathname}.md`;
+}
+
+function appendHeaderToken(headers: Headers, name: string, token: string): void {
+  const current = headers.get(name);
+  if (!current) {
+    headers.set(name, token);
+    return;
+  }
+
+  const tokens = current.split(",").map((value) => value.trim().toLowerCase());
+  if (!tokens.includes(token.toLowerCase())) {
+    headers.set(name, `${current}, ${token}`);
+  }
 }
 
 function findExposedMarkdownRoute(
