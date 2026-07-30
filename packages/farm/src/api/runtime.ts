@@ -1,4 +1,5 @@
 import { _runWithCurrentRequest } from "../server/request";
+import { isEndpointFailure, type EndpointFailure } from "./endpoint";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -88,14 +89,22 @@ async function invokeAPIRouteEndpointInContext(
     return headersValidation;
   }
 
-  const result = await farmHandler({
-    query: queryValidation,
-    body: bodyValidation,
-    headers: headersValidation,
-    request,
-    context: {},
-    params,
-  });
+  let result: unknown;
+  try {
+    result = await farmHandler({
+      query: queryValidation,
+      body: bodyValidation,
+      headers: headersValidation,
+      request,
+      context: {},
+      params,
+    });
+  } catch (error) {
+    if (isEndpointFailure(error)) {
+      return createEndpointFailureResponse(error);
+    }
+    throw error;
+  }
 
   return normalizeRouteResponse(result);
 }
@@ -123,6 +132,25 @@ export function isWebResponse(value: unknown): value is Response {
       "headers" in value &&
       "status" in value &&
       typeof (value as Response).arrayBuffer === "function")
+  );
+}
+
+export function createEndpointFailureResponse(failure: EndpointFailure<string, unknown>): Response {
+  return new Response(
+    JSON.stringify({
+      error: {
+        code: failure.code,
+        message: failure.message,
+        data: failure.data,
+      },
+    }),
+    {
+      status: failure.status,
+      headers: {
+        "cache-control": "no-store",
+        "content-type": "application/json",
+      },
+    },
   );
 }
 
