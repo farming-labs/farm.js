@@ -1,108 +1,76 @@
 ---
 title: "Migrations"
-description: "Move existing apps to Farm with deterministic code-first migrations, then run one-shot schema or provider commands."
-section: "Reference"
+description: "Move apps from the frameworks featured on the homepage with source-specific automated and manual guides."
+section: "Migrations"
 ---
 
 # Migrations
 
-Move existing apps to Farm with deterministic code-first migrations, then run one-shot schema or provider commands.
+Move an existing app to Farm with a source-specific guide. This section covers every framework in
+the homepage comparison: Next.js, SvelteKit, Nuxt, and TanStack Start.
 
-## Framework migrations
+## Choose a source
 
-Framework migrations are code-first codemods. They inspect the current project, prepare a file operation plan, and only write when you opt in with `--write`.
+Two sources have dry-run-first CLI migrators. Nuxt and SvelteKit require a manual migration because
+their Vue and Svelte components must be rewritten as React components.
+
+| Source                                      | Migration type | Coverage                                                                                |
+| ------------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
+| [Next.js](/docs/migrations/nextjs)          | Automated      | App Router files, common imports, middleware location, scripts, and Farm setup.         |
+| [SvelteKit](/docs/migrations/sveltekit)     | Manual         | Route structure, layouts, load functions, endpoints, hooks, environment, and adapters.  |
+| [Nuxt](/docs/migrations/nuxt)               | Manual         | Pages, layouts, server routes, data composables, middleware, runtime config, and Nitro. |
+| [TanStack Start](/docs/migrations/tanstack) | Automated      | File-based Router routes, route paths, default page exports, scripts, and Farm setup.   |
+
+Each source has its own guide because the automatic changes and manual review items are
+framework-specific.
+
+## Automated workflow
+
+For Next.js and TanStack Start, run inspection from the source project's root:
 
 ```bash
 farm migrate inspect
+```
+
+Inspection reports each supported source it detects, its confidence, and the evidence it found.
+Choose the matching source and run it without `--write` to review the plan:
+
+```bash
 farm migrate next
+# or
+farm migrate tanstack
+```
+
+The dry run prints planned file operations, skipped targets, warnings, and manual review items.
+Apply the reviewed plan, install the updated dependencies, and verify the migrated app:
+
+```bash
 farm migrate next --write
-farm migrate tanstack --write
+pnpm install
+pnpm dev
+pnpm build
 ```
 
-`farm migrate next` and `farm migrate tanstack` are dry-run by default. They print detected framework evidence, planned file writes, warnings, and the manual review list. Use `--force` only when you intentionally want generated files to overwrite existing Farm files.
+Replace `next` with `tanstack` when migrating a TanStack app.
 
-## Next.js migration
+## Manual workflow
 
-The Next.js migrator focuses on the App Router path because Farm uses the same route-file shape for pages, layouts, loading states, errors, not-found pages, and API route handlers.
+For Nuxt and SvelteKit, use the source guide as a checklist:
 
-| Source                 | Farm output                                         |
-| ---------------------- | --------------------------------------------------- |
-| app/page.tsx           | src/app/page.tsx                                    |
-| app/about/page.tsx     | src/app/about/page.tsx                              |
-| app/api/hello/route.ts | src/app/api/hello/route.ts                          |
-| middleware.ts          | src/app/middleware.ts                               |
-| package scripts        | farm dev, farm build, node .output/server/index.mjs |
+1. Create a minimal Farm shell next to the existing source.
+2. Reproduce the route tree with Farm page, layout, and API route files.
+3. Move one vertical feature at a time, including its data access and mutations.
+4. Rewrite Vue or Svelte components as React components instead of mechanically renaming files.
+5. Verify routing, server rendering, forms, APIs, middleware, environment variables, and deployment.
+6. Remove the previous framework only after the Farm build behaves the same in production.
 
-The migrator also creates `farm.config.ts`, creates a minimal root layout when one is missing, adds `@farm.js/core` and `@farm.js/cli`, and rewrites supported Next imports to Farm compatibility entries.
-
-```tsx
-import { Link } from "@farm.js/core/client";
-import { redirect } from "@farm.js/core/navigation";
-import { cookies } from "@farm.js/core/headers";
-
-export default function Page() {
-  if (!cookies().has("session")) redirect("/sign-in");
-  return <Link href="/docs">Docs</Link>;
-}
-```
-
-Supported rewrites include:
-
-| Next import     | Farm import              |
-| --------------- | ------------------------ |
-| next/link       | @farm.js/core/client     |
-| next/navigation | @farm.js/core/navigation |
-| next/headers    | @farm.js/core/headers    |
-
-Some Next.js APIs still need review because they are framework-specific. The migration report calls out `next/image`, `next/font`, `next/server`, Pages Router data functions, and `next.config.*` so the app owner can decide the right Farm equivalent.
-
-## Next compatibility layer
-
-Farm keeps the compatibility layer intentionally small. It covers common App Router APIs that map cleanly onto Farm's runtime:
-
-| API                   | Runtime                                                            |
-| --------------------- | ------------------------------------------------------------------ |
-| `redirect()`          | Throws a redirect signal that Farm turns into a redirect response. |
-| `permanentRedirect()` | Same redirect signal with status 308.                              |
-| `notFound()`          | Throws a not-found signal that Farm turns into a 404.              |
-| `useRouter()`         | Client hook backed by Farm's lightweight router.                   |
-| `usePathname()`       | Client hook for the current pathname.                              |
-| `useSearchParams()`   | Client hook for current URL search params.                         |
-| `headers()`           | Server helper that reads the current request headers.              |
-| `cookies()`           | Server helper that reads current request cookies.                  |
-
-This is not a full Next.js clone. APIs such as image optimization, fonts, server actions, route segment config edge cases, and platform-specific middleware behavior stay explicit migration review items until Farm has native equivalents.
-
-## TanStack Router migration
-
-The TanStack Router migrator targets file-based routes in `src/routes` or `routes`.
-
-| Source                       | Farm output                      |
-| ---------------------------- | -------------------------------- |
-| src/routes/index.tsx         | src/app/page.tsx                 |
-| src/routes/about.tsx         | src/app/about/page.tsx           |
-| src/routes/posts.$postId.tsx | src/app/posts/[postId]/page.tsx  |
-| src/routes/docs.$.tsx        | src/app/docs/[...splat]/page.tsx |
-
-For simple route files that use `component: ComponentName`, the migrator appends a default export so Farm can render the page module.
-
-```tsx
-export const Route = createFileRoute("/posts/$postId")({
-  component: PostPage,
-});
-
-function PostPage() {
-  return <h1>Post</h1>;
-}
-
-export default PostPage;
-```
-
-The migration report flags loaders, `beforeLoad`, search params, and `Route.use*` calls. Move that logic into Farm page props, server helpers, API routes, middleware, or integrations depending on what the route needs.
+The manual guides preserve URLs and server contracts where possible, but UI state and
+framework-specific modules require application-level decisions.
 
 ## Command migrations
 
-`farm migrate` without a framework source still runs one-shot commands from `migrations.commands` in `farm.config.ts`.
+`farm migrate` without a framework source has a separate purpose: it runs one-shot commands from
+`migrations.commands` in `farm.config.ts`.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -123,12 +91,16 @@ export default defineConfig({
 });
 ```
 
-Use command migrations for app-owned database migrations, integration schema setup, provider bootstrap commands, and CI steps that should run before `farm build`.
+Use command migrations for app-owned database migrations, integration schema setup, provider
+bootstrap commands, and CI steps that should run before `farm build`. See
+[Configuration](/docs/configuration#one-shot-migrations) for the complete configuration shape.
 
 ## Safety model
 
-- Framework migrations never delete source files.
-- Framework migrations default to dry-run and require `--write`.
-- Existing target files are skipped unless `--force` is passed.
-- Package dependencies for the previous framework are left in place until the app owner removes them.
-- The report is part of the feature: unsupported APIs are called out instead of guessed.
+- Automated migrations never delete source files.
+- Automated migrations default to dry-run and require `--write`.
+- Automated migrations skip existing target files unless `--force` is passed.
+- Automated migrations leave previous framework dependencies in place until the app owner removes them.
+- Unsupported APIs are reported as manual review items instead of being guessed.
+- Manual migrations should keep the old application runnable until the Farm replacement is verified.
+- Run the migration on a clean branch so its changes are easy to inspect or revert.
