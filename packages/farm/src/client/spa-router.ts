@@ -33,7 +33,24 @@ interface PageData {
     description?: string;
   };
   layoutModules?: string[];
+  routeSlots?: RouteSlotPageData[];
+  interception?: {
+    from?: string;
+    slots: string[];
+  };
   i18n?: FarmI18nClientSnapshot;
+}
+
+interface RouteSlotPageData {
+  name: string;
+  ownerPattern: string;
+  containerId: string;
+  interception: boolean;
+  fallback: boolean;
+  modulePath: string;
+  isClientComponent: boolean;
+  shouldHydrate: boolean;
+  props: Record<string, any>;
 }
 
 export interface RouterOptions {
@@ -87,6 +104,7 @@ export interface FarmNavigationState {
 export type FarmNavigationListener = (state: FarmNavigationState) => void;
 
 const FARM_PAGE_STATE_KEY = "__farmPageState";
+const FARM_INTERCEPT_FROM_KEY = "__farmInterceptFrom";
 const IDLE_NAVIGATION_STATE: FarmNavigationState = {
   state: "idle",
   pending: false,
@@ -188,7 +206,11 @@ export class SPARouter {
 
     const from = window.location.pathname + window.location.search;
     if (
-      await this.shouldBlockNavigation({ from, to: fullPath, action: replace ? "replace" : "push" })
+      await this.shouldBlockNavigation({
+        from,
+        to: fullPath,
+        action: replace ? "replace" : "push",
+      })
     ) {
       return;
     }
@@ -213,12 +235,12 @@ export class SPARouter {
       });
 
       // Fetch page data (from cache or server)
-      const pageData = await this.fetchPageData(fullPath);
+      const pageData = await this.fetchPageData(fullPath, true, from);
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
       }
 
-      if (pageData.isClientComponent === false) {
+      if (pageData.isClientComponent === false && !pageData.interception) {
         this.finishNavigation();
         window.location.assign(pageData.canonicalPath || fullPath);
         return;
@@ -259,15 +281,16 @@ export class SPARouter {
     if (isFarmLocaleChangeHref(href)) return;
     const url = new URL(href, window.location.origin);
     const fullPath = url.pathname + url.search;
+    const interceptFrom = window.location.pathname + window.location.search;
 
     // Skip if already prefetching or cached
     if (this.prefetchingUrls.has(fullPath)) return;
-    if (this.isCached(fullPath)) return;
+    if (this.isCached(fullPath, interceptFrom)) return;
 
     this.prefetchingUrls.add(fullPath);
 
     try {
-      await this.fetchPageData(fullPath, false);
+      await this.fetchPageData(fullPath, false, interceptFrom);
     } catch (error) {
       console.warn("[Farm.js] Prefetch failed:", href, error);
     } finally {
@@ -364,7 +387,12 @@ export class SPARouter {
     url: URL;
   }): Promise<void> {
     const historyPath = options.pageData.canonicalPath || options.fullPath;
-    const historyState = createHistoryState(historyPath, options.state);
+    const historyState = createHistoryState(
+      historyPath,
+      options.state,
+      undefined,
+      options.pageData.interception?.from ?? null,
+    );
     if (options.replace) {
       window.history.replaceState(historyState, "", historyPath);
     } else {
@@ -431,9 +459,14 @@ export class SPARouter {
   /**
    * Fetch page data from cache or server
    */
-  private async fetchPageData(path: string, recover = true): Promise<PageData> {
+  private async fetchPageData(
+    path: string,
+    recover = true,
+    interceptFrom?: string,
+  ): Promise<PageData> {
+    const cacheKey = getPageDataCacheKey(path, interceptFrom);
     // Check cache first
-    const cached = this.cache.get(path);
+    const cached = this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.options.cacheMaxAge) {
       return cached.data;
     }
@@ -443,6 +476,7 @@ export class SPARouter {
       headers: createFarmDeploymentRequestHeaders(this.options.deploymentId, {
         Accept: "application/x-farm-deferred+json, application/json",
         "X-Farm-SPA": "1",
+        ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
       }),
     });
 
@@ -465,7 +499,7 @@ export class SPARouter {
     const data = await readDeferredDataResponse<PageData>(response);
 
     // Cache the result
-    this.cache.set(path, {
+    this.cache.set(cacheKey, {
       data,
       timestamp: Date.now(),
     });
@@ -504,7 +538,11 @@ export class SPARouter {
         to: window.location.href,
         action: "pop",
       });
-      const pageData = await this.fetchPageData(path);
+      const interceptFrom =
+        typeof event.state?.[FARM_INTERCEPT_FROM_KEY] === "string"
+          ? event.state[FARM_INTERCEPT_FROM_KEY]
+          : undefined;
+      const pageData = await this.fetchPageData(path, true, interceptFrom);
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
       }
@@ -545,8 +583,8 @@ export class SPARouter {
   /**
    * Check if URL is cached
    */
-  private isCached(path: string): boolean {
-    const cached = this.cache.get(path);
+  private isCached(path: string, interceptFrom?: string): boolean {
+    const cached = this.cache.get(getPageDataCacheKey(path, interceptFrom));
     return cached !== undefined && Date.now() - cached.timestamp < this.options.cacheMaxAge;
   }
 
@@ -737,14 +775,29 @@ export function readPageState<TState = unknown>(): TState | null {
   return ((state as Record<string, unknown>)[FARM_PAGE_STATE_KEY] as TState | undefined) ?? null;
 }
 
-function createHistoryState(path: string, pageState: unknown, currentState?: unknown) {
+function createHistoryState(
+  path: string,
+  pageState: unknown,
+  currentState?: unknown,
+  interceptFrom?: string | null,
+) {
   const base =
     currentState && typeof currentState === "object" ? { ...(currentState as object) } : {};
-  return {
+  const nextState: Record<string, unknown> = {
     ...base,
     path,
     [FARM_PAGE_STATE_KEY]: pageState,
   };
+  if (interceptFrom === null) {
+    delete nextState[FARM_INTERCEPT_FROM_KEY];
+  } else if (interceptFrom) {
+    nextState[FARM_INTERCEPT_FROM_KEY] = interceptFrom;
+  }
+  return nextState;
+}
+
+function getPageDataCacheKey(path: string, interceptFrom?: string): string {
+  return interceptFrom ? `${path}\nintercept:${interceptFrom}` : path;
 }
 
 function createNavigationLocation(url: URL): FarmNavigationLocation {

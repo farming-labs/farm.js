@@ -12,7 +12,9 @@ describe("generateRouteTypes", () => {
     const appDir = path.join(tmpDir, "src", "app");
     await fs.promises.mkdir(path.join(appDir, "about"), { recursive: true });
     await fs.promises.mkdir(path.join(appDir, "content"), { recursive: true });
-    await fs.promises.mkdir(path.join(appDir, "users", "[id]"), { recursive: true });
+    await fs.promises.mkdir(path.join(appDir, "users", "[id]"), {
+      recursive: true,
+    });
     await fs.promises.writeFile(
       path.join(appDir, "page.tsx"),
       "export default function Home() { return null; }",
@@ -50,6 +52,41 @@ describe("generateRouteTypes", () => {
     expect(content).toContain('pattern: import("./farm-routes").RoutePattern');
   });
 
+  it("types route-slot targets without exposing slot directory syntax", async () => {
+    const feedDir = path.join(tmpDir, "src", "app", "feed");
+    const photoDir = path.join(feedDir, "photo", "[id]");
+    const modalDir = path.join(feedDir, "@modal", "(.)photo", "[id]");
+    const activityDir = path.join(feedDir, "@activity");
+    await fs.promises.mkdir(photoDir, { recursive: true });
+    await fs.promises.mkdir(modalDir, { recursive: true });
+    await fs.promises.mkdir(activityDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(feedDir, "page.tsx"),
+      "export default function Feed() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(photoDir, "page.tsx"),
+      "export default function Photo() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(modalDir, "page.tsx"),
+      "export default function Modal() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(activityDir, "page.tsx"),
+      "export default function Activity() { return null; }",
+    );
+
+    const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
+    const content = fs.readFileSync(outPath, "utf8");
+
+    expect(content).toContain('"/feed"');
+    expect(content).toContain("`/feed/photo/${string}`");
+    expect(content).not.toContain("@modal");
+    expect(content).not.toContain("@activity");
+    expect(content).not.toContain("(.)photo");
+  });
+
   it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and route types are string", async () => {
     const outPath = await generateRouteTypes({
       root: tmpDir,
@@ -68,7 +105,9 @@ describe("generateRouteTypes", () => {
     let content = fs.readFileSync(path.join(tmpDir, "src", "farm-routes.d.ts"), "utf8");
     expect(content).not.toContain("/blog");
 
-    await fs.promises.mkdir(path.join(tmpDir, "src", "app", "blog"), { recursive: true });
+    await fs.promises.mkdir(path.join(tmpDir, "src", "app", "blog"), {
+      recursive: true,
+    });
     await fs.promises.writeFile(
       path.join(tmpDir, "src", "app", "blog", "page.tsx"),
       "export default function Blog() { return null; }",
@@ -132,7 +171,9 @@ export default defineRoutes(({ page }) => [
 
   it("includes literal createRoute paths from normal feature files", async () => {
     const productRouteFile = path.join(tmpDir, "src", "features", "products", "page.tsx");
-    await fs.promises.mkdir(path.dirname(productRouteFile), { recursive: true });
+    await fs.promises.mkdir(path.dirname(productRouteFile), {
+      recursive: true,
+    });
     await fs.promises.writeFile(
       productRouteFile,
       `
@@ -158,7 +199,9 @@ export const ProductRoute = createRoute("/products/[id]", {
   it("writes a valid empty route union when no pages exist", async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "farm-empty-route-types-"));
     try {
-      await fs.promises.mkdir(path.join(root, "src", "app"), { recursive: true });
+      await fs.promises.mkdir(path.join(root, "src", "app"), {
+        recursive: true,
+      });
 
       const outPath = await generateRouteTypes({ root, srcDir: "src" });
       const content = fs.readFileSync(outPath, "utf8");

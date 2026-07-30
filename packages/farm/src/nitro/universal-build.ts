@@ -70,6 +70,15 @@ type UniversalBoundaryRoute = {
   pattern: string;
   modulePath: string;
 };
+type UniversalRouteSlot = {
+  name: string;
+  ownerPattern: string;
+  pattern: string;
+  modulePath: string;
+  containerId: string;
+  interception: boolean;
+  fallback: boolean;
+};
 type UniversalConfiguredHeaderRoute = {
   source: string;
   headers: Array<{ key: string; value: string }>;
@@ -619,6 +628,18 @@ export async function buildUniversal(
           : {}),
       });
     }
+    const routeSlots: UniversalRouteSlot[] = Array.from(
+      routeManager.getRouteSlots().values(),
+      (entry) => ({
+        name: entry.name,
+        ownerPattern: entry.ownerPattern,
+        pattern: entry.pattern,
+        modulePath: entry.modulePath,
+        containerId: entry.containerId,
+        interception: entry.interception,
+        fallback: entry.fallback,
+      }),
+    );
     logger.info(`📋 Found ${pageRoutes.length} page routes`);
 
     // Discover layout files early (needed for client CSS scanning)
@@ -677,7 +698,16 @@ export async function buildUniversal(
     logger.info("📦 Building client and SSR bundles in parallel...");
     const [clientBuildResult, ssrBuildResult] = await Promise.allSettled([
       // Client build (to disk)
-      buildClient(productionVite, config, root, srcDir, clientOutputDir, pageRoutes, layoutRoutes),
+      buildClient(
+        productionVite,
+        config,
+        root,
+        srcDir,
+        clientOutputDir,
+        pageRoutes,
+        layoutRoutes,
+        routeSlots,
+      ),
       // SSR build (in memory)
       buildSSRInMemory(
         productionVite,
@@ -689,6 +719,7 @@ export async function buildUniversal(
         preset,
         pageRoutes,
         layoutRoutes,
+        routeSlots,
       ),
     ]);
     const [routeRuntimeManifestResult] = await routeRuntimeManifestResultPromise;
@@ -716,6 +747,7 @@ export async function buildUniversal(
         clientOutputDir,
         pageRoutes,
         layoutRoutes,
+        routeSlots,
       );
     }
 
@@ -848,6 +880,7 @@ async function buildClient(
   outputDir: string,
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }> = [],
+  routeSlots: UniversalRouteSlot[] = [],
 ) {
   const viteBuild = productionVite.build;
   const { farmPlugin } = await import("../vite");
@@ -884,8 +917,17 @@ async function buildClient(
     }
   }
 
+  const clientRouteSlots = routeSlots.filter((slot) => {
+    try {
+      return getClientModuleMetadata(slot.modulePath, root).shouldHydrate;
+    } catch (error) {
+      logger.warn(`⚠️  Could not inspect route slot ${slot.modulePath}: ${error}`);
+      return false;
+    }
+  });
+
   logger.info(
-    `📱 Total hydratable routes detected: ${clientPages.length} out of ${pageRoutes.length} pages`,
+    `📱 Total hydratable routes detected: ${clientPages.length} pages and ${clientRouteSlots.length} slots`,
   );
 
   // Generate client hydration entry code
@@ -898,6 +940,7 @@ async function buildClient(
   const clientHydrationCode = generateClientHydrationEntry(
     clientPages,
     layoutRoutes,
+    clientRouteSlots,
     root,
     srcDir,
     isFarmDocsSearchEnabled(config.docs),
@@ -1282,6 +1325,7 @@ function generateClientHydrationEntry(
     relativePath: string;
   }>,
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
+  clientRouteSlots: UniversalRouteSlot[],
   root: string,
   srcDir: string,
   docsSearchEnabled: boolean,
@@ -1365,7 +1409,7 @@ function isFarmLocaleDocumentChange() {
 }
 `;
 
-  if (clientPages.length === 0) {
+  if (clientPages.length === 0 && clientRouteSlots.length === 0) {
     // No client pages - just basic runtime with CSS and SPA navigation
     return `
 // Farm.js Client Runtime (no client components)
@@ -1618,11 +1662,25 @@ document.addEventListener("click", function(e) {
   // Generate imports for client components
   const imports: string[] = [];
   const routeEntries: string[] = [];
+  const routeSlotEntries: string[] = [];
 
   clientPages.forEach((page, index) => {
     const importPath = toImportPath(page.modulePath);
     imports.push(`import Page${index} from "${importPath}";`);
     routeEntries.push(`  { pattern: ${JSON.stringify(page.pattern)}, Component: Page${index} }`);
+  });
+  clientRouteSlots.forEach((slot, index) => {
+    const importPath = toImportPath(slot.modulePath);
+    imports.push(`import RouteSlot${index} from "${importPath}";`);
+    routeSlotEntries.push(`  {
+    name: ${JSON.stringify(slot.name)},
+    ownerPattern: ${JSON.stringify(slot.ownerPattern)},
+    pattern: ${JSON.stringify(slot.pattern)},
+    containerId: ${JSON.stringify(slot.containerId)},
+    interception: ${JSON.stringify(slot.interception)},
+    fallback: ${JSON.stringify(slot.fallback)},
+    Component: RouteSlot${index},
+  }`);
   });
 
   // Full SPA client with hydration for client components
@@ -1645,6 +1703,10 @@ installChunkErrorRecovery();
 // Client component routes
 const clientRoutes = [
 ${routeEntries.join(",\n")}
+];
+
+const clientRouteSlots = [
+${routeSlotEntries.join(",\n")}
 ];
 
 // Layout routes for wrapping client components
@@ -1701,6 +1763,146 @@ function matchRoute(pathname) {
   return null;
 }
 
+function matchesRoutePrefix(pathname, pattern) {
+  if (pattern === "/") return true;
+  const pathSegments = getFarmRoutePathname(pathname).split("/").filter(Boolean);
+  const patternSegments = pattern.split("/").filter(Boolean);
+  if (patternSegments.length > pathSegments.length) return false;
+  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
+  return matchFarmRoute(pattern, candidate) !== null;
+}
+
+function matchInterceptedRouteSlot(pathname, from) {
+  for (const slot of clientRouteSlots) {
+    if (!slot.interception || !matchesRoutePrefix(from, slot.ownerPattern)) continue;
+    const params = matchFarmRoute(slot.pattern, getFarmRoutePathname(pathname));
+    if (params !== null) return { slot: slot, params: params };
+  }
+  return null;
+}
+
+function routeSlotKey(slot) {
+  return slot.ownerPattern + ":" + slot.name;
+}
+
+function findClientRouteSlot(slot) {
+  return clientRouteSlots.find(function(candidate) {
+    return candidate.name === slot.name &&
+      candidate.ownerPattern === slot.ownerPattern &&
+      candidate.pattern === slot.pattern &&
+      candidate.interception === slot.interception &&
+      candidate.fallback === slot.fallback;
+  });
+}
+
+function readRouteSlotPayload(doc) {
+  const script = doc.getElementById("__farm_route_slots_data__");
+  if (!script?.textContent) return [];
+  try {
+    const parsed = JSON.parse(script.textContent);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+const routeSlotRoots = new Map();
+let activeRouteInterception = null;
+
+function resetRouteSlotRoots() {
+  for (const root of routeSlotRoots.values()) {
+    try { root.unmount(); } catch {}
+  }
+  routeSlotRoots.clear();
+  activeRouteInterception = null;
+}
+
+function renderClientRouteSlot(slot, registration, mode) {
+  const container = document.getElementById(slot.containerId);
+  if (!container || !registration?.Component) return false;
+  const key = routeSlotKey(slot);
+  const existingRoot = routeSlotRoots.get(key);
+  const props = slot.props && typeof slot.props === "object" ? slot.props : {};
+  const element = React.createElement(registration.Component, props);
+
+  if (mode === "hydrate") {
+    if (existingRoot) return true;
+    const root = hydrateRoot(container, element);
+    routeSlotRoots.set(key, root);
+    return true;
+  }
+
+  if (existingRoot) {
+    try { existingRoot.unmount(); } catch {}
+    routeSlotRoots.delete(key);
+  } else {
+    container.replaceChildren();
+  }
+  const root = createRoot(container);
+  root.render(element);
+  routeSlotRoots.set(key, root);
+  return true;
+}
+
+function hydrateInitialRouteSlots() {
+  const slots = Array.isArray(window.__FARM_ROUTE_SLOTS__)
+    ? window.__FARM_ROUTE_SLOTS__
+    : [];
+  for (const slot of slots) {
+    const registration = findClientRouteSlot(slot);
+    if (!registration) continue;
+    try {
+      renderClientRouteSlot(slot, registration, "hydrate");
+    } catch (error) {
+      console.warn("[Farm.js] Could not hydrate route slot:", slot.name, error);
+    }
+  }
+}
+
+function renderRouteInterception(slot, registration, from) {
+  const container = document.getElementById(slot.containerId);
+  if (!container) return false;
+  const key = routeSlotKey(slot);
+  const previousSlot = (window.__FARM_ROUTE_SLOTS__ || []).find(function(candidate) {
+    return routeSlotKey(candidate) === key;
+  }) || null;
+  const previousHtml = container.innerHTML;
+
+  if (!renderClientRouteSlot(slot, registration, "render")) return false;
+  activeRouteInterception = {
+    from: from,
+    key: key,
+    slot: slot,
+    previousSlot: previousSlot,
+    previousHtml: previousHtml,
+  };
+  return true;
+}
+
+function clearRouteInterception(destination) {
+  if (!activeRouteInterception) return false;
+  const active = activeRouteInterception;
+  activeRouteInterception = null;
+  const root = routeSlotRoots.get(active.key);
+  if (root) {
+    try { root.unmount(); } catch {}
+    routeSlotRoots.delete(active.key);
+  }
+  const container = document.getElementById(active.slot.containerId);
+  if (container) {
+    container.innerHTML = active.previousHtml;
+    if (active.previousSlot) {
+      const registration = findClientRouteSlot(active.previousSlot);
+      if (registration) {
+        try {
+          renderClientRouteSlot(active.previousSlot, registration, "hydrate");
+        } catch {}
+      }
+    }
+  }
+  return destination === active.from;
+}
+
 // State
 let reactRoot = null;
 let currentPathname = null;
@@ -1719,12 +1921,17 @@ function resetReactRoot() {
 async function hydrate() {
   const pathname = window.location.pathname;
   const matched = matchRoute(pathname);
-  
+  hydrateInitialRouteSlots();
+
   if (!matched) {
     return;
   }
   
-  const container = document.getElementById("root");
+  const hasRouteSlots =
+    Array.isArray(window.__FARM_ROUTE_SLOTS__) && window.__FARM_ROUTE_SLOTS__.length > 0;
+  const container =
+    (hasRouteSlots ? document.getElementById("__farm_page__") : null) ||
+    document.getElementById("root");
   if (!container) {
     console.error("[Farm.js] No root element found");
     return;
@@ -1738,7 +1945,9 @@ async function hydrate() {
   
   // Create page element and wrap with layouts
   const pageElement = React.createElement(Component, props);
-  const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
+  const wrappedElement = hasRouteSlots
+    ? pageElement
+    : wrapWithLayouts(pageElement, pathname, params);
 
   const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
   const hydrationSession = await farmClientRuntime.beginHydration({
@@ -1802,6 +2011,57 @@ ${generateUniversalRouterStateProperties()}
           ? { pattern: matched.route.pattern, params: matched.params }
           : undefined,
       });
+
+      if (activeRouteInterception && clearRouteInterception(to)) {
+        await farmClientRuntime.markNavigationLoaded(clientNavigation, {
+          routeSlots: "restored",
+        });
+        await farmClientRuntime.resolveNavigation(clientNavigation);
+        void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
+        this.currentPath = to;
+        this.finishNavigation();
+        return;
+      }
+      if (activeRouteInterception) {
+        clearRouteInterception(to);
+      }
+
+      const intercepted = matchInterceptedRouteSlot(pathname, from);
+      if (intercepted) {
+        const html = await this.fetchPage(to, from);
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        const slotPayload = readRouteSlotPayload(doc);
+        const selectedSlot = slotPayload.find(function(slot) {
+          return slot.interception &&
+            slot.name === intercepted.slot.name &&
+            slot.ownerPattern === intercepted.slot.ownerPattern;
+        });
+
+        if (
+          selectedSlot &&
+          renderRouteInterception(selectedSlot, intercepted.slot, from)
+        ) {
+          await farmClientRuntime.markNavigationLoaded(clientNavigation, {
+            route: intercepted.slot.pattern,
+            params: intercepted.params,
+          });
+          const historyState = createHistoryState(
+            to,
+            options.state,
+            window.history.state,
+          );
+          if (action === "replace") {
+            window.history.replaceState(historyState, "", url);
+          } else if (action !== "pop") {
+            window.history.pushState(historyState, "", url);
+          }
+          await farmClientRuntime.resolveNavigation(clientNavigation);
+          void farmClientRuntime.scheduleNavigationRendered(clientNavigation);
+          this.currentPath = to;
+          this.finishNavigation();
+          return;
+        }
+      }
 
       if (matched) {
         const Component = matched.route.Component;
@@ -1879,21 +2139,28 @@ ${generateUniversalRouterStateProperties()}
     }
   },
   
-  fetchPage: async function(url) {
-    const cached = this.prefetchCache.get(url);
+  fetchPage: async function(url, interceptFrom) {
+    const cacheKey = interceptFrom ? url + "\\nintercept:" + interceptFrom : url;
+    const cached = this.prefetchCache.get(cacheKey);
     if (cached) return cached;
     
     const response = await fetch(url, {
-      headers: { "Accept": "text/html" }
+      headers: {
+        "Accept": "text/html",
+        ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
+      }
     });
     if (!response.ok) throw new Error("Failed to fetch page");
-    return response.text();
+    const html = await response.text();
+    this.prefetchCache.set(cacheKey, html);
+    return html;
   },
   
   swapContent: function(html, targetPath) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
+    const nextRouteSlots = readRouteSlotPayload(doc);
     
     // Update title
     const newTitle = doc.querySelector("title");
@@ -1918,7 +2185,10 @@ ${generateUniversalRouterStateProperties()}
     const currentRoot = document.getElementById("root");
     if (!newRoot || !currentRoot) return this.swapDocument(doc);
     resetReactRoot();
+    resetRouteSlotRoots();
     currentRoot.innerHTML = newRoot.innerHTML;
+    window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
+    hydrateInitialRouteSlots();
 
     // Check if new page has a client component
     const targetUrl = new URL(targetPath || window.location.href, window.location.origin);
@@ -1930,13 +2200,15 @@ ${generateUniversalRouterStateProperties()}
       const params = matched.params;
       const searchParams = Object.fromEntries(targetUrl.searchParams);
       const props = { params: params, searchParams: Promise.resolve(searchParams) };
-      
-      if (!reactRoot) {
-        reactRoot = createRoot(currentRoot);
-      }
       const pageElement = React.createElement(Component, props);
-      const wrappedElement = wrapWithLayouts(pageElement, newPathname, params);
-      reactRoot.render(wrappedElement);
+      const hasRouteSlots = nextRouteSlots.length > 0;
+      const pageContainer =
+        (hasRouteSlots ? document.getElementById("__farm_page__") : null) || currentRoot;
+      const wrappedElement = hasRouteSlots
+        ? pageElement
+        : wrapWithLayouts(pageElement, newPathname, params);
+      reactRoot = hydrateRoot(pageContainer, wrappedElement);
+      isHydrated = true;
     }
     return true;
   },
@@ -1945,6 +2217,7 @@ ${generateUniversalRouterStateProperties()}
     if (!doc.documentElement || !doc.body) return false;
 
     resetReactRoot();
+    resetRouteSlotRoots();
 
     Array.from(document.documentElement.attributes).forEach(function(attr) {
       if (!doc.documentElement.hasAttribute(attr.name)) {
@@ -1978,10 +2251,12 @@ ${generateUniversalRouterStateProperties()}
     if (url.origin !== window.location.origin) return;
     
     const pathname = url.pathname + url.search;
-    if (this.prefetchCache.has(pathname)) return;
+    const interceptFrom = this.currentPath;
+    const cacheKey = pathname + "\\nintercept:" + interceptFrom;
+    if (this.prefetchCache.has(cacheKey)) return;
     
-    this.fetchPage(pathname)
-      .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
+    this.fetchPage(pathname, interceptFrom)
+      .then(function(html) { spaRouter.prefetchCache.set(cacheKey, html); })
       .catch(function() {});
   },
   
@@ -2087,6 +2362,7 @@ async function buildSSRInMemory(
   preset: string,
   collectedPageRoutes: readonly UniversalPageRoute[],
   collectedLayoutRoutes: ReadonlyArray<{ pattern: string; modulePath: string }>,
+  collectedRouteSlots: readonly UniversalRouteSlot[],
 ): Promise<{
   bundle: OutputBundle;
   entryFile: string;
@@ -2129,6 +2405,7 @@ async function buildSSRInMemory(
   // client build instead of rescanning the same project tree.
   const pageRoutes = collectedPageRoutes.map((route) => ({ ...route }));
   const layoutRoutes = collectedLayoutRoutes.map((route) => ({ ...route }));
+  const routeSlots = collectedRouteSlots.map((slot) => ({ ...slot }));
 
   const metadataImageRoutes: UniversalMetadataImageRoute[] = [];
   for (const entry of routeManager.getMetadataImages().values()) {
@@ -2264,6 +2541,7 @@ async function buildSSRInMemory(
     apiRoutes,
     pageRoutes,
     layoutRoutes,
+    routeSlots,
     errorRoutes,
     metadataImageRoutes,
     middlewareRoutes,
@@ -2446,7 +2724,11 @@ async function buildSSRInMemory(
     }
   }
 
-  return { bundle: ssrBundle!, entryFile: ssrEntryFile!, configuredHeaderRoutes };
+  return {
+    bundle: ssrBundle!,
+    entryFile: ssrEntryFile!,
+    configuredHeaderRoutes,
+  };
 }
 
 /**
@@ -2457,6 +2739,7 @@ function generateVirtualEntryCode(
   apiRoutes: Array<{ path: string; filePath: string; methods: string[] }>,
   pageRoutes: UniversalPageRoute[],
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
+  routeSlots: UniversalRouteSlot[],
   errorRoutes: UniversalBoundaryRoute[],
   metadataImageRoutes: UniversalMetadataImageRoute[],
   middlewareRoutes: UniversalMiddlewareRoute[],
@@ -2530,10 +2813,12 @@ function generateVirtualEntryCode(
     }
 
     pageImports.push(`import * as ${varName} from "${route.modulePath}";`);
+    const shouldHydrate = getClientModuleMetadata(route.modulePath, config.root).shouldHydrate;
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
     module: ${varName},
+    shouldHydrate: ${JSON.stringify(shouldHydrate)},
   }`);
   });
 
@@ -2547,6 +2832,23 @@ function generateVirtualEntryCode(
     layoutRegistrations.push(`
   {
     pattern: ${JSON.stringify(layout.pattern)},
+    module: ${varName},
+  }`);
+  });
+
+  const routeSlotImports: string[] = [];
+  const routeSlotRegistrations: string[] = [];
+  routeSlots.forEach((slot, index) => {
+    const varName = `routeSlot${index}`;
+    routeSlotImports.push(`import * as ${varName} from "${slot.modulePath}";`);
+    routeSlotRegistrations.push(`
+  {
+    name: ${JSON.stringify(slot.name)},
+    ownerPattern: ${JSON.stringify(slot.ownerPattern)},
+    pattern: ${JSON.stringify(slot.pattern)},
+    containerId: ${JSON.stringify(slot.containerId)},
+    interception: ${JSON.stringify(slot.interception)},
+    fallback: ${JSON.stringify(slot.fallback)},
     module: ${varName},
   }`);
   });
@@ -2758,6 +3060,7 @@ async function handleAPIRequest(request) {
 ${apiImports.join("\n")}
 ${pageImports.join("\n")}
 ${layoutImports.join("\n")}
+${routeSlotImports.join("\n")}
 ${errorImports.join("\n")}
 ${metadataImageImports.join("\n")}
 ${middlewareImports.join("\n")}
@@ -2932,6 +3235,9 @@ for (const route of pageRoutes) {
 const layoutRoutes = [${layoutRegistrations.join(",")}
 ];
 
+const routeSlots = [${routeSlotRegistrations.join(",")}
+];
+
 // Route-level error boundaries bundled at build time.
 const errorRoutes = [${errorRegistrations.join(",")}
 ];
@@ -2966,20 +3272,23 @@ function serializeFarmInlineValue(value) {
     .replace(/\\u2029/g, "\\\\u2029");
 }
 
-function renderFarmClientBootstrapScript(canonicalPath) {
+function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots) {
   const integrationManifest = ${
     hasRuntimeIntegrationConfig ? "getRegisteredIntegrationAPIManifest()" : "{}"
   };
+  const serializedRouteSlots = serializeFarmInlineValue(selectedRouteSlots || []);
   let source = 'window.__FARM_INTEGRATION_API_MANIFEST__=' +
     serializeFarmInlineValue(integrationManifest) +
-    ';';
+    ';window.__FARM_ROUTE_SLOTS__=' + serializedRouteSlots + ';';
   if (typeof canonicalPath === "string" && canonicalPath.startsWith("/")) {
     const serializedPath = serializeFarmInlineValue(canonicalPath);
     source += 'if(location.pathname+location.search!==' + serializedPath + '){' +
       'history.replaceState(Object.assign({},history.state||{},{path:' + serializedPath + '}),"",' +
       serializedPath + ');}';
   }
-  return '<script>' + source + '</script>';
+  return '<script id="__farm_route_slots_data__" type="application/json">' +
+    serializedRouteSlots +
+    '</script><script>' + source + '</script>';
 }
 
 function escapeFarmHtmlAttribute(value) {
@@ -3741,6 +4050,79 @@ function matchPageRoute(pathname) {
   return null;
 }
 
+function matchesRoutePrefix(pathname, pattern) {
+  if (pattern === "/") return true;
+  const pathSegments = normalizeRuntimePath(pathname).split("/").filter(Boolean);
+  const patternSegments = normalizeRuntimePath(pattern).split("/").filter(Boolean);
+  if (patternSegments.length > pathSegments.length) return false;
+  const candidate = "/" + pathSegments.slice(0, patternSegments.length).join("/");
+  return matchRuntimePathPattern(pattern, candidate) !== null;
+}
+
+function routeSlotSpecificity(slot) {
+  return slot.pattern.split("/").reduce(function(score, segment) {
+    if (!segment) return score;
+    if (segment.startsWith("[[...")) return score + 1;
+    if (segment.startsWith("[...")) return score + 2;
+    if (segment.startsWith("[")) return score + 3;
+    return score + 10;
+  }, 0);
+}
+
+function matchRouteSlots(pathname, interceptFrom) {
+  const groups = new Map();
+  for (const slot of routeSlots) {
+    if (!matchesRoutePrefix(pathname, slot.ownerPattern)) continue;
+    const key = slot.ownerPattern + ":" + slot.name;
+    const entries = groups.get(key) || [];
+    entries.push(slot);
+    groups.set(key, entries);
+  }
+
+  const normalizedFrom =
+    typeof interceptFrom === "string" && interceptFrom.startsWith("/")
+      ? new URL(interceptFrom, "http://farm.local").pathname
+      : null;
+  const matches = [];
+
+  for (const entries of groups.values()) {
+    const candidates = entries
+      .filter(function(entry) { return !entry.fallback; })
+      .filter(function(entry) {
+        return !entry.interception ||
+          (normalizedFrom && matchesRoutePrefix(normalizedFrom, entry.ownerPattern));
+      })
+      .map(function(entry) {
+        return {
+          entry: entry,
+          params: matchRuntimePathPattern(entry.pattern, pathname),
+        };
+      })
+      .filter(function(candidate) { return candidate.params !== null; })
+      .sort(function(left, right) {
+        if (left.entry.interception !== right.entry.interception) {
+          return left.entry.interception ? -1 : 1;
+        }
+        return routeSlotSpecificity(right.entry) - routeSlotSpecificity(left.entry);
+      });
+
+    if (candidates[0]) {
+      matches.push({ ...candidates[0].entry, params: candidates[0].params });
+      continue;
+    }
+
+    const fallback = entries.find(function(entry) { return entry.fallback; });
+    if (fallback) matches.push({ ...fallback, params: {} });
+  }
+
+  return matches.sort(function(left, right) {
+    const ownerDepth =
+      left.ownerPattern.split("/").filter(Boolean).length -
+      right.ownerPattern.split("/").filter(Boolean).length;
+    return ownerDepth || left.name.localeCompare(right.name);
+  });
+}
+
 function hasLocalRequestRoute(request, routePathname) {
   const pathname = new URL(request.url).pathname;
   if (matchLocalAPIRequest(request) || matchLocalIntegrationRequest(request)) {
@@ -3899,6 +4281,7 @@ function getPPRShellBypassReason(request, middlewareData, middlewareContext) {
   if (method !== "GET" && method !== "HEAD") return "method";
   if (request.headers.get("cookie")) return "cookie";
   if (request.headers.get("authorization")) return "authorization";
+  if (request.headers.get("x-farm-intercept-from")) return "route-interception";
   if (request.headers.get("x-farm-ppr-refresh")) return "refresh";
   if (hasConfiguredRouteContext) return "route-context";
   if (middlewareData?.size) return "middleware-data";
@@ -4228,6 +4611,10 @@ async function handleFarmRequestInContext(
       
       // Get applicable layouts for this page
       const applicableLayouts = getApplicableLayouts(routePathname);
+      const selectedRouteSlots = matchRouteSlots(
+        routePathname,
+        request.headers.get("x-farm-intercept-from"),
+      );
       
       if (PageComponent) {
         // Parse search params - make it a resolved Promise for async components
@@ -4315,6 +4702,82 @@ async function handleFarmRequestInContext(
             throw routeStateError;
           }
         }
+
+        const renderedRouteSlots = await Promise.all(
+          selectedRouteSlots.map(async function(slot) {
+            const slotContext = hasConfiguredRouteContext
+              ? await resolveFarmRouteContext(farmResolvedRuntimeConfig, {
+                  request,
+                  params: slot.params,
+                  search: searchParamsObj,
+                  path: pathname,
+                })
+              : undefined;
+            const rawSlotProps = withFarmRouteContext(
+              {
+                params: slot.params,
+                searchParams: Promise.resolve(searchParamsObj),
+                path: pathname,
+                ...(middlewareData?.size ? { middleware: { data: middlewareData } } : {}),
+              },
+              slotContext,
+            );
+            if (slot.module.__farmResolveRouteProps && slotContext !== undefined) {
+              Object.defineProperty(rawSlotProps, "context", {
+                value: slotContext,
+                enumerable: true,
+                configurable: true,
+              });
+            }
+
+            const slotSchemas = slot.module.__farmRouteParsesProps
+              ? {}
+              : slot.module.__farmRouteSchemas || {};
+            let slotProps = slot.module.__farmResolveRouteProps
+              ? await slot.module.__farmResolveRouteProps(rawSlotProps)
+              : {
+                  ...rawSlotProps,
+                  params: slotSchemas.params?.parse
+                    ? slotSchemas.params.parse(slot.params)
+                    : slot.params,
+                  search: slotSchemas.search?.parse
+                    ? slotSchemas.search.parse(searchParamsObj)
+                    : searchParamsObj,
+                  searchParams: Promise.resolve(
+                    slotSchemas.search?.parse
+                      ? slotSchemas.search.parse(searchParamsObj)
+                      : searchParamsObj,
+                  ),
+                };
+            if (
+              slot.module.__farmResolveRouteProps &&
+              slotContext !== undefined &&
+              slotProps.context === slotContext
+            ) {
+              const { context: _slotContext, ...renderSlotProps } = slotProps;
+              slotProps = renderSlotProps;
+            }
+
+            return { ...slot, props: slotProps };
+          }),
+        );
+        const routeSlotPayload = renderedRouteSlots.map(function(slot) {
+          return {
+            name: slot.name,
+            ownerPattern: slot.ownerPattern,
+            pattern: slot.pattern,
+            containerId: slot.containerId,
+            interception: slot.interception,
+            fallback: slot.fallback,
+            props: {
+              params: slot.props.params,
+              search: slot.props.search || searchParamsObj,
+              searchParams: slot.props.search || searchParamsObj,
+              ...("data" in slot.props ? { data: slot.props.data } : {}),
+              path: pathname,
+            },
+          };
+        });
         
         const renderPageElement = async () => {
             // First, render the page content
@@ -4342,6 +4805,14 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
+            if (route.shouldHydrate && renderedRouteSlots.length > 0) {
+              pageElement = React.createElement(
+                "div",
+                { id: "__farm_page__", "data-farm-client": "true" },
+                pageElement,
+              );
+            }
+
             // Wrap with layouts (from innermost to outermost)
             // Layouts are sorted by depth (root first), so we process in reverse
             let wrappedElement = pageElement;
@@ -4349,9 +4820,23 @@ async function handleFarmRequestInContext(
               const layout = applicableLayouts[i];
               const LayoutComponent = layout.module.default;
               if (LayoutComponent) {
+                const slotProps = {};
+                for (const slot of renderedRouteSlots) {
+                  if (slot.ownerPattern !== layout.pattern) continue;
+                  slotProps[slot.name] = React.createElement(
+                    "div",
+                    {
+                      id: slot.containerId,
+                      "data-farm-route-slot": slot.name,
+                      "data-farm-slot-owner": slot.ownerPattern,
+                    },
+                    React.createElement(slot.module.default, slot.props),
+                  );
+                }
                 wrappedElement = React.createElement(LayoutComponent, {
                   children: wrappedElement,
                   params,
+                  ...slotProps,
                 });
               }
             }
@@ -4407,6 +4892,7 @@ async function handleFarmRequestInContext(
         );
         const hasRequestScopedRender = Boolean(
           pageStatus >= 400 ||
+          request.headers.get("x-farm-intercept-from") ||
           hasPrivateRequestHeaders ||
           hasConfiguredRouteContext ||
           middlewareData?.size ||
@@ -4446,7 +4932,10 @@ async function handleFarmRequestInContext(
             '  <link rel="modulepreload" href="/farm-client.js">\\n' +
             '</head>\\n<body>\\n  <div id="root">';
           const streamSuffix = '</div>\\n' +
-            '  ' + renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath) + '\\n' +
+            '  ' + renderFarmClientBootstrapScript(
+              pageProps.__farmCanonicalPath,
+              routeSlotPayload
+            ) + '\\n' +
             '  <script type="module" src="/farm-client.js"></script>\\n' +
             '</body>\\n</html>';
           const streamedDocument = createFarmDocumentStream(
@@ -4503,7 +4992,10 @@ async function handleFarmRequestInContext(
             // Inject client script before closing body tag
             .replace(
               /<\\/body>/i,
-              '  ' + renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath) + '\\n' +
+              '  ' + renderFarmClientBootstrapScript(
+                pageProps.__farmCanonicalPath,
+                routeSlotPayload
+              ) + '\\n' +
                 '  <script type="module" src="/farm-client.js"></script>\\n</body>',
             );
           
@@ -4524,7 +5016,7 @@ async function handleFarmRequestInContext(
 </head>
 <body>
   <div id="root">\${html}</div>
-  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath)}
+  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload)}
   <script type="module" src="/farm-client.js"></script>
 </body>
 </html>\`;

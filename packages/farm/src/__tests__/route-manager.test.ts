@@ -174,6 +174,76 @@ describe("RouteManager", () => {
 
       await expect(routeManager.discoverRoutes()).rejects.toThrow('Duplicate page route "/about"');
     });
+
+    it("requires an intercepted URL to have a canonical page", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return ["feed/page.tsx", "feed/@modal/(.)photo/[id]/page.tsx"];
+        }
+        if (pattern.includes("layout")) {
+          return ["feed/layout.tsx"];
+        }
+        return [];
+      });
+
+      await expect(routeManager.discoverRoutes()).rejects.toThrow(
+        'targets "/feed/photo/[id]", but no canonical page exists',
+      );
+    });
+  });
+
+  describe("named route slots", () => {
+    beforeEach(async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) {
+          return [
+            "feed/page.tsx",
+            "feed/photo/[id]/page.tsx",
+            "feed/@activity/page.tsx",
+            "feed/@modal/(.)photo/[id]/page.tsx",
+          ];
+        }
+        if (pattern.includes("default")) {
+          return ["feed/@modal/default.tsx"];
+        }
+        if (pattern.includes("layout")) {
+          return ["layout.tsx", "feed/layout.tsx"];
+        }
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+    });
+
+    it("keeps slot pages out of the canonical page map", () => {
+      expect(routeManager.getRoutes().size).toBe(2);
+      expect(routeManager.getRouteSlots().size).toBe(3);
+    });
+
+    it("matches ordinary slot content and default fallbacks", () => {
+      const match = routeManager.matchRoute("/feed");
+
+      expect(match.slots.map((slot) => [slot.name, slot.fallback])).toEqual([
+        ["activity", false],
+        ["modal", true],
+      ]);
+    });
+
+    it("uses an interception only when navigation provides a background route", () => {
+      const direct = routeManager.matchRoute("/feed/photo/42");
+      const intercepted = routeManager.matchRoute("/feed/photo/42", {
+        interceptFrom: "/feed",
+      });
+
+      expect(direct.slots.find((slot) => slot.name === "modal")?.fallback).toBe(true);
+      expect(intercepted.slots.find((slot) => slot.name === "modal")).toMatchObject({
+        interception: true,
+        fallback: false,
+        params: { id: "42" },
+      });
+    });
   });
 
   describe("route-level boundaries", () => {
