@@ -81,6 +81,39 @@ program
   });
 
 program
+  .command("upgrade")
+  .description("Upgrade installed Farm.js packages to a stable or beta release")
+  .option("-r, --root <root>", "Project root", process.cwd())
+  .option("--latest", "Upgrade to the latest stable release")
+  .option("--beta", "Upgrade to the latest beta release")
+  .option("--dry-run", "Print the package-manager commands without installing")
+  .action(async (options) => {
+    try {
+      if (options.latest === options.beta) {
+        throw new Error("Choose exactly one release channel: --latest (stable) or --beta.");
+      }
+
+      const { formatFarmUpgradePlan, upgradeFarm } = require("../dist/index.js");
+      const result = await upgradeFarm({
+        root: options.root,
+        channel: options.beta ? "beta" : "latest",
+        dryRun: options.dryRun,
+      });
+      console.log(formatFarmUpgradePlan(result.plan));
+      console.log(
+        result.executed
+          ? `Upgraded ${result.plan.packages.length} Farm package${
+              result.plan.packages.length === 1 ? "" : "s"
+            } to ${result.plan.channel}.`
+          : "Dry run only. No packages were changed.",
+      );
+    } catch (error) {
+      console.error("Failed to upgrade Farm packages:", error);
+      process.exit(1);
+    }
+  });
+
+program
   .command("generate")
   .description("Generate route/API types and integration schema artifacts")
   .option("-r, --root <root>", "Root directory", process.cwd())

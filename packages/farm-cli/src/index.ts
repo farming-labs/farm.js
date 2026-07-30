@@ -63,3 +63,19 @@ export {
   type FrameworkMigrationOperation,
   type FrameworkMigrationPlan,
 } from "./migrate";
+export {
+  createFarmUpgradePlan,
+  detectFarmPackageManager,
+  formatFarmUpgradePlan,
+  upgradeFarm,
+  type FarmDependencySection,
+  type FarmPackageManager,
+  type FarmSkippedUpgradePackage,
+  type FarmUpgradeChannel,
+  type FarmUpgradeCommand,
+  type FarmUpgradeCommandRunner,
+  type FarmUpgradeOptions,
+  type FarmUpgradePackage,
+  type FarmUpgradePlan,
+  type FarmUpgradeResult,
+} from "./upgrade";
