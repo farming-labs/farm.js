@@ -5,11 +5,5 @@ export default defineConfig({
   experimental: {
     serverComponents: true,
   },
-  vite: {
-    server: {
-      port: 3000,
-      strictPort: true,
-    },
-  },
   integrations: appIntegrations,
 });

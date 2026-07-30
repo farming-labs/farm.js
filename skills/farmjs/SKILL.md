@@ -63,19 +63,13 @@ export default defineConfig({
   experimental: {
     serverComponents: true,
   },
-  vite: {
-    server: {
-      port: 3000,
-      strictPort: true,
-    },
-  },
   integrations: appIntegrations,
 });
 ```
 
 Common config fields:
 
-- `srcDir`: app source directory, default usually `src`
+- `srcDir`: app source directory; omit it to use the default `src`
 - `experimental.serverComponents`: enables server component behavior
 - `integrations`: provider integrations object
 - `storage.mounts`: named storage instances

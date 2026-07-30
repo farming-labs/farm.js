@@ -17,6 +17,8 @@ import {
 import { mergeFarmViteConfig } from "./vite-config";
 import { FARM_VERSION } from "../version";
 
+export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
+
 // Farm.js branding plugin for createServer
 function createBrandingPlugin() {
   let serverStarted = false;
@@ -213,6 +215,8 @@ export async function createServer(config: FarmConfig = {}) {
           ],
           server: {
             middlewareMode: false,
+            port: DEFAULT_FARM_DEV_SERVER_PORT,
+            strictPort: true,
           },
           optimizeDeps: {
             // Avoid Vite scanning server/native-only deps from framework internals.
@@ -294,7 +298,7 @@ export async function createServer(config: FarmConfig = {}) {
 /**
  * Start the development server
  */
-export async function startDevServer(config: FarmConfig = {}, port = 3000) {
+export async function startDevServer(config: FarmConfig = {}, port?: number) {
   const server = await createServer(config);
   await server.listen(port);
   const pluginManager = (server as any).__farmPluginManager as PluginManager | undefined;

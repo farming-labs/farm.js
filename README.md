@@ -54,12 +54,14 @@ Create a `farm.config.ts`:
 import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
-  srcDir: "src",
   deploy: {
     target: "vercel",
   },
 });
 ```
+
+Farm uses `src` as the source directory by default. Add `srcDir` only when your app uses a
+different directory.
 
 `defineFarmConfig` remains available as a deprecated exact alias of `defineConfig`.
 

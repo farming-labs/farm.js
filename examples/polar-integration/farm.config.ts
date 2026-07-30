@@ -8,9 +8,7 @@ export default defineConfig({
   vite: {
     server: {
       port: 3002,
-      strictPort: true,
     },
   },
   integrations: appIntegrations,
 });
-

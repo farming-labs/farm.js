@@ -143,7 +143,6 @@ function createDocsContextDemoPlugin(
 }
 
 export default {
-  srcDir: "src",
   preset: "vercel",
   docs: {
     entry: "/docs",

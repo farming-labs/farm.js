@@ -177,6 +177,14 @@ describe("loadConfig", () => {
 });
 
 describe("resolveConfig", () => {
+  it('defaults srcDir to "src" and preserves an explicit override', async () => {
+    const defaults = await resolveConfig({}, "development");
+    const configured = await resolveConfig({ srcDir: "app" }, "development");
+
+    expect(defaults.srcDir).toBe("src");
+    expect(configured.srcDir).toBe("app");
+  });
+
   it("keeps optimized boundaries disabled by default and preserves explicit opt-in", async () => {
     const defaults = await resolveConfig({}, "production");
     const configured = await resolveConfig(

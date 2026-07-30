@@ -9,7 +9,7 @@ describe("mergeFarmViteConfig", () => {
     const merged = mergeFarmViteConfig(
       {
         plugins: [farmPlugin],
-        server: { middlewareMode: false },
+        server: { middlewareMode: false, port: 3000, strictPort: true },
         optimizeDeps: {
           noDiscovery: true,
           include: ["react"],
@@ -19,7 +19,7 @@ describe("mergeFarmViteConfig", () => {
       },
       {
         plugins: [userPlugin],
-        server: { port: 4100 },
+        server: { port: 4100, strictPort: false },
         optimizeDeps: {
           include: ["react", "react-dom"],
           exclude: ["supports-color"],
@@ -29,7 +29,11 @@ describe("mergeFarmViteConfig", () => {
     );
 
     expect(merged.plugins).toEqual([farmPlugin, userPlugin]);
-    expect(merged.server).toMatchObject({ middlewareMode: false, port: 4100 });
+    expect(merged.server).toMatchObject({
+      middlewareMode: false,
+      port: 4100,
+      strictPort: false,
+    });
     expect(merged.optimizeDeps).toMatchObject({
       noDiscovery: true,
       include: ["react", "react-dom"],

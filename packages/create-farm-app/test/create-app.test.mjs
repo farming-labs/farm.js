@@ -58,6 +58,12 @@ test("generates a buildable starter dependency manifest", async () => {
     assert.match(generatedHomePage, /Welcome to Farm\.js v\{FARM_VERSION\}/);
     assert.doesNotMatch(generatedHomePage, /Welcome to Farm\.js v?\d+\.\d+\.\d+/);
     assert.doesNotMatch(generatedHomePage, /from "farm\//);
+
+    const generatedConfig = await readFile(
+      path.join(tempDir, "generated-app/farm.config.ts"),
+      "utf8",
+    );
+    assert.doesNotMatch(generatedConfig, /srcDir/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
