@@ -24,6 +24,7 @@
 
 import type { Plugin, ViteDevServer } from "vite";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
+import { invokeAPIRouteEndpoint } from "@farm.js/core/api/runtime";
 
 export interface FarmApiOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -121,94 +122,7 @@ export default function farmApi(options: FarmApiOptions = {}): Plugin {
         }
 
         try {
-          // Parse query params
-          const queryObj: Record<string, string> = {};
-          url.searchParams.forEach((value, key) => {
-            queryObj[key] = value;
-          });
-
-          // Parse body for non-GET requests
-          let bodyObj: any = {};
-          if (method !== "GET" && method !== "HEAD") {
-            try {
-              const bodyText = await request.text();
-              if (bodyText) {
-                bodyObj = JSON.parse(bodyText);
-              }
-            } catch {
-              // Body parsing failed, use empty object
-            }
-          }
-
-          // Parse headers
-          const headersObj: Record<string, string> = {};
-          request.headers.forEach((value, key) => {
-            headersObj[key] = value;
-          });
-
-          // Validate with Zod if schemas are defined
-          const types = endpoint.__types || {};
-          let validatedQuery = queryObj;
-          let validatedBody = bodyObj;
-
-          if (types.query && typeof types.query.parse === "function") {
-            try {
-              validatedQuery = types.query.parse(queryObj);
-            } catch (e: any) {
-              return new Response(
-                JSON.stringify({
-                  error: "Invalid query parameters",
-                  details: e.errors || e.message,
-                }),
-                {
-                  status: 400,
-                  headers: { "Content-Type": "application/json" },
-                },
-              );
-            }
-          }
-
-          if (types.body && typeof types.body.parse === "function") {
-            try {
-              validatedBody = types.body.parse(bodyObj);
-            } catch (e: any) {
-              return new Response(
-                JSON.stringify({
-                  error: "Invalid request body",
-                  details: e.errors || e.message,
-                }),
-                {
-                  status: 400,
-                  headers: { "Content-Type": "application/json" },
-                },
-              );
-            }
-          }
-
-          // Build context object
-          const ctx = {
-            query: validatedQuery,
-            body: validatedBody,
-            headers: headersObj,
-            request,
-            context: {},
-            params: {},
-          };
-
-          // Call the handler (use __handler if available, otherwise the endpoint itself)
-          const handlerFn = endpoint.__handler || endpoint;
-          const result = await handlerFn(ctx);
-
-          // If result is already a Response, return it
-          if (result instanceof Response) {
-            return result;
-          }
-
-          // Otherwise, serialize to JSON
-          return new Response(JSON.stringify(result), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          });
+          return await invokeAPIRouteEndpoint(endpoint, request);
         } catch (error: any) {
           return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
             status: 500,

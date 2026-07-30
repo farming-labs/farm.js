@@ -13,6 +13,11 @@ import {
   type FarmClientCacheKey,
   type FarmClientDataCache,
 } from "../client-cache";
+import {
+  applyFarmCacheInvalidations,
+  decodeFarmCacheInvalidations,
+  FARM_CACHE_INVALIDATION_HEADER,
+} from "../cache-invalidation";
 
 export type APIClientOptions = {
   baseURL?: string;
@@ -385,6 +390,9 @@ export function createAPIClient<
     }
 
     const response = await fetch(url.toString(), fetchOptions);
+    applyFarmCacheInvalidations(
+      decodeFarmCacheInvalidations(response.headers?.get?.(FARM_CACHE_INVALIDATION_HEADER)),
+    );
     let data: any = undefined;
     if (response.status !== 204 && response.status !== 205) {
       data = await response.json();

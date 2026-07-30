@@ -1,5 +1,7 @@
 export type FarmCacheInvalidationListener = (key: string) => void;
 
+export const FARM_CACHE_INVALIDATION_HEADER = "x-farm-cache-invalidations";
+
 type FarmCacheInvalidationState = {
   listeners: Set<FarmCacheInvalidationListener>;
 };
@@ -30,6 +32,29 @@ export function applyFarmCacheInvalidations(keys: unknown): void {
     if (typeof key === "string") {
       notifyFarmCacheInvalidation(key);
     }
+  }
+}
+
+export function encodeFarmCacheInvalidations(keys: readonly string[]): string | null {
+  const normalized = Array.from(
+    new Set(keys.filter((key) => typeof key === "string" && key.length > 0)),
+  );
+  if (normalized.length === 0) return null;
+  return encodeURIComponent(JSON.stringify(normalized));
+}
+
+export function decodeFarmCacheInvalidations(value: string | null | undefined): readonly string[] {
+  if (!value) return [];
+
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value));
+    return Array.isArray(parsed)
+      ? Array.from(
+          new Set(parsed.filter((key): key is string => typeof key === "string" && key.length > 0)),
+        )
+      : [];
+  } catch {
+    return [];
   }
 }
 

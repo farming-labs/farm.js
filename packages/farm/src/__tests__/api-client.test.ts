@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAPIClient, createServerAPIClient } from "../api/client";
+import {
+  encodeFarmCacheInvalidations,
+  FARM_CACHE_INVALIDATION_HEADER,
+} from "../cache-invalidation";
 import { getFarmClientDataCache } from "../client-cache";
 import { endpoint } from "../integration-api";
 import { defineIntegration, integrationRoute, resolveIntegrationPlugins } from "../integrations";
@@ -55,6 +59,34 @@ beforeEach(() => {
 });
 
 describe("createAPIClient", () => {
+  it("applies invalidations declared by the server response", async () => {
+    const key = '["products","list"]';
+    const cache = getFarmClientDataCache();
+    cache.set(key, {
+      data: { products: [{ id: "1" }] },
+      updatedAt: Date.now(),
+      staleAt: Date.now() + 10_000,
+    });
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: new Headers({
+        [FARM_CACHE_INVALIDATION_HEADER]: encodeFarmCacheInvalidations([key])!,
+      }),
+      json: async () => ({ success: true }),
+    })) as any;
+    const api = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+    });
+
+    await api.users.post({
+      body: { name: "Ada", email: "ada@example.com" },
+    });
+
+    expect(cache.isStale(key)).toBe(true);
+  });
+
   it("shares structured cache keys across API client instances", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ id: "1", name: "Alice" }));
     globalThis.fetch = fetchMock as any;

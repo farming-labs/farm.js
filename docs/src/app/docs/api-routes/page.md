@@ -181,6 +181,45 @@ await api.users.get({
 
 The exact generated shape comes from route generation. Body and query schemas become typed caller input, and path segments become the nested `api.users.get` style namespace. During `farm dev`, Farm regenerates route/API types when page or API route files are added, changed, or removed. Run `farm generate` when you want the same refresh outside the dev server.
 
+## Declare invalidation with the mutation
+
+When every caller of a mutation makes the same data stale, declare that relationship on the
+endpoint instead of repeating client-side invalidation:
+
+```ts
+export const PATCH = createEndpoint(
+  {
+    method: "PATCH",
+    body: z.object({
+      id: z.string(),
+      name: z.string().min(1),
+    }),
+    invalidates: ({ body }) => [
+      { key: ["product", body.id] },
+      { key: ["products", "list"] },
+      { path: "/products" },
+    ],
+  },
+  async ({ body }) => {
+    return db.product.update({
+      where: { id: body.id },
+      data: { name: body.name },
+    });
+  },
+);
+```
+
+Farm applies declared keys and paths to the server cache after the handler succeeds. Normal
+`api.products.patch(...)` callers also receive the key invalidations through response metadata, so
+matching browser queries become stale without repeating an `invalidate` option. A response with a
+status of 400 or higher, or middleware that stops before the handler, does not invalidate.
+
+The resolver receives validated body, query, and headers plus the accumulated typed middleware
+context. Invalidation is declarative rather than inferred: database writes do not reliably reveal
+every affected query. Existing client-side `invalidate` options remain supported for
+caller-specific cache relationships, and handlers can continue calling `invalidate(...)` or
+`revalidatePath(...)` directly.
+
 ## When to use integrations instead
 
 Use API routes for app-owned endpoints. Use integrations when a provider or feature needs a package-like surface: config validation, lifecycle hooks, storage schema, middleware, providers, and typed callers bundled together.
