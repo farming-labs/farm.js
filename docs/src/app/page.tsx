@@ -19,7 +19,6 @@ import {
   Plug,
   Rocket,
   Route,
-  Settings2,
   Terminal,
   Workflow,
   X,
@@ -88,7 +87,7 @@ export const metadata = {
 
 const navItems = [
   { index: "01", label: "Guide", href: "/docs/getting-started", icon: BookOpen },
-  { index: "02", label: "Config", href: "/docs/configuration", icon: Settings2 },
+  { index: "02", label: "Migrations", href: "/docs/migrations", icon: GitFork },
   { index: "03", label: "Integrations", href: "/docs/integrations", icon: Blocks },
   { index: "04", label: "Resources", href: "/docs", icon: FileText },
 ] as const;
@@ -221,7 +220,7 @@ const ecosystemItems = [
   { label: "React 19", href: withFarmReferral("https://react.dev/"), brand: reactIconUrl },
   { label: "Stripe", href: withFarmReferral("https://stripe.com/"), brand: stripeIconUrl },
   {
-    label: "Cloudflare Agents",
+    label: "Cloudflare",
     href: withFarmReferral("https://developers.cloudflare.com/agents/"),
     brand: cloudflareIconUrl,
   },
