@@ -109,7 +109,6 @@ Use `fetchServerQuery(productQuery, input)` for an imperative browser read that 
 ## Invalidate after a mutation
 
 ```ts
-import { invalidate } from "@farm.js/core/cache";
 import { createServerFn } from "@farm.js/core/server-fn";
 import { z } from "zod";
 
@@ -119,13 +118,14 @@ export const updateProduct = createServerFn({
     name: z.string().min(1),
   }),
 
+  invalidates: ({ input }) => [{ key: ["product", input.id] }],
+
   async handler({ input }) {
     await db.product.update({
       where: { id: input.id },
       data: { name: input.name },
     });
 
-    invalidate(["product", input.id]);
     return { ok: true };
   },
 });

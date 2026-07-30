@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { subscribeFarmCacheInvalidation } from "./cache-invalidation";
+import { subscribeFarmCacheInvalidation, subscribeFarmCacheTask } from "./cache-invalidation";
 
 export const DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT = 1_000_000;
 
@@ -53,6 +53,7 @@ type ServerActionExecutionContext = {
   request: Request;
   signal: AbortSignal;
   invalidations: Set<string>;
+  cacheTasks: Set<Promise<void>>;
 };
 
 const SERVER_ACTION_STORAGE_KEY = Symbol.for("farm.serverActionStorage");
@@ -192,19 +193,28 @@ export function sanitizeServerActionError(_error: unknown): SanitizedServerActio
   };
 }
 
-export function runWithServerActionRequest<T>(
+export async function runWithServerActionRequest<T>(
   request: Request,
   callback: () => T | Promise<T>,
-): T | Promise<T> {
+): Promise<T> {
   throwIfAborted(request.signal);
-  return getServerActionStorage().run(
-    {
-      request,
-      signal: request.signal,
-      invalidations: new Set(),
-    },
-    callback,
-  );
+  const context: ServerActionExecutionContext = {
+    request,
+    signal: request.signal,
+    invalidations: new Set(),
+    cacheTasks: new Set(),
+  };
+
+  return getServerActionStorage().run(context, async () => {
+    try {
+      const result = await callback();
+      await Promise.all(context.cacheTasks);
+      return result;
+    } catch (error) {
+      await Promise.allSettled(context.cacheTasks);
+      throw error;
+    }
+  });
 }
 
 export function getServerActionExecutionContext(): ServerActionExecutionContext | undefined {
@@ -221,6 +231,10 @@ export function getServerActionInvalidations(): readonly string[] {
 
 subscribeFarmCacheInvalidation((key) => {
   getServerActionExecutionContext()?.invalidations.add(key);
+});
+
+subscribeFarmCacheTask((task) => {
+  getServerActionExecutionContext()?.cacheTasks.add(task);
 });
 
 function getServerActionStorage(): AsyncLocalStorage<ServerActionExecutionContext> {

@@ -158,7 +158,8 @@ export function createServerQuery(options: AnyServerQueryOptions): ServerQuery<u
           tags: [createRouteDataCacheTag(routeKey)],
           revalidate: staleTime === false ? false : Math.max(1, Math.ceil(staleTime / 1000)),
         });
-        updatedAt = cache.getEntry(cacheKey, { allowStale: true })?.createdAt ?? Date.now();
+        updatedAt =
+          (await cache.getEntryAsync(cacheKey, { allowStale: true }))?.createdAt ?? Date.now();
       }
 
       return createFarmServerQueryResult(data, {

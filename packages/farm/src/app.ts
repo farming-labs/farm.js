@@ -26,6 +26,7 @@ import {
   type FarmI18nRuntime,
 } from "./i18n/server";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
+import { configureFarmCache } from "./cache";
 
 type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images" | "i18n"> & {
   docs: FarmDocsResolvedConfig;
@@ -78,6 +79,7 @@ export class FarmApp {
     }
 
     await initStorage(this.config.storage);
+    await configureFarmCache(this.config.cache);
     await this.i18nRuntime.initialize();
 
     // Verify app directory structure
@@ -120,6 +122,7 @@ export class FarmApp {
       preset: config.preset ?? "node-server",
       deploy: config.deploy || {},
       storage: config.storage || {},
+      cache: config.cache || {},
       integrations: config.integrations || {},
       plugins: config.plugins || [],
       migrations: config.migrations || { commands: [] },

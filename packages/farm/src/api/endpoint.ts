@@ -1,10 +1,5 @@
 import { createEndpoint as betterCallEndpoint } from "better-call";
-import {
-  createRouteDataCacheKey,
-  invalidate,
-  revalidatePath,
-  type RouteDataCacheKey,
-} from "../cache";
+import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "../cache";
 
 // Generic schema type that works with both Zod v3 and v4
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -119,13 +114,7 @@ export type EndpointMiddleware<
 
 export type AnyEndpointMiddleware = (ctx: EndpointMiddlewareContext<any, any, any, any>) => unknown;
 
-export type EndpointInvalidationTarget =
-  | {
-      key: RouteDataCacheKey;
-    }
-  | {
-      path: string;
-    };
+export type EndpointInvalidationTarget = FarmCacheInvalidationTarget;
 
 export type EndpointInvalidationContext<
   TContext extends object = {},
@@ -198,7 +187,7 @@ export type EndpointOptions<
   headers?: THeaders;
   middleware?: TMiddlewares;
   /**
-   * Cache keys and route paths made stale after a successful handler result.
+   * Cache keys, tags, and route paths made stale after a successful handler result.
    * The resolver receives validated input and middleware context.
    */
   invalidates?: EndpointInvalidations<
@@ -598,41 +587,11 @@ async function applyEndpointInvalidations(
   const targets = typeof declaration === "function" ? await declaration(context) : declaration;
   if (!Array.isArray(targets)) {
     throw new TypeError(
-      "Endpoint invalidates must resolve to an array of { key } or { path } targets",
+      "Endpoint invalidates must resolve to an array of { key }, { path }, or { tag } targets",
     );
   }
 
-  const clientKeys: string[] = [];
-  for (const target of targets) {
-    assertEndpointInvalidationTarget(target);
-    if ("key" in target) {
-      invalidate(target.key);
-      clientKeys.push(createRouteDataCacheKey(target.key));
-    } else {
-      revalidatePath(target.path);
-    }
-  }
-
-  return Array.from(new Set(clientKeys));
-}
-
-function assertEndpointInvalidationTarget(
-  target: unknown,
-): asserts target is EndpointInvalidationTarget {
-  if (!target || typeof target !== "object") {
-    throw new TypeError("Endpoint invalidation targets must be { key } or { path } objects");
-  }
-
-  if ("key" in target) {
-    const key = (target as { key?: unknown }).key;
-    if (typeof key === "string" || Array.isArray(key)) return;
-  } else if ("path" in target && typeof (target as { path?: unknown }).path === "string") {
-    return;
-  }
-
-  throw new TypeError(
-    "Endpoint invalidation targets must contain a string/array key or a path string",
-  );
+  return applyFarmCacheInvalidationTargets(targets);
 }
 
 function createInitialEndpointContext(value: unknown) {

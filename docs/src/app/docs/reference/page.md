@@ -21,6 +21,7 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/query         | Query and route param types.                                                         |
 | @farm.js/core/storage       | Storage clients and mount helpers.                                                   |
 | @farm.js/core/cache         | Data cache, revalidation, cache keys.                                                |
+| @farm.js/cache-redis        | Distributed Redis cache, tag versions, and regeneration leases.                      |
 | @farm.js/core/after         | Post-response server work with `after()`.                                            |
 | @farm.js/core/cron          | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
 | @farm.js/integrations       | Auth, billing, email, jobs, AI, API keys, provider clients.                          |
@@ -46,6 +47,7 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/headers`          | `headers`, `cookies`.                                                                                      |
 | `@farm.js/core/router`           | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
 | `@farm.js/core/storage`          | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |
+| `@farm.js/cache-redis`           | `redisCache` distributed cache adapter.                                                                    |
 | `@farm.js/core/after`            | `after` for short work that starts after the current response finishes.                                    |
 | `@farm.js/integrations/stripe`   | Stripe billing integration.                                                                                |
 | `@farm.js/integrations/auth`     | Better Auth, Auth.js, Clerk, Auth0, WorkOS helpers when using the auth barrel.                             |

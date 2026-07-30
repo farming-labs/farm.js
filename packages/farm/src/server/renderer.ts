@@ -384,12 +384,12 @@ export class ServerRenderer {
   /**
    * Check if a path should be served from SSG cache
    */
-  private shouldServeSSG(pathname: string): SSGPage | null {
+  private async shouldServeSSG(pathname: string): Promise<SSGPage | null> {
     const ssgPage = matchSSGPage(pathname, this.ssgManifest);
     if (!ssgPage) return null;
 
-    const cached = this.getCachedSSGPage(pathname);
-    if (cached && this.dataCache.isStale(cached)) {
+    const cached = await this.getCachedSSGPage(pathname);
+    if (cached && (await this.dataCache.isStaleAsync(cached))) {
       // Stale - needs revalidation (serve stale, regenerate in background)
       this.regenerateSSGPage(ssgPage);
     }
@@ -406,17 +406,17 @@ export class ServerRenderer {
   }
 
   private getCachedSSGPage(urlPath: string) {
-    return this.dataCache.getEntry<CachedSSGPage>(this.getSSGCacheKey(urlPath), {
+    return this.dataCache.getEntryAsync<CachedSSGPage>(this.getSSGCacheKey(urlPath), {
       allowStale: true,
     });
   }
 
-  private cacheSSGPage(
+  private async cacheSSGPage(
     page: SSGPage,
     html: string,
     options: { document: boolean; createdAt?: number },
-  ): void {
-    this.dataCache.set(
+  ): Promise<void> {
+    await this.dataCache.setAsync(
       this.getSSGCacheKey(page.urlPath),
       { html, document: options.document },
       {
@@ -429,12 +429,12 @@ export class ServerRenderer {
   }
 
   private getCachedPPRShell(pathname: string, search: string) {
-    return this.dataCache.getEntry<CachedPPRShell>(this.getPPRCacheKey(pathname, search));
+    return this.dataCache.getEntryAsync<CachedPPRShell>(this.getPPRCacheKey(pathname, search));
   }
 
-  private cachePPRShell(options: PPRShellCacheOptions, html: string): void {
+  private async cachePPRShell(options: PPRShellCacheOptions, html: string): Promise<void> {
     const key = this.getPPRCacheKey(options.pathname, options.search);
-    this.dataCache.set(
+    await this.dataCache.setAsync(
       key,
       { html },
       {
@@ -558,7 +558,7 @@ export class ServerRenderer {
           const { renderToString } = await import("react-dom/server");
           const html = renderToString(await this.wrapWithIntegrationProviders(pageElement));
 
-          this.cacheSSGPage(page, html, { document: false });
+          await this.cacheSSGPage(page, html, { document: false });
 
           logger.info(`ISR: Regenerated ${page.urlPath}`);
         } catch (error) {
@@ -575,7 +575,7 @@ export class ServerRenderer {
    */
   private async serveSSGPage(req: FarmRequest, res: FarmResponse, page: SSGPage): Promise<boolean> {
     // Check cache first (for ISR)
-    const cached = this.getCachedSSGPage(page.urlPath);
+    const cached = await this.getCachedSSGPage(page.urlPath);
     if (cached) {
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.setHeader("X-Farm-SSG", "cached");
@@ -601,9 +601,9 @@ export class ServerRenderer {
       if (fs.existsSync(htmlPath)) {
         const stat = fs.statSync(htmlPath);
         const html = fs.readFileSync(htmlPath, "utf-8");
-        this.cacheSSGPage(page, html, { document: true, createdAt: stat.mtimeMs });
-        const fileCacheEntry = this.getCachedSSGPage(page.urlPath);
-        if (fileCacheEntry && this.dataCache.isStale(fileCacheEntry)) {
+        await this.cacheSSGPage(page, html, { document: true, createdAt: stat.mtimeMs });
+        const fileCacheEntry = await this.getCachedSSGPage(page.urlPath);
+        if (fileCacheEntry && (await this.dataCache.isStaleAsync(fileCacheEntry))) {
           this.regenerateSSGPage(page);
         }
 
@@ -693,7 +693,7 @@ export class ServerRenderer {
 
       // Check for pre-rendered SSG page first (production only)
       if (process.env.NODE_ENV === "production") {
-        const ssgPage = this.shouldServeSSG(pathname);
+        const ssgPage = await this.shouldServeSSG(pathname);
         if (ssgPage) {
           const served = await this.serveSSGPage(req, res, ssgPage);
           if (served) {
@@ -828,7 +828,7 @@ export class ServerRenderer {
 
       if (pprShellOptions) {
         const pprCacheKey = this.getPPRCacheKey(pathname, url.search);
-        const cachedPPRShell = this.getCachedPPRShell(pathname, url.search);
+        const cachedPPRShell = await this.getCachedPPRShell(pathname, url.search);
         if (cachedPPRShell) {
           emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
           this.serveCachedPPRShell(res, cachedPPRShell.value, renderingConfig.revalidate);

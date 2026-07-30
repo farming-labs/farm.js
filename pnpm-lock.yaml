@@ -1316,6 +1316,19 @@ importers:
         specifier: ^7.0.11
         version: 7.0.30(zod@4.3.6)
 
+  packages/farm-cache-redis:
+    dependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+    devDependencies:
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.1.0
+        version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
+
   packages/farm-auth0:
     dependencies:
       '@farm.js/core':

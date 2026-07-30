@@ -1,9 +1,11 @@
 export type FarmCacheInvalidationListener = (key: string) => void;
+export type FarmCacheTaskListener = (task: Promise<void>) => void;
 
 export const FARM_CACHE_INVALIDATION_HEADER = "x-farm-cache-invalidations";
 
 type FarmCacheInvalidationState = {
   listeners: Set<FarmCacheInvalidationListener>;
+  taskListeners: Set<FarmCacheTaskListener>;
 };
 
 const FARM_CACHE_INVALIDATION_STATE = Symbol.for("farm.cacheInvalidationState");
@@ -14,6 +16,7 @@ const globalState = globalThis as typeof globalThis & {
 function getFarmCacheInvalidationState(): FarmCacheInvalidationState {
   return (globalState[FARM_CACHE_INVALIDATION_STATE] ??= {
     listeners: new Set(),
+    taskListeners: new Set(),
   });
 }
 
@@ -22,6 +25,12 @@ export function notifyFarmCacheInvalidation(key: string): void {
 
   for (const listener of getFarmCacheInvalidationState().listeners) {
     listener(key);
+  }
+}
+
+export function notifyFarmCacheTask(task: Promise<void>): void {
+  for (const listener of getFarmCacheInvalidationState().taskListeners) {
+    listener(task);
   }
 }
 
@@ -64,4 +73,10 @@ export function subscribeFarmCacheInvalidation(
   const state = getFarmCacheInvalidationState();
   state.listeners.add(listener);
   return () => state.listeners.delete(listener);
+}
+
+export function subscribeFarmCacheTask(listener: FarmCacheTaskListener): () => void {
+  const state = getFarmCacheInvalidationState();
+  state.taskListeners.add(listener);
+  return () => state.taskListeners.delete(listener);
 }

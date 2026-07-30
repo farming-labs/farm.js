@@ -48,6 +48,30 @@ describe("config helpers", () => {
     expect(defineConfig(config)).toBe(config);
     expect(defineFarmConfig(config)).toBe(config);
   });
+
+  it("preserves a configured cache adapter and namespace", async () => {
+    const adapter = {
+      name: "test-cache",
+      get: vi.fn(async () => null),
+      set: vi.fn(async () => undefined),
+      delete: vi.fn(async () => undefined),
+    };
+
+    const config = await resolveConfig(
+      {
+        cache: {
+          adapter,
+          namespace: "catalog",
+        },
+      },
+      "production",
+    );
+
+    expect(config.cache).toEqual({
+      adapter,
+      namespace: "catalog",
+    });
+  });
 });
 
 describe("loadConfig", () => {
