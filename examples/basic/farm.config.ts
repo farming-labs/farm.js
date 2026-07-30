@@ -124,7 +124,6 @@ const runtimeLifecyclePlugin = definePlugin({
 
 export default defineConfig({
   extends: ['./layers/framework-features'],
-  srcDir: 'src',
   outDir: 'dist',
   basePath: '/',
   deploy: {

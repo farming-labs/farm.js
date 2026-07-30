@@ -241,7 +241,7 @@ export async function createFrameworkMigrationPlan(
     await planTanStackMigration(root, packageJson, plan, options);
   }
 
-  addSharedFarmFiles(root, packageJson, plan, source, options);
+  addSharedFarmFiles(root, packageJson, plan, options);
   return plan;
 }
 
@@ -393,7 +393,6 @@ function addSharedFarmFiles(
   root: string,
   packageJson: any,
   plan: FrameworkMigrationPlan,
-  source: FarmFrameworkMigrationSource,
   options: { force?: boolean },
 ) {
   const farmConfigPath = ["farm.config.ts", "farm.config.mts", "farm.config.js", "farm.config.mjs"]
@@ -401,19 +400,9 @@ function addSharedFarmFiles(
     .find((file) => existsSync(file));
 
   if (!farmConfigPath) {
-    const output =
-      source === "next"
-        ? `import { defineConfig } from "@farm.js/core";
+    const output = `import { defineConfig } from "@farm.js/core";
 
-export default defineConfig({
-  srcDir: "src",
-});
-`
-        : `import { defineConfig } from "@farm.js/core";
-
-export default defineConfig({
-  srcDir: "src",
-});
+export default defineConfig({});
 `;
 
     plan.operations.push({

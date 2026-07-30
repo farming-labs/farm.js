@@ -289,6 +289,7 @@ export default function AboutPage() {
     const farmConfig = await readFile(path.join(root, "farm.config.ts"), "utf8");
     assert.match(farmConfig, /defineConfig/);
     assert.doesNotMatch(farmConfig, /defineFarmConfig/);
+    assert.doesNotMatch(farmConfig, /srcDir/);
 
     const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
     assert.equal(packageJson.scripts.dev, "farm dev");

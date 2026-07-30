@@ -16,7 +16,6 @@ Use farm.config.ts as the single project control plane for source paths, integra
 import { defineConfig } from "@farm.js/core";
 
 export default defineConfig({
-  srcDir: "src",
   deploy: {
     target: "vercel",
   },
@@ -32,6 +31,8 @@ export default defineConfig({
   },
 });
 ```
+
+`srcDir` defaults to `"src"`. Set it only when the application source lives somewhere else.
 
 `defineConfig` is the canonical Farm helper. `defineFarmConfig` remains available as a deprecated exact alias for existing applications.
 

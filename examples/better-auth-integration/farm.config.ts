@@ -6,18 +6,17 @@ export default defineConfig({
   experimental: {
     serverComponents: true,
   },
-  vite: {
-    server: {
-      port: 3000,
-      strictPort: true,
-    },
-  },
   integrations: {
     auth: betterAuth({
       instance: auth,
       log(event) {
-        console.log("[better-auth-example]", event.phase, event.route?.path || "none");
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[better-auth]", event.phase, event.route?.path ?? "request");
+        }
       },
     }),
+  },
+  deploy: {
+    target: "vercel",
   },
 });

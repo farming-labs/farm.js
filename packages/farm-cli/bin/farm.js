@@ -33,7 +33,7 @@ function collectOption(value, previous) {
 program
   .command("dev")
   .description("Start development server")
-  .option("-p, --port <port>", "Port to run the server on", "3000")
+  .option("-p, --port <port>", "Override the port to run the server on")
   .option("-r, --root <root>", "Root directory", process.cwd())
   .option("--cron", "Run configured cron routes in-process during development")
   .action(async (options) => {
@@ -43,12 +43,12 @@ program
         {
           root: options.root,
         },
-        parseInt(options.port),
+        options.port === undefined ? undefined : parseInt(options.port, 10),
       );
       if (options.cron) {
         const { startFarmCronScheduler } = require("../dist/index.js");
         const address = server.httpServer?.address();
-        const port = typeof address === "object" && address ? address.port : parseInt(options.port);
+        const port = typeof address === "object" && address ? address.port : 3000;
         const scheduler = await startFarmCronScheduler({
           root: options.root,
           url: `http://localhost:${port}`,

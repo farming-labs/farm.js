@@ -26,6 +26,13 @@ export function mergeFarmViteConfig(
       ...farmConfig.server,
       ...userConfig.server,
     },
+    resolve: {
+      ...farmConfig.resolve,
+      ...userConfig.resolve,
+      dedupe: Array.from(
+        new Set([...(farmConfig.resolve?.dedupe || []), ...(userConfig.resolve?.dedupe || [])]),
+      ),
+    },
     optimizeDeps: {
       ...farmConfig.optimizeDeps,
       ...userConfig.optimizeDeps,

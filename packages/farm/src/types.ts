@@ -79,6 +79,7 @@ export interface FarmAppContext {}
 
 export interface FarmConfig {
   root?: string;
+  /** App source directory. @default "src" */
   srcDir?: string;
   extends?: readonly FarmLayerEntry[];
   /** Resolved layer graph. Populated by config resolution. */
