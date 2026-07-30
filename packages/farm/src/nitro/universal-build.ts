@@ -65,6 +65,7 @@ type UniversalPageRoute = {
   pattern: string;
   modulePath: string;
   source?: string;
+  markdownSourcePath?: string;
 };
 type UniversalBoundaryRoute = {
   pattern: string;
@@ -620,11 +621,17 @@ export async function buildUniversal(
     // Get page routes first (needed for both client and SSR builds)
     const pageRoutes: UniversalPageRoute[] = [];
     for (const [pattern, entry] of routeManager.getRoutes()) {
+      const markdownSourcePath =
+        entry.markdownSourcePath ||
+        (isFarmMarkdownPageFile(entry.modulePath) ? entry.modulePath : undefined);
       pageRoutes.push({
         pattern,
         modulePath: entry.modulePath,
-        ...(isFarmMarkdownPageFile(entry.modulePath)
-          ? { source: readFileSync(entry.modulePath, "utf8") }
+        ...(markdownSourcePath
+          ? {
+              source: readFileSync(markdownSourcePath, "utf8"),
+              markdownSourcePath,
+            }
           : {}),
       });
     }
@@ -2780,9 +2787,7 @@ function generateVirtualEntryCode(
   // Generate imports for all page routes
   const pageImports: string[] = [];
   const pageRegistrations: string[] = [];
-  const hasMarkdownPages = pageRoutes.some(
-    (route) => route.source !== undefined || isFarmMarkdownPageFile(route.modulePath),
-  );
+  const hasMarkdownPages = pageRoutes.some((route) => route.source !== undefined);
   const orderedPageRoutes = pageRoutes
     .map((route, index) => ({ route, index }))
     .sort(
@@ -2794,7 +2799,7 @@ function generateVirtualEntryCode(
 
   orderedPageRoutes.forEach((route, index) => {
     const varName = `pageRoute${index}`;
-    if (route.source !== undefined || isFarmMarkdownPageFile(route.modulePath)) {
+    if (isFarmMarkdownPageFile(route.modulePath)) {
       pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
@@ -2806,7 +2811,7 @@ function generateVirtualEntryCode(
     }),
     markdownSource: {
       source: ${JSON.stringify(route.source ?? "")},
-      filePath: ${JSON.stringify(route.modulePath)},
+      filePath: ${JSON.stringify(route.markdownSourcePath ?? route.modulePath)},
     },
   }`);
       return;
@@ -2819,6 +2824,14 @@ function generateVirtualEntryCode(
     pattern: ${JSON.stringify(route.pattern)},
     module: ${varName},
     shouldHydrate: ${JSON.stringify(shouldHydrate)},
+    ${
+      route.source !== undefined
+        ? `markdownSource: {
+      source: ${JSON.stringify(route.source)},
+      filePath: ${JSON.stringify(route.markdownSourcePath)},
+    },`
+        : ""
+    }
   }`);
   });
 
@@ -2951,7 +2964,7 @@ import { dirname as farmDocsDirname, join as farmDocsJoin } from "node:path";
 import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
     : "";
   const markdownHandlerImport = config.md?.enabled
-    ? `import { createMarkdownMirrorResponse } from "@farm.js/core/markdown";`
+    ? `import { applyMarkdownNegotiationHeaders, createMarkdownMirrorResponse } from "@farm.js/core/markdown";`
     : "";
   const appMarkdownImport = hasMarkdownPages
     ? `import { createFarmMarkdownRouteModule, createFarmMarkdownSourceResponse } from "@farm.js/core/app-markdown";`
@@ -4350,9 +4363,9 @@ async function getCachedPPRShell(cacheKey) {
  * Main request handler - created at runtime with bundled routes
  */
 async function handleFarmRequest(request) {
-  ${
+  const response = await ${
     config.i18n.enabled
-      ? `return _runWithFarmI18nRequest(
+      ? `_runWithFarmI18nRequest(
     farmI18nRuntime,
     request,
     async function(farmLocaleResolution) {
@@ -4371,9 +4384,21 @@ async function handleFarmRequest(request) {
       const response = await handleFarmRequestInContext(request, farmLocaleResolution);
       return applyFarmI18nResponse(response, farmLocaleResolution);
     }
-  );`
-      : "return handleFarmRequestInContext(request, null);"
+  )`
+      : "handleFarmRequestInContext(request, null)"
+  };
+  ${
+    config.md?.enabled
+      ? `const pathname = getFarmRoutePathname(new URL(request.url).pathname);
+  if (matchPageRoute(pathname)) {
+    return applyMarkdownNegotiationHeaders(response, {
+      config: farmMarkdownConfig,
+      pathname,
+    });
+  }`
+      : ""
   }
+  return response;
 }
 
 async function handleFarmRequestInContext(

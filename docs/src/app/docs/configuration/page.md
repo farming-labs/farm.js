@@ -91,7 +91,7 @@ mount, and shortcut together.
 | cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
 | i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.    |
 | docs          | Serving the built-in docs runtime and docs API.                                   |
-| md            | Exposing markdown mirrors like /pricing.md.                                       |
+| md            | Restricting or disabling automatic markdown mirrors like /pricing.md.             |
 | mdx           | Rendering `page.md` and `page.mdx` app routes, plus MDX components.               |
 | deploy        | Selecting a target, preset, and output directory.                                 |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                      |

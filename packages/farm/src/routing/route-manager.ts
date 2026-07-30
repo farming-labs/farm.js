@@ -64,6 +64,7 @@ import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 interface RouteEntry {
   route: ParsedRoute;
   modulePath: string;
+  markdownSourcePath?: string;
   pattern: string;
   source?: "file" | "programmatic";
   sourceRoot: string;
@@ -586,8 +587,72 @@ export class RouteManager {
       appDir,
     );
 
+    const canonicalPageGroups = new Map<
+      string,
+      {
+        route: ParsedRoute;
+        files: string[];
+      }
+    >();
+    for (const file of pageFiles.filter((candidate) => parseRouteSlotFile(candidate) === null)) {
+      const route = parseRoutePath(file);
+      const pattern = this.createRoutePattern(route);
+      const group = canonicalPageGroups.get(pattern);
+      if (group) {
+        group.files.push(file);
+      } else {
+        canonicalPageGroups.set(pattern, {
+          route,
+          files: [file],
+        });
+      }
+    }
+
+    for (const [pattern, group] of canonicalPageGroups) {
+      const componentFiles = group.files.filter((file) => !isFarmMarkdownPageFile(file));
+      const markdownFiles = group.files.filter(isFarmMarkdownPageFile);
+      if (componentFiles.length > 1) {
+        throw new Error(
+          `Duplicate page route "${pattern}". Found ${componentFiles
+            .map((file) => path.join(appDir, file))
+            .join(" and ")}.`,
+        );
+      }
+      if (markdownFiles.length > 1) {
+        throw new Error(
+          `Duplicate markdown representation for page route "${pattern}". Found ${markdownFiles
+            .map((file) => path.join(appDir, file))
+            .join(" and ")}.`,
+        );
+      }
+
+      const componentFile = componentFiles[0];
+      const markdownFile = markdownFiles[0];
+      const primaryFile = componentFile || markdownFile;
+      if (!primaryFile) continue;
+
+      const modulePath = path.join(appDir, primaryFile);
+      const existing = this.routes.get(pattern);
+      if (existing?.sourceRoot === source.root) {
+        throw new Error(
+          `Duplicate page route "${pattern}". Found both ${existing.modulePath} and ${modulePath}.`,
+        );
+      }
+      this.routes.set(pattern, {
+        route: group.route,
+        modulePath,
+        ...(markdownFile
+          ? {
+              markdownSourcePath: path.join(appDir, markdownFile),
+            }
+          : {}),
+        pattern,
+        source: "file",
+        sourceRoot: source.root,
+      });
+    }
+
     for (const [kind, files, target] of [
-      ["page", pageFiles.filter((file) => parseRouteSlotFile(file) === null), this.routes],
       ["layout", layoutFiles, this.layouts],
       ["loading", loadingFiles, this.loadings],
       ["error", errorFiles, this.errors],

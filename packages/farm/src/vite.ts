@@ -16,7 +16,7 @@ import {
   scanProgrammaticPagePaths,
 } from "./routes";
 import type { FarmDocsAPIHandler } from "./docs";
-import { createMarkdownMirrorResponse } from "./markdown";
+import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
 import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
 import { sendWebResponse } from "./server/response";
 import {
@@ -1094,12 +1094,17 @@ export function farmPlugin(
             config: farmApp.getConfig().mdx,
             resolveSource: async (pathname) => {
               const match = farmApp.getRouteManager().matchRoute(pathname);
-              if (!match.route || !isFarmMarkdownPageFile(match.route.modulePath)) {
+              const sourcePath =
+                match.route?.markdownSourcePath ||
+                (match.route && isFarmMarkdownPageFile(match.route.modulePath)
+                  ? match.route.modulePath
+                  : null);
+              if (!sourcePath) {
                 return null;
               }
               return {
-                source: await fs.promises.readFile(match.route.modulePath, "utf8"),
-                filePath: match.route.modulePath,
+                source: await fs.promises.readFile(sourcePath, "utf8"),
+                filePath: sourcePath,
               };
             },
           });
@@ -1121,6 +1126,37 @@ export function farmPlugin(
           if (markdownResponse) {
             await sendWebResponse(res, markdownResponse);
             return;
+          }
+
+          const markdownPageTarget = resolveMarkdownMirrorTarget(
+            farmApp.getConfig().md,
+            requestPathname,
+            {
+              accept: "text/markdown",
+            },
+          );
+          if (
+            markdownPageTarget &&
+            farmApp.getRouteManager().matchRoute(markdownPageTarget.pathname).route
+          ) {
+            const vary = res.getHeader("Vary");
+            const varyValues = String(vary || "")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean);
+            if (!varyValues.some((value) => value.toLowerCase() === "accept")) {
+              res.setHeader("Vary", [...varyValues, "Accept"].join(", "));
+            }
+            const alternatePath =
+              markdownPageTarget.pathname === "/"
+                ? "/index.md"
+                : `${markdownPageTarget.pathname}.md`;
+            const alternateLink = `<${alternatePath}>; rel="alternate"; type="text/markdown"`;
+            const currentLink = res.getHeader("Link");
+            res.setHeader(
+              "Link",
+              currentLink ? `${String(currentLink)}, ${alternateLink}` : alternateLink,
+            );
           }
 
           if (

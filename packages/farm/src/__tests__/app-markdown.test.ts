@@ -74,6 +74,45 @@ describe("app markdown pages", () => {
     await expect(response?.text()).resolves.toBe("# About\n\nRaw source.");
   });
 
+  it("serves raw source through markdown content negotiation", async () => {
+    const response = await createFarmMarkdownSourceResponse({
+      request: new Request("https://farm.test/", {
+        headers: {
+          Accept: "text/html, text/markdown;q=0.9",
+        },
+      }),
+      config: resolveMdxConfig(undefined),
+      resolveSource(pathname) {
+        expect(pathname).toBe("/");
+        return {
+          filePath: "/app/page.md",
+          source: "# Curated home",
+        };
+      },
+    });
+
+    expect(response?.headers.get("content-type")).toContain("text/markdown");
+    expect(response?.headers.get("content-location")).toBe("/index.md");
+    expect(response?.headers.get("vary")).toBe("Accept");
+    await expect(response?.text()).resolves.toBe("# Curated home");
+  });
+
+  it("ignores content negotiation when markdown has zero preference", async () => {
+    const response = await createFarmMarkdownSourceResponse({
+      request: new Request("https://farm.test/about", {
+        headers: {
+          Accept: "text/markdown;q=0",
+        },
+      }),
+      config: resolveMdxConfig(undefined),
+      resolveSource() {
+        throw new Error("resolveSource should not be called");
+      },
+    });
+
+    expect(response).toBeNull();
+  });
+
   it("allows raw markdown routes to be disabled", async () => {
     const response = await createFarmMarkdownSourceResponse({
       request: new Request("https://farm.test/about.md"),

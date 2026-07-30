@@ -491,7 +491,9 @@ Use `page.md` or `page.mdx` for static content routes. They behave like app page
 This page renders at `/about` and exposes source at `/about.md`.
 ```
 
-Do not place `page.tsx` and `page.mdx` in the same folder. Farm treats that as a duplicate route and asks you to choose one page source.
+When `page.tsx` and `page.md` or `page.mdx` share a folder, the React file owns the HTML route and
+the markdown file becomes its exact `.md` representation. Without a sidecar, Farm derives markdown
+from the rendered React page automatically.
 
 ## Metadata And OG Images
 
