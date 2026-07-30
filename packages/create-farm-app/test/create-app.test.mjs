@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("generates a buildable starter dependency manifest", async () => {
+test("generates a buildable starter application", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-"));
 
   try {
@@ -58,6 +58,19 @@ test("generates a buildable starter dependency manifest", async () => {
     assert.match(generatedHomePage, /Welcome to Farm\.js v\{FARM_VERSION\}/);
     assert.doesNotMatch(generatedHomePage, /Welcome to Farm\.js v?\d+\.\d+\.\d+/);
     assert.doesNotMatch(generatedHomePage, /from "farm\//);
+
+    const generatedLayout = await readFile(
+      path.join(tempDir, "generated-app/src/app/layout.tsx"),
+      "utf8",
+    );
+    assert.match(generatedLayout, /url: "\/favicon\.svg"/);
+    assert.match(generatedLayout, /type: "image\/svg\+xml"/);
+
+    const generatedFavicon = await readFile(
+      path.join(tempDir, "generated-app/public/favicon.svg"),
+      "utf8",
+    );
+    assert.match(generatedFavicon, /<title id="title">Farming Labs<\/title>/);
 
     const generatedConfig = await readFile(
       path.join(tempDir, "generated-app/farm.config.ts"),
