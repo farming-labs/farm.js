@@ -1,12 +1,25 @@
 // @vitest-environment node
 
-import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
 import { createServerFn, createServerMiddleware, FARM_SERVER_FN_SYMBOL } from "../server-fn";
-import { runWithServerActionRequest } from "../server-action-security";
+import {
+  getServerActionInvalidations,
+  runWithServerActionRequest,
+} from "../server-action-security";
 import { _runWithCurrentRequest } from "../server/request";
+import {
+  createFarmCacheKey,
+  createRouteDataCacheKey,
+  createRouteDataCacheTag,
+  getFarmDataCache,
+} from "../cache";
 
 describe("createServerFn", () => {
+  afterEach(() => {
+    getFarmDataCache().clear();
+  });
+
   it("validates object input before calling the handler", async () => {
     const handler = vi.fn(async ({ input }: { input: { email: string; password: string } }) => ({
       ok: true,
@@ -340,6 +353,86 @@ describe("createServerFn", () => {
     expect(result.request).toBe(request);
     expect(result.tenant).toBe("acme");
     expect(result.signal).toBe(request.signal);
+  });
+
+  it("applies declared cache invalidations after successful output validation", async () => {
+    const productKey = ["product", "product-1"] as const;
+    const productCacheKey = createFarmCacheKey(["route-data", productKey]);
+    const productsPageKey = "products-page";
+    const cache = getFarmDataCache();
+    cache.set(
+      productCacheKey,
+      { id: "product-1", name: "Old" },
+      {
+        tags: [createRouteDataCacheTag(productKey), "products"],
+      },
+    );
+    cache.set(productsPageKey, "<html>old</html>", {
+      paths: ["/products/product-1"],
+    });
+    const addTenant = createServerMiddleware({
+      handler({ next }) {
+        return next({ context: { tenantId: "tenant-1" } });
+      },
+    });
+    const updateProduct = createServerFn({
+      input: z.object({ id: z.string(), name: z.string() }),
+      output: z.object({ id: z.string(), name: z.string() }),
+      middleware: [addTenant],
+      invalidates: ({ input, result, context }) => {
+        expectTypeOf(input).toEqualTypeOf<{ id: string; name: string }>();
+        expectTypeOf(result).toEqualTypeOf<{ id: string; name: string }>();
+        expectTypeOf(context.tenantId).toEqualTypeOf<string>();
+        expect(context.tenantId).toBe("tenant-1");
+        return [
+          { key: ["product", input.id] },
+          { path: `/products/${result.id}` },
+          { tag: "products" },
+        ];
+      },
+      handler: async ({ input }) => input,
+    });
+    const request = new Request("https://app.example.com/actions/update-product", {
+      method: "POST",
+    });
+
+    const actionResult = await runWithServerActionRequest(request, () =>
+      updateProduct({ id: "product-1", name: "New" }),
+    );
+
+    expect(actionResult).toEqual({ id: "product-1", name: "New" });
+    expect(cache.getEntry(productCacheKey)).toBeUndefined();
+    expect(cache.getEntry(productsPageKey)).toBeUndefined();
+    const invalidations = await runWithServerActionRequest(request, async () => {
+      await updateProduct({ id: "product-1", name: "Newest" });
+      return getServerActionInvalidations();
+    });
+    expect(invalidations).toContain(createRouteDataCacheKey(productKey));
+  });
+
+  it("does not apply declared invalidations when the handler or output contract fails", async () => {
+    const key = ["products", "list"] as const;
+    const cacheKey = createFarmCacheKey(["route-data", key]);
+    const cache = getFarmDataCache();
+    cache.set(cacheKey, [{ id: "old" }], {
+      tags: [createRouteDataCacheTag(key)],
+    });
+    const handlerFailure = createServerFn({
+      invalidates: [{ key }],
+      handler() {
+        throw new Error("write failed");
+      },
+    });
+    const outputFailure = createServerFn({
+      output: z.object({ ok: z.literal(true) }),
+      invalidates: [{ key }],
+      handler: () => ({ ok: false }),
+    });
+
+    await expect(handlerFailure()).rejects.toThrow("write failed");
+    expect(cache.getEntry(cacheKey)?.value).toEqual([{ id: "old" }]);
+    await expect(outputFailure()).rejects.toBeTruthy();
+    expect(cache.getEntry(cacheKey)?.value).toEqual([{ id: "old" }]);
   });
 
   it("rejects middleware that skips or calls next more than once", async () => {

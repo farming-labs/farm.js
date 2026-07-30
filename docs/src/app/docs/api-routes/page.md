@@ -296,6 +296,7 @@ export const PATCH = createEndpoint(
     invalidates: ({ body }) => [
       { key: ["product", body.id] },
       { key: ["products", "list"] },
+      { tag: "products" },
       { path: "/products" },
     ],
   },
@@ -308,7 +309,7 @@ export const PATCH = createEndpoint(
 );
 ```
 
-Farm applies declared keys and paths to the server cache after the handler succeeds. Normal
+Farm applies declared keys, tags, and paths to the server cache after the handler succeeds. Normal
 `api.products.patch(...)` callers also receive the key invalidations through response metadata, so
 matching browser queries become stale without repeating an `invalidate` option. A response with a
 status of 400 or higher, or middleware that stops before the handler, does not invalidate.

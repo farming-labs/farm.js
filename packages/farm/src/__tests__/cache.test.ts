@@ -1,14 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  configureFarmCache,
   createFarmCacheKey,
   createRouteDataCacheTag,
   defineCacheKey,
+  FarmDataCache,
   getFarmDataCache,
   invalidate,
   invalidateRouteData,
   normalizeRevalidatePath,
   revalidatePath,
   revalidateTag,
+  type FarmCacheAdapter,
+  type FarmCacheEntry,
   unstable_cache,
   updateTag,
 } from "../cache";
@@ -25,6 +29,7 @@ import {
 describe("server cache primitives", () => {
   afterEach(() => {
     resetFarmObservability();
+    configureFarmCache(undefined);
     getFarmDataCache().clear();
     vi.useRealTimers();
   });
@@ -212,6 +217,41 @@ describe("server cache primitives", () => {
     expect(invalidations).toEqual([createFarmCacheKey(["product", "123"])]);
   });
 
+  it("waits for distributed invalidation before a server action completes", async () => {
+    let releaseInvalidation!: () => void;
+    const invalidationGate = new Promise<void>((resolve) => {
+      releaseInvalidation = resolve;
+    });
+    const invalidateTags = vi.fn(async () => invalidationGate);
+    configureFarmCache({
+      adapter: {
+        get: async () => null,
+        set: async () => undefined,
+        delete: async () => undefined,
+        getTagVersions: async () => ({}),
+        invalidateTags,
+      },
+    });
+    const request = new Request("https://farm.test/products", { method: "POST" });
+    let completed = false;
+
+    const action = runWithServerActionRequest(request, () => {
+      invalidate(["product", "123"]);
+      return { ok: true };
+    }).then((result) => {
+      completed = true;
+      return result;
+    });
+
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    expect(invalidateTags).toHaveBeenCalledOnce();
+
+    releaseInvalidation();
+    await expect(action).resolves.toEqual({ ok: true });
+    expect(completed).toBe(true);
+  });
+
   it("expires entries using revalidate seconds", async () => {
     vi.useFakeTimers();
     let calls = 0;
@@ -245,6 +285,104 @@ describe("server cache primitives", () => {
     expect(first).toEqual({ calls: 1 });
     expect(second).toEqual({ calls: 1 });
     expect(calls).toBe(1);
+  });
+
+  it("shares entries and tag invalidation through a distributed adapter", async () => {
+    const adapter = new TestSharedCacheAdapter();
+    const first = new FarmDataCache({ adapter, namespace: "catalog" });
+    const second = new FarmDataCache({ adapter, namespace: "catalog" });
+    let calls = 0;
+    const produce = async () => ({ calls: ++calls });
+
+    await expect(
+      first.getOrSet("featured", produce, {
+        tags: ["products"],
+        revalidate: 60,
+      }),
+    ).resolves.toEqual({ calls: 1 });
+    await expect(
+      second.getOrSet("featured", produce, {
+        tags: ["products"],
+        revalidate: 60,
+      }),
+    ).resolves.toEqual({ calls: 1 });
+
+    await first.revalidateTagAsync("products");
+
+    await expect(
+      second.getOrSet("featured", produce, {
+        tags: ["products"],
+        revalidate: 60,
+      }),
+    ).resolves.toEqual({ calls: 2 });
+    expect(calls).toBe(2);
+  });
+
+  it("isolates distributed entries by cache namespace", async () => {
+    const adapter = new TestSharedCacheAdapter();
+    const storefront = new FarmDataCache({ adapter, namespace: "storefront" });
+    const admin = new FarmDataCache({ adapter, namespace: "admin" });
+
+    await storefront.setAsync("settings", { theme: "light" });
+    await admin.setAsync("settings", { theme: "dark" });
+
+    await expect(storefront.getEntryAsync("settings")).resolves.toMatchObject({
+      value: { theme: "light" },
+    });
+    await expect(admin.getEntryAsync("settings")).resolves.toMatchObject({
+      value: { theme: "dark" },
+    });
+  });
+
+  it("deduplicates cache fills across instances with adapter leases", async () => {
+    const adapter = new TestSharedCacheAdapter();
+    const first = new FarmDataCache({ adapter, namespace: "catalog" });
+    const second = new FarmDataCache({ adapter, namespace: "catalog" });
+    let calls = 0;
+    const produce = async () => {
+      calls++;
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return { calls };
+    };
+
+    const [left, right] = await Promise.all([
+      first.getOrSet("popular", produce, { tags: ["products"] }),
+      second.getOrSet("popular", produce, { tags: ["products"] }),
+    ]);
+
+    expect(left).toEqual({ calls: 1 });
+    expect(right).toEqual({ calls: 1 });
+    expect(calls).toBe(1);
+  });
+
+  it("does not make a value fresh when its tag is invalidated during generation", async () => {
+    const adapter = new TestSharedCacheAdapter();
+    const first = new FarmDataCache({ adapter, namespace: "catalog" });
+    const second = new FarmDataCache({ adapter, namespace: "catalog" });
+    let finishGeneration!: () => void;
+    const generationGate = new Promise<void>((resolve) => {
+      finishGeneration = resolve;
+    });
+    let calls = 0;
+
+    const firstGeneration = first.getOrSet(
+      "featured",
+      async () => {
+        calls++;
+        await generationGate;
+        return { calls };
+      },
+      { tags: ["products"] },
+    );
+
+    await vi.waitFor(() => expect(calls).toBe(1));
+    await second.revalidateTagAsync("products");
+    finishGeneration();
+    await expect(firstGeneration).resolves.toEqual({ calls: 1 });
+
+    await expect(
+      second.getOrSet("featured", async () => ({ calls: ++calls }), { tags: ["products"] }),
+    ).resolves.toEqual({ calls: 2 });
   });
 
   it("emits hit, miss, set, and tag revalidation observability events", async () => {
@@ -281,3 +419,54 @@ describe("server cache primitives", () => {
     expect(createFarmCacheKey([{ b: 1, a: 2 }])).toBe(createFarmCacheKey([{ a: 2, b: 1 }]));
   });
 });
+
+class TestSharedCacheAdapter implements FarmCacheAdapter {
+  readonly name = "test-shared";
+  private entries = new Map<string, FarmCacheEntry>();
+  private tagVersions = new Map<string, number>();
+  private leases = new Map<string, string>();
+  private version = 0;
+  private leaseVersion = 0;
+
+  async get<T>(key: string): Promise<FarmCacheEntry<T> | null> {
+    return (structuredClone(this.entries.get(key)) as FarmCacheEntry<T> | undefined) ?? null;
+  }
+
+  async set<T>(key: string, entry: FarmCacheEntry<T>): Promise<void> {
+    this.entries.set(key, structuredClone(entry));
+  }
+
+  async delete(key: string): Promise<void> {
+    this.entries.delete(key);
+  }
+
+  async clear(): Promise<void> {
+    this.entries.clear();
+    this.tagVersions.clear();
+    this.leases.clear();
+  }
+
+  async getTagVersions(tags: readonly string[]): Promise<Readonly<Record<string, number>>> {
+    return Object.fromEntries(tags.map((tag) => [tag, this.tagVersions.get(tag) ?? 0]));
+  }
+
+  async invalidateTags(tags: readonly string[]): Promise<void> {
+    const version = ++this.version;
+    for (const tag of tags) {
+      this.tagVersions.set(tag, version);
+    }
+  }
+
+  async acquireLease(key: string): Promise<string | null> {
+    if (this.leases.has(key)) return null;
+    const token = `lease-${++this.leaseVersion}`;
+    this.leases.set(key, token);
+    return token;
+  }
+
+  async releaseLease(key: string, token: string): Promise<void> {
+    if (this.leases.get(key) === token) {
+      this.leases.delete(key);
+    }
+  }
+}

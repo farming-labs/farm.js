@@ -2916,6 +2916,7 @@ function generateVirtualEntryCode(
   _runWithMiddlewareData,
   addMetadataImageReference,
   applyProductionMiddlewareHeaders,
+  configureFarmCache,
   configureFarmObservability,
   createFarmCacheKey,
   createFarmLocaleCookie,
@@ -3158,6 +3159,7 @@ const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringif
     config.observability ?? false,
   )};
 configureFarmObservability(farmObservabilityConfig);
+configureFarmCache(farmResolvedRuntimeConfig.cache);
 const farmI18nConfig = ${JSON.stringify(config.i18n)};
 const farmI18nRuntime = ${
     config.i18n.enabled
@@ -4335,8 +4337,8 @@ function getRouteSharedCacheControl(routeModule, pprCanCache) {
   return "public, s-maxage=" + revalidate + ", stale-while-revalidate=300";
 }
 
-function getCachedPPRShell(cacheKey) {
-  const entry = pprShellCache.getEntry(cacheKey);
+async function getCachedPPRShell(cacheKey) {
+  const entry = await pprShellCache.getEntryAsync(cacheKey);
   if (!entry) {
     return null;
   }
@@ -4583,7 +4585,7 @@ async function handleFarmRequestInContext(
         }
       }
       if (pprCacheKey) {
-        const cachedPPRShell = getCachedPPRShell(pprCacheKey);
+        const cachedPPRShell = await getCachedPPRShell(pprCacheKey);
         if (cachedPPRShell) {
           emitFarmEvent({ type: "ppr.shell.hit", route: pathname, key: pprCacheKey });
           emitFarmEvent({
@@ -5024,7 +5026,7 @@ async function handleFarmRequestInContext(
         fullHtml = applyFarmI18nDocument(fullHtml, pathname, farmI18nSnapshot);
 
         if (pageStatus === 200 && pprCacheKey && request.method.toUpperCase() !== "HEAD") {
-          pprShellCache.set(
+          await pprShellCache.setAsync(
             pprCacheKey,
             { html: fullHtml },
             {

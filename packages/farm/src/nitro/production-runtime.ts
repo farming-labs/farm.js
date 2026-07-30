@@ -1,6 +1,11 @@
 export { _runWithAfterRequest } from "../after";
 export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
-export { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
+export {
+  configureFarmCache,
+  createFarmCacheKey,
+  getFarmDataCache,
+  normalizeRevalidatePath,
+} from "../cache";
 export { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 export {
   localizeFarmHref,

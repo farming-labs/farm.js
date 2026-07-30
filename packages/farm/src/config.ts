@@ -53,6 +53,7 @@ import {
 } from "./image-config";
 import { resolveFarmI18nConfig } from "./i18n/config";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
+import type { FarmCacheUserConfig } from "./cache";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -208,6 +209,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   extends?: readonly FarmLayerEntry[];
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
+  /** Shared application data, route, ISR, and PPR cache. */
+  cache?: FarmCacheUserConfig;
   migrations?: FarmMigrationsUserConfig;
   /** Map portable cron schedules to ordinary GET API routes. */
   cron?: FarmCronUserConfig | FarmCronResolvedConfig | false;
@@ -725,6 +728,7 @@ export async function resolveConfig(
     observability: userConfig.observability ?? false,
     devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
+    cache: userConfig.cache || {},
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
       serverComponents: false,

@@ -1,5 +1,6 @@
 import { getServerActionExecutionContext, getServerActionSignal } from "./server-action-security";
 import { _resolveCurrentRequest } from "./server/request-bridge";
+import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "./cache";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -69,6 +70,21 @@ export type ServerFnHandler<TInput, TResult, TContext extends object = {}> = (
   ctx: ServerFnContext<TInput, TContext>,
 ) => MaybePromise<TResult>;
 
+export type ServerFnInvalidationContext<
+  TInput,
+  TResult,
+  TContext extends object = {},
+> = ServerFnContext<TInput, TContext> & {
+  /** Parsed value returned by the successful server function. */
+  result: TResult;
+};
+
+export type ServerFnInvalidations<TInput, TResult, TContext extends object = {}> =
+  | readonly FarmCacheInvalidationTarget[]
+  | ((
+      context: ServerFnInvalidationContext<TInput, TResult, TContext>,
+    ) => readonly FarmCacheInvalidationTarget[] | Promise<readonly FarmCacheInvalidationTarget[]>);
+
 export type ServerFnMiddlewareHandlerContext<TContext extends object = {}> = ServerFnContext<
   unknown,
   TContext
@@ -108,6 +124,11 @@ export type ServerFnOptions<
   input?: TSchema;
   output?: undefined;
   middleware?: TMiddlewares;
+  invalidates?: ServerFnInvalidations<
+    TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
+    Awaited<TResult>,
+    ServerFnMiddlewareContext<TMiddlewares>
+  >;
   handler: ServerFnHandler<
     TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
     TResult,
@@ -123,6 +144,11 @@ export type ServerFnOutputOptions<
   input?: TInputSchema;
   output: TOutputSchema;
   middleware?: TMiddlewares;
+  invalidates?: ServerFnInvalidations<
+    TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
+    Awaited<InferServerFnSchemaOutput<TOutputSchema>>,
+    ServerFnMiddlewareContext<TMiddlewares>
+  >;
   handler: ServerFnHandler<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
     unknown,
@@ -199,6 +225,7 @@ export function createServerFn(options: {
   input?: ServerFnSchema;
   output?: ServerFnSchema;
   middleware?: readonly AnyServerFnMiddleware[];
+  invalidates?: ServerFnInvalidations<any, any, any>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   handler: ServerFnHandler<any, any, any>;
 }) {
@@ -221,9 +248,26 @@ export function createServerFn(options: {
       request,
       signal,
     };
-    const result = await runServerFnMiddleware(middleware, handlerContext, options.handler);
+    let resolvedContext: Readonly<object> = Object.freeze(Object.create(null));
+    const result = await runServerFnMiddleware(middleware, handlerContext, async (context) => {
+      resolvedContext = context.context;
+      return options.handler(context);
+    });
+    const parsedResult = await _parseServerFnSchema(options.output, result, "output");
 
-    return _parseServerFnSchema(options.output, result, "output");
+    if (options.invalidates) {
+      const declaration =
+        typeof options.invalidates === "function"
+          ? await options.invalidates({
+              ...handlerContext,
+              context: resolvedContext,
+              result: parsedResult,
+            })
+          : options.invalidates;
+      await applyFarmCacheInvalidationTargets(declaration);
+    }
+
+    return parsedResult;
   };
 
   Object.defineProperties(serverFn, {
@@ -245,6 +289,10 @@ export function createServerFn(options: {
     },
     __farmServerFnMiddleware: {
       value: middleware,
+      enumerable: false,
+    },
+    __farmServerFnInvalidates: {
+      value: options.invalidates,
       enumerable: false,
     },
   });

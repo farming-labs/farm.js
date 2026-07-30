@@ -55,7 +55,7 @@ describe("endpoint invalidations", () => {
           expectTypeOf(result).toEqualTypeOf<unknown>();
           expect(context.tenantId).toBe("tenant-1");
 
-          return [{ key: ["product", body.id] }, { path: "/products" }];
+          return [{ key: ["product", body.id] }, { path: "/products" }, { tag: "products" }];
         },
       },
       async ({ body }) => ({

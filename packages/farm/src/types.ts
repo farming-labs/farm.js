@@ -18,6 +18,7 @@ import type { FarmDevtoolsUserConfig } from "./devtools-config";
 import type { FarmImageConfig } from "./image-config";
 import type { FarmPlugin } from "./plugin";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
+import type { FarmCacheUserConfig } from "./cache";
 
 export type NitroPreset =
   | "node-server"
@@ -107,6 +108,8 @@ export interface FarmConfig {
     };
   };
   storage?: FarmStorageUserConfig;
+  /** Shared application data, route, ISR, and PPR cache. */
+  cache?: FarmCacheUserConfig;
   integrations?: FarmIntegrationsUserConfig;
   plugins?: FarmPlugin[];
   migrations?: FarmMigrationsUserConfig;
