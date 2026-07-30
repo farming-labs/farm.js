@@ -21,6 +21,14 @@ import {
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
 
 export const FARM_API_ROUTE_REF_SYMBOL: unique symbol = Symbol.for("farm.api.route-ref") as any;
+export const FARM_API_ROUTE_META_SYMBOL: unique symbol = Symbol.for("farm.api.route-meta") as any;
+
+export type APIRouteRefMetadata = {
+  path: string;
+  method: string;
+  baseURL: string;
+  sameOrigin: boolean;
+};
 
 export type APIClientOptions = {
   baseURL?: string;
@@ -747,10 +755,14 @@ export function createAPIClient<
   };
 
   // Return nested proxy (starts with empty path, user adds to it)
-  return createNestedProxy([], request, routeMeta, baseURL, rootAliases) as APIClient<
-    TRouter,
-    TIntegrations
-  >;
+  return createNestedProxy(
+    [],
+    request,
+    routeMeta,
+    baseURL,
+    options.baseURL === undefined,
+    rootAliases,
+  ) as APIClient<TRouter, TIntegrations>;
 }
 
 /**
@@ -772,6 +784,7 @@ function createNestedProxy(
   client: any,
   routeMeta: WeakMap<AnyRouteRef, RouteMeta>,
   baseURL: string,
+  sameOrigin: boolean,
   rootAliases?: Record<string, unknown>,
 ): any {
   const target = () => {};
@@ -780,6 +793,15 @@ function createNestedProxy(
     get(_target, prop: string | symbol) {
       if (prop === FARM_API_ROUTE_REF_SYMBOL) {
         return path.length > 0;
+      }
+      if (prop === FARM_API_ROUTE_META_SYMBOL) {
+        const metadata = resolveRouteMeta({ path, baseURL });
+        return Object.freeze({
+          path: metadata.routePath,
+          method: metadata.method,
+          baseURL,
+          sameOrigin,
+        });
       }
 
       if (path.length === 0 && typeof prop === "string" && rootAliases && prop in rootAliases) {
@@ -791,7 +813,14 @@ function createNestedProxy(
       }
 
       // Add prop to path and return new proxy
-      return createNestedProxy([...path, prop], client, routeMeta, baseURL, rootAliases);
+      return createNestedProxy(
+        [...path, prop],
+        client,
+        routeMeta,
+        baseURL,
+        sameOrigin,
+        rootAliases,
+      );
     },
 
     // When calling as a function
@@ -834,6 +863,31 @@ export function isAPIRouteRef(value: unknown): value is CallableRouteRef {
     typeof value === "function" &&
     (value as { [FARM_API_ROUTE_REF_SYMBOL]?: unknown })[FARM_API_ROUTE_REF_SYMBOL] === true
   );
+}
+
+export function getAPIRouteRefMetadata(value: unknown): APIRouteRefMetadata | null {
+  if (!isAPIRouteRef(value)) return null;
+  const metadata = (value as { [FARM_API_ROUTE_META_SYMBOL]?: unknown })[
+    FARM_API_ROUTE_META_SYMBOL
+  ];
+  if (!metadata || typeof metadata !== "object") return null;
+
+  const candidate = metadata as Partial<APIRouteRefMetadata>;
+  if (
+    typeof candidate.path !== "string" ||
+    typeof candidate.method !== "string" ||
+    typeof candidate.baseURL !== "string" ||
+    typeof candidate.sameOrigin !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    path: candidate.path,
+    method: candidate.method,
+    baseURL: candidate.baseURL,
+    sameOrigin: candidate.sameOrigin,
+  };
 }
 
 /**
