@@ -1,5 +1,6 @@
 import { describe, expectTypeOf, it, vi } from "vitest";
 import { createAPIClient, createServerAPIClient, type CacheKey } from "../api/client";
+import { defineCacheKey } from "../cache";
 import { endpoint } from "../integration-api";
 
 type APIRouter = {
@@ -160,6 +161,80 @@ describe("createAPIClient typing", () => {
               },
             ] as const,
           ] as const,
+        },
+      },
+    );
+  });
+
+  it("accepts optional defined cache keys without changing raw key support", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      buildResponse({
+        users: [],
+        total: 0,
+        limit: 5,
+        offset: 0,
+      }),
+    ) as any;
+
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const usersKey = defineCacheKey<UsersListResponse>()(
+      (limit: string) => ["users", "list", { limit }] as const,
+    );
+    const key = usersKey("5");
+
+    await api.users.get(
+      { query: { limit: "5" } },
+      {
+        cache: {
+          key,
+          policy: "cache-first",
+        },
+      },
+    );
+
+    await api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      {
+        invalidate: [key],
+        optimistic: {
+          update: [
+            [
+              key,
+              (prev) => {
+                expectTypeOf(prev).toEqualTypeOf<UsersListResponse | undefined>();
+                return {
+                  users: [{ id: "optimistic", name: "Ada" }, ...(prev?.users ?? [])],
+                  total: (prev?.total ?? 0) + 1,
+                  limit: prev?.limit ?? 5,
+                  offset: prev?.offset ?? 0,
+                };
+              },
+            ] as const,
+          ] as const,
+        },
+      },
+    );
+
+    if (false) {
+      await api.users.post(
+        { body: { name: "Ada", email: "ada@example.com" } },
+        {
+          optimistic: {
+            update: [
+              // @ts-expect-error defined key updaters must return the key's data contract.
+              [key, () => ({ success: true })] as const,
+            ],
+          },
+        },
+      );
+    }
+
+    await api.users.get(
+      { query: { limit: "5" } },
+      {
+        // Existing untyped structured keys remain supported.
+        cache: {
+          key: ["users", "list", { limit: "5" }],
         },
       },
     );

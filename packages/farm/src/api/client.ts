@@ -13,6 +13,7 @@ import {
   type FarmClientCacheKey,
   type FarmClientDataCache,
 } from "../client-cache";
+import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
 
 export type APIClientOptions = {
   baseURL?: string;
@@ -102,7 +103,7 @@ export type RetryOptions = {
 };
 
 export type InvalidateTarget =
-  | string
+  | FarmClientCacheKey
   | {
       key: FarmClientCacheKey;
     }
@@ -122,7 +123,7 @@ export type InvalidateOptions =
 
 export type OptimisticUpdate =
   | [CallableRouteRef<any>, unknown, (prev: any) => any]
-  | [CacheKey<any> | string, (prev: any) => any];
+  | [CacheKey<any> | DefinedCacheKey<any> | string, (prev: any) => any];
 
 export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> = {
   update: TUpdates & NormalizeOptimisticUpdates<TUpdates>;
@@ -178,11 +179,13 @@ type NormalizeOptimisticUpdate<TUpdate> = TUpdate extends readonly [
       ]
     : never
   : TUpdate extends readonly [infer TKey, (prev: any) => any]
-    ? TKey extends CacheKey<infer TData>
-      ? [TKey, (prev: TData | undefined) => TData]
-      : TKey extends string
-        ? [TKey, (prev: unknown) => unknown]
-        : never
+    ? TKey extends DefinedCacheKey<any, RouteDataCacheKey>
+      ? [TKey, (prev: InferCacheKeyData<TKey> | undefined) => InferCacheKeyData<TKey>]
+      : TKey extends CacheKey<infer TData>
+        ? [TKey, (prev: TData | undefined) => TData]
+        : TKey extends string
+          ? [TKey, (prev: unknown) => unknown]
+          : never
     : never;
 
 type NormalizeOptimisticUpdates<TUpdates extends readonly unknown[]> = {
@@ -896,7 +899,10 @@ function resolveTargetKey(
 
   if (Array.isArray(target)) {
     const [route, routeInput] = target;
-    return resolveTargetKey(routeMeta, route, routeInput, baseURL);
+    if (typeof route === "function") {
+      return resolveTargetKey(routeMeta, route, routeInput, baseURL);
+    }
+    return normalizeFarmClientCacheKey(target);
   }
 
   if ("key" in target) return normalizeFarmClientCacheKey(target.key);

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createAPIClient, createServerAPIClient } from "../api/client";
+import { defineCacheKey } from "../cache";
 import { getFarmClientDataCache } from "../client-cache";
 import { endpoint } from "../integration-api";
 import { defineIntegration, integrationRoute, resolveIntegrationPlugins } from "../integrations";
@@ -72,6 +73,75 @@ describe("createAPIClient", () => {
 
     expect(cached.data).toEqual({ id: "1", name: "Alice" });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses defined structured keys directly for optimistic updates and invalidation", async () => {
+    let getCount = 0;
+    const mutationResponse = createDeferred<any>();
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      if ((init?.method ?? "GET").toUpperCase() === "POST") {
+        return mutationResponse.promise;
+      }
+
+      getCount += 1;
+      return buildResponse({
+        users: [{ id: String(getCount), name: `User ${getCount}` }],
+        total: getCount,
+        limit: 5,
+        offset: 0,
+      });
+    });
+    globalThis.fetch = fetchMock as any;
+
+    type UsersData = APIRouter["users"]["get"]["__types"]["response"];
+    const usersKey = defineCacheKey<UsersData>()(
+      (limit: string) => ["users", "list", { limit }] as const,
+    )("5");
+    const api = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+    });
+    const input = { query: { limit: "5" } };
+    const cache = {
+      key: usersKey,
+      policy: "cache-first" as const,
+      staleTime: 10_000,
+    };
+
+    await api.users.get(input, { cache });
+    const mutation = api.users.post(
+      { body: { name: "Ada", email: "ada@example.com" } },
+      {
+        optimistic: {
+          update: [
+            [
+              usersKey,
+              (current) => ({
+                ...current!,
+                users: [{ id: "optimistic", name: "Ada" }, ...(current?.users ?? [])],
+              }),
+            ],
+          ],
+          rollbackOnError: true,
+        },
+        invalidate: [usersKey],
+      },
+    );
+
+    const optimistic = await api.users.get(input, { cache });
+    expect(optimistic.data?.users[0]).toEqual({
+      id: "optimistic",
+      name: "Ada",
+    });
+
+    mutationResponse.resolve(buildResponse({ success: true }));
+    await mutation;
+
+    const refreshed = await api.users.get(input, { cache });
+    expect(refreshed.data?.users[0]).toEqual({
+      id: "2",
+      name: "User 2",
+    });
+    expect(getCount).toBe(2);
   });
 
   it("keeps default cache keys isolated by API origin", async () => {

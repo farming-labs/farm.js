@@ -13,6 +13,7 @@ import type {
   RefObject,
   RefAttributes,
 } from "react";
+import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
 
 declare module "@farm.js/core/client" {
   export interface MiddlewareProps {
@@ -406,7 +407,7 @@ declare module "@farm.js/core/client" {
   export type CachePolicy = "cache-first" | "network-only" | "stale-while-revalidate";
 
   export type CacheOptions = {
-    key?: string;
+    key?: RouteDataCacheKey;
     policy?: CachePolicy;
     staleTime?: number;
     gcTime?: number;
@@ -419,9 +420,9 @@ declare module "@farm.js/core/client" {
   };
 
   export type InvalidateTarget =
-    | string
+    | RouteDataCacheKey
     | {
-        key: string;
+        key: RouteDataCacheKey;
       }
     | {
         path: string;
@@ -439,7 +440,7 @@ declare module "@farm.js/core/client" {
 
   export type OptimisticUpdate =
     | [CallableRouteRef<any>, unknown, (prev: any) => any]
-    | [CacheKey<any> | string, (prev: any) => any];
+    | [CacheKey<any> | DefinedCacheKey<any> | string, (prev: any) => any];
 
   export type OptimisticOptions<TUpdates extends readonly unknown[] = readonly OptimisticUpdate[]> =
     {
@@ -452,7 +453,7 @@ declare module "@farm.js/core/client" {
     TError = unknown,
     TUpdates extends readonly unknown[] = readonly OptimisticUpdate[],
   > = {
-    key?: CacheKey<TData> | string;
+    key?: CacheKey<TData> | RouteDataCacheKey;
     cache?: CacheOptions;
     retry?: RetryOptions;
     invalidate?: InvalidateOptions;
@@ -496,11 +497,13 @@ declare module "@farm.js/core/client" {
         ]
       : never
     : TUpdate extends readonly [infer TKey, (prev: any) => any]
-      ? TKey extends CacheKey<infer TData>
-        ? [TKey, (prev: TData | undefined) => TData]
-        : TKey extends string
-          ? [TKey, (prev: unknown) => unknown]
-          : never
+      ? TKey extends DefinedCacheKey<any, RouteDataCacheKey>
+        ? [TKey, (prev: InferCacheKeyData<TKey> | undefined) => InferCacheKeyData<TKey>]
+        : TKey extends CacheKey<infer TData>
+          ? [TKey, (prev: TData | undefined) => TData]
+          : TKey extends string
+            ? [TKey, (prev: unknown) => unknown]
+            : never
       : never;
 
   type NormalizeOptimisticUpdates<TUpdates extends readonly unknown[]> = {
