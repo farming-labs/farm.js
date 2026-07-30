@@ -379,6 +379,11 @@ declare module "@farm.js/core/client" {
     key: CacheKey<TData>;
   };
 
+  export interface FarmAPIStream<TItem> extends AsyncIterable<TItem> {
+    readonly response: Response;
+    cancel(reason?: unknown): Promise<void>;
+  }
+
   export class APIClientError<
     TCode extends string = string,
     TData = unknown,
@@ -542,6 +547,7 @@ declare module "@farm.js/core/client" {
   type TypedEndpointLike = {
     __types: {
       body: any;
+      inputBody?: any;
       query: any;
       response: any;
       errors?: any;
@@ -583,13 +589,26 @@ declare module "@farm.js/core/client" {
   type HasRequiredKeys<T> = RequiredKeys<T> extends never ? false : true;
 
   // Type utilities to extract endpoint input/output types
+  type InferEndpointBody<T> = T extends {
+    __types: {
+      inputBody: infer TInputBody;
+    };
+  }
+    ? TInputBody
+    : T extends {
+          __types: {
+            body: infer TBody;
+          };
+        }
+      ? TBody
+      : never;
+
   type InferEndpointInput<T> = T extends {
     __types: {
-      body: infer TBody;
       query: infer TQuery;
     };
   }
-    ? SimplifyEndpointInput<BodyInputProp<TBody> & QueryInputProp<TQuery>>
+    ? SimplifyEndpointInput<BodyInputProp<InferEndpointBody<T>> & QueryInputProp<TQuery>>
     : {};
 
   type InferEndpointOutput<T> = T extends {
@@ -597,7 +616,9 @@ declare module "@farm.js/core/client" {
       response: infer R;
     };
   }
-    ? R
+    ? R extends { readonly __farmStreamItem: infer TItem }
+      ? FarmAPIStream<TItem>
+      : R
     : any;
 
   type InferEndpointError<T> = T extends {

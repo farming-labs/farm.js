@@ -73,7 +73,7 @@ async function invokeAPIRouteEndpointInContext(
 
   let body: any = undefined;
   if (request.method.toUpperCase() !== "GET" && request.method.toUpperCase() !== "HEAD") {
-    body = await readJSONBody(request);
+    body = await readRequestBody(request);
   }
 
   const headers = Object.fromEntries(request.headers.entries());
@@ -205,17 +205,58 @@ function isFarmContextHandler(endpoint: unknown): boolean {
   return firstParameter === "ctx" || firstParameter === "context" || firstParameter.startsWith("{");
 }
 
-async function readJSONBody(request: Request): Promise<unknown> {
+async function readRequestBody(request: Request): Promise<unknown> {
+  const contentType = request.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+
   try {
+    if (contentType === "multipart/form-data") {
+      return formDataToObject(await request.clone().formData());
+    }
+
     const text = await request.clone().text();
-    if (text) {
+    if (!text) return undefined;
+    if (contentType === "application/x-www-form-urlencoded") {
+      return searchParamsToObject(new URLSearchParams(text));
+    }
+    if (contentType === "application/json" || contentType?.endsWith("+json")) {
       return JSON.parse(text);
     }
+
+    // Preserve permissive JSON parsing for callers that omit content-type.
+    return JSON.parse(text);
   } catch {
-    // Body might not be JSON.
+    // Validation below returns the route's typed 400 response when applicable.
   }
 
   return undefined;
+}
+
+function formDataToObject(
+  formData: FormData,
+): Record<string, FormDataEntryValue | FormDataEntryValue[]> {
+  return entriesToObject(formData.entries());
+}
+
+function searchParamsToObject(searchParams: URLSearchParams): Record<string, string | string[]> {
+  return entriesToObject(searchParams.entries());
+}
+
+function entriesToObject<TValue>(
+  entries: IterableIterator<[string, TValue]>,
+): Record<string, TValue | TValue[]> {
+  const output: Record<string, TValue | TValue[]> = Object.create(null);
+  for (const [key, value] of entries) {
+    if (key === "__proto__" || key === "constructor" || key === "prototype") continue;
+    const current = output[key];
+    if (current === undefined) {
+      output[key] = value;
+    } else if (Array.isArray(current)) {
+      current.push(value);
+    } else {
+      output[key] = [current, value];
+    }
+  }
+  return output;
 }
 
 function validateInput(schema: any, value: unknown, error: string): unknown | Response {

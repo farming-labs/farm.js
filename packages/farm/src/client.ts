@@ -9,6 +9,7 @@ export type {
   ServerAPIClientOptions,
   ServerAPIClientWithoutIntegrationsOptions,
 } from "./api/client";
+export type { FarmAPIStream } from "./api/transport";
 export { useMutation } from "./mutation-client";
 export type {
   InferMutationData,

@@ -150,6 +150,39 @@ test.describe("Framework feature integration", () => {
     await expect(page.getByTestId("client-runtime-boundary")).toHaveText("runtime:client");
   });
 
+  test("validates multipart uploads and streams typed progress events", async ({ request }) => {
+    const response = await request.post("/api/transport-lab", {
+      multipart: {
+        title: "Framework report",
+        file: {
+          name: "report.txt",
+          mimeType: "text/plain",
+          buffer: Buffer.from("farm"),
+        },
+        tags: "framework",
+      },
+    });
+
+    expect(response.ok()).toBeTruthy();
+    expect(response.headers()["content-type"]).toContain("application/x-ndjson");
+    expect(
+      (await response.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line)),
+    ).toEqual([
+      {
+        phase: "accepted",
+        title: "Framework report",
+        bytes: 4,
+      },
+      {
+        phase: "complete",
+        tags: ["framework"],
+      },
+    ]);
+  });
+
   test("hydrates and navigates optional catch-all routes", async ({ page }) => {
     await page.goto("/optional-catchall/one/two");
     await expect(page.getByTestId("optional-catchall-slug")).toHaveText("one/two");

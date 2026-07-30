@@ -35,6 +35,40 @@ if (result.error) {
 }
 ```
 
+## Upload files and consume progress streams
+
+`toFormData()` retains the endpoint's body shape while sending files as real multipart fields. When
+an endpoint returns `jsonStream()`, the generated client exposes a typed, single-consumer async
+iterable:
+
+```ts
+import { toFormData } from "@farm.js/core/api";
+
+const result = await api.imports.post({
+  body: toFormData({
+    title: "Quarterly report",
+    file,
+  }),
+});
+
+if (result.error) {
+  throw result.error;
+}
+
+for await (const event of result.data) {
+  if (event.phase === "accepted") {
+    console.log(`Uploading ${event.bytes} bytes`);
+  } else {
+    console.log(`Imported ${event.imported} rows`);
+  }
+}
+```
+
+Farm passes the `FormData` object directly to `fetch`, allowing the runtime to generate the required
+multipart boundary. Do not set `Content-Type` manually. Stream items are decoded only as the
+consumer advances the iterator, and `result.data.cancel()` aborts the response reader when the UI
+no longer needs progress.
+
 ## Track mutations in React
 
 `useMutation` gives generated API methods and Farm server functions the same pending, result, and
