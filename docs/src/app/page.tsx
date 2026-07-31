@@ -783,8 +783,8 @@ function Hero() {
         </div>
         <HeroTitleFrame>
           <h1 className="max-w-full text-[1.125rem] font-medium leading-[1.02] tracking-normal text-white min-[360px]:text-[1.3125rem] min-[380px]:text-[1.4375rem] min-[400px]:text-[1.5rem] min-[420px]:text-[1.625rem] sm:text-[2.25rem] md:text-[2.625rem] lg:text-[3.25rem]">
-            <span className="block">A Framework for</span>
-            <span className="block whitespace-nowrap">Product integrated Apps</span>
+            <span className="block">a framework for</span>
+            <span className="block whitespace-nowrap">product-integrated apps</span>
           </h1>
         </HeroTitleFrame>
         <p className="mt-5 max-w-[38rem] text-balance text-sm leading-6 text-white/56 sm:text-[15px] sm:leading-6">
