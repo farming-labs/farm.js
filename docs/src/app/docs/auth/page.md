@@ -1,20 +1,22 @@
 ---
-title: "Authentication"
-description: "Enable Farm-native email/password authentication with one config key, server helpers, and a React hook."
+title: "Built-in Authentication"
+description: "Enable Farm's built-in email/password authentication with one config key, server helpers, and a React hook."
 section: "Core"
 ---
 
-# Authentication
+# Built-in Authentication
 
-Farm Auth is the high-level path for applications that need ordinary email/password authentication without configuring a provider instance.
+Farm Auth is a built-in Farm framework feature for applications that need ordinary email/password authentication without configuring a provider instance. It is enabled through the top-level `auth` framework config—not through `integrations.auth`.
 
-Install the runtime package:
+The implementation lives in the first-party `@farm.js/auth` runtime package so database drivers and the authentication engine do not bloat `@farm.js/core`. Farm loads that package only when built-in auth is enabled.
+
+Install the optional runtime:
 
 ```bash
 pnpm add @farm.js/auth
 ```
 
-Then enable it in Farm:
+Then enable the built-in feature:
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -160,6 +162,6 @@ The migration command needs `DATABASE_URL`, but it does not require the runtime 
 
 ## Provider integrations
 
-Use the top-level `auth` key for the built-in, opinionated path. If the application needs a provider-owned UI, enterprise SSO, raw Better Auth plugins, or another provider-specific API, use one of the [auth integrations](/docs/integrations/auth) instead.
+Use the top-level `auth` key for Farm's built-in, opinionated path. It is a core framework capability, not a provider integration. If the application needs a provider-owned UI, enterprise SSO, raw Better Auth plugins, or another provider-specific API, use one of the [auth integrations](/docs/integrations/auth) instead.
 
 Do not configure both `auth` and `integrations.auth`; they would compete for the same auth route, so Farm reports a configuration error.

@@ -6,7 +6,7 @@ section: "Integrations"
 
 # Auth Integrations
 
-For the simplest email/password application, start with [Farm Auth](/docs/auth):
+For the simplest email/password application, start with [Farm's built-in Authentication](/docs/auth):
 
 ```ts
 export default defineConfig({
@@ -14,7 +14,7 @@ export default defineConfig({
 });
 ```
 
-It supplies a Farm-owned server API and React hook without a provider instance in application config. Use the integrations below when the application needs provider-specific behavior or a lower-level auth engine.
+This is a top-level framework feature, not an `integrations.auth` provider. It supplies a Farm-owned server API and React hook without a provider instance in application config. Use the integrations below when the application needs provider-specific behavior or a lower-level auth engine.
 
 Farm supports two auth integration styles:
 

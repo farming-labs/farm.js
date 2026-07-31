@@ -22,6 +22,7 @@ Routes, rendering, layouts, and request flow.
 - [Routing](/docs/routing): Farm uses an app directory routing model with static routes, dynamic segments, catch-all routes, and typed navigation.
 - [Layouts and Route Boundaries](/docs/layouts): Wrap routes with root and nested layouts, then use loading, error, and not-found files for route-level UX.
 - [Rendering Model](/docs/server-rendering): Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports and config.
+- [Built-in Authentication](/docs/auth): Enable email/password auth, sessions, server helpers, and React APIs with the top-level `auth` framework config.
 - [Middleware](/docs/middleware): Run request behavior before routes, pass request-scoped data to pages, and short-circuit with redirects or responses.
 - [Environment Functions](/docs/environment-functions): Remove server-only or client-only implementations from the opposite bundle while preserving one typed interface.
 
