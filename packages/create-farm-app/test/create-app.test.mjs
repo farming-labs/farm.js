@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -20,9 +20,14 @@ test("generates a buildable starter application", async () => {
         "--template",
         "basic",
         "--typescript",
+        "--skip-install",
       ],
       {
         cwd: tempDir,
+        env: {
+          ...process.env,
+          npm_config_user_agent: "pnpm/10.15.0 npm/? node/v22.0.0",
+        },
         stdio: "pipe",
       },
     );
@@ -35,7 +40,7 @@ test("generates a buildable starter application", async () => {
     );
 
     assert.equal(generatedPackage.name, "generated-app");
-    assert.equal(generatedPackage.packageManager, templatePackage.packageManager);
+    assert.equal(generatedPackage.packageManager, "pnpm@10.15.0");
     assert.equal(
       generatedPackage.dependencies["@farm.js/core"],
       templatePackage.dependencies["@farm.js/core"],
@@ -47,6 +52,19 @@ test("generates a buildable starter application", async () => {
     assert.equal(
       generatedPackage.devDependencies.tailwindcss,
       templatePackage.devDependencies.tailwindcss,
+    );
+    assert.equal(generatedPackage.dependencies.react, templatePackage.dependencies.react);
+    assert.equal(
+      generatedPackage.dependencies["react-dom"],
+      templatePackage.dependencies["react-dom"],
+    );
+    assert.equal(
+      generatedPackage.devDependencies["@types/react"],
+      templatePackage.devDependencies["@types/react"],
+    );
+    assert.equal(
+      generatedPackage.devDependencies["@types/react-dom"],
+      templatePackage.devDependencies["@types/react-dom"],
     );
 
     const generatedHomePage = await readFile(
@@ -86,6 +104,76 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedGitignore, /^\.env\.local$/m);
     assert.match(generatedGitignore, /^\*\.sqlite$/m);
     assert.match(generatedGitignore, /^\*\.sqlite-\*$/m);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("installs dependencies with the invoking package manager", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-install-"));
+  const binDir = path.join(tempDir, "bin");
+  const markerPath = path.join(tempDir, "install.json");
+  const runnerPath = path.join(binDir, "fake-package-manager.cjs");
+  const executablePath = path.join(binDir, process.platform === "win32" ? "pnpm.cmd" : "pnpm");
+
+  try {
+    await mkdir(binDir, { recursive: true });
+    await writeFile(
+      runnerPath,
+      `const { writeFileSync } = require("node:fs");
+writeFileSync(process.env.FARM_CREATE_APP_INSTALL_MARKER, JSON.stringify({
+  args: process.argv.slice(2),
+  cwd: process.cwd(),
+}));
+`,
+    );
+
+    if (process.platform === "win32") {
+      await writeFile(executablePath, `@"${process.execPath}" "${runnerPath}" %*\r\n`);
+    } else {
+      await writeFile(
+        executablePath,
+        `#!/bin/sh\nexec "${process.execPath}" "${runnerPath}" "$@"\n`,
+      );
+      await chmod(executablePath, 0o755);
+    }
+
+    const output = execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "generated-app",
+        "--template",
+        "basic",
+        "--typescript",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          FARM_CREATE_APP_INSTALL_MARKER: markerPath,
+          PATH: `${binDir}${path.delimiter}${process.env.PATH || ""}`,
+          npm_config_user_agent: "pnpm/10.15.0 npm/? node/v22.0.0",
+        },
+      },
+    );
+
+    const invocation = JSON.parse(await readFile(markerPath, "utf8"));
+    const generatedPackage = JSON.parse(
+      await readFile(path.join(tempDir, "generated-app/package.json"), "utf8"),
+    );
+
+    assert.deepEqual(invocation.args, ["install"]);
+    assert.equal(
+      await realpath(invocation.cwd),
+      await realpath(path.join(tempDir, "generated-app")),
+    );
+    assert.equal(generatedPackage.packageManager, "pnpm@10.15.0");
+    assert.match(output, /Installing dependencies with pnpm/);
+    assert.match(output, /Dependencies installed/);
+    assert.match(output, /pnpm dev/);
+    assert.doesNotMatch(output, /pnpm install/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

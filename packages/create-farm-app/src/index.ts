@@ -1,11 +1,20 @@
 import prompts from "prompts";
 import path from "path";
 import fs from "fs/promises";
+import { spawn } from "node:child_process";
 import { logger, showBanner } from "./utils";
 
 interface CreateAppOptions {
   template?: string;
   typescript?: boolean;
+  skipInstall?: boolean;
+}
+
+export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
+
+export interface PackageManager {
+  name: PackageManagerName;
+  version?: string;
 }
 
 export async function createApp(projectName?: string, options: CreateAppOptions = {}) {
@@ -87,6 +96,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   }
 
   const projectPath = path.resolve(process.cwd(), projectName!);
+  const packageManager = detectPackageManager();
   const hasExistingFiles = await directoryHasFiles(projectPath);
   if (hasExistingFiles) {
     const overwriteResponse = await prompts({
@@ -108,14 +118,23 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
 
   await copyTemplate(template!, projectPath, useTypeScript!);
 
-  await updatePackageJson(projectPath, projectName!);
+  await updatePackageJson(projectPath, projectName!, packageManager);
 
   logger.success(`🚜 Created ${projectName}`);
+
+  if (!options.skipInstall) {
+    logger.info(`Installing dependencies with ${packageManager.name}...`);
+    await installDependencies(projectPath, packageManager);
+    logger.success("Dependencies installed");
+  }
+
   logger.info("");
   logger.info("Next steps");
   logger.info(`  cd ${projectName}`);
-  logger.info("  pnpm install");
-  logger.info("  pnpm dev");
+  if (options.skipInstall) {
+    logger.info(`  ${packageManager.name} install`);
+  }
+  logger.info(`  ${getDevCommand(packageManager.name)}`);
   logger.info("");
   logger.info("Tailwind is enabled by default. You only need postcss config for custom plugins.");
 }
@@ -221,7 +240,11 @@ async function getAvailableTemplates(): Promise<string[]> {
     .sort();
 }
 
-async function updatePackageJson(projectPath: string, projectName: string) {
+async function updatePackageJson(
+  projectPath: string,
+  projectName: string,
+  packageManager: PackageManager,
+) {
   const packageJsonPath = path.join(projectPath, "package.json");
 
   try {
@@ -229,9 +252,60 @@ async function updatePackageJson(projectPath: string, projectName: string) {
     const packageJson = JSON.parse(content);
 
     packageJson.name = projectName;
+    if (packageManager.version) {
+      packageJson.packageManager = `${packageManager.name}@${packageManager.version}`;
+    }
 
     await fs.writeFile(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
-  } catch (error) {
+  } catch {
     logger.warn("Could not update package.json");
   }
+}
+
+export function detectPackageManager(
+  userAgent = process.env.npm_config_user_agent,
+): PackageManager {
+  const match = userAgent?.match(/^(npm|pnpm|yarn|bun)\/([^\s]+)/);
+  if (!match) {
+    return { name: "pnpm" };
+  }
+
+  const [, name, version] = match;
+  return {
+    name: name as PackageManagerName,
+    version: version === "?" ? undefined : version,
+  };
+}
+
+export function installDependencies(
+  projectPath: string,
+  packageManager: PackageManager,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const command =
+      process.platform === "win32" ? `${packageManager.name}.cmd` : packageManager.name;
+    const child = spawn(command, ["install"], {
+      cwd: projectPath,
+      env: process.env,
+      stdio: "inherit",
+    });
+
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+
+      const reason = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
+      reject(new Error(`${packageManager.name} install failed with ${reason}.`));
+    });
+  });
+}
+
+function getDevCommand(packageManager: PackageManagerName) {
+  if (packageManager === "npm" || packageManager === "bun") {
+    return `${packageManager} run dev`;
+  }
+  return `${packageManager} dev`;
 }

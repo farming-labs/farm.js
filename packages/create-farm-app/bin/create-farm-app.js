@@ -11,6 +11,7 @@ program
   .argument("[project-name]", "Name of the project")
   .option("-t, --template <template>", "Template to use")
   .option("--typescript", "Use TypeScript template")
+  .option("--skip-install", "Skip installing dependencies")
   .action(async (projectName, options) => {
     try {
       await createApp(projectName, options);

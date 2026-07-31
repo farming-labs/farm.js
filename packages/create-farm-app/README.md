@@ -5,7 +5,12 @@ Create a new Farm.js application
 Farm.js is currently in beta.
 
 ```bash
-npx @farm.js/create-app@latest my-app
+pnpm create @farm.js/app my-app
+cd my-app
+pnpm dev
 ```
+
+The scaffolder installs React, React DOM, Farm.js, TypeScript, and the other starter dependencies
+automatically. Pass `--skip-install` when you only want to generate the project files.
 
 See the [Farm.js repository](https://github.com/farming-labs/farm.js) for documentation, examples, and support.
