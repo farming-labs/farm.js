@@ -30,9 +30,8 @@
 ### Create a New App
 
 ```bash
-pnpm dlx @farm.js/create-app@latest my-app
+pnpm create @farm.js/app my-app
 cd my-app
-pnpm install
 pnpm dev
 ```
 

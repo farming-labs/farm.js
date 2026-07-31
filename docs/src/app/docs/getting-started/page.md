@@ -15,11 +15,13 @@ Farm keeps the first project small: an app directory, a config file, package met
 **Terminal**
 
 ```bash
-pnpm dlx @farm.js/create-app@latest my-app
+pnpm create @farm.js/app my-app
 cd my-app
-pnpm install
 pnpm dev
 ```
+
+The scaffolder installs React and all other starter dependencies automatically. Use
+`--skip-install` if you only want it to generate the project files.
 
 ## What you get
 
