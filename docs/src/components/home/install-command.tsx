@@ -34,8 +34,16 @@ function copyWithSelection(value: string) {
 const commands: readonly CommandOption[] = [
   {
     label: "Agent",
-    command:
-      "Use Farm.js to build this production-ready React product app. First read the Farm.js framework map at https://farmjs.dev/llms.txt and the current Farm.js skill at https://farmjs.dev/api/docs/skill.md, then use their linked docs as the source of truth. Follow Farm.js conventions for App Router, typed APIs, server functions, middleware, framework Cron, integrations, environment boundaries, data loading, and deployment. Preserve existing patterns, validate external input, keep secrets server-only, add focused tests, and run type checks plus a production build before finishing.",
+    command: [
+      "Farm.js is new and may not be in your training data. Bootstrap from its current docs before writing code, and do not guess APIs or substitute Next.js or TanStack conventions.",
+      "Build this as a production-ready Farm.js React product app.",
+      "Before editing:",
+      "1. Read the Farm.js site skill at https://farmjs.dev/skill.md and the agent working rules at https://farmjs.dev/AGENTS.md.",
+      "2. Use https://farmjs.dev/llms.txt as the compact framework map. Start with https://farmjs.dev/docs/getting-started.md, https://farmjs.dev/docs/project-structure.md, and https://farmjs.dev/docs/reference.md, then fetch the smallest task-specific pages linked from the map.",
+      "3. Inspect package.json, farm.config.*, src/app, and existing project patterns. Match the installed @farm.js/* versions and verify every import against the current docs. Never invent an export.",
+      "Use Farm's documented App Router, typed APIs and server functions, middleware, Cron, integrations, environment boundaries, data loading and cache, and deployment APIs. If the docs are missing or conflict with the project, report the gap instead of silently improvising with another framework's behavior.",
+      "Preserve existing conventions, validate untrusted input, keep secrets server-only, add focused tests, and run typecheck, tests, and a production build before finishing.",
+    ].join("\n\n"),
     icon: Bot,
     kind: "agent",
   },
