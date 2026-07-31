@@ -18,6 +18,13 @@ This is a top-level framework feature, not an `integrations.auth` provider. It s
 
 The integration path remains fully supported when an application needs provider-specific behavior or wants to own a lower-level auth engine. For example, `integrations.auth: betterAuth({ instance })` lets the application control the complete Better Auth configuration. The two paths are alternatives: configure either top-level `auth` or `integrations.auth`, never both.
 
+## Start from the matching starter
+
+| Authentication owner                                             | Complete starter                                                                          |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Farm owns the default email/password flow through `auth: true`   | [Farm.js Auth Starter](https://github.com/farming-labs/farmjs-auth-starter)               |
+| Your app owns a Better Auth instance through `integrations.auth` | [Farm.js Better Auth Starter](https://github.com/farming-labs/farmjs-better-auth-starter) |
+
 Farm supports two auth integration styles:
 
 - **Farm-owned auth flows** create login, callback, logout, and session or profile routes. Auth0, WorkOS, and Supabase use this model.

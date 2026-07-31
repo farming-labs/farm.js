@@ -1,4 +1,5 @@
 import type { Metadata, PageProps } from "@farm.js/core";
+import { FARM_VERSION } from "@farm.js/core/version";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -14,6 +15,7 @@ import {
   FolderTree,
   GitFork,
   Layers3,
+  Lock,
   Menu,
   Network,
   Plug,
@@ -109,6 +111,13 @@ function withFarmReferral(href: string) {
 }
 
 const integrationDirectoryItems = [
+  {
+    row: 0,
+    col: 0,
+    label: "Farm Auth",
+    href: "/docs/auth",
+    icon: Lock,
+  },
   {
     row: 0,
     col: 1,
@@ -674,7 +683,7 @@ function ButtonLink({
 function AnnouncementBar() {
   return (
     <a
-      aria-label="Farm.js is open source and in beta. View on GitHub."
+      aria-label={`Farm.js ${FARM_VERSION} is open source and in beta. View on GitHub.`}
       className="farm-announcement flex h-5 items-center justify-center gap-2 border-b border-white/12 px-4 font-mono text-[10px] font-normal uppercase tracking-normal focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-white"
       href="https://github.com/farming-labs/farm.js"
     >
@@ -683,7 +692,7 @@ function AnnouncementBar() {
       <span aria-hidden className="text-white/24">
         /
       </span>
-      <span className="text-white/76">Farm.js is in beta</span>
+      <span className="text-white/76">Farm.js {FARM_VERSION}</span>
     </a>
   );
 }
@@ -875,7 +884,7 @@ function EcosystemStrip() {
               >
                 {ecosystemItems.map((item, itemIndex) => (
                   <ProductStackTile
-                    key={`${copyIndex}-${item.label}`}
+                    key={`${copyIndex}-${itemIndex}-${item.label}`}
                     duplicate={copyIndex === 1}
                     item={item}
                     itemIndex={itemIndex}
@@ -1108,12 +1117,12 @@ function DeveloperExperienceGrid() {
         <TypedApiVisual />
       </FeatureCell>
       <FeatureCell
-        body="Bring in auth, billing, email, jobs, storage, docs, and agent runtimes through one integration system."
+        body="Enable Farm Auth with one config key, then add billing, email, jobs, storage, docs, and agent runtimes through integrations."
         className="border-t border-white/12"
         icon={Plug}
         index="01.3"
-        label="Integrations"
-        title="Add product features as integrations"
+        label="Auth + integrations"
+        title="Start built in. Extend when needed."
       >
         <IntegrationVisual />
       </FeatureCell>
@@ -1591,8 +1600,9 @@ function IntegrationsSection() {
               Bring the tools you already use
             </h2>
             <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-              Choose built-in integrations for auth, billing, email, jobs, storage, agents, API
-              keys, and UI, or connect your own.
+              Start with built-in Farm Auth, keep full control with Better Auth, then add
+              integrations for billing, email, jobs, storage, agents, API keys, and UI—or connect
+              your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">
               <ButtonLink
@@ -1600,6 +1610,20 @@ function IntegrationsSection() {
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
                 Integrations
+              </ButtonLink>
+              <ButtonLink
+                href="https://github.com/farming-labs/farmjs-auth-starter"
+                icon={<GithubIcon className="size-4" />}
+                variant="secondary"
+              >
+                Farm Auth Starter
+              </ButtonLink>
+              <ButtonLink
+                href="https://github.com/farming-labs/farmjs-better-auth-starter"
+                icon={<GithubIcon className="size-4" />}
+                variant="secondary"
+              >
+                Better Auth Starter
               </ButtonLink>
             </div>
           </div>

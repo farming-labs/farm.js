@@ -37,6 +37,17 @@ That one key:
 
 `auth: { enabled: true }` is also accepted when keeping feature switches in object form. `auth: true` is the canonical shorthand.
 
+## Start from a complete app
+
+The [Farm.js Auth Starter](https://github.com/farming-labs/farmjs-auth-starter) demonstrates the complete built-in path: email/password forms, server helpers, the React hook, protected middleware, local SQLite, and production Postgres configuration.
+
+```bash
+git clone https://github.com/farming-labs/farmjs-auth-starter.git
+cd farmjs-auth-starter
+pnpm install
+pnpm dev
+```
+
 ## Server helpers
 
 Read the current session or user from a Server Component, server function, middleware, or route handler:

@@ -10,130 +10,8 @@ import "@farm.js/core/image";
  * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
-export type RoutePath =
-  | "/"
-  | "/docs"
-  | `/docs/${string}`
-  | "/docs/after"
-  | "/docs/api-client"
-  | "/docs/api-routes"
-  | "/docs/cache-ppr"
-  | "/docs/cli"
-  | "/docs/configuration"
-  | "/docs/cron"
-  | "/docs/deployment"
-  | "/docs/devtools"
-  | "/docs/docs-engine"
-  | "/docs/environment-functions"
-  | "/docs/examples"
-  | "/docs/getting-started"
-  | "/docs/integrations"
-  | "/docs/integrations/auth"
-  | "/docs/integrations/auth/auth0"
-  | "/docs/integrations/auth/authjs"
-  | "/docs/integrations/auth/better-auth"
-  | "/docs/integrations/auth/clerk"
-  | "/docs/integrations/auth/supabase"
-  | "/docs/integrations/auth/workos"
-  | "/docs/integrations/autumn"
-  | "/docs/integrations/cf-agent"
-  | "/docs/integrations/custom"
-  | "/docs/integrations/email"
-  | "/docs/integrations/eve"
-  | "/docs/integrations/inngest"
-  | "/docs/integrations/jobs"
-  | "/docs/integrations/orm-storage"
-  | "/docs/integrations/polar"
-  | "/docs/integrations/stripe"
-  | "/docs/integrations/trigger"
-  | "/docs/integrations/ui-registry"
-  | "/docs/integrations/unkey"
-  | "/docs/internationalization"
-  | "/docs/layers"
-  | "/docs/layouts"
-  | "/docs/markdown"
-  | "/docs/middleware"
-  | "/docs/migrations"
-  | "/docs/migrations/nextjs"
-  | "/docs/migrations/nuxt"
-  | "/docs/migrations/sveltekit"
-  | "/docs/migrations/tanstack"
-  | "/docs/observability"
-  | "/docs/openapi"
-  | "/docs/plugins"
-  | "/docs/plugins/create-plugin"
-  | "/docs/preview"
-  | "/docs/project-structure"
-  | "/docs/query"
-  | "/docs/reference"
-  | "/docs/route-runtime"
-  | "/docs/routing"
-  | "/docs/server-queries"
-  | "/docs/server-rendering"
-  | "/docs/storage"
-  | "/docs/testing";
-export type RoutePattern =
-  | "/"
-  | "/docs"
-  | "/docs/[...docs]"
-  | "/docs/after"
-  | "/docs/api-client"
-  | "/docs/api-routes"
-  | "/docs/cache-ppr"
-  | "/docs/cli"
-  | "/docs/configuration"
-  | "/docs/cron"
-  | "/docs/deployment"
-  | "/docs/devtools"
-  | "/docs/docs-engine"
-  | "/docs/environment-functions"
-  | "/docs/examples"
-  | "/docs/getting-started"
-  | "/docs/integrations"
-  | "/docs/integrations/auth"
-  | "/docs/integrations/auth/auth0"
-  | "/docs/integrations/auth/authjs"
-  | "/docs/integrations/auth/better-auth"
-  | "/docs/integrations/auth/clerk"
-  | "/docs/integrations/auth/supabase"
-  | "/docs/integrations/auth/workos"
-  | "/docs/integrations/autumn"
-  | "/docs/integrations/cf-agent"
-  | "/docs/integrations/custom"
-  | "/docs/integrations/email"
-  | "/docs/integrations/eve"
-  | "/docs/integrations/inngest"
-  | "/docs/integrations/jobs"
-  | "/docs/integrations/orm-storage"
-  | "/docs/integrations/polar"
-  | "/docs/integrations/stripe"
-  | "/docs/integrations/trigger"
-  | "/docs/integrations/ui-registry"
-  | "/docs/integrations/unkey"
-  | "/docs/internationalization"
-  | "/docs/layers"
-  | "/docs/layouts"
-  | "/docs/markdown"
-  | "/docs/middleware"
-  | "/docs/migrations"
-  | "/docs/migrations/nextjs"
-  | "/docs/migrations/nuxt"
-  | "/docs/migrations/sveltekit"
-  | "/docs/migrations/tanstack"
-  | "/docs/observability"
-  | "/docs/openapi"
-  | "/docs/plugins"
-  | "/docs/plugins/create-plugin"
-  | "/docs/preview"
-  | "/docs/project-structure"
-  | "/docs/query"
-  | "/docs/reference"
-  | "/docs/route-runtime"
-  | "/docs/routing"
-  | "/docs/server-queries"
-  | "/docs/server-rendering"
-  | "/docs/storage"
-  | "/docs/testing";
+export type RoutePath = "/" | "/docs" | `/docs/${string}` | "/docs/after" | "/docs/api-client" | "/docs/api-routes" | "/docs/auth" | "/docs/cache-ppr" | "/docs/cli" | "/docs/configuration" | "/docs/cron" | "/docs/deployment" | "/docs/devtools" | "/docs/docs-engine" | "/docs/environment-functions" | "/docs/examples" | "/docs/getting-started" | "/docs/images" | "/docs/integrations" | "/docs/integrations/auth" | "/docs/integrations/auth/auth0" | "/docs/integrations/auth/authjs" | "/docs/integrations/auth/better-auth" | "/docs/integrations/auth/clerk" | "/docs/integrations/auth/supabase" | "/docs/integrations/auth/workos" | "/docs/integrations/autumn" | "/docs/integrations/cf-agent" | "/docs/integrations/custom" | "/docs/integrations/email" | "/docs/integrations/eve" | "/docs/integrations/inngest" | "/docs/integrations/jobs" | "/docs/integrations/orm-storage" | "/docs/integrations/polar" | "/docs/integrations/stripe" | "/docs/integrations/trigger" | "/docs/integrations/ui-registry" | "/docs/integrations/unkey" | "/docs/internationalization" | "/docs/layers" | "/docs/layouts" | "/docs/markdown" | "/docs/middleware" | "/docs/migrations" | "/docs/migrations/nextjs" | "/docs/migrations/nuxt" | "/docs/migrations/sveltekit" | "/docs/migrations/tanstack" | "/docs/observability" | "/docs/openapi" | "/docs/plugins" | "/docs/plugins/client" | "/docs/plugins/create-plugin" | "/docs/preview" | "/docs/project-structure" | "/docs/query" | "/docs/reference" | "/docs/route-runtime" | "/docs/routing" | "/docs/server-queries" | "/docs/server-rendering" | "/docs/storage" | "/docs/testing";
+export type RoutePattern = "/" | "/docs" | "/docs/[...docs]" | "/docs/after" | "/docs/api-client" | "/docs/api-routes" | "/docs/auth" | "/docs/cache-ppr" | "/docs/cli" | "/docs/configuration" | "/docs/cron" | "/docs/deployment" | "/docs/devtools" | "/docs/docs-engine" | "/docs/environment-functions" | "/docs/examples" | "/docs/getting-started" | "/docs/images" | "/docs/integrations" | "/docs/integrations/auth" | "/docs/integrations/auth/auth0" | "/docs/integrations/auth/authjs" | "/docs/integrations/auth/better-auth" | "/docs/integrations/auth/clerk" | "/docs/integrations/auth/supabase" | "/docs/integrations/auth/workos" | "/docs/integrations/autumn" | "/docs/integrations/cf-agent" | "/docs/integrations/custom" | "/docs/integrations/email" | "/docs/integrations/eve" | "/docs/integrations/inngest" | "/docs/integrations/jobs" | "/docs/integrations/orm-storage" | "/docs/integrations/polar" | "/docs/integrations/stripe" | "/docs/integrations/trigger" | "/docs/integrations/ui-registry" | "/docs/integrations/unkey" | "/docs/internationalization" | "/docs/layers" | "/docs/layouts" | "/docs/markdown" | "/docs/middleware" | "/docs/migrations" | "/docs/migrations/nextjs" | "/docs/migrations/nuxt" | "/docs/migrations/sveltekit" | "/docs/migrations/tanstack" | "/docs/observability" | "/docs/openapi" | "/docs/plugins" | "/docs/plugins/client" | "/docs/plugins/create-plugin" | "/docs/preview" | "/docs/project-structure" | "/docs/query" | "/docs/reference" | "/docs/route-runtime" | "/docs/routing" | "/docs/server-queries" | "/docs/server-rendering" | "/docs/storage" | "/docs/testing";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
@@ -157,3 +35,32 @@ declare module "@farm.js/core/dist/client.js" {
     pattern: import("./farm").RoutePattern;
   }
 }
+
+
+/**
+ * Auto-generated env types from farm.config.
+ * Regenerated on dev start, build, and farm generate.
+ */
+import type FarmConfig from "../farm.config";
+import type { InferEnv } from "@farm.js/core/env";
+
+type FarmConfigEnv = typeof FarmConfig extends { env?: infer TEnv } ? NonNullable<TEnv> : never;
+type FarmResolvedEnv = [FarmConfigEnv] extends [never]
+  ? { server: {}; public: {} }
+  : InferEnv<FarmConfigEnv>;
+
+declare module "@farm.js/core/env" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+declare module "@farm.js/core" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+export {};

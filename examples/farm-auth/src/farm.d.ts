@@ -11,15 +11,18 @@ import "@farm.js/core/image";
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
 export type RoutePath = "/" | "/dashboard" | "/sign-in" | "/sign-up";
+export type RoutePattern = "/" | "/dashboard" | "/sign-in" | "/sign-up";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
+    pattern: import("./farm").RoutePattern;
   }
 }
 
 declare module "@farm.js/core" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
+    pattern: import("./farm").RoutePattern;
   }
   // Ensure root import ("@farm.js/core") uses the same typed Link signature as client entry.
   const Link: typeof import("@farm.js/core/client").Link;
@@ -29,5 +32,35 @@ declare module "@farm.js/core" {
 declare module "@farm.js/core/dist/client.js" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
+    pattern: import("./farm").RoutePattern;
   }
 }
+
+
+/**
+ * Auto-generated env types from farm.config.
+ * Regenerated on dev start, build, and farm generate.
+ */
+import type FarmConfig from "../farm.config";
+import type { InferEnv } from "@farm.js/core/env";
+
+type FarmConfigEnv = typeof FarmConfig extends { env?: infer TEnv } ? NonNullable<TEnv> : never;
+type FarmResolvedEnv = [FarmConfigEnv] extends [never]
+  ? { server: {}; public: {} }
+  : InferEnv<FarmConfigEnv>;
+
+declare module "@farm.js/core/env" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+declare module "@farm.js/core" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+export {};

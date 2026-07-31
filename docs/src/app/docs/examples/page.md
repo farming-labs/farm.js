@@ -10,20 +10,20 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 
 ## Example apps
 
-| Example                          | Shows                                                                                           |
-| -------------------------------- | ----------------------------------------------------------------------------------------------- |
-| examples/basic                   | Core routing, layouts, deployment config, markdown mirrors, PPR, and framework Cron.            |
-| examples/deployment-presets      | Vercel, Cloudflare Pages, Netlify, self-hosted Node, and direct Nitro preset deployment output. |
-| examples/ssr-ssg-demo            | SSR, SSG, ISR, API routes, middleware.                                                          |
-| examples/i18n                    | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
-| examples/docs-integration        | Docs runtime and /api/docs machine routes.                                                      |
-| examples/stripe-integration      | Stripe checkout, portal, session, webhooks.                                                     |
-| examples/stripe-integrations/\*  | Stripe with Prisma, Drizzle, SQLite, org billing.                                               |
-| examples/better-auth-integration | Farm-native auth config, client APIs, sessions, and local SQLite.                               |
-| examples/jobs-trigger            | Trigger.dev jobs runtime.                                                                       |
-| examples/jobs-inngest            | Inngest jobs runtime.                                                                           |
-| examples/eve-agent               | Eve instructions, same-origin chat UI, managed development, and Vercel composition.             |
-| examples/cf-agent                | Cloudflare Agent state, callable RPC, Wrangler development, and combined Worker deployment.     |
+| Example                         | Shows                                                                                           |
+| ------------------------------- | ----------------------------------------------------------------------------------------------- |
+| examples/basic                  | Core routing, layouts, deployment config, markdown mirrors, PPR, and framework Cron.            |
+| examples/deployment-presets     | Vercel, Cloudflare Pages, Netlify, self-hosted Node, and direct Nitro preset deployment output. |
+| examples/ssr-ssg-demo           | SSR, SSG, ISR, API routes, middleware.                                                          |
+| examples/i18n                   | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
+| examples/docs-integration       | Docs runtime and /api/docs machine routes.                                                      |
+| examples/stripe-integration     | Stripe checkout, portal, session, webhooks.                                                     |
+| examples/stripe-integrations/\* | Stripe with Prisma, Drizzle, SQLite, org billing.                                               |
+| examples/farm-auth              | Built-in Farm Auth config, client APIs, sessions, and local SQLite.                             |
+| examples/jobs-trigger           | Trigger.dev jobs runtime.                                                                       |
+| examples/jobs-inngest           | Inngest jobs runtime.                                                                           |
+| examples/eve-agent              | Eve instructions, same-origin chat UI, managed development, and Vercel composition.             |
+| examples/cf-agent               | Cloudflare Agent state, callable RPC, Wrangler development, and combined Worker deployment.     |
 
 ## Run one example
 

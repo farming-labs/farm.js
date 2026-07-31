@@ -44,7 +44,7 @@ Provider integrations and custom integration contracts.
 - [Stripe Integration](/docs/integrations/stripe): Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and storage-backed billing snapshots.
 - [Autumn Integration](/docs/integrations/autumn): Add subscription, entitlement, and usage billing while keeping Farm's integration API and storage layer.
 - [Polar Integration](/docs/integrations/polar): Use Polar for products, checkout, customer portals, subscriptions, webhooks, and entitlement-aware app flows.
-- [Auth Integrations](/docs/integrations/auth): Use Better Auth, Auth.js, Clerk, Auth0, WorkOS, or Supabase without hand-rolling every auth route.
+- [Auth Integrations](/docs/integrations/auth): Choose built-in Farm Auth or an explicit Better Auth, Auth.js, Clerk, Auth0, WorkOS, or Supabase integration.
 - [Email Integration](/docs/integrations/email): Render React Email templates, send with Resend, schedule messages, preview templates, and receive webhooks.
 - [Jobs Integration](/docs/integrations/jobs): Define typed tasks once and run them through Trigger.dev or Inngest with trigger, schedule, batch, status, and cancel APIs.
 - [Unkey Integration](/docs/integrations/unkey): Create, verify, revoke, update, and delete API keys, plus protect routes with key verification and rate-limit checks.

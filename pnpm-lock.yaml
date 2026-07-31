@@ -264,13 +264,13 @@ importers:
         specifier: ^5.0.10
         version: 5.4.20(@types/node@20.19.21)
 
-  examples/better-auth-integration:
+  examples/farm-auth:
     dependencies:
       '@farm.js/auth':
         specifier: workspace:*
         version: link:../../packages/farm-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -280,17 +280,17 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.21
       '@types/react':
-        specifier: ^18.2.45
-        version: 18.3.26
+        specifier: ^19.0.0
+        version: 19.2.13
       '@types/react-dom':
-        specifier: ^18.2.18
-        version: 18.3.7(@types/react@18.3.26)
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
       typescript:
         specifier: ^5.3.3
         version: 5.9.3
