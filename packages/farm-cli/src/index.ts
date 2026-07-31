@@ -63,6 +63,7 @@ export {
   type FrameworkMigrationOperation,
   type FrameworkMigrationPlan,
 } from "./migrate";
+export { migrateFarmAuth, type MigrateFarmAuthOptions } from "./auth";
 export {
   createFarmUpgradePlan,
   detectFarmPackageManager,

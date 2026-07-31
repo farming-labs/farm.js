@@ -47,6 +47,7 @@ import {
 } from "../i18n/server";
 import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
+import { sendWebResponse } from "./response";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -1146,6 +1147,16 @@ export class ServerRenderer {
         });
       });
     } catch (error) {
+      if (isWebResponse(error)) {
+        if (!res.headersSent && !(res as any).writableEnded) {
+          await sendWebResponse(res, error);
+        } else if (!(res as any).writableEnded) {
+          res.end();
+        }
+        completeRender(error.status, pathname);
+        return;
+      }
+
       if (isFarmRedirectError(error)) {
         const redirect = getFarmRedirectError(error)!;
         const snapshot = getFarmI18nClientSnapshot();
@@ -1790,7 +1801,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         },
         onShellError(error) {
           didError = true;
-          if (!isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
+          if (!isWebResponse(error) && !isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
             logger.error(`SSR shell error: ${error}`);
             emitFarmEvent({
               type: "render.error",
@@ -1807,7 +1818,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         },
         onError(error) {
           didError = true;
-          if (!isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
+          if (!isWebResponse(error) && !isFarmRedirectError(error) && !isFarmNotFoundError(error)) {
             logger.error(`SSR streaming error: ${error}`);
             emitFarmEvent({
               type: "render.error",

@@ -19,6 +19,7 @@ import type { FarmImageConfig } from "./image-config";
 import type { FarmPlugin } from "./plugin";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
 import type { FarmCacheUserConfig } from "./cache";
+import type { FarmAuthUserConfig, ResolvedFarmAuthConfig } from "./auth-config";
 
 export type NitroPreset =
   | "node-server"
@@ -112,6 +113,8 @@ export interface FarmConfig {
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;
   integrations?: FarmIntegrationsUserConfig;
+  /** Farm-native authentication. `true` enables email/password auth. */
+  auth?: FarmAuthUserConfig | ResolvedFarmAuthConfig;
   plugins?: FarmPlugin[];
   migrations?: FarmMigrationsUserConfig;
   /** Map portable cron schedules to ordinary GET API routes. */

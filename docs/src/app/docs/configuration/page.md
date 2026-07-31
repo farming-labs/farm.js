@@ -86,6 +86,7 @@ mount, and shortcut together.
 | extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
 | integrations  | Registering built-in or custom integrations.                                      |
+| auth          | Enabling Farm-native email/password auth, sessions, server helpers, and hooks.    |
 | storage       | Providing storage clients and mounts for framework and integration code.          |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
 | cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |

@@ -125,6 +125,14 @@ export * from "./build/index";
 export * from "./client";
 export * from "./ssg";
 export * from "./cache";
+export type {
+  FarmAuthConfig,
+  FarmAuthDatabaseConfig,
+  FarmAuthEmailAndPasswordConfig,
+  FarmAuthSessionConfig,
+  FarmAuthUserConfig,
+  ResolvedFarmAuthConfig,
+} from "./auth-config";
 export * from "./deferred";
 export * from "./after";
 export {

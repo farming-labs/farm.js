@@ -6,7 +6,9 @@ section: "Integrations"
 
 # Better Auth Integration
 
-Use Better Auth when the app should own its auth database, methods, plugins, and session policy. Farm mounts the Better Auth handler, while Better Auth remains the source of truth for the auth API.
+Most applications should begin with [Farm Auth](/docs/auth), which reduces email/password auth to `auth: true` and supplies Farm-owned server helpers and React APIs.
+
+Use this lower-level Better Auth integration when the app specifically needs raw Better Auth plugins, adapters, callbacks, or instance APIs. Farm mounts the handler, while Better Auth remains the source of truth for the auth API.
 
 ## Add Better Auth
 
