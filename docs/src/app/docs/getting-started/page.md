@@ -15,7 +15,7 @@ Farm keeps the first project small: an app directory, a config file, package met
 **Terminal**
 
 ```bash
-pnpm create farm-app my-app
+pnpm dlx @farm.js/create-app@latest my-app
 cd my-app
 pnpm install
 pnpm dev

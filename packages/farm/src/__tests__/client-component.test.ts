@@ -128,6 +128,14 @@ describe("client component path resolution", () => {
     expect(shouldHydrateModule(pageFile, root)).toBe(true);
   });
 
+  it("preserves request-scoped server props when building ordinary hydration props", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+
+    expect(source).toMatch(
+      /return \{\s+\.\.\.\(existingProps \|\| \{\}\),\s+params: parsedParams,/,
+    );
+  });
+
   it("uses a document swap when generated SPA navigation leaves the app root", () => {
     const source = fs.readFileSync(
       path.join(process.cwd(), "src", "nitro", "universal-build.ts"),

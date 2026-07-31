@@ -142,7 +142,10 @@ async function copyDir(src: string, dest: string) {
 
   for (const entry of entries) {
     const srcPath = path.join(src, entry.name);
-    const destPath = path.join(dest, entry.name);
+    // npm excludes .gitignore files from published tarballs. Keep the template
+    // file publishable and restore its dot when generating the application.
+    const destinationName = entry.name === "gitignore" ? ".gitignore" : entry.name;
+    const destPath = path.join(dest, destinationName);
 
     if (entry.isDirectory()) {
       await copyDir(srcPath, destPath);

@@ -5,7 +5,7 @@ Create a new Farm.js application
 Farm.js is currently in beta.
 
 ```bash
-npm create @farm.js/app@beta
+npx @farm.js/create-app@latest my-app
 ```
 
 See the [Farm.js repository](https://github.com/farming-labs/farm.js) for documentation, examples, and support.

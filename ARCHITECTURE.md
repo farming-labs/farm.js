@@ -48,7 +48,7 @@ Command-line interface for development:
 - Production builds (`farm build`)
 - Project scaffolding integration
 
-#### `packages/create-farm-app/` (@farm.js/create-farm-app)
+#### `packages/create-farm-app/` (`@farm.js/create-app`)
 
 Project creation tool:
 

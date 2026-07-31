@@ -3581,6 +3581,7 @@ async function buildRouteComponentProps(pageModule, params, searchParams, path, 
   const parsedSearch = parseClientRouteSchema(schemas?.search, searchParams, 'search');
 
   return {
+    ...(existingProps || {}),
     params: parsedParams,
     search: parsedSearch,
     searchParams: schemas ? Promise.resolve(parsedSearch) : parsedSearch,

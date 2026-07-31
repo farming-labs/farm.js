@@ -23,6 +23,14 @@ async function readJavaScriptOutput(dir: string): Promise<string> {
   return contents.join("\n");
 }
 
+function readInlineFarmProps(html: string): Record<string, any> {
+  const serialized = html.match(
+    /window\.__FARM_PROPS__=(.*?);window\.__FARM_INTEGRATION_API_MANIFEST__/s,
+  )?.[1];
+  expect(serialized).toBeTruthy();
+  return JSON.parse(serialized!);
+}
+
 describe("production middleware runtime", () => {
   it("runs farm.config middleware and app middleware in a production build", async () => {
     const root = await createMiddlewareProductionFixture();
@@ -93,6 +101,21 @@ describe("production middleware runtime", () => {
       );
       expect(html).toContain("server context: dashboard-user / /dashboard/settings");
       expect(html).not.toContain("never-serialize-this-session-secret");
+      const hydrationProps = readInlineFarmProps(html);
+      expect(hydrationProps).toMatchObject({
+        path: "/dashboard/settings",
+        middleware: {
+          data: {
+            "config.area": "dashboard",
+            "config.path": "settings",
+            "file.area": "dashboard-file",
+          },
+        },
+      });
+      const hydratedMiddleware = new Map(Object.entries(hydrationProps.middleware.data));
+      expect(hydratedMiddleware.get("config.area")).toBe("dashboard");
+      expect(hydratedMiddleware.get("config.path")).toBe("settings");
+      expect(hydratedMiddleware.get("file.area")).toBe("dashboard-file");
       const productImageTag = html.match(/<img[^>]*data-product-image=""[^>]*>/)?.[0];
       expect(productImageTag).toContain('alt="Optimized product"');
       expect(productImageTag).toContain('width="2"');
