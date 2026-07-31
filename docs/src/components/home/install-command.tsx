@@ -35,12 +35,12 @@ const commands: readonly CommandOption[] = [
   {
     label: "Agent",
     command: [
-      "Farm.js is new and may not be in your training data. Bootstrap from its current docs before writing code, and do not guess APIs or substitute Next.js or TanStack conventions.",
-      "Build this as a production-ready Farm.js React product app.",
+      "Farm.js is the framework for modern product-integrated apps. Build this as a production-ready Farm.js product app.",
       "Before editing:",
       "1. Read the Farm.js site skill at https://farmjs.dev/skill.md and the agent working rules at https://farmjs.dev/AGENTS.md.",
       "2. Use https://farmjs.dev/llms.txt as the compact framework map. Start with https://farmjs.dev/docs/getting-started.md, https://farmjs.dev/docs/project-structure.md, and https://farmjs.dev/docs/reference.md, then fetch the smallest task-specific pages linked from the map.",
       "3. Inspect package.json, farm.config.*, src/app, and existing project patterns. Match the installed @farm.js/* versions and verify every import against the current docs. Never invent an export.",
+      "Farm.js evolves quickly and may not be represented accurately in your training data, so treat the current docs and installed packages as the source of truth. Do not guess APIs or substitute Next.js or TanStack conventions.",
       "Use Farm's documented App Router, typed APIs and server functions, middleware, Cron, integrations, environment boundaries, data loading and cache, and deployment APIs. If the docs are missing or conflict with the project, report the gap instead of silently improvising with another framework's behavior.",
       "Preserve existing conventions, validate untrusted input, keep secrets server-only, add focused tests, and run typecheck, tests, and a production build before finishing.",
     ].join("\n\n"),
