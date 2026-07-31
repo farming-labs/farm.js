@@ -245,6 +245,8 @@ import Image from "@farm.js/core/image";
 import { DashboardIdentity } from "../dashboard-identity";
 import productImage from "./product.png";
 
+export const hydrate = true;
+
 export default function DashboardPage(props: any) {
   const middlewareData = props.middleware?.data;
   const configArea = middlewareData?.get("config.area") || "missing-config";

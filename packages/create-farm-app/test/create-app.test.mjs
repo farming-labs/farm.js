@@ -77,6 +77,15 @@ test("generates a buildable starter application", async () => {
       "utf8",
     );
     assert.doesNotMatch(generatedConfig, /srcDir/);
+
+    const generatedGitignore = await readFile(
+      path.join(tempDir, "generated-app/.gitignore"),
+      "utf8",
+    );
+    assert.match(generatedGitignore, /^\.env$/m);
+    assert.match(generatedGitignore, /^\.env\.local$/m);
+    assert.match(generatedGitignore, /^\*\.sqlite$/m);
+    assert.match(generatedGitignore, /^\*\.sqlite-\*$/m);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

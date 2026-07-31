@@ -48,7 +48,7 @@ farm.js/
 ├── packages/
 │   ├── farm/              # Core framework
 │   ├── farm-cli/          # @farm.js/cli tools
-│   └── create-farm-app/   # @farm.js/create-farm-app tool
+│   └── create-farm-app/   # @farm.js/create-app tool
 ├── examples/              # Example applications
 ├── docs/                  # Documentation site
 ├── playground/            # Development testing

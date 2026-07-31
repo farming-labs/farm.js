@@ -3287,12 +3287,14 @@ function serializeFarmInlineValue(value) {
     .replace(/\\u2029/g, "\\\\u2029");
 }
 
-function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots) {
+function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, pageProps) {
   const integrationManifest = ${
     hasRuntimeIntegrationConfig ? "getRegisteredIntegrationAPIManifest()" : "{}"
   };
   const serializedRouteSlots = serializeFarmInlineValue(selectedRouteSlots || []);
-  let source = 'window.__FARM_INTEGRATION_API_MANIFEST__=' +
+  const serializedPageProps = serializeFarmInlineValue(pageProps || {});
+  let source = 'window.__FARM_PROPS__=' + serializedPageProps +
+    ';window.__FARM_INTEGRATION_API_MANIFEST__=' +
     serializeFarmInlineValue(integrationManifest) +
     ';window.__FARM_ROUTE_SLOTS__=' + serializedRouteSlots + ';';
   if (typeof canonicalPath === "string" && canonicalPath.startsWith("/")) {
@@ -4788,6 +4790,23 @@ async function handleFarmRequestInContext(
             return { ...slot, props: slotProps };
           }),
         );
+        const clientMiddleware = middlewareData?.size
+          ? { data: Object.fromEntries(middlewareData) }
+          : undefined;
+        const clientPageProps = {
+          params: pageProps.params,
+          search: pageProps.search ?? searchParamsObj,
+          searchParams: pageProps.search ?? searchParamsObj,
+          ...("data" in pageProps ? { data: pageProps.data } : {}),
+          ...(pageProps.__farmCanonicalPath
+            ? { __farmCanonicalPath: pageProps.__farmCanonicalPath }
+            : {}),
+          ...(pageProps.__farmRoutePropsResolved
+            ? { __farmRoutePropsResolved: true }
+            : {}),
+          path: pathname,
+          ...(clientMiddleware ? { middleware: clientMiddleware } : {}),
+        };
         const routeSlotPayload = renderedRouteSlots.map(function(slot) {
           return {
             name: slot.name,
@@ -4802,6 +4821,7 @@ async function handleFarmRequestInContext(
               searchParams: slot.props.search || searchParamsObj,
               ...("data" in slot.props ? { data: slot.props.data } : {}),
               path: pathname,
+              ...(clientMiddleware ? { middleware: clientMiddleware } : {}),
             },
           };
         });
@@ -4961,7 +4981,8 @@ async function handleFarmRequestInContext(
           const streamSuffix = '</div>\\n' +
             '  ' + renderFarmClientBootstrapScript(
               pageProps.__farmCanonicalPath,
-              routeSlotPayload
+              routeSlotPayload,
+              clientPageProps
             ) + '\\n' +
             '  <script type="module" src="/farm-client.js"></script>\\n' +
             '</body>\\n</html>';
@@ -5021,7 +5042,8 @@ async function handleFarmRequestInContext(
               /<\\/body>/i,
               '  ' + renderFarmClientBootstrapScript(
                 pageProps.__farmCanonicalPath,
-                routeSlotPayload
+                routeSlotPayload,
+                clientPageProps
               ) + '\\n' +
                 '  <script type="module" src="/farm-client.js"></script>\\n</body>',
             );
@@ -5043,7 +5065,7 @@ async function handleFarmRequestInContext(
 </head>
 <body>
   <div id="root">\${html}</div>
-  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload)}
+  \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload, clientPageProps)}
   <script type="module" src="/farm-client.js"></script>
 </body>
 </html>\`;
