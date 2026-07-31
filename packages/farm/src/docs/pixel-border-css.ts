@@ -414,8 +414,8 @@ code:not(pre code) {
 }
 
 .code-block-header {
-  min-height: 28px;
-  padding: 3px 7px 3px 9px;
+  min-height: 34px;
+  padding: 4px 8px 4px 10px;
 }
 
 .code-block-title {
@@ -629,8 +629,8 @@ code:not(pre code) {
   }
 
   .code-block-header {
-    min-height: 26px;
-    padding: 2px 6px 2px 8px;
+    min-height: 32px;
+    padding: 3px 7px 3px 9px;
   }
 
   .code-copy-floating {
@@ -670,38 +670,30 @@ code:not(pre code) {
 
 @media (max-width: 640px) {
   .code-block-header {
-    min-height: 22px;
-    padding: 1px 4px 1px 7px;
-  }
-
-  .code-block-title {
-    font-size: 9px;
-  }
-
-  .code-copy {
-    width: 20px;
-    height: 20px;
-  }
-
-  .code-copy svg {
-    width: 12px;
-    height: 12px;
+    min-height: 30px;
+    padding: 3px 6px 3px 8px;
   }
 
   .code-copy-floating {
-    top: 5px;
-    right: 5px;
+    top: 7px;
+    right: 7px;
   }
 
   #nd-docs-layout figure.shiki.code-block pre,
   .code-block pre {
-    padding: 10px !important;
-    font-size: 11px;
-    line-height: 1.55;
+    padding: 12px !important;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  #nd-docs-layout figure.shiki.code-block-plain pre,
+  .code-block-plain pre {
+    padding: 16px 44px 16px 14px !important;
+    line-height: 1.65;
   }
 
   .sh__line {
-    min-height: 1.55em;
+    min-height: 1.6em;
   }
 }
 
