@@ -266,21 +266,12 @@ importers:
 
   examples/better-auth-integration:
     dependencies:
-      '@better-auth/passkey':
-        specifier: ^1.3.1
-        version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
-      '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
-        version: link:../../packages/farm-better-auth
+      '@farm.js/auth':
+        specifier: workspace:*
+        version: link:../../packages/farm-auth
       '@farm.js/core':
         specifier: 0.1.0-beta.2
         version: link:../../packages/farm
-      better-auth:
-        specifier: ^1.3.1
-        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
-      better-sqlite3:
-        specifier: ^12.6.2
-        version: 12.8.0
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -291,9 +282,6 @@ importers:
       '@farm.js/cli':
         specifier: 0.1.0-beta.2
         version: link:../../packages/farm-cli
-      '@types/better-sqlite3':
-        specifier: ^7.6.13
-        version: 7.6.13
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.21
@@ -1337,6 +1325,38 @@ importers:
       '@farm.js/integration-utils':
         specifier: workspace:*
         version: link:../farm-integration-utils
+
+  packages/farm-auth:
+    dependencies:
+      better-auth:
+        specifier: 1.5.5
+        version: 1.5.5(@prisma/client@6.19.2)(better-sqlite3@12.8.0)(mongodb@6.21.0)(prisma@6.19.2)(react-dom@19.2.8)(react@19.2.8)
+      pg:
+        specifier: 8.20.0
+        version: 8.20.0
+    optionalDependencies:
+      better-sqlite3:
+        specifier: 12.8.0
+        version: 12.8.0
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.13
+        version: 7.6.13
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      '@types/react':
+        specifier: ^18.2.45
+        version: 18.3.26
+      react:
+        specifier: 19.2.8
+        version: 19.2.8
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vitest:
+        specifier: ^1.1.0
+        version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
   packages/farm-authjs:
     dependencies:

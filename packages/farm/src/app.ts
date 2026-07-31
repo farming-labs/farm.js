@@ -27,6 +27,7 @@ import {
 } from "./i18n/server";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { configureFarmCache } from "./cache";
+import { resolveFarmAuthConfig, type ResolvedFarmAuthConfig } from "./auth-config";
 
 type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images" | "i18n"> & {
   docs: FarmDocsResolvedConfig;
@@ -37,6 +38,7 @@ type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images" | "
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
+  auth: ResolvedFarmAuthConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -123,6 +125,7 @@ export class FarmApp {
       deploy: config.deploy || {},
       storage: config.storage || {},
       cache: config.cache || {},
+      auth: isResolvedAuthConfig(config.auth) ? config.auth : resolveFarmAuthConfig(config.auth),
       integrations: config.integrations || {},
       plugins: config.plugins || [],
       migrations: config.migrations || { commands: [] },
@@ -202,6 +205,16 @@ export class FarmApp {
 
 function isResolvedI18nConfig(value: FarmConfig["i18n"]): value is ResolvedFarmI18nConfig {
   return Boolean(value && typeof value === "object" && "enabled" in value);
+}
+
+function isResolvedAuthConfig(value: FarmConfig["auth"]): value is ResolvedFarmAuthConfig {
+  return Boolean(
+    value &&
+    typeof value === "object" &&
+    "enabled" in value &&
+    "emailAndPassword" in value &&
+    "database" in value,
+  );
 }
 
 export function createFarmApp(config?: FarmConfig, viteServer?: ViteDevServer): FarmApp {

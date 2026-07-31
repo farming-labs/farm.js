@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { authClient } from "../lib/auth-client";
+import { signIn, signUp } from "@farm.js/auth/client";
 
 interface AuthFormProps {
   mode: "sign-in" | "sign-up";
@@ -28,8 +28,8 @@ export function AuthForm({ mode }: AuthFormProps) {
 
     const response =
       mode === "sign-in"
-        ? await authClient.signIn.email({ email, password })
-        : await authClient.signUp.email({ email, password, name });
+        ? await signIn({ email, password })
+        : await signUp({ email, password, name });
 
     if (response.error) {
       setError(response.error.message ?? "Authentication failed");
@@ -45,8 +45,8 @@ export function AuthForm({ mode }: AuthFormProps) {
       <h1>{mode === "sign-in" ? "Sign In" : "Create Account"}</h1>
       <p>
         {mode === "sign-in"
-          ? "Use the real Better Auth client to create a session and enter the dashboard."
-          : "Create a demo account through Better Auth, then continue to the dashboard."}
+          ? "Use the Farm Auth client to create a session and enter the dashboard."
+          : "Create a demo account through Farm Auth, then continue to the dashboard."}
       </p>
       <form className="mock-form" onSubmit={submit}>
         {mode === "sign-up" ? (

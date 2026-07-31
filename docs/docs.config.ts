@@ -126,6 +126,7 @@ const sidebar = [
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
+      { label: "Built-in Authentication", slug: "auth", icon: "lock" },
       { label: "Images", slug: "images", icon: "image" },
       { label: "Environment Functions", slug: "environment-functions", icon: "code" },
       { label: "Middleware", slug: "middleware", icon: "shield" },

@@ -80,6 +80,26 @@ program
     }
   });
 
+const authCommand = program.command("auth").description("Manage Farm-native authentication");
+
+authCommand
+  .command("migrate")
+  .description("Create or update the Farm Auth database schema")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .action(async (options) => {
+    try {
+      const { migrateFarmAuth } = require("../dist/index.js");
+      await migrateFarmAuth({
+        root: options.root,
+        configPath: options.config,
+      });
+    } catch (error) {
+      console.error("Failed to migrate Farm Auth:", error);
+      process.exit(1);
+    }
+  });
+
 program
   .command("upgrade")
   .description("Upgrade installed Farm.js packages to a stable or beta release")

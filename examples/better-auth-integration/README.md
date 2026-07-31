@@ -1,10 +1,17 @@
-# Better Auth Integration Example
+# Farm Auth Example
 
-This example uses the real `better-auth` package with:
+This example uses Farm-native authentication with:
 
-- `src/lib/auth.ts` for the Better Auth server instance
-- `src/lib/auth-client.ts` for the React client
-- local SQLite storage via `better-sqlite3`
-- `.env.example` for `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, and optional social providers
+- `auth: true` in `farm.config.ts`
+- email/password sign-up and sign-in enabled by default
+- `@farm.js/auth/client` for browser functions and the `useAuth` hook
+- `@farm.js/auth/server` for request-scoped `auth.session()` and `auth.user()`
+- lazy local SQLite storage without database work during config loading
 
-Farm still handles the catch-all auth route internally, so there is no manual `src/app/api/auth/[...auth]/route.ts` file in the example.
+There is no app-local auth instance or manual `src/app/api/auth/[...auth]/route.ts`.
+
+For production, set `DATABASE_URL`, `FARM_AUTH_SECRET`, and `FARM_AUTH_URL`, then run:
+
+```bash
+pnpm auth:migrate
+```

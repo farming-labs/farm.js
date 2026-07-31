@@ -93,6 +93,29 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).not.toContain("Internal Server Error");
   });
 
+  it("preserves a Response thrown during server rendering", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer({
+      [routeModulePath]: {
+        default: function DashboardPage() {
+          throw Response.json(
+            { error: "Authentication required", code: "FARM_AUTH_REQUIRED" },
+            { status: 401, headers: { "x-auth-required": "true" } },
+          );
+        },
+      },
+    });
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers.get("x-auth-required")).toBe("true");
+    expect(JSON.parse(response.body)).toEqual({
+      error: "Authentication required",
+      code: "FARM_AUTH_REQUIRED",
+    });
+  });
+
   it("renders generated metadata and route image file tags", async () => {
     const response = createMockResponse();
     const renderer = createRenderer(
@@ -499,7 +522,9 @@ function createMockResponse(): MockResponse {
       cb?: (error?: Error | null) => void,
     ) {
       this.headersSent = true;
-      this.body += Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk ?? "");
+      this.body += ArrayBuffer.isView(chunk)
+        ? Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength).toString("utf8")
+        : String(chunk ?? "");
       const callback = typeof _encoding === "function" ? _encoding : cb;
       callback?.();
       return true;

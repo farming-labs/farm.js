@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { authClient } from "../../lib/auth-client";
+import { getSession, signOut } from "@farm.js/auth/client";
 
 type SessionState =
   | { status: "loading" }
@@ -14,7 +14,7 @@ export default function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
 
-    authClient.getSession().then((response) => {
+    getSession().then((response) => {
       if (cancelled) return;
 
       if (response.error || !response.data?.user) {
@@ -37,7 +37,7 @@ export default function DashboardPage() {
   }, []);
 
   async function logout() {
-    await authClient.signOut();
+    await signOut();
     window.location.href = "/";
   }
 

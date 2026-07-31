@@ -11,12 +11,6 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
-      "@farm.js/better-auth": [
-        "../../packages/farm-better-auth/dist/index.d.ts"
-      ],
-      "@farm.js/better-auth/*": [
-        "../../packages/farm-better-auth/dist/*"
-      ],
       "@farm.js/core": [
         "../../packages/farm/dist/index.d.ts"
       ],

@@ -19,7 +19,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/docs-integration        | Docs runtime and /api/docs machine routes.                                                      |
 | examples/stripe-integration      | Stripe checkout, portal, session, webhooks.                                                     |
 | examples/stripe-integrations/\*  | Stripe with Prisma, Drizzle, SQLite, org billing.                                               |
-| examples/better-auth-integration | Better Auth routes with local SQLite.                                                           |
+| examples/better-auth-integration | Farm-native auth config, client APIs, sessions, and local SQLite.                               |
 | examples/jobs-trigger            | Trigger.dev jobs runtime.                                                                       |
 | examples/jobs-inngest            | Inngest jobs runtime.                                                                           |
 | examples/eve-agent               | Eve instructions, same-origin chat UI, managed development, and Vercel composition.             |
@@ -43,7 +43,7 @@ pnpm --dir examples/basic dev
 | API routes           | Typed callers, validation errors, success responses, and generated types.                                      |
 | Docs integration     | `/docs`, markdown mirrors, docs API routes, page actions, and search.                                          |
 | Stripe               | Products, checkout redirect, portal redirect, session/status reads, and webhook handling.                      |
-| Better Auth          | Sign-up, sign-in, session read, logout, and protected routes.                                                  |
+| Farm Auth            | Sign-up, sign-in, session read, logout, and authenticated server requests.                                     |
 | Jobs                 | Trigger, batch trigger, schedule, status, and cancel calls.                                                    |
 | Eve agent            | Farm page rendering, `/eve/v1/health`, streaming messages, and Vercel output.                                  |
 | Cloudflare agent     | Farm page rendering, WebSocket connection, synchronized state, callable RPC, and Wrangler dry-run deployment.  |

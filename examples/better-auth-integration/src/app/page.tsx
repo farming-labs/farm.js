@@ -5,12 +5,12 @@ export default function Page() {
     <main className="page-shell">
       <section className="playground">
         <div className="hero">
-          <span className="eyebrow">Better Auth Flow</span>
+          <span className="eyebrow">Farm Auth Flow</span>
           <h1>Sign in, open the dashboard, and log out.</h1>
           <p>
-            Farm wraps the real Better Auth catch-all route. The flow below uses
-            a real <code>auth.ts</code> and <code>auth-client.ts</code> setup
-            with SQLite instead of a mock auth handler.
+            Farm Auth provides the catch-all route, local database, server
+            helpers, and client API. Email and password authentication works
+            without a separate auth instance or client setup.
           </p>
         </div>
 
@@ -20,7 +20,7 @@ export default function Page() {
             <div className="link-grid">
               <a className="nav-card" href="/sign-in">
                 <strong>Sign In</strong>
-                <span>Use the Better Auth client to create a session.</span>
+                <span>Use the Farm Auth client to create a session.</span>
               </a>
               <a className="nav-card" href="/sign-up">
                 <strong>Sign Up</strong>

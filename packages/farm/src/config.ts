@@ -54,6 +54,12 @@ import {
 import { resolveFarmI18nConfig } from "./i18n/config";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
 import type { FarmCacheUserConfig } from "./cache";
+import {
+  resolveFarmAuthConfig,
+  resolveFarmAuthIntegration,
+  type FarmAuthUserConfig,
+  type ResolvedFarmAuthConfig,
+} from "./auth-config";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -111,6 +117,14 @@ export type {
   FarmI18nUserConfig,
   ResolvedFarmI18nConfig,
 } from "./i18n/types";
+export type {
+  FarmAuthConfig,
+  FarmAuthDatabaseConfig,
+  FarmAuthEmailAndPasswordConfig,
+  FarmAuthSessionConfig,
+  FarmAuthUserConfig,
+  ResolvedFarmAuthConfig,
+} from "./auth-config";
 
 export interface RedirectConfig {
   source: string;
@@ -209,6 +223,12 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   extends?: readonly FarmLayerEntry[];
   plugins?: FarmPlugin[];
   integrations?: FarmIntegrationsUserConfig;
+  /**
+   * Farm-native authentication. `true` enables email/password auth with
+   * server helpers from `@farm.js/auth/server` and React APIs from
+   * `@farm.js/auth/client`.
+   */
+  auth?: FarmAuthUserConfig;
   /** Shared application data, route, ISR, and PPR cache. */
   cache?: FarmCacheUserConfig;
   migrations?: FarmMigrationsUserConfig;
@@ -285,6 +305,7 @@ export interface ResolvedFarmConfig extends Required<
     | "devtools"
     | "images"
     | "i18n"
+    | "auth"
   >
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
@@ -305,6 +326,7 @@ export interface ResolvedFarmConfig extends Required<
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
+  auth: ResolvedFarmAuthConfig;
   routeRules: FarmRouteRules;
 }
 
@@ -700,6 +722,19 @@ export async function resolveConfig(
   const mdx = resolveMdxConfig(userConfig.mdx);
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
+  const auth = resolveFarmAuthConfig(userConfig.auth);
+  if (auth.enabled && userConfig.integrations?.auth) {
+    throw new Error(
+      "Choose either the top-level `auth` config or `integrations.auth`; they cannot both own the auth route.",
+    );
+  }
+  const nativeAuthIntegration = await resolveFarmAuthIntegration(auth, {
+    root,
+    mode,
+  });
+  const integrations = nativeAuthIntegration
+    ? { ...userConfig.integrations, auth: nativeAuthIntegration }
+    : userConfig.integrations || {};
   const generateBuildId = userConfig.generateBuildId || (() => `build-${Date.now()}`);
   const deploymentId = normalizeFarmDeploymentId(
     userConfig.deploymentId ||
@@ -729,14 +764,15 @@ export async function resolveConfig(
     devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},
     cache: userConfig.cache || {},
+    auth,
     suppressLintOnLink: userConfig.suppressLintOnLink ?? false,
     experimental: {
       serverComponents: false,
       serverActions: false,
       ...userConfig.experimental,
     },
-    plugins: [...resolveIntegrationPlugins(userConfig.integrations), ...(userConfig.plugins || [])],
-    integrations: userConfig.integrations || {},
+    plugins: [...resolveIntegrationPlugins(integrations), ...(userConfig.plugins || [])],
+    integrations,
     trailingSlash: userConfig.trailingSlash ?? false,
     redirects: () => [...redirects, ...routeRuleRedirects],
     rewrites: () => rewrites,

@@ -334,31 +334,33 @@ data?.users[0]?.name;
 const integrationCodeTabs = [
   {
     id: "integrations",
-    label: "src/lib/integrations.ts",
+    label: "farm.config.ts",
     language: "ts",
-    highlightLines: [5, 6, 7, 8, 9],
-    code: `import { betterAuth, resend, stripe } from "@farm.js/integrations";
-import { auth } from "./auth";
+    highlightLines: [5, 7, 8, 9, 10, 11],
+    code: `import { defineConfig } from "@farm.js/core";
+import { resend, stripe } from "@farm.js/integrations";
 import { emailTemplates } from "./email";
-export const integrations = {
-    auth: betterAuth({ instance: auth }), // Better Auth
-    billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }), // Stripe
-    email: resend({ // Resend
-        apiKey: process.env.RESEND_API_KEY,
-        templates: emailTemplates,
-    }),
-} as const;`,
+export default defineConfig({
+    auth: true,
+    integrations: {
+        billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }),
+        email: resend({
+            apiKey: process.env.RESEND_API_KEY,
+            templates: emailTemplates,
+        }),
+    },
+});`,
   },
   {
     id: "config",
-    label: "farm.config.ts",
+    label: "Server and client APIs",
     language: "ts",
-    highlightLines: [4],
-    code: `import { defineConfig } from "@farm.js/core";
-import { integrations } from "./src/lib/integrations";
-export default defineConfig({
-    integrations,
-});`,
+    highlightLines: [2, 5],
+    code: `import { auth } from "@farm.js/auth/server";
+const user = await auth.user({ required: true });
+
+import { useAuth } from "@farm.js/auth/client";
+const { user, signIn, signOut } = useAuth();`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
@@ -443,7 +445,7 @@ const routeCodeTabs = [
     code: `export const ProductRoute = ${createRouteHelper}("/products/[id]", {
     params: ProductParams,
     data: {
-        before: ({ context }) => requireUser(context.session),
+        before: () => auth.user({ required: true }),
         main: ({ params, before }) => getProduct(params.id, before.id),
         after: ({ data }) => recordView(data.id),
     },

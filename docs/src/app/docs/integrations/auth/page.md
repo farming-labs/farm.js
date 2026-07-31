@@ -6,6 +6,18 @@ section: "Integrations"
 
 # Auth Integrations
 
+For the simplest email/password application, start with [Farm's built-in Authentication](/docs/auth):
+
+```ts
+export default defineConfig({
+  auth: true,
+});
+```
+
+This is a top-level framework feature, not an `integrations.auth` provider. It supplies a Farm-owned server API and React hook without a provider instance in application config.
+
+The integration path remains fully supported when an application needs provider-specific behavior or wants to own a lower-level auth engine. For example, `integrations.auth: betterAuth({ instance })` lets the application control the complete Better Auth configuration. The two paths are alternatives: configure either top-level `auth` or `integrations.auth`, never both.
+
 Farm supports two auth integration styles:
 
 - **Farm-owned auth flows** create login, callback, logout, and session or profile routes. Auth0, WorkOS, and Supabase use this model.
@@ -85,7 +97,7 @@ The available operation names depend on the provider:
 | WorkOS   | `login.get`, `signup.get`, `logout.post`, `session.get`                |
 | Supabase | `login.post`, `signup.post`, `oauth.get`, `logout.post`, `session.get` |
 
-Auth.js, Better Auth, and Clerk do not create this Farm auth caller tree. Use their native helpers and clients instead.
+Auth.js, Better Auth, and Clerk do not create this Farm auth caller tree. Use their native helpers and clients instead. The top-level Farm Auth feature uses `@farm.js/auth/server` and `@farm.js/auth/client`.
 
 ## Protected routes
 

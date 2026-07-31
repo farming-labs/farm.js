@@ -10,6 +10,7 @@ export default defineConfig({
     "packages/create-farm-app/package.json",
     "packages/farm-ai/package.json",
     "packages/farm-auth0/package.json",
+    "packages/farm-auth/package.json",
     "packages/farm-authjs/package.json",
     "packages/farm-autumn/package.json",
     "packages/farm-better-auth/package.json",
