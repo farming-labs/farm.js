@@ -41,7 +41,7 @@ export type InferEnv<TConfig> =
     : ResolvedFarmEnv;
 
 /**
- * Augmented by generated src/farm-env.d.ts for project-specific autocomplete.
+ * Augmented by generated src/farm.d.ts for project-specific autocomplete.
  */
 export interface FarmEnvTypes {}
 

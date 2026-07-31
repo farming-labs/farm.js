@@ -30,7 +30,7 @@ export default function ProductsPage() {
 }
 ```
 
-The generated `src/farm-images.d.ts` file types static imports as `StaticImageData`, including `src`, `width`, `height`, and `blurDataURL`. Import with `?url` when a library needs only the original asset URL:
+Farm provides static image declarations directly from `@farm.js/core`, so image imports are typed as `StaticImageData` without generating an application file. The metadata includes `src`, `width`, `height`, and `blurDataURL`. Import with `?url` when a library needs only the original asset URL:
 
 ```ts
 import jacketUrl from "./jacket.png?url";

@@ -71,7 +71,7 @@ const ALL_TYPE_ARTIFACTS: TypeArtifactSelection = {
   routes: true,
   api: true,
   env: true,
-  images: true,
+  images: false,
   i18n: true,
 };
 

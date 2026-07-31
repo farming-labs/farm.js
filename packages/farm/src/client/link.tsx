@@ -25,7 +25,7 @@ export type PrefetchBehavior = false | "intent" | "viewport" | "render" | "none"
 type PrefetchLegacy = boolean | "hover" | "viewport" | "none";
 
 /**
- * Augment this interface via your generated farm-routes.d.ts so Link href is typed
+ * Augment this interface via the generated farm.d.ts so Link href is typed
  * without passing a generic. Defaults to string when not augmented.
  */
 export interface LinkDefaultRoute {}

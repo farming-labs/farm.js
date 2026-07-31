@@ -23,7 +23,7 @@ Use `rg` first when locating files. Read the closest example before adding new c
    - Pages/layouts: `src/app/**`
    - Integration setup: `src/lib/integrations.ts`
    - Typed client export: `src/lib/api.ts`
-   - Generated route types: `src/farm-routes.d.ts`
+   - Generated project types: `src/farm.d.ts`
 2. Match existing patterns in the nearest example.
 3. For provider integrations, verify both static types and production build.
 4. If touching Stripe/Prisma examples, ensure `prisma generate` runs immediately before `tsc` or `farm build`.
@@ -86,7 +86,7 @@ Common config fields:
 - `src/app/about/page.tsx` maps to `/about`
 - `src/app/users/[id]/page.tsx` maps to `/users/:id`
 - `src/app/docs/[...slug]/page.tsx` maps to catch-all docs paths
-- Farm generates `src/farm-routes.d.ts` for typed `Link href`
+- Farm writes typed `Link href` declarations into `src/farm.d.ts`
 - Typed `href` supports query strings and hashes, for example `/users/123?tab=profile`
 
 Page shape:
@@ -129,8 +129,8 @@ export default defineConfig({
 });
 ```
 
-Put nested JSON catalogs at `src/messages/<locale>.json`. Farm generates
-`src/farm-i18n.d.ts`, so message keys and ICU variables are checked by TypeScript.
+Put nested JSON catalogs at `src/messages/<locale>.json`. Farm writes their declarations into
+`src/farm.d.ts`, so message keys and ICU variables are checked by TypeScript.
 
 Server modules import from `@farm.js/core/i18n/server`:
 

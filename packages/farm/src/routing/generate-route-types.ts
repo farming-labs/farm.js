@@ -70,16 +70,24 @@ const DEFAULT_OUT_FILE = "farm-routes.d.ts";
  * and write a .d.ts file for typed Link href.
  */
 export async function generateRouteTypes(options: GenerateRouteTypesOptions): Promise<string> {
-  const {
-    root,
-    srcDir = "src",
-    outFile = DEFAULT_OUT_FILE,
-    extraRoutes = [],
-    suppressLintOnLink = false,
-  } = options;
-  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
+  const root = path.resolve(options.root);
+  const srcDir = options.srcDir || "src";
+  const outFile = options.outFile || DEFAULT_OUT_FILE;
+  const outPath = path.isAbsolute(outFile) ? outFile : path.join(root, srcDir, outFile);
+  const content = await createRouteTypeDeclarations(options, outPath);
 
-  const outPath = path.join(root, srcDir, outFile);
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  writeFileIfChanged(outPath, content);
+
+  return outPath;
+}
+
+export async function createRouteTypeDeclarations(
+  options: GenerateRouteTypesOptions,
+  outPath: string,
+): Promise<string> {
+  const { root, srcDir = "src", extraRoutes = [], suppressLintOnLink = false } = options;
+  const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
 
   const patterns = new Set<string>();
 
@@ -127,20 +135,21 @@ export async function generateRouteTypes(options: GenerateRouteTypesOptions): Pr
     : patternLiterals.length
       ? patternLiterals.join(" | ")
       : "never";
+  const routeTypesImportPath = `./${path.basename(outPath).replace(/\.d\.ts$/, "")}`;
   const augmentationBlock = suppressLintOnLink
     ? ""
     : `
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
-    _: import("./farm-routes").RoutePath;
-    pattern: import("./farm-routes").RoutePattern;
+    _: import(${JSON.stringify(routeTypesImportPath)}).RoutePath;
+    pattern: import(${JSON.stringify(routeTypesImportPath)}).RoutePattern;
   }
 }
 
 declare module "@farm.js/core" {
   interface LinkDefaultRoute {
-    _: import("./farm-routes").RoutePath;
-    pattern: import("./farm-routes").RoutePattern;
+    _: import(${JSON.stringify(routeTypesImportPath)}).RoutePath;
+    pattern: import(${JSON.stringify(routeTypesImportPath)}).RoutePattern;
   }
   // Ensure root import ("@farm.js/core") uses the same typed Link signature as client entry.
   const Link: typeof import("@farm.js/core/client").Link;
@@ -149,8 +158,8 @@ declare module "@farm.js/core" {
 // Internal declaration path used by @farm.js/core root type re-exports.
 declare module "@farm.js/core/dist/client.js" {
   interface LinkDefaultRoute {
-    _: import("./farm-routes").RoutePath;
-    pattern: import("./farm-routes").RoutePattern;
+    _: import(${JSON.stringify(routeTypesImportPath)}).RoutePath;
+    pattern: import(${JSON.stringify(routeTypesImportPath)}).RoutePattern;
   }
 }
 `;
@@ -164,8 +173,5 @@ export type RoutePath = ${routePathType};
 export type RoutePattern = ${routePatternType};${augmentationBlock}
 `;
 
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  writeFileIfChanged(outPath, content);
-
-  return outPath;
+  return content;
 }

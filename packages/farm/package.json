@@ -109,6 +109,7 @@
         "./dist/agent-runtime.d.ts"
       ],
       "image": [
+        "./types/image.d.ts",
         "./dist/image.d.ts"
       ],
       "image/server": [
@@ -406,7 +407,7 @@
       "require": "./dist/agent-runtime.cjs"
     },
     "./image": {
-      "types": "./dist/image.d.ts",
+      "types": "./types/image.d.ts",
       "import": "./dist/image.mjs",
       "require": "./dist/image.cjs"
     },
