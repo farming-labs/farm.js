@@ -2,9 +2,7 @@ import path from 'node:path';
 import { localStorage, postgresStorage, sqliteStorage } from '@farm.js/core/storage';
 
 export const STORAGE_DEMO_POSTGRES_URL =
-  process.env.DATABASE_URL ??
-  process.env.FARM_TEST_POSTGRES_URL ??
-  'postgresql://neondb_owner:npg_vjgLO9k0ZHIY@ep-wandering-heart-amad1lvi-pooler.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
+  process.env.DATABASE_URL ?? process.env.FARM_TEST_POSTGRES_URL;
 
 export const STORAGE_DEMO_MOUNTS = {
   local: 'storage-demo-local',
