@@ -1600,8 +1600,9 @@ function IntegrationsSection() {
               Bring the tools you already use
             </h2>
             <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
-              Start with built-in Farm Auth, then add integrations for billing, email, jobs,
-              storage, agents, API keys, and UI—or connect your own.
+              Start with built-in Farm Auth, keep full control with Better Auth, then add
+              integrations for billing, email, jobs, storage, agents, API keys, and UI—or connect
+              your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">
               <ButtonLink
@@ -1615,7 +1616,14 @@ function IntegrationsSection() {
                 icon={<GithubIcon className="size-4" />}
                 variant="secondary"
               >
-                Auth Starter
+                Farm Auth Starter
+              </ButtonLink>
+              <ButtonLink
+                href="https://github.com/farming-labs/farmjs-better-auth-starter"
+                icon={<GithubIcon className="size-4" />}
+                variant="secondary"
+              >
+                Better Auth Starter
               </ButtonLink>
             </div>
           </div>
