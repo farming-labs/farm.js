@@ -1607,21 +1607,7 @@ function IntegrationsSection() {
                 href="/docs/integrations"
                 icon={<BookOpenText aria-hidden className="size-4" strokeWidth={1.5} />}
               >
-                Integrations
-              </ButtonLink>
-              <ButtonLink
-                href="https://github.com/farming-labs/farmjs-auth-starter"
-                icon={<GithubIcon className="size-4" />}
-                variant="secondary"
-              >
-                Farm Auth Starter
-              </ButtonLink>
-              <ButtonLink
-                href="https://github.com/farming-labs/farmjs-better-auth-starter"
-                icon={<GithubIcon className="size-4" />}
-                variant="secondary"
-              >
-                Better Auth Starter
+                Explore Integrations
               </ButtonLink>
             </div>
           </div>
