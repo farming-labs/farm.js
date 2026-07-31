@@ -12,6 +12,8 @@ This lower-level integration remains the supported extension path when the app n
 
 Use either top-level `auth` or `integrations.auth`, not both. They are alternative owners of the same auth catch-all route.
 
+For a complete application-owned example, use the [Farm.js Better Auth Starter](https://github.com/farming-labs/farmjs-better-auth-starter). It keeps the Better Auth instance, database adapter, native client, and extension points explicit.
+
 ## Add Better Auth
 
 **Terminal**

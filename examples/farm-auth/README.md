@@ -10,6 +10,8 @@ This example uses Farm-native authentication with:
 
 There is no app-local auth instance or manual `src/app/api/auth/[...auth]/route.ts`.
 
+For a standalone, deployable version of this flow, see the [Farm.js Auth Starter](https://github.com/farming-labs/farmjs-auth-starter).
+
 For production, set `DATABASE_URL`, `FARM_AUTH_SECRET`, and `FARM_AUTH_URL`, then run:
 
 ```bash

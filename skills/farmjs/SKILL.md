@@ -385,7 +385,7 @@ Read the matching example before editing:
 
 - `examples/auth0-integration`
 - `examples/authjs-integration`
-- `examples/better-auth-integration`
+- `examples/farm-auth`
 - `examples/clerk-integration`
 - `examples/supabase-integration`
 - `examples/workos-integration`

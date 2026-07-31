@@ -112,17 +112,34 @@ export function HelloButton() {
 }
 ```
 
+## Add authentication
+
+For the default email/password flow, install the optional Farm Auth runtime and enable one config key:
+
+```bash
+pnpm add @farm.js/auth
+```
+
+```ts
+export default defineConfig({
+  auth: true,
+});
+```
+
+The [Farm.js Auth Starter](https://github.com/farming-labs/farmjs-auth-starter) includes the complete forms, session UI, protected middleware, local SQLite setup, and production guidance.
+
 ## Add integrations later
 
 Keep the first app small. When a feature becomes provider-shaped, add it as an integration:
 
 ```bash
 farm add integration stripe --ui
-farm add integration better-auth --ui
 farm add integration unkey
 ```
 
 Integrations can contribute typed callers, routes, providers, middleware, storage schema, CLI registry components, config validation, and lifecycle hooks.
+
+Use `farm add integration better-auth --ui` instead when the application needs to own a Better Auth instance, plugins, adapters, providers, or callbacks. The [Better Auth integration guide](/docs/integrations/auth/better-auth) and [Better Auth starter](https://github.com/farming-labs/farmjs-better-auth-starter) document that explicit path.
 
 ## Next steps
 
