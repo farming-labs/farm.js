@@ -27,14 +27,14 @@ my-app/
 
 ## Common folders
 
-| Path                 | Purpose                                                          |
-| -------------------- | ---------------------------------------------------------------- |
-| src/app              | Pages, nested layouts, API routes, route boundaries, middleware. |
-| src/lib              | Shared server and client utilities.                              |
-| src/components       | Reusable UI and client components.                               |
-| layers               | Optional local Farm layers consumed through `extends`.           |
-| src/farm-routes.d.ts | Generated typed route union for Link.                            |
-| farm.config.ts       | Framework config, integrations, docs, storage, deployment.       |
+| Path           | Purpose                                                          |
+| -------------- | ---------------------------------------------------------------- |
+| src/app        | Pages, nested layouts, API routes, route boundaries, middleware. |
+| src/lib        | Shared server and client utilities.                              |
+| src/components | Reusable UI and client components.                               |
+| layers         | Optional local Farm layers consumed through `extends`.           |
+| src/farm.d.ts  | Generated project types for routes, env, and i18n.               |
+| farm.config.ts | Framework config, integrations, docs, storage, deployment.       |
 
 ## Optional files stay optional
 
@@ -87,7 +87,9 @@ Reusable product areas can live under `layers/<name>` with their own optional `f
 
 ## Generated files
 
-Farm generates route and API types from the app tree. `farm dev` keeps them current as page and API route files change; run the command manually when the dev server is not running.
+Farm keeps project-specific route, environment, and internationalization declarations in one generated `src/farm.d.ts` file. Static image declarations come from `@farm.js/core`, so they do not add another file to your source tree. Generated API clients remain in `src/lib/api.generated.ts` because applications import that module directly.
+
+`farm dev` keeps generated types current as source files change; run the command manually when the dev server is not running.
 
 **Terminal**
 

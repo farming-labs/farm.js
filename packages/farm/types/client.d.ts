@@ -3,7 +3,7 @@
  *
  * Provides stable exports for Link, useRouter, and API client so TypeScript
  * and IDEs resolve them even when the build output omits them. The generated
- * farm-routes.d.ts in your app augments LinkDefaultRoute for typed href.
+ * farm.d.ts in your app augments LinkDefaultRoute for typed href.
  */
 
 import type {

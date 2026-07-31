@@ -34,7 +34,21 @@ const CONFIG_FILENAMES = [
 export async function generateEnvTypes(options: GenerateEnvTypesOptions): Promise<string> {
   const root = path.resolve(options.root);
   const srcDir = options.srcDir || "src";
-  const outPath = path.join(root, srcDir, options.outFile || DEFAULT_OUT_FILE);
+  const outFile = options.outFile || DEFAULT_OUT_FILE;
+  const outPath = path.isAbsolute(outFile) ? outFile : path.join(root, srcDir, outFile);
+  const content = createEnvTypeDeclarations(options, outPath);
+
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
+  writeFileIfChanged(outPath, content);
+
+  return outPath;
+}
+
+export function createEnvTypeDeclarations(
+  options: GenerateEnvTypesOptions,
+  outPath: string,
+): string {
+  const root = path.resolve(options.root);
   const configPath = findConfigPath(root, options.configPath);
   const configPaths = [
     ...(options.layerConfigPaths ?? []).filter((value) => fs.existsSync(value)),
@@ -47,10 +61,7 @@ export async function generateEnvTypes(options: GenerateEnvTypesOptions): Promis
         ? createConfigBackedEnvTypes(outPath, configPaths[0])
         : createEmptyEnvTypes();
 
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  writeFileIfChanged(outPath, content);
-
-  return outPath;
+  return content;
 }
 
 function createLayeredConfigBackedEnvTypes(outPath: string, configPaths: string[]): string {

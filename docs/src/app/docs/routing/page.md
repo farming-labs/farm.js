@@ -87,7 +87,7 @@ export default function UserPage({ params }: PageProps) {
 
 ## Typed navigation
 
-Farm generates src/farm-routes.d.ts from your app tree. Link hrefs accept real routes, query strings, and hash fragments without widening everything to plain string.
+Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs accept real routes, query strings, and hash fragments without widening everything to plain string.
 
 **Client navigation**
 

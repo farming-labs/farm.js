@@ -56,7 +56,7 @@ Create one nested JSON catalog per locale.
 }
 ```
 
-Farm flattens nested objects into keys such as `home.title` and `cart.items`. During development, builds, and `farm generate`, it creates `src/farm-i18n.d.ts` from the default catalog.
+Farm flattens nested objects into keys such as `home.title` and `cart.items`. During development, builds, and `farm generate`, it writes the catalog declarations into the consolidated `src/farm.d.ts` file.
 
 ## Translate on the server
 
@@ -266,7 +266,7 @@ Each helper uses the active locale and the platform `Intl` implementation. Pass 
 
 ## Generated types and validation
 
-The generated `src/farm-i18n.d.ts` augments `@farm.js/core/i18n` with exact locale names, message keys, and ICU variables:
+The generated i18n section in `src/farm.d.ts` augments `@farm.js/core/i18n` with exact locale names, message keys, and ICU variables:
 
 ```ts
 t("home.title"); // valid

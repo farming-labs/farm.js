@@ -108,7 +108,7 @@ test("generates route and API types", async () => {
 
     await generateFarmArtifacts({ root });
 
-    const routeTypes = await readFile(path.join(root, "src", "farm-routes.d.ts"), "utf8");
+    const routeTypes = await readFile(path.join(root, "src", "farm.d.ts"), "utf8");
     const apiTypes = await readFile(path.join(root, "src", "lib", "api.generated.ts"), "utf8");
 
     assert.ok(routeTypes.includes('"/about"'));
@@ -165,7 +165,7 @@ test("generates typed i18n declarations", async () => {
 
     await generateFarmArtifacts({ root });
 
-    const i18nTypes = await readFile(path.join(root, "src", "farm-i18n.d.ts"), "utf8");
+    const i18nTypes = await readFile(path.join(root, "src", "farm.d.ts"), "utf8");
     assert.ok(i18nTypes.includes('"fr": true'));
     assert.ok(i18nTypes.includes('"home.welcome": { "name": string }'));
     assert.ok(i18nTypes.includes('"home.items": { "count": number }'));

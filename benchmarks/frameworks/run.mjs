@@ -120,14 +120,7 @@ const frameworks = [
       env: { HOST: "127.0.0.1", PORT: String(port), NODE_ENV: "production" },
     }),
     outputEntry: ".farm/.output/server/index.mjs",
-    clean: [
-      ".farm",
-      "node_modules/.vite",
-      "src/farm-routes.d.ts",
-      "src/farm-env.d.ts",
-      "src/farm-images.d.ts",
-      "src/lib/api.generated.ts",
-    ],
+    clean: [".farm", "node_modules/.vite", "src/farm.d.ts", "src/lib/api.generated.ts"],
   },
   {
     id: "next",

@@ -62,10 +62,10 @@ export interface FarmI18nClientSnapshot {
   messages: FarmI18nCatalog;
 }
 
-/** Generated `farm-i18n.d.ts` files augment this interface. */
+/** The generated `farm.d.ts` file augments this interface. */
 export interface FarmI18nMessageRegistry {}
 
-/** Generated `farm-i18n.d.ts` files augment this interface. */
+/** The generated `farm.d.ts` file augments this interface. */
 export interface FarmI18nLocaleRegistry {}
 
 type RegisteredMessageKey = Extract<keyof FarmI18nMessageRegistry, string>;

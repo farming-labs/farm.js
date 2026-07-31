@@ -1,10 +1,7 @@
 import {
-  APITypeGenerator,
-  generateEnvTypes,
-  generateFarmI18nTypes,
+  generateFarmTypeArtifacts,
   getFarmDocsRouteTypeEntries,
   getIntegrationSchemas,
-  generateRouteTypes,
   loadConfig,
   logger,
   resolveConfig,
@@ -77,37 +74,17 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
       : []),
     ...getFarmDocsRouteTypeEntries(resolvedConfig.docs),
   ];
-  await generateRouteTypes({
-    root: resolvedConfig.root,
-    srcDir: resolvedConfig.srcDir,
-    extraRoutes,
-    suppressLintOnLink: resolvedConfig.suppressLintOnLink,
-  });
-  await generateEnvTypes({
+  const typeArtifacts = await generateFarmTypeArtifacts({
     root: resolvedConfig.root,
     srcDir: resolvedConfig.srcDir,
     configPath: options.configPath,
+    layers: resolvedConfig.layers,
+    extraRoutes,
+    suppressLintOnLink: resolvedConfig.suppressLintOnLink,
+    i18nConfig: resolvedConfig.i18n,
   });
-  const appDir = path.join(resolvedConfig.root, resolvedConfig.srcDir, "app");
-  const apiGenerator = new APITypeGenerator(appDir);
-  const apiRoutes = apiGenerator.scanAPIRoutes();
-  const apiTypesPath = path.join(
-    resolvedConfig.root,
-    resolvedConfig.srcDir,
-    "lib",
-    "api.generated.ts",
-  );
-  await mkdir(path.dirname(apiTypesPath), { recursive: true });
-  await writeFile(apiTypesPath, apiGenerator.generateAPIRouter(apiRoutes), "utf8");
-  if (resolvedConfig.i18n.enabled) {
-    await generateFarmI18nTypes({
-      root: resolvedConfig.root,
-      srcDir: resolvedConfig.srcDir,
-      config: resolvedConfig.i18n,
-    });
-  }
   logger.success(
-    `Generated route, API, env${resolvedConfig.i18n.enabled ? ", and i18n" : ""} types (${apiRoutes.length} API route${apiRoutes.length === 1 ? "" : "s"}).`,
+    `Generated route, API, env${resolvedConfig.i18n.enabled ? ", and i18n" : ""} types (${typeArtifacts.apiRoutes.length} API route${typeArtifacts.apiRoutes.length === 1 ? "" : "s"}).`,
   );
 
   const schemas = getIntegrationSchemas(resolvedConfig.integrations);
