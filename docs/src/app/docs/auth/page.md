@@ -160,8 +160,33 @@ farm auth migrate
 
 The migration command needs `DATABASE_URL`, but it does not require the runtime secret.
 
-## Provider integrations
+## Extend with Better Auth
 
-Use the top-level `auth` key for Farm's built-in, opinionated path. It is a core framework capability, not a provider integration. If the application needs a provider-owned UI, enterprise SSO, raw Better Auth plugins, or another provider-specific API, use one of the [auth integrations](/docs/integrations/auth) instead.
+The built-in path is intentionally opinionated, but it does not replace the existing Better Auth integration. Both approaches are supported:
 
-Do not configure both `auth` and `integrations.auth`; they would compete for the same auth route, so Farm reports a configuration error.
+| Need                                                                 | Configuration owner                            |
+| -------------------------------------------------------------------- | ---------------------------------------------- |
+| Email/password auth with Farm defaults, helpers, and hooks           | Top-level `auth: true`                         |
+| Better Auth plugins, adapters, providers, callbacks, or instance API | `integrations.auth` with an app-owned instance |
+
+Choose the integration path when the application should own the complete Better Auth configuration:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { betterAuth } from "@farm.js/better-auth";
+import { auth } from "./src/lib/auth";
+
+export default defineConfig({
+  integrations: {
+    auth: betterAuth({
+      instance: auth,
+    }),
+  },
+});
+```
+
+This keeps working as the advanced extension path. Farm mounts the app-owned instance, while the application continues to use Better Auth's native server APIs and client. See the [Better Auth integration guide](/docs/integrations/auth/better-auth) for the complete setup.
+
+Do not configure top-level `auth` and `integrations.auth` together. Each path owns the auth catch-all route, so Farm reports a configuration error instead of choosing one implicitly.
+
+For a provider-owned UI, enterprise SSO, or another provider-specific API, choose one of the other [auth integrations](/docs/integrations/auth).

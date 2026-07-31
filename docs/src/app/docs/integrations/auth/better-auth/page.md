@@ -8,7 +8,9 @@ section: "Integrations"
 
 Most applications should begin with [Farm Auth](/docs/auth), which reduces email/password auth to `auth: true` and supplies Farm-owned server helpers and React APIs.
 
-Use this lower-level Better Auth integration when the app specifically needs raw Better Auth plugins, adapters, callbacks, or instance APIs. Farm mounts the handler, while Better Auth remains the source of truth for the auth API.
+This lower-level integration remains the supported extension path when the app needs raw Better Auth plugins, adapters, providers, callbacks, or instance APIs. It is not deprecated by built-in auth. Farm mounts the handler, while the application owns the Better Auth configuration and Better Auth remains the source of truth for the auth API.
+
+Use either top-level `auth` or `integrations.auth`, not both. They are alternative owners of the same auth catch-all route.
 
 ## Add Better Auth
 
@@ -64,6 +66,8 @@ export const appIntegrations = {
 } as const;
 ```
 
+The direct `@farm.js/better-auth` package import remains supported as well. The `@farm.js/integrations/better-auth` path is the compatibility export used by `farm add integration better-auth`.
+
 Farm mounts the instance handler for both methods:
 
 ```text
@@ -72,6 +76,17 @@ POST /api/auth/[...auth]
 ```
 
 There is no app-local `src/app/api/auth/[...auth]/route.ts` file to maintain.
+
+Register `appIntegrations` through `integrations` in `farm.config.ts`. Do not also add the top-level `auth` key:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { appIntegrations } from "./src/lib/integrations";
+
+export default defineConfig({
+  integrations: appIntegrations,
+});
+```
 
 ## Create the browser client
 
