@@ -955,10 +955,8 @@ function TerminalVisual() {
               <span className="farm-terminal-output mt-1.5 block space-y-1.5">
                 <span className="block whitespace-nowrap">
                   <span className="font-semibold text-green-400">Farm.js</span>{" "}
-                  <span className="text-white/34">v1.0.0</span>{" "}
-                  <span className="text-white/34">
-                    ready in {formatBenchmarkDuration(farmBenchmark.metrics.devFirstPageMs.median)}
-                  </span>
+                  <span className="text-white/34">v{FARM_VERSION}</span>{" "}
+                  <span className="text-white/34">ready in 23ms</span>
                 </span>
                 <span className="block whitespace-nowrap text-white/58">
                   <span className="inline-block w-[4.5rem] text-white/82">➜ Local:</span>
