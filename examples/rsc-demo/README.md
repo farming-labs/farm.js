@@ -30,8 +30,8 @@ Keep Server Actions disabled when an RSC application does not need client-callab
 
 ## Experimental optimized boundary
 
-The `/static-content` route compares a normal React host-element tree with the same typed document
-rendered inside one optimized boundary. Farm includes the
+The `/static-content` route renders ordinary JSX while Farm automatically selects safe host-only
+subtrees for native rendering. Farm includes the
 [Strata](https://github.com/farming-labs/strata) native runtime and handles its server packaging. The
 experiment is explicitly enabled in `vite.config.ts`:
 
@@ -41,20 +41,27 @@ experimental: {
 }
 ```
 
-Server Components can then import the adapter:
+Application components do not import an optimization component:
 
 ```tsx
-import { OptimizedBoundary } from "@farm.js/plugin/rsc/optimized-boundary";
-
-return <OptimizedBoundary as="article" document={document} />;
+export default function Article() {
+  return (
+    <article>
+      <h1>Representation-aware content</h1>
+      <p>Farm analyzes this existing server-rendered JSX automatically.</p>
+    </article>
+  );
+}
 ```
 
-No app-level Strata installation or manual renderer call is required. After the flag is enabled, Farm
-handles dependency validation, server-only enforcement, native externalization and production
-packaging. React owns the boundary and the surrounding application. It does not reconcile nodes
-inside the boundary, so Client Components, event handlers, refs, effects and independently updating
-state must stay outside it. The current runtime uses a native Node binding; edge and Cloudflare
-worker targets need a future Wasm or JavaScript fallback before enabling this experiment.
+No app-level Strata installation, boundary import, or manual renderer call is required. After the
+flag is enabled, Farm handles conservative eligibility checks, dependency validation, server-only
+enforcement, native externalization and production packaging. Unsupported or unsafe trees retain
+normal React rendering. React owns each selected boundary and the surrounding application. It does
+not reconcile nodes inside an optimized boundary, so Farm excludes Client Components, event
+handlers, refs, effects and independently updating state. The current runtime uses a native Node
+binding; edge and Cloudflare worker targets need a future Wasm or JavaScript fallback before enabling
+this experiment.
 
 ## Develop
 

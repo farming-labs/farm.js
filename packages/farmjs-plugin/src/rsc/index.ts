@@ -32,6 +32,7 @@ import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry } from "./entries/client.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
+import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import fs from "fs/promises";
@@ -80,8 +81,9 @@ export interface FarmRscConfig {
      */
     serverActions?: boolean;
     /**
-     * Enable server-only optimized boundaries through
-     * `@farm.js/plugin/rsc/optimized-boundary`.
+     * Automatically optimize eligible server-only host-element subtrees with
+     * the native Strata renderer. Unsupported trees keep normal React
+     * rendering; application components do not need a boundary import.
      *
      * @experimental
      * @default false
@@ -883,6 +885,26 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
         }
 
         return null;
+      },
+    },
+
+    {
+      name: "@farm.js/plugin/rsc:automatic-optimized-boundary",
+      enforce: "post",
+
+      transform(code, id) {
+        if (!rscEnabled || !optimizedBoundaryEnabled) return null;
+        const environmentName = (this as { environment?: { name?: string } }).environment?.name;
+        if (environmentName !== "rsc") return null;
+
+        const result = transformAutomaticOptimizedBoundaries(code, id);
+        if (!result) return null;
+        if (debug) {
+          console.log(
+            `[Farm.js] Added ${result.boundaryCount} automatic optimized-boundary candidate${result.boundaryCount === 1 ? "" : "s"} in ${id}`,
+          );
+        }
+        return { code: result.code, map: null };
       },
     },
 

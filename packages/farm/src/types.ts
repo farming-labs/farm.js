@@ -144,9 +144,9 @@ export interface FarmConfig {
     serverComponents?: boolean;
     serverActions?: boolean;
     /**
-     * Enable server-only optimized boundaries for host-only content. Boundary
-     * interiors cannot contain Client Components, event handlers, or
-     * independently updating React state.
+     * Automatically optimize eligible server-only host-element subtrees with
+     * the native Strata renderer. Unsupported trees keep normal React
+     * rendering; no application boundary component is required.
      *
      * @experimental
      * @default false

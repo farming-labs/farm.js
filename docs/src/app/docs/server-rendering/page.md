@@ -117,6 +117,43 @@ export default function DashboardPage() {
 }
 ```
 
+## Automatic optimized boundaries
+
+Farm can experimentally render large, non-interactive Server Component regions through the native
+Strata renderer. Enable the flag once in `farm.config.ts`:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  experimental: {
+    serverComponents: true,
+    optimizedBoundary: true,
+  },
+});
+```
+
+Application components remain ordinary JSX:
+
+```tsx
+export default function ArticlePage() {
+  return (
+    <article className="prose">
+      <h1>Representation-aware rendering</h1>
+      <p>Farm selects this host-only region automatically.</p>
+    </article>
+  );
+}
+```
+
+Farm evaluates eligible host-element trees on the server and uses Strata only when the region is
+large enough to benefit. Trees containing Client Components, event handlers, refs, unsupported
+elements or attributes, unsafe URLs, or other uncertain values retain normal React rendering. The
+flag does not require an application boundary component or a direct Strata dependency.
+
+The current Strata runtime uses a native Node binding. Keep this experiment on Node deployments until
+a Wasm or JavaScript fallback is available for edge and Cloudflare worker targets.
+
 ## Choosing a mode
 
 | Need                                   | Use                                     |
