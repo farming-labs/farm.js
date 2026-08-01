@@ -1,4 +1,3 @@
-import { brotliCompressSync } from "node:zlib";
 import { expect, test } from "@playwright/test";
 
 const routes = [
@@ -9,7 +8,7 @@ const routes = [
   ["/server-fn-middleware", "Server function middleware"],
   ["/server-query", "Unified server queries"],
   ["/after", "Post-response work"],
-  ["/static-content", "Optimized boundary comparison"],
+  ["/static-content", "Automatic optimized boundaries"],
 ] as const;
 
 test("all RSC example pages render successfully with the optimized boundary enabled", async ({
@@ -22,11 +21,13 @@ test("all RSC example pages render successfully with the optimized boundary enab
   }
 });
 
-test("the optimized boundary renders safe equivalent content", async ({ page }) => {
-  const response = await page.goto("/static-content?mode=optimized");
+test("ordinary JSX is automatically rendered through a safe optimized boundary", async ({
+  page,
+}) => {
+  const response = await page.goto("/static-content?view=details");
   expect(response?.status()).toBe(200);
 
-  const fragment = page.locator('article[data-static-content="optimized"]');
+  const fragment = page.locator('article[data-static-content="automatic"]');
   await expect(fragment).toHaveAttribute("data-strata", /^[a-f0-9]{64}$/);
   await expect(fragment.locator("section")).toHaveCount(36);
   await expect(fragment.locator("section").first()).toContainText(
@@ -47,51 +48,24 @@ test("the optimized boundary renders safe equivalent content", async ({ page }) 
   ).toBeUndefined();
 });
 
-test("switching representations preserves surrounding client state", async ({ page }) => {
-  await page.goto("/static-content?mode=optimized");
+test("switching optimized content preserves surrounding client state", async ({ page }) => {
+  await page.goto("/static-content?view=summary");
 
   const counter = page.getByRole("heading", { name: "Interactive Counter" }).locator("..");
   const value = counter.locator("span.text-4xl");
   await counter.getByRole("button", { name: "+", exact: true }).click();
   await expect(value).toHaveText("1");
 
-  await page.locator('[data-mode-link="react"]').click();
-  await expect(page).toHaveURL(/\/static-content\?mode=react$/);
-  await expect(page.locator('article[data-static-content="react"]')).toBeVisible();
+  await page.locator('[data-view-link="details"]').click();
+  await expect(page).toHaveURL(/\/static-content\?view=details$/);
+  await expect(page.locator('article[data-static-content="automatic"]')).toHaveAttribute(
+    "data-strata",
+    /^[a-f0-9]{64}$/,
+  );
   await expect(value).toHaveText("1");
 
-  await page.locator('[data-mode-link="optimized"]').click();
-  await expect(page).toHaveURL(/\/static-content\?mode=optimized$/);
-  await expect(page.locator('article[data-static-content="optimized"]')).toBeVisible();
+  await page.locator('[data-view-link="summary"]').click();
+  await expect(page).toHaveURL(/\/static-content\?view=summary$/);
+  await expect(page.locator('article[data-static-content="automatic"]')).toBeVisible();
   await expect(value).toHaveText("1");
-});
-
-test("optimized host content reduces the equivalent Flight payload", async ({
-  request,
-}, testInfo) => {
-  const headers = { Accept: "text/x-component" };
-  const [optimizedResponse, reactResponse] = await Promise.all([
-    request.get("/static-content?mode=optimized", { headers }),
-    request.get("/static-content?mode=react", { headers }),
-  ]);
-
-  expect(optimizedResponse.status()).toBe(200);
-  expect(reactResponse.status()).toBe(200);
-
-  const optimized = await optimizedResponse.body();
-  const react = await reactResponse.body();
-  const measurement = {
-    optimizedRawBytes: optimized.byteLength,
-    reactRawBytes: react.byteLength,
-    optimizedBrotliBytes: brotliCompressSync(optimized).byteLength,
-    reactBrotliBytes: brotliCompressSync(react).byteLength,
-  };
-
-  await testInfo.attach("optimized-boundary-flight-payloads.json", {
-    body: Buffer.from(`${JSON.stringify(measurement, null, 2)}\n`),
-    contentType: "application/json",
-  });
-
-  expect(measurement.optimizedRawBytes).toBeLessThan(measurement.reactRawBytes);
-  expect(measurement.optimizedBrotliBytes).toBeLessThan(measurement.reactBrotliBytes);
 });
