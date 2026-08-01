@@ -2636,14 +2636,14 @@ async function buildSSRInMemory(
           ".prisma/client",
           ".prisma/client/default",
         ],
-        // Don't externalize these - bundle them into the SSR output
-        // Keep this list minimal for faster builds
-        noExternal: [
-          "@farm.js/core",
-          "@farm.js/core/image",
-          "better-call",
-          ...(preset === "cloudflare-module" ? [] : ["react", "react-dom", "react-dom/server"]),
-        ],
+        // Node deployments must bundle application dependencies with Farm's
+        // React runtime. Leaving a React component package external can make it
+        // resolve a second React instance at runtime and break hooks during SSR.
+        // Native and build-only packages above remain explicitly external.
+        noExternal:
+          preset === "cloudflare-module"
+            ? ["@farm.js/core", "@farm.js/core/image", "better-call"]
+            : true,
       },
       define: {
         __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),

@@ -48,6 +48,9 @@ importers:
 
   docs:
     dependencies:
+      '@databuddy/sdk':
+        specifier: 2.6.0
+        version: 2.6.0(react@19.2.8)
       '@farm.js/core':
         specifier: workspace:*
         version: link:../packages/farm
@@ -2516,6 +2519,20 @@ packages:
       '@clack/core': 0.4.1
       picocolors: 1.1.1
       sisteransi: 1.0.5
+    dev: false
+
+  /@databuddy/sdk@2.6.0(react@19.2.8):
+    resolution: {integrity: sha512-coQVa/AJoesgsFSGWPFtlrl7xZx1nTTvoX3A9YLD+9f3+JDwr3ajVog3WOiLBJSLqk7xC+G+FnR/W/Wda5eWbw==}
+    peerDependencies:
+      react: '>=18'
+      vue: '>=3'
+    peerDependenciesMeta:
+      react:
+        optional: true
+      vue:
+        optional: true
+    dependencies:
+      react: 19.2.8
     dev: false
 
   /@clerk/backend@3.2.0(react-dom@19.2.8)(react@19.2.4):

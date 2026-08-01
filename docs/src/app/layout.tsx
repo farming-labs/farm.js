@@ -1,4 +1,5 @@
 import type { LayoutProps } from "@farm.js/core";
+import { Databuddy } from "@databuddy/sdk/react";
 import geistMonoUrl from "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2?url";
 import geistPixelUrl from "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2?url";
 import geistSansUrl from "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2?url";
@@ -59,6 +60,7 @@ export default function RootLayout({ children }: LayoutProps) {
       />
       <style dangerouslySetInnerHTML={{ __html: fontFaceCss }} />
       <main className="min-h-screen bg-black font-mono text-white">{children}</main>
+      <Databuddy clientId="0af7dbbd-628a-44c9-8814-df4138a061b0" trackWebVitals={true} />
     </>
   );
 }
