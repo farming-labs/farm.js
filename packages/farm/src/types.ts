@@ -20,6 +20,7 @@ import type { FarmPlugin } from "./plugin";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
 import type { FarmCacheUserConfig } from "./cache";
 import type { FarmAuthUserConfig, ResolvedFarmAuthConfig } from "./auth-config";
+import type { FarmPerformanceConfig } from "./preload";
 
 export type NitroPreset =
   | "node-server"
@@ -126,6 +127,8 @@ export interface FarmConfig {
   context?: FarmContextFactory<any>;
   serverActions?: FarmServerActionsConfig;
   images?: FarmImageConfig;
+  /** Browser resource scheduling and preload budgets. */
+  performance?: FarmPerformanceConfig;
   i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;

@@ -61,6 +61,8 @@ const editorial = localFont({
 ```
 
 Set `preload: false` for sources that are not needed above the fold or are only used on a narrow route.
+The global preload manager keeps at most two font hints by default and reports excess hints during
+rendering; configure the budget under `performance.preload` in `farm.config.ts`.
 
 ## Remote fonts
 

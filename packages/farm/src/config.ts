@@ -60,6 +60,10 @@ import {
   type FarmAuthUserConfig,
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
+import {
+  resolveFarmPerformanceConfig,
+  type ResolvedFarmPerformanceConfig,
+} from "./preload";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -101,6 +105,13 @@ export type {
   FarmDevtoolsUserConfig,
   ResolvedFarmDevtoolsConfig,
 } from "./devtools-config";
+export type {
+  FarmPerformanceConfig,
+  FarmPreloadMode,
+  FarmPreloadUserConfig,
+  ResolvedFarmPerformanceConfig,
+  ResolvedFarmPreloadConfig,
+} from "./preload";
 export type {
   FarmImageConfig,
   FarmImageFormat,
@@ -306,6 +317,7 @@ export interface ResolvedFarmConfig extends Required<
     | "images"
     | "i18n"
     | "auth"
+    | "performance"
   >
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
@@ -327,6 +339,7 @@ export interface ResolvedFarmConfig extends Required<
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
+  performance: ResolvedFarmPerformanceConfig;
   routeRules: FarmRouteRules;
 }
 
@@ -779,6 +792,7 @@ export async function resolveConfig(
     headers: () => [...headers, ...routeRuleHeaders],
     routeRules,
     images: resolveFarmImageConfig(userConfig.images),
+    performance: resolveFarmPerformanceConfig(userConfig.performance),
     publicDir: userConfig.publicDir || "public",
     i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode }),
     openapi: {

@@ -434,8 +434,9 @@ console.log(demo);`,
     );
 
     expect(source).toMatch(
-      /farmFontPreloadHeader \? \{ "Link": farmFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
+      /farmManagedFontPreloadHeader \? \{ "Link": farmManagedFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
     );
+    expect(source).toContain("manageFarmLinkHeaderPreloads(");
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
   });
 

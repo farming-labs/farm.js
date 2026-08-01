@@ -25,6 +25,11 @@ export {
 } from "../navigation-errors";
 export { configureFarmObservability, emitFarmEvent } from "../observability";
 export { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
+export {
+  manageFarmHtmlPreloads,
+  manageFarmLinkHeaderPreloads,
+  reportFarmPreloadWarnings,
+} from "../preload";
 
 export function appendFarmLinkHeader(headers: Headers, value: string): void {
   const current = headers.get("Link");

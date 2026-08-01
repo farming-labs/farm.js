@@ -2982,8 +2982,11 @@ function generateVirtualEntryCode(
   isFarmRedirectError,
   localizeFarmHref,
   localizeFarmPathname,
+  manageFarmHtmlPreloads,
+  manageFarmLinkHeaderPreloads,
   mergeMetadata,
   normalizeRevalidatePath,
+  reportFarmPreloadWarnings,
   renderMetadataHead,
   resolveFarmRouteContext,
   stripFarmLocaleFromPathname,
@@ -3134,6 +3137,14 @@ ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
 import * as React from "react";
 import * as ReactDOMServer from "react-dom/server";
+
+const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
+const farmManagedFontPreloads = manageFarmLinkHeaderPreloads(
+  farmFontPreloadHeader,
+  farmPreloadConfig,
+);
+reportFarmPreloadWarnings(farmManagedFontPreloads.warnings, "font preload header");
+const farmManagedFontPreloadHeader = farmManagedFontPreloads.value;
 
 // Custom 404 page component (if provided)
 const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
@@ -4672,7 +4683,7 @@ async function handleFarmRequestInContext(
             status: 200,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
-              ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
+              ...(farmManagedFontPreloadHeader ? { "Link": farmManagedFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
             },
           }), middlewareHeaders);
@@ -4998,7 +5009,7 @@ async function handleFarmRequestInContext(
           "Cache-Control": renderedPage.stream || hasRequestScopedRender || !sharedCacheControl
             ? "private, no-store"
             : sharedCacheControl,
-          ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
+          ...(farmManagedFontPreloadHeader ? { "Link": farmManagedFontPreloadHeader } : {}),
           ...(pprConfig.enabled ? getPPRHeaders(pprCanCache ? "miss" : "bypass", pprConfig) : {}),
         };
         const farmI18nSnapshot = getFarmI18nSnapshot();
@@ -5119,6 +5130,9 @@ async function handleFarmRequestInContext(
 </html>\`;
         }
         fullHtml = applyFarmI18nDocument(fullHtml, pathname, farmI18nSnapshot);
+        const managedDocumentPreloads = manageFarmHtmlPreloads(fullHtml, farmPreloadConfig);
+        fullHtml = managedDocumentPreloads.value;
+        reportFarmPreloadWarnings(managedDocumentPreloads.warnings, "route " + pathname);
 
         if (pageStatus === 200 && pprCacheKey && request.method.toUpperCase() !== "HEAD") {
           await pprShellCache.setAsync(
@@ -5423,6 +5437,9 @@ async function handleFarmRequestInContext(
 </html>\`;
     }
     fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot());
+    const managedNotFoundPreloads = manageFarmHtmlPreloads(fullHtml, farmPreloadConfig);
+    fullHtml = managedNotFoundPreloads.value;
+    reportFarmPreloadWarnings(managedNotFoundPreloads.warnings, "route " + pathname);
     
     emitFarmEvent({
       type: "render.complete",

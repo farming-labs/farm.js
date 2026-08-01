@@ -28,8 +28,15 @@ import {
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { configureFarmCache } from "./cache";
 import { resolveFarmAuthConfig, type ResolvedFarmAuthConfig } from "./auth-config";
+import {
+  resolveFarmPerformanceConfig,
+  type ResolvedFarmPerformanceConfig,
+} from "./preload";
 
-type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images" | "i18n"> & {
+type NormalizedFarmConfig = Omit<
+  Required<FarmConfig>,
+  "devtools" | "images" | "i18n" | "performance"
+> & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
@@ -39,6 +46,7 @@ type NormalizedFarmConfig = Omit<Required<FarmConfig>, "devtools" | "images" | "
   images: ResolvedFarmImageConfig;
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
+  performance: ResolvedFarmPerformanceConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -136,6 +144,7 @@ export class FarmApp {
       context: config.context || (() => undefined),
       serverActions: resolveServerActionsConfig(config.serverActions),
       images: resolveFarmImageConfig(config.images),
+      performance: resolveFarmPerformanceConfig(config.performance),
       i18n: isResolvedI18nConfig(config.i18n)
         ? config.i18n
         : resolveFarmI18nConfig(config.i18n, {
