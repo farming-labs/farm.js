@@ -64,4 +64,26 @@ describe("mergeFarmViteConfig", () => {
     });
     expect(merged.ssr?.noExternal).toEqual(["farm", "app-runtime"]);
   });
+
+  it("lets applications opt into discovery for additional CommonJS dependencies", () => {
+    const merged = mergeFarmViteConfig(
+      { optimizeDeps: createFarmClientOptimizeDepsConfig() },
+      {
+        optimizeDeps: {
+          noDiscovery: false,
+          include: ["legacy-commonjs-package"],
+        },
+      },
+    );
+
+    expect(merged.optimizeDeps).toMatchObject({
+      noDiscovery: false,
+      holdUntilCrawlEnd: false,
+      include: expect.arrayContaining([
+        "react",
+        "@farm.js/core/client",
+        "legacy-commonjs-package",
+      ]),
+    });
+  });
 });
