@@ -20,7 +20,7 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: `NODE_ENV=production HOST=127.0.0.1 PORT=${docsPort} node docs/.farm/.output/server/index.mjs`,
+      command: `NODE_ENV=production HOST=127.0.0.1 PORT=${docsPort} node docs/.vercel/output/server/index.mjs`,
       url: docsBaseURL,
       reuseExistingServer: false,
       timeout: 30_000,

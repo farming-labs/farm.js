@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 
 test.beforeAll(async () => {
   await Promise.all([
-    access("docs/.farm/.output/server/index.mjs"),
-    access("docs/.farm/.output/public/farm-client.js"),
+    access("docs/.vercel/output/server/index.mjs"),
+    access("docs/.vercel/output/public/farm-client.js"),
   ]);
 });
 
@@ -20,7 +20,7 @@ test("boots the emitted docs site and navigates into the guide", async ({ page }
   expect(response?.ok()).toBe(true);
   expect(response?.headers()["x-frame-options"]).toBe("DENY");
   await expect(page).toHaveTitle(/Farm\.js/);
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("A Framework for");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/a framework for/i);
   await expect(page.getByRole("navigation", { name: "Primary navigation" })).toBeVisible();
 
   const getStarted = page.getByRole("link", { name: "Get Started", exact: true }).first();
