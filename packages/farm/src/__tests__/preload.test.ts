@@ -30,9 +30,7 @@ describe("smart preload manager", () => {
     expect(result.value).not.toContain("/logo.webp");
     expect(result.value).not.toContain("/below-fold.webp");
     expect(result.value).toContain('rel="modulepreload"');
-    expect(result.warnings).toEqual([
-      { kind: "image", count: 3, budget: 1, removed: 2 },
-    ]);
+    expect(result.warnings).toEqual([{ kind: "image", count: 3, budget: 1, removed: 2 }]);
   });
 
   it("caps font Link headers while preserving non-preload relations", () => {
@@ -50,14 +48,13 @@ describe("smart preload manager", () => {
     expect(result.value).toContain("/fonts/mono.woff2");
     expect(result.value).not.toContain("/fonts/display.woff2");
     expect(result.value).toContain("rel=preconnect");
-    expect(result.warnings).toEqual([
-      { kind: "font", count: 3, budget: 2, removed: 1 },
-    ]);
+    expect(result.warnings).toEqual([{ kind: "font", count: 3, budget: 2, removed: 1 }]);
   });
 
   it("supports warning-only mode without changing the document", () => {
-    const config = resolveFarmPerformanceConfig({ preload: { mode: "warn", maxImages: 1 } })
-      .preload;
+    const config = resolveFarmPerformanceConfig({
+      preload: { mode: "warn", maxImages: 1 },
+    }).preload;
     const html =
       '<link rel="preload" as="image" href="/one.webp"><link rel="preload" as="image" href="/two.webp">';
 

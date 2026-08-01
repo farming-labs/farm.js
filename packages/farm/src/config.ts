@@ -60,10 +60,7 @@ import {
   type FarmAuthUserConfig,
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
-import {
-  resolveFarmPerformanceConfig,
-  type ResolvedFarmPerformanceConfig,
-} from "./preload";
+import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 

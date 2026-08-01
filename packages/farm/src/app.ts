@@ -28,10 +28,7 @@ import {
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { configureFarmCache } from "./cache";
 import { resolveFarmAuthConfig, type ResolvedFarmAuthConfig } from "./auth-config";
-import {
-  resolveFarmPerformanceConfig,
-  type ResolvedFarmPerformanceConfig,
-} from "./preload";
+import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 
 type NormalizedFarmConfig = Omit<
   Required<FarmConfig>,
