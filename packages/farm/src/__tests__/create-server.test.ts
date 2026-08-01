@@ -8,8 +8,8 @@ import {
 describe("mergeFarmViteConfig", () => {
   it("keeps Farm client runtimes in React's dependency optimizer generation", () => {
     expect(createFarmClientOptimizeDepsConfig()).toMatchObject({
-      noDiscovery: true,
-      holdUntilCrawlEnd: false,
+      noDiscovery: false,
+      holdUntilCrawlEnd: true,
       include: expect.arrayContaining([
         "react",
         "react-dom/client",
@@ -17,6 +17,10 @@ describe("mergeFarmViteConfig", () => {
         "@farm.js/core/plugin/client",
         "@farm.js/core/deferred",
         "@farm.js/core/deployment",
+        "@farm.js/core/i18n/client",
+        "@farm.js/core/query/client",
+        "@farm.js/core/server-fn/client",
+        "@farm.js/core/server-query/client",
       ]),
     });
     expect(FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE).toContain("react/jsx-dev-runtime");
@@ -65,19 +69,19 @@ describe("mergeFarmViteConfig", () => {
     expect(merged.ssr?.noExternal).toEqual(["farm", "app-runtime"]);
   });
 
-  it("lets applications opt into discovery for additional CommonJS dependencies", () => {
+  it("lets applications opt out of discovery with an explicit dependency list", () => {
     const merged = mergeFarmViteConfig(
       { optimizeDeps: createFarmClientOptimizeDepsConfig() },
       {
         optimizeDeps: {
-          noDiscovery: false,
+          noDiscovery: true,
           include: ["legacy-commonjs-package"],
         },
       },
     );
 
     expect(merged.optimizeDeps).toMatchObject({
-      noDiscovery: false,
+      noDiscovery: true,
       holdUntilCrawlEnd: false,
       include: expect.arrayContaining(["react", "@farm.js/core/client", "legacy-commonjs-package"]),
     });
