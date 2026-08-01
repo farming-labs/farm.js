@@ -1,8 +1,6 @@
 import type { LayoutProps } from "@farm.js/core";
+import { localFont } from "@farm.js/core/font";
 import { Databuddy } from "@databuddy/sdk/react";
-import geistMonoUrl from "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2?url";
-import geistPixelUrl from "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2?url";
-import geistSansUrl from "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2?url";
 import "./globals.css";
 
 export const metadata = {
@@ -14,52 +12,38 @@ export const metadata = {
   },
 };
 
-const fontFaceCss = `
-@font-face {
-  font-family: "Geist Sans";
-  src: url("${geistSansUrl}") format("woff2");
-  font-display: block;
-  font-style: normal;
-  font-weight: 100 900;
-}
+const geistSans = localFont({
+  src: "../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
+  family: "Geist Sans",
+  weight: "100 900",
+  variable: "--font-geist-sans",
+  fallback: ["ui-sans-serif", "system-ui", "sans-serif"],
+});
 
-@font-face {
-  font-family: "Geist Mono";
-  src: url("${geistMonoUrl}") format("woff2");
-  font-display: block;
-  font-style: normal;
-  font-weight: 100 900;
-}
+const geistMono = localFont({
+  src: "../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
+  family: "Geist Mono",
+  weight: "100 900",
+  variable: "--font-geist-mono",
+  fallback: ["ui-monospace", "monospace"],
+});
 
-@font-face {
-  font-family: "Geist Pixel Square";
-  src: url("${geistPixelUrl}") format("woff2");
-  font-display: block;
-  font-style: normal;
-  font-weight: 500;
-}
-
-:root {
-  --font-geist-sans: "Geist Sans";
-  --font-geist-mono: "Geist Mono";
-  --font-geist-pixel: "Geist Pixel Square";
-}
-`;
+const geistPixel = localFont({
+  src: "../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2",
+  family: "Geist Pixel Square",
+  weight: 500,
+  variable: "--font-geist-pixel",
+  fallback: ["monospace"],
+});
 
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <>
-      <link rel="preload" href={geistSansUrl} as="font" type="font/woff2" crossOrigin="anonymous" />
-      <link rel="preload" href={geistMonoUrl} as="font" type="font/woff2" crossOrigin="anonymous" />
-      <link
-        rel="preload"
-        href={geistPixelUrl}
-        as="font"
-        type="font/woff2"
-        crossOrigin="anonymous"
-      />
-      <style dangerouslySetInnerHTML={{ __html: fontFaceCss }} />
-      <main className="min-h-screen bg-black font-mono text-white">{children}</main>
+      <main
+        className={`${geistSans.variable} ${geistMono.variable} ${geistPixel.variable} ${geistMono.className} min-h-screen bg-black text-white`}
+      >
+        {children}
+      </main>
       <Databuddy clientId="0af7dbbd-628a-44c9-8814-df4138a061b0" trackWebVitals={true} />
     </>
   );

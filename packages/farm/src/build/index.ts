@@ -11,6 +11,7 @@ import { getFarmDocsRouteTypeEntries } from "../docs";
 import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
+import { farmFontImportsPlugin } from "../font-vite";
 import { mergeFarmViteConfig } from "../server/vite-config";
 import {
   canUseRolldownForRouteDiscovery,
@@ -203,7 +204,14 @@ async function createProjectModuleServer(
           plugins: [],
         },
       },
-      plugins: [farmEnvironmentFunctionsPlugin()],
+      plugins: [
+        farmFontImportsPlugin({
+          root,
+          basePath: config.basePath,
+          publicDir: config.publicDir,
+        }),
+        farmEnvironmentFunctionsPlugin(),
+      ],
       server: {
         middlewareMode: true,
         hmr: false,

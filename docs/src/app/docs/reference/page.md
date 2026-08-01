@@ -44,6 +44,7 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/client`           | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`.              |
 | `@farm.js/core/plugin/client`    | `createClientPluginManager` and browser lifecycle types for advanced tooling.                              |
 | `@farm.js/core/navigation`       | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`.                |
+| `@farm.js/core/font`             | Build-time `localFont` and `remoteFont` loaders with generated CSS, hashed assets, and preload hints.      |
 | `@farm.js/core/headers`          | `headers`, `cookies`.                                                                                      |
 | `@farm.js/core/router`           | `createFarmRouter`, `matchFarmRoute`, `buildFarmRoutePath`, `isFarmRouteActive`.                           |
 | `@farm.js/core/storage`          | `sqliteStorage`, `postgresStorage`, `redisStorage`, `createStorageClient`, `defineStorageClient`.          |

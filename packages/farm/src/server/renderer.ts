@@ -48,6 +48,7 @@ import {
 import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolver";
 import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
+import { renderFarmFontDevHead } from "../font-vite";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -1573,7 +1574,6 @@ export class ServerRenderer {
       for (const [key, value] of Object.entries(options.responseHeaders || {})) {
         res.setHeader(key, value);
       }
-
       const htmlParts: string[] = [];
       const staticShellParts: string[] | undefined = options.captureStaticShell ? [] : undefined;
       let staticShellClosed = false;
@@ -1686,6 +1686,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       const i18nAlternateTags = i18nSnapshot
         ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
         : "";
+      const fontHead = renderFarmFontDevHead(this.config.root || process.cwd());
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
@@ -1710,6 +1711,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
   ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>${title}</title>${metaTags}${i18nAlternateTags}
+  ${fontHead}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
   ${propsScript}
@@ -1959,6 +1961,7 @@ window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegra
 ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};` : ""}
 </script>`;
     const alternateLinks = i18nSnapshot ? renderI18nAlternateLinks(requestPath, i18nSnapshot) : "";
+    const fontHead = renderFarmFontDevHead(this.config.root || process.cwd());
 
     return `<!DOCTYPE html>
 <html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
@@ -1970,6 +1973,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
   <link rel="icon" href="data:,">
   <title>Farm.js App</title>${alternateLinks}
+  ${fontHead}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
   ${integrationManifestScript}

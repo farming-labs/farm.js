@@ -102,6 +102,7 @@ export * from "./cron";
 export * from "./env";
 export * from "./env-types";
 export * from "./environment";
+export * from "./font";
 export * from "./type-artifacts";
 export { createFarmImageTypeDeclarations, generateFarmImageTypes } from "./image-types";
 export type { GenerateFarmImageTypesOptions } from "./image-types";

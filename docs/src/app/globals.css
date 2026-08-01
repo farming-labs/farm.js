@@ -2,37 +2,8 @@
 @tailwind components;
 @tailwind utilities;
 
-@font-face {
-  font-family: "Geist Sans";
-  src: url("../../node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
-  font-display: block;
-  font-style: normal;
-  font-weight: 100 900;
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  src: url("../../node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2")
-    format("woff2");
-  font-display: block;
-  font-style: normal;
-  font-weight: 100 900;
-}
-
-@font-face {
-  font-family: "Geist Pixel Square";
-  src: url("../../node_modules/geist/dist/fonts/geist-pixel/GeistPixel-Square.woff2")
-    format("woff2");
-  font-display: block;
-  font-style: normal;
-  font-weight: 500;
-}
-
 @layer base {
   :root {
-    --font-geist-sans: "Geist Sans";
-    --font-geist-mono: "Geist Mono";
-    --font-geist-pixel: "Geist Pixel Square";
     --farm-bg: #000;
     --farm-line: rgb(255 255 255 / 0.12);
     --farm-line-soft: rgb(255 255 255 / 0.055);
@@ -45,8 +16,8 @@
 
   body {
     font-family:
-      var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-      "Liberation Mono", "Courier New", monospace;
+      "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+      "Courier New", monospace;
     margin: 0;
     background: var(--farm-bg);
     font-synthesis: none;

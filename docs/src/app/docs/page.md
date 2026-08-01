@@ -20,6 +20,7 @@ Create an app and learn the files that matter.
 Routes, rendering, layouts, and request flow.
 
 - [Routing](/docs/routing): Farm uses an app directory routing model with static routes, dynamic segments, catch-all routes, and typed navigation.
+- [Fonts](/docs/fonts): Compile local or remote fonts into self-hosted, hashed assets with generated CSS and no loader runtime.
 - [Layouts and Route Boundaries](/docs/layouts): Wrap routes with root and nested layouts, then use loading, error, and not-found files for route-level UX.
 - [Rendering Model](/docs/server-rendering): Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports and config.
 - [Built-in Authentication](/docs/auth): Enable email/password auth, sessions, server helpers, and React APIs with the top-level `auth` framework config.
