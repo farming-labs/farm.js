@@ -19,6 +19,8 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
 
 export function createFarmClientOptimizeDepsConfig(): ViteUserConfig["optimizeDeps"] {
   return {
+    // The application Vite config is merged after this default. Apps can add
+    // CommonJS packages to optimizeDeps.include or opt back into discovery.
     noDiscovery: true,
     // Vite 5 otherwise schedules a redundant optimizer pass when its static
     // crawl ends, even when discovery is disabled and no dependency was found.
