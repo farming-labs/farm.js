@@ -58,6 +58,7 @@ import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
 import { createFarmClientOptimizeDepsConfig } from "./server/vite-config";
+import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -879,11 +880,15 @@ export function farmPlugin(
         }
       };
 
+      const farmDocsFontAssetList = farmDocsDevRuntime
+        ? resolveFarmDocsFontAssets(farmConfig.root)
+        : [];
       const farmDocsHandler = farmDocsDevRuntime
         ? farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             clientEntry: "/@farm/client.js",
+            fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList),
           })
         : null;
       const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime
@@ -893,6 +898,9 @@ export function farmPlugin(
             docs: farmConfig.docs,
           })
         : null;
+      const farmDocsFontAssets = new Map(
+        farmDocsFontAssetList.map(({ url, sourcePath }) => [url, sourcePath]),
+      );
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
       const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
         try {
@@ -968,6 +976,20 @@ export function farmPlugin(
               await sendWebResponse(res, imageResponse);
               return;
             }
+          }
+
+          const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
+          if (
+            (requestMethod === "GET" || requestMethod === "HEAD") &&
+            farmDocsFontPath &&
+            fs.existsSync(farmDocsFontPath)
+          ) {
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "font/woff2");
+            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+            if (requestMethod === "HEAD") res.end();
+            else fs.createReadStream(farmDocsFontPath).pipe(res);
+            return;
           }
 
           if (
