@@ -8,10 +8,9 @@ export interface FarmVercelImmutableAssetRoute {
 }
 
 /**
- * Apply immutable caching only to Farm/Vite filenames that end in either the
- * default eight-character URL-safe build hash or Farm's longer hexadecimal
- * fingerprints. Stable entry filenames and HTML are deliberately excluded
- * because they can change between deployments.
+ * Apply immutable caching only to Farm/Vite filenames carrying Farm's `-h`
+ * content-fingerprint marker. Stable entry filenames and HTML are deliberately
+ * excluded because they can change between deployments.
  */
 export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelImmutableAssetRoute {
   const normalizedBasePath = normalizeBasePath(basePath);
@@ -19,7 +18,7 @@ export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelI
   const prefix = escapedBasePath ? `/${escapedBasePath}` : "";
 
   return {
-    src: `^${prefix}/(?:assets|chunks)/(?:.+/)*[^/]+-(?:[A-Za-z0-9_]{8}|(?=[A-Za-z0-9_-]{8}\\.)(?=[A-Za-z0-9_-]*[A-Z0-9_])[A-Za-z0-9_-]{8}|[a-fA-F0-9]{12,})\\.(?!(?:[hH][tT][mM][lL]?)$)[^/]+$`,
+    src: `^${prefix}/(?:assets|chunks)/(?:.+/)*[^/]+-h(?:[a-fA-F0-9]{8}|[a-fA-F0-9]{12}|[a-fA-F0-9]{16})\\.(?!(?:[hH][tT][mM][lL]?)$)[^/]+$`,
     headers: {
       "Cache-Control": FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
     },

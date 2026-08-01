@@ -1040,13 +1040,14 @@ async function buildClient(
           },
           output: {
             entryFileNames: "[name].js",
-            chunkFileNames: "chunks/[name]-[hash].js",
+            chunkFileNames: "chunks/[name]-h[hash].js",
+            hashCharacters: "hex",
             // Use predictable name for CSS so we can reference it in SSR HTML
             assetFileNames: (assetInfo) => {
               if (assetInfo.name?.endsWith(".css")) {
                 return "farm-client.css";
               }
-              return "assets/[name]-[hash][extname]";
+              return "assets/[name]-h[hash][extname]";
             },
           },
           // Externalize Node.js built-ins and server-side modules for client build

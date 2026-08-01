@@ -195,7 +195,7 @@ console.log(demo, farmFontPreloadHeader);`,
       expect(css).toContain('font-family: "Demo Sans"');
       expect(css).toContain("font-display: swap");
       expect(css).toContain("--font-demo:");
-      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-[a-f0-9]{12}\.woff2$/);
+      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-h[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("test-font-binary");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -334,7 +334,7 @@ console.log(demo);`,
       );
 
       expect(fetchMock).toHaveBeenCalledOnce();
-      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/self-hosted-[a-f0-9]{12}\.woff2$/);
+      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/self-hosted-h[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("self-hosted-font");
     } finally {
       vi.unstubAllGlobals();

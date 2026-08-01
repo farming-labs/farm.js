@@ -9,12 +9,12 @@ import {
 
 describe("Vercel immutable Farm assets", () => {
   it("matches content-hashed JavaScript, CSS, font, and image assets", () => {
-    expect(isFarmVercelImmutableAssetPath("/chunks/router-Ab12_cd9.js")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/assets/theme-a1b2c3d4.css")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/assets/fonts/Geist-5f687a5dd4c8.woff2")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/assets/github-QpYQ9fJQ.svg")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/chunks/vendor-Ab-2_cd9.wasm")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/assets/app-a1b2c3d4.js.map")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/chunks/router-hab12cd90.js")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/assets/theme-ha1b2c3d4.css")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/assets/fonts/Geist-h5f687a5dd4c8.woff2")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/assets/github-h0123456789abcdef.svg")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/chunks/vendor-hab12cd90.wasm")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/assets/app-ha1b2c3d4.js.map")).toBe(true);
   });
 
   it("does not give immutable caching to stable or unhashed URLs", () => {
@@ -23,14 +23,16 @@ describe("Vercel immutable Farm assets", () => {
     expect(isFarmVercelImmutableAssetPath("/assets/logo.svg")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/icon-v2.svg")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/readme-how-to-build.js")).toBe(false);
+    expect(isFarmVercelImmutableAssetPath("/assets/archive-202608010001.js")).toBe(false);
+    expect(isFarmVercelImmutableAssetPath("/assets/component-abcdefgh.js")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/shell-a1b2c3d4.html")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/shell-a1b2c3d4.HTM")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/index.html")).toBe(false);
   });
 
   it("scopes the route to the configured base path", () => {
-    expect(isFarmVercelImmutableAssetPath("/farm/assets/logo-a1b2c3d4.webp", "/farm")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/assets/logo-a1b2c3d4.webp", "/farm")).toBe(false);
+    expect(isFarmVercelImmutableAssetPath("/farm/assets/logo-ha1b2c3d4.webp", "/farm")).toBe(true);
+    expect(isFarmVercelImmutableAssetPath("/assets/logo-ha1b2c3d4.webp", "/farm")).toBe(false);
   });
 
   it("emits a continuing header route for the Build Output API", () => {
@@ -42,7 +44,7 @@ describe("Vercel immutable Farm assets", () => {
     });
     expect(route.continue).toBe(true);
     expect(route.caseSensitive).toBe(true);
-    expect(matcher.test("/assets/module-Ab-2_cd9.wasm")).toBe(true);
+    expect(matcher.test("/assets/module-hab12cd90.wasm")).toBe(true);
     expect(matcher.test("/assets/shell-a1b2c3d4.html")).toBe(false);
   });
 });
