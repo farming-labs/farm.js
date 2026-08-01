@@ -15,17 +15,20 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/plugin/client",
   "@farm.js/core/deferred",
   "@farm.js/core/deployment",
+  "@farm.js/core/i18n/client",
+  "@farm.js/core/query/client",
+  "@farm.js/core/server-fn/client",
+  "@farm.js/core/server-query/client",
 ] as const;
 
 export function createFarmClientOptimizeDepsConfig(): ViteUserConfig["optimizeDeps"] {
   return {
-    // The application Vite config is merged after this default. Apps can add
-    // CommonJS packages to optimizeDeps.include or opt back into discovery.
-    noDiscovery: true,
-    // Vite 5 otherwise schedules a redundant optimizer pass when its static
-    // crawl ends, even when discovery is disabled and no dependency was found.
-    // A page can hydrate between those passes and receive mixed browser hashes.
-    holdUntilCrawlEnd: false,
+    // Keep normal application dependency discovery for CJS-only packages, but
+    // seed every Farm browser runtime so React is present in the first crawl.
+    noDiscovery: false,
+    // Waiting for the crawl avoids serving a partial optimizer generation and
+    // then changing browser hashes while hydration is already in progress.
+    holdUntilCrawlEnd: true,
     include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
   };
 }
@@ -48,6 +51,13 @@ export function mergeFarmViteConfig(
   farmConfig: ViteUserConfig,
   userConfig: ViteUserConfig = {},
 ): ViteUserConfig {
+  const noDiscovery = userConfig.optimizeDeps?.noDiscovery ?? farmConfig.optimizeDeps?.noDiscovery;
+  const holdUntilCrawlEnd =
+    userConfig.optimizeDeps?.holdUntilCrawlEnd ??
+    (userConfig.optimizeDeps?.noDiscovery === true
+      ? false
+      : farmConfig.optimizeDeps?.holdUntilCrawlEnd);
+
   return {
     ...farmConfig,
     ...userConfig,
@@ -66,6 +76,8 @@ export function mergeFarmViteConfig(
     optimizeDeps: {
       ...farmConfig.optimizeDeps,
       ...userConfig.optimizeDeps,
+      noDiscovery,
+      holdUntilCrawlEnd,
       include: Array.from(
         new Set([
           ...(farmConfig.optimizeDeps?.include || []),
