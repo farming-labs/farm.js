@@ -17,7 +17,7 @@ export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelI
   const prefix = escapedBasePath ? `/${escapedBasePath}` : "";
 
   return {
-    src: `^${prefix}/(?:assets|chunks)/(?:.+/)*[^/]+-[A-Za-z0-9_-]{8,}\\.[^/]+$`,
+    src: `^${prefix}/(?:assets|chunks)/(?:.+/)*[^/]+-[A-Za-z0-9_]{8,}\\.(?:js|mjs|cjs|css|woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|svg|ico)$`,
     headers: {
       "Cache-Control": FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
     },

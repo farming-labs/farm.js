@@ -20,6 +20,8 @@ describe("Vercel immutable Farm assets", () => {
     expect(isFarmVercelImmutableAssetPath("/farm-client.css")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/logo.svg")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/icon-v2.svg")).toBe(false);
+    expect(isFarmVercelImmutableAssetPath("/assets/readme-how-to-build.js")).toBe(false);
+    expect(isFarmVercelImmutableAssetPath("/assets/shell-a1b2c3d4.html")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/index.html")).toBe(false);
   });
 
@@ -30,7 +32,7 @@ describe("Vercel immutable Farm assets", () => {
 
   it("emits a continuing header route for the Build Output API", () => {
     expect(createFarmVercelImmutableAssetRoute()).toEqual({
-      src: "^/(?:assets|chunks)/(?:.+/)*[^/]+-[A-Za-z0-9_-]{8,}\\.[^/]+$",
+      src: "^/(?:assets|chunks)/(?:.+/)*[^/]+-[A-Za-z0-9_]{8,}\\.(?:js|mjs|cjs|css|woff2?|ttf|otf|eot|png|jpe?g|gif|webp|avif|svg|ico)$",
       headers: {
         "Cache-Control": FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
       },
