@@ -4138,6 +4138,35 @@ function generateClientManifest(bundle: any): Record<string, any> {
   return manifest;
 }
 
+async function getFarmClientOptimizeDepsEntries(
+  config: FarmVitePluginOptions,
+  appRoot: string,
+): Promise<string[]> {
+  const glob = await import("fast-glob");
+  const sourcePatterns = getFarmSourceRoots(config).map(({ root, srcDir }) =>
+    path.join(root, srcDir, "**/*.{js,jsx,ts,tsx}").replace(/\\/g, "/"),
+  );
+  const sourceFiles = await glob.default(sourcePatterns, {
+    absolute: true,
+    onlyFiles: true,
+    unique: true,
+    ignore: ["**/*.d.ts", "**/node_modules/**", "**/.*/**"],
+  });
+  const clientEntries: string[] = [];
+
+  await Promise.all(
+    sourceFiles.map(async (file) => {
+      const source = await fs.promises.readFile(file, "utf8");
+      if (!hasUseClientDirective(source)) return;
+
+      const relative = path.relative(appRoot, file);
+      clientEntries.push((path.isAbsolute(relative) ? file : relative).replace(/\\/g, "/"));
+    }),
+  );
+
+  return clientEntries.sort();
+}
+
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
   const appRoot = path.resolve(config.root || process.cwd());
@@ -4150,6 +4179,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     );
     config = layeredConfig;
   }
+  const clientOptimizeDepsEntries = await getFarmClientOptimizeDepsEntries(config, appRoot);
 
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
@@ -4332,12 +4362,25 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
+      // Farm's route modules are loaded dynamically, so Vite cannot discover
+      // their dependencies from an index.html crawl. Scanning only explicit
+      // client boundaries up front prevents optimizer hash changes from
+      // introducing multiple React module instances during hydration.
+      entries: clientOptimizeDepsEntries,
       include: [
         "react",
         "react-dom",
         "react-dom/client",
         "react/jsx-runtime",
         "react/jsx-dev-runtime",
+        // Pre-bundle every framework client-runtime entry with React. Without
+        // this, Vite can discover a linked Farm entry after the page has loaded,
+        // regenerate the optimizer browser hash, and leave React DOM holding a
+        // different React module instance from a client component.
+        "@farm.js/core/client",
+        "@farm.js/core/plugin/client",
+        "@farm.js/core/deferred",
+        "@farm.js/core/deployment",
       ],
       // Exclude server-side packages from browser bundling
       exclude: [

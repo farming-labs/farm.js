@@ -304,9 +304,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("navigator.clipboard");
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
-    expect(html).toContain('url("/assets/GeistMono-Variable-BNLlm6Cd.woff2") format("woff2")');
-    expect(html).toContain('--font-geist-mono: "Geist Mono"');
-    expect(html).toContain('<link rel="preload" href="/assets/GeistMono-Variable-BNLlm6Cd.woff2"');
+    expect(html).toContain('--font-geist-mono: "Geist Mono", ui-monospace, monospace');
+    expect(html).not.toContain("/node_modules/geist/");
+    expect(html).not.toContain("/assets/Geist-Variable-CrgPqtmy.woff2");
+    expect(html).not.toContain("/assets/GeistMono-Variable-BNLlm6Cd.woff2");
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
