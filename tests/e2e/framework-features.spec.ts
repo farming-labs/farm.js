@@ -281,19 +281,6 @@ test.describe("Framework feature integration", () => {
   test("supports page state, blocking, pending navigation, and view transitions", async ({
     page,
   }) => {
-    await page.addInitScript(() => {
-      (window as any).__FARM_VIEW_TRANSITIONS__ = 0;
-      (document as any).startViewTransition = (update: () => void | Promise<void>) => {
-        (window as any).__FARM_VIEW_TRANSITIONS__ += 1;
-        const updateCallbackDone = Promise.resolve().then(update);
-        return {
-          ready: Promise.resolve(),
-          updateCallbackDone,
-          finished: updateCallbackDone,
-          skipTransition() {},
-        };
-      };
-    });
     await page.goto("/feature-lab");
 
     await page.getByTestId("push-page-state").click();
@@ -328,9 +315,33 @@ test.describe("Framework feature integration", () => {
     expect(typedProductHref.searchParams.get("locale")).toBe("am");
     expect(typedProductHref.searchParams.get("toast")).toBe("opened");
 
-    await page.getByTestId("view-transition-link").click();
-    await expect(page).toHaveURL(/\/store-e2e$/);
-    expect(await page.evaluate(() => (window as any).__FARM_VIEW_TRANSITIONS__)).toBe(1);
+    const transitionPage = await page.context().newPage();
+    try {
+      await transitionPage.addInitScript(() => {
+        (window as any).__FARM_VIEW_TRANSITIONS__ = 0;
+        (document as any).startViewTransition = (update: () => void | Promise<void>) => {
+          (window as any).__FARM_VIEW_TRANSITIONS__ += 1;
+          const updateCallbackDone = Promise.resolve().then(update);
+          return {
+            ready: Promise.resolve(),
+            updateCallbackDone,
+            finished: updateCallbackDone,
+            skipTransition() {},
+          };
+        };
+      });
+      await transitionPage.goto("/feature-lab");
+      await expect(transitionPage.getByTestId("client-runtime-boundary")).toHaveText(
+        "runtime:client",
+      );
+      await transitionPage.getByTestId("view-transition-link").click();
+      await expect(transitionPage).toHaveURL(/\/store-e2e$/);
+      await expect
+        .poll(() => transitionPage.evaluate(() => (window as any).__FARM_VIEW_TRANSITIONS__))
+        .toBe(1);
+    } finally {
+      await transitionPage.close();
+    }
   });
 
   test("serves static and dynamic metadata images and framework cron routes", async ({
