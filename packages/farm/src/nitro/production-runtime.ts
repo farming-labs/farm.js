@@ -25,3 +25,14 @@ export {
 } from "../navigation-errors";
 export { configureFarmObservability, emitFarmEvent } from "../observability";
 export { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
+
+export function appendFarmLinkHeader(headers: Headers, value: string): void {
+  const current = headers.get("Link");
+  if (!current) {
+    headers.set("Link", value);
+    return;
+  }
+  if (current !== value && !current.endsWith(`, ${value}`)) {
+    headers.set("Link", `${current}, ${value}`);
+  }
+}

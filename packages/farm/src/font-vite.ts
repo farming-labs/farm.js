@@ -214,6 +214,7 @@ export async function transformFarmFontCalls(
 
   const calls = findFontCalls(ast, bindings);
   if (calls.length === 0) return null;
+  validateFontBindingReferences(ast, calls, cleanId);
 
   const registeredCalls = calls.map((call) => ({
     kind: call.kind,
@@ -247,8 +248,7 @@ export async function transformFarmFontCalls(
 export function renderFarmFontDevHead(root: string): string {
   const registry = registries.get(normalizeRoot(root));
   if (!registry || registry.production || registry.size === 0) return "";
-  const preloads = registry.renderPreloadTags(false);
-  return `${preloads}\n  <link rel="stylesheet" href="/@farm/fonts.css">`;
+  return registry.renderPreloadTags(false);
 }
 
 class FarmFontRegistry {
@@ -319,7 +319,7 @@ class FarmFontRegistry {
   }
 
   getDevResource(pathname: string): FontResource | undefined {
-    for (const resource of this.resources.values()) {
+    for (const resource of this.getActiveResources()) {
       if (resource.bytes && resourceUrl(resource, false, this.basePath) === pathname) {
         return resource;
       }
@@ -328,7 +328,7 @@ class FarmFontRegistry {
   }
 
   emitAssets(context: { emitFile: (file: any) => string }, bundle: OutputBundle): void {
-    for (const resource of this.resources.values()) {
+    for (const resource of this.getActiveResources()) {
       if (!resource.bytes || !resource.outputFileName) continue;
       if (bundle[resource.outputFileName]) continue;
       context.emitFile({
@@ -373,6 +373,14 @@ class FarmFontRegistry {
       for (const definition of definitions) active.set(definition.id, definition);
     }
     return Array.from(active.values()).sort((left, right) => left.id.localeCompare(right.id));
+  }
+
+  private getActiveResources(): FontResource[] {
+    const active = new Set<FontResource>();
+    for (const definition of this.getDefinitions()) {
+      for (const source of definition.sources) active.add(source.resource);
+    }
+    return Array.from(active);
   }
 
   private getPreloadResources(production: boolean) {
@@ -647,6 +655,55 @@ function findFontCalls(ast: AstNode, bindings: ReturnType<typeof findFontBinding
   return calls;
 }
 
+function validateFontBindingReferences(ast: AstNode, calls: FontCall[], id: string): void {
+  const calledBindings = new Set(
+    calls.map((call) => call.binding).filter((binding): binding is string => Boolean(binding)),
+  );
+  const transformedCallees = new Set(
+    calls.flatMap((call) => {
+      const callee = call.node.callee;
+      return call.binding && isAstNode(callee) ? [`${callee.start}:${callee.end}`] : [];
+    }),
+  );
+
+  walkAst(ast, (node, ancestors) => {
+    if (
+      node.type !== "Identifier" ||
+      typeof node.name !== "string" ||
+      !calledBindings.has(node.name)
+    ) {
+      return;
+    }
+    const parent = ancestors.at(-1);
+    if (!parent || isNonReferenceIdentifier(node, parent)) return;
+    if (transformedCallees.has(`${node.start}:${node.end}`)) return;
+    throw fontError(
+      id,
+      `${node.name} can only be referenced by statically compiled font declarations`,
+    );
+  });
+}
+
+function isNonReferenceIdentifier(node: AstNode, parent: AstNode): boolean {
+  if (parent.type === "ImportSpecifier") return true;
+  if (
+    (parent.type === "MemberExpression" || parent.type === "OptionalMemberExpression") &&
+    parent.property === node &&
+    parent.computed !== true
+  ) {
+    return true;
+  }
+  if (
+    (parent.type === "Property" || parent.type === "PropertyDefinition") &&
+    parent.key === node &&
+    parent.computed !== true &&
+    parent.shorthand !== true
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function createFontImportReplacements(
   code: string,
   ast: AstNode,
@@ -880,9 +937,13 @@ function renderFontDefinitionCss(
 }
 
 function resourceUrl(resource: FontResource, production: boolean, basePath: string): string {
-  if (resource.publicPath) return joinBasePath(basePath, resource.publicPath);
+  if (resource.publicPath) {
+    return production ? joinBasePath(basePath, resource.publicPath) : resource.publicPath;
+  }
   if (!resource.bytes) return resource.publicUrl;
-  if (!production) return `/@farm/font/${resource.hash}${resource.extension}`;
+  if (!production) {
+    return joinBasePath(basePath, `/@farm/font/${resource.hash}${resource.extension}`);
+  }
   return joinBasePath(basePath, `/${resource.outputFileName}`);
 }
 
@@ -899,17 +960,39 @@ async function fetchRemoteFont(url: URL, integrity?: string): Promise<Buffer> {
         throw new Error(`request returned ${response.status} ${response.statusText}`);
       const length = Number(response.headers.get("content-length") || 0);
       if (length > MAX_REMOTE_FONT_BYTES) throw new Error("font exceeds the 20 MB limit");
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (bytes.byteLength > MAX_REMOTE_FONT_BYTES) throw new Error("font exceeds the 20 MB limit");
+      const bytes = await readResponseBodyWithLimit(response, MAX_REMOTE_FONT_BYTES);
       if (integrity) verifyIntegrity(bytes, integrity);
       return bytes;
     })().catch((error) => {
-      remoteBytes.delete(key);
       throw new Error(`[Farm fonts] Failed to download ${url.href}: ${(error as Error).message}`);
     });
     remoteBytes.set(key, pending);
+    const clearPending = () => {
+      if (remoteBytes.get(key) === pending) remoteBytes.delete(key);
+    };
+    void pending.then(clearPending, clearPending);
   }
   return pending;
+}
+
+async function readResponseBodyWithLimit(response: Response, limit: number): Promise<Buffer> {
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > limit) {
+      await reader.cancel("font exceeds the configured byte limit");
+      throw new Error("font exceeds the 20 MB limit");
+    }
+    chunks.push(chunk.value);
+  }
+
+  return Buffer.concat(chunks, total);
 }
 
 function verifyIntegrity(bytes: Buffer, integrity: string): void {

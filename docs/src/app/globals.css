@@ -16,8 +16,8 @@
 
   body {
     font-family:
-      var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-      "Liberation Mono", "Courier New", monospace;
+      "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+      "Courier New", monospace;
     margin: 0;
     background: var(--farm-bg);
     font-synthesis: none;

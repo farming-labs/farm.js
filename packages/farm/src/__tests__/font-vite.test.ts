@@ -8,6 +8,7 @@ import path from "node:path";
 import { build, createServer, type Plugin, type Rollup } from "vite";
 import { describe, expect, it, vi } from "vitest";
 import { farmFontImportsPlugin, mergeFarmFontCss, renderFarmFontDevHead } from "../font-vite";
+import { appendFarmLinkHeader } from "../nitro/production-runtime";
 import { farmPlugin } from "../vite";
 
 function fontRuntimeStub(): Plugin {
@@ -57,7 +58,7 @@ export const demo = localFont({ src: "./demo.woff2", family: "Dev Demo" });`,
       root,
       configFile: false,
       logLevel: "silent",
-      plugins: [fontRuntimeStub(), farmFontImportsPlugin({ root })],
+      plugins: [fontRuntimeStub(), farmFontImportsPlugin({ root, basePath: "/docs" })],
       server: { middlewareMode: true },
     });
     const http = createHttpServer(vite.middlewares);
@@ -67,8 +68,10 @@ export const demo = localFont({ src: "./demo.woff2", family: "Dev Demo" });`,
       expect(transformed?.code).toContain("farm-font-");
       expect(transformed?.code).not.toContain("font-runtime-stub");
       expect(transformed?.code).not.toContain("@farm.js/core/font");
+      expect(transformed?.code).toContain("font-css");
       expect(renderFarmFontDevHead(root)).toContain('<link rel="preload"');
-      expect(renderFarmFontDevHead(root)).toContain('href="/@farm/fonts.css"');
+      expect(renderFarmFontDevHead(root)).toContain('href="/docs/@farm/font/');
+      expect(renderFarmFontDevHead(root)).not.toContain('rel="stylesheet"');
 
       await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
       const address = http.address();
@@ -78,9 +81,58 @@ export const demo = localFont({ src: "./demo.woff2", family: "Dev Demo" });`,
       const fontPath = css.match(/url\("([^"]+)"\)/)?.[1];
 
       expect(css).toContain('font-family: "Dev Demo"');
-      expect(fontPath).toMatch(/^\/@farm\/font\/[a-f0-9]{12}\.woff2$/);
+      expect(fontPath).toMatch(/^\/docs\/@farm\/font\/[a-f0-9]{12}\.woff2$/);
       const bytes = await fetch(`${origin}${fontPath}`).then((response) => response.text());
       expect(bytes).toBe("development-font");
+    } finally {
+      if (http.listening) {
+        await new Promise<void>((resolve, reject) =>
+          http.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+      await vite.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("serves publicDir fonts from their Vite URL in base-path development", async () => {
+    const temporaryRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-public-dev-"));
+    const root = await fs.realpath(temporaryRoot);
+    await fs.mkdir(path.join(root, "public", "fonts"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "public", "fonts", "public.woff2"),
+      Buffer.from("public-development-font"),
+    );
+    await fs.writeFile(
+      path.join(root, "entry.ts"),
+      `import { localFont } from "@farm.js/core/font";
+export const demo = localFont({ src: "/fonts/public.woff2", family: "Public Dev" });`,
+    );
+    const vite = await createServer({
+      root,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [fontRuntimeStub(), farmFontImportsPlugin({ root, basePath: "/docs" })],
+      server: { middlewareMode: true },
+    });
+    const http = createHttpServer(vite.middlewares);
+
+    try {
+      await vite.transformRequest("/entry.ts");
+      const head = renderFarmFontDevHead(root);
+      expect(head).toContain('href="/fonts/public.woff2"');
+      expect(head).not.toContain('href="/docs/fonts/public.woff2"');
+
+      await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
+      const address = http.address();
+      if (!address || typeof address === "string") throw new Error("Missing test server address");
+      const origin = `http://127.0.0.1:${address.port}`;
+      const css = await fetch(`${origin}/@farm/fonts.css`).then((response) => response.text());
+
+      expect(css).toContain('url("/fonts/public.woff2")');
+      await expect(
+        fetch(`${origin}/fonts/public.woff2`).then((response) => response.text()),
+      ).resolves.toBe("public-development-font");
     } finally {
       if (http.listening) {
         await new Promise<void>((resolve, reject) =>
@@ -145,6 +197,25 @@ console.log(demo, farmFontPreloadHeader);`,
       expect(css).toContain("--font-demo:");
       expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("test-font-binary");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects loader bindings that would remain after their import is compiled away", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-binding-"));
+    try {
+      await fs.writeFile(path.join(root, "demo.woff2"), Buffer.from("binding-font"));
+      await fs.writeFile(
+        path.join(root, "entry.ts"),
+        `import { localFont } from "@farm.js/core/font";
+export const demo = localFont({ src: "./demo.woff2", family: "Binding Demo" });
+console.log(localFont, demo);`,
+      );
+
+      await expect(buildFixture(root)).rejects.toThrow(
+        "localFont can only be referenced by statically compiled font declarations",
+      );
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
@@ -269,6 +340,103 @@ console.log(demo);`,
       vi.unstubAllGlobals();
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("refetches remote fonts across builds and emits only the current asset", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-remote-rebuild-"));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(Buffer.from("remote-font-v1"), { status: 200 }))
+      .mockResolvedValueOnce(new Response(Buffer.from("remote-font-v2"), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    try {
+      await fs.writeFile(
+        path.join(root, "entry.ts"),
+        `import { remoteFont } from "@farm.js/core/font";
+export const demo = remoteFont({
+  src: "https://fonts.example.test/rebuild.woff2",
+  family: "Remote Rebuild",
+});
+console.log(demo);`,
+      );
+
+      await buildFixture(root);
+      const secondResult = await buildFixture(root);
+      const fontAssets = secondResult.output.filter(
+        (output): output is Rollup.OutputAsset =>
+          output.type === "asset" && output.fileName.startsWith("assets/fonts/"),
+      );
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fontAssets).toHaveLength(1);
+      expect(Buffer.from(fontAssets[0].source).toString()).toBe("remote-font-v2");
+    } finally {
+      vi.unstubAllGlobals();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("stops reading a remote font as soon as it exceeds 20 MB", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-font-remote-limit-"));
+    const cancel = vi.fn();
+    let pulls = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulls += 1;
+        controller.enqueue(new Uint8Array(1024 * 1024));
+        if (pulls === 25) controller.close();
+      },
+      cancel,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(stream, { status: 200 })),
+    );
+
+    try {
+      await fs.writeFile(
+        path.join(root, "entry.ts"),
+        `import { remoteFont } from "@farm.js/core/font";
+export const demo = remoteFont({
+  src: "https://fonts.example.test/too-large.woff2",
+  family: "Too Large",
+});
+console.log(demo);`,
+      );
+
+      await expect(buildFixture(root)).rejects.toThrow("font exceeds the 20 MB limit");
+      expect(pulls).toBeLessThan(25);
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllGlobals();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("appends configured Link values without replacing generated preloads", () => {
+    const headers = new Headers({
+      Link: "</assets/fonts/demo.woff2>; rel=preload; as=font",
+    });
+
+    appendFarmLinkHeader(headers, "</api>; rel=preconnect");
+    appendFarmLinkHeader(headers, "</api>; rel=preconnect");
+
+    expect(headers.get("Link")).toBe(
+      "</assets/fonts/demo.woff2>; rel=preload; as=font, </api>; rel=preconnect",
+    );
+  });
+
+  it("keeps font preload headers on generated PPR cache-hit responses", async () => {
+    const source = await fs.readFile(
+      path.join(process.cwd(), "src", "nitro", "universal-build.ts"),
+      "utf8",
+    );
+
+    expect(source).toMatch(
+      /farmFontPreloadHeader \? \{ "Link": farmFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
+    );
+    expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
   });
 
   it("replaces an earlier generated font section when client and SSR CSS are combined", () => {

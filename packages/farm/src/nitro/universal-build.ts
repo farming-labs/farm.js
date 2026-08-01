@@ -2967,6 +2967,7 @@ function generateVirtualEntryCode(
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
   addMetadataImageReference,
+  appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
@@ -4030,9 +4031,14 @@ function applyConfiguredResponseHeaders(response, pathname) {
   for (const headerRoute of configuredHeaderRoutes) {
     if (!matchRuntimePathPattern(headerRoute.source, pathname)) continue;
     for (const header of headerRoute.headers) {
-      if ((headers || response.headers).get(header.key) === header.value) continue;
+      const currentValue = (headers || response.headers).get(header.key);
+      if (currentValue === header.value) continue;
       if (!headers) headers = new Headers(response.headers);
-      headers.set(header.key, header.value);
+      if (header.key.toLowerCase() === "link") {
+        appendFarmLinkHeader(headers, header.value);
+      } else {
+        headers.set(header.key, header.value);
+      }
     }
   }
 
@@ -4666,6 +4672,7 @@ async function handleFarmRequestInContext(
             status: 200,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
+              ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
             },
           }), middlewareHeaders);
