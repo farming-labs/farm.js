@@ -1006,8 +1006,10 @@ export class RouteManager {
       pattern: entry.pattern,
     }));
 
-    const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath));
     const i18n = this.getI18nConfig();
+    const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath), {
+      suggestStaticRendering: i18n?.routing !== "none",
+    });
     if (!i18n) {
       return result;
     }

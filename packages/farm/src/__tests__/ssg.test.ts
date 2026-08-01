@@ -133,7 +133,8 @@ describe("route rendering config", () => {
     expect(
       analyzeStaticRouteCandidate(
         {},
-        `export default async function Account() { return (await cookies()).get("session"); }`,
+        `import { cookies } from "@farm.js/core";
+         export default async function Account() { return (await cookies()).get("session"); }`,
       ),
     ).toMatchObject({
       candidate: false,
@@ -150,6 +151,36 @@ describe("route rendering config", () => {
     expect(
       analyzeStaticRouteCandidate({}, `export default function Search({ searchParams }) {}`),
     ).toMatchObject({ candidate: false });
+
+    expect(
+      analyzeStaticRouteCandidate(
+        {},
+        `import { cookies as readCookies, useSearchParams } from "@farm.js/core";
+         export default function Account(props: PageProps) {
+           readCookies(); useSearchParams(); return props.middleware?.data ?? props.context;
+         }`,
+      ),
+    ).toMatchObject({
+      candidate: false,
+      blockers: expect.arrayContaining([
+        "the route reads request cookies",
+        "the route reads URL search parameters",
+        "the route reads middleware request data",
+        "the route reads request context",
+      ]),
+    });
+
+    expect(
+      analyzeStaticRouteCandidate(
+        {},
+        `// cookies() and auth() are examples, not request reads.
+         export default function Static() {
+           const text = "searchParams cookies()";
+           function auth() { return true; }
+           return <Child searchParams={text} authenticated={auth()} />;
+         }`,
+      ),
+    ).toEqual({ candidate: true, blockers: [] });
   });
 
   it("suggests static rendering without changing the route mode", async () => {
@@ -174,6 +205,22 @@ describe("route rendering config", () => {
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]?.[0]).toContain("/about");
     expect(warn.mock.calls[0]?.[0]).toContain('dynamic = "force-static"');
+  });
+
+  it("can suppress static suggestions when locale routing must remain dynamic", async () => {
+    const dir = await createTempDir("farm-static-candidate-i18n-");
+    const pagePath = path.join(dir, "page.tsx");
+    await writeFile(pagePath, `export default function About() { return <main>About</main>; }`);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const result = await collectSSGPages(
+      [{ path: "/about", filePath: pagePath, isDynamic: false, pattern: "/about" }],
+      async () => ({}) as RouteModule,
+      { suggestStaticRendering: false },
+    );
+
+    expect(result).toEqual({ ssg: [], ssr: ["/about"] });
+    expect(warn).not.toHaveBeenCalled();
   });
 
   it("collects static pages marked by source directives", async () => {

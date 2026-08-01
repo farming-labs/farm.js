@@ -92,20 +92,23 @@ const OPTIONAL_CATCH_ALL_SEGMENT = /^\[\[\.\.\.([^\]]+)\]\]$/;
 const REQUIRED_CATCH_ALL_SEGMENT = /^\[\.\.\.([^\]]+)\]$/;
 const REQUIRED_DYNAMIC_SEGMENT = /^\[([^\]]+)\]$/;
 
-const REQUEST_BOUND_SOURCE_PATTERNS: ReadonlyArray<{
-  label: string;
-  pattern: RegExp;
-}> = [
-  { label: "request cookies", pattern: /\bcookies\s*\(/ },
-  { label: "request headers", pattern: /\bheaders\s*\(/ },
-  { label: "the current Request", pattern: /\bgetCurrentRequest\s*\(/ },
-  { label: "URL search parameters", pattern: /\bsearchParams\b/ },
-  { label: "middleware request data", pattern: /\bmiddlewareData\b/ },
-  {
-    label: "request authentication",
-    pattern: /\b(?:auth|getServerSession|getSession|currentUser)\s*\(/,
-  },
-];
+const REQUEST_API_LABELS = new Map<string, string>([
+  ["cookies", "request cookies"],
+  ["headers", "request headers"],
+  ["getCurrentRequest", "the current Request"],
+  ["useSearchParams", "URL search parameters"],
+  ["auth", "request authentication"],
+  ["getServerSession", "request authentication"],
+  ["getSession", "request authentication"],
+  ["currentUser", "request authentication"],
+]);
+
+const ROUTE_PROP_LABELS = new Map<string, string>([
+  ["searchParams", "URL search parameters"],
+  ["middleware", "middleware request data"],
+  ["middlewareData", "middleware request data"],
+  ["context", "request context"],
+]);
 
 /**
  * Resolve route rendering from Farm exports, Next-compatible exports, and
@@ -202,17 +205,104 @@ export function analyzeStaticRouteCandidate(
   }
 
   if (source) {
-    for (const requestBoundPattern of REQUEST_BOUND_SOURCE_PATTERNS) {
-      if (requestBoundPattern.pattern.test(source)) {
-        blockers.push(`the route reads ${requestBoundPattern.label}`);
-      }
-    }
+    blockers.push(...findRequestBoundSourceBlockers(source));
   }
 
   return {
     candidate: blockers.length === 0,
     blockers,
   };
+}
+
+function findRequestBoundSourceBlockers(source: string): string[] {
+  const blockers = new Set<string>();
+  const code = stripCommentsAndLiteralContents(source);
+
+  const sourceWithoutComments = stripComments(source);
+  for (const binding of readRequestApiImportBindings(sourceWithoutComments)) {
+    if (new RegExp(`\\b${escapeRegExp(binding.local)}\\s*\\(`).test(code)) {
+      blockers.add(`the route reads ${binding.label}`);
+    }
+  }
+
+  for (const namespace of readNamespaceImportBindings(sourceWithoutComments)) {
+    for (const [name, label] of REQUEST_API_LABELS) {
+      if (new RegExp(`\\b${escapeRegExp(namespace)}\\s*\\.\\s*${name}\\s*\\(`).test(code)) {
+        blockers.add(`the route reads ${label}`);
+      }
+    }
+  }
+
+  const params = readDefaultRouteParameters(code);
+  if (params) {
+    for (const [name, label] of ROUTE_PROP_LABELS) {
+      if (new RegExp(`\\b${name}\\b`).test(params)) {
+        blockers.add(`the route reads ${label}`);
+      }
+    }
+
+    const propsName = params.match(/^\s*([A-Za-z_$][\w$]*)\s*(?::|,|$)/)?.[1];
+    if (propsName) {
+      for (const [name, label] of ROUTE_PROP_LABELS) {
+        if (new RegExp(`\\b${escapeRegExp(propsName)}\\s*\\.\\s*${name}\\b`).test(code)) {
+          blockers.add(`the route reads ${label}`);
+        }
+      }
+    }
+  }
+
+  return [...blockers];
+}
+
+function readRequestApiImportBindings(source: string): Array<{ local: string; label: string }> {
+  const bindings: Array<{ local: string; label: string }> = [];
+  const namedImports = source.matchAll(/\bimport\s*\{([\s\S]*?)\}\s*from\s*["'][^"']+["']/g);
+
+  for (const match of namedImports) {
+    for (const rawSpecifier of (match[1] ?? "").split(",")) {
+      const specifier = rawSpecifier.trim().replace(/^type\s+/, "");
+      const imported = specifier.match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (!imported?.[1]) continue;
+      const label = REQUEST_API_LABELS.get(imported[1]);
+      if (label) bindings.push({ local: imported[2] ?? imported[1], label });
+    }
+  }
+
+  for (const match of source.matchAll(/\bimport\s+([A-Za-z_$][\w$]*)\s+from\s*["'][^"']+["']/g)) {
+    const local = match[1]!;
+    const label = REQUEST_API_LABELS.get(local);
+    if (label) bindings.push({ local, label });
+  }
+
+  return bindings;
+}
+
+function readNamespaceImportBindings(source: string): string[] {
+  return [...source.matchAll(/\bimport\s*\*\s*as\s*([A-Za-z_$][\w$]*)\s*from\s*["'][^"']+["']/g)]
+    .map((match) => match[1])
+    .filter((binding): binding is string => Boolean(binding));
+}
+
+function readDefaultRouteParameters(code: string): string | undefined {
+  return (
+    code.match(/\bexport\s+default\s+(?:async\s+)?function\b[^(]*\(([^)]*)\)/)?.[1] ??
+    code.match(/\bexport\s+default\s+(?:async\s+)?\(([^)]*)\)\s*=>/)?.[1]
+  );
+}
+
+function stripCommentsAndLiteralContents(source: string): string {
+  return stripComments(source)
+    .replace(/'(?:\\.|[^'\\])*'/g, "''")
+    .replace(/"(?:\\.|[^"\\])*"/g, '""')
+    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+}
+
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n\r]*/g, " ");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function hasExplicitRenderingConfig(
@@ -400,6 +490,7 @@ function skipHorizontalWhitespace(source: string, start: number): number {
 export async function collectSSGPages(
   routes: RouteEntry[],
   loadModule: (filePath: string) => Promise<RouteModule>,
+  options: { suggestStaticRendering?: boolean } = {},
 ): Promise<SSGCollectionResult> {
   const ssgPages: SSGPage[] = [];
   const ssrRoutes: string[] = [];
@@ -457,7 +548,10 @@ export async function collectSSGPages(
         // SSR route (default)
         ssrRoutes.push(route.path);
 
-        if (analyzeStaticRouteCandidate(mod, source, { isDynamic: route.isDynamic }).candidate) {
+        if (
+          options.suggestStaticRendering !== false &&
+          analyzeStaticRouteCandidate(mod, source, { isDynamic: route.isDynamic }).candidate
+        ) {
           staticCandidateRoutes.push(route.path);
         }
       }
