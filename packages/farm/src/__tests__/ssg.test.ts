@@ -181,6 +181,45 @@ describe("route rendering config", () => {
          }`,
       ),
     ).toEqual({ candidate: true, blockers: [] });
+
+    expect(
+      analyzeStaticRouteCandidate(
+        {},
+        `import Farm, { /* request API */ headers as readHeaders, cookies } from "@farm.js/core";
+         const Page = (props) => {
+           const { searchParams, middleware } = props;
+           const value = \`https://farmjs.dev/${'${readHeaders?.().get("host")}'}\`;
+           cookies?.();
+           return value + searchParams.get("q") + middleware.data;
+         };
+         export default Page;`,
+      ),
+    ).toMatchObject({
+      candidate: false,
+      blockers: expect.arrayContaining([
+        "the route reads request headers",
+        "the route reads request cookies",
+        "the route reads URL search parameters",
+        "the route reads middleware request data",
+      ]),
+    });
+
+    expect(
+      analyzeStaticRouteCandidate(
+        {},
+        `import * as request from "https://example.test/request.js";
+         const Page = function (props) {
+           return request?.headers?.().get("x-demo") + props.context;
+         };
+         export { Page as default };`,
+      ),
+    ).toMatchObject({
+      candidate: false,
+      blockers: expect.arrayContaining([
+        "the route reads request headers",
+        "the route reads request context",
+      ]),
+    });
   });
 
   it("suggests static rendering without changing the route mode", async () => {

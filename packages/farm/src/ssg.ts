@@ -220,14 +220,18 @@ function findRequestBoundSourceBlockers(source: string): string[] {
 
   const sourceWithoutComments = stripComments(source);
   for (const binding of readRequestApiImportBindings(sourceWithoutComments)) {
-    if (new RegExp(`\\b${escapeRegExp(binding.local)}\\s*\\(`).test(code)) {
+    if (new RegExp(`\\b${escapeRegExp(binding.local)}\\s*(?:\\?\\.\\s*)?\\(`).test(code)) {
       blockers.add(`the route reads ${binding.label}`);
     }
   }
 
   for (const namespace of readNamespaceImportBindings(sourceWithoutComments)) {
     for (const [name, label] of REQUEST_API_LABELS) {
-      if (new RegExp(`\\b${escapeRegExp(namespace)}\\s*\\.\\s*${name}\\s*\\(`).test(code)) {
+      if (
+        new RegExp(
+          `\\b${escapeRegExp(namespace)}\\s*(?:\\?\\.\\s*|\\.\\s*)${name}\\s*(?:\\?\\.\\s*)?\\(`,
+        ).test(code)
+      ) {
         blockers.add(`the route reads ${label}`);
       }
     }
@@ -247,6 +251,13 @@ function findRequestBoundSourceBlockers(source: string): string[] {
         if (new RegExp(`\\b${escapeRegExp(propsName)}\\s*\\.\\s*${name}\\b`).test(code)) {
           blockers.add(`the route reads ${label}`);
         }
+        if (
+          new RegExp(`\\{[^}]*\\b${name}\\b[^}]*\\}\\s*=\\s*${escapeRegExp(propsName)}\\b`).test(
+            code,
+          )
+        ) {
+          blockers.add(`the route reads ${label}`);
+        }
       }
     }
   }
@@ -256,49 +267,166 @@ function findRequestBoundSourceBlockers(source: string): string[] {
 
 function readRequestApiImportBindings(source: string): Array<{ local: string; label: string }> {
   const bindings: Array<{ local: string; label: string }> = [];
-  const namedImports = source.matchAll(/\bimport\s*\{([\s\S]*?)\}\s*from\s*["'][^"']+["']/g);
-
-  for (const match of namedImports) {
-    for (const rawSpecifier of (match[1] ?? "").split(",")) {
+  for (const clause of readStaticImportClauses(source)) {
+    const namedGroup = clause.match(/\{([\s\S]*?)\}/)?.[1];
+    for (const rawSpecifier of (namedGroup ?? "").split(",")) {
       const specifier = rawSpecifier.trim().replace(/^type\s+/, "");
       const imported = specifier.match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
       if (!imported?.[1]) continue;
       const label = REQUEST_API_LABELS.get(imported[1]);
       if (label) bindings.push({ local: imported[2] ?? imported[1], label });
     }
-  }
 
-  for (const match of source.matchAll(/\bimport\s+([A-Za-z_$][\w$]*)\s+from\s*["'][^"']+["']/g)) {
-    const local = match[1]!;
-    const label = REQUEST_API_LABELS.get(local);
-    if (label) bindings.push({ local, label });
+    const local = clause.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/)?.[1];
+    if (local) {
+      const label = REQUEST_API_LABELS.get(local);
+      if (label) bindings.push({ local, label });
+    }
   }
 
   return bindings;
 }
 
 function readNamespaceImportBindings(source: string): string[] {
-  return [...source.matchAll(/\bimport\s*\*\s*as\s*([A-Za-z_$][\w$]*)\s*from\s*["'][^"']+["']/g)]
-    .map((match) => match[1])
+  return readStaticImportClauses(source)
+    .map((clause) => clause.match(/\*\s*as\s*([A-Za-z_$][\w$]*)/)?.[1])
     .filter((binding): binding is string => Boolean(binding));
 }
 
+function readStaticImportClauses(source: string): string[] {
+  return [...source.matchAll(/\bimport\s+(?!\()([\s\S]*?)\s+from\s*["'][^"']+["']/g)]
+    .map((match) => match[1])
+    .filter((clause): clause is string => Boolean(clause));
+}
+
 function readDefaultRouteParameters(code: string): string | undefined {
-  return (
+  const inlineParams =
     code.match(/\bexport\s+default\s+(?:async\s+)?function\b[^(]*\(([^)]*)\)/)?.[1] ??
-    code.match(/\bexport\s+default\s+(?:async\s+)?\(([^)]*)\)\s*=>/)?.[1]
+    code.match(/\bexport\s+default\s+(?:async\s+)?\(([^)]*)\)\s*=>/)?.[1];
+  if (inlineParams !== undefined) return inlineParams;
+
+  const binding =
+    code.match(/\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*;?/)?.[1] ??
+    code.match(/\bexport\s*\{\s*([A-Za-z_$][\w$]*)\s+as\s+default\s*\}/)?.[1];
+  if (!binding) return undefined;
+  const escapedBinding = escapeRegExp(binding);
+
+  return (
+    code.match(new RegExp(`\\bfunction\\s+${escapedBinding}\\s*\\(([^)]*)\\)`))?.[1] ??
+    code.match(
+      new RegExp(
+        `\\b(?:const|let|var)\\s+${escapedBinding}\\s*=\\s*(?:async\\s+)?\\(([^)]*)\\)\\s*=>`,
+      ),
+    )?.[1] ??
+    code.match(
+      new RegExp(`\\b(?:const|let|var)\\s+${escapedBinding}\\s*=\\s*function\\s*\\(([^)]*)\\)`),
+    )?.[1]
   );
 }
 
 function stripCommentsAndLiteralContents(source: string): string {
-  return stripComments(source)
-    .replace(/'(?:\\.|[^'\\])*'/g, "''")
-    .replace(/"(?:\\.|[^"\\])*"/g, '""')
-    .replace(/`(?:\\.|[^`\\])*`/g, "``");
+  return sanitizeSource(source, true);
 }
 
 function stripComments(source: string): string {
-  return source.replace(/\/\*[\s\S]*?\*\//g, " ").replace(/\/\/[^\n\r]*/g, " ");
+  return sanitizeSource(source, false);
+}
+
+function sanitizeSource(source: string, maskLiterals: boolean): string {
+  const output = [...source];
+  const mask = (index: number) => {
+    if (output[index] !== "\n" && output[index] !== "\r") output[index] = " ";
+  };
+
+  const scanQuoted = (start: number, quote: "'" | '"'): number => {
+    let index = start;
+    if (maskLiterals) mask(index);
+    index += 1;
+    while (index < source.length) {
+      if (source[index] === "\\") {
+        if (maskLiterals) mask(index);
+        if (index + 1 < source.length && maskLiterals) mask(index + 1);
+        index += 2;
+        continue;
+      }
+      const character = source[index];
+      if (maskLiterals) mask(index);
+      index += 1;
+      if (character === quote) break;
+    }
+    return index;
+  };
+
+  const scanCode = (start: number, stopAtTemplateBrace: boolean): number => {
+    let index = start;
+    let braceDepth = 0;
+    while (index < source.length) {
+      const character = source[index];
+      const next = source[index + 1];
+      if (character === "/" && next === "/") {
+        while (index < source.length && source[index] !== "\n" && source[index] !== "\r") {
+          mask(index++);
+        }
+        continue;
+      }
+      if (character === "/" && next === "*") {
+        mask(index++);
+        mask(index++);
+        while (index < source.length) {
+          const closesComment = source[index] === "*" && source[index + 1] === "/";
+          mask(index++);
+          if (closesComment) {
+            mask(index++);
+            break;
+          }
+        }
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        index = scanQuoted(index, character);
+        continue;
+      }
+      if (character === "`") {
+        if (maskLiterals) mask(index);
+        index += 1;
+        while (index < source.length) {
+          if (source[index] === "\\") {
+            if (maskLiterals) mask(index);
+            if (index + 1 < source.length && maskLiterals) mask(index + 1);
+            index += 2;
+          } else if (source[index] === "`") {
+            if (maskLiterals) mask(index);
+            index += 1;
+            break;
+          } else if (source[index] === "$" && source[index + 1] === "{") {
+            if (maskLiterals) {
+              mask(index);
+              mask(index + 1);
+            }
+            index = scanCode(index + 2, true);
+          } else {
+            if (maskLiterals) mask(index);
+            index += 1;
+          }
+        }
+        continue;
+      }
+      if (character === "{") {
+        braceDepth += 1;
+      } else if (character === "}") {
+        if (stopAtTemplateBrace && braceDepth === 0) {
+          if (maskLiterals) mask(index);
+          return index + 1;
+        }
+        braceDepth = Math.max(0, braceDepth - 1);
+      }
+      index += 1;
+    }
+    return index;
+  };
+
+  scanCode(0, false);
+  return output.join("");
 }
 
 function escapeRegExp(value: string): string {
