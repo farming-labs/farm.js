@@ -1,5 +1,4 @@
-export const FARM_IMMUTABLE_ASSET_CACHE_CONTROL =
-  "public, max-age=31536000, immutable" as const;
+export const FARM_IMMUTABLE_ASSET_CACHE_CONTROL = "public, max-age=31536000, immutable" as const;
 
 export interface FarmVercelImmutableAssetRoute {
   src: string;
@@ -12,9 +11,7 @@ export interface FarmVercelImmutableAssetRoute {
  * eight-or-more-character content hash. Stable entry filenames and HTML are
  * deliberately excluded because they can change between deployments.
  */
-export function createFarmVercelImmutableAssetRoute(
-  basePath = "/",
-): FarmVercelImmutableAssetRoute {
+export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelImmutableAssetRoute {
   const normalizedBasePath = normalizeBasePath(basePath);
   const escapedBasePath = escapeRegex(normalizedBasePath);
   const prefix = escapedBasePath ? `/${escapedBasePath}` : "";

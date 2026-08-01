@@ -24,9 +24,7 @@ describe("Vercel immutable Farm assets", () => {
   });
 
   it("scopes the route to the configured base path", () => {
-    expect(isFarmVercelImmutableAssetPath("/farm/assets/logo-a1b2c3d4.webp", "/farm")).toBe(
-      true,
-    );
+    expect(isFarmVercelImmutableAssetPath("/farm/assets/logo-a1b2c3d4.webp", "/farm")).toBe(true);
     expect(isFarmVercelImmutableAssetPath("/assets/logo-a1b2c3d4.webp", "/farm")).toBe(false);
   });
 
