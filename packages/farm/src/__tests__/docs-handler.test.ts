@@ -304,7 +304,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("navigator.clipboard");
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
-    expect(html).toContain('--font-geist-mono: "Geist Mono", ui-monospace, monospace');
+    expect(html).toContain("--font-geist-mono: ui-monospace, monospace");
+    expect(html).not.toContain('font-family: "Geist Sans"');
+    expect(html).not.toContain('font-family: "Geist Mono"');
     expect(html).not.toContain("/node_modules/geist/");
     expect(html).not.toContain("/assets/Geist-Variable-CrgPqtmy.woff2");
     expect(html).not.toContain("/assets/GeistMono-Variable-BNLlm6Cd.woff2");
