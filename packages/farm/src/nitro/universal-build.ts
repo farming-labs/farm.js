@@ -43,6 +43,7 @@ import {
   isFarmDocsSearchEnabled,
   resolveFarmDocsSearchClientModule,
 } from "../docs/search-client";
+import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import {
   createFarmRouteRuntimeManifest,
   validateFarmRouteRuntimeDeployment,
@@ -769,6 +770,9 @@ export async function buildUniversal(
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
+    if (config.docs.enabled) {
+      await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
+    }
 
     // Step 3: Build with Nitro using virtual bundle
     logger.info(`🚀 Building server with Nitro (preset: ${preset})...`);
@@ -825,6 +829,17 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, output.source);
   }
+}
+
+async function copyFarmDocsFontAssetsToClient(root: string, outputDir: string): Promise<void> {
+  const fs = await import("fs/promises");
+  await Promise.all(
+    resolveFarmDocsFontAssets(root).map(async ({ sourcePath, url }) => {
+      const targetPath = path.join(outputDir, url.replace(/^\/+/, ""));
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.copyFile(sourcePath, targetPath);
+    }),
+  );
 }
 
 async function mergeBuiltFontCss(
@@ -2807,6 +2822,9 @@ function generateVirtualEntryCode(
   const farmDocsBaseConfig = config.docs?.enabled
     ? { ...config.docs, config: undefined }
     : undefined;
+  const farmDocsFontAssets = config.docs?.enabled
+    ? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(config.root))
+    : [];
 
   // Generate imports for all API routes
   const apiImports: string[] = [];
@@ -3260,7 +3278,7 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
 };
 const farmDocsHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, clientEntry: "/farm-client.js" })`
+      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, clientEntry: "/farm-client.js", fontAssets: ${JSON.stringify(farmDocsFontAssets)} })`
       : "null"
   };
 const farmDocsAPIHandler = ${
