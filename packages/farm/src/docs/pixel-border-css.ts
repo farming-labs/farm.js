@@ -38,8 +38,8 @@ export const farmDocsPixelBorderCss = String.raw`
   --scrollbar-thumb-hover: var(--color-fd-ring);
   --scrollbar-track: transparent;
   --radius: 0px;
-  --font-geist-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;
-  --font-geist-mono: "Geist Mono", ui-monospace, monospace;
+  --font-geist-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-geist-mono: ui-monospace, monospace;
 }
 
 .dark {

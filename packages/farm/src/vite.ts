@@ -893,27 +893,6 @@ export function farmPlugin(
             docs: farmConfig.docs,
           })
         : null;
-      const farmDocsFontAssets = new Map<string, string>(
-        farmDocsDevRuntime
-          ? [
-              [
-                "/assets/Geist-Variable-CrgPqtmy.woff2",
-                path.join(
-                  farmConfig.root,
-                  "node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
-                ),
-              ],
-              [
-                "/assets/GeistMono-Variable-BNLlm6Cd.woff2",
-                path.join(
-                  farmConfig.root,
-                  "node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
-                ),
-              ],
-            ]
-          : [],
-      );
-
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
       const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
         try {
@@ -989,15 +968,6 @@ export function farmPlugin(
               await sendWebResponse(res, imageResponse);
               return;
             }
-          }
-
-          const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
-          if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
-            res.statusCode = 200;
-            res.setHeader("Content-Type", "font/woff2");
-            res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-            fs.createReadStream(farmDocsFontPath).pipe(res);
-            return;
           }
 
           if (
@@ -4139,35 +4109,6 @@ function generateClientManifest(bundle: any): Record<string, any> {
   return manifest;
 }
 
-async function getFarmClientOptimizeDepsEntries(
-  config: FarmVitePluginOptions,
-  appRoot: string,
-): Promise<string[]> {
-  const glob = await import("fast-glob");
-  const sourcePatterns = getFarmSourceRoots(config).map(({ root, srcDir }) =>
-    path.join(root, srcDir, "**/*.{js,jsx,ts,tsx}").replace(/\\/g, "/"),
-  );
-  const sourceFiles = await glob.default(sourcePatterns, {
-    absolute: true,
-    onlyFiles: true,
-    unique: true,
-    ignore: ["**/*.d.ts", "**/node_modules/**", "**/.*/**"],
-  });
-  const clientEntries: string[] = [];
-
-  await Promise.all(
-    sourceFiles.map(async (file) => {
-      const source = await fs.promises.readFile(file, "utf8");
-      if (!hasUseClientDirective(source)) return;
-
-      const relative = path.relative(appRoot, file);
-      clientEntries.push((path.isAbsolute(relative) ? file : relative).replace(/\\/g, "/"));
-    }),
-  );
-
-  return clientEntries.sort();
-}
-
 export async function defineConfig(config: FarmVitePluginOptions = {}) {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
   const appRoot = path.resolve(config.root || process.cwd());
@@ -4180,8 +4121,6 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     );
     config = layeredConfig;
   }
-  const clientOptimizeDepsEntries = await getFarmClientOptimizeDepsEntries(config, appRoot);
-
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
     "node:string_decoder":
@@ -4363,11 +4302,6 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
-      // Farm's route modules are loaded dynamically, so Vite cannot discover
-      // their dependencies from an index.html crawl. Scanning only explicit
-      // client boundaries up front prevents optimizer hash changes from
-      // introducing multiple React module instances during hydration.
-      entries: clientOptimizeDepsEntries,
       // Pre-bundle every framework client-runtime entry with React. Without
       // this, Vite can discover a linked Farm entry after the page has loaded,
       // regenerate the optimizer browser hash, and leave React DOM holding a
