@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearReportedFarmPreloadWarnings,
   manageFarmDocumentPreloads,
@@ -9,6 +9,10 @@ import {
   reportFarmPreloadWarnings,
   resolveFarmPerformanceConfig,
 } from "../preload";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("smart preload manager", () => {
   it("defaults to one image and two font preloads in enforce mode", () => {
@@ -55,6 +59,30 @@ describe("smart preload manager", () => {
     expect(result.warnings).toEqual([{ kind: "image", count: 2, budget: 1, removed: 1 }]);
   });
 
+  it("only rewrites real HTML link elements outside inert and quoted content", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      `<div data-example='<link rel="preload" as="image" href="/attribute.webp">'>demo</div>`,
+      '<link-card rel="preload" as="image" href="/custom.webp"></link-card>',
+      '<title><link rel="preload" as="image" href="/title.webp"></title>',
+      '<noscript><link rel="preload" as="image" href="/noscript.webp"></noscript>',
+      '<script>const closing = "</scriptx>"; <link rel="preload" as="image" href="/script.webp"></script>',
+      '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/below.webp">',
+    ].join("\n");
+
+    const result = manageFarmHtmlPreloads(html, config);
+
+    expect(result.value).toContain("/attribute.webp");
+    expect(result.value).toContain("/custom.webp");
+    expect(result.value).toContain("/title.webp");
+    expect(result.value).toContain("/noscript.webp");
+    expect(result.value).toContain("/script.webp");
+    expect(result.value).toContain("/hero.webp");
+    expect(result.value).not.toContain("/below.webp");
+    expect(result.warnings).toEqual([{ kind: "image", count: 2, budget: 1, removed: 1 }]);
+  });
+
   it("caps font Link headers while preserving non-preload relations", () => {
     const config = resolveFarmPerformanceConfig(undefined).preload;
     const header = [
@@ -86,6 +114,22 @@ describe("smart preload manager", () => {
     expect(result.value).toContain("designer's-body.woff2");
     expect(result.value).not.toContain("/fonts/mono.woff2");
     expect(result.value).toContain("rel=preconnect");
+  });
+
+  it("parses quoted parameters and relation token lists after the URI", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxFonts: 1 } }).preload;
+    const header = [
+      '</fonts/hero.woff2>; rel="preload alternate"; as="font"; fetchpriority="high"; title="two\\\\"',
+      '</fonts/body.woff2>; rel = "preload" ; as = "font"',
+      '<https://example.test/?rel=preload&as=font>; rel="next"',
+    ].join(", ");
+
+    const result = manageFarmLinkHeaderPreloads(header, config);
+
+    expect(result.value).toContain("hero.woff2");
+    expect(result.value).not.toContain("body.woff2");
+    expect(result.value).toContain("rel=preload&as=font");
+    expect(result.warnings).toEqual([{ kind: "font", count: 2, budget: 1, removed: 1 }]);
   });
 
   it("shares one budget across HTML and response Link hints", () => {

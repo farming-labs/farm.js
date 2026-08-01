@@ -115,7 +115,7 @@ export function manageFarmLinkHeaderPreloads(
           {
             index,
             kind,
-            highPriority: /(?:^|;)\s*fetchpriority\s*=\s*"?high"?(?:;|$)/i.test(link),
+            highPriority: getLinkHeaderParameter(link, "fetchpriority")?.toLowerCase() === "high",
           },
         ]
       : [];
@@ -157,7 +157,7 @@ export function manageFarmDocumentPreloads(
     candidates.push({
       index: headerOffset + index,
       kind,
-      highPriority: /(?:^|;)\s*fetchpriority\s*=\s*"?high"?(?:;|$)/i.test(link),
+      highPriority: getLinkHeaderParameter(link, "fetchpriority")?.toLowerCase() === "high",
     });
   }
 
@@ -184,7 +184,7 @@ export function reportFarmPreloadWarnings(
   }
 
   for (const warning of warnings) {
-    const key = `${context}:${warning.kind}:${warning.count}:${warning.budget}`;
+    const key = `${context}:${warning.kind}:${warning.count}:${warning.budget}:${warning.removed}`;
     const reportedAt = reportedWarnings.get(key);
     if (reportedAt !== undefined && now - reportedAt < PRELOAD_WARNING_TTL_MS) continue;
     reportedWarnings.set(key, now);
@@ -262,9 +262,46 @@ function getHtmlPreloadKind(link: string): FarmPreloadKind | undefined {
 }
 
 function getLinkHeaderPreloadKind(link: string): FarmPreloadKind | undefined {
-  if (!/(?:^|;)\s*rel\s*=\s*"?preload"?(?:;|$)/i.test(link)) return undefined;
-  const asMatch = link.match(/(?:^|;)\s*as\s*=\s*"?([^";\s]+)"?/i);
-  return normalizePreloadKind(asMatch?.[1]);
+  const relations = getLinkHeaderParameter(link, "rel")?.toLowerCase().split(/\s+/) ?? [];
+  if (!relations.includes("preload")) return undefined;
+  return normalizePreloadKind(getLinkHeaderParameter(link, "as"));
+}
+
+function getLinkHeaderParameter(link: string, name: string): string | undefined {
+  const uriEnd = link.indexOf(">");
+  if (uriEnd === -1) return undefined;
+
+  for (const parameter of splitLinkParameters(link.slice(uriEnd + 1))) {
+    const separator = parameter.indexOf("=");
+    const parameterName = (separator === -1 ? parameter : parameter.slice(0, separator))
+      .trim()
+      .toLowerCase();
+    if (parameterName !== name.toLowerCase() || separator === -1) continue;
+    const rawValue = parameter.slice(separator + 1).trim();
+    if (rawValue.startsWith('"') && rawValue.endsWith('"')) {
+      return rawValue.slice(1, -1).replace(/\\([\\"])/g, "$1");
+    }
+    return rawValue;
+  }
+  return undefined;
+}
+
+function splitLinkParameters(value: string): string[] {
+  const parameters: string[] = [];
+  let start = 0;
+  let quoted = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index];
+    if (character === '"' && !isEscaped(value, index)) quoted = !quoted;
+    else if (character === ";" && !quoted) {
+      const parameter = value.slice(start, index).trim();
+      if (parameter) parameters.push(parameter);
+      start = index + 1;
+    }
+  }
+  const parameter = value.slice(start).trim();
+  if (parameter) parameters.push(parameter);
+  return parameters;
 }
 
 function normalizePreloadKind(value: string | undefined): FarmPreloadKind | undefined {
@@ -300,11 +337,13 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
       continue;
     }
 
-    const rawText = lowerHtml.slice(start).match(/^<(script|style|template|textarea)\b/);
+    const rawText = lowerHtml
+      .slice(start)
+      .match(/^<(script|style|template|textarea|title|noscript|svg)(?=[\s/>])/);
     if (rawText?.[1]) {
       const openingEnd = findHtmlTagEnd(html, start);
       if (openingEnd === -1) break;
-      const closingStart = lowerHtml.indexOf(`</${rawText[1]}`, openingEnd);
+      const closingStart = findHtmlClosingTag(lowerHtml, rawText[1], openingEnd);
       if (closingStart === -1) {
         cursor = html.length;
         continue;
@@ -314,7 +353,7 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
       continue;
     }
 
-    if (/^<link\b/i.test(html.slice(start))) {
+    if (/^<link(?=[\s/>])/i.test(html.slice(start))) {
       const end = findHtmlTagEnd(html, start);
       if (end === -1) break;
       elements.push({ start, end, value: html.slice(start, end) });
@@ -322,10 +361,27 @@ function findHtmlLinkElements(html: string): HtmlLinkElement[] {
       continue;
     }
 
+    if (/^<\/?[A-Za-z][\w:-]*(?=[\s/>])/.test(html.slice(start))) {
+      const end = findHtmlTagEnd(html, start);
+      cursor = end === -1 ? html.length : end;
+      continue;
+    }
+
     cursor = start + 1;
   }
 
   return elements;
+}
+
+function findHtmlClosingTag(html: string, tagName: string, start: number): number {
+  const prefix = `</${tagName}`;
+  let candidate = html.indexOf(prefix, start);
+  while (candidate !== -1) {
+    const boundary = html[candidate + prefix.length];
+    if (boundary === ">" || boundary === "/" || /\s/.test(boundary ?? "")) return candidate;
+    candidate = html.indexOf(prefix, candidate + prefix.length);
+  }
+  return -1;
 }
 
 function findHtmlTagEnd(html: string, start: number): number {
@@ -367,7 +423,7 @@ function splitLinkHeader(value: string): string[] {
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
     if (quoted) {
-      if (character === '"' && value[index - 1] !== "\\") quoted = false;
+      if (character === '"' && !isEscaped(value, index)) quoted = false;
       continue;
     }
     if (character === '"') {
@@ -384,6 +440,14 @@ function splitLinkHeader(value: string): string[] {
 
   links.push(value.slice(start).trim());
   return links.filter(Boolean);
+}
+
+function isEscaped(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === "\\"; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
 }
 
 function normalizeBudget(value: number | undefined, fallback: number): number {

@@ -438,7 +438,7 @@ console.log(demo);`,
     );
     expect(source).toContain("manageFarmDocumentPreloads(");
     expect(source).toContain("manageFarmLinkHeaderPreloads(");
-    expect(source).toContain("isStreaming || response.body === null");
+    expect(source).toContain("isStreaming || !isBuffered || response.body === null");
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
     expect(source).toContain(
       "applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname)",
