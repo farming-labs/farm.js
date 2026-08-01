@@ -248,7 +248,7 @@ export async function transformFarmFontCalls(
 export function renderFarmFontDevHead(root: string): string {
   const registry = registries.get(normalizeRoot(root));
   if (!registry || registry.production || registry.size === 0) return "";
-  return registry.renderPreloadTags(false);
+  return `${registry.renderPreloadTags(false)}\n  <link rel="stylesheet" href="/@farm/fonts.css">`;
 }
 
 class FarmFontRegistry {
