@@ -57,6 +57,7 @@ import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
+import { FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE } from "./server/vite-config";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -4367,21 +4368,11 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
       // client boundaries up front prevents optimizer hash changes from
       // introducing multiple React module instances during hydration.
       entries: clientOptimizeDepsEntries,
-      include: [
-        "react",
-        "react-dom",
-        "react-dom/client",
-        "react/jsx-runtime",
-        "react/jsx-dev-runtime",
-        // Pre-bundle every framework client-runtime entry with React. Without
-        // this, Vite can discover a linked Farm entry after the page has loaded,
-        // regenerate the optimizer browser hash, and leave React DOM holding a
-        // different React module instance from a client component.
-        "@farm.js/core/client",
-        "@farm.js/core/plugin/client",
-        "@farm.js/core/deferred",
-        "@farm.js/core/deployment",
-      ],
+      // Pre-bundle every framework client-runtime entry with React. Without
+      // this, Vite can discover a linked Farm entry after the page has loaded,
+      // regenerate the optimizer browser hash, and leave React DOM holding a
+      // different React module instance from a client component.
+      include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
       // Exclude server-side packages from browser bundling
       exclude: [
         "@farm.js/core/server",
