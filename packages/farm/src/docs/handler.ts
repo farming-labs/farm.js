@@ -23,6 +23,11 @@ import {
 } from "@farming-labs/docs";
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
+import {
+  resolveFarmDocsFontAssets,
+  toFarmDocsPublicFontAssets,
+  type FarmDocsPublicFontAsset,
+} from "./fonts";
 import { resolveFarmDocsPageLastModified } from "./last-modified";
 import { farmDocsPixelBorderCss } from "./pixel-border-css";
 import { generateFarmDocsSearchBootstrapRuntime, isFarmDocsSearchEnabled } from "./search-client";
@@ -32,6 +37,7 @@ export interface FarmDocsHandlerOptions {
   root: string;
   srcDir?: string;
   clientEntry?: string;
+  fontAssets?: readonly FarmDocsPublicFontAsset[];
 }
 
 export interface FarmDocsPage {
@@ -1626,9 +1632,29 @@ function resolvePixelBorderThemeCss(options: FarmDocsHandlerOptions): string {
   }
 }
 
-function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
+function renderFarmDocsBridgeCss(
+  docs: FarmDocsResolvedConfig,
+  fontAssets: readonly FarmDocsPublicFontAsset[],
+): string {
   const sidebarWidth = getThemeLayoutValue(docs, "sidebarWidth", 320);
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
+  const fontFaces = fontAssets
+    .map(
+      ({ family, url }) =>
+        `@font-face { font-family: "${family}"; src: url("${url}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: swap; }`,
+    )
+    .join("\n");
+  const fontVariables = [
+    fontAssets.some(({ family }) => family === "Geist Sans")
+      ? '--font-geist-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;'
+      : "",
+    fontAssets.some(({ family }) => family === "Geist Mono")
+      ? '--font-geist-mono: "Geist Mono", ui-monospace, monospace;'
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const fontCss = fontFaces ? `${fontFaces}\n:root { ${fontVariables} }` : "";
 
   return `
     :root { color-scheme: dark; --font-geist-sans: ui-sans-serif, system-ui, sans-serif; --font-geist-mono: ui-monospace, monospace; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 44px); --fd-docs-font-sans: var(--font-geist-sans, var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 0px; --fd-sidebar-nested-icon-gap: 0px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
@@ -1815,7 +1841,17 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
       .sh__line { min-height: 1.6em; }
     }
 ${farmDocsPixelBorderCss}
+${fontCss}
   `;
+}
+
+function renderFarmDocsFontPreloads(fontAssets: readonly FarmDocsPublicFontAsset[]): string {
+  return fontAssets
+    .map(
+      ({ url }) =>
+        `<link rel="preload" href="${escapeAttribute(url)}" as="font" type="font/woff2" crossorigin>`,
+    )
+    .join("\n  ");
 }
 
 function renderPixelDocsHtml(
@@ -1825,6 +1861,7 @@ function renderPixelDocsHtml(
   themeCss: string,
   clientEntry: string,
   faviconHref: string,
+  fontAssets: readonly FarmDocsPublicFontAsset[],
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -1843,9 +1880,10 @@ function renderPixelDocsHtml(
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
   ${renderFarmDocsFaviconLink(faviconHref)}
+  ${renderFarmDocsFontPreloads(fontAssets)}
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   <style>${themeCss}
-${renderFarmDocsBridgeCss(docs)}</style>
+${renderFarmDocsBridgeCss(docs, fontAssets)}</style>
   ${searchEnabled ? renderDocsSearchBootstrapScript() : ""}
 </head>
 <body>
@@ -1901,6 +1939,8 @@ export function createFarmDocsHandler(
   options: FarmDocsHandlerOptions,
 ) {
   const faviconHref = resolveFarmDocsFavicon(docs, options);
+  const fontAssets =
+    options.fontAssets ?? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(options.root));
 
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
@@ -1940,6 +1980,7 @@ export function createFarmDocsHandler(
         resolvePixelBorderThemeCss(options),
         options.clientEntry || "/farm-client.js",
         faviconHref,
+        fontAssets,
       ),
       {
         status: 200,

@@ -438,6 +438,21 @@ console.log(demo);`,
       /farmFontPreloadHeader \? \{ "Link": farmFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
     );
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
+    expect(source).toContain("await copyFarmDocsFontAssetsToClient(root, clientOutputDir);");
+    expect(source).toContain("resolveFarmDocsFontAssets(root).map");
+    expect(source).toContain("fontAssets: ${JSON.stringify(farmDocsFontAssets)}");
+  });
+
+  it("serves the same fingerprinted docs fonts in development", async () => {
+    const source = await fs.readFile(path.join(process.cwd(), "src", "vite.ts"), "utf8");
+
+    expect(source).toContain("resolveFarmDocsFontAssets(farmConfig.root)");
+    expect(source).toContain("fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList)");
+    expect(source).toContain('res.setHeader("Content-Type", "font/woff2")');
+    expect(source).toContain(
+      'res.setHeader("Cache-Control", "public, max-age=31536000, immutable")',
+    );
+    expect(source).toContain('requestMethod === "HEAD"');
   });
 
   it("replaces an earlier generated font section when client and SSR CSS are combined", () => {
