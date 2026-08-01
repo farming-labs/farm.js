@@ -1,5 +1,33 @@
 import type { UserConfig as ViteUserConfig } from "vite";
 
+/**
+ * Client runtimes that must be optimized in the same generation as React.
+ * Farm loads route modules dynamically, so Vite's HTML crawl cannot reliably
+ * discover these linked-package entry points before hydration begins.
+ */
+export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
+  "react",
+  "react-dom",
+  "react-dom/client",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+  "@farm.js/core/client",
+  "@farm.js/core/plugin/client",
+  "@farm.js/core/deferred",
+  "@farm.js/core/deployment",
+] as const;
+
+export function createFarmClientOptimizeDepsConfig(): ViteUserConfig["optimizeDeps"] {
+  return {
+    noDiscovery: true,
+    // Vite 5 otherwise schedules a redundant optimizer pass when its static
+    // crawl ends, even when discovery is disabled and no dependency was found.
+    // A page can hydrate between those passes and receive mixed browser hashes.
+    holdUntilCrawlEnd: false,
+    include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
+  };
+}
+
 type ViteNoExternal = NonNullable<NonNullable<ViteUserConfig["ssr"]>["noExternal"]>;
 
 function mergeNoExternal(
