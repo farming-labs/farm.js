@@ -1,4 +1,4 @@
-import type { ConfigEnv, Plugin, ViteDevServer, HmrContext } from "vite";
+import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
 import { logger, toViteModuleId } from "./utils";
@@ -57,7 +57,7 @@ import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
-import { FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE } from "./server/vite-config";
+import { createFarmClientOptimizeDepsConfig } from "./server/vite-config";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -4109,7 +4109,7 @@ function generateClientManifest(bundle: any): Record<string, any> {
   return manifest;
 }
 
-export async function defineConfig(config: FarmVitePluginOptions = {}) {
+export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<UserConfig> {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
   const appRoot = path.resolve(config.root || process.cwd());
   if (config.extends?.length) {
@@ -4302,11 +4302,11 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
+      ...createFarmClientOptimizeDepsConfig(),
       // Pre-bundle every framework client-runtime entry with React. Without
       // this, Vite can discover a linked Farm entry after the page has loaded,
       // regenerate the optimizer browser hash, and leave React DOM holding a
       // different React module instance from a client component.
-      include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
       // Exclude server-side packages from browser bundling
       exclude: [
         "@farm.js/core/server",
