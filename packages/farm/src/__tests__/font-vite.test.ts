@@ -69,9 +69,10 @@ export const demo = localFont({ src: "./demo.woff2", family: "Dev Demo" });`,
       expect(transformed?.code).not.toContain("font-runtime-stub");
       expect(transformed?.code).not.toContain("@farm.js/core/font");
       expect(transformed?.code).toContain("font-css");
-      expect(renderFarmFontDevHead(root)).toContain('<link rel="preload"');
-      expect(renderFarmFontDevHead(root)).toContain('href="/docs/@farm/font/');
-      expect(renderFarmFontDevHead(root)).not.toContain('rel="stylesheet"');
+      const head = renderFarmFontDevHead(root);
+      expect(head).toContain('<link rel="preload"');
+      expect(head).toContain('href="/docs/@farm/font/');
+      expect(head).toContain('<link rel="stylesheet" href="/@farm/fonts.css">');
 
       await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
       const address = http.address();
