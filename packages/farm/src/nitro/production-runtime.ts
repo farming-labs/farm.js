@@ -26,6 +26,7 @@ export {
 export { configureFarmObservability, emitFarmEvent } from "../observability";
 export { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 export {
+  manageFarmDocumentPreloads,
   manageFarmHtmlPreloads,
   manageFarmLinkHeaderPreloads,
   reportFarmPreloadWarnings,

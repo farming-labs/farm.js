@@ -37,13 +37,21 @@ export interface FarmManagedPreloads {
   warnings: FarmPreloadBudgetWarning[];
 }
 
+export interface FarmManagedDocumentPreloads {
+  html: string;
+  linkHeader: string;
+  warnings: FarmPreloadBudgetWarning[];
+}
+
 const DEFAULT_PRELOAD_CONFIG: ResolvedFarmPreloadConfig = {
   mode: "enforce",
   maxImages: 1,
   maxFonts: 2,
 };
 
-const reportedWarnings = new Set<string>();
+const reportedWarnings = new Map<string, number>();
+const PRELOAD_WARNING_TTL_MS = 60_000;
+const MAX_REPORTED_PRELOAD_WARNINGS = 256;
 
 export function resolveFarmPerformanceConfig(
   config: FarmPerformanceConfig | undefined,
@@ -66,15 +74,16 @@ export function manageFarmHtmlPreloads(
   html: string,
   config: ResolvedFarmPreloadConfig,
 ): FarmManagedPreloads {
-  const matches = [...html.matchAll(/<link\b[^>]*>/gi)];
-  const candidates = matches.flatMap((match, index) => {
-    const kind = getHtmlPreloadKind(match[0]);
+  const elements = findHtmlLinkElements(html);
+  const candidates = elements.flatMap((element, index) => {
+    const kind = getHtmlPreloadKind(element.value);
     return kind
       ? [
           {
             index,
             kind,
-            highPriority: readHtmlAttribute(match[0], "fetchpriority") === "high",
+            highPriority:
+              readHtmlAttribute(element.value, "fetchpriority")?.toLowerCase() === "high",
           },
         ]
       : [];
@@ -85,11 +94,8 @@ export function manageFarmHtmlPreloads(
     return { value: html, warnings: budget.warnings };
   }
 
-  let matchIndex = 0;
   return {
-    value: html.replace(/<link\b[^>]*>/gi, (link) =>
-      budget.removed.has(matchIndex++) ? "" : link,
-    ),
+    value: removeHtmlLinkElements(html, elements, budget.removed),
     warnings: budget.warnings,
   };
 }
@@ -125,15 +131,68 @@ export function manageFarmLinkHeaderPreloads(
   };
 }
 
-/** Print each route-and-budget warning once per server process. */
+/** Apply a single document budget across HTML and HTTP Link header hints. */
+export function manageFarmDocumentPreloads(
+  html: string,
+  linkHeader: string,
+  config: ResolvedFarmPreloadConfig,
+): FarmManagedDocumentPreloads {
+  const elements = findHtmlLinkElements(html);
+  const links = linkHeader ? splitLinkHeader(linkHeader) : [];
+  const headerOffset = elements.length;
+  const candidates: PreloadCandidate[] = [];
+
+  for (const [index, element] of elements.entries()) {
+    const kind = getHtmlPreloadKind(element.value);
+    if (!kind) continue;
+    candidates.push({
+      index,
+      kind,
+      highPriority: readHtmlAttribute(element.value, "fetchpriority")?.toLowerCase() === "high",
+    });
+  }
+  for (const [index, link] of links.entries()) {
+    const kind = getLinkHeaderPreloadKind(link);
+    if (!kind) continue;
+    candidates.push({
+      index: headerOffset + index,
+      kind,
+      highPriority: /(?:^|;)\s*fetchpriority\s*=\s*"?high"?(?:;|$)/i.test(link),
+    });
+  }
+
+  const budget = selectPreloadsWithinBudget(candidates, config);
+  if (config.mode === "warn" || budget.removed.size === 0) {
+    return { html, linkHeader, warnings: budget.warnings };
+  }
+
+  return {
+    html: removeHtmlLinkElements(html, elements, budget.removed),
+    linkHeader: links.filter((_, index) => !budget.removed.has(headerOffset + index)).join(", "),
+    warnings: budget.warnings,
+  };
+}
+
+/** Rate-limit identical route-and-budget warnings within a server process. */
 export function reportFarmPreloadWarnings(
   warnings: FarmPreloadBudgetWarning[],
   context = "the rendered document",
 ): void {
+  const now = Date.now();
+  for (const [key, reportedAt] of reportedWarnings) {
+    if (now - reportedAt >= PRELOAD_WARNING_TTL_MS) reportedWarnings.delete(key);
+  }
+
   for (const warning of warnings) {
     const key = `${context}:${warning.kind}:${warning.count}:${warning.budget}`;
-    if (reportedWarnings.has(key)) continue;
-    reportedWarnings.add(key);
+    const reportedAt = reportedWarnings.get(key);
+    if (reportedAt !== undefined && now - reportedAt < PRELOAD_WARNING_TTL_MS) continue;
+    reportedWarnings.set(key, now);
+    while (reportedWarnings.size > MAX_REPORTED_PRELOAD_WARNINGS) {
+      const oldest = reportedWarnings.keys().next().value;
+      if (oldest === undefined) break;
+      reportedWarnings.delete(oldest);
+    }
 
     const action = warning.removed > 0 ? ` Removed ${warning.removed} lower-priority hint(s).` : "";
     const recommendation =
@@ -145,6 +204,10 @@ export function reportFarmPreloadWarnings(
         `(budget: ${warning.budget}).${action}${recommendation}`,
     );
   }
+}
+
+export function clearReportedFarmPreloadWarnings(): void {
+  reportedWarnings.clear();
 }
 
 interface PreloadCandidate {
@@ -216,20 +279,99 @@ function readHtmlAttribute(element: string, name: string): string | undefined {
   return match?.[1] ?? match?.[2] ?? match?.[3];
 }
 
+interface HtmlLinkElement {
+  start: number;
+  end: number;
+  value: string;
+}
+
+function findHtmlLinkElements(html: string): HtmlLinkElement[] {
+  const elements: HtmlLinkElement[] = [];
+  const lowerHtml = html.toLowerCase();
+  let cursor = 0;
+
+  while (cursor < html.length) {
+    const start = html.indexOf("<", cursor);
+    if (start === -1) break;
+
+    if (lowerHtml.startsWith("<!--", start)) {
+      const commentEnd = lowerHtml.indexOf("-->", start + 4);
+      cursor = commentEnd === -1 ? html.length : commentEnd + 3;
+      continue;
+    }
+
+    const rawText = lowerHtml.slice(start).match(/^<(script|style|template|textarea)\b/);
+    if (rawText?.[1]) {
+      const openingEnd = findHtmlTagEnd(html, start);
+      if (openingEnd === -1) break;
+      const closingStart = lowerHtml.indexOf(`</${rawText[1]}`, openingEnd);
+      if (closingStart === -1) {
+        cursor = html.length;
+        continue;
+      }
+      const closingEnd = findHtmlTagEnd(html, closingStart);
+      cursor = closingEnd === -1 ? html.length : closingEnd;
+      continue;
+    }
+
+    if (/^<link\b/i.test(html.slice(start))) {
+      const end = findHtmlTagEnd(html, start);
+      if (end === -1) break;
+      elements.push({ start, end, value: html.slice(start, end) });
+      cursor = end;
+      continue;
+    }
+
+    cursor = start + 1;
+  }
+
+  return elements;
+}
+
+function findHtmlTagEnd(html: string, start: number): number {
+  let quote: '"' | "'" | undefined;
+  for (let index = start + 1; index < html.length; index += 1) {
+    const character = html[index];
+    if (quote) {
+      if (character === quote) quote = undefined;
+    } else if (character === '"' || character === "'") {
+      quote = character;
+    } else if (character === ">") {
+      return index + 1;
+    }
+  }
+  return -1;
+}
+
+function removeHtmlLinkElements(
+  html: string,
+  elements: HtmlLinkElement[],
+  removed: ReadonlySet<number>,
+): string {
+  let cursor = 0;
+  let output = "";
+  for (const [index, element] of elements.entries()) {
+    if (!removed.has(index)) continue;
+    output += html.slice(cursor, element.start);
+    cursor = element.end;
+  }
+  return output + html.slice(cursor);
+}
+
 function splitLinkHeader(value: string): string[] {
   const links: string[] = [];
   let start = 0;
   let insideAngleBrackets = false;
-  let quote: '"' | "'" | undefined;
+  let quoted = false;
 
   for (let index = 0; index < value.length; index += 1) {
     const character = value[index];
-    if (quote) {
-      if (character === quote && value[index - 1] !== "\\") quote = undefined;
+    if (quoted) {
+      if (character === '"' && value[index - 1] !== "\\") quoted = false;
       continue;
     }
-    if (character === '"' || character === "'") {
-      quote = character;
+    if (character === '"') {
+      quoted = true;
     } else if (character === "<") {
       insideAngleBrackets = true;
     } else if (character === ">") {

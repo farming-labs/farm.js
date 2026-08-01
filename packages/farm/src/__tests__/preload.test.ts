@@ -2,6 +2,8 @@
 
 import { describe, expect, it, vi } from "vitest";
 import {
+  clearReportedFarmPreloadWarnings,
+  manageFarmDocumentPreloads,
   manageFarmHtmlPreloads,
   manageFarmLinkHeaderPreloads,
   reportFarmPreloadWarnings,
@@ -19,7 +21,7 @@ describe("smart preload manager", () => {
     const config = resolveFarmPerformanceConfig(undefined).preload;
     const html = [
       '<link rel="preload" as="image" href="/logo.webp">',
-      '<link rel="preload" as="image" href="/hero.webp" fetchPriority="high">',
+      '<link rel="preload" as="image" href="/hero.webp" fetchPriority="High">',
       '<link rel="preload" as="image" href="/below-fold.webp">',
       '<link rel="modulepreload" href="/farm-client.js">',
     ].join("\n");
@@ -31,6 +33,26 @@ describe("smart preload manager", () => {
     expect(result.value).not.toContain("/below-fold.webp");
     expect(result.value).toContain('rel="modulepreload"');
     expect(result.warnings).toEqual([{ kind: "image", count: 3, budget: 1, removed: 2 }]);
+  });
+
+  it("ignores link-looking text in comments and raw-text elements", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxImages: 1 } }).preload;
+    const html = [
+      '<script>const example = `<link rel="preload" as="image" href="/script.webp">`;</script>',
+      '<!-- <link rel="preload" as="image" href="/comment.webp"> -->',
+      '<template><link rel="preload" as="image" href="/template.webp"></template>',
+      '<link rel="preload" as="image" href="/hero.webp" fetchpriority="high">',
+      '<link rel="preload" as="image" href="/below.webp" data-note="1 > 0">',
+    ].join("\n");
+
+    const result = manageFarmHtmlPreloads(html, config);
+
+    expect(result.value).toContain("/script.webp");
+    expect(result.value).toContain("/comment.webp");
+    expect(result.value).toContain("/template.webp");
+    expect(result.value).toContain("/hero.webp");
+    expect(result.value).not.toContain("/below.webp");
+    expect(result.warnings).toEqual([{ kind: "image", count: 2, budget: 1, removed: 1 }]);
   });
 
   it("caps font Link headers while preserving non-preload relations", () => {
@@ -51,6 +73,37 @@ describe("smart preload manager", () => {
     expect(result.warnings).toEqual([{ kind: "font", count: 3, budget: 2, removed: 1 }]);
   });
 
+  it("splits Link values with apostrophes in URIs", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxFonts: 1 } }).preload;
+    const header = [
+      "</fonts/designer's-body.woff2>; rel=preload; as=font",
+      "</fonts/mono.woff2>; rel=preload; as=font",
+      "<https://api.example.test>; rel=preconnect",
+    ].join(", ");
+
+    const result = manageFarmLinkHeaderPreloads(header, config);
+
+    expect(result.value).toContain("designer's-body.woff2");
+    expect(result.value).not.toContain("/fonts/mono.woff2");
+    expect(result.value).toContain("rel=preconnect");
+  });
+
+  it("shares one budget across HTML and response Link hints", () => {
+    const config = resolveFarmPerformanceConfig({ preload: { maxFonts: 2 } }).preload;
+    const html = [
+      '<link rel="preload" as="font" href="/fonts/body.woff2">',
+      '<link rel="preload" as="font" href="/fonts/mono.woff2">',
+    ].join("");
+    const header = "</fonts/display.woff2>; rel=preload; as=font";
+
+    const result = manageFarmDocumentPreloads(html, header, config);
+
+    expect(result.html).toContain("body.woff2");
+    expect(result.html).toContain("mono.woff2");
+    expect(result.linkHeader).toBe("");
+    expect(result.warnings).toEqual([{ kind: "font", count: 3, budget: 2, removed: 1 }]);
+  });
+
   it("supports warning-only mode without changing the document", () => {
     const config = resolveFarmPerformanceConfig({
       preload: { mode: "warn", maxImages: 1 },
@@ -65,6 +118,7 @@ describe("smart preload manager", () => {
   });
 
   it("reports actionable preload budget guidance", () => {
+    clearReportedFarmPreloadWarnings();
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     reportFarmPreloadWarnings(
       [{ kind: "image", count: 4, budget: 1, removed: 3 }],
@@ -74,5 +128,12 @@ describe("smart preload manager", () => {
     expect(warn).toHaveBeenCalledOnce();
     expect(warn.mock.calls[0]?.[0]).toContain("route /catalog emitted 4 image preload hints");
     expect(warn.mock.calls[0]?.[0]).toContain("LCP image");
+
+    clearReportedFarmPreloadWarnings();
+    reportFarmPreloadWarnings(
+      [{ kind: "image", count: 4, budget: 1, removed: 3 }],
+      "route /catalog",
+    );
+    expect(warn).toHaveBeenCalledTimes(2);
   });
 });

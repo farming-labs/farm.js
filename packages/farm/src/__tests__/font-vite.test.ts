@@ -434,10 +434,15 @@ console.log(demo);`,
     );
 
     expect(source).toMatch(
-      /farmManagedFontPreloadHeader \? \{ "Link": farmManagedFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
+      /farmFontPreloadHeader \? \{ "Link": farmFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
     );
+    expect(source).toContain("manageFarmDocumentPreloads(");
     expect(source).toContain("manageFarmLinkHeaderPreloads(");
+    expect(source).toContain("isStreaming || response.body === null");
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
+    expect(source).toContain(
+      "applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname)",
+    );
   });
 
   it("replaces an earlier generated font section when client and SSR CSS are combined", () => {
