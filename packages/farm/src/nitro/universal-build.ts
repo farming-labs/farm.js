@@ -50,6 +50,7 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
+import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import { getFarmIntegrationPluginServerRuntime } from "../integrations";
@@ -6355,6 +6356,9 @@ async function postProcessVercelOutput(
 
   // Update routes to use the correct function path
   vercelConfig.routes = [
+    // Apply the header before the filesystem handler. `continue` lets Vercel
+    // serve the matching file while preserving the immutable cache policy.
+    createFarmVercelImmutableAssetRoute(config.basePath),
     // Serve static files first
     {
       handle: "filesystem",
