@@ -75,6 +75,11 @@ export interface RouteRenderingConfig {
   directive?: string;
 }
 
+export interface StaticRouteCandidateAnalysis {
+  candidate: boolean;
+  blockers: string[];
+}
+
 interface DirectiveRenderingConfig {
   ssg: boolean;
   ppr: boolean;
@@ -86,6 +91,21 @@ interface DirectiveRenderingConfig {
 const OPTIONAL_CATCH_ALL_SEGMENT = /^\[\[\.\.\.([^\]]+)\]\]$/;
 const REQUIRED_CATCH_ALL_SEGMENT = /^\[\.\.\.([^\]]+)\]$/;
 const REQUIRED_DYNAMIC_SEGMENT = /^\[([^\]]+)\]$/;
+
+const REQUEST_BOUND_SOURCE_PATTERNS: ReadonlyArray<{
+  label: string;
+  pattern: RegExp;
+}> = [
+  { label: "request cookies", pattern: /\bcookies\s*\(/ },
+  { label: "request headers", pattern: /\bheaders\s*\(/ },
+  { label: "the current Request", pattern: /\bgetCurrentRequest\s*\(/ },
+  { label: "URL search parameters", pattern: /\bsearchParams\b/ },
+  { label: "middleware request data", pattern: /\bmiddlewareData\b/ },
+  {
+    label: "request authentication",
+    pattern: /\b(?:auth|getServerSession|getSession|currentUser)\s*\(/,
+  },
+];
 
 /**
  * Resolve route rendering from Farm exports, Next-compatible exports, and
@@ -153,6 +173,60 @@ export async function resolveRouteRenderingConfigFromFile(
 ): Promise<RouteRenderingConfig> {
   const source = await readFile(filePath, "utf8").catch(() => undefined);
   return resolveRouteRenderingConfig(mod, source);
+}
+
+/**
+ * Conservatively identify a route that may be safe to pre-render.
+ *
+ * This intentionally produces a suggestion rather than changing rendering:
+ * request-bound work can live in a transitive import, which source inspection
+ * of the route module cannot prove safe. Explicit route config always wins.
+ */
+export function analyzeStaticRouteCandidate(
+  mod: RouteModule | null | undefined,
+  source: string | undefined,
+  options: { isDynamic?: boolean } = {},
+): StaticRouteCandidateAnalysis {
+  const blockers: string[] = [];
+
+  if (!source) {
+    blockers.push("route source is unavailable");
+  }
+
+  if (options.isDynamic) {
+    blockers.push("the route has dynamic path segments");
+  }
+
+  if (hasExplicitRenderingConfig(mod, source)) {
+    blockers.push("the route already has explicit rendering config");
+  }
+
+  if (source) {
+    for (const requestBoundPattern of REQUEST_BOUND_SOURCE_PATTERNS) {
+      if (requestBoundPattern.pattern.test(source)) {
+        blockers.push(`the route reads ${requestBoundPattern.label}`);
+      }
+    }
+  }
+
+  return {
+    candidate: blockers.length === 0,
+    blockers,
+  };
+}
+
+function hasExplicitRenderingConfig(
+  mod: RouteModule | null | undefined,
+  source: string | undefined,
+): boolean {
+  return (
+    typeof mod?.ssg === "boolean" ||
+    typeof mod?.ppr === "boolean" ||
+    typeof mod?.experimental_ppr === "boolean" ||
+    typeof mod?.revalidate !== "undefined" ||
+    typeof mod?.dynamic !== "undefined" ||
+    typeof parseRouteRenderingDirective(source) !== "undefined"
+  );
 }
 
 export function parseRouteRenderingDirective(
@@ -329,6 +403,7 @@ export async function collectSSGPages(
 ): Promise<SSGCollectionResult> {
   const ssgPages: SSGPage[] = [];
   const ssrRoutes: string[] = [];
+  const staticCandidateRoutes: string[] = [];
 
   for (const route of routes) {
     try {
@@ -339,7 +414,8 @@ export async function collectSSGPages(
         continue;
       }
 
-      const rendering = await resolveRouteRenderingConfigFromFile(mod, route.filePath);
+      const source = await readFile(route.filePath, "utf8").catch(() => undefined);
+      const rendering = resolveRouteRenderingConfig(mod, source);
 
       // Check if page is marked for SSG
       if (rendering.ssg) {
@@ -380,12 +456,30 @@ export async function collectSSGPages(
       } else {
         // SSR route (default)
         ssrRoutes.push(route.path);
+
+        if (analyzeStaticRouteCandidate(mod, source, { isDynamic: route.isDynamic }).candidate) {
+          staticCandidateRoutes.push(route.path);
+        }
       }
     } catch (error) {
       console.error(`Error processing route ${route.path}:`, error);
       // Fall back to SSR for problematic routes
       ssrRoutes.push(route.path);
     }
+  }
+
+  if (staticCandidateRoutes.length > 0) {
+    const visibleRoutes = staticCandidateRoutes.slice(0, 10);
+    const remainingCount = staticCandidateRoutes.length - visibleRoutes.length;
+    const remainingSuffix = remainingCount > 0 ? `\n  …and ${remainingCount} more` : "";
+
+    console.warn(
+      `[Farm.js] ${staticCandidateRoutes.length} route${
+        staticCandidateRoutes.length === 1 ? " appears" : "s appear"
+      } eligible for static rendering:\n  ${visibleRoutes.join("\n  ")}${remainingSuffix}\n` +
+        `Add \`export const dynamic = "force-static";\` after verifying that imported code ` +
+        `does not read cookies, headers, authentication, or other request data.`,
+    );
   }
 
   return { ssg: ssgPages, ssr: ssrRoutes };
