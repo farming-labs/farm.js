@@ -11,6 +11,7 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
+    "@databuddy/sdk": "2.6.0",
     "@farm.js/core": "workspace:*",
     "@farming-labs/docs": "^0.2.44",
     "@farming-labs/theme": "^0.2.44",
