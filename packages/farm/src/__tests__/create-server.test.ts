@@ -1,7 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { mergeFarmViteConfig } from "../server/vite-config";
+import {
+  createFarmClientOptimizeDepsConfig,
+  FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE,
+  mergeFarmViteConfig,
+} from "../server/vite-config";
 
 describe("mergeFarmViteConfig", () => {
+  it("keeps Farm client runtimes in React's dependency optimizer generation", () => {
+    expect(createFarmClientOptimizeDepsConfig()).toMatchObject({
+      noDiscovery: true,
+      holdUntilCrawlEnd: false,
+      include: expect.arrayContaining([
+        "react",
+        "react-dom/client",
+        "@farm.js/core/client",
+        "@farm.js/core/plugin/client",
+        "@farm.js/core/deferred",
+        "@farm.js/core/deployment",
+      ]),
+    });
+    expect(FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE).toContain("react/jsx-dev-runtime");
+  });
+
   it("preserves Farm plugins and dependency safeguards when user Vite config is merged", () => {
     const farmPlugin = { name: "farm:framework" };
     const userPlugin = { name: "app:plugin" };
