@@ -56,6 +56,7 @@ import { getFarmIntegrationPluginServerRuntime } from "../integrations";
 import type { TransformOptions } from "esbuild";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
+import { mergeFarmFontCss } from "../font-vite";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -816,9 +817,45 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
   const fs = await import("fs/promises");
   for (const [fileName, output] of Object.entries(bundle)) {
     if (output.type !== "asset") continue;
+    if (fileName === "farm-fonts.css") {
+      await mergeBuiltFontCss(outputDir, output.source);
+      continue;
+    }
     const filePath = path.join(outputDir, fileName);
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(filePath, output.source);
+  }
+}
+
+async function mergeBuiltFontCss(
+  outputDir: string,
+  fontCssSource?: string | Uint8Array,
+): Promise<void> {
+  const fs = await import("fs/promises");
+  const fontCssPath = path.join(outputDir, "farm-fonts.css");
+  let fontCss = fontCssSource;
+  if (fontCss === undefined) {
+    try {
+      fontCss = await fs.readFile(fontCssPath);
+    } catch {
+      return;
+    }
+  }
+
+  const clientCssPath = path.join(outputDir, "farm-client.css");
+  let clientCss = "";
+  try {
+    clientCss = await fs.readFile(clientCssPath, "utf8");
+  } catch {
+    // A font-only app may not have produced a stylesheet yet.
+  }
+  const normalizedFontCss =
+    typeof fontCss === "string" ? fontCss : Buffer.from(fontCss).toString("utf8");
+  await fs.writeFile(clientCssPath, mergeFarmFontCss(clientCss, normalizedFontCss));
+  try {
+    await fs.rm(fontCssPath, { force: true });
+  } catch {
+    // The CSS may have come from the in-memory SSR bundle only.
   }
 }
 
@@ -1113,6 +1150,7 @@ async function buildClient(
                 'export { useRouter } from "@farm.js/core/client";',
                 'export { usePathname, useSearchParams } from "@farm.js/core/navigation";',
                 'export { createAPIClient } from "@farm.js/core/client";',
+                'export { localFont, remoteFont } from "@farm.js/core/font";',
               ].join("\n");
             }
             return null;
@@ -1141,6 +1179,7 @@ async function buildClient(
         ],
       },
     });
+    await mergeBuiltFontCss(outputDir);
     await validateClientBuildOutput(root, srcDir, outputDir);
   } finally {
     // Clean up temporary entry file
@@ -3091,6 +3130,7 @@ ${mdxComponentsImport}
 ${integrationImports}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
+import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
 import * as React from "react";
 import * as ReactDOMServer from "react-dom/server";
 
@@ -4951,6 +4991,7 @@ async function handleFarmRequestInContext(
           "Cache-Control": renderedPage.stream || hasRequestScopedRender || !sharedCacheControl
             ? "private, no-store"
             : sharedCacheControl,
+          ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
           ...(pprConfig.enabled ? getPPRHeaders(pprCanCache ? "miss" : "bypass", pprConfig) : {}),
         };
         const farmI18nSnapshot = getFarmI18nSnapshot();

@@ -52,6 +52,7 @@ import {
 } from "./deployment";
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
+import { farmFontImportsPlugin } from "./font-vite";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
@@ -60,6 +61,7 @@ import type { FarmI18nClientSnapshot } from "./i18n/types";
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
   images?: FarmUserConfig["images"];
+  publicDir?: FarmUserConfig["publicDir"];
 }
 
 type TypeArtifactSelection = Pick<
@@ -455,6 +457,11 @@ export function farmPlugin(
   initialPluginManager?: PluginManager,
 ): Plugin {
   const imageImports = farmImageImportsPlugin();
+  const fontImports = farmFontImportsPlugin({
+    root: options.root,
+    basePath: options.basePath,
+    publicDir: options.publicDir,
+  });
   let farmApp: FarmApp;
   let server: ViteDevServer;
   let hmrManager: HMRManager;
@@ -503,10 +510,16 @@ export function farmPlugin(
     },
 
     async configResolved(config) {
-      // Defer initialization until Vite server is available
+      if (typeof fontImports.configResolved === "function") {
+        await fontImports.configResolved.call(this, config);
+      }
+      // Defer Farm application initialization until Vite server is available.
     },
 
     async configureServer(viteServer) {
+      if (typeof fontImports.configureServer === "function") {
+        await fontImports.configureServer.call(this, viteServer);
+      }
       server = viteServer;
 
       // Store the plugin manager passed during creation
@@ -2077,6 +2090,11 @@ export function farmPlugin(
     },
 
     async resolveId(id, importer, resolveOptions) {
+      if (typeof fontImports.resolveId === "function") {
+        const fontId = await fontImports.resolveId.call(this, id, importer, resolveOptions);
+        if (fontId) return fontId;
+      }
+
       if (typeof imageImports.resolveId === "function") {
         const imageId = await imageImports.resolveId.call(this, id, importer, resolveOptions);
         if (imageId) return imageId;
@@ -2101,6 +2119,11 @@ export function farmPlugin(
     },
 
     async load(id) {
+      if (typeof fontImports.load === "function") {
+        const fontModule = await fontImports.load.call(this, id);
+        if (fontModule) return fontModule;
+      }
+
       if (typeof imageImports.load === "function") {
         const imageModule = await imageImports.load.call(this, id);
         if (imageModule) return imageModule;
@@ -2236,6 +2259,20 @@ export const manifest = getManifest();
       let transformedCode = code;
       let transformed = false;
 
+      if (typeof fontImports.transform === "function") {
+        const fontResult = await fontImports.transform.call(
+          this,
+          transformedCode,
+          id,
+          transformOptions,
+        );
+        const fontCode = typeof fontResult === "string" ? fontResult : fontResult?.code;
+        if (fontCode) {
+          transformedCode = fontCode;
+          transformed = true;
+        }
+      }
+
       if (transformOptions?.ssr && server) {
         const rewrittenImports = rewriteEarlySsrRelativeImports({
           code: transformedCode,
@@ -2300,7 +2337,10 @@ if (import.meta.hot) {
       return transformed ? { code: transformedCode, map: null } : null;
     },
 
-    generateBundle(options, bundle) {
+    async generateBundle(options, bundle) {
+      if (typeof fontImports.generateBundle === "function") {
+        await fontImports.generateBundle.call(this, options, bundle, false);
+      }
       const clientManifest = generateClientManifest(bundle);
       this.emitFile({
         type: "asset",

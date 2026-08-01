@@ -43,6 +43,7 @@ export const farmPackageBuildOptions = {
     env: "src/env.ts",
     "env-types": "src/env-types.ts",
     environment: "src/environment.ts",
+    font: "src/font.ts",
     "environment/vite": "src/environment-vite.ts",
     testing: "src/testing.ts",
     "agent-runtime": "src/agent-runtime.ts",

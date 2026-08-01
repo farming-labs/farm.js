@@ -102,6 +102,9 @@
       "environment/vite": [
         "./dist/environment/vite.d.ts"
       ],
+      "font": [
+        "./dist/font.d.ts"
+      ],
       "testing": [
         "./dist/testing.d.ts"
       ],
@@ -320,6 +323,11 @@
       "types": "./dist/environment/vite.d.ts",
       "import": "./dist/environment/vite.mjs",
       "require": "./dist/environment/vite.cjs"
+    },
+    "./font": {
+      "types": "./dist/font.d.ts",
+      "import": "./dist/font.mjs",
+      "require": "./dist/font.cjs"
     },
     "./vite": {
       "types": "./dist/vite.d.ts",
