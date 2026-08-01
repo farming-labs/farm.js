@@ -79,11 +79,7 @@ describe("mergeFarmViteConfig", () => {
     expect(merged.optimizeDeps).toMatchObject({
       noDiscovery: false,
       holdUntilCrawlEnd: false,
-      include: expect.arrayContaining([
-        "react",
-        "@farm.js/core/client",
-        "legacy-commonjs-package",
-      ]),
+      include: expect.arrayContaining(["react", "@farm.js/core/client", "legacy-commonjs-package"]),
     });
   });
 });
