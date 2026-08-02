@@ -3,7 +3,7 @@ import { pixelBorder } from "@farming-labs/theme/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { siNextdotjs, siNuxt, siSvelte, siTanstack } from "simple-icons";
+import { siCloudflare, siNextdotjs, siNuxt, siSvelte, siTanstack } from "simple-icons";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
   favicon?: string;
@@ -53,6 +53,7 @@ const icons = {
   "brand-clerk": brandPath(
     "m21.47 20.829-2.881-2.881a.572.572 0 0 0-.7-.084 6.854 6.854 0 0 1-7.081 0 .576.576 0 0 0-.7.084l-2.881 2.881a.576.576 0 0 0-.103.69.57.57 0 0 0 .166.186 12 12 0 0 0 14.113 0 .58.58 0 0 0 .239-.423.576.576 0 0 0-.172-.453Zm.002-17.668-2.88 2.88a.569.569 0 0 1-.701.084A6.857 6.857 0 0 0 8.724 8.08a6.862 6.862 0 0 0-1.222 3.692 6.86 6.86 0 0 0 .978 3.764.573.573 0 0 1-.083.699l-2.881 2.88a.567.567 0 0 1-.864-.063A11.993 11.993 0 0 1 6.771 2.7a11.99 11.99 0 0 1 14.637-.405.566.566 0 0 1 .232.418.57.57 0 0 1-.168.448Zm-7.118 12.261a3.427 3.427 0 1 0 0-6.854 3.427 3.427 0 0 0 0 6.854Z",
   ),
+  "brand-cloudflare": brandPath(siCloudflare.path),
   "brand-inngest": brandSvg(
     '<path fill="currentColor" stroke="none" d="M4 3.5a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2Zm2.3 6.6H1.7v10.4h4.6V10.1Zm2 10.4V10h4l.2 1.2a5 5 0 0 1 3.6-1.5c3 0 4.9 2 4.9 5.4v5.4h-4.6v-5.2c0-1.1-.5-1.7-1.4-1.7-1.1 0-2 .8-2 2.2v4.7H8.3Z"></path>',
   ),
@@ -227,7 +228,11 @@ const sidebar = [
         icon: "sparkles",
         children: [
           { label: "Eve", slug: "integrations/eve", icon: "sparkles" },
-          { label: "Cloudflare Agents", slug: "integrations/cf-agent", icon: "cloud" },
+          {
+            label: "Cloudflare Agents",
+            slug: "integrations/cf-agent",
+            icon: "brand-cloudflare",
+          },
         ],
       },
       {
