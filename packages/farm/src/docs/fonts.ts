@@ -36,7 +36,7 @@ export function resolveFarmDocsFontAssets(root: string): FarmDocsFontAsset[] {
       {
         family,
         sourcePath,
-        url: `/assets/${baseName}-h${fingerprint}${extension}`,
+        url: `/assets/fonts/${baseName}-h${fingerprint}${extension}`,
       },
     ];
   });

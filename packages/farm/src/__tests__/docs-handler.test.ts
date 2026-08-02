@@ -426,8 +426,8 @@ describe("createFarmDocsHandler", () => {
 
     expect(assets).toHaveLength(2);
     expect(assets.map(({ url }) => url)).toEqual([
-      expect.stringMatching(/^\/assets\/Geist-Variable-h[a-f0-9]{12}\.woff2$/),
-      expect.stringMatching(/^\/assets\/GeistMono-Variable-h[a-f0-9]{12}\.woff2$/),
+      expect.stringMatching(/^\/assets\/fonts\/Geist-Variable-h[a-f0-9]{12}\.woff2$/),
+      expect.stringMatching(/^\/assets\/fonts\/GeistMono-Variable-h[a-f0-9]{12}\.woff2$/),
     ]);
     for (const { family, url } of assets) {
       expect(html).toContain(
@@ -438,6 +438,13 @@ describe("createFarmDocsHandler", () => {
     }
     expect(html).toContain('--font-geist-sans: "Geist Sans"');
     expect(html).toContain('--font-geist-mono: "Geist Mono"');
+    expect(html).toContain("font-display: block");
+    expect(html).toContain("font-synthesis: none");
+    expect(response?.headers.get("link")).toBe(
+      assets
+        .map(({ url }) => `<${url}>; rel=preload; as=font; type=font/woff2; crossorigin`)
+        .join(", "),
+    );
     expect(html).not.toContain("/node_modules/geist/");
   });
 

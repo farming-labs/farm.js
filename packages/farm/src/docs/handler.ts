@@ -1641,7 +1641,7 @@ function renderFarmDocsBridgeCss(
   const fontFaces = fontAssets
     .map(
       ({ family, url }) =>
-        `@font-face { font-family: "${family}"; src: url("${url}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: swap; }`,
+        `@font-face { font-family: "${family}"; src: url("${url}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: block; }`,
     )
     .join("\n");
   const fontVariables = [
@@ -1661,7 +1661,7 @@ function renderFarmDocsBridgeCss(
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: calc(var(--fd-nav-height, 44px) + 24px); }
     html[data-farm-docs-sidebar="open"], html[data-farm-docs-sidebar="open"] body { overflow: hidden; }
-    body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); text-rendering: optimizeLegibility; }
+    body { margin: 0; min-height: 100vh; background: var(--color-fd-background, hsl(0 0% 2%)); color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-family: var(--fd-docs-font-sans); font-synthesis: none; text-rendering: optimizeLegibility; }
     ::selection { background: var(--color-fd-foreground, #fff); color: var(--color-fd-background, #000); }
     a { color: inherit; }
     #nd-docs-layout { --fd-sidebar-col: var(--fd-sidebar-width); display: grid; grid-template: "sidebar header header" var(--fd-nav-height, 44px) "sidebar main toc" 1fr / var(--fd-sidebar-width) minmax(0, 1fr) var(--fd-toc-width) !important; min-height: 100vh; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-background, hsl(0 0% 2%)); }
@@ -1854,6 +1854,12 @@ function renderFarmDocsFontPreloads(fontAssets: readonly FarmDocsPublicFontAsset
     .join("\n  ");
 }
 
+function renderFarmDocsFontPreloadHeader(fontAssets: readonly FarmDocsPublicFontAsset[]): string {
+  return fontAssets
+    .map(({ url }) => `<${url}>; rel=preload; as=font; type=font/woff2; crossorigin`)
+    .join(", ");
+}
+
 function renderPixelDocsHtml(
   page: LoadedFarmDocsPage,
   pages: FarmDocsPage[],
@@ -1941,6 +1947,7 @@ export function createFarmDocsHandler(
   const faviconHref = resolveFarmDocsFavicon(docs, options);
   const fontAssets =
     options.fontAssets ?? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(options.root));
+  const fontPreloadHeader = renderFarmDocsFontPreloadHeader(fontAssets);
 
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
@@ -1987,6 +1994,7 @@ export function createFarmDocsHandler(
         headers: {
           "Content-Type": "text/html; charset=utf-8",
           "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300",
+          ...(fontPreloadHeader ? { Link: fontPreloadHeader } : {}),
         },
       },
     );
