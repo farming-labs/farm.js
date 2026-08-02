@@ -386,7 +386,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       "article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);",
     );
-    expect(html).toContain("--fd-docs-font-mono: var(--font-geist-mono");
+    expect(html).toContain("--fd-docs-font-mono: var(--fd-layout-font-code, var(--font-geist-mono");
     expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
@@ -446,6 +446,45 @@ describe("createFarmDocsHandler", () => {
         .join(", "),
     );
     expect(html).not.toContain("/node_modules/geist/");
+  });
+
+  it("uses resolved layout fonts for standalone docs pages", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, {
+      root,
+      srcDir: "src",
+      fontAssets: [],
+      resolveLayoutFonts: async (pathname) => {
+        expect(pathname).toBe("/docs");
+        return {
+          body: {
+            className: "font-product-sans",
+            variable: "",
+            style: { fontFamily: '"Product Sans", system-ui, sans-serif' },
+            preloads: [{ href: "/assets/product-sans.woff2", type: "font/woff2" }],
+          },
+          code: {
+            className: "font-product-mono",
+            variable: "",
+            style: { fontFamily: '"Product Mono", ui-monospace, monospace' },
+            preloads: [{ href: "/assets/product-mono.woff2", type: "font/woff2" }],
+          },
+        };
+      },
+      fontStylesheetHref: "/farm-fonts.css",
+    });
+
+    const response = await handler(new Request("http://farm.test/docs"));
+    const html = (await response?.text()) || "";
+
+    expect(html).toContain('<link rel="stylesheet" href="/farm-fonts.css">');
+    expect(html).toContain('--fd-layout-font-body: "Product Sans", system-ui, sans-serif;');
+    expect(html).toContain('--fd-layout-font-code: "Product Mono", ui-monospace, monospace;');
+    expect(html).not.toContain('<link rel="preload"');
+    expect(html).not.toContain("@font-face");
+    expect(response?.headers.get("link")).toBe(
+      "</assets/product-sans.woff2>; rel=preload; as=font; type=font/woff2; crossorigin, </assets/product-mono.woff2>; rel=preload; as=font; type=font/woff2; crossorigin",
+    );
   });
 
   it("uses the built-in docs favicon when the project does not provide one", async () => {

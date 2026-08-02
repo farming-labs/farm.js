@@ -867,12 +867,8 @@ async function mergeBuiltFontCss(
   }
   const normalizedFontCss =
     typeof fontCss === "string" ? fontCss : Buffer.from(fontCss).toString("utf8");
+  await fs.writeFile(fontCssPath, normalizedFontCss);
   await fs.writeFile(clientCssPath, mergeFarmFontCss(clientCss, normalizedFontCss));
-  try {
-    await fs.rm(fontCssPath, { force: true });
-  } catch {
-    // The CSS may have come from the in-memory SSR bundle only.
-  }
 }
 
 class IncompleteClientBuildOutputError extends Error {
@@ -3021,6 +3017,9 @@ function generateVirtualEntryCode(
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farm.js/core/docs";`
     : "";
+  const docsFontImport = config.docs?.enabled
+    ? `import { resolveFarmLayoutFonts } from "@farm.js/core/font";`
+    : "";
   const docsRuntimeImport = config.docs?.enabled
     ? `import { existsSync as farmDocsExistsSync } from "node:fs";
 import { dirname as farmDocsDirname, join as farmDocsJoin } from "node:path";
@@ -3147,6 +3146,7 @@ ${productionRuntimeImport}
 ${pluginRuntimeImport}
 ${i18nServerImport}
 ${docsHandlerImport}
+${docsFontImport}
 ${docsRuntimeImport}
 ${markdownHandlerImport}
 ${appMarkdownImport}
@@ -3285,7 +3285,17 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
 };
 const farmDocsHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, clientEntry: "/farm-client.js", fontAssets: ${JSON.stringify(farmDocsFontAssets)} })`
+      ? `createFarmDocsHandler(farmDocsResolvedConfig, {
+  root: farmDocsRuntimeRoot,
+  srcDir: ${JSON.stringify(config.srcDir)},
+  clientEntry: "/farm-client.js",
+  fontAssets: ${JSON.stringify(farmDocsFontAssets)},
+  resolveLayoutFonts: (pathname) =>
+    resolveFarmLayoutFonts(
+      getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
+    ),
+  fontStylesheetHref: "/farm-fonts.css",
+})`
       : "null"
   };
 const farmDocsAPIHandler = ${

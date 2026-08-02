@@ -189,6 +189,7 @@ console.log(demo, farmFontPreloadHeader);`,
 
       expect(entry?.code).toMatch(/className:\s*["']farm-font-/);
       expect(entry?.code).toMatch(/variable:\s*["']farm-font-variable-/);
+      expect(entry?.code).toMatch(/preloads:\s*\[\{\s*href:\s*["']\/assets\/fonts\/demo-/);
       expect(entry?.code).not.toContain("localFont({");
       expect(entry?.code).not.toContain("__FARM_FONT_PRELOAD_HEADER__");
       expect(entry?.code).toContain("%3C%2Fassets%2Ffonts%2Fdemo-");
@@ -287,6 +288,9 @@ console.log(demo);`,
       );
 
       const result = await buildFixture(root);
+      const entry = result.output.find(
+        (output): output is Rollup.OutputChunk => output.type === "chunk" && output.isEntry,
+      );
       const assets = result.output.filter(
         (output): output is Rollup.OutputAsset => output.type === "asset",
       );
@@ -296,6 +300,7 @@ console.log(demo);`,
         .join("\n");
 
       expect(css).toContain("https://cdn.example.com/fonts/demo.woff2");
+      expect(entry?.code).toMatch(/preloads:\s*\[\]/);
       expect(assets.some((output) => output.fileName.startsWith("assets/fonts/"))).toBe(false);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -446,7 +451,12 @@ console.log(demo);`,
     );
     expect(source).toContain("await copyFarmDocsFontAssetsToClient(root, clientOutputDir);");
     expect(source).toContain("resolveFarmDocsFontAssets(root).map");
-    expect(source).toContain("fontAssets: ${JSON.stringify(farmDocsFontAssets)}");
+    expect(source).toContain("fontAssets: ${JSON.stringify(farmDocsFontAssets)},");
+    expect(source).toContain(
+      "getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module)",
+    );
+    expect(source).toContain('fontStylesheetHref: "/farm-fonts.css"');
+    expect(source).toContain("await fs.writeFile(fontCssPath, normalizedFontCss)");
   });
 
   it("serves the same fingerprinted docs fonts in development", async () => {
@@ -454,6 +464,8 @@ console.log(demo);`,
 
     expect(source).toContain("resolveFarmDocsFontAssets(farmConfig.root)");
     expect(source).toContain("fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList)");
+    expect(source).toContain("resolveFarmLayoutFonts(layoutModules)");
+    expect(source).toContain('fontStylesheetHref: "/@farm/fonts.css"');
     expect(source).toContain('res.setHeader("Content-Type", "font/woff2")');
     expect(source).toContain(
       'res.setHeader("Cache-Control", "public, max-age=31536000, immutable")',

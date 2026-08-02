@@ -53,6 +53,7 @@ import {
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
+import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
@@ -889,6 +890,14 @@ export function farmPlugin(
             srcDir: farmConfig.srcDir,
             clientEntry: "/@farm/client.js",
             fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList),
+            resolveLayoutFonts: async (pathname) => {
+              const layouts = routeManager.matchRoute(pathname).layouts;
+              const layoutModules = await Promise.all(
+                layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
+              );
+              return resolveFarmLayoutFonts(layoutModules);
+            },
+            fontStylesheetHref: "/@farm/fonts.css",
           })
         : null;
       const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime

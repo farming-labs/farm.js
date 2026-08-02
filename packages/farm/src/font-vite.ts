@@ -59,6 +59,7 @@ interface FontDefinition {
   fallback: string[];
   display: FarmFontDisplay;
   preload: boolean;
+  preloadResources: Array<{ href: string; type: string }>;
   weight?: number | string;
   style?: string;
   sources: NormalizedFontSource[];
@@ -468,6 +469,13 @@ class FarmFontRegistry {
       fallback,
       display,
       preload: raw.preload !== false,
+      preloadResources:
+        raw.preload === false
+          ? []
+          : normalizedSources.map(({ resource }) => ({
+              href: resourceUrl(resource, production, this.basePath),
+              type: fontContentType(resource.extension),
+            })),
       weight: defaultWeight,
       style: raw.style === undefined ? undefined : defaultStyle,
       sources: normalizedSources,
@@ -909,6 +917,7 @@ function serializeFontResult(font: FontDefinition): string {
         ? { fontWeight: font.weight }
         : {}),
     },
+    preloads: font.preloadResources,
   });
 }
 
