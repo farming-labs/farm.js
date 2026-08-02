@@ -55,6 +55,7 @@ export const farmPackageBuildOptions = {
     "i18n/client": "src/i18n/client.tsx",
     "internal/client-runtime": "src/client/production-runtime.ts",
     "internal/production-runtime": "src/nitro/production-runtime.ts",
+    "internal/metadata-image-runtime": "src/metadata-image.ts",
     "internal/build-runtime": "src/nitro/build-runtime.ts",
     "internal/config-runtime": "src/config-runtime.ts",
     "internal/production-node-env": "src/build/production-node-env.ts",
@@ -66,6 +67,7 @@ export const farmPackageBuildOptions = {
   external: [
     "react",
     "react-dom",
+    "@vercel/og",
     "rolldown",
     "sharp",
     "vite",

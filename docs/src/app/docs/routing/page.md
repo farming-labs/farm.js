@@ -594,7 +594,7 @@ Static images inside a dynamic segment are shared by every concrete route. Use a
 
 ### Generated metadata images
 
-Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Farm automatically adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
+Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Return ordinary stateless JSX: Farm owns the image endpoint and PNG renderer, so the component does not import `ImageResponse` or declare an API URL. Farm also adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
 
 **src/app/products/[id]/opengraph-image.tsx**
 
@@ -603,23 +603,49 @@ import type { PageProps } from "@farm.js/core";
 
 export const size = { width: 1200, height: 630 };
 export const alt = "Product preview";
-export const contentType = "image/svg+xml";
+export const revalidate = 300;
 
-export default function ProductOpenGraphImage({ params }: PageProps) {
+function ProductCard({ name, id }: { name: string; id: string }) {
   return (
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630">
-      <rect width="1200" height="630" fill="#111827" />
-      <text x="80" y="340" fill="white" fontSize="72">
-        Product {params.id}
-      </text>
-    </svg>
+    <div className="flex h-full w-full flex-col justify-between bg-[#09090b] p-20 text-white">
+      <span className="text-3xl font-medium text-emerald-400">Acme</span>
+      <div className="flex flex-col">
+        <span className="text-2xl text-zinc-400">Product {id}</span>
+        <span className="mt-3 text-8xl font-bold tracking-tight">{name}</span>
+      </div>
+    </div>
   );
+}
+
+export default async function ProductOpenGraphImage({ params }: PageProps) {
+  const product = await getProduct(params.id);
+  return <ProductCard id={params.id} name={product.name} />;
 }
 ```
 
-For `/products/42`, this file is served at `/products/42/opengraph-image` and Farm emits `og:image`, `og:image:width`, `og:image:height`, and `og:image:alt` tags. The default return value can be a React SVG element, a string, bytes, or a `Response`.
+For `/products/42`, Farm calls the component with `params.id === "42"`, serves the generated PNG at `/products/42/opengraph-image`, and emits `og:image`, `og:image:width`, `og:image:height`, and `og:image:alt` tags. A nested page such as `/products/42/reviews` inherits this image until a nearer route segment defines its own. The component and its data-loading code remain on the server.
 
-Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, prefer a 1200 by 630 PNG or JPEG unless the image must be generated dynamically.
+`className` supports the image renderer's Tailwind utility set, including arbitrary values. Inline `style` can be used with it and wins when both set the same property. This is not a browser screenshot: image JSX supports flex layout, typography, borders, gradients, absolute positioning, and embedded images, but not CSS Grid, animations, media queries, pseudo-elements, hooks, or stateful and class components. The application stylesheet and custom Tailwind plugins are not executed. Use an absolute URL for an `<img>` source.
+
+Farm uses 1200 by 630 when `size` is omitted and includes Geist as the default font. Export `fonts` to embed a custom brand font:
+
+```tsx
+const brandFont = fetch("https://cdn.example.com/fonts/Brand-Bold.ttf").then((response) =>
+  response.arrayBuffer(),
+);
+
+export const fonts = [
+  { name: "Brand", data: brandFont, weight: 700 as const, style: "normal" as const },
+];
+```
+
+Satori-compatible TTF, OTF, and WOFF files are supported; WOFF2 is not. Set `fontFamily: "Brand"` on the element that uses the font.
+
+Generated images revalidate on every request by default. Export `revalidate = 300` to let a CDN cache the route for five minutes, or `revalidate = false` only when the output is permanently immutable. Farm emits an `ETag`, supports conditional requests and `HEAD`, and performs JSX-to-image rendering internally.
+
+For advanced renderers, the default export may still return a `Response`, string, or bytes. To preserve the earlier React-to-SVG behavior, export `contentType = "image/svg+xml"` and return an SVG React element. A returned `Response` keeps its own status, headers, and body.
+
+Keep only one implementation for each image kind in a segment. For example, defining both `opengraph-image.png` and `opengraph-image.tsx` produces a build error. For broad social-platform compatibility, use 1200 by 630; generated JSX routes emit PNG automatically.
 
 ## File Route States
 

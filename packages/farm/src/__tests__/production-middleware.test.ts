@@ -70,6 +70,22 @@ describe("production middleware runtime", () => {
           ),
         ),
       ).resolves.toBeUndefined();
+      await expect(
+        fs.access(
+          path.join(
+            root,
+            ".vercel",
+            "output",
+            "functions",
+            "__nitro.func",
+            "node_modules",
+            "@vercel",
+            "og",
+            "dist",
+            "Geist-Regular.ttf",
+          ),
+        ),
+      ).resolves.toBeUndefined();
       const nitroBundle = await readJavaScriptOutput(
         path.join(root, ".vercel", "output", "functions", "__nitro.func"),
       );
@@ -240,8 +256,16 @@ describe("production middleware runtime", () => {
         new Request("https://example.test/users/42/opengraph-image"),
       );
       expect(dynamicImageResponse.status).toBe(200);
-      expect(dynamicImageResponse.headers.get("content-type")).toBe("image/svg+xml");
-      await expect(dynamicImageResponse.text()).resolves.toContain("User 42");
+      expect(dynamicImageResponse.headers.get("content-type")).toBe("image/png");
+      expect(dynamicImageResponse.headers.get("cache-control")).toBe(
+        "public, s-maxage=120, stale-while-revalidate=300",
+      );
+      const dynamicImageBytes = Buffer.from(await dynamicImageResponse.arrayBuffer());
+      expect(dynamicImageBytes.subarray(0, 8)).toEqual(
+        Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      );
+      expect(dynamicImageBytes.readUInt32BE(16)).toBe(1200);
+      expect(dynamicImageBytes.readUInt32BE(20)).toBe(630);
 
       const programmaticResponse = await serverModule.default.fetch(
         new Request("https://example.test/programmatic/42"),

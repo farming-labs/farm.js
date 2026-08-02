@@ -1332,4 +1332,52 @@ export default defineConfig({
       await fs.rm(root, { recursive: true, force: true });
     }
   }, 120_000);
+
+  it("bundles generated metadata images for the Cloudflare worker runtime", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      await fs.writeFile(
+        path.join(root, "src", "app", "opengraph-image.tsx"),
+        `
+export const alt = "Cloudflare metadata image";
+
+function Label({ children }) {
+  return <span className="text-4xl text-white">{children}</span>;
+}
+
+export default function OpenGraphImage() {
+  return (
+    <div className="flex h-full w-full items-center justify-center bg-[#09090b]">
+      <Label>Farm.js on Cloudflare</Label>
+    </div>
+  );
+}
+`.trim(),
+      );
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          generateBuildId: () => "metadata-image-cloudflare-test",
+          deploy: {
+            target: "cloudflare",
+            preset: "cloudflare-module",
+          },
+        },
+        "production",
+      );
+
+      await build(config, { root, preset: "cloudflare-module" });
+
+      const serverOutput = await readJavaScriptOutput(
+        path.join(root, config.deploy.outputDir, "server"),
+      );
+      expect(serverOutput).not.toContain(".wasm?module");
+      expect(serverOutput).toContain("Cloudflare metadata image");
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
 });

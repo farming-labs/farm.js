@@ -1,5 +1,5 @@
 import React from "react";
-import { renderToPipeableStream, renderToStaticMarkup } from "react-dom/server";
+import { renderToPipeableStream } from "react-dom/server";
 import * as fs from "fs";
 import * as path from "path";
 import type {
@@ -49,6 +49,7 @@ import { createFarmLocaleCookie, getFarmLocaleVaryHeaders } from "../i18n/resolv
 import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
+import { createFarmMetadataImageResponse } from "../metadata-image";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -1361,6 +1362,14 @@ export class ServerRenderer {
       };
     },
   ): Promise<void> {
+    const method = (req.method || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      res.statusCode = 405;
+      res.setHeader("Allow", "GET, HEAD");
+      res.end();
+      return;
+    }
+
     if (options.image.sourceType === "static") {
       if (!options.image.staticInfo) {
         throw new Error(`Static metadata image ${options.image.modulePath} is missing file info`);
@@ -1398,47 +1407,12 @@ export class ServerRenderer {
     value: unknown,
     imageModule: RouteModule,
   ): Promise<void> {
-    if (isWebResponse(value)) {
-      res.statusCode = value.status;
-      value.headers.forEach((headerValue, key) => {
-        res.setHeader(key, headerValue);
-      });
-
-      if (req.method === "HEAD") {
-        res.end();
-        return;
-      }
-
-      const body = Buffer.from(await value.arrayBuffer());
-      res.write(body);
-      res.end();
-      return;
-    }
-
-    const contentType = (imageModule as any).contentType || "image/svg+xml; charset=utf-8";
-    let body: string | Buffer;
-
-    if (typeof value === "string") {
-      body = value;
-    } else if (value instanceof ArrayBuffer) {
-      body = Buffer.from(value);
-    } else if (ArrayBuffer.isView(value)) {
-      body = Buffer.from(value.buffer, value.byteOffset, value.byteLength);
-    } else if (React.isValidElement(value)) {
-      body = renderToStaticMarkup(value);
-    } else {
-      throw new Error("Metadata image must return a Response, string, bytes, or React element");
-    }
-
-    res.statusCode = res.statusCode || 200;
-    res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=0, must-revalidate");
-    if (req.method === "HEAD") {
-      res.end();
-      return;
-    }
-    res.write(body);
-    res.end();
+    const ifNoneMatch = req.headers["if-none-match"];
+    const response = await createFarmMetadataImageResponse(value, imageModule, {
+      method: req.method,
+      ifNoneMatch: Array.isArray(ifNoneMatch) ? ifNoneMatch[0] : ifNoneMatch,
+    });
+    await sendWebResponse(res as any, response);
   }
 
   private async writeStaticMetadataImageResponse(

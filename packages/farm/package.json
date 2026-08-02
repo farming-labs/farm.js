@@ -133,6 +133,9 @@
       "internal/production-runtime": [
         "./dist/internal/production-runtime.d.ts"
       ],
+      "internal/metadata-image-runtime": [
+        "./dist/internal/metadata-image-runtime.d.ts"
+      ],
       "internal/client-runtime": [
         "./dist/internal/client-runtime.d.ts"
       ],
@@ -449,6 +452,11 @@
       "import": "./dist/internal/production-runtime.mjs",
       "require": "./dist/internal/production-runtime.cjs"
     },
+    "./internal/metadata-image-runtime": {
+      "types": "./dist/internal/metadata-image-runtime.d.ts",
+      "import": "./dist/internal/metadata-image-runtime.mjs",
+      "require": "./dist/internal/metadata-image-runtime.cjs"
+    },
     "./internal/client-runtime": {
       "types": "./dist/internal/client-runtime.d.ts",
       "import": "./dist/internal/client-runtime.mjs",
@@ -494,6 +502,7 @@
     "@scalar/api-reference": "^1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
     "@tailwindcss/vite": "4.1.18",
+    "@vercel/og": "0.11.1",
     "@vitejs/plugin-react": "^4.2.1",
     "better-call": "^1.0.19",
     "db0": "^0.3.4",

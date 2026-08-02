@@ -375,13 +375,16 @@ import React from "react";
 
 export const size = { width: 1200, height: 630 };
 export const alt = "User preview";
-export const contentType = "image/svg+xml";
+export const revalidate = 120;
 
 export default function UserImage({ params }: { params: { id: string } }) {
   return React.createElement(
-    "svg",
-    { xmlns: "http://www.w3.org/2000/svg", viewBox: "0 0 1200 630" },
-    React.createElement("text", null, \`User \${params.id}\`),
+    "div",
+    {
+      className:
+        "flex h-full w-full items-center justify-center bg-[#09090b] text-8xl font-bold text-white",
+    },
+    \`User \${params.id}\`,
   );
 }
 `.trim(),
