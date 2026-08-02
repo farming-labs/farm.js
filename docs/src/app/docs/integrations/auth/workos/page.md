@@ -51,6 +51,29 @@ Farm builds the absolute redirect URI from the incoming request origin and `call
 
 Development has a local fallback cookie password. Production startup fails without an explicit password.
 
+## Use an existing WorkOS instance
+
+Pass a configured SDK through `instance` when the app needs WorkOS constructor options that Farm
+does not own. Farm uses the instance directly, so `apiKey` is no longer required by the integration.
+The AuthKit client ID can come from the instance, while the cookie password remains required because
+Farm owns the sealed session cookie.
+
+```ts
+import { WorkOS } from "@workos-inc/node";
+import { workos } from "@farm.js/integrations/workos";
+
+const workosClient = new WorkOS({
+  apiKey: process.env.WORKOS_API_KEY,
+  clientId: process.env.WORKOS_CLIENT_ID,
+});
+
+export const auth = workos({
+  instance: workosClient,
+  cookiePassword: process.env.WORKOS_COOKIE_PASSWORD,
+  protectedRoutes: ["/dashboard(.*)"],
+});
+```
+
 ## Routes and methods
 
 | Method | Default route   | Purpose                                                          |
@@ -142,18 +165,19 @@ Signed-out requests receive a `307` redirect to `/login` with the original root-
 
 ## Options
 
-| Option            | Default            | Use                                |
-| ----------------- | ------------------ | ---------------------------------- |
-| `clientId`        | `WORKOS_CLIENT_ID` | AuthKit client ID.                 |
-| `apiKey`          | `WORKOS_API_KEY`   | Server API key.                    |
-| `cookiePassword`  | WorkOS cookie env  | Sealed-session password.           |
-| `cookieName`      | `wos-session`      | Session cookie name.               |
-| `loginPath`       | `/login`           | Sign-in route.                     |
-| `signUpPath`      | `/signup`          | Sign-up route.                     |
-| `callbackPath`    | `/callback`        | AuthKit callback route.            |
-| `logoutPath`      | `/logout`          | Logout route.                      |
-| `sessionPath`     | `/auth/session`    | Session JSON route.                |
-| `protectedRoutes` | None               | One matcher or a list of matchers. |
+| Option            | Default            | Use                                          |
+| ----------------- | ------------------ | -------------------------------------------- |
+| `instance`        | None               | Existing WorkOS SDK instance.                |
+| `clientId`        | `WORKOS_CLIENT_ID` | AuthKit client ID.                           |
+| `apiKey`          | `WORKOS_API_KEY`   | Server API key when no instance is supplied. |
+| `cookiePassword`  | WorkOS cookie env  | Sealed-session password.                     |
+| `cookieName`      | `wos-session`      | Session cookie name.                         |
+| `loginPath`       | `/login`           | Sign-in route.                               |
+| `signUpPath`      | `/signup`          | Sign-up route.                               |
+| `callbackPath`    | `/callback`        | AuthKit callback route.                      |
+| `logoutPath`      | `/logout`          | Logout route.                                |
+| `sessionPath`     | `/auth/session`    | Session JSON route.                          |
+| `protectedRoutes` | None               | One matcher or a list of matchers.           |
 
 ## Production checklist
 

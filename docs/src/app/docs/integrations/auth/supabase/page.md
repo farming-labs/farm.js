@@ -57,6 +57,34 @@ Farm accepts the standard Supabase URL plus any of these anonymous or publishabl
 
 Keep service-role credentials in separate server code that performs administrative operations. Do not expose them to auth pages or pass them to `supabase(...)`.
 
+## Customize the request-scoped client
+
+Supabase SSR clients contain request cookie handlers, so a single shared client is unsafe. The
+`instance` option is therefore a factory. Farm calls it for every request and supplies its
+cookie-aware `options`; keep those options when adding custom fetch, headers, or other SDK settings.
+
+```ts
+import { supabase } from "@farm.js/integrations/supabase";
+
+export const auth = supabase({
+  instance: ({ createClient, options }) =>
+    createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      ...options,
+      global: {
+        ...options.global,
+        headers: {
+          ...options.global?.headers,
+          "x-application-name": "farm-dashboard",
+        },
+      },
+    }),
+  protectedRoutes: ["/dashboard(.*)"],
+});
+```
+
+The factory can also use the provided `url` and `anonKey` values when those are configured on the
+integration. Do not create the client outside the factory or cache its return value.
+
 ## Routes and methods
 
 | Method        | Default route    | Purpose                                                           |
@@ -156,6 +184,7 @@ The middleware checks the current Supabase cookie session. Signed-out requests r
 
 | Option            | Default                       | Use                                          |
 | ----------------- | ----------------------------- | -------------------------------------------- |
+| `instance`        | None                          | Request-scoped Supabase client factory.      |
 | `url`             | Supabase URL env              | Project URL.                                 |
 | `anonKey`         | Anonymous/publishable key env | Browser-safe project key.                    |
 | `appBaseUrl`      | `APP_BASE_URL`                | Public app origin.                           |

@@ -73,6 +73,10 @@ export type AppIntegrations = typeof appIntegrations;
 
 Swap `trigger(...)` for `inngest(...)` to keep the same caller namespace with the Inngest runtime. Runtime capabilities are not identical, so check the matrix below before sharing task defaults.
 
+The runtime definition is the jobs integration's injection boundary. Farm does not construct a
+Trigger.dev or Inngest SDK instance in the application process; it calls the configured external
+runtime over HTTP.
+
 ## Create callers
 
 ```ts

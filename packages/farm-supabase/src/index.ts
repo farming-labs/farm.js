@@ -20,7 +20,6 @@ import {
   withSearchParams,
 } from "@farm.js/integration-utils";
 import {
-  supabaseClient,
   supabaseAuthFormFields,
   type SupabaseCredentials,
   type SupabaseLogoutInput,
@@ -42,7 +41,29 @@ export interface SupabaseIntegrationPages {
   signUp?: string;
 }
 
+export type SupabaseIntegrationClient = ReturnType<typeof createServerClient>;
+export type SupabaseIntegrationClientOptions = Parameters<typeof createServerClient>[2];
+
+export interface SupabaseIntegrationInstanceContext {
+  request: Request;
+  url?: string;
+  anonKey?: string;
+  createClient: typeof createServerClient;
+  options: SupabaseIntegrationClientOptions;
+}
+
+/**
+ * Creates a request-scoped Supabase client using Farm's cookie adapter.
+ *
+ * A factory is used instead of a shared client because Supabase SSR clients
+ * are bound to the cookies of the current request.
+ */
+export type SupabaseIntegrationInstance = (
+  context: SupabaseIntegrationInstanceContext,
+) => SupabaseIntegrationClient;
+
 export interface SupabaseIntegrationInput {
+  instance?: SupabaseIntegrationInstance;
   url?: string;
   anonKey?: string;
   appBaseUrl?: string;
@@ -60,8 +81,8 @@ export interface SupabaseIntegrationInput {
 }
 
 interface ResolvedSupabaseEnv {
-  url: string;
-  anonKey: string;
+  url?: string;
+  anonKey?: string;
   appBaseUrl?: string;
 }
 
@@ -136,9 +157,9 @@ function resolveEnv(input: SupabaseIntegrationInput): ResolvedSupabaseEnv {
     "";
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
 
-  if (!url || !anonKey) {
+  if (!input.instance && (!url || !anonKey)) {
     throw new Error(
-      "Supabase integration requires SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_ANON_KEY (or a Supabase publishable key env).",
+      "Supabase integration requires an instance factory or SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) and SUPABASE_ANON_KEY (or a Supabase publishable key env).",
     );
   }
 
@@ -737,10 +758,11 @@ function renderCheckEmailPage(
 function createSupabaseHandler(
   context: Pick<FarmIntegrationHandlerContext, "request" | "req">,
   env: ResolvedSupabaseEnv,
+  instance?: SupabaseIntegrationInstance,
 ) {
   const setCookies: string[] = [];
 
-  const supabase = createServerClient(env.url, env.anonKey, {
+  const options: SupabaseIntegrationClientOptions = {
     auth: {
       flowType: "pkce",
       detectSessionInUrl: false,
@@ -756,7 +778,17 @@ function createSupabaseHandler(
         context.req.set("supabase:set-cookies", [...setCookies]);
       },
     },
-  });
+  };
+
+  const supabase = instance
+    ? instance({
+        request: context.request,
+        url: env.url,
+        anonKey: env.anonKey,
+        createClient: createServerClient,
+        options,
+      })
+    : createServerClient(env.url!, env.anonKey!, options);
 
   return {
     supabase,
@@ -852,7 +884,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
         appBaseUrl: "APP_BASE_URL",
       },
       input: env,
-      required: ["url", "anonKey"],
+      required: input.instance ? [] : ["url", "anonKey"],
     }),
     api,
     log: input.log,
@@ -909,7 +941,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
               });
             }
 
-            const { supabase, setCookies } = createSupabaseHandler(context, env);
+            const { supabase, setCookies } = createSupabaseHandler(context, env, input.instance);
             const { error } = await supabase.auth.signInWithPassword({
               email: parsedRequest.email,
               password: parsedRequest.password,
@@ -991,7 +1023,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             });
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(context, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env, input.instance);
           const { data, error } = await supabase.auth.signInWithOAuth({
             provider: provider as any,
             options: {
@@ -1089,7 +1121,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             });
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(context, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env, input.instance);
           const { data, error } = await supabase.auth.signUp({
             email: parsedRequest.email,
             password: parsedRequest.password,
@@ -1199,7 +1231,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             return new Response("Missing Supabase authorization code.", { status: 400 });
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(context, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env, input.instance);
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
             return new Response(error.message, { status: 500 });
@@ -1235,7 +1267,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             }
           }
 
-          const { supabase, setCookies } = createSupabaseHandler(context, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env, input.instance);
           const { error } = await supabase.auth.signOut();
           if (error) {
             if (clientRequest) {
@@ -1273,7 +1305,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
         path: sessionPath,
         methods: ["GET"],
         async handler(_request: Request, context: FarmIntegrationHandlerContext) {
-          const { supabase, setCookies } = createSupabaseHandler(context, env);
+          const { supabase, setCookies } = createSupabaseHandler(context, env, input.instance);
           const { data, error } = await supabase.auth.getUser();
 
           const headers = new Headers({
@@ -1307,7 +1339,7 @@ export function supabase(input: SupabaseIntegrationInput = {}) {
             {
               matcher: protectedMatchers,
               async handler(_request: Request, context: FarmIntegrationHandlerContext) {
-                const { supabase } = createSupabaseHandler(context, env);
+                const { supabase } = createSupabaseHandler(context, env, input.instance);
                 const {
                   data: { session },
                 } = await supabase.auth.getSession();

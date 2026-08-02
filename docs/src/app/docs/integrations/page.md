@@ -17,7 +17,13 @@ Farm treats every integration as a small server plugin. That means an integratio
 ```ts
 import { defineConfig } from "@farm.js/core";
 import { stripe } from "@farm.js/integrations/stripe";
+import { betterAuth as createBetterAuth } from "better-auth";
 import { betterAuth } from "@farm.js/integrations/better-auth";
+
+const auth = createBetterAuth({
+  baseURL: process.env.BETTER_AUTH_URL,
+  secret: process.env.BETTER_AUTH_SECRET,
+});
 
 export default defineConfig({
   integrations: {
@@ -26,14 +32,49 @@ export default defineConfig({
       webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
     }),
     auth: betterAuth({
-      baseURL: process.env.BETTER_AUTH_URL,
-      secret: process.env.BETTER_AUTH_SECRET,
+      instance: auth,
     }),
   },
 });
 ```
 
 The object key is the application namespace. If you register Stripe as `billing`, the typed caller lives at `api.billing`. If you register it as `stripe`, it lives at `api.stripe`.
+
+## Bring your own provider instance
+
+When an integration uses an in-process vendor SDK, pass a configured client through `instance`.
+Farm uses that exact object and does not create a second client. This lets the application control
+SDK versions, transports, retries, telemetry, test doubles, and provider-specific options without
+waiting for the Farm adapter to expose every constructor option.
+
+```ts
+import Stripe from "stripe";
+import { stripe } from "@farm.js/integrations/stripe";
+
+const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  maxNetworkRetries: 2,
+});
+
+export const billing = stripe({
+  instance: stripeClient,
+  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+});
+```
+
+For backward compatibility, integrations that previously accepted credentials still do. When both
+are supplied, `instance` wins and credentials remain available only as configuration metadata.
+Instance injection owns construction, but the object must still implement the SDK methods the Farm
+adapter calls; a vendor breaking those methods can still require an adapter update.
+
+| Integration kind                                                                     | Injection boundary                                                                                                                       |
+| ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Stripe, Autumn, Polar, Resend, Clerk, WorkOS, Auth0, Auth.js, Better Auth, and Unkey | `instance`: an already configured SDK/client or compatible adapter.                                                                      |
+| Supabase SSR                                                                         | `instance`: a request-scoped factory that receives Farm's cookie-aware client options. Never share one SSR auth client between requests. |
+| AI                                                                                   | `model` plus optional AI SDK function overrides. The model is already the injected provider object.                                      |
+| Trigger.dev and Inngest jobs                                                         | `runtime: trigger(...)` or `runtime: inngest(...)`. Farm talks to the selected external runtime and does not construct its SDK.          |
+| Eve and Cloudflare Agents                                                            | `origin` for an external runtime, or Farm's managed development process. Agent SDKs remain application-owned.                            |
+
+Provider pages show the exact constructor and any integration-owned options that are still required.
 
 ## Create callers
 

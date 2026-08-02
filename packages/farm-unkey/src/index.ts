@@ -296,7 +296,12 @@ export interface UnkeyProtectionOptions {
   ) => Promise<Response | void> | Response | void;
 }
 
+export type UnkeyIntegrationInstance = UnkeyClient;
+
 export interface UnkeyIntegrationInput extends UnkeyClientOptions {
+  /** Existing Unkey-compatible client. Preferred over the legacy `client` alias. */
+  instance?: UnkeyIntegrationInstance;
+  /** @deprecated Use `instance` instead. */
   client?: UnkeyClient;
   paths?: UnkeyIntegrationPaths;
   protectedRoutes?: string | string[];
@@ -368,8 +373,8 @@ function createUnkeyApi(paths: ResolvedUnkeyPaths) {
 export function unkey(input: UnkeyIntegrationInput = {}) {
   const config = resolveUnkeyConfig(input);
   const paths = resolveUnkeyPaths(input.paths);
-  const hasInjectedClient = !!input.client;
-  const client = input.client ?? createUnkeyClient(config);
+  const hasInjectedClient = !!(input.instance ?? input.client);
+  const client = input.instance ?? input.client ?? createUnkeyClient(config);
   const protection = input.protection;
   const protectedRoutes = input.protectedRoutes ?? protection?.matcher;
 

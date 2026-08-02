@@ -186,6 +186,9 @@ agent: cfAgent({
 
 `CF_AGENT_ORIGIN` is also read automatically. With an external origin, Farm keeps the public route prefix but skips combined Worker generation.
 
+Cloudflare Agents run in a Worker rather than as an in-process SDK, so `origin` is the equivalent
+injection boundary. The application still owns the Agent class, bindings, and Wrangler options.
+
 ## Options
 
 | Option          | Purpose                                                                     |

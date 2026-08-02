@@ -30,6 +30,7 @@ export {
   stripeSchema,
 } from "@farm.js/stripe";
 export type {
+  UnkeyIntegrationInstance,
   UnkeyAPIEnvelope,
   UnkeyClient,
   UnkeyClientOptions,
@@ -48,6 +49,19 @@ export type {
   UnkeyVerifyKeyInput,
   UnkeyVerifyKeyResult,
 } from "@farm.js/unkey";
+export type { BetterAuthInstance, BetterAuthIntegrationInput } from "@farm.js/better-auth";
+export type { AuthJsHandlerSet, AuthJsInstance, AuthJsIntegrationInput } from "@farm.js/authjs";
+export type { Auth0Instance, Auth0IntegrationInput } from "@farm.js/auth0";
+export type { ClerkIntegrationInput, ClerkIntegrationInstance } from "@farm.js/clerk";
+export type { WorkOSIntegrationInput, WorkOSIntegrationInstance } from "@farm.js/workos";
+export type {
+  SupabaseIntegrationClient,
+  SupabaseIntegrationClientOptions,
+  SupabaseIntegrationInput,
+  SupabaseIntegrationInstance,
+  SupabaseIntegrationInstanceContext,
+  SupabaseIntegrationPages,
+} from "@farm.js/supabase";
 export type {
   AIChatPrepareContext,
   AIChatRequestBody,
@@ -185,6 +199,7 @@ export type {
   AutumnBillingPlan,
   AutumnBillingProduct,
   AutumnIntegrationInput,
+  AutumnIntegrationInstance,
   AutumnWebhookConfig,
   AutumnWebhookEvent,
 } from "@farm.js/autumn";
@@ -225,6 +240,7 @@ export type {
   PolarBillingPlan,
   PolarBillingProduct,
   PolarIntegrationInput,
+  PolarIntegrationInstance,
   PolarWebhookConfig,
   PolarWebhookEvent,
 } from "@farm.js/polar";

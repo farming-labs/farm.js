@@ -38,6 +38,10 @@ export const integrations = {
 };
 ```
 
+Pass `instance: new Stripe(...)` instead of `secretKey` when the application needs to own Stripe
+SDK construction, retries, telemetry, or API-version settings. Farm uses the supplied instance
+directly; webhook and billing configuration remain integration options.
+
 ## Usage
 
 **Client checkout**

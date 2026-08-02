@@ -61,7 +61,7 @@ export interface ResendIntegrationDefaults {
 
 export interface ResendIntegrationInput<TTemplates extends EmailTemplates = EmailTemplates> {
   apiKey?: string;
-  instance?: ResendSdk;
+  instance?: ResendIntegrationInstance;
   basePath?: string;
   defaults?: ResendIntegrationDefaults;
   templates: TTemplates;

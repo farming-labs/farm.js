@@ -7,6 +7,8 @@ import {
 } from "@farm.js/integration-utils";
 
 export interface ClerkIntegrationInput {
+  /** Existing Clerk backend client. When provided, Farm does not construct its own client. */
+  instance?: ClerkIntegrationInstance;
   publishableKey?: string;
   secretKey?: string;
   signInUrl?: string;
@@ -17,9 +19,11 @@ export interface ClerkIntegrationInput {
   log?: FarmIntegrationLogger;
 }
 
+export type ClerkIntegrationInstance = ClerkClient;
+
 interface ResolvedClerkConfig {
   publishableKey: string;
-  secretKey: string;
+  secretKey?: string;
 }
 
 function resolveClerkKeys(input: ClerkIntegrationInput): ResolvedClerkConfig {
@@ -30,15 +34,15 @@ function resolveClerkKeys(input: ClerkIntegrationInput): ResolvedClerkConfig {
     "";
   const secretKey = input.secretKey ?? process.env.CLERK_SECRET_KEY ?? "";
 
-  if (!publishableKey || !secretKey) {
+  if (!publishableKey || (!input.instance && !secretKey)) {
     throw new Error(
-      "Clerk integration requires NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY.",
+      "Clerk integration requires a publishable key and either a Clerk instance or CLERK_SECRET_KEY.",
     );
   }
 
   return {
     publishableKey,
-    secretKey,
+    secretKey: secretKey || undefined,
   };
 }
 
@@ -50,13 +54,16 @@ export function clerk(input: ClerkIntegrationInput = {}) {
 
   let cachedClient: ClerkClient | null = null;
   const getClient = () => {
+    if (input.instance) {
+      return input.instance;
+    }
     if (cachedClient) {
       return cachedClient;
     }
 
     cachedClient = createClerkClient({
       publishableKey,
-      secretKey,
+      secretKey: secretKey!,
     });
     return cachedClient;
   };
@@ -79,7 +86,7 @@ export function clerk(input: ClerkIntegrationInput = {}) {
         publishableKey,
         secretKey,
       },
-      required: ["publishableKey", "secretKey"],
+      required: input.instance ? ["publishableKey"] : ["publishableKey", "secretKey"],
     }),
     log: input.log,
     providers: [

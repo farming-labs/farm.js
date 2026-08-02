@@ -120,6 +120,9 @@ agent: eve({
 
 `EVE_BASE_URL` is also read automatically when `origin` is omitted.
 
+Eve runs as a separate service rather than an in-process SDK, so `origin` is the equivalent of an
+`instance` option. The application continues to own Eve's agent and model configuration.
+
 ## Options
 
 | Option                 | Purpose                                                                       |

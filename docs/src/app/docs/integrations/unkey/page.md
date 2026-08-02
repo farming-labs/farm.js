@@ -26,6 +26,27 @@ export default defineConfig({
 });
 ```
 
+## Use an existing Unkey client
+
+Use `instance` when client construction belongs to application code or a shared dependency
+container. It takes precedence over credentials passed directly to the integration.
+
+```ts
+import { createUnkeyClient, unkey } from "@farm.js/integrations/unkey";
+
+const unkeyClient = createUnkeyClient({
+  rootKey: process.env.UNKEY_ROOT_KEY,
+  apiId: process.env.UNKEY_API_ID,
+});
+
+export const keys = unkey({
+  instance: unkeyClient,
+});
+```
+
+The previous `client` option remains supported as a deprecated alias, making this change
+backward-compatible.
+
 ## Create and verify keys
 
 **Caller**

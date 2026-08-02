@@ -225,6 +225,8 @@ export interface PolarBillingOptions {
 }
 
 export interface PolarIntegrationInput {
+  /** Existing Polar SDK instance. When provided, Farm does not construct its own client. */
+  instance?: PolarIntegrationInstance;
   accessToken?: string;
   server?: "sandbox" | "production";
   appBaseUrl?: string;
@@ -244,8 +246,10 @@ export interface PolarIntegrationInput {
   log?: FarmIntegrationLogger;
 }
 
+export type PolarIntegrationInstance = Polar;
+
 interface ResolvedPolarConfig {
-  accessToken: string;
+  accessToken?: string;
   server: "sandbox" | "production";
   appBaseUrl?: string;
   webhookSecret?: string;
@@ -915,8 +919,8 @@ export function polar<TInput extends PolarIntegrationInput>(
   const appBaseUrl = input.appBaseUrl ?? process.env.APP_BASE_URL ?? undefined;
   const webhookSecret = process.env.POLAR_WEBHOOK_SECRET ?? undefined;
 
-  if (!accessToken) {
-    throw new Error("Polar integration requires POLAR_ACCESS_TOKEN.");
+  if (!input.instance && !accessToken) {
+    throw new Error("Polar integration requires a Polar instance or POLAR_ACCESS_TOKEN.");
   }
 
   const billing = input.billing;
@@ -984,10 +988,12 @@ export function polar<TInput extends PolarIntegrationInput>(
       throw new Error(`Polar billing meter "${key}" requires polar.meterId (or legacy meterId).`);
     }
   }
-  const sdk = new Polar({
-    accessToken,
-    server,
-  });
+  const sdk =
+    input.instance ??
+    new Polar({
+      accessToken,
+      server,
+    });
   const webhookRoutes = webhookDefinitions.map((definition) =>
     integrationRoute.post(definition.path, {
       responseFormat: "json",
@@ -1079,7 +1085,7 @@ export function polar<TInput extends PolarIntegrationInput>(
         appBaseUrl,
         webhookSecret,
       },
-      required: ["accessToken", "server"],
+      required: input.instance ? ["server"] : ["accessToken", "server"],
     }),
     api: createPolarApi({
       productsPath,

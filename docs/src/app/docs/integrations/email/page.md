@@ -29,6 +29,10 @@ export const email = resend({
 });
 ```
 
+Pass `instance: new Resend(...)` instead of `apiKey` when the application owns Resend client
+construction. Farm keeps templates, defaults, scheduling, previews, routes, and webhooks unchanged
+while using that exact client.
+
 ## Send mail
 
 **Caller**

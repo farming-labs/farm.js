@@ -26,10 +26,21 @@ import { autumn } from "@farm.js/integrations/autumn";
 export const integrations = {
   billing: autumn({
     secretKey: process.env.AUTUMN_SECRET_KEY,
-    webhookSecret: process.env.AUTUMN_WEBHOOK_SECRET,
+    billing: {
+      resolveOwner(ctx) {
+        const userId = ctx.req.get<string>("user.id");
+        return userId ? { id: userId, kind: "user" } : null;
+      },
+    },
   }),
 };
 ```
+
+Pass `instance: new Autumn(...)` instead of `secretKey` when the application owns the Autumn SDK
+configuration. Farm keeps billing, webhook, route, and storage behavior while using that exact
+client.
+
+`AUTUMN_WEBHOOK_SECRET` is read from the environment when webhook routes are configured.
 
 ## Usage
 
