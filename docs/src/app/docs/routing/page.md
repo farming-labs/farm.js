@@ -533,6 +533,40 @@ export default function ProductPage() {
 }
 ```
 
+Use `generateMetadata` in a layout when the same dynamic metadata flow should apply to every page in a route subtree. Farm passes the matched route params to each layout and merges the result before applying the page metadata. A catch-all docs layout can therefore load the current document for every nested docs URL:
+
+**src/app/docs/[...slug]/layout.tsx**
+
+```tsx
+import type { LayoutProps } from "@farm.js/core";
+
+export async function generateMetadata({ params }: Pick<LayoutProps, "params">) {
+  const slug = params.slug?.split("/") ?? [];
+  const document = await getDocument(slug);
+
+  return {
+    title: document.title,
+    description: document.description,
+    openGraph: {
+      title: document.title,
+      description: document.description,
+      type: "article",
+    },
+    twitter: {
+      card: "summary_large_image",
+      title: document.title,
+      description: document.description,
+    },
+  };
+}
+
+export default function DocsLayout({ children }: LayoutProps) {
+  return children;
+}
+```
+
+Pair this layout with `opengraph-image.tsx` in the same `[...slug]` segment to generate a different PNG for each document. `generateMetadata` supplies the title, description, and social fields; the image file renders the PNG described below. Leave `openGraph.images` and `twitter.images` unset when Farm should attach the nearest generated image automatically. An explicit image value still takes precedence.
+
 ### Favicons
 
 Place favicon files in `public/`, then declare them through the root layout metadata. Files in `public/` are served from the application root, so `public/favicon.svg` is available at `/favicon.svg`.
