@@ -61,6 +61,48 @@ export interface FarmFont {
     fontStyle?: string;
     fontWeight?: number | string;
   }>;
+  /** Compiled resources that should be preloaded when this font is selected. */
+  preloads: readonly Readonly<{
+    href: string;
+    type: string;
+  }>[];
+}
+
+/** Semantic font roles inherited by framework-owned surfaces such as Farm Docs. */
+export interface FarmLayoutFonts {
+  /** Default text and prose font. */
+  body?: FarmFont;
+  /** Code, keyboard input, and other technical UI font. */
+  code?: FarmFont;
+}
+
+export interface FarmLayoutFontModule {
+  fonts?: FarmLayoutFonts;
+}
+
+/**
+ * Define the semantic fonts exported by a layout.
+ *
+ * Layouts are resolved from the root toward the requested route. A nearer
+ * layout overrides only the roles it defines, so it can replace `body` while
+ * continuing to inherit `code` from a parent layout.
+ */
+export function defineLayoutFonts<const T extends FarmLayoutFonts>(fonts: T): T {
+  return fonts;
+}
+
+/** Resolve semantic font roles from root layout to nearest layout. */
+export function resolveFarmLayoutFonts(
+  layouts: readonly FarmLayoutFontModule[],
+): FarmLayoutFonts | undefined {
+  let resolved: FarmLayoutFonts | undefined;
+
+  for (const layout of layouts) {
+    if (!layout.fonts) continue;
+    resolved = { ...resolved, ...layout.fonts };
+  }
+
+  return resolved;
 }
 
 function fontCompilerError(loader: string): never {

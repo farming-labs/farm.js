@@ -14,8 +14,13 @@ import {
   createCompressionPlugin,
   createLoggerPlugin,
 } from "../plugins";
-import { mergeFarmViteConfig } from "./vite-config";
+import {
+  createFarmClientOptimizeDepsConfig,
+  createFarmClientOptimizeDepsEntries,
+  mergeFarmViteConfig,
+} from "./vite-config";
 import { FARM_VERSION } from "../version";
+import { getFarmAppDirectories } from "../layers";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -223,15 +228,9 @@ export async function createServer(config: FarmConfig = {}) {
             dedupe: ["react", "react-dom"],
           },
           optimizeDeps: {
-            // Avoid Vite scanning server/native-only deps from framework internals.
-            noDiscovery: true,
-            include: [
-              "react",
-              "react-dom",
-              "react-dom/client",
-              "react/jsx-runtime",
-              "react/jsx-dev-runtime",
-            ],
+            ...createFarmClientOptimizeDepsConfig(
+              createFarmClientOptimizeDepsEntries(projectRoot, getFarmAppDirectories(finalConfig)),
+            ),
             exclude: [
               "@farm.js/core/server",
               "@farm.js/core/api",

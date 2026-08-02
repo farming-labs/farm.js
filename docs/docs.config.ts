@@ -343,10 +343,6 @@ const config = {
   breadcrumb: {
     enabled: true,
   },
-  readingTime: {
-    enabled: true,
-    wordsPerMinute: 220,
-  },
   lastUpdated: {
     enabled: true,
     label: "Last updated at",

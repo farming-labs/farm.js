@@ -43,6 +43,7 @@ import {
   isFarmDocsSearchEnabled,
   resolveFarmDocsSearchClientModule,
 } from "../docs/search-client";
+import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "../docs/fonts";
 import {
   createFarmRouteRuntimeManifest,
   validateFarmRouteRuntimeDeployment,
@@ -50,6 +51,7 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
+import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import { getFarmIntegrationPluginServerRuntime } from "../integrations";
@@ -769,6 +771,9 @@ export async function buildUniversal(
 
     const { bundle: ssrBundle, entryFile: ssrEntryFile, configuredHeaderRoutes } = ssrResult;
     await writeSSRAssetsToClient(ssrBundle, clientOutputDir);
+    if (config.docs.enabled) {
+      await copyFarmDocsFontAssetsToClient(root, clientOutputDir);
+    }
 
     // Step 3: Build with Nitro using virtual bundle
     logger.info(`🚀 Building server with Nitro (preset: ${preset})...`);
@@ -827,6 +832,17 @@ async function writeSSRAssetsToClient(bundle: OutputBundle, outputDir: string): 
   }
 }
 
+async function copyFarmDocsFontAssetsToClient(root: string, outputDir: string): Promise<void> {
+  const fs = await import("fs/promises");
+  await Promise.all(
+    resolveFarmDocsFontAssets(root).map(async ({ sourcePath, url }) => {
+      const targetPath = path.join(outputDir, url.replace(/^\/+/, ""));
+      await fs.mkdir(path.dirname(targetPath), { recursive: true });
+      await fs.copyFile(sourcePath, targetPath);
+    }),
+  );
+}
+
 async function mergeBuiltFontCss(
   outputDir: string,
   fontCssSource?: string | Uint8Array,
@@ -851,12 +867,8 @@ async function mergeBuiltFontCss(
   }
   const normalizedFontCss =
     typeof fontCss === "string" ? fontCss : Buffer.from(fontCss).toString("utf8");
+  await fs.writeFile(fontCssPath, normalizedFontCss);
   await fs.writeFile(clientCssPath, mergeFarmFontCss(clientCss, normalizedFontCss));
-  try {
-    await fs.rm(fontCssPath, { force: true });
-  } catch {
-    // The CSS may have come from the in-memory SSR bundle only.
-  }
 }
 
 class IncompleteClientBuildOutputError extends Error {
@@ -1039,13 +1051,14 @@ async function buildClient(
           },
           output: {
             entryFileNames: "[name].js",
-            chunkFileNames: "chunks/[name]-[hash].js",
+            chunkFileNames: "chunks/[name]-h[hash].js",
+            hashCharacters: "hex",
             // Use predictable name for CSS so we can reference it in SSR HTML
             assetFileNames: (assetInfo) => {
               if (assetInfo.name?.endsWith(".css")) {
                 return "farm-client.css";
               }
-              return "assets/[name]-[hash][extname]";
+              return "assets/[name]-h[hash][extname]";
             },
           },
           // Externalize Node.js built-ins and server-side modules for client build
@@ -2807,6 +2820,9 @@ function generateVirtualEntryCode(
   const farmDocsBaseConfig = config.docs?.enabled
     ? { ...config.docs, config: undefined }
     : undefined;
+  const farmDocsFontAssets = config.docs?.enabled
+    ? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(config.root))
+    : [];
 
   // Generate imports for all API routes
   const apiImports: string[] = [];
@@ -2982,8 +2998,11 @@ function generateVirtualEntryCode(
   isFarmRedirectError,
   localizeFarmHref,
   localizeFarmPathname,
+  manageFarmDocumentPreloads,
+  manageFarmLinkHeaderPreloads,
   mergeMetadata,
   normalizeRevalidatePath,
+  reportFarmPreloadWarnings,
   renderMetadataHead,
   resolveFarmRouteContext,
   stripFarmLocaleFromPathname,
@@ -2997,6 +3016,9 @@ function generateVirtualEntryCode(
     : "";
   const docsHandlerImport = config.docs?.enabled
     ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farm.js/core/docs";`
+    : "";
+  const docsFontImport = config.docs?.enabled
+    ? `import { resolveFarmLayoutFonts } from "@farm.js/core/font";`
     : "";
   const docsRuntimeImport = config.docs?.enabled
     ? `import { existsSync as farmDocsExistsSync } from "node:fs";
@@ -3124,6 +3146,7 @@ ${productionRuntimeImport}
 ${pluginRuntimeImport}
 ${i18nServerImport}
 ${docsHandlerImport}
+${docsFontImport}
 ${docsRuntimeImport}
 ${markdownHandlerImport}
 ${appMarkdownImport}
@@ -3134,6 +3157,8 @@ ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
 import * as React from "react";
 import * as ReactDOMServer from "react-dom/server";
+
+const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
 
 // Custom 404 page component (if provided)
 const hasCustomNotFound = ${notFoundPath ? "true" : "false"};
@@ -3260,7 +3285,17 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
 };
 const farmDocsHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsHandler(farmDocsResolvedConfig, { root: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, clientEntry: "/farm-client.js" })`
+      ? `createFarmDocsHandler(farmDocsResolvedConfig, {
+  root: farmDocsRuntimeRoot,
+  srcDir: ${JSON.stringify(config.srcDir)},
+  clientEntry: "/farm-client.js",
+  fontAssets: ${JSON.stringify(farmDocsFontAssets)},
+  resolveLayoutFonts: (pathname) =>
+    resolveFarmLayoutFonts(
+      getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
+    ),
+  fontStylesheetHref: "/farm-fonts.css",
+})`
       : "null"
   };
 const farmDocsAPIHandler = ${
@@ -4522,7 +4557,16 @@ async function handleFarmRequestInContext(
   if (farmDocsHandler) {
     const docsResponse = await farmDocsHandler(request.clone());
     if (docsResponse) {
-      return docsResponse;
+      if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
+        return docsResponse;
+      }
+      const docsHeaders = new Headers(docsResponse.headers);
+      docsHeaders.set("x-farm-preload-buffered", "1");
+      return new Response(docsResponse.body, {
+        status: docsResponse.status,
+        statusText: docsResponse.statusText,
+        headers: docsHeaders,
+      });
     }
   }
   `
@@ -4672,6 +4716,7 @@ async function handleFarmRequestInContext(
             status: 200,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
+              "x-farm-preload-buffered": "1",
               ...(farmFontPreloadHeader ? { "Link": farmFontPreloadHeader } : {}),
               ...getPPRHeaders("hit", pprConfig),
             },
@@ -5057,7 +5102,7 @@ async function handleFarmRequestInContext(
           );
           return applyProductionMiddlewareHeaders(new Response(streamedDocument, {
             status: pageStatus,
-            headers: responseHeaders,
+            headers: { ...responseHeaders, "x-farm-preload-streaming": "1" },
           }), middlewareHeaders);
         }
 
@@ -5158,7 +5203,7 @@ async function handleFarmRequestInContext(
           fullHtml,
           { 
             status: pageStatus,
-            headers: responseHeaders
+            headers: { ...responseHeaders, "x-farm-preload-buffered": "1" }
           }
         ), middlewareHeaders);
       }
@@ -5266,6 +5311,7 @@ async function handleFarmRequestInContext(
             headers: {
               "Content-Type": "text/html; charset=utf-8",
               "Cache-Control": "private, no-store",
+              "x-farm-preload-buffered": "1",
             },
           }), middlewareHeaders);
         } catch (boundaryError) {
@@ -5288,6 +5334,7 @@ async function handleFarmRequestInContext(
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "private, no-store",
+            "x-farm-preload-buffered": "1",
           },
         }
       ), middlewareHeaders);
@@ -5434,13 +5481,19 @@ async function handleFarmRequestInContext(
 
     return applyProductionMiddlewareHeaders(new Response(fullHtml, {
       status: 404,
-      headers: { "Content-Type": "text/html; charset=utf-8" }
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "x-farm-preload-buffered": "1",
+      }
     }), middlewareHeaders);
   } catch (error) {
     console.error("404 render error:", error);
     return applyProductionMiddlewareHeaders(new Response(
       \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
-      { status: 404, headers: { "Content-Type": "text/html" } }
+      {
+        status: 404,
+        headers: { "Content-Type": "text/html", "x-farm-preload-buffered": "1" },
+      }
     ), middlewareHeaders);
   }
   ${
@@ -5486,7 +5539,10 @@ async function handleFarmPluginRequest(request, runtimeOptions) {
   await farmPluginRuntime.runHookParallel("beforeRender", renderPayload);
 
   const response = await handleFarmRequest(request);
-  if (!hasFarmPluginHTMLTransforms || !response.headers.get("content-type")?.includes("text/html")) {
+  if (
+    !hasFarmPluginHTMLTransforms ||
+    !response.headers.get("content-type")?.toLowerCase().includes("text/html")
+  ) {
     return response;
   }
 
@@ -5496,7 +5552,52 @@ async function handleFarmPluginRequest(request, runtimeOptions) {
 
   const headers = new Headers(response.headers);
   headers.delete("content-length");
+  headers.delete("x-farm-preload-streaming");
+  headers.set("x-farm-preload-buffered", "1");
   return new Response(html, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+async function applyFarmPreloadBudget(response, pathname) {
+  const headers = new Headers(response.headers);
+  const linkHeader = headers.get("Link") || "";
+  const isHtml = headers.get("Content-Type")?.toLowerCase().includes("text/html");
+  const isStreaming = headers.get("x-farm-preload-streaming") === "1";
+  const isBuffered = headers.get("x-farm-preload-buffered") === "1";
+  headers.delete("x-farm-preload-streaming");
+  headers.delete("x-farm-preload-buffered");
+
+  if (!isHtml) {
+    if (!isStreaming && !isBuffered) return response;
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  if (isStreaming || !isBuffered || response.body === null) {
+    const managed = manageFarmLinkHeaderPreloads(linkHeader, farmPreloadConfig);
+    if (managed.value) headers.set("Link", managed.value);
+    else headers.delete("Link");
+    reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+
+  const html = await response.text();
+  const managed = manageFarmDocumentPreloads(html, linkHeader, farmPreloadConfig);
+  if (managed.linkHeader) headers.set("Link", managed.linkHeader);
+  else headers.delete("Link");
+  if (managed.html !== html) headers.delete("Content-Length");
+  reportFarmPreloadWarnings(managed.warnings, "route " + pathname);
+  return new Response(managed.html, {
     status: response.status,
     statusText: response.statusText,
     headers,
@@ -5525,7 +5626,8 @@ export async function fetch(request, context) {
   const response = await _runWithCurrentRequest(request, () =>
     _runWithAfterRequest(request, runRequest, context),
   );
-  return applyConfiguredResponseHeaders(response, new URL(request.url).pathname);
+  const pathname = new URL(request.url).pathname;
+  return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
 }
 export default { fetch };
   `.trim();
@@ -6355,6 +6457,9 @@ async function postProcessVercelOutput(
 
   // Update routes to use the correct function path
   vercelConfig.routes = [
+    // Apply the header before the filesystem handler. `continue` lets Vercel
+    // serve the matching file while preserving the immutable cache policy.
+    createFarmVercelImmutableAssetRoute(config.basePath),
     // Serve static files first
     {
       handle: "filesystem",

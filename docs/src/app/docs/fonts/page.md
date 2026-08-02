@@ -12,7 +12,7 @@ Farm compiles font declarations into ordinary CSS and content-hashed assets. The
 Call `localFont` at module scope in a layout or page. The source can be relative to that module or a package font specifier.
 
 ```tsx title="src/app/layout.tsx"
-import { localFont } from "@farm.js/core/font";
+import { defineLayoutFonts, localFont } from "@farm.js/core/font";
 
 const geist = localFont({
   src: "geist/dist/fonts/geist-sans/Geist-Variable.woff2",
@@ -22,12 +22,31 @@ const geist = localFont({
   fallback: ["system-ui", "sans-serif"],
 });
 
+const geistMono = localFont({
+  src: "geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
+  family: "Geist Mono",
+  weight: "100 900",
+  fallback: ["ui-monospace", "monospace"],
+});
+
+export const fonts = defineLayoutFonts({
+  body: geist,
+  code: geistMono,
+});
+
 export default function RootLayout({ children }) {
   return <main className={`${geist.variable} ${geist.className}`}>{children}</main>;
 }
 ```
 
 Farm emits the font with a content hash, generates its `@font-face`, and adds a preload hint by default. `display` defaults to `"swap"`.
+
+The optional `fonts` layout export gives semantic roles to those compiled fonts. Framework-owned
+surfaces that render outside the layout's React tree, including built-in Farm Docs, use the layouts
+applicable to the requested path. Resolution runs from the root toward the nearest layout, and a
+nearer layout overrides only the roles it declares. For example, a `/docs/layout.tsx` can replace
+`body` while continuing to inherit `code` from the root layout. Regular application pages continue
+to use the classes or variables applied by their rendered layouts.
 
 ### Fonts in `public`
 
@@ -61,6 +80,8 @@ const editorial = localFont({
 ```
 
 Set `preload: false` for sources that are not needed above the fold or are only used on a narrow route.
+The global preload manager keeps at most two font hints by default and reports excess hints during
+rendering; configure the budget under `performance.preload` in `farm.config.ts`.
 
 ## Remote fonts
 
@@ -99,5 +120,6 @@ Every loader returns:
 - `className`, which applies the generated font stack
 - `variable`, which defines the configured CSS custom property, or an empty string when none was configured
 - `style`, an inline-style compatible object containing `fontFamily` and any fixed style or weight
+- `preloads`, compiled resource metadata used by layout-aware framework surfaces
 
 The options must be static and the call must initialize a module-scope variable. This lets Farm resolve files, validate remote URLs, deduplicate identical declarations, generate CSS, and assign assets to the build before application code runs.

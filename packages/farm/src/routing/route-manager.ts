@@ -88,6 +88,16 @@ export interface MatchedRouteSlot {
   params: Record<string, string>;
 }
 
+export function shouldSuggestStaticRenderingForI18n(
+  i18n: Pick<ResolvedFarmI18nConfig, "routing" | "detection"> | undefined,
+): boolean {
+  return (
+    !i18n ||
+    i18n.routing === "prefix-always" ||
+    (i18n.routing === "prefix-except-default" && i18n.detection.every((signal) => signal === "url"))
+  );
+}
+
 interface MetadataImageEntry extends RouteEntry {
   kind: MetadataImageKind;
   fileName: "opengraph-image" | "twitter-image";
@@ -1006,8 +1016,10 @@ export class RouteManager {
       pattern: entry.pattern,
     }));
 
-    const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath));
     const i18n = this.getI18nConfig();
+    const result = await collectSSGPages(routes, (filePath) => this.loadRouteModule(filePath), {
+      suggestStaticRendering: shouldSuggestStaticRenderingForI18n(i18n),
+    });
     if (!i18n) {
       return result;
     }

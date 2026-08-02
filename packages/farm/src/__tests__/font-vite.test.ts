@@ -189,6 +189,7 @@ console.log(demo, farmFontPreloadHeader);`,
 
       expect(entry?.code).toMatch(/className:\s*["']farm-font-/);
       expect(entry?.code).toMatch(/variable:\s*["']farm-font-variable-/);
+      expect(entry?.code).toMatch(/preloads:\s*\[\{\s*href:\s*["']\/assets\/fonts\/demo-/);
       expect(entry?.code).not.toContain("localFont({");
       expect(entry?.code).not.toContain("__FARM_FONT_PRELOAD_HEADER__");
       expect(entry?.code).toContain("%3C%2Fassets%2Ffonts%2Fdemo-");
@@ -196,7 +197,7 @@ console.log(demo, farmFontPreloadHeader);`,
       expect(css).toContain('font-family: "Demo Sans"');
       expect(css).toContain("font-display: swap");
       expect(css).toContain("--font-demo:");
-      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-[a-f0-9]{12}\.woff2$/);
+      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-h[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("test-font-binary");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -287,6 +288,9 @@ console.log(demo);`,
       );
 
       const result = await buildFixture(root);
+      const entry = result.output.find(
+        (output): output is Rollup.OutputChunk => output.type === "chunk" && output.isEntry,
+      );
       const assets = result.output.filter(
         (output): output is Rollup.OutputAsset => output.type === "asset",
       );
@@ -296,6 +300,7 @@ console.log(demo);`,
         .join("\n");
 
       expect(css).toContain("https://cdn.example.com/fonts/demo.woff2");
+      expect(entry?.code).toMatch(/preloads:\s*\[\]/);
       expect(assets.some((output) => output.fileName.startsWith("assets/fonts/"))).toBe(false);
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -335,7 +340,7 @@ console.log(demo);`,
       );
 
       expect(fetchMock).toHaveBeenCalledOnce();
-      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/self-hosted-[a-f0-9]{12}\.woff2$/);
+      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/self-hosted-h[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("self-hosted-font");
     } finally {
       vi.unstubAllGlobals();
@@ -437,7 +442,35 @@ console.log(demo);`,
     expect(source).toMatch(
       /farmFontPreloadHeader \? \{ "Link": farmFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
     );
+    expect(source).toContain("manageFarmDocumentPreloads(");
+    expect(source).toContain("manageFarmLinkHeaderPreloads(");
+    expect(source).toContain("isStreaming || !isBuffered || response.body === null");
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
+    expect(source).toContain(
+      "applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname)",
+    );
+    expect(source).toContain("await copyFarmDocsFontAssetsToClient(root, clientOutputDir);");
+    expect(source).toContain("resolveFarmDocsFontAssets(root).map");
+    expect(source).toContain("fontAssets: ${JSON.stringify(farmDocsFontAssets)},");
+    expect(source).toContain(
+      "getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module)",
+    );
+    expect(source).toContain('fontStylesheetHref: "/farm-fonts.css"');
+    expect(source).toContain("await fs.writeFile(fontCssPath, normalizedFontCss)");
+  });
+
+  it("serves the same fingerprinted docs fonts in development", async () => {
+    const source = await fs.readFile(path.join(process.cwd(), "src", "vite.ts"), "utf8");
+
+    expect(source).toContain("resolveFarmDocsFontAssets(farmConfig.root)");
+    expect(source).toContain("fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList)");
+    expect(source).toContain("resolveFarmLayoutFonts(layoutModules)");
+    expect(source).toContain('fontStylesheetHref: "/@farm/fonts.css"');
+    expect(source).toContain('res.setHeader("Content-Type", "font/woff2")');
+    expect(source).toContain(
+      'res.setHeader("Cache-Control", "public, max-age=31536000, immutable")',
+    );
+    expect(source).toContain('requestMethod === "HEAD"');
   });
 
   it("replaces an earlier generated font section when client and SSR CSS are combined", () => {

@@ -99,6 +99,7 @@ mount, and shortcut together.
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
 | serverActions | Restricting trusted action origins and request body size.                         |
 | images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
+| performance   | Budgeting image and font preload hints without changing the rendered resources.   |
 | openapi       | Publishing API reference docs.                                                    |
 
 ## Images
@@ -125,6 +126,32 @@ export default defineConfig({
 ```
 
 Remote sources are denied by default. See [Images](/docs/images) for static imports, responsive layouts, provider selection, caching, and security behavior.
+
+## Preload budgets
+
+Farm keeps one image preload—the explicitly high-priority hint first—and two font preloads by
+default. Lower-priority hints above those budgets are removed from buffered HTML and `Link` response
+headers, while the actual image and font elements remain unchanged and load normally. Route scripts,
+stylesheets, and module preloads are not removed.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  performance: {
+    preload: {
+      mode: "enforce",
+      maxImages: 1,
+      maxFonts: 2,
+    },
+  },
+});
+```
+
+Farm prints one actionable warning when a route exceeds a budget. Use `mode: "warn"` to audit an
+existing application without removing any hints. Mark the likely LCP image with `preload` (or
+`fetchPriority="high"`) and set `preload: false` on font declarations that are not needed above the
+fold.
 
 ## Layers
 

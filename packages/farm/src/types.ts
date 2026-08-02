@@ -20,6 +20,8 @@ import type { FarmPlugin } from "./plugin";
 import type { FarmI18nUserConfig, ResolvedFarmI18nConfig } from "./i18n/types";
 import type { FarmCacheUserConfig } from "./cache";
 import type { FarmAuthUserConfig, ResolvedFarmAuthConfig } from "./auth-config";
+import type { FarmPerformanceConfig } from "./preload";
+import type { FarmLayoutFonts } from "./font";
 
 export type NitroPreset =
   | "node-server"
@@ -126,6 +128,8 @@ export interface FarmConfig {
   context?: FarmContextFactory<any>;
   serverActions?: FarmServerActionsConfig;
   images?: FarmImageConfig;
+  /** Browser resource scheduling and preload budgets. */
+  performance?: FarmPerformanceConfig;
   i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;
@@ -390,6 +394,8 @@ export type StaticPathParams = Record<string, StaticPathPrimitive | readonly Sta
 
 export interface LayoutModule {
   default: Layout;
+  /** Semantic fonts inherited by framework-owned surfaces for this route. */
+  fonts?: FarmLayoutFonts;
   runtime?: FarmRouteRuntime;
   regions?: FarmRouteRegions;
   maxDuration?: FarmRouteMaxDuration;

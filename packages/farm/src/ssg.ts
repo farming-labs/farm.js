@@ -75,6 +75,11 @@ export interface RouteRenderingConfig {
   directive?: string;
 }
 
+export interface StaticRouteCandidateAnalysis {
+  candidate: boolean;
+  blockers: string[];
+}
+
 interface DirectiveRenderingConfig {
   ssg: boolean;
   ppr: boolean;
@@ -86,6 +91,24 @@ interface DirectiveRenderingConfig {
 const OPTIONAL_CATCH_ALL_SEGMENT = /^\[\[\.\.\.([^\]]+)\]\]$/;
 const REQUIRED_CATCH_ALL_SEGMENT = /^\[\.\.\.([^\]]+)\]$/;
 const REQUIRED_DYNAMIC_SEGMENT = /^\[([^\]]+)\]$/;
+
+const REQUEST_API_LABELS = new Map<string, string>([
+  ["cookies", "request cookies"],
+  ["headers", "request headers"],
+  ["getCurrentRequest", "the current Request"],
+  ["useSearchParams", "URL search parameters"],
+  ["auth", "request authentication"],
+  ["getServerSession", "request authentication"],
+  ["getSession", "request authentication"],
+  ["currentUser", "request authentication"],
+]);
+
+const ROUTE_PROP_LABELS = new Map<string, string>([
+  ["searchParams", "URL search parameters"],
+  ["middleware", "middleware request data"],
+  ["middlewareData", "middleware request data"],
+  ["context", "request context"],
+]);
 
 /**
  * Resolve route rendering from Farm exports, Next-compatible exports, and
@@ -153,6 +176,275 @@ export async function resolveRouteRenderingConfigFromFile(
 ): Promise<RouteRenderingConfig> {
   const source = await readFile(filePath, "utf8").catch(() => undefined);
   return resolveRouteRenderingConfig(mod, source);
+}
+
+/**
+ * Conservatively identify a route that may be safe to pre-render.
+ *
+ * This intentionally produces a suggestion rather than changing rendering:
+ * request-bound work can live in a transitive import, which source inspection
+ * of the route module cannot prove safe. Explicit route config always wins.
+ */
+export function analyzeStaticRouteCandidate(
+  mod: RouteModule | null | undefined,
+  source: string | undefined,
+  options: { isDynamic?: boolean } = {},
+): StaticRouteCandidateAnalysis {
+  const blockers: string[] = [];
+
+  if (!source) {
+    blockers.push("route source is unavailable");
+  }
+
+  if (options.isDynamic) {
+    blockers.push("the route has dynamic path segments");
+  }
+
+  if (hasExplicitRenderingConfig(mod, source)) {
+    blockers.push("the route already has explicit rendering config");
+  }
+
+  if (source) {
+    blockers.push(...findRequestBoundSourceBlockers(source));
+  }
+
+  return {
+    candidate: blockers.length === 0,
+    blockers,
+  };
+}
+
+function findRequestBoundSourceBlockers(source: string): string[] {
+  const blockers = new Set<string>();
+  const code = stripCommentsAndLiteralContents(source);
+
+  const sourceWithoutComments = stripComments(source);
+  for (const binding of readRequestApiImportBindings(sourceWithoutComments)) {
+    if (new RegExp(`\\b${escapeRegExp(binding.local)}\\s*(?:\\?\\.\\s*)?\\(`).test(code)) {
+      blockers.add(`the route reads ${binding.label}`);
+    }
+  }
+
+  for (const namespace of readNamespaceImportBindings(sourceWithoutComments)) {
+    for (const [name, label] of REQUEST_API_LABELS) {
+      if (
+        new RegExp(
+          `\\b${escapeRegExp(namespace)}\\s*(?:\\?\\.\\s*|\\.\\s*)${name}\\s*(?:\\?\\.\\s*)?\\(`,
+        ).test(code)
+      ) {
+        blockers.add(`the route reads ${label}`);
+      }
+    }
+  }
+
+  const params = readDefaultRouteParameters(code);
+  if (params) {
+    for (const [name, label] of ROUTE_PROP_LABELS) {
+      if (new RegExp(`\\b${name}\\b`).test(params)) {
+        blockers.add(`the route reads ${label}`);
+      }
+    }
+
+    const propsName = params.match(/^\s*([A-Za-z_$][\w$]*)\s*(?::|,|$)/)?.[1];
+    if (propsName) {
+      for (const [name, label] of ROUTE_PROP_LABELS) {
+        if (new RegExp(`\\b${escapeRegExp(propsName)}\\s*\\.\\s*${name}\\b`).test(code)) {
+          blockers.add(`the route reads ${label}`);
+        }
+        if (
+          new RegExp(`\\{[^}]*\\b${name}\\b[^}]*\\}\\s*=\\s*${escapeRegExp(propsName)}\\b`).test(
+            code,
+          )
+        ) {
+          blockers.add(`the route reads ${label}`);
+        }
+      }
+    }
+  }
+
+  return [...blockers];
+}
+
+function readRequestApiImportBindings(source: string): Array<{ local: string; label: string }> {
+  const bindings: Array<{ local: string; label: string }> = [];
+  for (const clause of readStaticImportClauses(source)) {
+    const namedGroup = clause.match(/\{([\s\S]*?)\}/)?.[1];
+    for (const rawSpecifier of (namedGroup ?? "").split(",")) {
+      const specifier = rawSpecifier.trim().replace(/^type\s+/, "");
+      const imported = specifier.match(/^([A-Za-z_$][\w$]*)(?:\s+as\s+([A-Za-z_$][\w$]*))?$/);
+      if (!imported?.[1]) continue;
+      const label = REQUEST_API_LABELS.get(imported[1]);
+      if (label) bindings.push({ local: imported[2] ?? imported[1], label });
+    }
+
+    const local = clause.match(/^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/)?.[1];
+    if (local) {
+      const label = REQUEST_API_LABELS.get(local);
+      if (label) bindings.push({ local, label });
+    }
+  }
+
+  return bindings;
+}
+
+function readNamespaceImportBindings(source: string): string[] {
+  return readStaticImportClauses(source)
+    .map((clause) => clause.match(/\*\s*as\s*([A-Za-z_$][\w$]*)/)?.[1])
+    .filter((binding): binding is string => Boolean(binding));
+}
+
+function readStaticImportClauses(source: string): string[] {
+  return [...source.matchAll(/\bimport\s+(?!\()([\s\S]*?)\s+from\s*["'][^"']+["']/g)]
+    .map((match) => match[1])
+    .filter((clause): clause is string => Boolean(clause));
+}
+
+function readDefaultRouteParameters(code: string): string | undefined {
+  const inlineParams =
+    code.match(/\bexport\s+default\s+(?:async\s+)?function\b[^(]*\(([^)]*)\)/)?.[1] ??
+    code.match(/\bexport\s+default\s+(?:async\s+)?\(([^)]*)\)\s*=>/)?.[1];
+  if (inlineParams !== undefined) return inlineParams;
+
+  const binding =
+    code.match(/\bexport\s+default\s+([A-Za-z_$][\w$]*)\s*;?/)?.[1] ??
+    code.match(/\bexport\s*\{\s*([A-Za-z_$][\w$]*)\s+as\s+default\s*\}/)?.[1];
+  if (!binding) return undefined;
+  const escapedBinding = escapeRegExp(binding);
+
+  return (
+    code.match(new RegExp(`\\bfunction\\s+${escapedBinding}\\s*\\(([^)]*)\\)`))?.[1] ??
+    code.match(
+      new RegExp(
+        `\\b(?:const|let|var)\\s+${escapedBinding}\\s*=\\s*(?:async\\s+)?\\(([^)]*)\\)\\s*=>`,
+      ),
+    )?.[1] ??
+    code.match(
+      new RegExp(`\\b(?:const|let|var)\\s+${escapedBinding}\\s*=\\s*function\\s*\\(([^)]*)\\)`),
+    )?.[1]
+  );
+}
+
+function stripCommentsAndLiteralContents(source: string): string {
+  return sanitizeSource(source, true);
+}
+
+function stripComments(source: string): string {
+  return sanitizeSource(source, false);
+}
+
+function sanitizeSource(source: string, maskLiterals: boolean): string {
+  const output = [...source];
+  const mask = (index: number) => {
+    if (output[index] !== "\n" && output[index] !== "\r") output[index] = " ";
+  };
+
+  const scanQuoted = (start: number, quote: "'" | '"'): number => {
+    let index = start;
+    if (maskLiterals) mask(index);
+    index += 1;
+    while (index < source.length) {
+      if (source[index] === "\\") {
+        if (maskLiterals) mask(index);
+        if (index + 1 < source.length && maskLiterals) mask(index + 1);
+        index += 2;
+        continue;
+      }
+      const character = source[index];
+      if (maskLiterals) mask(index);
+      index += 1;
+      if (character === quote) break;
+    }
+    return index;
+  };
+
+  const scanCode = (start: number, stopAtTemplateBrace: boolean): number => {
+    let index = start;
+    let braceDepth = 0;
+    while (index < source.length) {
+      const character = source[index];
+      const next = source[index + 1];
+      if (character === "/" && next === "/") {
+        while (index < source.length && source[index] !== "\n" && source[index] !== "\r") {
+          mask(index++);
+        }
+        continue;
+      }
+      if (character === "/" && next === "*") {
+        mask(index++);
+        mask(index++);
+        while (index < source.length) {
+          const closesComment = source[index] === "*" && source[index + 1] === "/";
+          mask(index++);
+          if (closesComment) {
+            mask(index++);
+            break;
+          }
+        }
+        continue;
+      }
+      if (character === "'" || character === '"') {
+        index = scanQuoted(index, character);
+        continue;
+      }
+      if (character === "`") {
+        if (maskLiterals) mask(index);
+        index += 1;
+        while (index < source.length) {
+          if (source[index] === "\\") {
+            if (maskLiterals) mask(index);
+            if (index + 1 < source.length && maskLiterals) mask(index + 1);
+            index += 2;
+          } else if (source[index] === "`") {
+            if (maskLiterals) mask(index);
+            index += 1;
+            break;
+          } else if (source[index] === "$" && source[index + 1] === "{") {
+            if (maskLiterals) {
+              mask(index);
+              mask(index + 1);
+            }
+            index = scanCode(index + 2, true);
+          } else {
+            if (maskLiterals) mask(index);
+            index += 1;
+          }
+        }
+        continue;
+      }
+      if (character === "{") {
+        braceDepth += 1;
+      } else if (character === "}") {
+        if (stopAtTemplateBrace && braceDepth === 0) {
+          if (maskLiterals) mask(index);
+          return index + 1;
+        }
+        braceDepth = Math.max(0, braceDepth - 1);
+      }
+      index += 1;
+    }
+    return index;
+  };
+
+  scanCode(0, false);
+  return output.join("");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function hasExplicitRenderingConfig(
+  mod: RouteModule | null | undefined,
+  source: string | undefined,
+): boolean {
+  return (
+    typeof mod?.ssg === "boolean" ||
+    typeof mod?.ppr === "boolean" ||
+    typeof mod?.experimental_ppr === "boolean" ||
+    typeof mod?.revalidate !== "undefined" ||
+    typeof mod?.dynamic !== "undefined" ||
+    typeof parseRouteRenderingDirective(source) !== "undefined"
+  );
 }
 
 export function parseRouteRenderingDirective(
@@ -326,9 +618,11 @@ function skipHorizontalWhitespace(source: string, start: number): number {
 export async function collectSSGPages(
   routes: RouteEntry[],
   loadModule: (filePath: string) => Promise<RouteModule>,
+  options: { suggestStaticRendering?: boolean } = {},
 ): Promise<SSGCollectionResult> {
   const ssgPages: SSGPage[] = [];
   const ssrRoutes: string[] = [];
+  const staticCandidateRoutes: string[] = [];
 
   for (const route of routes) {
     try {
@@ -339,7 +633,8 @@ export async function collectSSGPages(
         continue;
       }
 
-      const rendering = await resolveRouteRenderingConfigFromFile(mod, route.filePath);
+      const source = await readFile(route.filePath, "utf8").catch(() => undefined);
+      const rendering = resolveRouteRenderingConfig(mod, source);
 
       // Check if page is marked for SSG
       if (rendering.ssg) {
@@ -380,12 +675,33 @@ export async function collectSSGPages(
       } else {
         // SSR route (default)
         ssrRoutes.push(route.path);
+
+        if (
+          options.suggestStaticRendering !== false &&
+          analyzeStaticRouteCandidate(mod, source, { isDynamic: route.isDynamic }).candidate
+        ) {
+          staticCandidateRoutes.push(route.path);
+        }
       }
     } catch (error) {
       console.error(`Error processing route ${route.path}:`, error);
       // Fall back to SSR for problematic routes
       ssrRoutes.push(route.path);
     }
+  }
+
+  if (staticCandidateRoutes.length > 0) {
+    const visibleRoutes = staticCandidateRoutes.slice(0, 10);
+    const remainingCount = staticCandidateRoutes.length - visibleRoutes.length;
+    const remainingSuffix = remainingCount > 0 ? `\n  …and ${remainingCount} more` : "";
+
+    console.warn(
+      `[Farm.js] ${staticCandidateRoutes.length} route${
+        staticCandidateRoutes.length === 1 ? " appears" : "s appear"
+      } eligible for static rendering:\n  ${visibleRoutes.join("\n  ")}${remainingSuffix}\n` +
+        `Add \`export const dynamic = "force-static";\` after verifying that imported code ` +
+        `does not read cookies, headers, authentication, or other request data.`,
+    );
   }
 
   return { ssg: ssgPages, ssr: ssrRoutes };
