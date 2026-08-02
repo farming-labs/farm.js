@@ -53,11 +53,15 @@ import {
 import { getPublicFarmImageConfig, resolveFarmImageConfig } from "./image-config";
 import { farmImageImportsPlugin } from "./image-vite";
 import { farmFontImportsPlugin } from "./font-vite";
+import { resolveFarmLayoutFonts } from "./font";
 import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
-import { createFarmClientOptimizeDepsConfig } from "./server/vite-config";
+import {
+  createFarmClientOptimizeDepsConfig,
+  createFarmClientOptimizeDepsEntries,
+} from "./server/vite-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 
 interface FarmVitePluginOptions extends FarmConfig {
@@ -889,6 +893,14 @@ export function farmPlugin(
             srcDir: farmConfig.srcDir,
             clientEntry: "/@farm/client.js",
             fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList),
+            resolveLayoutFonts: async (pathname) => {
+              const layouts = routeManager.matchRoute(pathname).layouts;
+              const layoutModules = await Promise.all(
+                layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
+              );
+              return resolveFarmLayoutFonts(layoutModules);
+            },
+            fontStylesheetHref: "/@farm/fonts.css",
           })
         : null;
       const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime
@@ -4324,7 +4336,12 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
-      ...createFarmClientOptimizeDepsConfig(),
+      ...createFarmClientOptimizeDepsConfig(
+        createFarmClientOptimizeDepsEntries(
+          appRoot,
+          getFarmAppDirectories({ ...config, root: appRoot }),
+        ),
+      ),
       // Pre-bundle every framework client-runtime entry with React. Without
       // this, Vite can discover a linked Farm entry after the page has loaded,
       // regenerate the optimizer browser hash, and leave React DOM holding a

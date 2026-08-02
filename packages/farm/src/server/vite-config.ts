@@ -1,4 +1,8 @@
+import path from "node:path";
 import type { UserConfig as ViteUserConfig } from "vite";
+
+const FARM_CLIENT_ENTRY_PATTERN =
+  "**/{page,layout,loading,error,not-found,default}.{js,jsx,ts,tsx}";
 
 /**
  * Client runtimes that must be optimized in the same generation as React.
@@ -21,7 +25,24 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/server-query/client",
 ] as const;
 
-export function createFarmClientOptimizeDepsConfig(): ViteUserConfig["optimizeDeps"] {
+export function createFarmClientOptimizeDepsEntries(
+  projectRoot: string,
+  appDirectories: readonly string[],
+): string[] {
+  const resolvedProjectRoot = path.resolve(projectRoot);
+
+  return appDirectories.map((appDirectory) => {
+    const relativeAppDirectory = path
+      .relative(resolvedProjectRoot, path.resolve(appDirectory))
+      .replace(/\\/g, "/");
+    const prefix = relativeAppDirectory || ".";
+    return `${prefix}/${FARM_CLIENT_ENTRY_PATTERN}`;
+  });
+}
+
+export function createFarmClientOptimizeDepsConfig(
+  entries?: readonly string[],
+): ViteUserConfig["optimizeDeps"] {
   return {
     // Keep normal application dependency discovery for CJS-only packages, but
     // seed every Farm browser runtime so React is present in the first crawl.
@@ -30,6 +51,10 @@ export function createFarmClientOptimizeDepsConfig(): ViteUserConfig["optimizeDe
     // then changing browser hashes while hydration is already in progress.
     holdUntilCrawlEnd: true,
     include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
+    // Farm's HTML boots through a virtual module and imports route UI lazily.
+    // Explicit entries let Vite finish that crawl before a navigation can
+    // rotate the optimizer hash underneath a hydrated React runtime.
+    ...(entries?.length ? { entries: [...entries] } : {}),
   };
 }
 
