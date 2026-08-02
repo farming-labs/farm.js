@@ -1,6 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { isFarmIslandStrategy, type FarmIslandStrategy } from "../island";
 
 function readIfExists(filePath: string): string | null {
   try {
@@ -58,11 +59,13 @@ export function resolveModuleSourcePath(modulePath: string, root?: string): stri
 export interface ClientModuleMetadata {
   isClientComponent: boolean;
   shouldHydrate: boolean;
+  islandStrategy: FarmIslandStrategy | null;
 }
 
 interface ParsedClientModuleMetadata {
   isClientComponent: boolean;
   hasHydrateExport: boolean;
+  islandStrategy: FarmIslandStrategy | null;
 }
 
 const RESOLVABLE_SOURCE_EXTENSIONS = [
@@ -94,6 +97,22 @@ export function hasHydrateExport(content: string | null): boolean {
   );
 }
 
+export function getIslandStrategyExport(content: string | null): FarmIslandStrategy | null {
+  if (!content) return null;
+
+  const declaration = content.match(/\bexport\s+const\s+island(?:\s*:[^=;]+)?\s*=\s*([^;\r\n]+)/);
+  if (!declaration) return null;
+
+  const literal = declaration[1].trim().match(/^(["'])([^"']+)\1$/);
+  if (!literal || !isFarmIslandStrategy(literal[2])) {
+    throw new Error(
+      'Farm island configuration must be a static "load", "interaction", "visible", or "idle" string literal.',
+    );
+  }
+
+  return literal[2];
+}
+
 export function stripUseClientDirective(content: string): string {
   return content.replace(/^\s*(["'])use client\1\s*;?\s*/, "");
 }
@@ -103,12 +122,14 @@ function parseClientModuleMetadata(content: string | null): ParsedClientModuleMe
     return {
       isClientComponent: false,
       hasHydrateExport: false,
+      islandStrategy: null,
     };
   }
 
   return {
     isClientComponent: hasUseClientDirective(content),
     hasHydrateExport: hasHydrateExport(content),
+    islandStrategy: getIslandStrategyExport(content),
   };
 }
 
@@ -134,6 +155,7 @@ function inspectClientModuleMetadata(
     return {
       isClientComponent: false,
       shouldHydrate: false,
+      islandStrategy: null,
     };
   }
 
@@ -145,22 +167,35 @@ function inspectClientModuleMetadata(
     return {
       isClientComponent: true,
       shouldHydrate: true,
+      islandStrategy: parsed.islandStrategy ?? "load",
     };
   }
 
   let importsClientBoundary = false;
+  let importedIslandStrategy: FarmIslandStrategy | null = null;
   for (const specifier of getRelativeImportSpecifiers(content)) {
     const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
     const importedMetadata = inspectClientModuleMetadata(importedPath, root, visited);
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
-      break;
+      if (importedIslandStrategy === null) {
+        importedIslandStrategy = importedMetadata.islandStrategy;
+      } else if (importedIslandStrategy !== importedMetadata.islandStrategy) {
+        // One route-level React root cannot honor multiple schedules safely.
+        // Fall back to eager hydration when its imported boundaries disagree.
+        importedIslandStrategy = "load";
+      }
     }
   }
 
+  const shouldHydrate = parsed.hasHydrateExport || importsClientBoundary;
+
   return {
     isClientComponent: false,
-    shouldHydrate: parsed.hasHydrateExport || importsClientBoundary,
+    shouldHydrate,
+    islandStrategy: shouldHydrate
+      ? (parsed.islandStrategy ?? importedIslandStrategy ?? "load")
+      : null,
   };
 }
 

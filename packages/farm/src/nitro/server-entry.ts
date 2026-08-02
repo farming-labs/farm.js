@@ -218,6 +218,7 @@ async function defaultHandler({
         modulePath: route.modulePath,
         isClientComponent,
         shouldHydrate,
+        islandStrategy: moduleMetadata.islandStrategy,
         metadata: {
           title: mergedMetadata.title,
           description: mergedMetadata.description,

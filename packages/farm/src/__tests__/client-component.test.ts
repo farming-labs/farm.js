@@ -4,6 +4,7 @@ import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   getClientModuleMetadata,
+  getIslandStrategyExport,
   hasHydrateExport,
   hasUseClientDirective,
   isClientComponentModule,
@@ -102,6 +103,7 @@ describe("client component path resolution", () => {
     expect(getClientModuleMetadata(sourceFile, root)).toEqual({
       isClientComponent: false,
       shouldHydrate: true,
+      islandStrategy: "load",
     });
     expect(isClientComponentModule(sourceFile, root)).toBe(false);
     expect(shouldHydrateModule(sourceFile, root)).toBe(true);
@@ -123,9 +125,66 @@ describe("client component path resolution", () => {
     expect(getClientModuleMetadata(pageFile, root)).toEqual({
       isClientComponent: false,
       shouldHydrate: true,
+      islandStrategy: "load",
     });
     expect(isClientComponentModule(pageFile, root)).toBe(false);
     expect(shouldHydrateModule(pageFile, root)).toBe(true);
+  });
+
+  it("reads a static island strategy from client modules", () => {
+    expect(
+      getIslandStrategyExport(
+        '"use client";\nexport const island = "interaction";\nexport function Copy() {}',
+      ),
+    ).toBe("interaction");
+    expect(() => getIslandStrategyExport("export const island = getStrategy();")).toThrow(
+      /must be a static/,
+    );
+  });
+
+  it("propagates an imported client boundary island strategy to its route", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-island-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+    const clientFile = path.join(root, "src", "app", "demo", "copy-button.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      clientFile,
+      '"use client";\nexport const island = "interaction";\nexport function CopyButton() { return null; }\n',
+    );
+    fs.writeFileSync(
+      pageFile,
+      'import { CopyButton } from "./copy-button";\nexport default function Page() { return <CopyButton />; }\n',
+    );
+
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: true,
+      islandStrategy: "interaction",
+    });
+  });
+
+  it("falls back to eager hydration when imported island strategies disagree", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-islands-mixed-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(path.dirname(pageFile), "copy.tsx"),
+      '"use client";\nexport const island = "interaction";\nexport function Copy() { return null; }\n',
+    );
+    fs.writeFileSync(
+      path.join(path.dirname(pageFile), "chart.tsx"),
+      '"use client";\nexport const island = "visible";\nexport function Chart() { return null; }\n',
+    );
+    fs.writeFileSync(
+      pageFile,
+      'import { Copy } from "./copy";\nimport { Chart } from "./chart";\nexport default function Page() { return <><Copy /><Chart /></>; }\n',
+    );
+
+    expect(getClientModuleMetadata(pageFile, root).islandStrategy).toBe("load");
   });
 
   it("preserves request-scoped server props when building ordinary hydration props", () => {
@@ -175,6 +234,9 @@ describe("client component path resolution", () => {
     expect(source).toContain("currentPath: window.location.pathname + window.location.search");
     expect(source).toContain('if (action !== "pop" && to === this.currentPath)');
     expect(source).toContain("this.currentPath = to;");
+    expect(source).toContain("scheduleFarmIslandHydration");
+    expect(source).toContain("load: () => import(");
+    expect(source).not.toContain("imports.push(`import Page${index}");
   });
 
   it("uses a document swap when dev navigation enters the docs runtime", () => {

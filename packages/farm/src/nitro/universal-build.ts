@@ -59,6 +59,7 @@ import type { TransformOptions } from "esbuild";
 import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build/production-vite";
 import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 import { mergeFarmFontCss } from "../font-vite";
+import type { FarmIslandStrategy } from "../island";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -955,6 +956,7 @@ async function buildClient(
     pattern: string;
     modulePath: string;
     relativePath: string;
+    islandStrategy: FarmIslandStrategy;
   }> = [];
 
   for (const route of pageRoutes) {
@@ -965,7 +967,11 @@ async function buildClient(
       const metadata = getClientModuleMetadata(route.modulePath, root);
       if (metadata.shouldHydrate) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
-        clientPages.push({ ...route, relativePath });
+        clientPages.push({
+          ...route,
+          relativePath,
+          islandStrategy: metadata.islandStrategy ?? "load",
+        });
         logger.info(`📱 Found hydratable route: ${route.pattern} -> ${route.modulePath}`);
       }
     } catch (error) {
@@ -1382,6 +1388,7 @@ function generateClientHydrationEntry(
     pattern: string;
     modulePath: string;
     relativePath: string;
+    islandStrategy: FarmIslandStrategy;
   }>,
   layoutRoutes: Array<{ pattern: string; modulePath: string }>,
   clientRouteSlots: UniversalRouteSlot[],
@@ -1723,10 +1730,13 @@ document.addEventListener("click", function(e) {
   const routeEntries: string[] = [];
   const routeSlotEntries: string[] = [];
 
-  clientPages.forEach((page, index) => {
+  clientPages.forEach((page) => {
     const importPath = toImportPath(page.modulePath);
-    imports.push(`import Page${index} from "${importPath}";`);
-    routeEntries.push(`  { pattern: ${JSON.stringify(page.pattern)}, Component: Page${index} }`);
+    routeEntries.push(`  {
+    pattern: ${JSON.stringify(page.pattern)},
+    islandStrategy: ${JSON.stringify(page.islandStrategy)},
+    load: () => import(${JSON.stringify(importPath)}).then((module) => module.default),
+  }`);
   });
   clientRouteSlots.forEach((slot, index) => {
     const importPath = toImportPath(slot.modulePath);
@@ -1749,7 +1759,7 @@ ${cssImport}
 ${layoutImports}
 import React from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
-import { createClientPluginManager, installChunkErrorRecovery } from "@farm.js/core/internal/client-runtime";
+import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
@@ -1820,6 +1830,12 @@ function matchRoute(pathname) {
     if (params !== null) return { route: route, params: params };
   }
   return null;
+}
+
+async function loadRouteComponent(route) {
+  if (route.Component) return route.Component;
+  route.Component = await route.load();
+  return route.Component;
 }
 
 function matchesRoutePrefix(pathname, pattern) {
@@ -1986,50 +2002,51 @@ async function hydrate() {
     return;
   }
   
-  const hasRouteSlots =
-    Array.isArray(window.__FARM_ROUTE_SLOTS__) && window.__FARM_ROUTE_SLOTS__.length > 0;
   const container =
-    (hasRouteSlots ? document.getElementById("__farm_page__") : null) ||
+    document.getElementById("__farm_page__") ||
     document.getElementById("root");
   if (!container) {
     console.error("[Farm.js] No root element found");
     return;
   }
   
-  const Component = matched.route.Component;
-  const params = matched.params;
-  const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
-  
-  const props = { params: params, searchParams: Promise.resolve(searchParams) };
-  
-  // Create page element and wrap with layouts
-  const pageElement = React.createElement(Component, props);
-  const wrappedElement = hasRouteSlots
-    ? pageElement
-    : wrapWithLayouts(pageElement, pathname, params);
+  container.dataset.farmIsland = "page";
+  container.dataset.farmIslandStrategy = matched.route.islandStrategy || "load";
 
-  const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
-  const hydrationSession = await farmClientRuntime.beginHydration({
+  await scheduleFarmIslandHydration({
     container,
-    mode: shouldHydrate ? "hydrate" : "render",
-  });
+    strategy: matched.route.islandStrategy,
+    hydrate: async function() {
+      const Component = await loadRouteComponent(matched.route);
+      const params = matched.params;
+      const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+      const props = { params: params, searchParams: Promise.resolve(searchParams) };
+      const pageElement = React.createElement(Component, props);
+      const wrappedElement = container.id === "__farm_page__"
+        ? pageElement
+        : wrapWithLayouts(pageElement, pathname, params);
+      const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
+      const hydrationSession = await farmClientRuntime.beginHydration({
+        container,
+        mode: shouldHydrate ? "hydrate" : "render",
+      });
 
-  try {
-    if (shouldHydrate) {
-      reactRoot = hydrateRoot(container, wrappedElement);
-      isHydrated = true;
-    } else {
-      if (!reactRoot) {
-        reactRoot = createRoot(container);
+      try {
+        if (shouldHydrate) {
+          reactRoot = hydrateRoot(container, wrappedElement);
+          isHydrated = true;
+        } else {
+          if (!reactRoot) reactRoot = createRoot(container);
+          reactRoot.render(wrappedElement);
+        }
+        currentPathname = pathname;
+        await farmClientRuntime.completeHydration(hydrationSession);
+      } catch (error) {
+        await farmClientRuntime.failHydration(hydrationSession, error);
+        console.error("[Farm.js] Hydration error:", error);
       }
-      reactRoot.render(wrappedElement);
-    }
-    currentPathname = pathname;
-    await farmClientRuntime.completeHydration(hydrationSession);
-  } catch (error) {
-    await farmClientRuntime.failHydration(hydrationSession, error);
-    console.error("[Farm.js] Hydration error:", error);
-  }
+    },
+  });
 }
 
 // SPA Router
@@ -2123,7 +2140,7 @@ ${generateUniversalRouterStateProperties()}
       }
 
       if (matched) {
-        const Component = matched.route.Component;
+        const Component = await loadRouteComponent(matched.route);
         const params = matched.params;
         const searchParams = Object.fromEntries(url.searchParams);
         const props = { params: params, searchParams: Promise.resolve(searchParams) };
@@ -2160,7 +2177,7 @@ ${generateUniversalRouterStateProperties()}
         const html = await this.fetchPage(url.pathname + url.search);
         await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
         await this.runViewTransition(options.viewTransition, async () => {
-          if (!this.swapContent(html, url.pathname + url.search)) {
+          if (!(await this.swapContent(html, url.pathname + url.search))) {
             throw new Error("Farm could not swap the target document");
           }
           const historyState = createHistoryState(
@@ -2215,7 +2232,7 @@ ${generateUniversalRouterStateProperties()}
     return html;
   },
   
-  swapContent: function(html, targetPath) {
+  swapContent: async function(html, targetPath) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
@@ -2255,7 +2272,7 @@ ${generateUniversalRouterStateProperties()}
     const matched = matchRoute(newPathname);
     if (matched) {
       // Re-hydrate the client component
-      const Component = matched.route.Component;
+      const Component = await loadRouteComponent(matched.route);
       const params = matched.params;
       const searchParams = Object.fromEntries(targetUrl.searchParams);
       const props = { params: params, searchParams: Promise.resolve(searchParams) };
@@ -2873,12 +2890,13 @@ function generateVirtualEntryCode(
     }
 
     pageImports.push(`import * as ${varName} from "${route.modulePath}";`);
-    const shouldHydrate = getClientModuleMetadata(route.modulePath, config.root).shouldHydrate;
+    const clientMetadata = getClientModuleMetadata(route.modulePath, config.root);
     pageRegistrations.push(`
   {
     pattern: ${JSON.stringify(route.pattern)},
     module: ${varName},
-    shouldHydrate: ${JSON.stringify(shouldHydrate)},
+    shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
+    islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},
     ${
       route.source !== undefined
         ? `markdownSource: {
@@ -4944,10 +4962,15 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
-            if (route.shouldHydrate && renderedRouteSlots.length > 0) {
+            if (route.shouldHydrate) {
               pageElement = React.createElement(
                 "div",
-                { id: "__farm_page__", "data-farm-client": "true" },
+                {
+                  id: "__farm_page__",
+                  "data-farm-client": "true",
+                  "data-farm-island": "page",
+                  "data-farm-island-strategy": route.islandStrategy || "load",
+                },
                 pageElement,
               );
             }

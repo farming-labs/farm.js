@@ -159,6 +159,7 @@ export async function generateDevManifest(
       segments: route.segments,
       isClientComponent: metadata.isClientComponent,
       shouldHydrate: metadata.shouldHydrate,
+      islandStrategy: metadata.islandStrategy,
       preloads: [],
       assets: [],
     };
@@ -250,6 +251,7 @@ export async function generateProdManifest(
       segments: route.segments,
       isClientComponent: metadata.isClientComponent,
       shouldHydrate: metadata.shouldHydrate,
+      islandStrategy: metadata.islandStrategy,
       preloads,
       assets,
     };
