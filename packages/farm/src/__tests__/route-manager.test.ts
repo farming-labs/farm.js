@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { RouteManager } from "../routing/route-manager";
+import { RouteManager, shouldSuggestStaticRenderingForI18n } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
 
 // Mock the file system utilities
@@ -423,5 +423,32 @@ describe("RouteManager", () => {
         'Duplicate opengraph-image route "/about"',
       );
     });
+  });
+});
+
+describe("static rendering suggestions with i18n", () => {
+  it("only suggests static rendering when locale selection is URL-stable", () => {
+    expect(shouldSuggestStaticRenderingForI18n(undefined)).toBe(true);
+    expect(
+      shouldSuggestStaticRenderingForI18n({
+        routing: "prefix-always",
+        detection: ["cookie", "accept-language"],
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuggestStaticRenderingForI18n({
+        routing: "prefix-except-default",
+        detection: ["url"],
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuggestStaticRenderingForI18n({
+        routing: "prefix-except-default",
+        detection: ["url", "cookie"],
+      }),
+    ).toBe(false);
+    expect(shouldSuggestStaticRenderingForI18n({ routing: "none", detection: ["url"] })).toBe(
+      false,
+    );
   });
 });
