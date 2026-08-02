@@ -58,7 +58,10 @@ import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
-import { createFarmClientOptimizeDepsConfig } from "./server/vite-config";
+import {
+  createFarmClientOptimizeDepsConfig,
+  createFarmClientOptimizeDepsEntries,
+} from "./server/vite-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 
 interface FarmVitePluginOptions extends FarmConfig {
@@ -4333,7 +4336,12 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
-      ...createFarmClientOptimizeDepsConfig(),
+      ...createFarmClientOptimizeDepsConfig(
+        createFarmClientOptimizeDepsEntries(
+          appRoot,
+          getFarmAppDirectories({ ...config, root: appRoot }),
+        ),
+      ),
       // Pre-bundle every framework client-runtime entry with React. Without
       // this, Vite can discover a linked Farm entry after the page has loaded,
       // regenerate the optimizer browser hash, and leave React DOM holding a
