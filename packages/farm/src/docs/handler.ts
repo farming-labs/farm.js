@@ -32,6 +32,14 @@ import {
 import { resolveFarmDocsPageLastModified } from "./last-modified";
 import { farmDocsPixelBorderCss } from "./pixel-border-css";
 import { generateFarmDocsSearchBootstrapRuntime, isFarmDocsSearchEnabled } from "./search-client";
+import {
+  createFarmDocsSocialImageDescriptor,
+  getFarmDocsCustomSocialImage,
+  getFarmDocsSocialImageSlug,
+  isFarmDocsSocialImageEnabled,
+  renderFarmDocsSocialImageSvg,
+  renderFarmDocsSocialMetadata,
+} from "./social-image";
 import type { FarmDocsResolvedConfig } from "./types";
 
 export interface FarmDocsHandlerOptions {
@@ -294,6 +302,7 @@ export function loadFarmDocsPage(
     slug,
     title,
     description: frontmatter.description,
+    section: frontmatter.section,
     href,
     sourcePath,
     lastModified: resolveFarmDocsPageLastModified(contentDir, sourcePath, frontmatter),
@@ -1904,6 +1913,7 @@ function renderPixelDocsHtml(
   themeCss: string,
   clientEntry: string,
   faviconHref: string,
+  requestUrl: URL,
   fontAssets: readonly FarmDocsPublicFontAsset[],
   layoutFonts?: FarmLayoutFonts,
   fontStylesheetHref?: string,
@@ -1916,6 +1926,12 @@ function renderPixelDocsHtml(
   const tocItems = extractTocItems(page.body, getThemeTocDepth(docs));
   const themeName = getThemeName(docs);
   const searchEnabled = isFarmDocsSearchEnabled(docs);
+  const socialMetadata = isFarmDocsSocialImageEnabled(page, docs)
+    ? renderFarmDocsSocialMetadata(
+        createFarmDocsSocialImageDescriptor(page, docs, requestUrl),
+        getFarmDocsCustomSocialImage(page),
+      )
+    : "";
 
   return `<!DOCTYPE html>
 <html class="dark" lang="en" data-docs-theme="${escapeAttribute(themeName)}">
@@ -1928,6 +1944,7 @@ function renderPixelDocsHtml(
   ${renderFarmDocsFontPreloads(fontAssets)}
   ${fontStylesheetHref ? `<link rel="stylesheet" href="${escapeAttribute(fontStylesheetHref)}">` : ""}
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
+  ${socialMetadata}
   <style>${themeCss}
 ${renderFarmDocsBridgeCss(docs, fontAssets, layoutFonts)}</style>
   ${searchEnabled ? renderDocsSearchBootstrapScript() : ""}
@@ -1993,6 +2010,39 @@ export function createFarmDocsHandler(
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
 
     const contentDir = resolveFarmDocsContentDir(docs, options);
+    const requestUrl = new URL(request.url);
+    const socialImageSlug = getFarmDocsSocialImageSlug(docs, requestUrl);
+    if (socialImageSlug !== null) {
+      const socialImagePage = loadFarmDocsPage(contentDir, docs, socialImageSlug);
+      if (
+        !socialImagePage ||
+        !isFarmDocsSocialImageEnabled(socialImagePage, docs) ||
+        getFarmDocsCustomSocialImage(socialImagePage)
+      ) {
+        return null;
+      }
+
+      const descriptor = createFarmDocsSocialImageDescriptor(socialImagePage, docs, requestUrl);
+      if (requestUrl.pathname !== descriptor.imagePath) return null;
+
+      const etag = `"${descriptor.hash}"`;
+      const immutable = requestUrl.searchParams.get("v") === descriptor.hash;
+      const headers = new Headers({
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Cache-Control": immutable
+          ? "public, max-age=31536000, immutable"
+          : "public, max-age=0, must-revalidate",
+        ETag: etag,
+        "X-Content-Type-Options": "nosniff",
+      });
+      if (request.headers.get("if-none-match") === etag) {
+        return new Response(null, { status: 304, headers });
+      }
+      if (request.method === "HEAD") return new Response(null, { status: 200, headers });
+
+      return new Response(renderFarmDocsSocialImageSvg(descriptor), { status: 200, headers });
+    }
+
     const publicResponse = createFarmDocsPublicResponse(contentDir, docs, request);
     if (publicResponse) return publicResponse;
 
@@ -2035,6 +2085,7 @@ export function createFarmDocsHandler(
         resolvePixelBorderThemeCss(options),
         options.clientEntry || "/farm-client.js",
         faviconHref,
+        requestUrl,
         activeFontAssets,
         layoutFonts,
         usesLayoutFonts ? options.fontStylesheetHref : undefined,

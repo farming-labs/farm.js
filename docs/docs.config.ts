@@ -1,6 +1,8 @@
 import { defineDocs } from "@farming-labs/docs";
 import { pixelBorder } from "@farming-labs/theme/pixel-border";
-import type { FarmDocsSidebarItem } from "@farm.js/core";
+import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { siNextdotjs, siNuxt, siSvelte, siTanstack } from "simple-icons";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
@@ -9,6 +11,7 @@ type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
   navigation?: {
     sidebar?: FarmDocsSidebarItem[];
   };
+  socialImage?: boolean | FarmDocsSocialImageConfig;
 };
 
 const brandPath = (path: string, viewBox = "0 0 24 24") =>
@@ -16,6 +19,22 @@ const brandPath = (path: string, viewBox = "0 0 24 24") =>
 
 const brandSvg = (content: string, viewBox = "0 0 24 24") =>
   `<svg viewBox="${viewBox}" focusable="false">${content}</svg>`;
+
+const resolveGeistFontsDirectory = () => {
+  const candidates = [
+    path.join(process.cwd(), "node_modules", "geist", "dist", "fonts"),
+    path.join(process.cwd(), "docs", "node_modules", "geist", "dist", "fonts"),
+    path.join(process.cwd(), "..", "docs", "node_modules", "geist", "dist", "fonts"),
+  ];
+  const directory = candidates.find((candidate) => existsSync(candidate));
+  if (!directory)
+    throw new Error("Could not resolve Geist fonts for the Farm.js docs social image.");
+  return directory;
+};
+
+const geistFontsDirectory = resolveGeistFontsDirectory();
+const embeddedWoff2 = (...segments: string[]) =>
+  `data:font/woff2;base64,${readFileSync(path.join(geistFontsDirectory, ...segments)).toString("base64")}`;
 
 const icons = {
   activity: '<path d="M22 12h-4l-3 7L9 5l-3 7H2"></path>',
@@ -295,6 +314,16 @@ const config = {
     description: "Farm.js framework documentation powered by @farming-labs/docs.",
   },
   favicon: "/favicon.svg",
+  socialImage: {
+    baseUrl: "https://farmjs.dev",
+    siteName: "Farm.js",
+    brand: "Farm.js",
+    fonts: {
+      display: embeddedWoff2("geist-pixel", "GeistPixel-Square.woff2"),
+      sans: embeddedWoff2("geist-sans", "Geist-Variable.woff2"),
+      mono: embeddedWoff2("geist-mono", "GeistMono-Variable.woff2"),
+    },
+  },
   nav: {
     title: "Farm.js",
     url: "/",
@@ -336,4 +365,5 @@ export default {
   ...defineDocs(config),
   favicon: config.favicon,
   navigation: config.navigation,
+  socialImage: config.socialImage,
 } satisfies FarmDocsSerializableConfig;

@@ -213,6 +213,16 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       '<link rel="icon" href="/favicon.svg" sizes="any" type="image/svg+xml">',
     );
+    expect(html).toContain('<meta property="og:type" content="article">');
+    expect(html).toContain('<meta property="og:title" content="Farm Docs">');
+    expect(html).toContain('<meta property="og:description" content="Local docs">');
+    expect(html).toContain('<meta property="og:url" content="http://farm.test/docs">');
+    expect(html).toMatch(
+      /<meta property="og:image" content="http:\/\/farm\.test\/docs\/_social\/index\/opengraph-image\.svg\?v=[a-f0-9]{16}">/,
+    );
+    expect(html).toContain('<meta property="og:image:width" content="1200">');
+    expect(html).toContain('<meta property="og:image:height" content="630">');
+    expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(html).toContain('data-docs-theme="farm-docs"');
     expect(html).toContain('id="nd-docs-layout"');
     expect(html).toContain('id="nd-toc"');
@@ -402,6 +412,80 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("renders versioned page-specific docs social images with cache validators", async () => {
+    const { root, docs } = await createDocsFixture();
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const pageResponse = await handler(new Request("http://farm.test/docs/guide"));
+    const html = (await pageResponse?.text()) || "";
+    const imageUrl = html.match(/property="og:image" content="([^"]+)"/)?.[1];
+
+    expect(imageUrl).toMatch(
+      /^http:\/\/farm\.test\/docs\/_social\/guide\/opengraph-image\.svg\?v=[a-f0-9]{16}$/,
+    );
+
+    const imageResponse = await handler(new Request(imageUrl!));
+    expect(imageResponse?.status).toBe(200);
+    expect(imageResponse?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(imageResponse?.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(imageResponse?.headers.get("x-content-type-options")).toBe("nosniff");
+    const image = await imageResponse?.text();
+    expect(image).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+    expect(image).toContain('<svg xmlns="http://www.w3.org/2000/svg"');
+    expect(image).toContain('role="img"');
+    expect(image).toContain("Guide — Farm.js documentation");
+    expect(image).toContain("PRODUCT ARCHITECTURE");
+
+    const etag = imageResponse?.headers.get("etag");
+    const notModified = await handler(
+      new Request(imageUrl!, { headers: { "if-none-match": etag! } }),
+    );
+    expect(notModified?.status).toBe(304);
+    expect(await notModified?.text()).toBe("");
+
+    const head = await handler(new Request(imageUrl!, { method: "HEAD" }));
+    expect(head?.status).toBe(200);
+    expect(head?.headers.get("content-type")).toBe("image/svg+xml; charset=utf-8");
+    expect(await head?.text()).toBe("");
+  });
+
+  it("supports docs-wide opt-out and page-level social image overrides", async () => {
+    const { root, docs, docsDir } = await createDocsFixture();
+    await fs.writeFile(
+      path.join(docsDir, "guide", "page.md"),
+      [
+        "---",
+        'title: "Guide preview"',
+        'description: "A custom social description"',
+        'socialTitle: "Guide for teams"',
+        'socialImage: "/custom-guide.png"',
+        'socialIllustration: "cli"',
+        "---",
+        "",
+        "# Guide",
+      ].join("\n"),
+    );
+
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(new Request("https://docs.example.com/docs/guide"));
+    const html = await response?.text();
+    expect(html).toContain('<meta property="og:title" content="Guide for teams">');
+    expect(html).toContain(
+      '<meta property="og:image" content="https://docs.example.com/custom-guide.png">',
+    );
+
+    const disabledHandler = createFarmDocsHandler(
+      { ...docs, config: { ...docs.config, socialImage: false } },
+      { root, srcDir: "src" },
+    );
+    const disabledResponse = await disabledHandler(new Request("http://farm.test/docs"));
+    const disabledHtml = await disabledResponse?.text();
+    expect(disabledHtml).not.toContain('property="og:image"');
+    expect(disabledHtml).not.toContain('name="twitter:card"');
+    expect(
+      await disabledHandler(new Request("http://farm.test/docs/_social/index/opengraph-image.svg")),
+    ).toBeNull();
   });
 
   it("uses content-fingerprinted Geist assets when the package fonts are available", async () => {

@@ -51,6 +51,27 @@ description: "Install Farm and create your first application."
 # Getting Started
 ```
 
+Every Markdown docs page also gets a page-specific 1200 by 630 social preview automatically. Farm
+uses the title, description, section, and route to emit Open Graph and X metadata, then selects a
+technical illustration suited to the page topic. The generated SVG is accessible, resolution
+independent, content-fingerprinted, and served with immutable caching.
+
+Use frontmatter only when a page needs to override the automatic result:
+
+```md
+---
+title: "Authentication"
+description: "Protect routes and verify sessions."
+socialTitle: "Authentication in Farm.js"
+socialDescription: "Typed, server-side authentication for full-stack React apps."
+socialIllustration: "auth"
+---
+```
+
+`socialIllustration` accepts `auth`, `cache`, `cli`, `integrations`, `project`, `routing`, or
+`runtime`. Set `socialImage` to an absolute or root-relative image URL to supply a custom preview,
+or set it to `false` to disable the preview for one page.
+
 ## Automatic docs routes
 
 When `docs.entry` is enabled, Farm serves the docs entry and `/api/docs` machine endpoints
@@ -83,6 +104,11 @@ export default defineConfig({
       provider: "simple",
       enabled: true,
       maxResults: 10,
+    },
+    socialImage: {
+      baseUrl: "https://docs.example.com",
+      siteName: "Acme",
+      brand: "Acme",
     },
     pageActions: {
       copyMarkdown: {

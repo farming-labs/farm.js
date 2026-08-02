@@ -1,0 +1,1 @@
+Farm.js, a framework for product-integrated apps by Farming Labs
