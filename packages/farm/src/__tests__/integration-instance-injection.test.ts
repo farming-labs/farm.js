@@ -84,6 +84,7 @@ describe("integration instance injection", () => {
     } as unknown as WorkOSIntegrationInstance;
     const integration = workos({
       instance,
+      clientId: "client_other",
       cookiePassword: "test-cookie-password-that-is-long-enough",
     });
     const route = integration.routes.find((candidate) => candidate.path === "/login");
@@ -98,6 +99,9 @@ describe("integration instance injection", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ redirectTo: "https://auth.example.com/authorize" });
     expect(getAuthorizationUrl).toHaveBeenCalledOnce();
+    expect(getAuthorizationUrl).toHaveBeenCalledWith(
+      expect.objectContaining({ clientId: "client_test" }),
+    );
   });
 
   it("uses an injected Clerk backend client without requiring a secret key", async () => {

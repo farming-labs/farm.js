@@ -66,7 +66,7 @@ function createWorkOSApi(input: {
 }
 
 function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
-  const clientId = input.clientId ?? input.instance?.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
+  const clientId = input.instance?.clientId ?? input.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
   const apiKey = input.apiKey ?? process.env.WORKOS_API_KEY ?? "";
   const cookiePassword =
     input.cookiePassword ??

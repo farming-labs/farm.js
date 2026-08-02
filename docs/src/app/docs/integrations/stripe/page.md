@@ -55,10 +55,12 @@ const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   maxNetworkRetries: 2,
 });
 
-export const billing = stripe({
-  instance: stripeClient,
-  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
-});
+export const integrations = {
+  billing: stripe({
+    instance: stripeClient,
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+  }),
+};
 ```
 
 Use this path when the application needs to own retries, telemetry, API-version settings, or a
