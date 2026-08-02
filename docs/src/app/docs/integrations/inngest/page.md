@@ -38,6 +38,12 @@ export const appIntegrations = {
 } as const;
 ```
 
+## Runtime ownership
+
+Pass Inngest credentials and endpoint configuration to `inngest(...)`; Farm constructs the HTTP
+runtime adapter and sends events to existing provider functions. Inngest continues to own function
+registration and execution. There is no in-process Inngest SDK instance to inject into Farm.
+
 ## Environment variables
 
 | Variable              | Current use                                                    |

@@ -51,12 +51,22 @@ Farm builds the absolute redirect URI from the incoming request origin and `call
 
 Development has a local fallback cookie password. Production startup fails without an explicit password.
 
-## Use an existing WorkOS instance
+## Choose SDK ownership
+
+### Let Farm construct WorkOS
+
+The configuration above is the default path. When `instance` is omitted, Farm constructs one
+WorkOS client from `clientId` and `apiKey`, supplied directly or through environment variables.
+
+### Provide an application-owned instance
 
 Pass a configured SDK through `instance` when the app needs WorkOS constructor options that Farm
 does not own. Farm uses the instance directly, so `apiKey` is no longer required by the integration.
 The AuthKit client ID can come from the instance, while the cookie password remains required because
 Farm owns the sealed session cookie.
+
+When both are present, the supplied instance wins. Integration-owned route, cookie, and protection
+options still belong in `workos(...)`.
 
 ```ts
 import { WorkOS } from "@workos-inc/node";

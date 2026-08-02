@@ -77,6 +77,11 @@ The runtime definition is the jobs integration's injection boundary. Farm does n
 Trigger.dev or Inngest SDK instance in the application process; it calls the configured external
 runtime over HTTP.
 
+This means jobs have one clear ownership split: the application passes provider credentials and
+endpoint options to `trigger(...)` or `inngest(...)`, Farm constructs the HTTP runtime adapter, and
+the provider continues to own deployed tasks or functions. There is no in-process SDK `instance` to
+inject.
+
 ## Create callers
 
 ```ts

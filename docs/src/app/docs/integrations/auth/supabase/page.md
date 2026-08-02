@@ -57,7 +57,15 @@ Farm accepts the standard Supabase URL plus any of these anonymous or publishabl
 
 Keep service-role credentials in separate server code that performs administrative operations. Do not expose them to auth pages or pass them to `supabase(...)`.
 
-## Customize the request-scoped client
+## Choose client ownership
+
+### Let Farm construct Supabase
+
+The configuration above is the default path. When `instance` is omitted, Farm creates a fresh
+Supabase SSR client for every request from `url` and `anonKey`, using its cookie adapter. Both values
+may be supplied directly or through environment variables.
+
+### Provide an application-owned factory
 
 Supabase SSR clients contain request cookie handlers, so a single shared client is unsafe. The
 `instance` option is therefore a factory. Farm calls it for every request and supplies its
@@ -83,7 +91,9 @@ export const auth = supabase({
 ```
 
 The factory can also use the provided `url` and `anonKey` values when those are configured on the
-integration. Do not create the client outside the factory or cache its return value.
+integration. The factory wins when supplied, while routes, pages, OAuth providers, and protection
+remain Farm integration options. Do not create the client outside the factory or cache its return
+value.
 
 ## Routes and methods
 

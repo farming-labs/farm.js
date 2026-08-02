@@ -29,9 +29,30 @@ export const email = resend({
 });
 ```
 
-Pass `instance: new Resend(...)` instead of `apiKey` when the application owns Resend client
-construction. Farm keeps templates, defaults, scheduling, previews, routes, and webhooks unchanged
-while using that exact client.
+## Choose SDK ownership
+
+### Let Farm construct Resend
+
+The example above is the default path. When `instance` is omitted, Farm creates the Resend SDK from
+`apiKey`, supplied directly or through `RESEND_API_KEY`.
+
+### Provide an application-owned instance
+
+```tsx
+import { Resend } from "resend";
+import { resend } from "@farm.js/integrations/email";
+
+const resendClient = new Resend(process.env.RESEND_API_KEY);
+
+export const email = resend({
+  instance: resendClient,
+  defaults: { from: "hello@example.com" },
+  templates,
+});
+```
+
+The instance wins if an API key is also supplied. Templates, defaults, scheduling, previews,
+routes, and webhooks remain integration options in either mode.
 
 ## Send mail
 

@@ -26,7 +26,15 @@ export default defineConfig({
 });
 ```
 
-## Use an existing Unkey client
+## Choose client ownership
+
+### Let Farm construct Unkey
+
+The configuration above is the default path. When `instance` is omitted, Farm creates its Unkey
+client from `rootKey`, `apiId`, `baseUrl`, and an optional custom `fetch`, supplied directly or
+through environment variables where supported.
+
+### Provide an application-owned instance
 
 Use `instance` when client construction belongs to application code or a shared dependency
 container. It takes precedence over credentials passed directly to the integration.
@@ -45,7 +53,7 @@ export const keys = unkey({
 ```
 
 The previous `client` option remains supported as a deprecated alias, making this change
-backward-compatible.
+backward-compatible. Routes and protection settings still belong in `unkey(...)` in either mode.
 
 ## Create and verify keys
 

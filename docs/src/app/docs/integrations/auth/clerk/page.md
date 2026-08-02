@@ -48,11 +48,22 @@ The keys can be omitted from the call when the environment variables are set.
 
 Install `@clerk/react` and `@clerk/backend` in the application. Farm loads the React provider at render time and the backend client inside protected-route middleware.
 
-## Use an existing Clerk instance
+## Choose SDK ownership
+
+### Let Farm construct Clerk
+
+The configuration above is the default path. When `instance` is omitted, Farm lazily creates one
+Clerk backend client from `publishableKey` and `secretKey`. Both values may be passed directly or
+read from the documented environment variables.
+
+### Provide an application-owned instance
 
 Pass a backend client through `instance` to keep Clerk construction and version-specific options in
 application code. The publishable key is still required for `ClerkProvider`; the secret key is not
 required by Farm when the backend instance is supplied.
+
+When both an instance and construction credentials are present, the instance wins. Farm-owned
+options such as `protectedRoutes`, `providerProps`, and sign-in URLs still belong in `clerk(...)`.
 
 ```ts
 import { createClerkClient } from "@clerk/backend";

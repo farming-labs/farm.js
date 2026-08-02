@@ -50,6 +50,31 @@ auth0({
 });
 ```
 
+## Choose route ownership
+
+### Let Farm construct the Auth0 flow
+
+The configuration above is the default path. When `instance` is omitted, Farm constructs the OAuth
+flow from the Auth0 domain, client credentials, session secret, callback settings, and scopes. Farm
+then owns the login, signup, callback, logout, profile, and protected-route behavior.
+
+### Provide application-owned middleware
+
+```ts
+auth0({
+  instance: {
+    matcher: ["/auth(.*)", "/dashboard(.*)"],
+    middleware(request) {
+      return myAuth0Middleware(request);
+    },
+  },
+});
+```
+
+This advanced path accepts a compatible middleware adapter rather than the Auth0 SDK itself. The
+supplied instance wins and Farm only mounts its middleware; it does not create the built-in login,
+callback, logout, or profile routes.
+
 ## Environment variables
 
 | Variable              | Required                  | Purpose                                                                   |
@@ -132,6 +157,7 @@ Only root-relative `returnTo` values are accepted. Invalid or external values fa
 
 | Option                    | Default                | Use                                                                          |
 | ------------------------- | ---------------------- | ---------------------------------------------------------------------------- |
+| `instance`                | None                   | Application-owned middleware adapter; disables the built-in flow.            |
 | `domain`                  | `AUTH0_DOMAIN`         | Auth0 tenant domain.                                                         |
 | `clientId`                | `AUTH0_CLIENT_ID`      | OAuth client ID.                                                             |
 | `clientSecret`            | `AUTH0_CLIENT_SECRET`  | OAuth client secret for confidential clients.                                |
@@ -143,8 +169,6 @@ Only root-relative `returnTo` values are accepted. Invalid or external values fa
 | `scopes`                  | `openid profile email` | Requested OAuth scopes.                                                      |
 | `tokenEndpointAuthMethod` | `auto`                 | `client_secret_basic`, `client_secret_post`, `none`, or automatic selection. |
 | `protectedRoutes`         | None                   | One matcher or a list of matchers.                                           |
-
-Advanced adapters can pass `instance: { middleware, matcher }`. In that mode Farm mounts the supplied middleware and does not create the built-in login, callback, logout, or profile routes.
 
 ## Production checklist
 

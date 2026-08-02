@@ -36,11 +36,36 @@ export const integrations = {
 };
 ```
 
-Pass `instance: new Autumn(...)` instead of `secretKey` when the application owns the Autumn SDK
-configuration. Farm keeps billing, webhook, route, and storage behavior while using that exact
-client.
-
 `AUTUMN_WEBHOOK_SECRET` is read from the environment when webhook routes are configured.
+
+## Choose SDK ownership
+
+### Let Farm construct Autumn
+
+The config-first example is the default path. When `instance` is omitted, Farm creates the Autumn
+SDK from `secretKey` and optional `serverURL`, supplied directly or through environment variables
+where supported.
+
+### Provide an application-owned instance
+
+```ts
+import { Autumn } from "autumn-js";
+import { autumn } from "@farm.js/integrations/autumn";
+
+const autumnClient = new Autumn({
+  secretKey: process.env.AUTUMN_SECRET_KEY,
+});
+
+export const billing = autumn({
+  instance: autumnClient,
+  billing: {
+    resolveOwner: () => null,
+  },
+});
+```
+
+The instance wins if a secret key is also supplied. Billing, webhook, route, product, meter, and
+storage settings remain integration options in either mode.
 
 ## Usage
 

@@ -32,6 +32,8 @@ Farm supports two auth integration styles:
 
 That distinction determines whether you call auth through Farm's generated `api` clients or through the provider's native SDK.
 
+SDK construction is a separate choice. WorkOS, Supabase, and Clerk can construct their SDK client from integration options or documented environment variables when `instance` is omitted; pass `instance` when the application should construct and own that client instead. An injected instance always wins over constructor options. Auth.js and Better Auth require an application-owned instance because their providers, adapters, callbacks, and plugins are application-specific. Auth0's optional `instance` is a middleware adapter for mounting an existing auth implementation, not an Auth0 SDK client.
+
 ## Choose by ownership
 
 | Provider                                           | Farm owns                                                                                                   | Your app or provider owns                                          |

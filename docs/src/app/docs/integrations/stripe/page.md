@@ -38,9 +38,32 @@ export const integrations = {
 };
 ```
 
-Pass `instance: new Stripe(...)` instead of `secretKey` when the application needs to own Stripe
-SDK construction, retries, telemetry, or API-version settings. Farm uses the supplied instance
-directly; webhook and billing configuration remain integration options.
+## Choose SDK ownership
+
+### Let Farm construct Stripe
+
+The config-first example is the default path. When `instance` is omitted, Farm creates the Stripe
+SDK from `secretKey`, supplied directly or through `STRIPE_SECRET_KEY`.
+
+### Provide an application-owned instance
+
+```ts
+import Stripe from "stripe";
+import { stripe } from "@farm.js/integrations/stripe";
+
+const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!, {
+  maxNetworkRetries: 2,
+});
+
+export const billing = stripe({
+  instance: stripeClient,
+  webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
+});
+```
+
+Use this path when the application needs to own retries, telemetry, API-version settings, or a
+compatible test adapter. The instance wins if a secret key is also supplied. Webhook, product,
+billing, route, and storage settings remain integration options in either mode.
 
 ## Usage
 
