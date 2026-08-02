@@ -14,6 +14,16 @@ Use either top-level `auth` or `integrations.auth`, not both. They are alternati
 
 For a complete application-owned example, use the [Farm.js Better Auth Starter](https://github.com/farming-labs/farmjs-better-auth-starter). It keeps the Better Auth instance, database adapter, native client, and extension points explicit.
 
+## SDK ownership
+
+Better Auth is application-owned only. Farm cannot construct it from a small credential set because
+the database, adapters, providers, plugins, callbacks, migrations, and cookie behavior are part of
+the application's auth design. Create the Better Auth object in application code and pass it through
+`instance`; Farm owns only catch-all route mounting and integration logging.
+
+For a Farm-constructed alternative, use top-level [Farm Auth](/docs/auth). Do not configure both
+ownership models in the same application.
+
 ## Add Better Auth
 
 **Terminal**

@@ -108,6 +108,9 @@ export default defineConfig({
 
 The `cloudflare-module` preset is required when Farm and the Agent runtime share one Worker. During `farm dev`, Farm starts Wrangler on an available loopback port and proxies `/agents` with WebSocket upgrades enabled.
 
+This is the Farm-managed path: omit `origin` and pass `config`, `environment`, and `dev` options.
+Farm starts Wrangler and composes the Worker from that configuration.
+
 ## Connect from React
 
 **src/app/page.tsx**
@@ -185,6 +188,10 @@ agent: cfAgent({
 ```
 
 `CF_AGENT_ORIGIN` is also read automatically. With an external origin, Farm keeps the public route prefix but skips combined Worker generation.
+
+Cloudflare Agents run in a Worker rather than as an in-process SDK, so `origin` is the equivalent
+injection boundary. Supplying it selects the application-owned Worker path and takes precedence over
+managed startup. The application still owns the Agent class and bindings in both modes.
 
 ## Options
 

@@ -26,10 +26,51 @@ import { polar } from "@farm.js/integrations/polar";
 export const integrations = {
   billing: polar({
     accessToken: process.env.POLAR_ACCESS_TOKEN,
-    webhookSecret: process.env.POLAR_WEBHOOK_SECRET,
+    billing: {
+      resolveOwner(ctx) {
+        const userId = ctx.req.get<string>("user.id");
+        return userId ? { id: userId, kind: "user" } : null;
+      },
+    },
   }),
 };
 ```
+
+`POLAR_WEBHOOK_SECRET` is read from the environment when webhook routes are configured.
+
+With no `instance`, Farm constructs the Polar SDK from `accessToken` and `server`. The token can be
+passed directly or read from `POLAR_ACCESS_TOKEN`.
+
+## Choose SDK ownership
+
+### Let Farm construct Polar
+
+Use the config-first example above for the common path. Farm owns SDK construction, while the
+application still supplies billing ownership, products, meters, routes, and webhook behavior.
+
+### Provide an application-owned instance
+
+```ts
+import { Polar } from "@polar-sh/sdk";
+import { polar } from "@farm.js/integrations/polar";
+
+const polarClient = new Polar({
+  accessToken: process.env.POLAR_ACCESS_TOKEN!,
+  server: "sandbox",
+});
+
+export const billing = polar({
+  instance: polarClient,
+  server: "sandbox",
+  billing: {
+    resolveOwner: () => null,
+  },
+});
+```
+
+Farm uses the supplied SDK directly, so the integration does not require `accessToken`. `server`
+still describes the integration environment and defaults from `POLAR_SERVER`. When both an instance
+and token are supplied, the instance wins.
 
 ## Usage
 

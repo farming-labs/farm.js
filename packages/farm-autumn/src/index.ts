@@ -258,8 +258,10 @@ export interface AutumnBillingOptions {
   hooks?: AutumnBillingHooks;
 }
 
+export type AutumnIntegrationInstance = AutumnSDK;
+
 export interface AutumnIntegrationInput extends AutumnClientPathOptions {
-  instance?: AutumnSDK;
+  instance?: AutumnIntegrationInstance;
   secretKey?: string;
   serverURL?: string;
   appBaseUrl?: string;

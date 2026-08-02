@@ -38,6 +38,12 @@ export const appIntegrations = {
 } as const;
 ```
 
+## Runtime ownership
+
+Pass Trigger.dev credentials and endpoint configuration to `trigger(...)`; Farm constructs the HTTP
+runtime adapter and calls the existing provider task. Trigger.dev continues to own task deployment
+and execution. There is no in-process Trigger.dev SDK instance to inject into Farm.
+
 ## Environment variables
 
 | Variable                 | Current use                                                                                  |

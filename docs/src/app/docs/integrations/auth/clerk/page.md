@@ -48,6 +48,39 @@ The keys can be omitted from the call when the environment variables are set.
 
 Install `@clerk/react` and `@clerk/backend` in the application. Farm loads the React provider at render time and the backend client inside protected-route middleware.
 
+## Choose SDK ownership
+
+### Let Farm construct Clerk
+
+The configuration above is the default path. When `instance` is omitted, Farm lazily creates one
+Clerk backend client from `publishableKey` and `secretKey`. Both values may be passed directly or
+read from the documented environment variables.
+
+### Provide an application-owned instance
+
+Pass a backend client through `instance` to keep Clerk construction and version-specific options in
+application code. The publishable key is still required for `ClerkProvider`; the secret key is not
+required by Farm when the backend instance is supplied.
+
+When both an instance and construction credentials are present, the instance wins. Farm-owned
+options such as `protectedRoutes`, `providerProps`, and sign-in URLs still belong in `clerk(...)`.
+
+```ts
+import { createClerkClient } from "@clerk/backend";
+import { clerk } from "@farm.js/integrations/clerk";
+
+const clerkClient = createClerkClient({
+  secretKey: process.env.CLERK_SECRET_KEY,
+  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+});
+
+export const auth = clerk({
+  instance: clerkClient,
+  publishableKey: process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY,
+  protectedRoutes: ["/dashboard(.*)"],
+});
+```
+
 ## Create sign-in and sign-up pages
 
 `signInUrl` and `signUpUrl` tell Farm where your Clerk pages live. They do not create those pages.
@@ -143,8 +176,9 @@ clerk({
 
 | Option              | Default                   | Use                                               |
 | ------------------- | ------------------------- | ------------------------------------------------- |
+| `instance`          | None                      | Existing Clerk backend client.                    |
 | `publishableKey`    | Clerk publishable key env | Client-safe Clerk key.                            |
-| `secretKey`         | `CLERK_SECRET_KEY`        | Server Clerk key.                                 |
+| `secretKey`         | `CLERK_SECRET_KEY`        | Server Clerk key when no instance is supplied.    |
 | `signInUrl`         | `/sign-in`                | App-owned Clerk sign-in page.                     |
 | `signUpUrl`         | `/sign-up`                | App-owned Clerk sign-up page.                     |
 | `protectedRoutes`   | None                      | One matcher or a list of matchers.                |

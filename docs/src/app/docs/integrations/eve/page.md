@@ -40,6 +40,9 @@ export default defineConfig({
 
 The key `agent` is a convention and can be renamed. During `farm dev`, Farm starts Eve on an available loopback port and exposes its `/eve` and `/.well-known/workflow` routes through the Farm origin.
 
+This is the Farm-managed path: omit `origin` and pass runtime options such as `root`, `dev`, and
+`vercel` to the integration. Farm starts or composes the Eve service from that configuration.
+
 ## Define the agent
 
 An instructions file is enough for the first agent. Keep the Eve directory at `agent/` in the Farm project root.
@@ -119,6 +122,11 @@ agent: eve({
 ```
 
 `EVE_BASE_URL` is also read automatically when `origin` is omitted.
+
+Eve runs as a separate service rather than an in-process SDK, so `origin` is the equivalent of an
+`instance` option. Supplying it selects the application-owned runtime path and takes precedence over
+managed startup. The application continues to own Eve's agent and model configuration in both
+modes.
 
 ## Options
 

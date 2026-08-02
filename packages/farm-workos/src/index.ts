@@ -14,6 +14,8 @@ import type { WorkOSRedirectQuery, WorkOSRedirectResult, WorkOSSessionResult } f
 import { workosClient } from "./client.js";
 
 export interface WorkOSIntegrationInput {
+  /** Existing WorkOS SDK instance. When provided, Farm does not construct its own client. */
+  instance?: WorkOSIntegrationInstance;
   clientId?: string;
   apiKey?: string;
   cookiePassword?: string;
@@ -27,11 +29,13 @@ export interface WorkOSIntegrationInput {
   log?: FarmIntegrationLogger;
 }
 
+export type WorkOSIntegrationInstance = WorkOS;
+
 const DEV_COOKIE_PASSWORD = "farmjs-workos-cookie-password-development-2026";
 
 interface ResolvedWorkOSConfig {
   clientId: string;
-  apiKey: string;
+  apiKey?: string;
   cookiePassword: string;
 }
 
@@ -62,7 +66,7 @@ function createWorkOSApi(input: {
 }
 
 function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
-  const clientId = input.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
+  const clientId = input.instance?.clientId ?? input.clientId ?? process.env.WORKOS_CLIENT_ID ?? "";
   const apiKey = input.apiKey ?? process.env.WORKOS_API_KEY ?? "";
   const cookiePassword =
     input.cookiePassword ??
@@ -70,8 +74,10 @@ function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
     process.env.FARM_WORKOS_COOKIE_PASSWORD ??
     (process.env.NODE_ENV === "production" ? "" : DEV_COOKIE_PASSWORD);
 
-  if (!clientId || !apiKey) {
-    throw new Error("WorkOS integration requires WORKOS_CLIENT_ID and WORKOS_API_KEY.");
+  if (!clientId || (!input.instance && !apiKey)) {
+    throw new Error(
+      "WorkOS integration requires a client ID and either a WorkOS instance or WORKOS_API_KEY.",
+    );
   }
 
   if (!cookiePassword) {
@@ -80,13 +86,13 @@ function resolveEnv(input: WorkOSIntegrationInput): ResolvedWorkOSConfig {
 
   return {
     clientId,
-    apiKey,
+    apiKey: apiKey || undefined,
     cookiePassword,
   };
 }
 
 async function getSession(
-  workos: WorkOS,
+  workos: WorkOSIntegrationInstance,
   request: Request,
   cookieName: string,
   cookiePassword: string,
@@ -122,10 +128,12 @@ export function workos(input: WorkOSIntegrationInput = {}) {
   const logoutPath = input.logoutPath ?? "/logout";
   const sessionPath = input.sessionPath ?? "/auth/session";
 
-  const workos = new WorkOS({
-    apiKey,
-    clientId,
-  });
+  const workos =
+    input.instance ??
+    new WorkOS({
+      apiKey,
+      clientId,
+    });
 
   async function redirectToAuth(request: Request, screenHint: "sign-in" | "sign-up") {
     const requestUrl = new URL(request.url);
@@ -164,7 +172,9 @@ export function workos(input: WorkOSIntegrationInput = {}) {
         apiKey,
         cookiePassword,
       },
-      required: ["clientId", "apiKey", "cookiePassword"],
+      required: input.instance
+        ? ["clientId", "cookiePassword"]
+        : ["clientId", "apiKey", "cookiePassword"],
     }),
     api: createWorkOSApi({
       loginPath,

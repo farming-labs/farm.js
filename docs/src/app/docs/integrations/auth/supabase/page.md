@@ -57,6 +57,44 @@ Farm accepts the standard Supabase URL plus any of these anonymous or publishabl
 
 Keep service-role credentials in separate server code that performs administrative operations. Do not expose them to auth pages or pass them to `supabase(...)`.
 
+## Choose client ownership
+
+### Let Farm construct Supabase
+
+The configuration above is the default path. When `instance` is omitted, Farm creates a fresh
+Supabase SSR client for every request from `url` and `anonKey`, using its cookie adapter. Both values
+may be supplied directly or through environment variables.
+
+### Provide an application-owned factory
+
+Supabase SSR clients contain request cookie handlers, so a single shared client is unsafe. The
+`instance` option is therefore a factory. Farm calls it for every request and supplies its
+cookie-aware `options`; keep those options when adding custom fetch, headers, or other SDK settings.
+
+```ts
+import { supabase } from "@farm.js/integrations/supabase";
+
+export const auth = supabase({
+  instance: ({ createClient, options }) =>
+    createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_ANON_KEY!, {
+      ...options,
+      global: {
+        ...options.global,
+        headers: {
+          ...options.global?.headers,
+          "x-application-name": "farm-dashboard",
+        },
+      },
+    }),
+  protectedRoutes: ["/dashboard(.*)"],
+});
+```
+
+The factory can also use the provided `url` and `anonKey` values when those are configured on the
+integration. The factory wins when supplied, while routes, pages, OAuth providers, and protection
+remain Farm integration options. Do not create the client outside the factory or cache its return
+value.
+
 ## Routes and methods
 
 | Method        | Default route    | Purpose                                                           |
@@ -156,6 +194,7 @@ The middleware checks the current Supabase cookie session. Signed-out requests r
 
 | Option            | Default                       | Use                                          |
 | ----------------- | ----------------------------- | -------------------------------------------- |
+| `instance`        | None                          | Request-scoped Supabase client factory.      |
 | `url`             | Supabase URL env              | Project URL.                                 |
 | `anonKey`         | Anonymous/publishable key env | Browser-safe project key.                    |
 | `appBaseUrl`      | `APP_BASE_URL`                | Public app origin.                           |

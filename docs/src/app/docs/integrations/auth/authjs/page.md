@@ -10,6 +10,16 @@ Use this adapter when Auth.js should own providers, callbacks, cookies, and sess
 
 Farm creates the catch-all route. It does not reimplement Auth.js or generate a separate Farm auth client.
 
+## SDK ownership
+
+Auth.js is application-owned only. Farm cannot safely construct it from a small credential set
+because providers, adapters, callbacks, cookies, events, and session behavior are application
+decisions. Create the Auth.js object in application code and pass it through `instance`; Farm owns
+only catch-all route mounting and integration logging.
+
+There is intentionally no Farm-constructed fallback for this adapter. Applications wanting a
+Farm-owned configuration path can use [Farm Auth](/docs/auth) instead.
+
 ## Add Auth.js
 
 **Terminal**
