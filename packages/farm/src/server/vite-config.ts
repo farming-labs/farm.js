@@ -1,5 +1,38 @@
 import type { UserConfig as ViteUserConfig } from "vite";
 
+/**
+ * Client runtimes that must be optimized in the same generation as React.
+ * Farm loads route modules dynamically, so Vite's HTML crawl cannot reliably
+ * discover these linked-package entry points before hydration begins.
+ */
+export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
+  "react",
+  "react-dom",
+  "react-dom/client",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+  "@farm.js/core/client",
+  "@farm.js/core/plugin/client",
+  "@farm.js/core/deferred",
+  "@farm.js/core/deployment",
+  "@farm.js/core/i18n/client",
+  "@farm.js/core/query/client",
+  "@farm.js/core/server-fn/client",
+  "@farm.js/core/server-query/client",
+] as const;
+
+export function createFarmClientOptimizeDepsConfig(): ViteUserConfig["optimizeDeps"] {
+  return {
+    // Keep normal application dependency discovery for CJS-only packages, but
+    // seed every Farm browser runtime so React is present in the first crawl.
+    noDiscovery: false,
+    // Waiting for the crawl avoids serving a partial optimizer generation and
+    // then changing browser hashes while hydration is already in progress.
+    holdUntilCrawlEnd: true,
+    include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
+  };
+}
+
 type ViteNoExternal = NonNullable<NonNullable<ViteUserConfig["ssr"]>["noExternal"]>;
 
 function mergeNoExternal(
@@ -18,6 +51,13 @@ export function mergeFarmViteConfig(
   farmConfig: ViteUserConfig,
   userConfig: ViteUserConfig = {},
 ): ViteUserConfig {
+  const noDiscovery = userConfig.optimizeDeps?.noDiscovery ?? farmConfig.optimizeDeps?.noDiscovery;
+  const holdUntilCrawlEnd =
+    userConfig.optimizeDeps?.holdUntilCrawlEnd ??
+    (userConfig.optimizeDeps?.noDiscovery === true
+      ? false
+      : farmConfig.optimizeDeps?.holdUntilCrawlEnd);
+
   return {
     ...farmConfig,
     ...userConfig,
@@ -36,6 +76,8 @@ export function mergeFarmViteConfig(
     optimizeDeps: {
       ...farmConfig.optimizeDeps,
       ...userConfig.optimizeDeps,
+      noDiscovery,
+      holdUntilCrawlEnd,
       include: Array.from(
         new Set([
           ...(farmConfig.optimizeDeps?.include || []),

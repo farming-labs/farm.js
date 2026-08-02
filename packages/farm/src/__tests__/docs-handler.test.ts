@@ -17,6 +17,7 @@ import {
   createFarmDocsLastModifiedManifest,
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
+import { resolveFarmDocsFontAssets } from "../docs/fonts";
 import { farmDocsPixelBorderCss } from "../docs/pixel-border-css";
 
 describe("farmDocsPixelBorderCss", () => {
@@ -304,9 +305,12 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("navigator.clipboard");
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
-    expect(html).toContain('url("/assets/GeistMono-Variable-BNLlm6Cd.woff2") format("woff2")');
-    expect(html).toContain('--font-geist-mono: "Geist Mono"');
-    expect(html).toContain('<link rel="preload" href="/assets/GeistMono-Variable-BNLlm6Cd.woff2"');
+    expect(html).toContain("--font-geist-mono: ui-monospace, monospace");
+    expect(html).not.toContain('font-family: "Geist Sans"');
+    expect(html).not.toContain('font-family: "Geist Mono"');
+    expect(html).not.toContain("/node_modules/geist/");
+    expect(html).not.toContain("/assets/Geist-Variable-CrgPqtmy.woff2");
+    expect(html).not.toContain("/assets/GeistMono-Variable-BNLlm6Cd.woff2");
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
@@ -398,6 +402,43 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
+  });
+
+  it("uses content-fingerprinted Geist assets when the package fonts are available", async () => {
+    const { root, docs } = await createDocsFixture();
+    const sansPath = path.join(
+      root,
+      "node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
+    );
+    const monoPath = path.join(
+      root,
+      "node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
+    );
+    await fs.mkdir(path.dirname(sansPath), { recursive: true });
+    await fs.mkdir(path.dirname(monoPath), { recursive: true });
+    await fs.writeFile(sansPath, "sans-font-fixture");
+    await fs.writeFile(monoPath, "mono-font-fixture");
+
+    const assets = resolveFarmDocsFontAssets(root);
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
+    const response = await handler(new Request("http://farm.test/docs"));
+    const html = (await response?.text()) || "";
+
+    expect(assets).toHaveLength(2);
+    expect(assets.map(({ url }) => url)).toEqual([
+      expect.stringMatching(/^\/assets\/Geist-Variable-h[a-f0-9]{12}\.woff2$/),
+      expect.stringMatching(/^\/assets\/GeistMono-Variable-h[a-f0-9]{12}\.woff2$/),
+    ]);
+    for (const { family, url } of assets) {
+      expect(html).toContain(
+        `<link rel="preload" href="${url}" as="font" type="font/woff2" crossorigin>`,
+      );
+      expect(html).toContain(`font-family: "${family}"`);
+      expect(html).toContain(`src: url("${url}") format("woff2")`);
+    }
+    expect(html).toContain('--font-geist-sans: "Geist Sans"');
+    expect(html).toContain('--font-geist-mono: "Geist Mono"');
+    expect(html).not.toContain("/node_modules/geist/");
   });
 
   it("uses the built-in docs favicon when the project does not provide one", async () => {

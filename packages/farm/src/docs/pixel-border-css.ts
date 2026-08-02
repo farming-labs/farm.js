@@ -38,8 +38,8 @@ export const farmDocsPixelBorderCss = String.raw`
   --scrollbar-thumb-hover: var(--color-fd-ring);
   --scrollbar-track: transparent;
   --radius: 0px;
-  --font-geist-sans: "Geist Sans";
-  --font-geist-mono: "Geist Mono";
+  --font-geist-sans: ui-sans-serif, system-ui, sans-serif;
+  --font-geist-mono: ui-monospace, monospace;
 }
 
 .dark {
@@ -50,28 +50,6 @@ html,
 body,
 #nd-docs-layout {
   background-color: var(--color-fd-background) !important;
-}
-
-@font-face {
-  font-family: "Geist Sans";
-  font-display: block;
-  font-style: normal;
-  font-weight: 100 900;
-  src:
-    local("Geist Sans"),
-    url("/assets/Geist-Variable-CrgPqtmy.woff2") format("woff2"),
-    url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2");
-}
-
-@font-face {
-  font-family: "Geist Mono";
-  font-display: block;
-  font-style: normal;
-  font-weight: 100 900;
-  src:
-    local("Geist Mono"),
-    url("/assets/GeistMono-Variable-BNLlm6Cd.woff2") format("woff2"),
-    url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2");
 }
 
 * {

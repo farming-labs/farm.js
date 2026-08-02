@@ -1,4 +1,4 @@
-import type { ConfigEnv, Plugin, ViteDevServer, HmrContext } from "vite";
+import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
 import { logger, toViteModuleId } from "./utils";
@@ -57,6 +57,8 @@ import { createFarmImageHandler, type FarmImageHandler } from "./image-server";
 import { getFarmI18nClientSnapshot } from "./i18n/server";
 import { localizeFarmPathname } from "./i18n/routing";
 import type { FarmI18nClientSnapshot } from "./i18n/types";
+import { createFarmClientOptimizeDepsConfig } from "./server/vite-config";
+import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -878,11 +880,15 @@ export function farmPlugin(
         }
       };
 
+      const farmDocsFontAssetList = farmDocsDevRuntime
+        ? resolveFarmDocsFontAssets(farmConfig.root)
+        : [];
       const farmDocsHandler = farmDocsDevRuntime
         ? farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
             root: farmConfig.root,
             srcDir: farmConfig.srcDir,
             clientEntry: "/@farm/client.js",
+            fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList),
           })
         : null;
       const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime
@@ -892,27 +898,9 @@ export function farmPlugin(
             docs: farmConfig.docs,
           })
         : null;
-      const farmDocsFontAssets = new Map<string, string>(
-        farmDocsDevRuntime
-          ? [
-              [
-                "/assets/Geist-Variable-CrgPqtmy.woff2",
-                path.join(
-                  farmConfig.root,
-                  "node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2",
-                ),
-              ],
-              [
-                "/assets/GeistMono-Variable-BNLlm6Cd.woff2",
-                path.join(
-                  farmConfig.root,
-                  "node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2",
-                ),
-              ],
-            ]
-          : [],
+      const farmDocsFontAssets = new Map(
+        farmDocsFontAssetList.map(({ url, sourcePath }) => [url, sourcePath]),
       );
-
       // Built-in terminal logging (always enabled in development, independent of logger plugin)
       const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
         try {
@@ -991,11 +979,16 @@ export function farmPlugin(
           }
 
           const farmDocsFontPath = farmDocsFontAssets.get(requestPathname);
-          if (farmDocsFontPath && fs.existsSync(farmDocsFontPath)) {
+          if (
+            (requestMethod === "GET" || requestMethod === "HEAD") &&
+            farmDocsFontPath &&
+            fs.existsSync(farmDocsFontPath)
+          ) {
             res.statusCode = 200;
             res.setHeader("Content-Type", "font/woff2");
             res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
-            fs.createReadStream(farmDocsFontPath).pipe(res);
+            if (requestMethod === "HEAD") res.end();
+            else fs.createReadStream(farmDocsFontPath).pipe(res);
             return;
           }
 
@@ -4138,7 +4131,7 @@ function generateClientManifest(bundle: any): Record<string, any> {
   return manifest;
 }
 
-export async function defineConfig(config: FarmVitePluginOptions = {}) {
+export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<UserConfig> {
   const tailwindcss = (await import("@tailwindcss/vite")).default;
   const appRoot = path.resolve(config.root || process.cwd());
   if (config.extends?.length) {
@@ -4150,7 +4143,6 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     );
     config = layeredConfig;
   }
-
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
     "node:string_decoder":
@@ -4332,13 +4324,11 @@ export async function defineConfig(config: FarmVitePluginOptions = {}) {
     customLogger: farmLogger,
     clearScreen: false,
     optimizeDeps: {
-      include: [
-        "react",
-        "react-dom",
-        "react-dom/client",
-        "react/jsx-runtime",
-        "react/jsx-dev-runtime",
-      ],
+      ...createFarmClientOptimizeDepsConfig(),
+      // Pre-bundle every framework client-runtime entry with React. Without
+      // this, Vite can discover a linked Farm entry after the page has loaded,
+      // regenerate the optimizer browser hash, and leave React DOM holding a
+      // different React module instance from a client component.
       // Exclude server-side packages from browser bundling
       exclude: [
         "@farm.js/core/server",

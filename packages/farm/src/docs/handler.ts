@@ -23,6 +23,11 @@ import {
 } from "@farming-labs/docs";
 import { marked, Renderer } from "marked";
 import { highlight } from "sugar-high";
+import {
+  resolveFarmDocsFontAssets,
+  toFarmDocsPublicFontAssets,
+  type FarmDocsPublicFontAsset,
+} from "./fonts";
 import { resolveFarmDocsPageLastModified } from "./last-modified";
 import { farmDocsPixelBorderCss } from "./pixel-border-css";
 import { generateFarmDocsSearchBootstrapRuntime, isFarmDocsSearchEnabled } from "./search-client";
@@ -32,6 +37,7 @@ export interface FarmDocsHandlerOptions {
   root: string;
   srcDir?: string;
   clientEntry?: string;
+  fontAssets?: readonly FarmDocsPublicFontAsset[];
 }
 
 export interface FarmDocsPage {
@@ -54,9 +60,6 @@ const DOCS_FILE_EXTENSIONS = [".mdx", ".md"];
 const FARM_DOCS_FALLBACK_FAVICON =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='black'/%3E%3Cpath d='M7 8h18v3H10v5h12v3H10v5H7z' fill='white'/%3E%3C/svg%3E";
 const FARM_DOCS_FAVICON_FILES = ["favicon.svg", "favicon.ico", "favicon.png"];
-
-const GEIST_SANS_FONT_URL = "/assets/Geist-Variable-CrgPqtmy.woff2";
-const GEIST_MONO_FONT_URL = "/assets/GeistMono-Variable-BNLlm6Cd.woff2";
 
 function trimSlashes(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
@@ -1629,14 +1632,32 @@ function resolvePixelBorderThemeCss(options: FarmDocsHandlerOptions): string {
   }
 }
 
-function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
+function renderFarmDocsBridgeCss(
+  docs: FarmDocsResolvedConfig,
+  fontAssets: readonly FarmDocsPublicFontAsset[],
+): string {
   const sidebarWidth = getThemeLayoutValue(docs, "sidebarWidth", 320);
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
+  const fontFaces = fontAssets
+    .map(
+      ({ family, url }) =>
+        `@font-face { font-family: "${family}"; src: url("${url}") format("woff2"); font-style: normal; font-weight: 100 900; font-display: swap; }`,
+    )
+    .join("\n");
+  const fontVariables = [
+    fontAssets.some(({ family }) => family === "Geist Sans")
+      ? '--font-geist-sans: "Geist Sans", ui-sans-serif, system-ui, sans-serif;'
+      : "",
+    fontAssets.some(({ family }) => family === "Geist Mono")
+      ? '--font-geist-mono: "Geist Mono", ui-monospace, monospace;'
+      : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const fontCss = fontFaces ? `${fontFaces}\n:root { ${fontVariables} }` : "";
 
   return `
-    @font-face { font-family: "Geist Sans"; src: local("Geist Sans"), url("${GEIST_SANS_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    @font-face { font-family: "Geist Mono"; src: local("Geist Mono"), url("${GEIST_MONO_FONT_URL}") format("woff2"), url("/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2") format("woff2"); font-display: block; font-style: normal; font-weight: 100 900; }
-    :root { color-scheme: dark; --font-geist-sans: "Geist Sans"; --font-geist-mono: "Geist Mono"; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 44px); --fd-docs-font-sans: var(--font-geist-sans, "Geist Sans", var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, "Geist Mono", var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 0px; --fd-sidebar-nested-icon-gap: 0px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
+    :root { color-scheme: dark; --font-geist-sans: ui-sans-serif, system-ui, sans-serif; --font-geist-mono: ui-monospace, monospace; --fd-sidebar-width: ${sidebarWidth}px; --fd-content-width: ${contentWidth}px; --fd-toc-width: 240px; --fd-docs-height: 100vh; --fd-docs-row-1: var(--fd-nav-height, 44px); --fd-docs-font-sans: var(--font-geist-sans, var(--font-sans, system-ui, -apple-system, sans-serif)); --fd-docs-font-mono: var(--font-geist-mono, var(--font-mono, ui-monospace, monospace)); --fd-font-sans: var(--fd-docs-font-sans); --fd-font-mono: var(--fd-docs-font-mono); --fd-pixel-rail-width: 12px; --fd-sidebar-edge: calc(var(--fd-pixel-rail-width) + 18px); --fd-sidebar-guide-x: calc(var(--fd-sidebar-edge) + 16px); --fd-sidebar-link-x: calc(var(--fd-sidebar-guide-x) + 22px); --fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px); --fd-sidebar-branch-gap: 0px; --fd-sidebar-nested-icon-gap: 0px; --fd-sidebar-line-color: color-mix(in srgb, var(--color-fd-border, hsl(0 0% 15%)) 88%, transparent); }
     * { box-sizing: border-box; }
     html { background: var(--color-fd-background, hsl(0 0% 2%)); scroll-padding-top: calc(var(--fd-nav-height, 44px) + 24px); }
     html[data-farm-docs-sidebar="open"], html[data-farm-docs-sidebar="open"] body { overflow: hidden; }
@@ -1820,7 +1841,17 @@ function renderFarmDocsBridgeCss(docs: FarmDocsResolvedConfig): string {
       .sh__line { min-height: 1.6em; }
     }
 ${farmDocsPixelBorderCss}
+${fontCss}
   `;
+}
+
+function renderFarmDocsFontPreloads(fontAssets: readonly FarmDocsPublicFontAsset[]): string {
+  return fontAssets
+    .map(
+      ({ url }) =>
+        `<link rel="preload" href="${escapeAttribute(url)}" as="font" type="font/woff2" crossorigin>`,
+    )
+    .join("\n  ");
 }
 
 function renderPixelDocsHtml(
@@ -1830,6 +1861,7 @@ function renderPixelDocsHtml(
   themeCss: string,
   clientEntry: string,
   faviconHref: string,
+  fontAssets: readonly FarmDocsPublicFontAsset[],
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -1848,11 +1880,10 @@ function renderPixelDocsHtml(
   <meta name="generator" content="@farming-labs/docs via Farm.js">
   <title>${escapeHtml(page.title)}</title>
   ${renderFarmDocsFaviconLink(faviconHref)}
-  <link rel="preload" href="${GEIST_SANS_FONT_URL}" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="${GEIST_MONO_FONT_URL}" as="font" type="font/woff2" crossorigin>
+  ${renderFarmDocsFontPreloads(fontAssets)}
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   <style>${themeCss}
-${renderFarmDocsBridgeCss(docs)}</style>
+${renderFarmDocsBridgeCss(docs, fontAssets)}</style>
   ${searchEnabled ? renderDocsSearchBootstrapScript() : ""}
 </head>
 <body>
@@ -1908,6 +1939,8 @@ export function createFarmDocsHandler(
   options: FarmDocsHandlerOptions,
 ) {
   const faviconHref = resolveFarmDocsFavicon(docs, options);
+  const fontAssets =
+    options.fontAssets ?? toFarmDocsPublicFontAssets(resolveFarmDocsFontAssets(options.root));
 
   return async function handleFarmDocsRequest(request: Request): Promise<Response | null> {
     if (!docs?.enabled || (request.method !== "GET" && request.method !== "HEAD")) return null;
@@ -1947,6 +1980,7 @@ export function createFarmDocsHandler(
         resolvePixelBorderThemeCss(options),
         options.clientEntry || "/farm-client.js",
         faviconHref,
+        fontAssets,
       ),
       {
         status: 200,
