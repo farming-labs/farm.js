@@ -154,9 +154,11 @@ async function finalizeMetadataImageResponse(
   responseHeaders.set("Content-Length", String(body.byteLength));
   responseHeaders.set("X-Content-Type-Options", "nosniff");
 
-  const matchesEntityTag = options.ifNoneMatch
-    ?.split(",")
-    .some((candidate) => candidate.trim().replace(/^W\//, "") === etag);
+  const matchesEntityTag =
+    options.ifNoneMatch?.trim() === "*" ||
+    options.ifNoneMatch
+      ?.split(",")
+      .some((candidate) => candidate.trim().replace(/^W\//, "") === etag);
   if (matchesEntityTag) {
     return new Response(null, { status: 304, headers: responseHeaders });
   }

@@ -58,6 +58,14 @@ describe("generated metadata images", () => {
     );
     expect(notModified.status).toBe(304);
     expect((await notModified.arrayBuffer()).byteLength).toBe(0);
+
+    const wildcardNotModified = await createFarmMetadataImageResponse(
+      <div className="flex h-full w-full bg-black text-white">Farm.js</div>,
+      { size: { width: 120, height: 63 } },
+      { ifNoneMatch: "*" },
+    );
+    expect(wildcardNotModified.status).toBe(304);
+    expect((await wildcardNotModified.arrayBuffer()).byteLength).toBe(0);
   });
 
   it("keeps explicit SVG and Response handlers as escape hatches", async () => {
