@@ -1,12 +1,12 @@
 ---
 title: "Stripe Integration"
-description: "Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and storage-backed billing snapshots."
+description: "Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and database-backed billing snapshots."
 section: "Integrations"
 ---
 
 # Stripe Integration
 
-Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and storage-backed billing snapshots.
+Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and database-backed billing snapshots.
 
 ## Install from the CLI
 
@@ -56,9 +56,9 @@ if (checkout.data?.redirectTo) {
 }
 ```
 
-## Storage-aware billing
+## Database-backed billing
 
-The Stripe integration can use Farm's integration ORM layer through ctx.args.db, so billing snapshot reads and writes can work across Prisma, Drizzle, SQLite SQL, and other farming-labs/orm compatible clients.
+The Stripe integration can use Farm's integration ORM layer through `ctx.args.db`, so relational billing snapshot reads and writes can work across supported database clients. This is database access, not Farm KV storage.
 
 ## What Stripe adds
 
@@ -70,7 +70,7 @@ The Stripe integration can use Farm's integration ORM layer through ctx.args.db,
 | Billing status  | Subscription, trial, seats, cancellation, and plan state.                                   |
 | Entitlements    | Feature, limit, usage, meter, and billing checks.                                           |
 | Webhooks        | Event verification and snapshot updates for checkout and subscription events.               |
-| Storage         | Schema-backed billing account snapshots through `ctx.args.db`.                              |
+| Database        | Schema-backed billing account snapshots through `ctx.args.db`.                              |
 
 ## Common callers
 

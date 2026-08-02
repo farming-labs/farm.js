@@ -1,12 +1,12 @@
 ---
 title: "Configuration"
-description: "Use farm.config.ts as the single project control plane for source paths, integrations, docs, storage, deployment, and framework behavior."
+description: "Use farm.config.ts as the single project control plane for source paths, integrations, docs, KV storage, database clients, deployment, and framework behavior."
 section: "Start"
 ---
 
 # Configuration
 
-Use farm.config.ts as the single project control plane for source paths, integrations, docs, storage, deployment, and framework behavior.
+Use farm.config.ts as the single project control plane for source paths, integrations, docs, KV storage, database clients, deployment, and framework behavior.
 
 ## Define config
 
@@ -87,7 +87,7 @@ mount, and shortcut together.
 | srcDir        | Changing the app source folder from the default src.                              |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
-| storage       | Providing storage clients and mounts for framework and integration code.          |
+| storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client. |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
 | cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
 | i18n          | Configuring locale routes, detection, message catalogs, typing, and direction.    |
@@ -309,7 +309,7 @@ The keys become typed namespaces. `billing` becomes `api.billing`, and `auth` be
 
 ## One-shot migrations
 
-Use `migrations.commands` when the app needs a predictable command before build or deploy. This keeps schema setup close to the storage and integration config without turning the framework into a migration engine.
+Use `migrations.commands` when the app needs a predictable command before build or deploy. This keeps schema setup close to the database and integration config without turning the framework into a migration engine.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -376,7 +376,8 @@ Prefer a CI release or commit identifier when a deployment runs on multiple serv
 ## Production notes
 
 - Keep secrets in environment variables, not committed config.
-- Use `storage.client` when integrations need schema-backed persistence.
+- Use `storage.driver` and `storage.mounts` for KV data read through `getStorage()`.
+- Use a raw object at `storage.client` only when schema-backed integrations need a database client; see [Database and ORM Clients](/docs/integrations/orm-storage).
 - Use `migrations.commands` for schema setup that should be explicit in CI.
 - Use `docs.entry` when the docs runtime should be mounted automatically.
 - Prefer route-level exports such as `dynamic`, `revalidate`, and `ppr` when behavior belongs to one page.

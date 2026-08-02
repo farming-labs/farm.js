@@ -1359,7 +1359,7 @@ function StorageVisual() {
     <FoundationCodeTabsVisual
       id="farm-storage-code"
       tabs={storageCodeTabs}
-      tabsLabel="Farm storage examples"
+      tabsLabel="Farm KV storage examples"
     />
   );
 }
@@ -1643,12 +1643,12 @@ function FoundationGrid() {
         <LayersVisual />
       </FeatureCell>
       <FeatureCell
-        body="Mount SQLite, Redis, S3, or any supported driver once, then reuse the storage layer across server code, middleware, rate limits, and integrations."
+        body="Mount SQLite, Redis, S3, or another key/value driver for caches, settings, counters, idempotency records, and object-backed values."
         className="border-t border-white/12"
         icon={Database}
         index="02.5"
-        label="Storage"
-        title="Storage built into the runtime"
+        label="KV Storage"
+        title="Key/value storage for the runtime"
       >
         <StorageVisual />
       </FeatureCell>
@@ -1848,7 +1848,7 @@ function IntegrationsSection() {
             </h2>
             <p className="mt-5 text-sm leading-6 text-white/48 sm:text-base sm:leading-7">
               Start with built-in Farm Auth, keep full control with Better Auth, then add
-              integrations for billing, email, jobs, storage, agents, API keys, and UI—or connect
+              integrations for billing, email, jobs, KV storage, agents, API keys, and UI—or connect
               your own.
             </p>
             <div className="mt-8 flex flex-wrap items-center gap-2">

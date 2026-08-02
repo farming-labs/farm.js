@@ -1,6 +1,6 @@
 ---
 title: "DevTools and Doctor"
-description: "Inspect Farm's resolved routes, APIs, integrations, storage, schedules, deployment settings, and diagnostics in the browser or terminal."
+description: "Inspect Farm's resolved routes, APIs, integrations, KV storage, schedules, deployment settings, and diagnostics in the browser or terminal."
 section: "Runtime"
 ---
 
@@ -61,7 +61,7 @@ export default defineConfig({
 | Overview | Route, API, middleware, integration, schedule, and diagnostic totals.                                                        |
 | Routes   | Pages, layouts, loading boundaries, error boundaries, source files, and effective runtime controls.                          |
 | API      | Registered methods, paths, source modules, runtime, regions, and maximum duration.                                           |
-| Systems  | Integration routes and middleware, React providers, schema models, request middleware, and storage mounts.                   |
+| Systems  | Integration routes and middleware, React providers, database models, request middleware, and KV mounts.                      |
 | Runtime  | Deployment target, Nitro preset, output directory, cron routes, workflows, layers, feature flags, and environment key names. |
 
 Use the view navigation to move between surfaces. Routes and API endpoints can be filtered by path, method, or source file. Press `/` while one of those views is active to focus its filter. The **Raw** view contains the complete machine-readable snapshot.
@@ -127,7 +127,7 @@ SUMMARY  2 passed / 1 warning / 0 failed / 1 info
 DEVTOOLS http://localhost:3000/__farm/devtools
 ```
 
-When the dev server is not running, or when DevTools is disabled, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manifest, checks the app router and root layout, resolves the deployment target, and inspects storage and cron configuration.
+When the dev server is not running, or when DevTools is disabled, Doctor automatically falls back to project inspection. It loads `farm.config.*`, validates the package manifest, checks the app router and root layout, resolves the deployment target, and inspects KV storage and cron configuration.
 
 ## Target another server
 
@@ -161,9 +161,9 @@ Offline mode checks:
 - The app directory or programmatic router contains page routes.
 - A root layout is available from the app or an extended layer.
 - Deployment target, preset, and output directory resolve.
-- Integrations and storage mounts are visible in config.
+- Integrations and KV mounts are visible in config.
 - Configured cron routes have matching app-directory API route files.
-- Serverless targets do not depend on explicitly configured in-memory root storage.
+- Serverless targets do not depend on explicitly configured in-memory root KV storage.
 
 Live mode is more complete because it sees generated and programmatic API routes, inherited runtime settings, loaded middleware, and discovered workflows after Farm initializes the app.
 
@@ -204,7 +204,7 @@ Common diagnostic codes include:
 | `ROOT_LAYOUT_MISSING`          | The app has no shared root layout.                           |
 | `CRON_ROUTE_MISSING`           | A configured schedule targets an API route Farm cannot find. |
 | `CRON_SECRET_NOT_SET`          | Scheduled production requests do not yet have `CRON_SECRET`. |
-| `EPHEMERAL_PRODUCTION_STORAGE` | A serverless deployment uses in-memory root storage.         |
+| `EPHEMERAL_PRODUCTION_STORAGE` | A serverless deployment uses in-memory root KV storage.      |
 | `ROUTE_RUNTIME_UNRESOLVED`     | Farm could not resolve a page's inherited runtime controls.  |
 | `LIVE_RUNTIME_UNREACHABLE`     | An explicitly selected running app did not answer the probe. |
 

@@ -45,9 +45,9 @@ const checkout = await api.billing.checkout.post({
 });
 ```
 
-## Storage-aware billing
+## Database-backed billing
 
-Polar callbacks can read and write through ctx.args.db, so webhook snapshots, subscription state, and customer entitlement checks share the same storage-agnostic integration layer.
+Polar callbacks can read and write relational records through `ctx.args.db`, so webhook snapshots, subscription state, and customer entitlement checks share the same database-agnostic integration layer. This path is separate from KV storage.
 
 ## What Polar adds
 

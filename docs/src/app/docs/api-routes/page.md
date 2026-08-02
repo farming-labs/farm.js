@@ -322,4 +322,4 @@ caller-specific cache relationships, and handlers can continue calling `invalida
 
 ## When to use integrations instead
 
-Use API routes for app-owned endpoints. Use integrations when a provider or feature needs a package-like surface: config validation, lifecycle hooks, storage schema, middleware, providers, and typed callers bundled together.
+Use API routes for app-owned endpoints. Use integrations when a provider or feature needs a package-like surface: config validation, lifecycle hooks, database schemas, middleware, providers, and typed callers bundled together.

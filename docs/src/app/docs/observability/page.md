@@ -1,12 +1,12 @@
 ---
 title: "Observability"
-description: "Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, storage, cache, PPR, builds, plugins, and errors."
+description: "Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, integration databases, cache, PPR, builds, plugins, and errors."
 section: "Runtime"
 ---
 
 # Observability
 
-Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, storage, cache, PPR, builds, plugins, and errors.
+Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, integration databases, cache, PPR, builds, plugins, and errors.
 
 ## Subscribe to events
 
@@ -24,17 +24,19 @@ onFarmEvent((event) => {
 
 ## Event families
 
-| Family       | Examples                                                                         |
-| ------------ | -------------------------------------------------------------------------------- |
-| Server       | server.start, server.ready, server.shutdown                                      |
-| Routing      | route.discovered, route.matched, route.notFound, route.redirect                  |
-| Rendering    | render.start, render.complete, render.stream.shellReady, render.error            |
-| Cache        | cache.hit, cache.miss, cache.set, cache.revalidateTag                            |
-| PPR          | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated                           |
-| Middleware   | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
-| Integrations | integration.ready, integration.api.call.start, integration.webhook.verified      |
-| Storage      | storage.query.start, storage.schema.ready                                        |
-| Build        | build.start, routes.generated, types.generated, manifest.generated               |
+| Family               | Examples                                                                         |
+| -------------------- | -------------------------------------------------------------------------------- |
+| Server               | server.start, server.ready, server.shutdown                                      |
+| Routing              | route.discovered, route.matched, route.notFound, route.redirect                  |
+| Rendering            | render.start, render.complete, render.stream.shellReady, render.error            |
+| Cache                | cache.hit, cache.miss, cache.set, cache.revalidateTag                            |
+| PPR                  | ppr.shell.hit, ppr.shell.cached, ppr.shell.invalidated                           |
+| Middleware           | middleware.start, middleware.complete, middleware.shortCircuit, middleware.error |
+| Integrations         | integration.ready, integration.api.call.start, integration.webhook.verified      |
+| Integration database | storage.query.start, storage.schema.ready                                        |
+| Build                | build.start, routes.generated, types.generated, manifest.generated               |
+
+The `storage.query.*` and `storage.schema.*` event names are compatibility identifiers for integration database activity. They do not describe `getStorage()` KV operations.
 
 ## Configure in farm.config.ts
 
@@ -76,14 +78,14 @@ unsubscribe();
 
 ## Useful event types
 
-| Area         | Events                                                                                                                                                                                                                             |
-| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cache        | `cache.hit`, `cache.miss`, `cache.set`, `cache.stale`, `cache.bypass`, `cache.invalidated`, `cache.revalidatePath`, `cache.revalidateTag`, `cache.updateTag`, `cache.error`                                                        |
-| PPR          | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error`                                  |
-| API          | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error`                                                                                                                                                  |
-| Integrations | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
-| Middleware   | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error`                                                                                                                                           |
-| Storage      | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error`                                                                                                             |
+| Area                 | Events                                                                                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cache                | `cache.hit`, `cache.miss`, `cache.set`, `cache.stale`, `cache.bypass`, `cache.invalidated`, `cache.revalidatePath`, `cache.revalidateTag`, `cache.updateTag`, `cache.error`                                                        |
+| PPR                  | `ppr.shell.hit`, `ppr.shell.miss`, `ppr.shell.cached`, `ppr.shell.bypass`, `ppr.shell.invalidated`, `ppr.suspense.holeDetected`, `ppr.refresh.start`, `ppr.refresh.complete`, `ppr.refresh.error`                                  |
+| API                  | `api.request.start`, `api.request.complete`, `api.validation.failed`, `api.error`                                                                                                                                                  |
+| Integrations         | `integration.registered`, `integration.config.validated`, `integration.ready`, `integration.disposed`, `integration.api.call.start`, `integration.api.call.complete`, `integration.webhook.verified`, `integration.webhook.failed` |
+| Middleware           | `middleware.start`, `middleware.complete`, `middleware.shortCircuit`, `middleware.error`                                                                                                                                           |
+| Integration database | `storage.query.start`, `storage.query.complete`, `storage.query.error`, `storage.schema.ready`, `storage.schema.error`                                                                                                             |
 
 Middleware events include the matched middleware route, request pathname, middleware file/config name, duration for completes, status for short circuits, and the thrown error for failures.
 

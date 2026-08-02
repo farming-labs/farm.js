@@ -1,12 +1,12 @@
 ---
 title: "Custom Integrations"
-description: "Build a first-class Farm integration with typed APIs, route handlers, lifecycle hooks, config validation, middleware, providers, storage schemas, and runtime logs."
+description: "Build a first-class Farm integration with typed APIs, route handlers, lifecycle hooks, config validation, middleware, providers, database schemas, and runtime logs."
 section: "Integrations"
 ---
 
 # Custom Integrations
 
-Use a custom integration when a service is bigger than a helper function. A good integration owns the contract between the app and the service: config, routes, typed callers, storage, lifecycle checks, request behavior, and any UI/provider setup the app needs.
+Use a custom integration when a service is bigger than a helper function. A good integration owns the contract between the app and the service: config, routes, typed callers, database models, lifecycle checks, request behavior, and any UI/provider setup the app needs.
 
 Farm integrations are declared with `defineIntegration`. They are registered in `farm.config.ts`, then Farm turns them into pre-plugins during config resolution.
 
@@ -394,12 +394,12 @@ export const acme = defineIntegration({
 
 Lifecycle hooks receive the same base context plus the parsed `integrationConfig`, a `log` helper, and cleanup support.
 
-| Hook            | When it runs                             | Use it for                                                                            |
-| --------------- | ---------------------------------------- | ------------------------------------------------------------------------------------- |
-| `validate(ctx)` | During integration init                  | Check API keys, required URLs, config combinations, and app prerequisites.            |
-| `setup(ctx)`    | During integration init after validation | Prepare storage, register webhooks, create queues, warm clients, or schedule cleanup. |
-| `ready(ctx)`    | When the app/plugin manager is ready     | Emit ready logs or start background listeners.                                        |
-| `dispose(ctx)`  | During shutdown                          | Close clients, flush buffers, unregister listeners, or stop workers.                  |
+| Hook            | When it runs                             | Use it for                                                                              |
+| --------------- | ---------------------------------------- | --------------------------------------------------------------------------------------- |
+| `validate(ctx)` | During integration init                  | Check API keys, required URLs, config combinations, and app prerequisites.              |
+| `setup(ctx)`    | During integration init after validation | Prepare databases, register webhooks, create queues, warm clients, or schedule cleanup. |
+| `ready(ctx)`    | When the app/plugin manager is ready     | Emit ready logs or start background listeners.                                          |
+| `dispose(ctx)`  | During shutdown                          | Close clients, flush buffers, unregister listeners, or stop workers.                    |
 
 ```ts
 export const acme = defineIntegration({
@@ -649,7 +649,7 @@ Route handlers, route middleware, and route hooks receive `ctx` with these field
 | `input.query`              | Parsed and validated query, if a query schema exists.                           |
 | `args.db`                  | Lazy ORM client for the integration schema.                                     |
 | `args.getDb()`             | Promise-based ORM client resolver.                                              |
-| `args.storage.getClient()` | Raw `storage.client`, if configured.                                            |
+| `args.storage.getClient()` | Raw integration database client from `storage.client`, if configured.           |
 | `data`                     | Small sanitized metadata from `createIntegrations({ data })` and per-call data. |
 | `integration`              | Category, type, slot alias, and original `instance`.                            |
 | `route`                    | Route kind, path, and methods.                                                  |
@@ -660,9 +660,9 @@ Route handlers, route middleware, and route hooks receive `ctx` with these field
 `ctx.req.set(key, value, { exposeToPage: true })` can expose values to page props. Avoid exposing secrets.
 `ctx.requestContext` remains as a deprecated compatibility alias for existing integrations.
 
-## Storage schema
+## Database schema
 
-Declare `schema` when an integration owns data. Farm maps that schema to the integration ORM so route handlers and lifecycle hooks can use `ctx.args.db`.
+Declare `schema` when an integration owns database records. Farm maps that schema to the integration ORM so route handlers and lifecycle hooks can use `ctx.args.db`. This path is separate from KV mounts read with `getStorage()`.
 
 ```ts
 import { defineIntegration, defineIntegrationSchema, integrationRoute } from "@farm.js/core";
@@ -727,11 +727,11 @@ export const billing = defineIntegration({
 });
 ```
 
-If an integration does not define `schema`, `ctx.args.db` throws. Use `ctx.args.storage.getClient()` when you only need the app's raw storage client.
+If an integration does not define `schema`, `ctx.args.db` throws. Use `ctx.args.storage.getClient()` only when the integration needs the raw database or provider client.
 
-## Storage config
+## Database client config
 
-The app supplies the storage client once:
+The app supplies the integration database client once. `storage.client` is the current beta config name; a raw database object here is not returned by `getStorage()` and does not configure a KV mount:
 
 **farm.config.ts**
 
@@ -752,7 +752,7 @@ export default defineConfig({
 });
 ```
 
-The integration code still uses `ctx.args.db`, not SQLite-specific APIs. If the app later switches to another supported client, the integration surface stays the same.
+The integration code still uses `ctx.args.db`, not SQLite-specific APIs. If the app later switches to another supported client, the integration surface stays the same. See [Database and ORM Clients](/docs/integrations/orm-storage) for PostgreSQL, direct application ORM use, and adapter-owned databases.
 
 ## Providers
 
@@ -848,6 +848,6 @@ export const { api, apiClient } = createIntegrations({
 - Define a stable `category` and `type`.
 - Keep app namespace keys predictable in `farm.config.ts`.
 - Add integration tests for valid input, invalid input, middleware short-circuiting, hooks, and client caller inference.
-- Add storage tests with real data when `schema` is present.
+- Add database tests with real data when `schema` is present.
 - Log enough request metadata to debug failures without logging secrets.
-- Document env vars, route paths, API callers, and storage models for app teams.
+- Document env vars, route paths, API callers, and database models for app teams.

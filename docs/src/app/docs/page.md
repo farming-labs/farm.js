@@ -13,7 +13,7 @@ Create an app and learn the files that matter.
 
 - [Getting Started](/docs/getting-started): Create a Farm.js app, understand the files that matter, and run the development server.
 - [Project Structure](/docs/project-structure): The compact file layout Farm expects, plus the optional files you add only when the app needs them.
-- [Configuration](/docs/configuration): Use farm.config.ts as the single project control plane for source paths, integrations, docs, storage, deployment, and framework behavior.
+- [Configuration](/docs/configuration): Use farm.config.ts as the single project control plane for source paths, integrations, docs, KV storage, database clients, deployment, and framework behavior.
 
 ### Core
 
@@ -29,28 +29,28 @@ Routes, rendering, layouts, and request flow.
 
 ### Data and APIs
 
-Typed params, API routes, API callers, and storage.
+Typed params, API routes, API callers, KV storage, and database access.
 
 - [Query and Params](/docs/query): Parse search params and route params with typed helpers on the server and synchronized state on the client.
 - [API Routes](/docs/api-routes): Expose HTTP handlers from src/app/api and validate input with schemas before handler code runs.
 - [API Client](/docs/api-client): Call app API routes with api.hello.get style inference, cache policies, invalidation, retries, callbacks, and optimistic updates.
 - [Server Queries](/docs/server-queries): Define typed server reads once, deduplicate requests, prefetch browser data, use SWR, and share invalidation keys with routes and APIs.
-- [Storage](/docs/storage): Use Farm storage clients for key-value data and pass storage clients to framework features and integrations.
+- [KV Storage](/docs/storage): Use `getStorage()` for caches, settings, counters, idempotency records, and object-backed values.
 
 ### Integrations
 
 Provider integrations and custom integration contracts.
 
-- [Integrations](/docs/integrations): Register services once, get owned routes, typed callers, providers, middleware, storage access, lifecycle hooks, and validation.
-- [Stripe Integration](/docs/integrations/stripe): Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and storage-backed billing snapshots.
-- [Autumn Integration](/docs/integrations/autumn): Add subscription, entitlement, and usage billing while keeping Farm's integration API and storage layer.
+- [Integrations](/docs/integrations): Register services once, get owned routes, typed callers, providers, middleware, database models, lifecycle hooks, and validation.
+- [Stripe Integration](/docs/integrations/stripe): Add checkout, portal sessions, billing status, webhooks, product catalogs, metering, and database-backed billing snapshots.
+- [Autumn Integration](/docs/integrations/autumn): Add subscription, entitlement, and usage billing with schema-backed database records through the integration ORM.
 - [Polar Integration](/docs/integrations/polar): Use Polar for products, checkout, customer portals, subscriptions, webhooks, and entitlement-aware app flows.
 - [Auth Integrations](/docs/integrations/auth): Choose built-in Farm Auth or an explicit Better Auth, Auth.js, Clerk, Auth0, WorkOS, or Supabase integration.
 - [Email Integration](/docs/integrations/email): Render React Email templates, send with Resend, schedule messages, preview templates, and receive webhooks.
 - [Jobs Integration](/docs/integrations/jobs): Define typed tasks once and run them through Trigger.dev or Inngest with trigger, schedule, batch, status, and cancel APIs.
 - [Unkey Integration](/docs/integrations/unkey): Create, verify, revoke, update, and delete API keys, plus protect routes with key verification and rate-limit checks.
 - [UI Registry](/docs/integrations/ui-registry): Opt into shadcn-style UI scaffolds for built-in integrations when you want working screens with the integration setup.
-- [ORM Storage for Integrations](/docs/integrations/orm-storage): Pass one storage client through farm.config.ts and let integrations use ctx.args.db through the unified farming-labs/orm-style API.
+- [Database and ORM Clients](/docs/integrations/orm-storage): Use application-owned ORM models, schema-backed integration databases, and adapter-owned data without confusing them with KV storage.
 
 ### Runtime
 
@@ -58,7 +58,7 @@ Cache, PPR, observability, instant preview, and deployment output.
 
 - [Post-response Work](/docs/after): Schedule short server work with after() without delaying the response.
 - [Cache and PPR](/docs/cache-ppr): Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation, and static shell caching for PPR pages.
-- [Observability](/docs/observability): Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, storage, cache, PPR, builds, plugins, and errors.
+- [Observability](/docs/observability): Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, integration databases, cache, PPR, builds, plugins, and errors.
 - [DevTools and Doctor](/docs/devtools): Inspect the resolved app runtime in the browser and run the same diagnostics from the terminal or CI.
 - [Cron](/docs/cron): Map portable UTC schedules to ordinary API routes, run them locally, and compile them to deployment-native triggers.
 - [Instant Preview](/docs/preview): Expose the current local app through a public URL for sharing, webhooks, OAuth callbacks, and external testing.

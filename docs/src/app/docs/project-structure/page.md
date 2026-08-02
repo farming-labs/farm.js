@@ -27,14 +27,14 @@ my-app/
 
 ## Common folders
 
-| Path           | Purpose                                                          |
-| -------------- | ---------------------------------------------------------------- |
-| src/app        | Pages, nested layouts, API routes, route boundaries, middleware. |
-| src/lib        | Shared server and client utilities.                              |
-| src/components | Reusable UI and client components.                               |
-| layers         | Optional local Farm layers consumed through `extends`.           |
-| src/farm.d.ts  | Generated project types for routes, env, and i18n.               |
-| farm.config.ts | Framework config, integrations, docs, storage, deployment.       |
+| Path           | Purpose                                                                  |
+| -------------- | ------------------------------------------------------------------------ |
+| src/app        | Pages, nested layouts, API routes, route boundaries, middleware.         |
+| src/lib        | Shared server and client utilities.                                      |
+| src/components | Reusable UI and client components.                                       |
+| layers         | Optional local Farm layers consumed through `extends`.                   |
+| src/farm.d.ts  | Generated project types for routes, env, and i18n.                       |
+| farm.config.ts | Framework config, integrations, docs, KV storage, databases, deployment. |
 
 ## Optional files stay optional
 

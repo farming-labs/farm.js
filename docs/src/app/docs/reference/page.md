@@ -19,7 +19,7 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/headers       | Next-compatible request headers and cookies helpers.                                 |
 | @farm.js/core/router        | Lightweight route matching, href building, and active-route checks.                  |
 | @farm.js/core/query         | Query and route param types.                                                         |
-| @farm.js/core/storage       | Storage clients and mount helpers.                                                   |
+| @farm.js/core/storage       | Key/value clients, drivers, mounts, and `getStorage()`.                              |
 | @farm.js/core/cache         | Data cache, revalidation, cache keys.                                                |
 | @farm.js/cache-redis        | Distributed Redis cache, tag versions, and regeneration leases.                      |
 | @farm.js/core/after         | Post-response server work with `after()`.                                            |
@@ -31,7 +31,7 @@ A compact map of the main package exports and where to learn more.
 1. Start with Getting Started and Project Structure.
 2. Read Routing, Layouts, and Rendering Model.
 3. Add API Routes, API Client, and Query.
-4. Choose integrations and storage once your product needs them.
+4. Choose integrations, KV storage, and database ownership once your product needs them.
 5. Finish with Deployment, Observability, and Reference.
 
 ## Integration exports
@@ -64,5 +64,7 @@ A compact map of the main package exports and where to learn more.
 - API clients are typed callers for app routes.
 - Integrations are provider or feature packages that can own routes, callers, schemas, providers, config, and lifecycle.
 - Plugins are framework-level hooks for server requests, rendering, builds, browser hydration, navigation, and runtime behavior.
-- Storage is the shared place to pass key/value stores and runtime database clients.
+- KV storage uses `getStorage()` for values addressed by string keys.
+- Application models use an application-owned ORM; schema-backed integrations use `ctx.args.db`.
+- The current beta `storage.client` config name also accepts a raw integration database client, but that client is not a KV mount.
 - Cron maps a UTC schedule to an app-owned GET API route; it does not add durable workflow state.
