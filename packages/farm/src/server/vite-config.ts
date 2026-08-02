@@ -34,7 +34,7 @@ export function createFarmClientOptimizeDepsEntries(
   return appDirectories.map((appDirectory) => {
     const relativeAppDirectory = path
       .relative(resolvedProjectRoot, path.resolve(appDirectory))
-      .replaceAll("\\", "/");
+      .replace(/\\/g, "/");
     const prefix = relativeAppDirectory || ".";
     return `${prefix}/${FARM_CLIENT_ENTRY_PATTERN}`;
   });
