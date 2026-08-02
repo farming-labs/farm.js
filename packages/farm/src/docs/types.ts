@@ -14,6 +14,28 @@ export interface FarmDocsNavigationConfig {
   sidebar?: FarmDocsSidebarItem[];
 }
 
+export interface FarmDocsSocialImageConfig {
+  /** Generate a page-specific 1200×630 social image. Defaults to true. */
+  enabled?: boolean;
+  /** Absolute public origin used in social metadata, e.g. https://example.com. */
+  baseUrl?: string;
+  /** Site name shown in Open Graph metadata. Defaults to the docs navigation title. */
+  siteName?: string;
+  /** Short brand label drawn in the image header. Defaults to siteName. */
+  brand?: string;
+  /** Optional WOFF2 URLs or data URLs embedded into the generated SVG. */
+  fonts?: FarmDocsSocialImageFonts;
+}
+
+export interface FarmDocsSocialImageFonts {
+  /** Display face used for page titles. */
+  display?: string;
+  /** Sans-serif face used for descriptions. */
+  sans?: string;
+  /** Monospace face used for labels, routes, and diagrams. */
+  mono?: string;
+}
+
 export type FarmDocsRuntimeConfig = Partial<DocsConfig> & {
   /**
    * Public favicon URL used by the standalone docs renderer.
@@ -25,6 +47,11 @@ export type FarmDocsRuntimeConfig = Partial<DocsConfig> & {
    * Icon values reference keys from `icons`.
    */
   navigation?: FarmDocsNavigationConfig;
+  /**
+   * Automatic page-specific Open Graph and X images for Markdown docs.
+   * Enabled by default. Set false to opt out for the complete docs tree.
+   */
+  socialImage?: boolean | FarmDocsSocialImageConfig;
 };
 
 export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {

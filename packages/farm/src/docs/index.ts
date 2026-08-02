@@ -21,6 +21,8 @@ export type {
   FarmDocsConfigInput,
   FarmDocsNavigationConfig,
   FarmDocsResolvedConfig,
+  FarmDocsSocialImageConfig,
+  FarmDocsSocialImageFonts,
   FarmDocsSidebarItem,
   FarmDocsUserConfig,
 } from "./types";

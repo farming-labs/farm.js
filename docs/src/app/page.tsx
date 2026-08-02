@@ -74,6 +74,7 @@ const homepageDescription =
   "Farm.js is the framework for modern integrated apps, unifying routing, typed APIs, middleware, integrations, docs, and deployment.";
 
 export const metadata = {
+  metadataBase: "https://farmjs.dev",
   title: homepageTitle,
   description: homepageDescription,
   openGraph: {
@@ -84,9 +85,10 @@ export const metadata = {
     type: "website",
   },
   twitter: {
-    card: "summary",
+    card: "summary_large_image",
     title: homepageTitle,
     description: homepageDescription,
+    images: ["/opengraph-image"],
   },
 } satisfies Metadata;
 
