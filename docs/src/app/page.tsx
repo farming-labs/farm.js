@@ -350,12 +350,11 @@ const integrationCodeTabs = [
     id: "integrations",
     label: "farm.config.ts",
     language: "ts",
-    highlightLines: [5, 7, 8, 9, 10, 11],
+    highlightLines: [5, 6, 7, 8, 9, 10],
     code: `import { defineConfig } from "@farm.js/core";
 import { resend, stripe } from "@farm.js/integrations";
 import { emailTemplates } from "./email";
 export default defineConfig({
-    auth: true,
     integrations: {
         billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }),
         email: resend({
@@ -366,15 +365,23 @@ export default defineConfig({
 });`,
   },
   {
-    id: "config",
-    label: "Server and client APIs",
+    id: "apis",
+    label: "Billing and email APIs",
     language: "ts",
-    highlightLines: [2, 5],
-    code: `import { auth } from "@farm.js/auth/server";
-const user = await auth.user({ required: true });
+    highlightLines: [3, 7, 9],
+    code: `import { api, apiClient } from "@/lib/api";
 
-import { useAuth } from "@farm.js/auth/client";
-const { user, signIn, signOut } = useAuth();`,
+const checkout = await apiClient.billing.checkout.post({
+    body: { productId: "pro" },
+});
+
+await api.email.send.post({
+    body: {
+        template: "welcome",
+        to: "ada@example.com",
+        data: { name: "Ada" },
+    },
+});`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
 
@@ -1120,11 +1127,11 @@ function DeveloperExperienceGrid() {
         <TypedApiVisual />
       </FeatureCell>
       <FeatureCell
-        body="Enable Farm Auth with one config key, then add billing, email, jobs, storage, docs, and agent runtimes through integrations."
+        body="Configure billing and email once, then use their typed APIs from client and server code."
         className="border-t border-white/12"
         icon={Plug}
         index="01.3"
-        label="Auth + integrations"
+        label="Billing + email"
         title="Start built in. Extend when needed."
       >
         <IntegrationVisual />
