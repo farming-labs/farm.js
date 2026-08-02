@@ -1,12 +1,12 @@
 ---
 title: "Integrations"
-description: "Register services once, get owned routes, typed callers, agent runtimes, providers, middleware, storage access, lifecycle hooks, and validation."
+description: "Register services once, get owned routes, typed callers, agent runtimes, providers, middleware, database models, lifecycle hooks, and validation."
 section: "Integrations"
 ---
 
 # Integrations
 
-Integrations are the Farm layer for connecting product services to your app. A payment provider, auth system, email service, job runner, API-key platform, UI registry, or internal company SDK can register everything it owns in one place: route handlers, typed client/server callers, request middleware, React providers, storage schemas, lifecycle hooks, and runtime logs.
+Integrations are the Farm layer for connecting product services to your app. A payment provider, auth system, email service, job runner, API-key platform, UI registry, or internal company SDK can register everything it owns in one place: route handlers, typed client/server callers, request middleware, React providers, database schemas, lifecycle hooks, and runtime logs.
 
 Farm treats every integration as a small server plugin. That means an integration can participate in framework startup and shutdown, own HTTP routes, and still expose a compact typed API to the rest of the app.
 
@@ -87,10 +87,10 @@ Other integration fields are independent of that HTTP choice:
 | --------------------- | --------------------------------------------------------------------------------------------------- |
 | `middleware`          | Integration-owned request behavior for matchers outside a single endpoint.                          |
 | `providers`           | React provider metadata and optional wrapper components.                                            |
-| `schema`              | Storage models used by `ctx.args.db` through the ORM layer.                                         |
+| `schema`              | Database models used by `ctx.args.db` through the integration ORM.                                  |
 | `config`              | Schema-validated config from defaults, env, input, and resolver output.                             |
 | `validate`            | Early checks before the integration starts.                                                         |
-| `setup`               | Bootstrapping work such as storage checks or webhook registration.                                  |
+| `setup`               | Bootstrapping work such as database checks or webhook registration.                                 |
 | `ready`               | Post-start work once the app is ready.                                                              |
 | `dispose`             | Shutdown cleanup.                                                                                   |
 | `log`                 | Runtime events for registration, request start, request end, request error, and lifecycle messages. |
@@ -101,7 +101,7 @@ Other integration fields are independent of that HTTP choice:
 
 Integration handlers declared through either `routes` or `endpoints` use the same web primitives as
 normal route handlers. The handler receives the `Request` and a context object with params, parsed
-input, request metadata, shared request context, integration metadata, and `args` for storage.
+input, request metadata, shared request context, integration metadata, and `args` for database access.
 
 **src/integrations/local-demo.ts**
 
@@ -265,7 +265,7 @@ The route reads that value from `ctx.data`. Browser-provided data is client cont
 | Agents    | Eve and Cloudflare Agents run beside Farm in development and compose with supported deployment targets.                  |
 | API Keys  | Unkey can create, verify, revoke, update, and delete customer or service keys.                                           |
 | Interface | UI registry entries scaffold shadcn-style integration screens when `--ui` is enabled.                                    |
-| Storage   | ORM storage gives schema-backed integrations a provider-neutral `ctx.args.db`.                                           |
+| Database  | Integration schemas give database-backed integrations a provider-neutral `ctx.args.db`.                                  |
 
 ## When to build your own
 
@@ -274,7 +274,7 @@ Create a custom integration when a service needs one or more of these:
 - Routes or webhooks that should be mounted automatically.
 - Typed client/server functions that should not be hand-written in each app.
 - Config validation that should fail during startup.
-- Storage models shared by routes, hooks, and built-in UI.
+- Database models shared by routes, hooks, and built-in UI.
 - Request middleware that belongs to the service.
 - Setup or teardown work such as webhook registration, queue consumers, or health checks.
 

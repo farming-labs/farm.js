@@ -1,6 +1,6 @@
 ---
 title: "Better Auth Integration"
-description: "Mount a Better Auth instance in Farm and use its native client, storage, methods, and plugins."
+description: "Mount a Better Auth instance in Farm and use its native client, database adapter, methods, and plugins."
 section: "Integrations"
 ---
 

@@ -1,6 +1,6 @@
 ---
 title: "Autumn Integration"
-description: "Add subscription and usage billing with Autumn while keeping Farm's integration API and storage layer."
+description: "Add subscription and usage billing with Autumn while keeping Farm's integration and database APIs stable."
 section: "Integrations"
 ---
 
@@ -45,9 +45,9 @@ const checkout = await api.billing.checkout.post({
 });
 ```
 
-## Storage-aware billing
+## Database-backed billing
 
-The integration can persist customer, plan, entitlement, and usage snapshots through ctx.args.db, so the app keeps the same Farm integration surface even when the backing storage client changes.
+The integration can persist customer, plan, entitlement, and usage records through `ctx.args.db`, so the app keeps the same integration surface when the database client changes. This schema-backed path is separate from KV storage.
 
 ## What Autumn adds
 

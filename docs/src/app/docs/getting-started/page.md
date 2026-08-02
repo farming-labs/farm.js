@@ -137,7 +137,7 @@ farm add integration stripe --ui
 farm add integration unkey
 ```
 
-Integrations can contribute typed callers, routes, providers, middleware, storage schema, CLI registry components, config validation, and lifecycle hooks.
+Integrations can contribute typed callers, routes, providers, middleware, database schemas, CLI registry components, config validation, and lifecycle hooks.
 
 Use `farm add integration better-auth --ui` instead when the application needs to own a Better Auth instance, plugins, adapters, providers, or callbacks. The [Better Auth integration guide](/docs/integrations/auth/better-auth) and [Better Auth starter](https://github.com/farming-labs/farmjs-better-auth-starter) document that explicit path.
 

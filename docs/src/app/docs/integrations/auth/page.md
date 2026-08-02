@@ -34,14 +34,14 @@ That distinction determines whether you call auth through Farm's generated `api`
 
 ## Choose by ownership
 
-| Provider                                           | Farm owns                                                                                                   | Your app or provider owns                                          |
-| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| [Auth0](/docs/integrations/auth/auth0)             | OAuth routes, PKCE/state validation, local session cookie, profile route, protected-route redirects         | Auth0 tenant, connections, actions, and user records               |
-| [WorkOS](/docs/integrations/auth/workos)           | AuthKit redirects, callback, sealed session cookie, session route, protected-route redirects                | WorkOS organizations, SSO configuration, and user management       |
-| [Supabase](/docs/integrations/auth/supabase)       | Email/password and OAuth routes, SSR cookies, optional auth pages, session route, protected-route redirects | Supabase project, providers, policies, and user data               |
-| [Clerk](/docs/integrations/auth/clerk)             | `ClerkProvider` registration and optional request middleware                                                | Clerk UI, hooks, sessions, organizations, and account flows        |
-| [Auth.js](/docs/integrations/auth/authjs)          | The `/api/auth/[...nextauth]` catch-all route                                                               | Auth.js providers, callbacks, session strategy, and native helpers |
-| [Better Auth](/docs/integrations/auth/better-auth) | The `/api/auth/[...auth]` catch-all route                                                                   | Better Auth storage, plugins, methods, sessions, and native client |
+| Provider                                           | Farm owns                                                                                                   | Your app or provider owns                                                   |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| [Auth0](/docs/integrations/auth/auth0)             | OAuth routes, PKCE/state validation, local session cookie, profile route, protected-route redirects         | Auth0 tenant, connections, actions, and user records                        |
+| [WorkOS](/docs/integrations/auth/workos)           | AuthKit redirects, callback, sealed session cookie, session route, protected-route redirects                | WorkOS organizations, SSO configuration, and user management                |
+| [Supabase](/docs/integrations/auth/supabase)       | Email/password and OAuth routes, SSR cookies, optional auth pages, session route, protected-route redirects | Supabase project, providers, policies, and user data                        |
+| [Clerk](/docs/integrations/auth/clerk)             | `ClerkProvider` registration and optional request middleware                                                | Clerk UI, hooks, sessions, organizations, and account flows                 |
+| [Auth.js](/docs/integrations/auth/authjs)          | The `/api/auth/[...nextauth]` catch-all route                                                               | Auth.js providers, callbacks, session strategy, and native helpers          |
+| [Better Auth](/docs/integrations/auth/better-auth) | The `/api/auth/[...auth]` catch-all route                                                                   | Better Auth database adapter, plugins, methods, sessions, and native client |
 
 ## Register a provider
 

@@ -69,7 +69,7 @@ farm generate
 
 `farm dev` refreshes generated route/API types automatically when page and API route files change. Use `farm generate` when you want to refresh the same files outside the dev server, such as in CI, before publishing a package, or after moving files while the dev server was stopped.
 
-When integration storage schemas are configured, `farm generate` also writes schema artifacts if Farm can detect the data layer. Pass `--orm` and `--output` when you want explicit schema output for a migration step.
+When integration database schemas are configured, `farm generate` also writes schema artifacts if Farm can detect the data layer. Pass `--orm` and `--output` when you want explicit schema output for a migration step.
 
 ## Framework migrations
 

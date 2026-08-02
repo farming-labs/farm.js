@@ -56,7 +56,7 @@ cron: {
 
 ## Implement the Route
 
-The target is a normal route under `src/app/api`. It can use storage, integrations, cache invalidation, and other server APIs just like any other GET handler.
+The target is a normal route under `src/app/api`. It can use KV storage, application databases, integrations, cache invalidation, and other server APIs just like any other GET handler.
 
 ```ts title="src/app/api/maintenance/cleanup/route.ts"
 import { cronRoute } from "@farm.js/core/cron";

@@ -1,21 +1,35 @@
 ---
-title: "Storage"
-description: "Use Farm storage clients for key-value data and pass storage clients to framework features and integrations."
+title: "KV Storage"
+description: "Use Farm's key/value API for caches, settings, counters, idempotency records, and object-backed values."
 section: "Data and APIs"
 ---
 
-# Storage
+# KV Storage
 
-Use Farm storage clients for key-value data and pass storage clients to framework features and integrations.
+Farm's `@farm.js/core/storage` module is a **key/value API**. Every value is stored under a string key and read with operations such as `getItem`, `setItem`, `getKeys`, and `removeItem`.
 
-Farm storage has two related configuration paths:
+Use it for caches, feature flags, application settings, rate-limit counters, idempotency records, checkpoints, and object-backed values. Do not use it as a relational ORM for users, accounts, products, or other records that need model fields, relations, joins, or typed filters.
 
-- `storage.mounts` registers named key/value stores that server code reads with `getStorage(name)`.
-- `storage.client` configures the root key/value store when it receives a Farm storage client, or supplies an application-owned database or ORM client to schema-backed integrations when it receives another runtime object.
+## Choose the right data API
 
-Use mounts for values such as settings, feature flags, cache entries, rate-limit counters, idempotency keys, and small JSON records. Use a database or ORM object as `storage.client` when integrations need model-based access through `ctx.args.db`.
+| What you need                                     | Use                                                         |
+| ------------------------------------------------- | ----------------------------------------------------------- |
+| Cache entries, flags, settings, counters, or JSON | Farm KV storage through `getStorage(name)`                  |
+| Rate limiting shared across production instances  | A durable `ratelimit` mount under `storage.mounts`          |
+| Files or values addressed by one key              | An object-backed KV helper such as `s3Storage(...)`         |
+| Application models, relations, joins, and filters | An application-owned `@farming-labs/orm` or another ORM     |
+| Models owned by a schema-backed Farm integration  | Farm's integration ORM through `ctx.args.db`                |
+| Better Auth users, accounts, and sessions         | Better Auth's configured database adapter and instance APIs |
+| Provider-specific SQL or database operations      | The raw integration runtime client through `getClient()`    |
 
-## Create a storage client
+The current beta config groups two different inputs under the `storage` key:
+
+- `storage.driver`, `storage.mounts`, and a Farm storage client configure the KV system used by `getStorage()`.
+- A raw database or ORM object passed to `storage.client` is reserved for schema-backed integrations and is documented under [Database and ORM Clients](/docs/integrations/orm-storage).
+
+These paths do not convert into each other. In particular, a raw PostgreSQL pool supplied as `storage.client` does not become the value returned by `getStorage()`, and it does not make the default in-memory KV store durable.
+
+## Create a KV client
 
 **src/lib/storage.ts**
 
@@ -32,7 +46,7 @@ export const rateLimitStorage = redisStorage({
 });
 ```
 
-Storage helpers return ready-to-use clients, so application code can import and call them directly. Mounting the clients is useful when you want one central configuration and a stable name that any server-side module can retrieve later.
+KV helpers return ready-to-use clients, so application code can import and call them directly. Mounting the clients is useful when you want one central configuration and a stable name that any server-side module can retrieve later.
 
 ## Register named mounts
 
@@ -52,7 +66,7 @@ export default defineConfig({
 });
 ```
 
-Each property under `mounts` is a storage namespace:
+Each property under `mounts` is a KV namespace:
 
 - `app` is an application-defined name. Farm does not attach special behavior to it.
 - `ratelimit` is a Farm convention. The built-in `.rateLimit()` middleware uses this namespace automatically.
@@ -130,9 +144,9 @@ The same mount can be used from other server-only application surfaces:
 
 Do not call `getStorage()` from a client component or browser bundle. Expose the required operation through an API route, server action, or server function instead.
 
-## Storage operations
+## KV operations
 
-Mounted stores expose the standard Farm storage API:
+Mounted stores expose the standard Farm KV API:
 
 ```ts
 const appStore = getStorage("app");
@@ -203,9 +217,9 @@ Mount names describe the responsibility; drivers decide where the values live:
 
 The names are conventions chosen by the application, except for framework-owned names such as `ratelimit`. Two mounts may use the same driver type while remaining isolated, or use different drivers based on durability and latency requirements.
 
-## Supported drivers
+## Supported KV drivers
 
-Farm supports storage at three levels:
+Farm supports KV storage at three levels:
 
 1. Farm convenience helpers for common databases, caches, and object stores.
 2. Direct driver configuration through `driver: "name"`.
@@ -213,7 +227,7 @@ Farm supports storage at three levels:
 
 The root store and every mount can use a different supported driver.
 
-### Farm storage helpers
+### Farm KV helpers
 
 Import these helpers from `@farm.js/core/storage`:
 
@@ -274,7 +288,7 @@ export default defineConfig({
 
 In this example, `getStorage()` uses SQLite, `getStorage("cache")` uses Redis, and `getStorage("uploads")` uses S3.
 
-### Database driver names
+### Database-backed KV drivers
 
 Farm resolves these names through `db0` and exposes the result as key/value storage:
 
@@ -291,7 +305,7 @@ Farm resolves these names through `db0` and exposes the result as key/value stor
 | `libsql-http`                  | libSQL HTTP client      | `url`, optional `authToken`, and optional `tableName`.            |
 | `db0`                          | Existing `db0` database | Pass `{ database, tableName? }` inside `options`.                 |
 
-These drivers create or use a key/value table for Farm storage. They are separate from passing a raw database or ORM object through `storage.client` for integration models.
+These drivers create or use a key/value table for Farm KV storage. They do not expose tables, models, joins, or arbitrary SQL through `getStorage()`. Passing a raw database or ORM object through `storage.client` is a separate integration database path.
 
 ### Complete built-in driver set
 
@@ -329,7 +343,7 @@ Farm also accepts the built-in driver names exported by its installed `unstorage
 | Web Storage             | `localstorage`, `session-storage`, `sessionStorage` | Browser local or session storage.                                                       |
 | Capacitor               | `capacitor-preferences`, `capacitorPreferences`     | Capacitor Preferences-backed mobile storage.                                            |
 
-Farm application storage normally initializes on the server. Browser-only drivers require a compatible custom runtime and should not be used as a reason to call `getStorage()` from client components.
+Farm KV storage normally initializes on the server. Browser-only drivers require a compatible custom runtime and should not be used as a reason to call `getStorage()` from client components.
 
 Most remote and platform drivers load an optional provider SDK. Install the package required by the selected driver, such as `ioredis`, `mongodb`, `@upstash/redis`, `@vercel/kv`, `@vercel/blob`, `@netlify/blobs`, `aws4fetch`, `uploadthing`, the relevant Azure SDK, `@deno/kv`, `idb-keyval`, or `lru-cache`. Database aliases may likewise require `sqlite3`, `better-sqlite3`, `mysql2`, `@electric-sql/pglite`, `@planetscale/database`, or `@libsql/client`; the `sqlite` alias uses Node's built-in `node:sqlite`. Cloudflare binding drivers instead require the corresponding runtime binding.
 
@@ -350,12 +364,12 @@ export const customStorage = driverStorage(() =>
 
 The wrapped driver can be mounted or used as the root Farm storage client just like a built-in helper.
 
-## Runtime clients for integrations
+## Database and ORM clients are separate
 
-`storage.client` has two behaviors based on the configured value:
+The current beta API uses `storage.client` for two distinguishable object shapes:
 
 - A Farm storage client, such as `sqliteStorage(...)`, becomes the root key/value store used by `getStorage()`.
-- Another database, ORM, or provider object becomes the runtime client for schema-backed integrations. That object is not returned by `getStorage(name)`.
+- A raw database, ORM, or provider object becomes the runtime client for schema-backed integrations. That object is not returned by `getStorage(name)`.
 
 ```ts
 import { defineConfig } from "@farm.js/core";
@@ -370,7 +384,9 @@ export default defineConfig({
 });
 ```
 
-When an integration defines a schema, Farm exposes a typed ORM layer at `ctx.args.db`. The integration does not need to know whether the app passed SQLite, Postgres, or another supported runtime client.
+In this example, the raw SQLite database is available only to integrations. Because no KV driver or Farm storage client is configured, `getStorage()` continues to use the default in-memory KV store.
+
+When an integration also defines a schema, Farm exposes a typed ORM layer at `ctx.args.db`. The integration does not need to know whether the app passed SQLite, PostgreSQL, or another supported runtime client.
 
 Use this rule of thumb:
 
@@ -378,37 +394,13 @@ Use this rule of thumb:
 - Use `ctx.args.db` inside an integration that declares models and needs ORM-style queries.
 - Use `ctx.args.storage.getClient()` inside integration server code only when provider-specific operations require the raw configured runtime client.
 
-## Schema migrations
+See [Database and ORM Clients](/docs/integrations/orm-storage) for application-owned ORM usage, integration schemas, PostgreSQL pools, Better Auth ownership, and migrations.
 
-Farm can generate integration schema artifacts with `farm generate`, then run your app-owned migration command with `farm migrate`.
-
-**farm.config.ts**
-
-```ts
-import { defineConfig } from "@farm.js/core";
-
-export default defineConfig({
-  storage: {
-    client: db,
-  },
-  migrations: {
-    commands: [
-      {
-        name: "apply schema",
-        command: "pnpm drizzle-kit migrate",
-      },
-    ],
-  },
-});
-```
-
-`farm migrate` does not hide the database tool. It gives the project one consistent place to run Prisma, Drizzle, SQL files, Better Auth setup, or provider-specific schema commands before `farm build`.
-
-## Storage client or runtime client
+## KV client or database client
 
 | Config                                      | Use it for                                             |
 | ------------------------------------------- | ------------------------------------------------------ |
-| `sqliteStorage(...)`                        | Farm key/value storage with a Farm storage client.     |
+| `sqliteStorage(...)`                        | Farm KV storage with a Farm storage client.            |
 | `redisStorage(...)`                         | Cache, rate-limit, or queue-like key/value data.       |
 | `storage.mounts`                            | Multiple named key/value stores.                       |
 | `storage.client` with a Farm storage client | Reuse a created Farm storage client as the root store. |
@@ -416,8 +408,7 @@ export default defineConfig({
 
 ## Production notes
 
-- Use durable storage for production state.
-- Keep local/memory storage for development and tests.
-- Pass one runtime client through config so integrations do not each invent storage options.
-- Create physical tables/migrations that match integration schemas, then run them with `farm migrate`.
-- Close database clients during app shutdown when the underlying driver requires it.
+- Use a shared durable KV driver for production state that must survive restarts or be visible across instances.
+- Keep memory KV storage for tests and explicitly disposable local state.
+- Do not assume that a PostgreSQL-backed KV helper provides relational database access.
+- Configure KV mounts and database clients independently when an application needs both.

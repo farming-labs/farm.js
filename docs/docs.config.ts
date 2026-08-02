@@ -163,7 +163,7 @@ const sidebar = [
       { label: "Query and Params", slug: "query", icon: "search" },
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
-      { label: "Storage", slug: "storage", icon: "database" },
+      { label: "KV Storage", slug: "storage", icon: "database" },
     ],
   },
   {
@@ -243,11 +243,11 @@ const sidebar = [
         ],
       },
       {
-        label: "Storage",
+        label: "Database",
         icon: "database",
         children: [
           {
-            label: "ORM Storage",
+            label: "Database & ORM",
             slug: "integrations/orm-storage",
             icon: "database",
           },
