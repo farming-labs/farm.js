@@ -9,6 +9,7 @@ import {
 import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plugin";
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
+import type { FarmIslandStrategy } from "../island";
 
 /**
  * Farm.js SPA Router
@@ -28,6 +29,7 @@ interface PageData {
   canonicalPath?: string;
   isClientComponent?: boolean;
   shouldHydrate?: boolean;
+  islandStrategy?: FarmIslandStrategy | null;
   metadata?: {
     title?: string;
     description?: string;

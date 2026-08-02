@@ -155,7 +155,7 @@ function createPPRRefreshScript(): string {
 }
 
 function createPreHydrationClickQueueScript(): string {
-  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]"))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
+  return `<script>(function(){if(window.__FARM_PREHYDRATION_CLICK_QUEUE__)return;var queue=[];window.__FARM_PREHYDRATION_CLICK_QUEUE__=queue;window.__FARM_HYDRATED__=false;document.documentElement.dataset.farmHydrated="false";function isModified(event){return !!(event.metaKey||event.altKey||event.ctrlKey||event.shiftKey)}function closestQueuedTarget(target){while(target&&target!==document.documentElement){if(target.matches&&target.matches('button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]'))return target;target=target.parentElement}return null}document.addEventListener("click",function(event){if(window.__FARM_HYDRATED__)return;if(event.defaultPrevented||event.button!==0||isModified(event))return;var target=closestQueuedTarget(event.target);if(!target||target.closest&&target.closest("a[href]")||target.closest&&target.closest('[data-farm-island-hydrated="true"]'))return;if(queue.some(function(item){return item.target===target}))return;queue.push({target:target,createdAt:Date.now()});document.dispatchEvent(new CustomEvent("farm:island-interaction",{detail:{target:target}}));event.preventDefault();event.stopImmediatePropagation()},true);})();</script>`;
 }
 
 function searchParamsToObject(
@@ -943,6 +943,7 @@ export class ServerRenderer {
       (req as any).__FARM_ROUTE__ = pathname;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
       (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate;
+      (req as any).__FARM_ISLAND_STRATEGY__ = moduleMetadata.islandStrategy;
       (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ = hasHydratableRouteSlots;
       (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
         ? loadingBoundaryEntry.modulePath.substring(
@@ -1046,7 +1047,12 @@ export class ServerRenderer {
             if (isClientComponent || shouldHydrate) {
               pageElement = React.createElement(
                 "div",
-                { id: "__farm_page__", "data-farm-client": "true" },
+                {
+                  id: "__farm_page__",
+                  "data-farm-client": "true",
+                  "data-farm-island": "page",
+                  "data-farm-island-strategy": moduleMetadata.islandStrategy ?? "load",
+                },
                 pageElement,
               );
             }
@@ -1617,6 +1623,7 @@ export class ServerRenderer {
           search: routeEntry.search,
           isClientComponent: routeEntry.isClientComponent,
           shouldHydrate: routeEntry.shouldHydrate,
+          islandStrategy: routeEntry.islandStrategy,
           preloads: [routeEntry.modulePath],
           assets: [],
         };
@@ -1662,6 +1669,7 @@ window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
+window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
 window.__FARM_LOADING_MODULE__ = ${JSON.stringify(
         (req as any).__FARM_LOADING_MODULE_PATH__ || null,

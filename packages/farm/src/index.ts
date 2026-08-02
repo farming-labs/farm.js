@@ -28,6 +28,7 @@ export type {
   ResolvedFarmPerformanceConfig,
   ResolvedFarmPreloadConfig,
 } from "./preload";
+export type { FarmIslandStrategy } from "./island";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 export {
   getFarmAppDirectories,

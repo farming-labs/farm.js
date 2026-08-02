@@ -127,6 +127,43 @@ export default function DashboardPage() {
 }
 ```
 
+## Deferred route islands
+
+Client routes and server routes that import a client boundary can defer their JavaScript while Farm
+keeps the server-rendered HTML visible. Add an optional static `island` export to the client module:
+
+```tsx
+"use client";
+
+export const island = "interaction";
+
+export function CopyButton({ value }: { value: string }) {
+  return <button onClick={() => navigator.clipboard.writeText(value)}>Copy</button>;
+}
+```
+
+Farm propagates the strategy to the route hydration boundary, emits it in the route manifest, and
+splits production route modules behind dynamic imports. Deferred routes therefore avoid evaluating
+their route chunk until its trigger while preserving the initial SSR output.
+
+These strategies control hydration of the initial server-rendered document. During client-side
+navigation, the navigation itself signals user intent, so Farm loads and renders the destination
+route immediately instead of leaving the previous route visible while waiting for another trigger.
+
+| Strategy      | Hydration trigger                                                     |
+| ------------- | --------------------------------------------------------------------- |
+| `load`        | Immediately. This is the default and compatibility-first behavior.    |
+| `interaction` | The first button-like click; Farm replays that click after hydration. |
+| `visible`     | When the route boundary approaches the viewport.                      |
+| `idle`        | During browser idle time, with a timeout fallback.                    |
+
+The export must be one of these static string literals so Farm can analyze it without executing
+application code. Without an explicit route-level `island` export, a route that imports client
+boundaries with different strategies safely falls back to `load` because its current route-level
+React root cannot schedule those children independently. Keep interactive leaves small today; a
+future compiler boundary can reuse the same export for independently hydrated nested component
+islands.
+
 ## Automatic optimized boundaries
 
 Farm can experimentally render large, non-interactive Server Component regions through the native

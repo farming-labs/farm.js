@@ -3,6 +3,8 @@
  * Following the TanStack Start pattern: route → chunks/assets
  */
 
+import type { FarmIslandStrategy } from "../island";
+
 /**
  * A tag to be rendered in the HTML (script, link, meta, etc.)
  */
@@ -26,6 +28,8 @@ export interface RouteManifestEntry {
   isClientComponent?: boolean;
   /** Whether this route should hydrate on the client after SSR */
   shouldHydrate?: boolean;
+  /** When Farm should import and hydrate this route boundary */
+  islandStrategy?: FarmIslandStrategy | null;
   /** Route pattern (for client-side matching) */
   pattern: string;
   /** Serializable route search behavior for browser navigation. */
@@ -84,7 +88,13 @@ export interface DehydratedManifest {
     string,
     Pick<
       RouteManifestEntry,
-      "modulePath" | "pattern" | "segments" | "isClientComponent" | "shouldHydrate" | "search"
+      | "modulePath"
+      | "pattern"
+      | "segments"
+      | "isClientComponent"
+      | "shouldHydrate"
+      | "islandStrategy"
+      | "search"
     >
   >;
   /** All layouts (for navigation) */

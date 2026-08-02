@@ -38,6 +38,7 @@ import path from "path";
 import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
+import type { FarmIslandStrategy } from "../island";
 import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
 import {
   inspectStaticMetadataImage,
@@ -425,6 +426,7 @@ export class RouteManager {
       modulePath: string;
       shouldHydrate: boolean;
       isClientComponent: boolean;
+      islandStrategy: FarmIslandStrategy | null;
       search?: ProgrammaticRouteSearchClientOptions;
       segments: Array<{
         segment: string;
@@ -469,6 +471,7 @@ export class RouteManager {
         modulePath: toUrlPath(entry.modulePath),
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
+        islandStrategy: metadata.islandStrategy,
         search: getProgrammaticRouteSearchClientOptions(programmaticPage?.search),
         segments: entry.route.segments.map((seg) => ({
           segment: seg.segment,
