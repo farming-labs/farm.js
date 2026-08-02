@@ -107,6 +107,10 @@ Images are lazy-loaded and asynchronously decoded by default. Set `preload` only
 <Image src={jacket} alt="Green field jacket" preload sizes="100vw" />
 ```
 
+The global preload manager keeps one image hint by default, prioritizing the hint marked high before
+ordinary React-generated hints. Excess hints are reported and removed without removing the image
+elements themselves. Configure or audit the budget with `performance.preload` in `farm.config.ts`.
+
 `placeholder="blur"` uses the placeholder generated for a static import. A string source must provide `blurDataURL` explicitly. Use `unoptimized` to preserve the original URL for a particular image.
 
 ## Configuration

@@ -437,7 +437,13 @@ console.log(demo);`,
     expect(source).toMatch(
       /farmFontPreloadHeader \? \{ "Link": farmFontPreloadHeader \} : \{\}\),\s+\.\.\.getPPRHeaders\("hit", pprConfig\)/,
     );
+    expect(source).toContain("manageFarmDocumentPreloads(");
+    expect(source).toContain("manageFarmLinkHeaderPreloads(");
+    expect(source).toContain("isStreaming || !isBuffered || response.body === null");
     expect(source).toContain("appendFarmLinkHeader(headers, header.value);");
+    expect(source).toContain(
+      "applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname)",
+    );
     expect(source).toContain("await copyFarmDocsFontAssetsToClient(root, clientOutputDir);");
     expect(source).toContain("resolveFarmDocsFontAssets(root).map");
     expect(source).toContain("fontAssets: ${JSON.stringify(farmDocsFontAssets)}");

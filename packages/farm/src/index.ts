@@ -21,6 +21,13 @@ export {
   getPresetForDeployTarget,
 } from "./config";
 export type { FarmLayerConfig } from "./config";
+export type {
+  FarmPerformanceConfig,
+  FarmPreloadMode,
+  FarmPreloadUserConfig,
+  ResolvedFarmPerformanceConfig,
+  ResolvedFarmPreloadConfig,
+} from "./preload";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 export {
   getFarmAppDirectories,

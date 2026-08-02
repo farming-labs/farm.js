@@ -72,6 +72,25 @@ describe("config helpers", () => {
       namespace: "catalog",
     });
   });
+
+  it("resolves smart preload budgets", async () => {
+    const defaults = await resolveConfig({}, "production");
+    const configured = await resolveConfig(
+      {
+        performance: {
+          preload: { mode: "warn", maxImages: 2, maxFonts: 1 },
+        },
+      },
+      "production",
+    );
+
+    expect(defaults.performance).toEqual({
+      preload: { mode: "enforce", maxImages: 1, maxFonts: 2 },
+    });
+    expect(configured.performance).toEqual({
+      preload: { mode: "warn", maxImages: 2, maxFonts: 1 },
+    });
+  });
 });
 
 describe("loadConfig", () => {
