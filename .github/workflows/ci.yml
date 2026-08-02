@@ -54,7 +54,7 @@ jobs:
       - name: Build packages
         run: pnpm build
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Run tests
         run: pnpm test -- ${{ matrix.test_args }}
@@ -62,7 +62,7 @@ jobs:
       - name: Type check
         run: pnpm type-check
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
 
   lint:
     name: Lint
@@ -118,7 +118,7 @@ jobs:
       - name: Build packages
         run: pnpm build
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Build examples
         run: pnpm build:examples -- ${{ matrix.build_args }}
@@ -149,7 +149,7 @@ jobs:
       - name: Verify framework features
         run: pnpm test:e2e:framework
         env:
-          NODE_OPTIONS: --max-old-space-size=4096
+          NODE_OPTIONS: --max-old-space-size=8192
 
       - name: Upload Playwright failure artifacts
         if: ${{ failure() }}

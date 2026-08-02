@@ -375,8 +375,22 @@ test.describe("Framework feature integration", () => {
 
     const image = await request.get("/feature-lab/metadata/7/opengraph-image");
     expect(image.status()).toBe(200);
-    expect(image.headers()["content-type"]).toContain("image/svg+xml");
-    expect(await image.text()).toContain("Feature product 7");
+    expect(image.headers()["content-type"]).toBe("image/png");
+    expect(image.headers()["cache-control"]).toBe(
+      "public, s-maxage=300, stale-while-revalidate=300",
+    );
+    expect(image.headers()["etag"]).toMatch(/^"[a-f0-9]{32}"$/);
+    const imageBytes = await image.body();
+    expect(imageBytes.subarray(0, 8)).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    );
+    expect(imageBytes.readUInt32BE(16)).toBe(1200);
+    expect(imageBytes.readUInt32BE(20)).toBe(630);
+
+    const imageHead = await request.head("/feature-lab/metadata/7/opengraph-image");
+    expect(imageHead.status()).toBe(200);
+    expect(imageHead.headers()["content-type"]).toBe("image/png");
+    expect(await imageHead.body()).toHaveLength(0);
 
     const run = await request.get("/api/maintenance/cleanup", {
       headers: {

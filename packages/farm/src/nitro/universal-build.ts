@@ -213,6 +213,13 @@ function isCloudflareImagePreset(preset: string): boolean {
   return preset === "cloudflare" || preset === "cloudflare-pages" || preset === "cloudflare-module";
 }
 
+function shouldUseExternalMetadataImageRuntime(
+  preset: string,
+  hasGeneratedMetadataImages: boolean,
+): boolean {
+  return hasGeneratedMetadataImages && preset !== "vercel-edge" && !isCloudflareImagePreset(preset);
+}
+
 function resolveImageRuntime(
   config: ResolvedFarmConfig,
   preset: string,
@@ -241,6 +248,38 @@ function isNitroRollupExternal(id: string): boolean {
     normalizedId.includes("/node_modules/@prisma/client/") ||
     normalizedId.includes("/node_modules/.prisma/client/")
   );
+}
+
+const FARM_METADATA_IMAGE_WASM_PREFIX = "\0farm-metadata-image-wasm:";
+
+function createMetadataImageWasmPlugin(): Rollup.Plugin {
+  return {
+    name: "farm-metadata-image-wasm",
+    resolveId(source, importer) {
+      if (
+        !source.endsWith(".wasm?module") ||
+        !importer?.replace(/\\/g, "/").includes("/@vercel/og/")
+      ) {
+        return null;
+      }
+
+      const requestPath = source.slice(0, -"?module".length);
+      const resolvedPath = path.isAbsolute(requestPath)
+        ? requestPath
+        : path.resolve(path.dirname(importer.split("?", 1)[0]), requestPath);
+      return `${FARM_METADATA_IMAGE_WASM_PREFIX}${resolvedPath}`;
+    },
+    load(id) {
+      if (!id.startsWith(FARM_METADATA_IMAGE_WASM_PREFIX)) return null;
+      const wasmPath = id.slice(FARM_METADATA_IMAGE_WASM_PREFIX.length);
+      const encoded = readFileSync(wasmPath).toString("base64");
+      return `
+const encoded = ${JSON.stringify(encoded)};
+const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+export default new WebAssembly.Module(bytes);
+`;
+    },
+  };
 }
 
 function collectSSRExternalPackages(ssrBundle: OutputBundle): Set<string> {
@@ -2679,6 +2718,10 @@ async function buildSSRInMemory(
   // Find a temporary file path for the virtual entry
   // We'll use a plugin to intercept this
   const virtualEntryId = "\0virtual:farm-ssr-entry";
+  const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(
+    preset,
+    metadataImageRoutes.some((image) => image.sourceType === "module"),
+  );
 
   try {
     await viteBuild({
@@ -2697,6 +2740,7 @@ async function buildSSRInMemory(
           external: [
             "fsevents",
             "sharp",
+            ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
             "@prisma/client",
             "@prisma/client/default",
             "@prisma/client/default.js",
@@ -2725,6 +2769,7 @@ async function buildSSRInMemory(
         external: [
           "fsevents",
           "sharp",
+          ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
           "esbuild",
           "lightningcss",
           "rollup",
@@ -2753,7 +2798,14 @@ async function buildSSRInMemory(
         // Native and build-only packages above remain explicitly external.
         noExternal:
           preset === "cloudflare-module"
-            ? ["@farm.js/core", "@farm.js/core/image", "better-call"]
+            ? [
+                "@farm.js/core",
+                "@farm.js/core/image",
+                "better-call",
+                ...(metadataImageRoutes.some((image) => image.sourceType === "module")
+                  ? ["@vercel/og"]
+                  : []),
+              ]
             : true,
       },
       define: {
@@ -2762,6 +2814,10 @@ async function buildSSRInMemory(
       },
       plugins: [
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(!useExternalMetadataImageRuntime &&
+        metadataImageRoutes.some((image) => image.sourceType === "module")
+          ? [createMetadataImageWasmPlugin()]
+          : []),
         {
           name: "farm-react-production-mode",
           enforce: "pre",
@@ -2874,6 +2930,9 @@ function generateVirtualEntryCode(
   i18nCatalogs: FarmI18nCatalogs,
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
+  const hasGeneratedMetadataImages = metadataImageRoutes.some(
+    (image) => image.sourceType === "module",
+  );
   const hasMiddlewareRuntime =
     middlewareRoutes.length > 0 || hasFarmMiddlewareConfig(config.middleware);
   const farmDocsBaseConfig = config.docs?.enabled
@@ -3068,6 +3127,9 @@ function generateVirtualEntryCode(
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
+  const metadataImageRuntimeImport = hasGeneratedMetadataImages
+    ? `import { createFarmMetadataImageResponse } from "@farm.js/core/internal/metadata-image-runtime";`
+    : "";
   const pluginRuntimeImport = hasPluginRuntime
     ? `import { PluginManager } from "@farm.js/core/plugin";`
     : "";
@@ -3203,6 +3265,7 @@ ${middlewareImports.join("\n")}
 ${notFoundImport}
 ${apiRouteHelpersImport}
 ${productionRuntimeImport}
+${metadataImageRuntimeImport}
 ${pluginRuntimeImport}
 ${i18nServerImport}
 ${docsHandlerImport}
@@ -4024,30 +4087,14 @@ async function handleMetadataImageRequest(request, routePathname) {
       ? await imageModule.default(props)
       : imageModule.default;
 
-    if (value instanceof Response) {
-      return method === "HEAD"
-        ? new Response(null, { status: value.status, headers: value.headers })
-        : value;
+    ${
+      hasGeneratedMetadataImages
+        ? `return createFarmMetadataImageResponse(value, imageModule, {
+      method,
+      ifNoneMatch: request.headers.get("if-none-match"),
+    });`
+        : 'throw new Error("Generated metadata image runtime is unavailable");'
     }
-
-    let body;
-    if (typeof value === "string" || value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
-      body = value;
-    } else {
-      if (!React.isValidElement(value)) {
-        throw new Error("Metadata image must return a Response, string, bytes, or React element");
-      }
-      body = ReactDOMServer.renderToStaticMarkup(value);
-    }
-
-    return new Response(method === "HEAD" ? null : body, {
-      status: 200,
-      headers: {
-        "Content-Type": imageModule.contentType || "image/svg+xml; charset=utf-8",
-        "Cache-Control": "public, max-age=0, must-revalidate",
-        "X-Content-Type-Options": "nosniff",
-      },
-    });
   } catch (error) {
     console.error("Metadata image render failed:", error);
     return new Response("Internal Server Error", {
@@ -5933,8 +5980,20 @@ async function buildNitroUniversal(
   const outputDir = resolveDeployOutputPath(root, config.deploy.outputDir);
   const ssrOutputDir = path.join(root, distDir, "ssr");
   const imageRuntime = resolveImageRuntime(config, preset);
+  const hasGeneratedMetadataImages = Array.from(routeManager.getMetadataImages().values()).some(
+    (image) => image.sourceType === "module",
+  );
+  const useExternalMetadataImageRuntime = shouldUseExternalMetadataImageRuntime(
+    preset,
+    hasGeneratedMetadataImages,
+  );
+  const nitroRollupExternal = (id: string) =>
+    (useExternalMetadataImageRuntime && id === "@vercel/og") || isNitroRollupExternal(id);
   const ssrExternalPackages = collectSSRExternalPackages(ssrBundle);
-  const copiedRuntimePackages = new Set(imageRuntime === "node" ? ["sharp"] : []);
+  const copiedRuntimePackages = new Set([
+    ...(imageRuntime === "node" ? ["sharp"] : []),
+    ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
+  ]);
   // Nitro normally rebundles the Vite SSR graph so its bare dependencies are
   // deployable. Skip that duplicate pass only when Farm already knows how to
   // package every remaining external; otherwise retain Nitro's proven path.
@@ -6182,10 +6241,15 @@ export default async function farmNitroEventHandler(event) {
         ".prisma/client/default",
         "better-sqlite3",
         "sharp",
+        ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
       ],
     },
     rollupConfig: {
-      external: isNitroRollupExternal,
+      external: nitroRollupExternal,
+      plugins:
+        hasGeneratedMetadataImages && !useExternalMetadataImageRuntime
+          ? [createMetadataImageWasmPlugin()]
+          : [],
     },
     // Keep the public Nitro boolean intact for build hooks. It is translated to
     // Nitro's existing esbuild pass after hooks run, avoiding a second Terser pass.
@@ -6228,7 +6292,7 @@ export default async function farmNitroEventHandler(event) {
     !hasUnsupportedEsbuildOverrides &&
     !hasLateBuildMutationConfig &&
     !hasUnsupportedSSRRebundleOverrides &&
-    nitroConfig.rollupConfig?.external === isNitroRollupExternal &&
+    nitroConfig.rollupConfig?.external === nitroRollupExternal &&
     !hasRollupPlugins(nitroConfig.rollupConfig?.plugins) &&
     customRollupKeys.length === 0 &&
     path.resolve(nitroConfig.output?.serverDir || "") === path.resolve(expectedServerDir) &&
@@ -6359,6 +6423,9 @@ export default async function farmNitroEventHandler(event) {
       : Promise.resolve(),
     imageRuntime === "node"
       ? copySharpRuntime(config, root, path.join(outputDir, "server"), fs)
+      : Promise.resolve(),
+    useExternalMetadataImageRuntime
+      ? copyMetadataImageRuntime(root, path.join(outputDir, "server"), fs)
       : Promise.resolve(),
   ]);
   const failedCopy = copyResults.find(
@@ -6666,6 +6733,51 @@ async function copySharpRuntime(
   };
   await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
   logger.info(`🖼️  Bundled Sharp image runtime (${copiedPackages.size} packages)`);
+}
+
+async function copyMetadataImageRuntime(
+  root: string,
+  nitroFuncDir: string,
+  fs: typeof import("fs/promises"),
+): Promise<void> {
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  let runtimeRequire = projectRequire;
+  let packageJsonPath = resolvePackageJson(runtimeRequire, "@vercel/og");
+
+  if (!packageJsonPath) {
+    try {
+      runtimeRequire = createRequire(projectRequire.resolve("@farm.js/core"));
+      packageJsonPath = resolvePackageJson(runtimeRequire, "@vercel/og");
+    } catch {
+      // The missing-runtime diagnostic below remains authoritative.
+    }
+  }
+
+  if (!packageJsonPath) {
+    throw new Error(
+      "Generated metadata images require @vercel/og. Reinstall @farm.js/core with production dependencies.",
+    );
+  }
+
+  const packageJson = JSON.parse(await fs.readFile(packageJsonPath, "utf8"));
+  const packageDir = path.dirname(packageJsonPath);
+  const targetDir = path.join(nitroFuncDir, "node_modules", "@vercel", "og");
+  await fs.mkdir(path.dirname(targetDir), { recursive: true });
+  await fs.cp(packageDir, targetDir, {
+    recursive: true,
+    force: true,
+    dereference: true,
+    mode: fsConstants.COPYFILE_FICLONE,
+  });
+
+  const functionPackagePath = path.join(nitroFuncDir, "package.json");
+  const functionPackage = JSON.parse(await fs.readFile(functionPackagePath, "utf8"));
+  functionPackage.dependencies = {
+    ...functionPackage.dependencies,
+    "@vercel/og": String(packageJson.version || "0.11.1"),
+  };
+  await fs.writeFile(functionPackagePath, JSON.stringify(functionPackage, null, 2));
+  logger.info("🖼️  Bundled generated metadata image runtime");
 }
 
 function resolvePackageJson(parentRequire: NodeJS.Require, packageName: string): string | null {
