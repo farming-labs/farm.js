@@ -3380,6 +3380,12 @@ let hasClientTakenOver = false;
 const routeSlotRoots = new Map();
 const routeSlotDefinitions = new Map();
 let activeRouteInterception = null;
+let pendingPageHydrationController = null;
+
+function cancelPendingPageHydration() {
+  pendingPageHydrationController?.abort();
+  pendingPageHydrationController = null;
+}
 
 function normalizeServerProps(rawProps) {
   const props = rawProps && typeof rawProps === 'object' ? { ...rawProps } : {};
@@ -3525,8 +3531,7 @@ function applyCanonicalPathFromProps(props) {
 
 function replayPreHydrationClicks(container = null) {
   if (!container) {
-    window.__FARM_HYDRATED__ = true;
-    document.documentElement.dataset.farmHydrated = 'true';
+    markFarmHydrated();
   } else {
     container.dataset.farmIslandHydrated = 'true';
   }
@@ -3553,6 +3558,11 @@ function replayPreHydrationClicks(container = null) {
     if (target.isConnected === false) continue;
     setTimeout(() => target.click(), 0);
   }
+}
+
+function markFarmHydrated() {
+  window.__FARM_HYDRATED__ = true;
+  document.documentElement.dataset.farmHydrated = 'true';
 }
 
 async function buildClientHydrationElement(PageComponent, pageProps) {
@@ -3697,9 +3707,10 @@ async function tryHydrateImportedPage(
   layouts,
   useHydrate = false,
   existingProps = null,
+  signal = null,
 ) {
   const modulePath = route?.modulePath;
-  if (!modulePath) {
+  if (!modulePath || signal?.aborted) {
     return false;
   }
 
@@ -3708,6 +3719,7 @@ async function tryHydrateImportedPage(
     pageModule = await import(/* @vite-ignore */ modulePath);
     pageModuleCache.set(modulePath, pageModule);
   }
+  if (signal?.aborted || !container?.isConnected) return false;
 
   const PageComponent = pageModule?.default;
   if (!PageComponent) {
@@ -3722,6 +3734,7 @@ async function tryHydrateImportedPage(
     window.location.pathname,
     existingProps,
   );
+  if (signal?.aborted || !container?.isConnected) return false;
 
   const wrappedElement = useHydrate && container?.id === '__farm_page__'
     ? wrapWithIntegrationProviders(
@@ -3732,6 +3745,7 @@ async function tryHydrateImportedPage(
         currentPageProps,
         layouts,
       );
+  if (signal?.aborted || !container?.isConnected) return false;
 
   if (useHydrate) {
     try {
@@ -3762,6 +3776,7 @@ async function tryHydrateImportedPage(
 async function renderPage(pageData) {
   const container = document.getElementById('root');
   if (!container) return;
+  cancelPendingPageHydration();
   const destination = window.location.pathname + window.location.search;
 
   if (pageData.interception) {
@@ -4030,48 +4045,83 @@ async function hydrate() {
     pageContainer.dataset.farmIsland = 'page';
     pageContainer.dataset.farmIslandStrategy = islandStrategy;
 
-    await scheduleFarmIslandHydration({
-      container: pageContainer,
-      strategy: islandStrategy,
-      hydrate: async () => {
-        // Layout code is only needed when this route boundary actually hydrates.
-        try {
-          const layoutModule = await import(/* @vite-ignore */ '/src/app/layout.tsx');
-          LayoutComponent = layoutModule.default;
-        } catch (e) {
-          console.warn('[Farm.js] Could not preload layout:', e);
-        }
+    const hydrationPathname = window.location.pathname;
+    const hydrationController = new AbortController();
+    pendingPageHydrationController = hydrationController;
+    try {
+      await scheduleFarmIslandHydration({
+        container: pageContainer,
+        strategy: islandStrategy,
+        signal: hydrationController.signal,
+        hydrate: async () => {
+          if (
+            hydrationController.signal.aborted ||
+            !pageContainer.isConnected ||
+            window.location.pathname !== hydrationPathname
+          ) {
+            return;
+          }
 
-        const hydrationSession = await farmClientRuntime.beginHydration({
-          container: pageContainer,
-          mode: shouldHydrate ? 'hydrate' : 'render',
-        });
+          // Layout code is only needed when this route boundary actually hydrates.
+          try {
+            const layoutModule = await import(/* @vite-ignore */ '/src/app/layout.tsx');
+            LayoutComponent = layoutModule.default;
+          } catch (e) {
+            console.warn('[Farm.js] Could not preload layout:', e);
+          }
+          if (hydrationController.signal.aborted || !pageContainer.isConnected) return;
 
-        let hydrated = false;
-        try {
-          hydrated = await tryHydrateImportedPage(
-            pageContainer,
-            { modulePath },
-            currentPageProps.params || {},
-            layouts,
-            shouldHydrate,
-            currentPageProps,
-          );
-          await farmClientRuntime.completeHydration(hydrationSession);
-        } catch (error) {
-          await farmClientRuntime.failHydration(hydrationSession, error);
-          throw error;
-        }
+          const hydrationSession = await farmClientRuntime.beginHydration({
+            container: pageContainer,
+            mode: shouldHydrate ? 'hydrate' : 'render',
+          });
 
-        if (hydrated) {
-          replayPreHydrationClicks();
-          console.log('[Farm.js] ✅ Hydrated:', modulePath, '(' + islandStrategy + ')');
-          return;
-        }
+          let hydrated = false;
+          try {
+            if (hydrationController.signal.aborted || !pageContainer.isConnected) {
+              await farmClientRuntime.failHydration(
+                hydrationSession,
+                new DOMException('Route hydration was cancelled', 'AbortError'),
+              );
+              return;
+            }
+            hydrated = await tryHydrateImportedPage(
+              pageContainer,
+              { modulePath },
+              currentPageProps.params || {},
+              layouts,
+              shouldHydrate,
+              currentPageProps,
+              hydrationController.signal,
+            );
+            if (hydrationController.signal.aborted || !pageContainer.isConnected) {
+              await farmClientRuntime.failHydration(
+                hydrationSession,
+                new DOMException('Route hydration was cancelled', 'AbortError'),
+              );
+              return;
+            }
+            await farmClientRuntime.completeHydration(hydrationSession);
+          } catch (error) {
+            await farmClientRuntime.failHydration(hydrationSession, error);
+            throw error;
+          }
 
-        console.log('[Farm.js] Server component - SPA router ready')
-      },
-    });
+          if (hydrated) {
+            // The scheduler owns queue draining and exactly-once click replay.
+            markFarmHydrated();
+            console.log('[Farm.js] ✅ Hydrated:', modulePath, '(' + islandStrategy + ')');
+            return;
+          }
+
+          console.log('[Farm.js] Server component - SPA router ready')
+        },
+      });
+    } finally {
+      if (pendingPageHydrationController === hydrationController) {
+        pendingPageHydrationController = null;
+      }
+    }
   } catch (error) {
     console.error('[Farm.js] Hydration error:', error)
   }

@@ -137,9 +137,39 @@ describe("client component path resolution", () => {
         '"use client";\nexport const island = "interaction";\nexport function Copy() {}',
       ),
     ).toBe("interaction");
+    expect(
+      getIslandStrategyExport(`
+// export const island = chooseStrategy();
+const example = 'export const island = "idle"';
+export const island = "visible" as const // hydrate near the viewport
+export function Chart() {}
+`),
+    ).toBe("visible");
     expect(() => getIslandStrategyExport("export const island = getStrategy();")).toThrow(
       /must be a static/,
     );
+  });
+
+  it("ignores unrelated island exports in imported server modules", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-shared-island-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(path.dirname(pageFile), "shared.ts"),
+      "export const island = getDomainIsland();\nexport const value = 1;\n",
+    );
+    fs.writeFileSync(
+      path.join(path.dirname(pageFile), "button.tsx"),
+      '"use client";\nexport const island = "interaction";\nexport function Button() {}\n',
+    );
+    fs.writeFileSync(
+      pageFile,
+      'import { value } from "./shared";\nimport { Button } from "./button";\nexport default function Page() { return <Button data-value={value} />; }\n',
+    );
+
+    expect(getClientModuleMetadata(pageFile, root).islandStrategy).toBe("interaction");
   });
 
   it("propagates an imported client boundary island strategy to its route", () => {
@@ -235,6 +265,10 @@ describe("client component path resolution", () => {
     expect(source).toContain('if (action !== "pop" && to === this.currentPath)');
     expect(source).toContain("this.currentPath = to;");
     expect(source).toContain("scheduleFarmIslandHydration");
+    expect(source).toContain("pendingPageHydrationController?.abort()");
+    expect(source).toContain("reactRootContainer !== container");
+    expect(source).toContain('document.getElementById("__farm_page__") || currentRoot');
+    expect(source).toContain("Navigation itself signals intent");
     expect(source).toContain("load: () => import(");
     expect(source).not.toContain("imports.push(`import Page${index}");
   });
@@ -257,6 +291,8 @@ describe("client component path resolution", () => {
     expect(source).toContain(
       "async handlePopState(event) {\n    if (document.documentElement.dataset.farmDocsRuntime === 'true') return;",
     );
+    expect(source).toContain("The scheduler owns queue draining and exactly-once click replay");
+    expect(source).toContain("pendingPageHydrationController?.abort()");
     expect(routerSource).toContain(
       'if (document.documentElement.dataset.farmDocsRuntime === "true") return;',
     );

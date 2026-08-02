@@ -1980,15 +1980,24 @@ function clearRouteInterception(destination) {
 
 // State
 let reactRoot = null;
+let reactRootContainer = null;
 let currentPathname = null;
 let isHydrated = false;
+let pendingPageHydrationController = null;
 
 ${generateUniversalRouterStateRuntime()}
 
+function cancelPendingPageHydration() {
+  pendingPageHydrationController?.abort();
+  pendingPageHydrationController = null;
+}
+
 function resetReactRoot() {
+  cancelPendingPageHydration();
   if (!reactRoot) return;
   reactRoot.unmount();
   reactRoot = null;
+  reactRootContainer = null;
   isHydrated = false;
 }
 
@@ -2013,40 +2022,67 @@ async function hydrate() {
   container.dataset.farmIsland = "page";
   container.dataset.farmIslandStrategy = matched.route.islandStrategy || "load";
 
-  await scheduleFarmIslandHydration({
-    container,
-    strategy: matched.route.islandStrategy,
-    hydrate: async function() {
-      const Component = await loadRouteComponent(matched.route);
-      const params = matched.params;
-      const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
-      const props = { params: params, searchParams: Promise.resolve(searchParams) };
-      const pageElement = React.createElement(Component, props);
-      const wrappedElement = container.id === "__farm_page__"
-        ? pageElement
-        : wrapWithLayouts(pageElement, pathname, params);
-      const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
-      const hydrationSession = await farmClientRuntime.beginHydration({
-        container,
-        mode: shouldHydrate ? "hydrate" : "render",
-      });
-
-      try {
-        if (shouldHydrate) {
-          reactRoot = hydrateRoot(container, wrappedElement);
-          isHydrated = true;
-        } else {
-          if (!reactRoot) reactRoot = createRoot(container);
-          reactRoot.render(wrappedElement);
+  const hydrationController = new AbortController();
+  pendingPageHydrationController = hydrationController;
+  try {
+    await scheduleFarmIslandHydration({
+      container,
+      strategy: matched.route.islandStrategy,
+      signal: hydrationController.signal,
+      hydrate: async function() {
+        const Component = await loadRouteComponent(matched.route);
+        if (
+          hydrationController.signal.aborted ||
+          !container.isConnected ||
+          window.location.pathname !== pathname
+        ) {
+          return;
         }
-        currentPathname = pathname;
-        await farmClientRuntime.completeHydration(hydrationSession);
-      } catch (error) {
-        await farmClientRuntime.failHydration(hydrationSession, error);
-        console.error("[Farm.js] Hydration error:", error);
-      }
-    },
-  });
+        const params = matched.params;
+        const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
+        const props = { params: params, searchParams: Promise.resolve(searchParams) };
+        const pageElement = React.createElement(Component, props);
+        const wrappedElement = container.id === "__farm_page__"
+          ? pageElement
+          : wrapWithLayouts(pageElement, pathname, params);
+        const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
+        const hydrationSession = await farmClientRuntime.beginHydration({
+          container,
+          mode: shouldHydrate ? "hydrate" : "render",
+        });
+
+        try {
+          if (hydrationController.signal.aborted || !container.isConnected) {
+            await farmClientRuntime.failHydration(
+              hydrationSession,
+              new DOMException("Route hydration was cancelled", "AbortError"),
+            );
+            return;
+          }
+          if (shouldHydrate) {
+            reactRoot = hydrateRoot(container, wrappedElement);
+            reactRootContainer = container;
+            isHydrated = true;
+          } else {
+            if (!reactRoot) {
+              reactRoot = createRoot(container);
+              reactRootContainer = container;
+            }
+            reactRoot.render(wrappedElement);
+          }
+          currentPathname = pathname;
+          await farmClientRuntime.completeHydration(hydrationSession);
+        } catch (error) {
+          await farmClientRuntime.failHydration(hydrationSession, error);
+          console.error("[Farm.js] Hydration error:", error);
+        }
+      },
+    });
+  } finally {
+    if (pendingPageHydrationController === hydrationController) {
+      pendingPageHydrationController = null;
+    }
+  }
 }
 
 // SPA Router
@@ -2074,6 +2110,8 @@ ${generateUniversalRouterStateProperties()}
     const from = this.currentPath;
     if (await this.shouldBlockNavigation({ from, to, action })) return;
 
+    // A route transition invalidates any trigger waiting on the previous DOM boundary.
+    cancelPendingPageHydration();
     this.saveScrollPosition(window.location.pathname);
     this.startNavigation(from, url, action);
     let clientNavigation;
@@ -2140,6 +2178,8 @@ ${generateUniversalRouterStateProperties()}
       }
 
       if (matched) {
+        // Navigation itself signals intent, so destination routes load eagerly even
+        // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
         const params = matched.params;
         const searchParams = Object.fromEntries(url.searchParams);
@@ -2166,8 +2206,10 @@ ${generateUniversalRouterStateProperties()}
 
           const container = document.getElementById("root");
           if (container) {
+            if (reactRoot && reactRootContainer !== container) resetReactRoot();
             if (!reactRoot) {
               reactRoot = createRoot(container);
+              reactRootContainer = container;
             }
             reactRoot.render(wrappedElement);
             currentPathname = pathname;
@@ -2277,13 +2319,13 @@ ${generateUniversalRouterStateProperties()}
       const searchParams = Object.fromEntries(targetUrl.searchParams);
       const props = { params: params, searchParams: Promise.resolve(searchParams) };
       const pageElement = React.createElement(Component, props);
-      const hasRouteSlots = nextRouteSlots.length > 0;
       const pageContainer =
-        (hasRouteSlots ? document.getElementById("__farm_page__") : null) || currentRoot;
-      const wrappedElement = hasRouteSlots
+        document.getElementById("__farm_page__") || currentRoot;
+      const wrappedElement = pageContainer.id === "__farm_page__"
         ? pageElement
         : wrapWithLayouts(pageElement, newPathname, params);
       reactRoot = hydrateRoot(pageContainer, wrappedElement);
+      reactRootContainer = pageContainer;
       isHydrated = true;
     }
     return true;

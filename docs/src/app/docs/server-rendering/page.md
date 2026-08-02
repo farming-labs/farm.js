@@ -146,6 +146,10 @@ Farm propagates the strategy to the route hydration boundary, emits it in the ro
 splits production route modules behind dynamic imports. Deferred routes therefore avoid evaluating
 their route chunk until its trigger while preserving the initial SSR output.
 
+These strategies control hydration of the initial server-rendered document. During client-side
+navigation, the navigation itself signals user intent, so Farm loads and renders the destination
+route immediately instead of leaving the previous route visible while waiting for another trigger.
+
 | Strategy      | Hydration trigger                                                     |
 | ------------- | --------------------------------------------------------------------- |
 | `load`        | Immediately. This is the default and compatibility-first behavior.    |

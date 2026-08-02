@@ -93,14 +93,77 @@ describe("scheduleFarmIslandHydration", () => {
       hydrate: () => button.addEventListener("click", () => handledClicks++),
     });
 
-    document.dispatchEvent(
-      new CustomEvent("farm:island-interaction", { detail: { target: button } }),
-    );
     await scheduled;
 
     expect(queue).toHaveLength(0);
     await vi.runAllTimersAsync();
     expect(handledClicks).toBe(1);
+  });
+
+  it("hydrates and replays non-HTML ARIA button interactions", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML =
+      '<div id="island"><svg role="button" tabindex="0"><circle /></svg></div>';
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("svg")!;
+    let handledClicks = 0;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      hydrate: () => button.addEventListener("click", () => handledClicks++),
+    });
+
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+    await scheduled;
+    await vi.runAllTimersAsync();
+
+    expect(handledClicks).toBe(1);
+  });
+
+  it("cancels a deferred boundary without hydrating it", async () => {
+    const controller = new AbortController();
+    const hydrate = vi.fn();
+    const container = document.getElementById("island")!;
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      signal: controller.signal,
+      hydrate,
+    });
+
+    controller.abort();
+
+    await expect(scheduled).resolves.toBeUndefined();
+    container.querySelector("button")!.click();
+    expect(hydrate).not.toHaveBeenCalled();
+  });
+
+  it("does not finish or replay an in-flight hydration after cancellation", async () => {
+    const controller = new AbortController();
+    const container = document.getElementById("island")!;
+    const button = container.querySelector("button")!;
+    let finishHydrate!: () => void;
+    const hydrate = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishHydrate = resolve;
+        }),
+    );
+    const scheduled = scheduleFarmIslandHydration({
+      container,
+      strategy: "interaction",
+      signal: controller.signal,
+      hydrate,
+    });
+
+    button.click();
+    await vi.waitFor(() => expect(hydrate).toHaveBeenCalledOnce());
+    controller.abort();
+    await expect(scheduled).resolves.toBeUndefined();
+    finishHydrate();
+    await Promise.resolve();
+
+    expect(container.hasAttribute("data-farm-island-hydrated")).toBe(false);
   });
 
   it("uses idle scheduling with a timeout", async () => {

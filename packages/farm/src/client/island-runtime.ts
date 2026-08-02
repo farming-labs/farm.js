@@ -5,7 +5,44 @@ import type { FarmIslandStrategy } from "../island";
 export interface ScheduleFarmIslandHydrationOptions<T> {
   container: Element;
   strategy?: FarmIslandStrategy | null;
+  signal?: AbortSignal;
   hydrate: () => T | Promise<T>;
+}
+
+interface FarmQueuedClick {
+  target?: EventTarget | null;
+}
+
+function getPreHydrationClickQueue(): FarmQueuedClick[] | null {
+  const windowWithQueue = window as typeof window & {
+    __FARM_PREHYDRATION_CLICK_QUEUE__?: FarmQueuedClick[];
+  };
+  return Array.isArray(windowWithQueue.__FARM_PREHYDRATION_CLICK_QUEUE__)
+    ? windowWithQueue.__FARM_PREHYDRATION_CLICK_QUEUE__
+    : null;
+}
+
+function findQueuedTarget(container: Element): Element | null {
+  const queue = getPreHydrationClickQueue();
+  if (!queue) return null;
+  for (const item of queue) {
+    if (item?.target instanceof Element && container.contains(item.target)) return item.target;
+  }
+  return null;
+}
+
+function takeQueuedTargets(container: Element): Element[] {
+  const queue = getPreHydrationClickQueue();
+  if (!queue) return [];
+
+  const targets: Element[] = [];
+  for (let index = queue.length - 1; index >= 0; index--) {
+    const target = queue[index]?.target;
+    if (!(target instanceof Element) || !container.contains(target)) continue;
+    queue.splice(index, 1);
+    targets.unshift(target);
+  }
+  return targets;
 }
 
 function runWhenIdle(callback: () => void): () => void {
@@ -23,26 +60,23 @@ function runWhenIdle(callback: () => void): () => void {
   return () => window.clearTimeout(handle);
 }
 
-function finishIslandHydration(container: Element, activatingTarget?: HTMLElement | null): void {
+function replayClick(target: Element): void {
+  const clickable = target as Element & { click?: () => void };
+  if (typeof clickable.click === "function") {
+    clickable.click();
+    return;
+  }
+  target.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+}
+
+function finishIslandHydration(container: Element, activatingTarget?: Element | null): void {
   container.setAttribute("data-farm-island-hydrated", "true");
 
-  const windowWithQueue = window as typeof window & {
-    __FARM_PREHYDRATION_CLICK_QUEUE__?: Array<{ target?: EventTarget | null }>;
-  };
-  const queue = windowWithQueue.__FARM_PREHYDRATION_CLICK_QUEUE__;
-  const targets = new Set<HTMLElement>();
+  const targets = new Set<Element>();
   if (activatingTarget?.isConnected) targets.add(activatingTarget);
+  for (const target of takeQueuedTargets(container)) if (target.isConnected) targets.add(target);
 
-  if (Array.isArray(queue)) {
-    for (let index = queue.length - 1; index >= 0; index--) {
-      const target = queue[index]?.target;
-      if (!(target instanceof HTMLElement) || !container.contains(target)) continue;
-      queue.splice(index, 1);
-      if (target.isConnected) targets.add(target);
-    }
-  }
-
-  for (const target of targets) window.setTimeout(() => target.click(), 0);
+  for (const target of targets) window.setTimeout(() => replayClick(target), 0);
 }
 
 /**
@@ -52,38 +86,48 @@ function finishIslandHydration(container: Element, activatingTarget?: HTMLElemen
 export function scheduleFarmIslandHydration<T>({
   container,
   strategy,
+  signal,
   hydrate,
-}: ScheduleFarmIslandHydrationOptions<T>): Promise<T> {
+}: ScheduleFarmIslandHydrationOptions<T>): Promise<T | undefined> {
   const resolvedStrategy = strategy ?? "load";
+  if (signal?.aborted) return Promise.resolve(undefined);
 
   if (resolvedStrategy === "load") {
     return Promise.resolve()
-      .then(hydrate)
+      .then(() => (signal?.aborted ? undefined : hydrate()))
       .then((value) => {
-        finishIslandHydration(container);
+        if (!signal?.aborted) finishIslandHydration(container);
         return value;
       });
   }
 
-  return new Promise<T>((resolve, reject) => {
+  return new Promise<T | undefined>((resolve, reject) => {
     let started = false;
-    let queuedClickTarget: HTMLElement | null = null;
-    const cleanups = new Set<() => void>();
+    let cancelled = false;
+    let queuedClickTarget: Element | null = null;
+    const triggerCleanups = new Set<() => void>();
+    let removeAbortListener: (() => void) | null = null;
 
+    const cleanupTriggers = () => {
+      for (const dispose of triggerCleanups) dispose();
+      triggerCleanups.clear();
+    };
     const cleanup = () => {
-      for (const dispose of cleanups) dispose();
-      cleanups.clear();
+      cleanupTriggers();
+      removeAbortListener?.();
+      removeAbortListener = null;
     };
 
     const start = () => {
-      if (started) return;
+      if (started || cancelled) return;
       started = true;
-      cleanup();
+      cleanupTriggers();
       Promise.resolve()
         .then(hydrate)
         .then(
           (value) => {
             cleanup();
+            if (cancelled || signal?.aborted) return;
             const target = queuedClickTarget;
             queuedClickTarget = null;
             finishIslandHydration(container, target);
@@ -96,8 +140,19 @@ export function scheduleFarmIslandHydration<T>({
         );
     };
 
+    if (signal) {
+      const abort = () => {
+        cancelled = true;
+        cleanup();
+        takeQueuedTargets(container);
+        resolve(undefined);
+      };
+      signal.addEventListener("abort", abort, { once: true });
+      removeAbortListener = () => signal.removeEventListener("abort", abort);
+    }
+
     if (resolvedStrategy === "idle") {
-      cleanups.add(runWhenIdle(start));
+      triggerCleanups.add(runWhenIdle(start));
       return;
     }
 
@@ -114,14 +169,14 @@ export function scheduleFarmIslandHydration<T>({
         { rootMargin: "200px" },
       );
       observer.observe(container);
-      cleanups.add(() => observer.disconnect());
+      triggerCleanups.add(() => observer.disconnect());
       return;
     }
 
     const queueActivatingClick = (event: MouseEvent) => {
       const target =
         event.target instanceof Element
-          ? event.target.closest<HTMLElement>(
+          ? event.target.closest(
               'button,[role="button"],input[type="button"],input[type="submit"],input[type="reset"]',
             )
           : null;
@@ -144,17 +199,23 @@ export function scheduleFarmIslandHydration<T>({
     };
     const activateFromQueuedClick = (event: Event) => {
       const target = (event as CustomEvent<{ target?: EventTarget | null }>).detail?.target;
-      if (!(target instanceof HTMLElement) || !container.contains(target)) return;
+      if (!(target instanceof Element) || !container.contains(target)) return;
 
       queuedClickTarget ??= target;
       start();
     };
 
     document.addEventListener("click", queueActivatingClick, true);
-    cleanups.add(() => document.removeEventListener("click", queueActivatingClick, true));
+    triggerCleanups.add(() => document.removeEventListener("click", queueActivatingClick, true));
     document.addEventListener("farm:island-interaction", activateFromQueuedClick);
-    cleanups.add(() =>
+    triggerCleanups.add(() =>
       document.removeEventListener("farm:island-interaction", activateFromQueuedClick),
     );
+
+    const queuedTarget = findQueuedTarget(container);
+    if (queuedTarget) {
+      queuedClickTarget = queuedTarget;
+      start();
+    }
   });
 }

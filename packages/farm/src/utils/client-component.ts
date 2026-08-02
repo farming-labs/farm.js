@@ -97,27 +97,160 @@ export function hasHydrateExport(content: string | null): boolean {
   );
 }
 
+interface ModuleSourceToken {
+  kind: "identifier" | "string" | "punctuation";
+  value: string;
+  line: number;
+}
+
+function tokenizeModuleSource(content: string): ModuleSourceToken[] {
+  const tokens: ModuleSourceToken[] = [];
+  let index = 0;
+  let line = 1;
+
+  while (index < content.length) {
+    const character = content[index];
+    if (/\s/.test(character)) {
+      if (character === "\n") line++;
+      index++;
+      continue;
+    }
+
+    if (character === "/" && content[index + 1] === "/") {
+      index += 2;
+      while (index < content.length && content[index] !== "\n") index++;
+      continue;
+    }
+    if (character === "/" && content[index + 1] === "*") {
+      index += 2;
+      while (index < content.length) {
+        if (content[index] === "\n") line++;
+        if (content[index] === "*" && content[index + 1] === "/") {
+          index += 2;
+          break;
+        }
+        index++;
+      }
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      const quote = character;
+      const tokenLine = line;
+      let value = "";
+      index++;
+      while (index < content.length) {
+        const next = content[index];
+        if (next === "\\") {
+          value += next;
+          if (index + 1 < content.length) value += content[index + 1];
+          index += 2;
+          continue;
+        }
+        if (next === quote) {
+          index++;
+          break;
+        }
+        if (next === "\n") line++;
+        value += next;
+        index++;
+      }
+      tokens.push({ kind: "string", value, line: tokenLine });
+      continue;
+    }
+
+    if (character === "`") {
+      index++;
+      while (index < content.length) {
+        const next = content[index];
+        if (next === "\\") {
+          index += 2;
+          continue;
+        }
+        if (next === "`") {
+          index++;
+          break;
+        }
+        if (next === "\n") line++;
+        index++;
+      }
+      continue;
+    }
+
+    if (/[A-Za-z_$]/.test(character)) {
+      const start = index++;
+      while (index < content.length && /[\w$]/.test(content[index])) index++;
+      tokens.push({ kind: "identifier", value: content.slice(start, index), line });
+      continue;
+    }
+
+    tokens.push({ kind: "punctuation", value: character, line });
+    index++;
+  }
+
+  return tokens;
+}
+
+function isIslandExportStart(tokens: ModuleSourceToken[], index: number): boolean {
+  const token = tokens[index];
+  const previous = tokens[index - 1];
+  const startsStatement =
+    !previous ||
+    previous.value === ";" ||
+    previous.value === "{" ||
+    previous.value === "}" ||
+    token.line > previous.line;
+  return (
+    startsStatement &&
+    token.value === "export" &&
+    tokens[index + 1]?.value === "const" &&
+    tokens[index + 2]?.value === "island"
+  );
+}
+
 export function getIslandStrategyExport(content: string | null): FarmIslandStrategy | null {
   if (!content) return null;
 
-  const declaration = content.match(/\bexport\s+const\s+island(?:\s*:[^=;]+)?\s*=\s*([^;\r\n]+)/);
-  if (!declaration) return null;
+  const tokens = tokenizeModuleSource(content);
+  for (let index = 0; index < tokens.length - 2; index++) {
+    if (!isIslandExportStart(tokens, index)) continue;
 
-  const literal = declaration[1].trim().match(/^(["'])([^"']+)\1$/);
-  if (!literal || !isFarmIslandStrategy(literal[2])) {
+    let valueIndex = index + 3;
+    if (tokens[valueIndex]?.value === ":") {
+      while (valueIndex < tokens.length && tokens[valueIndex].value !== "=") valueIndex++;
+    }
+    if (tokens[valueIndex]?.value !== "=") break;
+    valueIndex++;
+
+    const literal = tokens[valueIndex];
+    if (!literal || literal.kind !== "string" || !isFarmIslandStrategy(literal.value)) break;
+
+    let trailingIndex = valueIndex + 1;
+    if (tokens[trailingIndex]?.value === "as" && tokens[trailingIndex + 1]?.value === "const") {
+      trailingIndex += 2;
+    }
+    const trailing = tokens[trailingIndex];
+    if (trailing && trailing.value !== ";" && trailing.line === literal.line) break;
+    return literal.value;
+  }
+
+  if (tokens.some((_token, index) => isIslandExportStart(tokens, index))) {
     throw new Error(
       'Farm island configuration must be a static "load", "interaction", "visible", or "idle" string literal.',
     );
   }
 
-  return literal[2];
+  return null;
 }
 
 export function stripUseClientDirective(content: string): string {
   return content.replace(/^\s*(["'])use client\1\s*;?\s*/, "");
 }
 
-function parseClientModuleMetadata(content: string | null): ParsedClientModuleMetadata {
+function parseClientModuleMetadata(
+  content: string | null,
+  inspectIslandExport: boolean,
+): ParsedClientModuleMetadata {
   if (!content) {
     return {
       isClientComponent: false,
@@ -126,16 +259,21 @@ function parseClientModuleMetadata(content: string | null): ParsedClientModuleMe
     };
   }
 
+  const isClientComponent = hasUseClientDirective(content);
+  const hasHydrate = hasHydrateExport(content);
   return {
-    isClientComponent: hasUseClientDirective(content),
-    hasHydrateExport: hasHydrateExport(content),
-    islandStrategy: getIslandStrategyExport(content),
+    isClientComponent,
+    hasHydrateExport: hasHydrate,
+    islandStrategy:
+      inspectIslandExport || isClientComponent || hasHydrate
+        ? getIslandStrategyExport(content)
+        : null,
   };
 }
 
 export function getClientModuleMetadata(modulePath: string, root?: string): ClientModuleMetadata {
   const resolvedPath = resolveModuleSourcePath(modulePath, root);
-  return inspectClientModuleMetadata(resolvedPath, root, new Set());
+  return inspectClientModuleMetadata(resolvedPath, root, new Set(), true);
 }
 
 export function isClientComponentModule(modulePath: string, root?: string): boolean {
@@ -150,6 +288,7 @@ function inspectClientModuleMetadata(
   resolvedPath: string | null,
   root: string | undefined,
   visited: Set<string>,
+  inspectIslandExport: boolean,
 ): ClientModuleMetadata {
   if (!resolvedPath || visited.has(resolvedPath)) {
     return {
@@ -162,7 +301,7 @@ function inspectClientModuleMetadata(
   visited.add(resolvedPath);
 
   const content = readIfExists(resolvedPath);
-  const parsed = parseClientModuleMetadata(content);
+  const parsed = parseClientModuleMetadata(content, inspectIslandExport);
   if (parsed.isClientComponent) {
     return {
       isClientComponent: true,
@@ -175,7 +314,7 @@ function inspectClientModuleMetadata(
   let importedIslandStrategy: FarmIslandStrategy | null = null;
   for (const specifier of getRelativeImportSpecifiers(content)) {
     const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
-    const importedMetadata = inspectClientModuleMetadata(importedPath, root, visited);
+    const importedMetadata = inspectClientModuleMetadata(importedPath, root, visited, false);
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
       if (importedIslandStrategy === null) {
