@@ -248,7 +248,7 @@ export async function transformFarmFontCalls(
 export function renderFarmFontDevHead(root: string): string {
   const registry = registries.get(normalizeRoot(root));
   if (!registry || registry.production || registry.size === 0) return "";
-  return registry.renderPreloadTags(false);
+  return `${registry.renderPreloadTags(false)}\n  <link rel="stylesheet" href="/@farm/fonts.css">`;
 }
 
 class FarmFontRegistry {
@@ -583,7 +583,7 @@ class FarmFontRegistry {
     const normalizedExtension = extension.toLowerCase();
     const hash = createHash("sha256").update(bytes).digest("hex").slice(0, 12);
     const baseName = sanitizeFileName(path.basename(fileName, extension)) || "font";
-    const outputFileName = `assets/fonts/${baseName}-${hash}${normalizedExtension}`;
+    const outputFileName = `assets/fonts/${baseName}-h${hash}${normalizedExtension}`;
     const key = `${hash}${normalizedExtension}`;
     const existing = this.resources.get(key);
     if (existing) return existing;

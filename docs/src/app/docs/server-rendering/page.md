@@ -67,6 +67,16 @@ export default async function DashboardPage() {
 
 Use static rendering for pages that can be built once and served quickly.
 
+During a production build, Farm also scans routes that use the default dynamic mode. If a
+non-parameterized route does not read cookies, headers, authentication, search parameters, or
+middleware request data, Farm reports it as a static-rendering candidate. The build keeps the route
+dynamic until you opt in, because request-bound work may be hidden in an imported component or data
+loader.
+
+Review each suggestion, including its imported code, then add the static export when it is safe. This
+keeps personalized pages dynamic while making stable pages easy to move onto the fastest rendering
+and caching path.
+
 **src/app/about/page.tsx**
 
 ```tsx

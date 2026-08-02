@@ -8,9 +8,12 @@ import {
   BookOpenText,
   Bot,
   Braces,
+  Check,
   CloudCog,
+  Cpu,
   Database,
   ExternalLink,
+  FileOutput,
   FileText,
   FolderTree,
   GitFork,
@@ -1070,7 +1073,7 @@ function FeatureCell({
   icon: LucideIcon;
   label: string;
   title: string;
-  body: string;
+  body: ReactNode;
   className?: string;
   children: ReactNode;
 }) {
@@ -1363,6 +1366,209 @@ function AdvancedRoutesVisual() {
   );
 }
 
+const optimizedBoundaryChecks = [
+  ["Host-only tree", "pass"],
+  ["Client code", "none"],
+  ["Events or refs", "none"],
+  ["Size gate", "pass"],
+] as const;
+
+function FeatureDiagramFrame({
+  ariaLabel,
+  href,
+  icon: Icon,
+  label,
+  status,
+  footerLabel,
+  footerValue,
+  children,
+}: {
+  ariaLabel: string;
+  href: string;
+  icon: LucideIcon;
+  label: string;
+  status: string;
+  footerLabel: string;
+  footerValue: string;
+  children: ReactNode;
+}) {
+  return (
+    <FoundationCanvas interactive>
+      <a
+        aria-label={ariaLabel}
+        className="group/diagram absolute inset-0 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+        href={href}
+      >
+        <figure className="farm-illustration-surface absolute -bottom-px -right-px top-4 flex w-[calc(100%-1.5rem)] flex-col overflow-hidden border border-white/10 transition-colors duration-150 group-hover/diagram:border-white/18 sm:w-[calc(100%-2.5rem)]">
+          <figcaption className="flex h-10 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] font-normal uppercase tracking-normal">
+            <span className="flex items-center gap-1.5 text-white/54">
+              <Icon aria-hidden className="size-3" strokeWidth={1.5} />
+              {label}
+            </span>
+            <span className="border border-white/12 bg-white/[0.035] px-2 py-1 text-white/44">
+              {status}
+            </span>
+          </figcaption>
+
+          <div className="relative min-h-0 flex-1">
+            <span
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgb(255_255_255/0.018)_1px,transparent_1px),linear-gradient(90deg,rgb(255_255_255/0.018)_1px,transparent_1px)] bg-[size:24px_24px] opacity-55"
+            />
+            <div className="relative z-10 h-full">{children}</div>
+          </div>
+
+          <div className="flex h-12 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.025] px-4 font-mono text-[9px] font-normal uppercase tracking-normal sm:px-5">
+            <span className="text-white/32">{footerLabel}</span>
+            <span className="flex items-center gap-2 text-white/86">
+              {footerValue}
+              <ArrowRight
+                aria-hidden
+                className="size-3 transition-transform duration-150 group-hover/diagram:translate-x-0.5"
+                strokeWidth={1.5}
+              />
+            </span>
+          </div>
+        </figure>
+      </a>
+    </FoundationCanvas>
+  );
+}
+
+function DiagramConnector() {
+  return (
+    <div aria-hidden className="flex min-w-0 items-center">
+      <span className="h-px min-w-0 flex-1 bg-white/12" />
+      <span className="grid size-6 shrink-0 place-items-center border border-white/12 bg-black text-white/46">
+        <ArrowRight className="size-2.5" strokeWidth={1.5} />
+      </span>
+      <span className="h-px min-w-0 flex-1 bg-white/12" />
+    </div>
+  );
+}
+
+function OptimizedBoundaryVisual() {
+  return (
+    <FeatureDiagramFrame
+      ariaLabel="Read about automatic optimized boundaries"
+      footerLabel="Selected renderer"
+      footerValue="Strata / Rust"
+      href="/docs/server-rendering#automatic-optimized-boundaries"
+      icon={Cpu}
+      label="Boundary analysis"
+      status="Experimental"
+    >
+      <div className="grid h-full grid-cols-[minmax(0,0.88fr)_2.25rem_minmax(0,1.12fr)] items-center px-4 sm:grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] sm:px-5">
+        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
+          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
+            <span className="text-white/34">Candidate</span>
+            <span className="text-white/58">RSC</span>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 text-center font-mono tracking-normal">
+            <span className="border border-white/10 bg-white/[0.035] px-2 py-1 text-[7px] uppercase text-white/38 sm:text-[8px]">
+              Server component
+            </span>
+            <span className="mt-3 text-[11px] text-white/86 sm:text-xs">&lt;article&gt;</span>
+            <span className="mt-1 text-[8px] text-white/32 sm:text-[9px]">host-only region</span>
+          </div>
+        </div>
+
+        <DiagramConnector />
+
+        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
+          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
+            <span className="text-white/34">Runtime scan</span>
+            <span className="flex items-center gap-1 text-white/68">
+              <Check aria-hidden className="size-2.5" strokeWidth={1.8} /> Eligible
+            </span>
+          </div>
+          <div className="min-h-0 flex-1 px-3">
+            {optimizedBoundaryChecks.map(([label, value]) => (
+              <div
+                key={label}
+                className="flex h-[30px] items-center justify-between border-b border-white/8 font-mono text-[8px] tracking-normal last:border-b-0 sm:text-[9px]"
+              >
+                <span className="truncate text-white/38">{label}</span>
+                <span className="ml-2 flex shrink-0 items-center gap-1 text-white/68">
+                  <Check aria-hidden className="size-2.5" strokeWidth={1.8} />
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </FeatureDiagramFrame>
+  );
+}
+
+function MarkdownMirrorsVisual() {
+  return (
+    <FeatureDiagramFrame
+      ariaLabel="Read about automatic Markdown mirrors"
+      footerLabel="Content negotiation"
+      footerValue="text/markdown"
+      href="/docs/markdown"
+      icon={FileOutput}
+      label="Representation map"
+      status="Automatic"
+    >
+      <div className="grid h-full grid-cols-[minmax(0,0.88fr)_2.25rem_minmax(0,1.12fr)] items-center px-4 sm:grid-cols-[minmax(0,0.82fr)_3rem_minmax(0,1.18fr)] sm:px-5">
+        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
+          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
+            <span className="text-white/34">Source</span>
+            <span className="text-white/58">Page</span>
+          </div>
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 text-center font-mono tracking-normal">
+            <span className="border border-white/10 bg-white/[0.035] px-2 py-1 text-[7px] uppercase text-white/38 sm:text-[8px]">
+              App route
+            </span>
+            <span className="mt-3 text-[11px] text-white/86 sm:text-xs">/pricing</span>
+            <span className="mt-1 text-[8px] text-white/32 sm:text-[9px]">one source</span>
+          </div>
+        </div>
+
+        <DiagramConnector />
+
+        <div className="flex h-[152px] min-w-0 flex-col border border-white/12 bg-black/88">
+          <div className="flex h-8 shrink-0 items-center justify-between border-b border-white/8 px-3 font-mono text-[8px] font-normal uppercase tracking-normal">
+            <span className="text-white/34">Representations</span>
+            <span className="text-white/58">2 outputs</span>
+          </div>
+          <div className="grid min-h-0 flex-1 grid-rows-2">
+            <div className="flex min-w-0 items-center justify-between border-b border-white/8 px-3 font-mono tracking-normal">
+              <div className="min-w-0">
+                <span className="block text-[7px] uppercase text-white/28 sm:text-[8px]">
+                  Browser
+                </span>
+                <span className="mt-1 block truncate text-[9px] text-white/74 sm:text-[10px]">
+                  /pricing
+                </span>
+              </div>
+              <span className="ml-2 border border-white/10 bg-white/[0.025] px-2 py-1 text-[7px] uppercase text-white/48 sm:text-[8px]">
+                HTML
+              </span>
+            </div>
+            <div className="flex min-w-0 items-center justify-between px-3 font-mono tracking-normal">
+              <div className="min-w-0">
+                <span className="block text-[7px] uppercase text-white/28 sm:text-[8px]">
+                  Agent
+                </span>
+                <span className="mt-1 block truncate text-[9px] text-white/86 sm:text-[10px]">
+                  /pricing.md
+                </span>
+              </div>
+              <span className="ml-2 border border-white/14 bg-white/[0.045] px-2 py-1 text-[7px] uppercase text-white/78 sm:text-[8px]">
+                Markdown
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </FeatureDiagramFrame>
+  );
+}
+
 function AgentRuntimeVisual() {
   return (
     <FoundationCodeTabsVisual
@@ -1408,7 +1614,7 @@ function FoundationGrid() {
         <DeploymentVisual />
       </FeatureCell>
       <FeatureCell
-        body="Enable docs in your app config, then serve pages, Markdown, search, and agent-ready endpoints from the same source."
+        body="Enable a complete docs surface with MDX, navigation, search, MCP, and agent-ready endpoints from the same source."
         className="border-t border-white/12"
         icon={BookOpenText}
         index="02.3"
@@ -1446,6 +1652,40 @@ function FoundationGrid() {
         title="Configure the whole route in one place"
       >
         <AdvancedRoutesVisual />
+      </FeatureCell>
+      <FeatureCell
+        body={
+          <>
+            Farm detects large, host-only Server Component regions and renders eligible trees
+            through{" "}
+            <a
+              className="font-medium text-white underline decoration-white/45 underline-offset-4 transition-[text-decoration-color] duration-150 hover:decoration-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+              href="https://github.com/farming-labs/strata"
+              rel="noreferrer"
+              target="_blank"
+            >
+              Strata
+            </a>
+            {"'s Rust-native renderer. Everything else stays on React."}
+          </>
+        }
+        className="border-t border-white/12"
+        icon={Cpu}
+        index="02.7"
+        label="Experimental rendering"
+        title="Native rendering for static regions"
+      >
+        <OptimizedBoundaryVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Every app page receives a Markdown representation at a .md URL or through content negotiation. Keep the generated output or override it with page.md."
+        className="border-t border-white/12 lg:border-l"
+        icon={FileOutput}
+        index="02.8"
+        label="Markdown mirrors"
+        title="Every page, readable by agents"
+      >
+        <MarkdownMirrorsVisual />
       </FeatureCell>
     </section>
   );

@@ -69,9 +69,10 @@ export const demo = localFont({ src: "./demo.woff2", family: "Dev Demo" });`,
       expect(transformed?.code).not.toContain("font-runtime-stub");
       expect(transformed?.code).not.toContain("@farm.js/core/font");
       expect(transformed?.code).toContain("font-css");
-      expect(renderFarmFontDevHead(root)).toContain('<link rel="preload"');
-      expect(renderFarmFontDevHead(root)).toContain('href="/docs/@farm/font/');
-      expect(renderFarmFontDevHead(root)).not.toContain('rel="stylesheet"');
+      const head = renderFarmFontDevHead(root);
+      expect(head).toContain('<link rel="preload"');
+      expect(head).toContain('href="/docs/@farm/font/');
+      expect(head).toContain('<link rel="stylesheet" href="/@farm/fonts.css">');
 
       await new Promise<void>((resolve) => http.listen(0, "127.0.0.1", resolve));
       const address = http.address();
@@ -195,7 +196,7 @@ console.log(demo, farmFontPreloadHeader);`,
       expect(css).toContain('font-family: "Demo Sans"');
       expect(css).toContain("font-display: swap");
       expect(css).toContain("--font-demo:");
-      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-[a-f0-9]{12}\.woff2$/);
+      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/demo-h[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("test-font-binary");
     } finally {
       await fs.rm(root, { recursive: true, force: true });
@@ -334,7 +335,7 @@ console.log(demo);`,
       );
 
       expect(fetchMock).toHaveBeenCalledOnce();
-      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/self-hosted-[a-f0-9]{12}\.woff2$/);
+      expect(fontAsset?.fileName).toMatch(/^assets\/fonts\/self-hosted-h[a-f0-9]{12}\.woff2$/);
       expect(Buffer.from(fontAsset?.source || []).toString()).toBe("self-hosted-font");
     } finally {
       vi.unstubAllGlobals();
