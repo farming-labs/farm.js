@@ -51,6 +51,7 @@ import {
 } from "../route-runtime-manifest";
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
+import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import { getFarmIntegrationPluginServerRuntime } from "../integrations";
@@ -1054,13 +1055,14 @@ async function buildClient(
           },
           output: {
             entryFileNames: "[name].js",
-            chunkFileNames: "chunks/[name]-[hash].js",
+            chunkFileNames: "chunks/[name]-h[hash].js",
+            hashCharacters: "hex",
             // Use predictable name for CSS so we can reference it in SSR HTML
             assetFileNames: (assetInfo) => {
               if (assetInfo.name?.endsWith(".css")) {
                 return "farm-client.css";
               }
-              return "assets/[name]-[hash][extname]";
+              return "assets/[name]-h[hash][extname]";
             },
           },
           // Externalize Node.js built-ins and server-side modules for client build
@@ -6373,6 +6375,9 @@ async function postProcessVercelOutput(
 
   // Update routes to use the correct function path
   vercelConfig.routes = [
+    // Apply the header before the filesystem handler. `continue` lets Vercel
+    // serve the matching file while preserving the immutable cache policy.
+    createFarmVercelImmutableAssetRoute(config.basePath),
     // Serve static files first
     {
       handle: "filesystem",

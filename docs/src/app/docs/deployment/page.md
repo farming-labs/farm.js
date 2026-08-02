@@ -36,6 +36,17 @@ export default defineConfig({
 
 These targets get the most polished Farm defaults. They map `deploy.target` to a Nitro preset, output directory, and the matching `farm deploy` command when Farm has a deploy wrapper for that platform.
 
+### Immutable fingerprinted assets on Vercel
+
+Farm's Vercel Build Output automatically serves content-hashed files under `assets/` and `chunks/`
+with `Cache-Control: public, max-age=31536000, immutable`. This covers fingerprinted JavaScript, CSS,
+fonts, and images, including nested asset directories and applications with a `basePath`.
+
+The rule intentionally excludes HTML, unhashed public files, and stable entry URLs such as
+`/farm-client.js` and `/farm-client.css`. Those URLs can change between deployments and must remain
+revalidatable. The immutable header route runs before Vercel's filesystem handler, so matching files
+are still served directly from the CDN and never enter the Farm server function.
+
 ## Preset showcase
 
 Use `deploy.target` when you want one config file to control the platform output. Farm maps that target to the Nitro preset, default output directory, and deploy command shape.

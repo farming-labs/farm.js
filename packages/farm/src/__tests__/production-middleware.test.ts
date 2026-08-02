@@ -10,6 +10,7 @@ import {
   cleanupMiddlewareProductionFixture,
   createMiddlewareProductionFixture,
 } from "./fixtures/middleware-production-fixture";
+import { createFarmVercelImmutableAssetRoute } from "../nitro/vercel-assets";
 
 async function readJavaScriptOutput(dir: string): Promise<string> {
   const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -40,6 +41,14 @@ describe("production middleware runtime", () => {
       const userConfig = await loadConfig(root, undefined, "production");
       const config = await resolveConfig({ ...userConfig, root }, "production");
       await build(config, { root, preset: "vercel" });
+
+      const vercelOutputConfig = JSON.parse(
+        await fs.readFile(path.join(root, ".vercel", "output", "config.json"), "utf8"),
+      );
+      expect(vercelOutputConfig.routes[0]).toEqual(
+        createFarmVercelImmutableAssetRoute(config.basePath),
+      );
+      expect(vercelOutputConfig.routes[1]).toEqual({ handle: "filesystem" });
 
       const staticAssetsDir = path.join(root, ".vercel", "output", "static", "assets");
       const productAssetName = (await fs.readdir(staticAssetsDir)).find((file) =>
