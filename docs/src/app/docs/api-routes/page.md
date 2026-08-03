@@ -204,7 +204,7 @@ Endpoint middleware is local to one `createEndpoint` declaration and can use its
 ## Typed expected errors
 
 Declare failures that are part of an endpoint's public contract, then return them through the typed
-`fail` function:
+`error` function:
 
 ```ts
 export const POST = createEndpoint(
@@ -217,22 +217,22 @@ export const POST = createEndpoint(
       duplicate: {
         status: 409,
         message: "A product with this name already exists",
-        schema: z.object({
+        data: z.object({
           existingId: z.string(),
         }),
       },
       forbidden: {
         status: 403,
-        schema: z.object({
+        data: z.object({
           permission: z.string(),
         }),
       },
     },
   },
-  async ({ body, fail }) => {
+  async ({ body, error }) => {
     const existing = await findProductByName(body.name);
     if (existing) {
-      return fail("duplicate", {
+      return error("duplicate", {
         existingId: existing.id,
       });
     }
@@ -259,6 +259,10 @@ Farm validates the failure payload before returning a JSON error response. Decla
 payloads are public, so do not include secrets. Undeclared exceptions remain unexpected server
 errors and are not converted into a declared failure. Endpoints without an `errors` declaration
 keep the existing `Error` client type.
+
+The generated client makes this endpoint RPC-like to call, but the transport remains a regular HTTP
+request and JSON error response. Existing endpoint definitions using `schema` and `fail` continue to
+work as deprecated aliases; use `data` and `error` in new code for consistency with server functions.
 
 ## Client inference
 
