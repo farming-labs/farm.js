@@ -23,6 +23,58 @@ import type { FarmAuthUserConfig, ResolvedFarmAuthConfig } from "./auth-config";
 import type { FarmPerformanceConfig } from "./preload";
 import type { FarmLayoutFonts } from "./font";
 
+declare global {
+  namespace FarmJS {
+    /** @internal Application route patterns registered by generated types. */
+    interface RouteRegistry {}
+  }
+}
+
+/** All generated route module patterns for the current application. */
+export type AppRoutePattern = FarmJS.RouteRegistry extends {
+  pattern: infer TPattern extends string;
+}
+  ? TPattern
+  : string;
+
+type FarmRoutePropsDefault = never;
+
+type FarmRoutePropsTarget = AppRoutePattern;
+
+type StripPageRouteSuffix<TRoute extends string> = TRoute extends `${infer TPath}?${string}`
+  ? StripPageRouteSuffix<TPath>
+  : TRoute extends `${infer TPath}#${string}`
+    ? StripPageRouteSuffix<TPath>
+    : TRoute;
+
+type SimplifyPageRouteParams<TValue> = { [TKey in keyof TValue]: TValue[TKey] } & {};
+
+type PageRouteSegmentParams<TSegment extends string> = TSegment extends `[[...${infer TParam}]]`
+  ? { [TKey in TParam]?: string }
+  : TSegment extends `[...${infer TParam}]`
+    ? { [TKey in TParam]: string }
+    : TSegment extends `[${infer TParam}]`
+      ? { [TKey in TParam]: string }
+      : {};
+
+type ExtractPageRouteParams<TRoute extends string> =
+  TRoute extends `${infer TSegment}/${infer TRest}`
+    ? PageRouteSegmentParams<TSegment> & ExtractPageRouteParams<TRest>
+    : PageRouteSegmentParams<TRoute>;
+
+/** Infer the decoded params received by a page from a route pattern. */
+export type PageRouteParams<TRoute extends string> = string extends TRoute
+  ? Record<string, string>
+  : TRoute extends string
+    ? SimplifyPageRouteParams<ExtractPageRouteParams<StripPageRouteSuffix<TRoute>>>
+    : never;
+
+type ResolvePageRouteParams<TRoute extends FarmRoutePropsTarget> = [TRoute] extends [never]
+  ? Record<string, string>
+  : TRoute extends string
+    ? PageRouteParams<TRoute>
+    : Record<string, string>;
+
 export type NitroPreset =
   | "node-server"
   | "vercel"
@@ -196,8 +248,8 @@ export interface PluginContextProps {
  * @param middleware - Data set by middleware.ts (optional, available if middleware exists)
  * @param context - Data explicitly exposed by plugins for this request (optional)
  */
-export interface PageProps {
-  params: Record<string, string>;
+export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+  params: ResolvePageRouteParams<TRoute>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
   path: string;
   /**
@@ -222,8 +274,8 @@ export interface PageProps {
   context?: PluginContextProps;
 }
 
-export interface LoadingProps {
-  params: Record<string, string>;
+export interface LoadingProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+  params: ResolvePageRouteParams<TRoute>;
   searchParams: Promise<Record<string, string | string[] | undefined>>;
   search?: Record<string, string | string[] | undefined>;
   path: string;
@@ -231,7 +283,9 @@ export interface LoadingProps {
   context?: PluginContextProps;
 }
 
-export interface ErrorProps extends LoadingProps {
+export interface ErrorProps<
+  TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault,
+> extends LoadingProps<TRoute> {
   error: unknown;
   reset: () => void;
 }
@@ -256,21 +310,40 @@ export interface ErrorProps extends LoadingProps {
  * }
  * ```
  */
-export type PagePropsWithMiddleware<T extends Record<string, any>> = PageProps & {
+export type PagePropsWithMiddleware<
+  T extends Record<string, any>,
+  TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault,
+> = PageProps<TRoute> & {
   middleware: {
     data: Map<keyof T, T[keyof T]>;
   };
 };
 
-export interface LayoutProps {
+export interface LayoutProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
   children: ReactNode;
-  params: Record<string, string>;
+  params: ResolvePageRouteParams<TRoute>;
 }
 
-export type Page = ComponentType<PageProps>;
-export type Layout = ComponentType<LayoutProps>;
-export type Loading = ComponentType<LoadingProps>;
-export type ErrorBoundary = ComponentType<ErrorProps>;
+/** Props passed to a route's `generateMetadata` function. */
+export type MetadataProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+  PageProps<TRoute>;
+
+/** Props passed to a layout's `generateMetadata` function. */
+export interface LayoutMetadataProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+  params: ResolvePageRouteParams<TRoute>;
+}
+
+export type Page<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = ComponentType<
+  PageProps<TRoute>
+>;
+export type Layout<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = ComponentType<
+  LayoutProps<TRoute>
+>;
+export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = ComponentType<
+  LoadingProps<TRoute>
+>;
+export type ErrorBoundary<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+  ComponentType<ErrorProps<TRoute>>;
 /**
  * Route module exports for pages
  *
@@ -340,8 +413,8 @@ export type ErrorBoundary = ComponentType<ErrorProps>;
  * }
  * ```
  */
-export interface RouteModule {
-  default?: Page;
+export interface RouteModule<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+  default?: Page<TRoute>;
   /** Execution runtime for this route. Layout values are inherited unless overridden. */
   runtime?: FarmRouteRuntime;
   /** Provider-specific execution regions, or "auto" to clear an inherited value. */
@@ -374,13 +447,13 @@ export interface RouteModule {
    * Return all paths to pre-render for dynamic SSG routes
    * Required for dynamic routes (e.g., [slug]) when ssg = true
    */
-  getStaticPaths?: () => Promise<StaticPathParams[]> | StaticPathParams[];
+  getStaticPaths?: GenerateStaticParams<TRoute>;
   /**
    * @deprecated Use getStaticPaths instead
    */
-  generateStaticParams?: () => Promise<StaticPathParams[]> | StaticPathParams[];
+  generateStaticParams?: GenerateStaticParams<TRoute>;
   metadata?: Metadata & Record<string, any>;
-  generateMetadata?: (props: PageProps) => Promise<Metadata> | Metadata;
+  generateMetadata?: (props: MetadataProps<TRoute>) => Promise<Metadata> | Metadata;
 }
 
 /** A value accepted for one static route parameter. */
@@ -392,15 +465,45 @@ export type StaticPathPrimitive = string | number | boolean;
  */
 export type StaticPathParams = Record<string, StaticPathPrimitive | readonly StaticPathPrimitive[]>;
 
-export interface LayoutModule {
-  default: Layout;
+type StaticRouteSegmentParams<TSegment extends string> = TSegment extends `[[...${infer TParam}]]`
+  ? { [TKey in TParam]?: readonly StaticPathPrimitive[] }
+  : TSegment extends `[...${infer TParam}]`
+    ? { [TKey in TParam]: readonly StaticPathPrimitive[] }
+    : TSegment extends `[${infer TParam}]`
+      ? { [TKey in TParam]: StaticPathPrimitive }
+      : {};
+
+type ExtractStaticRouteParams<TRoute extends string> =
+  TRoute extends `${infer TSegment}/${infer TRest}`
+    ? StaticRouteSegmentParams<TSegment> & ExtractStaticRouteParams<TRest>
+    : StaticRouteSegmentParams<TRoute>;
+
+/** Infer the values accepted from `getStaticPaths` for a route pattern. */
+export type StaticRouteParams<TRoute extends string> = string extends TRoute
+  ? StaticPathParams
+  : TRoute extends string
+    ? SimplifyPageRouteParams<ExtractStaticRouteParams<StripPageRouteSuffix<TRoute>>>
+    : never;
+
+type ResolveStaticRouteParams<TRoute extends FarmRoutePropsTarget> = [TRoute] extends [never]
+  ? StaticPathParams
+  : TRoute extends string
+    ? StaticRouteParams<TRoute>
+    : StaticPathParams;
+
+/** A route-aware `getStaticPaths` or `generateStaticParams` function. */
+export type GenerateStaticParams<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+  () => Array<ResolveStaticRouteParams<TRoute>> | Promise<Array<ResolveStaticRouteParams<TRoute>>>;
+
+export interface LayoutModule<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+  default: Layout<TRoute>;
   /** Semantic fonts inherited by framework-owned surfaces for this route. */
   fonts?: FarmLayoutFonts;
   runtime?: FarmRouteRuntime;
   regions?: FarmRouteRegions;
   maxDuration?: FarmRouteMaxDuration;
   metadata?: Metadata & Record<string, any>;
-  generateMetadata?: (props: { params: Record<string, string> }) => Promise<Metadata> | Metadata;
+  generateMetadata?: (props: LayoutMetadataProps<TRoute>) => Promise<Metadata> | Metadata;
 }
 
 export interface Metadata {

@@ -18,6 +18,13 @@ import type {
 } from "react";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
 
+declare global {
+  namespace FarmJS {
+    /** @internal Application route patterns registered by generated types. */
+    interface RouteRegistry {}
+  }
+}
+
 declare module "@farm.js/core/client" {
   export interface MiddlewareProps {
     data: Map<string, any>;
@@ -27,18 +34,122 @@ declare module "@farm.js/core/client" {
     data: Map<string, any>;
   }
 
-  export interface PageProps {
-    params: Record<string, string>;
+  export type AppRoutePattern = FarmJS.RouteRegistry extends {
+    pattern: infer TPattern extends string;
+  }
+    ? TPattern
+    : string;
+
+  type FarmRoutePropsDefault = never;
+
+  type FarmRoutePropsTarget = AppRoutePattern;
+
+  type StripPageRouteSuffix<TRoute extends string> = TRoute extends `${infer TPath}?${string}`
+    ? StripPageRouteSuffix<TPath>
+    : TRoute extends `${infer TPath}#${string}`
+      ? StripPageRouteSuffix<TPath>
+      : TRoute;
+
+  type SimplifyPageRouteParams<TValue> = { [TKey in keyof TValue]: TValue[TKey] } & {};
+
+  type PageRouteSegmentParams<TSegment extends string> = TSegment extends `[[...${infer TParam}]]`
+    ? { [TKey in TParam]?: string }
+    : TSegment extends `[...${infer TParam}]`
+      ? { [TKey in TParam]: string }
+      : TSegment extends `[${infer TParam}]`
+        ? { [TKey in TParam]: string }
+        : {};
+
+  type ExtractPageRouteParams<TRoute extends string> =
+    TRoute extends `${infer TSegment}/${infer TRest}`
+      ? PageRouteSegmentParams<TSegment> & ExtractPageRouteParams<TRest>
+      : PageRouteSegmentParams<TRoute>;
+
+  export type PageRouteParams<TRoute extends string> = string extends TRoute
+    ? Record<string, string>
+    : TRoute extends string
+      ? SimplifyPageRouteParams<ExtractPageRouteParams<StripPageRouteSuffix<TRoute>>>
+      : never;
+
+  type ResolvePageRouteParams<TRoute extends FarmRoutePropsTarget> = [TRoute] extends [never]
+    ? Record<string, string>
+    : TRoute extends string
+      ? PageRouteParams<TRoute>
+      : Record<string, string>;
+
+  export interface PageProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+    params: ResolvePageRouteParams<TRoute>;
     searchParams: Promise<Record<string, string | string[] | undefined>>;
     path: string;
     middleware?: MiddlewareProps;
     context?: PluginContextProps;
   }
 
-  export interface LayoutProps {
-    children: ReactNode;
-    params: Record<string, string>;
+  export interface LoadingProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+    params: ResolvePageRouteParams<TRoute>;
+    searchParams: Promise<Record<string, string | string[] | undefined>>;
+    search?: Record<string, string | string[] | undefined>;
+    path: string;
+    middleware?: MiddlewareProps;
+    context?: PluginContextProps;
   }
+
+  export interface ErrorProps<
+    TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault,
+  > extends LoadingProps<TRoute> {
+    error: unknown;
+    reset: () => void;
+  }
+
+  export interface LayoutProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
+    children: ReactNode;
+    params: ResolvePageRouteParams<TRoute>;
+  }
+
+  export type MetadataProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+    PageProps<TRoute>;
+
+  export interface LayoutMetadataProps<
+    TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault,
+  > {
+    params: ResolvePageRouteParams<TRoute>;
+  }
+
+  export type StaticPathPrimitive = string | number | boolean;
+  export type StaticPathParams = Record<
+    string,
+    StaticPathPrimitive | readonly StaticPathPrimitive[]
+  >;
+
+  type StaticRouteSegmentParams<TSegment extends string> = TSegment extends `[[...${infer TParam}]]`
+    ? { [TKey in TParam]?: readonly StaticPathPrimitive[] }
+    : TSegment extends `[...${infer TParam}]`
+      ? { [TKey in TParam]: readonly StaticPathPrimitive[] }
+      : TSegment extends `[${infer TParam}]`
+        ? { [TKey in TParam]: StaticPathPrimitive }
+        : {};
+
+  type ExtractStaticRouteParams<TRoute extends string> =
+    TRoute extends `${infer TSegment}/${infer TRest}`
+      ? StaticRouteSegmentParams<TSegment> & ExtractStaticRouteParams<TRest>
+      : StaticRouteSegmentParams<TRoute>;
+
+  export type StaticRouteParams<TRoute extends string> = string extends TRoute
+    ? StaticPathParams
+    : TRoute extends string
+      ? SimplifyPageRouteParams<ExtractStaticRouteParams<StripPageRouteSuffix<TRoute>>>
+      : never;
+
+  type ResolveStaticRouteParams<TRoute extends FarmRoutePropsTarget> = [TRoute] extends [never]
+    ? StaticPathParams
+    : TRoute extends string
+      ? StaticRouteParams<TRoute>
+      : StaticPathParams;
+
+  export type GenerateStaticParams<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+    () =>
+      | Array<ResolveStaticRouteParams<TRoute>>
+      | Promise<Array<ResolveStaticRouteParams<TRoute>>>;
 
   export interface Metadata {
     title?: string | { default?: string; template?: string };

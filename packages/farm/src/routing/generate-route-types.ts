@@ -66,8 +66,8 @@ export interface GenerateRouteTypesOptions {
 const DEFAULT_OUT_FILE = "farm-routes.d.ts";
 
 /**
- * Scan app directory for page files, generate RoutePath union type,
- * and write a .d.ts file for typed Link href.
+ * Scan application route modules, generate page and module route unions,
+ * and write a .d.ts file for typed Link hrefs and route component props.
  */
 export async function generateRouteTypes(options: GenerateRouteTypesOptions): Promise<string> {
   const root = path.resolve(options.root);
@@ -90,21 +90,26 @@ export async function createRouteTypeDeclarations(
   const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
 
   const patterns = new Set<string>();
+  const routeModulePatterns = new Set<string>();
 
   const glob = await import("fast-glob");
   for (const source of sourceRoots) {
     const appDir = path.join(source.root, source.srcDir, "app");
     if (fs.existsSync(appDir)) {
-      const pageFiles = await glob.default("**/page.{ts,tsx,js,jsx,md,mdx}", {
-        cwd: appDir,
-        absolute: false,
-      });
+      const routeModuleFiles = await glob.default(
+        "**/{page,layout,loading,error}.{ts,tsx,js,jsx,md,mdx}",
+        {
+          cwd: appDir,
+          absolute: false,
+        },
+      );
 
-      for (const file of pageFiles) {
+      for (const file of routeModuleFiles) {
         if (parseRouteSlotFile(file)) continue;
         const route = parseRoutePath(file);
+        const pattern = createRoutePattern(route);
+        routeModulePatterns.add(pattern);
         if (route.type === "page") {
-          const pattern = createRoutePattern(route);
           patterns.add(pattern);
         }
       }
@@ -112,18 +117,23 @@ export async function createRouteTypeDeclarations(
 
     for (const route of await discoverProgrammaticRoutePaths(source.root, source.srcDir)) {
       patterns.add(route);
+      routeModulePatterns.add(route);
     }
   }
 
   for (const route of extraRoutes) {
     if (route.startsWith("/")) {
       patterns.add(route);
+      routeModulePatterns.add(route);
     }
   }
 
   const sortedPatterns = Array.from(patterns).sort();
   const typeLiterals = Array.from(new Set(sortedPatterns.flatMap(routePatternToTsTypeLiterals)));
   const patternLiterals = sortedPatterns.map(routePatternToRouteLiteral);
+  const routeModulePatternLiterals = Array.from(routeModulePatterns)
+    .sort()
+    .map(routePatternToRouteLiteral);
 
   const routePathType = suppressLintOnLink
     ? "string"
@@ -135,8 +145,11 @@ export async function createRouteTypeDeclarations(
     : patternLiterals.length
       ? patternLiterals.join(" | ")
       : "never";
+  const routeModulePatternType = routeModulePatternLiterals.length
+    ? routeModulePatternLiterals.join(" | ")
+    : "never";
   const routeTypesImportPath = `./${path.basename(outPath).replace(/\.d\.ts$/, "")}`;
-  const augmentationBlock = suppressLintOnLink
+  const linkAugmentationBlock = suppressLintOnLink
     ? ""
     : `
 declare module "@farm.js/core/client" {
@@ -164,13 +177,25 @@ declare module "@farm.js/core/dist/client.js" {
 }
 `;
 
+  const routeModuleAugmentationBlock = `
+declare global {
+  namespace FarmJS {
+    interface RouteRegistry {
+      pattern: import(${JSON.stringify(routeTypesImportPath)}).RouteModulePattern;
+    }
+  }
+}
+`;
+
   const content = `/**
  * Auto-generated route types from src/app.
- * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
+ * Link href and route component props are typed automatically from generated declarations.
+ * Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
 export type RoutePath = ${routePathType};
-export type RoutePattern = ${routePatternType};${augmentationBlock}
+export type RoutePattern = ${routePatternType};
+export type RouteModulePattern = ${routeModulePatternType};${linkAugmentationBlock}${routeModuleAugmentationBlock}
 `;
 
   return content;
