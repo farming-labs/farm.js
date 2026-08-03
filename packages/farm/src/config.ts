@@ -63,7 +63,6 @@ import {
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import {
   getFarmSecurityHeader,
-  isResolvedFarmSecurityConfig,
   resolveFarmSecurityConfig,
   type FarmCspConfig,
   type FarmCspDirectives,
@@ -746,9 +745,7 @@ export async function resolveConfig(
   const routeRules = normalizeRouteRules(userConfig.routeRules);
   const routeRuleRedirects = routeRulesToRedirects(routeRules);
   const routeRuleHeaders = routeRulesToHeaders(routeRules);
-  const security = isResolvedFarmSecurityConfig(userConfig.security)
-    ? userConfig.security
-    : resolveFarmSecurityConfig(userConfig.security);
+  const security = resolveFarmSecurityConfig(userConfig.security);
   const securityHeader = getFarmSecurityHeader(security);
 
   const deploy = resolveDeployConfig(userConfig);

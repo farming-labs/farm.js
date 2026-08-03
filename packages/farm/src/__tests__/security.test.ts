@@ -44,6 +44,22 @@ describe("security.csp", () => {
     });
   });
 
+  it("revalidates resolved policy values", () => {
+    expect(
+      resolveFarmSecurityConfig({
+        csp: { value: "default-src 'self';", reportOnly: true },
+      }),
+    ).toEqual({
+      csp: { value: "default-src 'self'", reportOnly: true },
+    });
+
+    expect(() =>
+      resolveFarmSecurityConfig({
+        csp: { value: "default-src 'self'\r\nX-Test: yes", reportOnly: false },
+      }),
+    ).toThrow(/single-line/);
+  });
+
   it("rejects the long-form config key with an actionable diagnostic", () => {
     expect(() => resolveFarmSecurityConfig({ contentSecurityPolicy: true } as never)).toThrow(
       /Use security\.csp instead/,
@@ -61,5 +77,22 @@ describe("security.csp", () => {
       /Invalid security\.csp directive value/,
     );
     expect(() => resolveFarmSecurityConfig({ csp: "" })).toThrow(/non-empty/);
+  });
+
+  it("rejects malformed runtime option shapes with actionable errors", () => {
+    expect(() => resolveFarmSecurityConfig({ csp: null } as never)).toThrow(
+      /policy string, false, or an options object/,
+    );
+    expect(() => resolveFarmSecurityConfig({ csp: { policy: 42 } } as never)).toThrow(
+      /non-empty single-line string/,
+    );
+    expect(() => resolveFarmSecurityConfig({ csp: { directives: null } } as never)).toThrow(
+      /directives must be an object/,
+    );
+    expect(() =>
+      resolveFarmSecurityConfig({
+        csp: { policy: "default-src 'self'", reportOnly: "yes" },
+      } as never),
+    ).toThrow(/reportOnly must be a boolean/);
   });
 });

@@ -11,6 +11,7 @@ import { build } from "../build";
 import { loadConfig, resolveConfig } from "../config";
 
 const packageRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const testCspPolicy = "default-src 'self'; object-src 'none'";
 
 async function createFixture(externalRewriteOrigin?: string): Promise<string> {
   const root = await fs.mkdtemp(path.join(packageRoot, ".tmp-production-ssg-"));
@@ -43,7 +44,7 @@ export default {
   srcDir: "src",
   images: { provider: "none" },
   security: {
-    csp: "default-src 'self'; object-src 'none'",
+    csp: ${JSON.stringify(testCspPolicy)},
   },
   middleware: [
     {
@@ -428,9 +429,7 @@ describe("production SSG output", () => {
 
       const firstStatic = await fetch(`${production.origin}/static`);
       expect(firstStatic.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
-      expect(firstStatic.headers.get("content-security-policy")).toBe(
-        "default-src 'self'; object-src 'none'",
-      );
+      expect(firstStatic.headers.get("content-security-policy")).toBe(testCspPolicy);
       const firstStaticHtml = await firstStatic.text();
       await new Promise((resolve) => setTimeout(resolve, 25));
       const secondStaticHtml = await fetch(`${production.origin}/static`).then((response) =>
@@ -460,9 +459,7 @@ describe("production SSG output", () => {
 
       const firstConfigured = await fetch(`${production.origin}/configured`);
       expect(firstConfigured.headers.get("x-configured-middleware")).toBe("yes");
-      expect(firstConfigured.headers.get("content-security-policy")).toBe(
-        "default-src 'self'; object-src 'none'",
-      );
+      expect(firstConfigured.headers.get("content-security-policy")).toBe(testCspPolicy);
       const firstConfiguredHtml = await firstConfigured.text();
       await new Promise((resolve) => setTimeout(resolve, 25));
       const secondConfiguredHtml = await fetch(`${production.origin}/configured`).then((response) =>
@@ -527,9 +524,7 @@ describe("production SSG output", () => {
 
       const localAPIResponse = await fetch(`${production.origin}/api/local?via=local`);
       expect(localAPIResponse.status).toBe(200);
-      expect(localAPIResponse.headers.get("content-security-policy")).toBe(
-        "default-src 'self'; object-src 'none'",
-      );
+      expect(localAPIResponse.headers.get("content-security-policy")).toBe(testCspPolicy);
       await expect(localAPIResponse.json()).resolves.toEqual({ source: "local-api" });
 
       const localAPIMethodResponse = await fetch(`${production.origin}/api/local`, {

@@ -29,40 +29,54 @@ export interface ResolvedFarmSecurityConfig {
   csp: ResolvedFarmCspConfig | false;
 }
 
-export function isResolvedFarmSecurityConfig(
-  input: FarmSecurityConfig | ResolvedFarmSecurityConfig | undefined,
-): input is ResolvedFarmSecurityConfig {
-  return Boolean(
-    input &&
-    (input.csp === false ||
-      (typeof input.csp === "object" &&
-        input.csp !== null &&
-        "value" in input.csp &&
-        "reportOnly" in input.csp)),
-  );
-}
-
 export function resolveFarmSecurityConfig(
-  input: FarmSecurityConfig | undefined,
+  input: FarmSecurityConfig | ResolvedFarmSecurityConfig | undefined,
 ): ResolvedFarmSecurityConfig {
-  if (input && Object.prototype.hasOwnProperty.call(input, "contentSecurityPolicy")) {
+  if (input === undefined) return { csp: false };
+  if (!isPlainRecord(input)) {
+    throw new TypeError("security must be an object containing the csp option.");
+  }
+  if (Object.prototype.hasOwnProperty.call(input, "contentSecurityPolicy")) {
     throw new TypeError(
       "security.contentSecurityPolicy is not supported. Use security.csp instead.",
     );
   }
 
-  if (input?.csp === undefined || input.csp === false) return { csp: false };
+  const csp = input.csp;
+  if (csp === undefined || csp === false) return { csp: false };
 
-  if (typeof input.csp === "string") {
+  if (typeof csp === "string") {
     return {
       csp: {
-        value: validateSerializedCsp(input.csp),
+        value: validateSerializedCsp(csp),
         reportOnly: false,
       },
     };
   }
 
-  const { policy, directives, reportOnly = false } = input.csp;
+  if (!isPlainRecord(csp)) {
+    throw new TypeError("security.csp must be a policy string, false, or an options object.");
+  }
+
+  const reportOnly = validateReportOnly(csp.reportOnly);
+  if (Object.prototype.hasOwnProperty.call(csp, "value")) {
+    if (
+      Object.prototype.hasOwnProperty.call(csp, "policy") ||
+      Object.prototype.hasOwnProperty.call(csp, "directives")
+    ) {
+      throw new TypeError(
+        "Resolved security.csp values cannot include policy or directives options.",
+      );
+    }
+    return {
+      csp: {
+        value: validateSerializedCsp(csp.value),
+        reportOnly,
+      },
+    };
+  }
+
+  const { policy, directives } = csp;
   if (policy !== undefined && directives !== undefined) {
     throw new TypeError("security.csp accepts either policy or directives, not both.");
   }
@@ -75,13 +89,16 @@ export function resolveFarmSecurityConfig(
       value:
         policy !== undefined
           ? validateSerializedCsp(policy)
-          : serializeFarmCspDirectives(directives!),
+          : serializeFarmCspDirectives(directives as FarmCspDirectives),
       reportOnly,
     },
   };
 }
 
 export function serializeFarmCspDirectives(directives: FarmCspDirectives): string {
+  if (!isPlainRecord(directives)) {
+    throw new TypeError("security.csp.directives must be an object.");
+  }
   const serialized: string[] = [];
   const normalizedNames = new Set<string>();
 
@@ -145,10 +162,27 @@ function validateDirectiveValue(value: string): string {
   return normalized;
 }
 
-function validateSerializedCsp(value: string): string {
+function validateSerializedCsp(value: unknown): string {
+  if (typeof value !== "string") {
+    throw new TypeError("security.csp policy must be a non-empty single-line string.");
+  }
   const normalized = value.trim().replace(/;+$/g, "").trim();
   if (!normalized || /[\r\n]/.test(normalized) || normalized.includes("\0")) {
     throw new TypeError("security.csp policy must be a non-empty single-line string.");
   }
   return normalized;
+}
+
+function validateReportOnly(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") {
+    throw new TypeError("security.csp.reportOnly must be a boolean.");
+  }
+  return value;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
 }

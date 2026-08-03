@@ -29,11 +29,7 @@ import type { ResolvedFarmI18nConfig } from "./i18n/types";
 import { configureFarmCache } from "./cache";
 import { resolveFarmAuthConfig, type ResolvedFarmAuthConfig } from "./auth-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
-import {
-  isResolvedFarmSecurityConfig,
-  resolveFarmSecurityConfig,
-  type ResolvedFarmSecurityConfig,
-} from "./security";
+import { resolveFarmSecurityConfig, type ResolvedFarmSecurityConfig } from "./security";
 
 type NormalizedFarmConfig = Omit<
   Required<FarmConfig>,
@@ -146,9 +142,7 @@ export class FarmApp {
       routeRules: normalizeRouteRules(config.routeRules),
       context: config.context || (() => undefined),
       serverActions: resolveServerActionsConfig(config.serverActions),
-      security: isResolvedFarmSecurityConfig(config.security)
-        ? config.security
-        : resolveFarmSecurityConfig(config.security),
+      security: resolveFarmSecurityConfig(config.security),
       images: resolveFarmImageConfig(config.images),
       performance: resolveFarmPerformanceConfig(config.performance),
       i18n: isResolvedI18nConfig(config.i18n)
