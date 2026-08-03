@@ -144,3 +144,26 @@ test("reports Netlify deploys as production operations", async () => {
     if (root) await rm(root, { recursive: true, force: true });
   }
 });
+
+test("keeps an untrusted Netlify site value in a single process argument", async () => {
+  let root;
+
+  try {
+    root = await mkdtemp(path.join(tmpdir(), "farm-cli-netlify-safe-args-"));
+    const site = "site-id; touch /tmp/farm-deploy-injected";
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `export default ${JSON.stringify({
+        deploy: { target: "netlify", preset: "netlify", netlify: { site } },
+      })};\n`,
+    );
+
+    const plan = await createFarmDeployPlan({ root });
+
+    assert.equal(plan.deploy.executable, "netlify");
+    assert.deepEqual(plan.deploy.args, ["deploy", "--prod", "--dir=.", "--site", site]);
+    assert.match(plan.deploy.command, /'site-id; touch \/tmp\/farm-deploy-injected'/);
+  } finally {
+    if (root) await rm(root, { recursive: true, force: true });
+  }
+});
