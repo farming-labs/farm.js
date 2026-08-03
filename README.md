@@ -28,17 +28,17 @@
 
 ## ✨ Built for Modern React
 
-| Feature                            | What it gives you                                                                                                                                 |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| ⚛️ **Custom RSC renderer**         | A purpose-built RSC, streaming SSR, and client hydration pipeline with Suspense and progressive navigation.                                       |
-| 🔄 **Server Actions**              | Write mutations next to your components with `"use server"`, form actions, optional encrypted bound arguments, and configurable request security. |
-| ⚡ **Blazingly fast development**  | Vite-powered startup, on-demand transforms, and fast HMR keep the feedback loop nearly instant.                                                   |
-| 🧭 **Typed app-directory routing** | Pages, layouts, route groups, dynamic segments, loading states, error boundaries, middleware, and generated route types.                          |
-| 🧩 **Flexible rendering**          | Choose streaming SSR, static generation, ISR, PPR, or deferred hydration islands route by route.                                                  |
-| 🛠️ **Full-stack primitives**       | Build with API routes, server functions, middleware, caching, KV storage, cron handlers, OpenAPI, and post-response work.                         |
-| 🔌 **First-party integrations**    | Add authentication, billing, email, jobs, AI, API keys, databases, and provider-owned routes through one typed integration model.                 |
-| 🚀 **Production-ready output**     | Build deployable server and client output with Nitro-powered adapters and per-route runtime controls.                                             |
-| 🎨 **Great defaults**              | Start with TypeScript, Tailwind CSS, sensible conventions, and a clean project structure—without assembling the framework yourself.               |
+| Feature                            | What it gives you                                                                                                                                                                               |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⚛️ **Custom RSC renderer**         | A purpose-built RSC, streaming SSR, and client hydration pipeline, with optional Rust-native rendering for eligible host-only regions through [Strata](https://github.com/farming-labs/strata). |
+| 🔄 **Server Actions**              | Write mutations next to your components with `"use server"`, form actions, optional encrypted bound arguments, and configurable request security.                                               |
+| ⚡ **Blazingly fast development**  | Vite-powered startup, on-demand transforms, and fast HMR keep the feedback loop nearly instant.                                                                                                 |
+| 🧭 **Typed app-directory routing** | Pages, layouts, route groups, dynamic segments, loading states, error boundaries, middleware, and generated route types.                                                                        |
+| 🧩 **Flexible rendering**          | Choose streaming SSR, static generation, ISR, PPR, or deferred hydration islands route by route.                                                                                                |
+| 🛠️ **Full-stack primitives**       | Build with API routes, server functions, middleware, caching, KV storage, cron handlers, OpenAPI, and post-response work.                                                                       |
+| 🔌 **First-party integrations**    | Add authentication, billing, email, jobs, AI, API keys, databases, and provider-owned routes through one typed integration model.                                                               |
+| 🚀 **Production-ready output**     | Build deployable server and client output with Nitro-powered adapters and per-route runtime controls.                                                                                           |
+| 🎨 **Great defaults**              | Start with TypeScript, Tailwind CSS, sensible conventions, and a clean project structure—without assembling the framework yourself.                                                             |
 
 > **Experimental native rendering:** Farm.js can automatically send eligible, server-only React subtrees through the [Strata](https://github.com/farming-labs/strata) native renderer while safely falling back to normal React rendering for unsupported trees.
 
