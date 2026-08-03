@@ -16,28 +16,28 @@ describe("typed endpoint errors", () => {
         duplicate: {
           status: 409,
           message: "A product with this name already exists",
-          schema: z.object({
+          data: z.object({
             existingId: z.string(),
           }),
         },
         forbidden: {
           status: 403,
-          schema: z.object({
+          data: z.object({
             permission: z.string(),
           }),
         },
       },
     },
-    async ({ body, fail }) => {
-      if (false) {
+    async ({ body, error }) => {
+      if (body.name === "__typecheck__") {
         // @ts-expect-error only declared endpoint error codes are accepted.
-        fail("missing", {});
+        error("missing", {});
         // @ts-expect-error duplicate errors require a string existingId.
-        fail("duplicate", { existingId: 123 });
+        error("duplicate", { existingId: 123 });
       }
 
       if (body.name === "Existing") {
-        return fail("duplicate", {
+        return error("duplicate", {
           existingId: "product-1",
         });
       }
@@ -173,7 +173,7 @@ describe("typed endpoint errors", () => {
           errors: {
             invalid: {
               status: 200,
-              schema: z.object({}),
+              data: z.object({}),
             },
           },
         },

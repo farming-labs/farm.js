@@ -21,6 +21,12 @@ type InferOutput<T> = T extends { _output: infer O }
     ? R
     : unknown;
 
+type InferInput<T> = T extends { _input: infer I }
+  ? I
+  : T extends { parse: (data: infer I) => unknown }
+    ? I
+    : unknown;
+
 type InferBodyInput<T> =
   T extends MultipartSchema<AnySchema> ? TypedFormData<InferOutput<T>> : InferOutput<T>;
 
@@ -30,31 +36,60 @@ type InferHeadersOutput<T> = [T] extends [never]
     ? InferOutput<T>
     : Record<string, string>;
 
-export type EndpointErrorDefinition<
-  TSchema extends AnySchema = AnySchema,
-  TStatus extends number = number,
-> = {
+export type EndpointErrorSchema = AnySchema & { parse: (data: unknown) => unknown };
+
+type EndpointErrorDefinitionBase<TStatus extends number> = {
   status: TStatus;
-  schema: TSchema;
   /** Public message safe to expose to API callers. */
   message?: string;
 };
 
-export type EndpointErrorDefinitions = Record<string, EndpointErrorDefinition<AnySchema, number>>;
+export type EndpointErrorDefinition<
+  TSchema extends EndpointErrorSchema = EndpointErrorSchema,
+  TStatus extends number = number,
+> = EndpointErrorDefinitionBase<TStatus> &
+  (
+    | {
+        /** Schema for the public error payload exposed to API callers. */
+        data: TSchema;
+        schema?: never;
+      }
+    | {
+        data?: never;
+        /** @deprecated Use `data` for consistency with server functions. */
+        schema: TSchema;
+      }
+  );
+
+export type EndpointErrorDefinitions = Record<
+  string,
+  EndpointErrorDefinition<EndpointErrorSchema, number>
+>;
+
+type InferEndpointErrorSchema<TDefinition> = TDefinition extends {
+  data: infer TSchema extends AnySchema;
+}
+  ? TSchema
+  : TDefinition extends { schema: infer TSchema extends AnySchema }
+    ? TSchema
+    : never;
 
 export type EndpointErrorContracts<TErrors extends EndpointErrorDefinitions> = {
   [TCode in keyof TErrors]: {
-    data: InferOutput<TErrors[TCode]["schema"]>;
+    data: InferOutput<InferEndpointErrorSchema<TErrors[TCode]>>;
     status: TErrors[TCode]["status"];
   };
 };
 
-export type EndpointFail<TErrors extends EndpointErrorDefinitions> = <
+export type EndpointErrorHandler<TErrors extends EndpointErrorDefinitions> = <
   TCode extends keyof TErrors & string,
 >(
   code: TCode,
-  data: InferOutput<TErrors[TCode]["schema"]>,
+  data: InferInput<InferEndpointErrorSchema<TErrors[TCode]>>,
 ) => never;
+
+/** @deprecated Use `EndpointErrorHandler`. */
+export type EndpointFail<TErrors extends EndpointErrorDefinitions> = EndpointErrorHandler<TErrors>;
 
 export class EndpointFailure<TCode extends string = string, TData = unknown> extends Error {
   readonly code: TCode;
@@ -219,6 +254,8 @@ export type EndpointHandler<
   request: Request;
   context: Readonly<TContext>;
   params: EndpointParams;
+  error: EndpointErrorHandler<TErrors>;
+  /** @deprecated Use `error`. */
   fail: EndpointFail<TErrors>;
 }) => Promise<TResponse> | TResponse;
 
@@ -393,13 +430,13 @@ export function createEndpoint(
 
   const middleware = normalizeEndpointMiddleware(options.middleware);
   const errors = normalizeEndpointErrors(options.errors);
-  const fail = createEndpointFail(errors);
+  const error = createEndpointErrorHandler(errors);
   const wrappedHandler = (async (ctx: EndpointMiddlewareContext<any, any, any, any>) => {
     const execution = await runEndpointMiddleware(
       middleware,
       ctx,
       handler,
-      fail,
+      error,
       options.invalidates,
     );
     return execution.result;
@@ -426,7 +463,7 @@ export function createEndpoint(
   endpoint.__autoPath = !path; // Flag to indicate path should be auto-inferred
   endpoint.__handler = wrappedHandler; // Used by Farm's route runtime.
   endpoint.__farmInvoke = (ctx: EndpointMiddlewareContext<any, any, any, any>) =>
-    runEndpointMiddleware(middleware, ctx, handler, fail, options.invalidates);
+    runEndpointMiddleware(middleware, ctx, handler, error, options.invalidates);
   endpoint.__middleware = middleware;
   endpoint.__sourceHandler = handler;
   endpoint.__invalidates = options.invalidates;
@@ -474,8 +511,9 @@ function normalizeEndpointErrors(
     ) {
       throw new TypeError(`Endpoint error "${code}" status must be an integer between 400 and 599`);
     }
-    if (!definition.schema || typeof definition.schema.parse !== "function") {
-      throw new TypeError(`Endpoint error "${code}" requires a schema with parse()`);
+    const dataSchema = resolveEndpointErrorSchema(definition);
+    if (!dataSchema || typeof dataSchema.parse !== "function") {
+      throw new TypeError(`Endpoint error "${code}" requires a data schema with parse()`);
     }
     if (definition.message !== undefined && typeof definition.message !== "string") {
       throw new TypeError(`Endpoint error "${code}" message must be a string`);
@@ -487,21 +525,30 @@ function normalizeEndpointErrors(
   return Object.freeze(normalized);
 }
 
-function createEndpointFail(
+function resolveEndpointErrorSchema(
+  definition: EndpointErrorDefinition<EndpointErrorSchema, number>,
+): EndpointErrorSchema | undefined {
+  if (definition.data && definition.schema) {
+    throw new TypeError("Endpoint errors cannot define both data and schema");
+  }
+  return definition.data ?? definition.schema;
+}
+
+function createEndpointErrorHandler(
   definitions: Readonly<EndpointErrorDefinitions>,
-): EndpointFail<EndpointErrorDefinitions> {
+): EndpointErrorHandler<EndpointErrorDefinitions> {
   return ((code: string, data: unknown): never => {
     const definition = definitions[code];
     if (!definition) {
       throw new TypeError(`Endpoint error "${code}" is not declared`);
     }
 
-    const parsed = definition.schema.parse!(data);
+    const parsed = resolveEndpointErrorSchema(definition)!.parse(data);
     throw new EndpointFailure(code, parsed, {
       status: definition.status,
       message: definition.message ?? "Request failed",
     });
-  }) as EndpointFail<EndpointErrorDefinitions>;
+  }) as EndpointErrorHandler<EndpointErrorDefinitions>;
 }
 
 function normalizeEndpointMiddleware(
@@ -526,7 +573,7 @@ async function runEndpointMiddleware(
   middleware: readonly AnyEndpointMiddleware[],
   handlerContext: EndpointMiddlewareContext<any, any, any, any>,
   handler: EndpointHandler<any, any, any, any, any, EndpointErrorDefinitions>,
-  fail: EndpointFail<EndpointErrorDefinitions>,
+  error: EndpointErrorHandler<EndpointErrorDefinitions>,
   invalidations: EndpointInvalidations<any, any, any, any> | undefined,
 ): Promise<{
   result: unknown;
@@ -566,7 +613,7 @@ async function runEndpointMiddleware(
     context = mergeEndpointContext(context, result, index);
   }
 
-  const result = await handler({ ...handlerContext, context, fail });
+  const result = await handler({ ...handlerContext, context, error, fail: error });
   return {
     result,
     context,
