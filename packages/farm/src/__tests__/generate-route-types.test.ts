@@ -5,6 +5,10 @@ import * as os from "os";
 import ts from "typescript";
 import { generateRouteTypes } from "../routing/generate-route-types";
 
+function readTypeAlias(content: string, name: string): string {
+  return content.match(new RegExp(`export type ${name} =([\\s\\S]*?);`))?.[1] ?? "";
+}
+
 describe("generateRouteTypes", () => {
   let tmpDir: string;
 
@@ -100,7 +104,9 @@ describe("generateRouteTypes", () => {
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain("export type RoutePath = string");
     expect(content).toContain("export type RoutePattern = string");
-    expect(content).toContain('export type RouteModulePattern = "/" | "/about"');
+    const routeModulePattern = readTypeAlias(content, "RouteModulePattern");
+    expect(routeModulePattern).toContain('"/"');
+    expect(routeModulePattern).toContain('"/about"');
     expect(content).toContain("interface RouteRegistry");
     expect(content).not.toContain("LinkDefaultRoute");
   });
@@ -146,11 +152,13 @@ describe("generateRouteTypes", () => {
 
     const outPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
     const content = fs.readFileSync(outPath, "utf8");
-    const routePath = content.match(/export type RoutePath = ([^;]+);/)?.[1];
+    const routePath = readTypeAlias(content, "RoutePath");
+    const routePattern = readTypeAlias(content, "RoutePattern");
 
     expect(routePath).toContain('"/docs"');
     expect(routePath).toContain("`/docs/${string}`");
-    expect(content).toContain('export type RoutePattern = "/" | "/about"');
+    expect(routePattern).toContain('"/"');
+    expect(routePattern).toContain('"/about"');
     expect(content).toContain('"/docs/[[...slug]]"');
   });
 

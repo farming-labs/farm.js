@@ -13,6 +13,7 @@ import {
   createFarmRouteRuntimeManifest,
   validateFarmRouteRuntimeDeployment,
 } from "../route-runtime-manifest";
+import { getFarmPresetRuntime } from "../deployment";
 import type { FarmRouteRuntimeManifest } from "../route-runtime";
 import { RouteManager } from "../routing/route-manager";
 import type { FarmConfig } from "../types";
@@ -118,6 +119,29 @@ describe("route runtime deployment manifest", () => {
         expect.stringContaining("does not map per-route regions"),
         expect.stringContaining("does not map per-route maxDuration"),
       ],
+    });
+  });
+
+  it("classifies self-hosted presets and warns when a custom runtime cannot be inferred", () => {
+    expect(getFarmPresetRuntime("self-host")).toBe("node");
+    expect(getFarmPresetRuntime("farm")).toBe("node");
+    expect(getFarmPresetRuntime("custom")).toBe("unknown");
+
+    const manifest: FarmRouteRuntimeManifest = {
+      version: 1,
+      routes: [
+        {
+          kind: "page",
+          pattern: "/reports",
+          rendering: "dynamic",
+          runtime: "edge",
+        },
+      ],
+    };
+
+    expect(validateFarmRouteRuntimeDeployment(manifest, "custom")).toEqual({
+      runtime: "unknown",
+      warnings: [expect.stringContaining("could not verify")],
     });
   });
 });

@@ -153,6 +153,7 @@ const sidebar = [
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },
       { label: "Built-in Authentication", slug: "auth", icon: "lock" },
       { label: "Images", slug: "images", icon: "image" },
+      { label: "Fonts", slug: "fonts", icon: "file" },
       { label: "Environment Functions", slug: "environment-functions", icon: "code" },
       { label: "Middleware", slug: "middleware", icon: "shield" },
     ],
@@ -164,6 +165,7 @@ const sidebar = [
       { label: "Query and Params", slug: "query", icon: "search" },
       { label: "API Routes", slug: "api-routes", icon: "server" },
       { label: "API Client", slug: "api-client", icon: "terminal" },
+      { label: "Server Queries", slug: "server-queries", icon: "database" },
       { label: "KV Storage", slug: "storage", icon: "database" },
     ],
   },
@@ -265,6 +267,8 @@ const sidebar = [
     icon: "gauge",
     children: [
       { label: "Cache and PPR", slug: "cache-ppr", icon: "zap" },
+      { label: "Route Runtime", slug: "route-runtime", icon: "server" },
+      { label: "After Responses", slug: "after", icon: "timer" },
       { label: "Observability", slug: "observability", icon: "activity" },
       { label: "DevTools", slug: "devtools", icon: "monitor" },
       { label: "Cron", slug: "cron", icon: "timer" },
@@ -286,6 +290,7 @@ const sidebar = [
     icon: "wrench",
     children: [
       { label: "Plugin Ecosystem", slug: "plugins", icon: "plug" },
+      { label: "Client Plugins", slug: "plugins/client", icon: "monitor" },
       { label: "Create a Plugin", slug: "plugins/create-plugin", icon: "wrench" },
     ],
   },

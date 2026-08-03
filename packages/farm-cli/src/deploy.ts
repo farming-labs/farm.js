@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from "fs";
 import path from "path";
 import {
   getPresetForDeployTarget,
+  getFarmPresetRuntime,
   loadConfig,
   logger,
   normalizeDeployTarget,
@@ -18,21 +19,85 @@ export interface DeployFarmOptions {
   cloudflare?: boolean;
   netlify?: boolean;
   prod?: boolean;
+  /** Print the resolved build and deployment operations without executing them. */
+  plan?: boolean;
+}
+
+export interface FarmDeployPlan {
+  root: string;
+  target: "vercel" | "cloudflare" | "netlify";
+  preset: string;
+  runtime: "node" | "edge" | "unknown";
+  outputDir: string;
+  production: boolean;
+  build: { command: string; cwd: string };
+  deploy: { command: string; cwd: string };
+  cloudflareAgent?: CloudflareAgentDeployPlan;
 }
 
 export interface CloudflareAgentDeployPlan {
   configPath: string;
   environment?: string;
+  /** The integration will create this config as part of the production build. */
+  generated?: boolean;
 }
 
 /**
  * Deploy Farm.js application
  */
 export async function deployFarm(options: DeployFarmOptions = {}) {
-  const root = options.root || process.cwd();
+  const { plan, deployConfig } = await resolveFarmDeployContext(options);
+
+  if (options.plan) {
+    logger.info(formatFarmDeployPlan(plan));
+    return plan;
+  }
+
+  logger.info(`🚀 Building with ${plan.preset} preset...`);
+  await buildFarm({ root: plan.root, preset: plan.preset });
+
+  if (!existsSync(plan.outputDir)) {
+    throw new Error(`Build output not found at ${plan.outputDir}. Please run 'farm build' first.`);
+  }
+
+  await deployPlatform(plan.target, plan.root, plan.outputDir, deployConfig, options.prod);
+  return plan;
+}
+
+export async function createFarmDeployPlan(
+  options: DeployFarmOptions = {},
+): Promise<FarmDeployPlan> {
+  return (await resolveFarmDeployContext(options)).plan;
+}
+
+export function formatFarmDeployPlan(plan: FarmDeployPlan): string {
+  return [
+    "FARM / DEPLOY PLAN",
+    "",
+    `Target:     ${plan.target}`,
+    `Preset:     ${plan.preset}`,
+    `Runtime:    ${plan.runtime}`,
+    `Output:     ${plan.outputDir}`,
+    `Production: ${plan.production ? "yes" : "no"}`,
+    "",
+    `1. ${plan.build.command}`,
+    `   cwd: ${plan.build.cwd}`,
+    `2. ${plan.deploy.command}`,
+    `   cwd: ${plan.deploy.cwd}`,
+    ...(plan.cloudflareAgent
+      ? [
+          "",
+          `Cloudflare Agent config: ${plan.cloudflareAgent.configPath}${plan.cloudflareAgent.generated ? " (generated during build)" : ""}`,
+        ]
+      : []),
+  ].join("\n");
+}
+
+async function resolveFarmDeployContext(options: DeployFarmOptions) {
+  const root = path.resolve(options.root || process.cwd());
   const mode = "production";
   const userConfig = await loadConfig(root, undefined, mode);
-  const config = userConfig ? await resolveConfig(userConfig, mode) : undefined;
+  const config = await resolveConfig({ root, ...userConfig }, mode);
 
   // Determine platform and preset
   const cliTarget = options.vercel
@@ -42,13 +107,12 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
       : options.netlify
         ? "netlify"
         : undefined;
-  const platform = normalizeDeployTarget(cliTarget || config?.deploy.target);
+  const platform = normalizeDeployTarget(cliTarget || config.deploy.target);
 
   if (platform !== "vercel" && platform !== "cloudflare" && platform !== "netlify") {
-    logger.error(
+    throw new Error(
       "Please specify a deployment target with --vercel, --cloudflare, --netlify, or farm.config deploy.target.",
     );
-    process.exit(1);
   }
 
   const deployConfig = resolveDeployConfig(userConfig || {}, {
@@ -58,20 +122,71 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
       : undefined,
   });
   const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
-
-  // Build with the correct preset
-  logger.info(`🚀 Building with ${preset} preset...`);
-  await buildFarm({ root, preset });
-
   const nitroOutput = resolveDeployOutputPath(root, deployConfig.outputDir);
+  const cloudflareAgent =
+    platform === "cloudflare"
+      ? resolveCloudflareAgentDeployPlan(root) ||
+        resolveConfiguredCloudflareAgentDeployPlan(root, config.integrations)
+      : undefined;
+  const deploy = createDeployCommand(
+    platform,
+    root,
+    nitroOutput,
+    deployConfig,
+    options.prod,
+    cloudflareAgent,
+  );
+  const plan: FarmDeployPlan = {
+    root: path.resolve(root),
+    target: platform,
+    preset,
+    runtime: getFarmPresetRuntime(preset),
+    outputDir: nitroOutput,
+    production: platform === "netlify" || Boolean(options.prod),
+    build: {
+      command: `farm build --preset ${preset}`,
+      cwd: path.resolve(root),
+    },
+    deploy,
+    ...(cloudflareAgent ? { cloudflareAgent } : {}),
+  };
 
-  if (!existsSync(nitroOutput)) {
-    logger.error(`Build output not found at ${nitroOutput}. Please run 'farm build' first.`);
-    process.exit(1);
+  return { plan, deployConfig };
+}
+
+function createDeployCommand(
+  platform: FarmDeployPlan["target"],
+  root: string,
+  outputDir: string,
+  deployConfig: ReturnType<typeof resolveDeployConfig>,
+  prod: boolean | undefined,
+  cloudflareAgent: CloudflareAgentDeployPlan | undefined,
+): FarmDeployPlan["deploy"] {
+  if (platform === "vercel") {
+    return {
+      command: `vercel deploy --prebuilt --yes${prod ? " --prod" : ""}`,
+      cwd: path.resolve(root),
+    };
   }
-
-  // Deploy using platform CLI (always uses user's credentials)
-  await deployPlatform(platform, root, nitroOutput, deployConfig, options.prod);
+  if (platform === "netlify") {
+    const site = deployConfig.netlify?.site;
+    return {
+      command: `netlify deploy --prod --dir=.${site ? ` --site=${site}` : ""}`,
+      cwd: outputDir,
+    };
+  }
+  if (cloudflareAgent) {
+    return {
+      command: `wrangler deploy --config ${cloudflareAgent.configPath}${cloudflareAgent.environment ? ` --env ${cloudflareAgent.environment}` : ""}`,
+      cwd: path.resolve(root),
+    };
+  }
+  const projectName =
+    deployConfig.cloudflare?.projectName || deployConfig.projectName || "farm-app";
+  return {
+    command: `wrangler pages deploy . --project-name=${projectName}`,
+    cwd: outputDir,
+  };
 }
 
 /**
@@ -387,6 +502,48 @@ export function resolveCloudflareAgentDeployPlan(
     configPath,
     ...(typeof environment === "string" ? { environment: environment.trim() } : {}),
   };
+}
+
+function resolveConfiguredCloudflareAgentDeployPlan(
+  root: string,
+  integrations: Record<string, unknown> | undefined,
+): CloudflareAgentDeployPlan | undefined {
+  const integration = Object.values(integrations || {}).find(
+    (value) =>
+      isRecord(value) &&
+      value.category === "agent" &&
+      value.type === "cloudflare" &&
+      value.serverRuntime === false,
+  );
+  if (!isRecord(integration) || !isRecord(integration.instance)) return undefined;
+
+  const configuredPath = integration.instance.config;
+  if (typeof configuredPath !== "string" || !configuredPath.trim()) return undefined;
+
+  const projectRoot = path.resolve(root);
+  const sourceConfigPath = path.resolve(projectRoot, configuredPath);
+  assertPathInsideProject(projectRoot, sourceConfigPath, "Cloudflare Agents source config");
+  const configPath = path.join(path.dirname(sourceConfigPath), ".farm-cf-agent.wrangler.jsonc");
+  const environment = integration.instance.environment;
+
+  return {
+    configPath,
+    ...(typeof environment === "string" && environment.trim()
+      ? { environment: environment.trim() }
+      : {}),
+    generated: true,
+  };
+}
+
+function assertPathInsideProject(projectRoot: string, candidate: string, label: string): void {
+  const relativePath = path.relative(projectRoot, candidate);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(`${label} must stay inside the Farm project root.`);
+  }
 }
 
 function assertWranglerInstalled(root: string): void {

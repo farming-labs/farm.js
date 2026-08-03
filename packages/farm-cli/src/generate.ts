@@ -29,6 +29,22 @@ export interface GenerateFarmOptions {
   orm?: GenerateFarmSchemaTarget;
   output?: string;
   dialect?: GenerateFarmSqlDialect;
+  /** Verify committed type artifacts without writing files. */
+  check?: boolean;
+}
+
+export class FarmGeneratedArtifactsStaleError extends Error {
+  readonly stalePaths: string[];
+
+  constructor(root: string, stalePaths: readonly string[]) {
+    const normalizedPaths = [...new Set(stalePaths)].sort();
+    const relativePaths = normalizedPaths.map((filePath) => path.relative(root, filePath));
+    super(
+      `Generated types are stale:\n${relativePaths.map((filePath) => `  - ${filePath}`).join("\n")}\nRun farm generate and commit the updated files.`,
+    );
+    this.name = "FarmGeneratedArtifactsStaleError";
+    this.stalePaths = normalizedPaths;
+  }
 }
 
 type PackageManifest = {
@@ -61,6 +77,11 @@ const PRISMA_GENERATED_END = "// Farm.js integrations generated schema: end";
 
 export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
   const root = path.resolve(options.root || process.cwd());
+  if (options.check && hasSchemaOptions(options)) {
+    throw new Error(
+      "--check verifies generated framework types and cannot be combined with schema output options.",
+    );
+  }
   const userConfig = await loadConfig(root, options.configPath, "development");
 
   if (!userConfig && hasSchemaOptions(options)) {
@@ -82,7 +103,19 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     extraRoutes,
     suppressLintOnLink: resolvedConfig.suppressLintOnLink,
     i18nConfig: resolvedConfig.i18n,
+    check: options.check,
   });
+
+  if (options.check) {
+    if (typeArtifacts.stalePaths.length) {
+      throw new FarmGeneratedArtifactsStaleError(root, typeArtifacts.stalePaths);
+    }
+    logger.success(
+      `Generated route, API, env${resolvedConfig.i18n.enabled ? ", and i18n" : ""} types are up to date.`,
+    );
+    return typeArtifacts;
+  }
+
   logger.success(
     `Generated route, API, env${resolvedConfig.i18n.enabled ? ", and i18n" : ""} types (${typeArtifacts.apiRoutes.length} API route${typeArtifacts.apiRoutes.length === 1 ? "" : "s"}).`,
   );
@@ -94,7 +127,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     if (hasSchemaOptions(options)) {
       logger.warn("No integration schemas were found in the current Farm config.");
     }
-    return;
+    return typeArtifacts;
   }
 
   const packageManifest = await readPackageManifest(root);
@@ -109,7 +142,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
     logger.warn(
       `Integration schemas were found, but Farm could not choose a schema target automatically: ${(error as Error).message}`,
     );
-    return;
+    return typeArtifacts;
   }
 
   if (!orm) {
@@ -117,7 +150,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
       logger.warn(
         "Integration schemas were found, but no data layer was detected. Pass --orm prisma|drizzle|postgres|mysql|sqlite|mongodb to generate schema artifacts.",
       );
-      return;
+      return typeArtifacts;
     }
     throw new Error(
       "Could not auto-detect a schema target. Pass one explicitly with --orm prisma|drizzle|postgres|mysql|sqlite|mongodb.",
@@ -140,7 +173,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
 
       await writePrismaSchema(schemaPath, collectedModels);
       logger.success(`Generated Prisma integration schema in ${path.relative(root, schemaPath)}.`);
-      return;
+      return typeArtifacts;
     }
 
     case "drizzle": {
@@ -158,7 +191,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
         : path.join(root, "farm-integrations.generated.ts");
       await writeGeneratedFile(outputPath, generateDrizzleSchema(collectedModels, dialect));
       logger.success(`Generated Drizzle integration schema in ${path.relative(root, outputPath)}.`);
-      return;
+      return typeArtifacts;
     }
 
     case "postgres":
@@ -169,7 +202,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
         : path.join(root, `farm-integrations.generated.${orm}.sql`);
       await writeGeneratedFile(outputPath, generateSqlSchema(collectedModels, orm));
       logger.success(`Generated ${orm} integration schema in ${path.relative(root, outputPath)}.`);
-      return;
+      return typeArtifacts;
     }
 
     case "mongodb": {
@@ -180,7 +213,7 @@ export async function generateFarmArtifacts(options: GenerateFarmOptions = {}) {
       logger.success(
         `Generated MongoDB integration bootstrap in ${path.relative(root, outputPath)}.`,
       );
-      return;
+      return typeArtifacts;
     }
   }
 }

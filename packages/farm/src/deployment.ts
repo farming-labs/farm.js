@@ -4,6 +4,37 @@ export const FARM_DEPLOYMENT_COOKIE = "__farm_deployment";
 export const FARM_DEPLOYMENT_MISMATCH_CODE = "FARM_DEPLOYMENT_MISMATCH";
 export const FARM_DEPLOYMENT_MISMATCH_STATUS = 409;
 
+export type FarmPresetRuntime = "node" | "edge" | "unknown";
+
+export function getFarmPresetRuntime(preset: string): FarmPresetRuntime {
+  if (
+    preset === "cloudflare" ||
+    preset === "cloudflare-pages" ||
+    preset === "cloudflare-module" ||
+    preset === "netlify-edge" ||
+    preset === "vercel-edge" ||
+    preset === "deno"
+  ) {
+    return "edge";
+  }
+
+  if (
+    preset === "node-server" ||
+    preset === "vercel" ||
+    preset === "netlify" ||
+    preset === "aws-lambda" ||
+    preset === "azure" ||
+    preset === "firebase" ||
+    preset === "bun" ||
+    preset === "self-host" ||
+    preset === "farm"
+  ) {
+    return "node";
+  }
+
+  return "unknown";
+}
+
 export interface FarmDeploymentMismatch {
   clientDeploymentId: string;
   serverDeploymentId: string;

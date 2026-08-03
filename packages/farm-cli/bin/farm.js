@@ -144,6 +144,7 @@ program
   )
   .option("--dialect <dialect>", "SQL dialect for Drizzle generation (postgres, mysql, sqlite)")
   .option("-o, --output <output>", "Custom output path")
+  .option("--check", "Fail when committed generated framework types are stale")
   .action(async (options) => {
     try {
       const { generateFarmArtifacts } = require("../dist/index.js");
@@ -153,6 +154,7 @@ program
         orm: options.orm,
         dialect: options.dialect,
         output: options.output,
+        check: options.check,
       });
     } catch (error) {
       console.error("Failed to generate Farm artifacts:", error);
@@ -169,6 +171,7 @@ program
   .option("--host <host>", "Host of a running local app")
   .option("--url <url>", "Base URL of a running Farm app")
   .option("--offline", "Inspect project files without probing a running app")
+  .option("--fix", "Apply safe additive corrections without overwriting application files")
   .option("--timeout <ms>", "Live runtime probe timeout in milliseconds", "1200")
   .option("--json", "Print machine-readable JSON")
   .action(async (options) => {
@@ -185,12 +188,37 @@ program
         host: options.host,
         url: options.url,
         offline: options.offline,
+        fix: options.fix,
         timeoutMs,
       });
       console.log(options.json ? JSON.stringify(report, null, 2) : formatFarmDoctorReport(report));
       if (report.health === "error") process.exitCode = 1;
     } catch (error) {
       console.error("Failed to inspect Farm app:", error);
+      process.exit(1);
+    }
+  });
+
+program
+  .command("explain <path>")
+  .description("Explain how a URL maps to a Farm route and deployment runtime")
+  .option("-r, --root <root>", "Root directory", process.cwd())
+  .option("-c, --config <config>", "Path to farm config file")
+  .option("--json", "Print machine-readable JSON")
+  .action(async (pathname, options) => {
+    try {
+      const { explainFarmRoute, formatFarmRouteExplanation } = require("../dist/index.js");
+      const explanation = await explainFarmRoute(pathname, {
+        root: options.root,
+        configPath: options.config,
+      });
+      console.log(
+        options.json
+          ? JSON.stringify(explanation, null, 2)
+          : formatFarmRouteExplanation(explanation),
+      );
+    } catch (error) {
+      console.error("Failed to explain Farm route:", error);
       process.exit(1);
     }
   });
@@ -433,6 +461,7 @@ program
   .option("--cloudflare", "Deploy to Cloudflare")
   .option("--netlify", "Deploy to Netlify")
   .option("--prod", "Deploy to production (Vercel: uses prebuilt output)")
+  .option("--plan", "Print the resolved deployment plan without building or deploying")
   .option("--custom", "Use your own credentials (not Farm.js managed)")
   .action(async (options) => {
     try {
