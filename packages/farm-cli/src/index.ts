@@ -9,9 +9,12 @@ export {
 } from "./add-integration";
 export { buildFarm } from "./build";
 export {
+  createFarmDeployPlan,
   deployFarm,
+  formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
   type CloudflareAgentDeployPlan,
+  type FarmDeployPlan,
 } from "./deploy";
 export {
   createPreviewTunnelPlan,
@@ -33,15 +36,26 @@ export {
   type PreviewGatewayResponse,
   type PreviewGatewaySession,
 } from "./preview-gateway";
-export { generateFarmArtifacts } from "./generate";
+export {
+  FarmGeneratedArtifactsStaleError,
+  generateFarmArtifacts,
+  type GenerateFarmOptions,
+} from "./generate";
 export {
   formatFarmDoctorReport,
   runFarmDoctor,
   type FarmDoctorCheck,
   type FarmDoctorCheckStatus,
+  type FarmDoctorFix,
   type FarmDoctorOptions,
   type FarmDoctorReport,
 } from "./doctor";
+export {
+  explainFarmRoute,
+  formatFarmRouteExplanation,
+  type ExplainFarmRouteOptions,
+  type FarmRouteExplanation,
+} from "./explain";
 export {
   formatFarmCronJobs,
   listFarmCronJobs,

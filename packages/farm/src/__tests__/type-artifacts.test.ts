@@ -68,6 +68,7 @@ describe("generateFarmTypeArtifacts", () => {
     expect(types).toContain("`/users/${string}`");
     expect(types).toContain('"/users/[id]"');
     expect(types).toContain('"/docs/reference"');
+    expect(types).toContain('export type RoutePath =\n  | "/"');
     expect(types).toContain('_: import("./farm").RoutePath');
     expect(types).toContain('import "@farm.js/core/image"');
     expect(readFileSync(apiTypesPath, "utf8")).toContain("hello: {");
@@ -225,5 +226,24 @@ describe("generateFarmTypeArtifacts", () => {
     for (const filePath of outputPaths.filter((filePath) => filePath !== first.apiTypesPath)) {
       expect(statSync(filePath).mtimeMs).toBe(preservedMtimes.get(filePath));
     }
+  });
+
+  it("checks generated artifacts without changing them", async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), "farm-check-type-artifacts-"));
+    const apiRoutePath = path.join(root, "src", "app", "api", "hello", "route.ts");
+    mkdirSync(path.dirname(apiRoutePath), { recursive: true });
+    writeFileSync(apiRoutePath, "export const GET = async () => Response.json({ ok: true });\n");
+
+    const generated = await generateFarmTypeArtifacts({ root });
+    const current = await generateFarmTypeArtifacts({ root, check: true });
+
+    expect(current.stalePaths).toEqual([]);
+
+    const staleSource = "// deliberately stale\n";
+    writeFileSync(generated.apiTypesPath!, staleSource);
+    const stale = await generateFarmTypeArtifacts({ root, check: true });
+
+    expect(stale.stalePaths).toEqual([generated.apiTypesPath]);
+    expect(readFileSync(generated.apiTypesPath!, "utf8")).toBe(staleSource);
   });
 });

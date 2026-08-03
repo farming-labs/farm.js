@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync } from "fs";
-import { dirname, join, resolve } from "path";
+import { dirname, isAbsolute, join, resolve } from "path";
 import { APITypeGenerator, type APIRouteInfo } from "./type-generator";
 import {
   createRouteTypeDeclarations,
@@ -7,7 +7,7 @@ import {
   type GenerateRouteTypesOptions,
 } from "./routing/generate-route-types";
 import { createEnvTypeDeclarations, generateEnvTypes } from "./env-types";
-import { generateFarmImageTypes } from "./image-types";
+import { createFarmImageTypeDeclarations, generateFarmImageTypes } from "./image-types";
 import { generateFarmI18nTypes, renderFarmI18nTypes } from "./i18n/type-generator";
 import { readFarmI18nCatalogs } from "./i18n/catalog";
 import type { ResolvedFarmI18nConfig } from "./i18n/types";
@@ -34,6 +34,8 @@ export interface GenerateFarmTypeArtifactsOptions {
   env?: boolean;
   images?: boolean;
   i18n?: boolean;
+  /** Compare generated content with disk without writing files. */
+  check?: boolean;
 }
 
 export interface GenerateFarmTypeArtifactsResult {
@@ -44,6 +46,8 @@ export interface GenerateFarmTypeArtifactsResult {
   imageTypesPath?: string;
   i18nTypesPath?: string;
   apiRoutes: APIRouteInfo[];
+  /** Generated files whose checked-in content is missing or stale. */
+  stalePaths: string[];
 }
 
 export async function generateFarmTypeArtifacts(
@@ -61,6 +65,7 @@ export async function generateFarmTypeArtifacts(
 
   const result: GenerateFarmTypeArtifactsResult = {
     apiRoutes: [],
+    stalePaths: [],
   };
   const unifiedTypesPath = join(root, srcDir, "farm.d.ts");
   const shouldRefreshUnifiedTypes =
@@ -80,14 +85,22 @@ export async function generateFarmTypeArtifacts(
     unifiedSections.push(await createRouteTypeDeclarations(routeOptions, unifiedTypesPath));
     result.routeTypesPath = unifiedTypesPath;
   } else if (shouldGenerateRoutes) {
-    result.routeTypesPath = await generateRouteTypes({
+    const routeOptions = {
       root,
       srcDir,
       outFile: options.routeTypesOutFile,
       extraRoutes: options.extraRoutes || [],
       suppressLintOnLink: options.suppressLintOnLink,
       sourceRoots,
-    });
+    } satisfies GenerateRouteTypesOptions;
+    if (options.check) {
+      const routeTypesPath = resolveGeneratedPath(root, srcDir, options.routeTypesOutFile!);
+      const content = await createRouteTypeDeclarations(routeOptions, routeTypesPath);
+      checkGeneratedFile(routeTypesPath, content, result.stalePaths);
+      result.routeTypesPath = routeTypesPath;
+    } else {
+      result.routeTypesPath = await generateRouteTypes(routeOptions);
+    }
   }
 
   if (shouldGenerateApi) {
@@ -98,8 +111,7 @@ export async function generateFarmTypeArtifacts(
       : join(root, srcDir, "lib", "api.generated.ts");
     const content = generator.generateAPIRouter(apiRoutes, { outFile: apiTypesPath });
 
-    mkdirSync(dirname(apiTypesPath), { recursive: true });
-    writeFileIfChanged(apiTypesPath, content);
+    writeOrCheckGeneratedFile(apiTypesPath, content, options.check, result.stalePaths);
 
     result.apiTypesPath = apiTypesPath;
     result.apiRoutes = apiRoutes;
@@ -121,7 +133,7 @@ export async function generateFarmTypeArtifacts(
     );
     result.envTypesPath = unifiedTypesPath;
   } else if (shouldGenerateEnv) {
-    result.envTypesPath = await generateEnvTypes({
+    const envOptions = {
       root,
       srcDir,
       outFile: options.envTypesOutFile,
@@ -129,17 +141,34 @@ export async function generateFarmTypeArtifacts(
       layerConfigPaths: (options.layers ?? [])
         .map((layer) => layer.configFile)
         .filter((configFile): configFile is string => Boolean(configFile)),
-    });
+    };
+    if (options.check) {
+      const envTypesPath = resolveGeneratedPath(root, srcDir, options.envTypesOutFile!);
+      checkGeneratedFile(
+        envTypesPath,
+        createEnvTypeDeclarations(envOptions, envTypesPath),
+        result.stalePaths,
+      );
+      result.envTypesPath = envTypesPath;
+    } else {
+      result.envTypesPath = await generateEnvTypes(envOptions);
+    }
   }
 
   // Static image modules are declared by @farm.js/core itself. Keep the
   // explicit output option for callers that need a standalone declaration.
   if (shouldGenerateImages && options.imageTypesOutFile) {
-    result.imageTypesPath = generateFarmImageTypes({
-      root,
-      srcDir,
-      outFile: options.imageTypesOutFile,
-    });
+    const imageTypesPath = resolveGeneratedPath(root, srcDir, options.imageTypesOutFile, false);
+    if (options.check) {
+      checkGeneratedFile(imageTypesPath, createFarmImageTypeDeclarations(), result.stalePaths);
+      result.imageTypesPath = imageTypesPath;
+    } else {
+      result.imageTypesPath = generateFarmImageTypes({
+        root,
+        srcDir,
+        outFile: options.imageTypesOutFile,
+      });
+    }
   }
 
   if (shouldRefreshUnifiedTypes && options.i18nConfig?.enabled && !options.i18nTypesOutFile) {
@@ -147,17 +176,27 @@ export async function generateFarmTypeArtifacts(
     unifiedSections.push(renderFarmI18nTypes(options.i18nConfig.locales, signatures));
     result.i18nTypesPath = unifiedTypesPath;
   } else if (shouldGenerateI18n && options.i18nConfig) {
-    result.i18nTypesPath = await generateFarmI18nTypes({
-      root,
-      srcDir,
-      config: options.i18nConfig,
-      outFile: options.i18nTypesOutFile,
-    });
+    if (options.check) {
+      const i18nTypesPath = resolveGeneratedPath(root, srcDir, options.i18nTypesOutFile!, false);
+      const { signatures } = await readFarmI18nCatalogs(options.i18nConfig);
+      checkGeneratedFile(
+        i18nTypesPath,
+        renderFarmI18nTypes(options.i18nConfig.locales, signatures),
+        result.stalePaths,
+      );
+      result.i18nTypesPath = i18nTypesPath;
+    } else {
+      result.i18nTypesPath = await generateFarmI18nTypes({
+        root,
+        srcDir,
+        config: options.i18nConfig,
+        outFile: options.i18nTypesOutFile,
+      });
+    }
   }
 
   if (shouldRefreshUnifiedTypes) {
-    mkdirSync(dirname(unifiedTypesPath), { recursive: true });
-    writeFileIfChanged(
+    writeOrCheckGeneratedFile(
       unifiedTypesPath,
       `/**
  * Generated by Farm.js. Do not edit.
@@ -166,13 +205,51 @@ export async function generateFarmTypeArtifacts(
 
 import "@farm.js/core/image";
 
-${unifiedSections.join("\n")}`,
+${unifiedSections.map((section) => section.trimEnd()).join("\n\n")}
+`,
+      options.check,
+      result.stalePaths,
     );
     result.typesPath = unifiedTypesPath;
-    removeLegacyTypeArtifacts(root, srcDir);
+    if (options.check) {
+      collectLegacyTypeArtifacts(root, srcDir, result.stalePaths);
+    } else {
+      removeLegacyTypeArtifacts(root, srcDir);
+    }
   }
 
   return result;
+}
+
+function resolveGeneratedPath(
+  root: string,
+  srcDir: string,
+  outFile: string,
+  relativeToSrc = true,
+): string {
+  if (isAbsolute(outFile)) return resolve(outFile);
+  return resolve(root, relativeToSrc ? join(srcDir, outFile) : outFile);
+}
+
+function writeOrCheckGeneratedFile(
+  filePath: string,
+  content: string,
+  check: boolean | undefined,
+  stalePaths: string[],
+): void {
+  if (check) {
+    checkGeneratedFile(filePath, content, stalePaths);
+    return;
+  }
+
+  mkdirSync(dirname(filePath), { recursive: true });
+  writeFileIfChanged(filePath, content);
+}
+
+function checkGeneratedFile(filePath: string, content: string, stalePaths: string[]): void {
+  if (!existsSync(filePath) || readFileSync(filePath, "utf8") !== content) {
+    stalePaths.push(filePath);
+  }
 }
 
 const LEGACY_TYPE_ARTIFACTS = [
@@ -190,5 +267,13 @@ function removeLegacyTypeArtifacts(root: string, srcDir: string): void {
     if (source.includes(marker)) {
       unlinkSync(filePath);
     }
+  }
+}
+
+function collectLegacyTypeArtifacts(root: string, srcDir: string, stalePaths: string[]): void {
+  for (const [fileName, marker] of LEGACY_TYPE_ARTIFACTS) {
+    const filePath = join(root, srcDir, fileName);
+    if (!existsSync(filePath)) continue;
+    if (readFileSync(filePath, "utf8").includes(marker)) stalePaths.push(filePath);
   }
 }

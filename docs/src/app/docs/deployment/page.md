@@ -273,8 +273,11 @@ export default defineConfig({
 | `farm deploy --vercel`                 | Uses `vercel deploy --prebuilt`.                        |
 | `farm deploy --cloudflare`             | Deploys the Cloudflare Pages output with Wrangler.      |
 | `farm deploy --netlify`                | Deploys the Netlify output with Netlify CLI.            |
+| `farm deploy --plan`                   | Prints the resolved build and deploy operations only.   |
 
 For other Nitro presets, use the host's documented deploy command or CI workflow after `farm build` writes the Nitro output.
+
+Use `farm deploy --plan` before a release when you want to verify the selected target, preset, runtime, output directory, and provider command. Planning is read-only: it does not run the build, require a provider login, inspect existing output, or deploy anything.
 
 ## Environment variables
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
@@ -123,6 +123,32 @@ test("prints a machine-readable report through the CLI", async () => {
   }
 });
 
+test("applies only safe additive fixes", async () => {
+  const root = await createTempProject({ layout: false });
+  const layoutPath = path.join(root, "src/app/layout.tsx");
+
+  try {
+    const report = await runFarmDoctor({ root, offline: true, fix: true });
+
+    assert.deepEqual(report.fixes, [
+      {
+        code: "ROOT_LAYOUT_CREATED",
+        title: "Created the missing root layout",
+        filePath: "src/app/layout.tsx",
+      },
+    ]);
+    assert.ok(report.checks.some((check) => check.code === "ROOT_LAYOUT_READY"));
+    assert.match(await readFile(layoutPath, "utf8"), /export default function RootLayout/);
+
+    const before = (await stat(layoutPath)).mtimeMs;
+    const repeated = await runFarmDoctor({ root, offline: true, fix: true });
+    assert.deepEqual(repeated.fixes, []);
+    assert.equal((await stat(layoutPath)).mtimeMs, before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function createTempProject(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-"));
   const target = options.target || "node";
@@ -153,11 +179,13 @@ async function createTempProject(options = {}) {
     "utf8",
   );
   await writeFile(path.join(root, "src/app/page.tsx"), "export default () => null;\n", "utf8");
-  await writeFile(
-    path.join(root, "src/app/layout.tsx"),
-    "export default ({ children }) => children;\n",
-    "utf8",
-  );
+  if (options.layout !== false) {
+    await writeFile(
+      path.join(root, "src/app/layout.tsx"),
+      "export default ({ children }) => children;\n",
+      "utf8",
+    );
+  }
   await writeFile(
     path.join(root, "src/app/api/maintenance/cleanup/route.ts"),
     "export function GET() { return Response.json({ ok: true }); }\n",

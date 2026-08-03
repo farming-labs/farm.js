@@ -38,6 +38,14 @@ function routePatternToRouteLiteral(pattern: string): string {
   return JSON.stringify(pattern);
 }
 
+function renderTypeUnion(values: readonly string[]): string {
+  return values.length <= 1 ? values[0] || "never" : `\n  | ${values.join("\n  | ")}`;
+}
+
+function renderTypeAlias(name: string, value: string): string {
+  return `export type ${name} =${value.startsWith("\n") ? "" : " "}${value};`;
+}
+
 function createRoutePattern(route: ParsedRoute): string {
   if (route.segments.length === 0) return "/";
   return (
@@ -135,19 +143,9 @@ export async function createRouteTypeDeclarations(
     .sort()
     .map(routePatternToRouteLiteral);
 
-  const routePathType = suppressLintOnLink
-    ? "string"
-    : typeLiterals.length
-      ? typeLiterals.join(" | ")
-      : "never";
-  const routePatternType = suppressLintOnLink
-    ? "string"
-    : patternLiterals.length
-      ? patternLiterals.join(" | ")
-      : "never";
-  const routeModulePatternType = routeModulePatternLiterals.length
-    ? routeModulePatternLiterals.join(" | ")
-    : "never";
+  const routePathType = suppressLintOnLink ? "string" : renderTypeUnion(typeLiterals);
+  const routePatternType = suppressLintOnLink ? "string" : renderTypeUnion(patternLiterals);
+  const routeModulePatternType = renderTypeUnion(routeModulePatternLiterals);
   const routeTypesImportPath = `./${path.basename(outPath).replace(/\.d\.ts$/, "")}`;
   const linkAugmentationBlock = suppressLintOnLink
     ? ""
@@ -193,9 +191,9 @@ declare global {
  * Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
-export type RoutePath = ${routePathType};
-export type RoutePattern = ${routePatternType};
-export type RouteModulePattern = ${routeModulePatternType};${linkAugmentationBlock}${routeModuleAugmentationBlock}
+${renderTypeAlias("RoutePath", routePathType)}
+${renderTypeAlias("RoutePattern", routePatternType)}
+${renderTypeAlias("RouteModulePattern", routeModulePatternType)}${linkAugmentationBlock}${routeModuleAugmentationBlock}
 `;
 
   return content;

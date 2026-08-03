@@ -5,7 +5,7 @@ import {
   type FarmCronJob,
   type ResolvedFarmConfig,
 } from "@farm.js/core";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 
@@ -45,6 +45,13 @@ export interface FarmDoctorReport {
   };
   summary: Record<FarmDoctorCheckStatus, number>;
   checks: FarmDoctorCheck[];
+  fixes?: FarmDoctorFix[];
+}
+
+export interface FarmDoctorFix {
+  code: string;
+  title: string;
+  filePath: string;
 }
 
 export interface FarmDoctorOptions {
@@ -58,6 +65,8 @@ export interface FarmDoctorOptions {
   fetch?: typeof globalThis.fetch;
   env?: Record<string, string | undefined>;
   now?: () => Date;
+  /** Apply only additive corrections that never overwrite application files. */
+  fix?: boolean;
 }
 
 type LiveSnapshot = {
@@ -107,7 +116,7 @@ export async function runFarmDoctor(options: FarmDoctorOptions = {}): Promise<Fa
   const liveTarget = resolveLiveTarget(options);
   let liveError: string | undefined;
 
-  if (!options.offline) {
+  if (!options.offline && !options.fix) {
     try {
       const snapshot = await fetchLiveSnapshot(liveTarget, options);
       return createLiveReport(snapshot, liveTarget, options.now);
@@ -161,6 +170,13 @@ export function formatFarmDoctorReport(
     `${report.summary.fail} failed`,
     `${report.summary.info} info`,
   ].join(" / ");
+  if (report.fixes?.length) {
+    lines.push("", color.bold("FIXED"));
+    for (const fix of report.fixes) {
+      lines.push(`  ${color.green("✓")} ${fix.title}`);
+      lines.push(`    ${color.dim(fix.filePath)}`);
+    }
+  }
   lines.push("", `${color.bold("SUMMARY")}  ${summary}`);
   if (report.target?.devtoolsUrl) {
     lines.push(`${color.bold("DEVTOOLS")} ${report.target.devtoolsUrl}`);
@@ -316,8 +332,43 @@ async function createProjectReport(
     collectCronChecks(config, options.env || process.env, checks);
   }
 
+  if (config && options.fix) {
+    const fixes = applySafeProjectFixes(root, config, checks);
+    if (fixes.length) {
+      const refreshed = await createProjectReport(root, { ...options, fix: false });
+      refreshed.fixes = fixes;
+      return refreshed;
+    }
+    report.fixes = [];
+  }
+
   finalizeReport(report);
   return report;
+}
+
+function applySafeProjectFixes(
+  root: string,
+  config: ResolvedFarmConfig,
+  checks: readonly FarmDoctorCheck[],
+): FarmDoctorFix[] {
+  const fixes: FarmDoctorFix[] = [];
+  if (checks.some((check) => check.code === "ROOT_LAYOUT_MISSING")) {
+    const layoutPath = path.join(root, config.srcDir, "app", "layout.tsx");
+    if (!existsSync(layoutPath)) {
+      mkdirSync(path.dirname(layoutPath), { recursive: true });
+      writeFileSync(
+        layoutPath,
+        `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`,
+        { encoding: "utf8", flag: "wx" },
+      );
+      fixes.push({
+        code: "ROOT_LAYOUT_CREATED",
+        title: "Created the missing root layout",
+        filePath: path.relative(root, layoutPath),
+      });
+    }
+  }
+  return fixes;
 }
 
 function collectNodeCheck(checks: FarmDoctorCheck[]): void {

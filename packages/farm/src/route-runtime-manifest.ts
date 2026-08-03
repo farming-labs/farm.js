@@ -1,6 +1,7 @@
 import path from "path";
 import type { APIRouteManager } from "./api/route-manager";
 import type { ResolvedFarmConfig } from "./config";
+import { getFarmPresetRuntime, type FarmPresetRuntime } from "./deployment";
 import {
   getFarmRouteRuntimeConfig,
   hasFarmRouteRuntimeControls,
@@ -17,7 +18,7 @@ import { resolveRouteRenderingConfigFromFile } from "./ssg";
 export const FARM_ROUTE_RUNTIME_MANIFEST = "route-runtime-manifest.json";
 
 export interface FarmRouteRuntimeDeploymentValidation {
-  runtime: "node" | "edge" | "unknown";
+  runtime: FarmPresetRuntime;
   warnings: string[];
 }
 
@@ -95,7 +96,7 @@ export function validateFarmRouteRuntimeDeployment(
   manifest: FarmRouteRuntimeManifest,
   preset: string,
 ): FarmRouteRuntimeDeploymentValidation {
-  const runtime = getPresetRuntime(preset);
+  const runtime = getFarmPresetRuntime(preset);
   const warnings = new Set<string>();
 
   for (const route of manifest.routes) {
@@ -121,33 +122,6 @@ export function validateFarmRouteRuntimeDeployment(
   }
 
   return { runtime, warnings: Array.from(warnings) };
-}
-
-export function getPresetRuntime(preset: string): FarmRouteRuntimeDeploymentValidation["runtime"] {
-  if (
-    preset === "cloudflare" ||
-    preset === "cloudflare-pages" ||
-    preset === "cloudflare-module" ||
-    preset === "netlify-edge" ||
-    preset === "vercel-edge" ||
-    preset === "deno"
-  ) {
-    return "edge";
-  }
-
-  if (
-    preset === "node-server" ||
-    preset === "vercel" ||
-    preset === "netlify" ||
-    preset === "aws-lambda" ||
-    preset === "azure" ||
-    preset === "firebase" ||
-    preset === "bun"
-  ) {
-    return "node";
-  }
-
-  return "unknown";
 }
 
 function normalizeManifestSource(root: string, modulePath: string): string {
