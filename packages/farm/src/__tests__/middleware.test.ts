@@ -2,7 +2,12 @@ import { describe, it, expect, expectTypeOf, vi, beforeEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { middleware, getRateLimitStatus } from "../middleware/chain";
+import {
+  middleware,
+  getRateLimitStatus,
+  memoryRateLimitStorage,
+  UnsupportedRateLimitStorageError,
+} from "../middleware/chain";
 import { createContext } from "../middleware/context";
 import { MiddlewareManager } from "../middleware/manager";
 import {
@@ -38,6 +43,28 @@ async function executeChain(handlers: any[], ctx: MiddlewareContext) {
     }
   };
   await executeNext();
+}
+
+function createTestRateLimitStorage(
+  entries: Iterable<[string, { count: number; resetAt: number }]> = [],
+) {
+  const records = new Map(entries);
+  const storage: RateLimitStorage = {
+    increment(key, windowMs) {
+      const now = Date.now();
+      const current = records.get(key);
+      const next =
+        !current || current.resetAt <= now
+          ? { count: 1, resetAt: now + windowMs }
+          : { count: current.count + 1, resetAt: current.resetAt };
+      records.set(key, next);
+      return next;
+    },
+    get(key) {
+      return records.get(key) ?? null;
+    },
+  };
+  return { records, storage };
 }
 
 // Helper to create mock request/response
@@ -403,6 +430,9 @@ describe("Middleware Chain", () => {
 
       await executeNext();
       expect(ctx._handled).toBe(false);
+      expect(ctx.headers.get("RateLimit-Policy")).toBe('"farm";q=2;w=1');
+      expect(ctx.headers.get("RateLimit")).toMatch(/^"farm";r=1;t=\d+$/);
+      expect(ctx.headers.has("Retry-After")).toBe(false);
     }
 
     // Second request - should pass
@@ -446,28 +476,41 @@ describe("Middleware Chain", () => {
           "Content-Type": "application/json",
         }),
       );
+      expect(ctx.headers.get("RateLimit-Policy")).toBe('"farm";q=2;w=1');
+      expect(ctx.headers.get("RateLimit")).toMatch(/^"farm";r=0;t=\d+$/);
+      expect(ctx.headers.get("Retry-After")).toMatch(/^\d+$/);
     }
   });
 
+  it("increments process-local counters atomically across concurrent requests", async () => {
+    const storage = memoryRateLimitStorage();
+
+    const results = await Promise.all(
+      Array.from({ length: 250 }, () => storage.increment("concurrent", 60_000)),
+    );
+
+    expect(results.map((entry) => entry.count).sort((a, b) => a - b)).toEqual(
+      Array.from({ length: 250 }, (_, index) => index + 1),
+    );
+    await expect(Promise.resolve(storage.get?.("concurrent"))).resolves.toMatchObject({
+      count: 250,
+    });
+  });
+
+  it("rejects legacy non-atomic get/set storage", () => {
+    const storage = {
+      get: vi.fn(),
+      set: vi.fn(),
+      delete: vi.fn(),
+    } as unknown as RateLimitStorage;
+
+    expect(() => middleware().rateLimit({ requests: 10, window: "1m", storage })).toThrow(
+      UnsupportedRateLimitStorageError,
+    );
+  });
+
   it("should support rate limiting with custom storage (Redis-like)", async () => {
-    const mockRedisStore = new Map<string, string>();
-    const customStorage = {
-      async set(key: string, value: any, ttl?: number) {
-        mockRedisStore.set(key, JSON.stringify(value));
-        if (ttl) {
-          setTimeout(() => {
-            mockRedisStore.delete(key);
-          }, ttl * 1000);
-        }
-      },
-      async get(key: string) {
-        const data = mockRedisStore.get(key);
-        return data ? JSON.parse(data) : null;
-      },
-      async delete(key: string) {
-        mockRedisStore.delete(key);
-      },
-    };
+    const { records: mockRedisStore, storage: customStorage } = createTestRateLimitStorage();
 
     const spyFn = vi.fn();
     const chain = middleware().rateLimit({
@@ -499,7 +542,7 @@ describe("Middleware Chain", () => {
       const ctx = createContext(req, res);
       await executeChain(ctx);
       expect(ctx._handled).toBe(false);
-      const count = JSON.parse(mockRedisStore.get("redis-test-key") || "{}").count;
+      const count = mockRedisStore.get("redis-test-key")?.count;
       expect(count).toBe(1);
     }
 
@@ -509,7 +552,7 @@ describe("Middleware Chain", () => {
       const ctx = createContext(req, res);
       await executeChain(ctx);
       expect(ctx._handled).toBe(false);
-      const count = JSON.parse(mockRedisStore.get("redis-test-key") || "{}").count;
+      const count = mockRedisStore.get("redis-test-key")?.count;
       expect(count).toBe(2);
     }
 
@@ -519,7 +562,7 @@ describe("Middleware Chain", () => {
       const ctx = createContext(req, res);
       await executeChain(ctx);
       expect(ctx._handled).toBe(false);
-      const count = JSON.parse(mockRedisStore.get("redis-test-key") || "{}").count;
+      const count = mockRedisStore.get("redis-test-key")?.count;
       expect(count).toBe(3);
     }
 
@@ -542,18 +585,7 @@ describe("Middleware Chain", () => {
   });
 
   it("should support custom storage with synchronous operations", async () => {
-    const syncStore = new Map<string, any>();
-    const customStorage = {
-      set(key: string, value: any, ttl?: number) {
-        syncStore.set(key, value);
-      },
-      get(key: string) {
-        return syncStore.get(key) || null;
-      },
-      delete(key: string) {
-        syncStore.delete(key);
-      },
-    };
+    const { records: syncStore, storage: customStorage } = createTestRateLimitStorage();
 
     const chain = middleware().rateLimit({
       requests: 2,
@@ -603,19 +635,16 @@ describe("Middleware Chain", () => {
     const storedData = syncStore.get("sync-test-key");
     expect(storedData).toHaveProperty("count");
     expect(storedData).toHaveProperty("resetAt");
-    expect(storedData.count).toBe(2);
+    expect(storedData.count).toBe(3);
   });
 
-  it("should pass TTL to custom storage", async () => {
-    const ttlSpy = vi.fn();
-    const customStorage = {
-      set(key: string, value: any, ttl?: number) {
-        ttlSpy(key, value, ttl);
+  it("should pass the fixed window to custom atomic storage", async () => {
+    const incrementSpy = vi.fn();
+    const customStorage: RateLimitStorage = {
+      increment(key, windowMs) {
+        incrementSpy(key, windowMs);
+        return { count: 1, resetAt: Date.now() + windowMs };
       },
-      get(key: string) {
-        return null;
-      },
-      delete(key: string) {},
     };
 
     const chain = middleware().rateLimit({
@@ -640,39 +669,13 @@ describe("Middleware Chain", () => {
 
     await executeNext();
 
-    expect(ttlSpy).toHaveBeenCalled();
-    const [key, value, ttl] = ttlSpy.mock.calls[0];
-    expect(ttl).toBe(120);
+    expect(incrementSpy).toHaveBeenCalled();
+    const [, windowMs] = incrementSpy.mock.calls[0];
+    expect(windowMs).toBe(120_000);
   });
 
-  it("should support ttl method in custom storage", async () => {
-    const storageWithTTL = new Map<string, { value: any; expiresAt: number }>();
-    const customStorage = {
-      set(key: string, value: any, ttl?: number) {
-        storageWithTTL.set(key, {
-          value,
-          expiresAt: ttl ? Date.now() + ttl * 1000 : Number.POSITIVE_INFINITY,
-        });
-      },
-      get(key: string) {
-        const item = storageWithTTL.get(key);
-        if (!item) return null;
-        if (item.expiresAt < Date.now()) {
-          storageWithTTL.delete(key);
-          return null;
-        }
-        return item.value;
-      },
-      delete(key: string) {
-        storageWithTTL.delete(key);
-      },
-      ttl(key: string) {
-        const item = storageWithTTL.get(key);
-        if (!item) return null;
-        const remainingMs = item.expiresAt - Date.now();
-        return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
-      },
-    };
+  it("should retain the reset time returned by custom storage", async () => {
+    const { records, storage: customStorage } = createTestRateLimitStorage();
 
     const chain = middleware().rateLimit({
       requests: 5,
@@ -702,13 +705,13 @@ describe("Middleware Chain", () => {
       expect(ctx._handled).toBe(false);
     }
 
-    const ttl = customStorage.ttl("ttl-test-key");
-    expect(ttl).not.toBeNull();
-    expect(ttl).toBeGreaterThan(0);
-    expect(ttl).toBeLessThanOrEqual(10);
+    const resetAt = records.get("ttl-test-key")?.resetAt;
+    expect(resetAt).toBeDefined();
+    expect(resetAt! - Date.now()).toBeGreaterThan(0);
+    expect(resetAt! - Date.now()).toBeLessThanOrEqual(10_000);
   });
 
-  it("should support ttl method with default storage", async () => {
+  it("should retain a reset window with default storage", async () => {
     const chain = middleware().rateLimit({
       requests: 3,
       window: "5s",
@@ -745,9 +748,8 @@ describe("Middleware Chain", () => {
 describe("getRateLimitStatus", () => {
   it("should return status with no requests when key does not exist", async () => {
     const storage: RateLimitStorage = {
+      increment: vi.fn(),
       get: vi.fn().mockResolvedValue(null),
-      set: vi.fn(),
-      delete: vi.fn(),
     };
 
     const status = await getRateLimitStatus("test-key", 100, storage);
@@ -768,12 +770,11 @@ describe("getRateLimitStatus", () => {
     const resetAt = now + 60000; // 60 seconds from now
 
     const storage: RateLimitStorage = {
+      increment: vi.fn(),
       get: vi.fn().mockResolvedValue({
         count: 42,
         resetAt,
       }),
-      set: vi.fn(),
-      delete: vi.fn(),
     };
 
     const status = await getRateLimitStatus("user:123", 100, storage);
@@ -791,12 +792,11 @@ describe("getRateLimitStatus", () => {
     const resetAt = now + 120000; // 2 minutes from now
 
     const storage: RateLimitStorage = {
+      increment: vi.fn(),
       get: vi.fn().mockResolvedValue({
         count: 150,
         resetAt,
       }),
-      set: vi.fn(),
-      delete: vi.fn(),
     };
 
     const status = await getRateLimitStatus("ip:192.168.1.1", 100, storage);
@@ -812,12 +812,11 @@ describe("getRateLimitStatus", () => {
     const pastTime = Date.now() - 10000; // 10 seconds ago
 
     const storage: RateLimitStorage = {
+      increment: vi.fn(),
       get: vi.fn().mockResolvedValue({
         count: 50,
         resetAt: pastTime,
       }),
-      set: vi.fn(),
-      delete: vi.fn(),
     };
 
     const status = await getRateLimitStatus("expired-key", 100, storage);
@@ -830,52 +829,21 @@ describe("getRateLimitStatus", () => {
     expect(status.resetAt).toBeNull();
   });
 
-  it("should use storage.ttl() if resetAt is not present", async () => {
+  it("should reject an inspectable storage record without resetAt", async () => {
     const storage: RateLimitStorage = {
+      increment: vi.fn(),
       get: vi.fn().mockResolvedValue({
         count: 30,
-        // No resetAt
-      }),
-      set: vi.fn(),
-      delete: vi.fn(),
-      ttl: vi.fn().mockResolvedValue(90), // 90 seconds remaining
+      } as any),
     };
 
-    const status = await getRateLimitStatus("ttl-key", 100, storage);
-
-    expect(status.requests).toBe(30);
-    expect(status.remaining).toBe(70);
-    expect(status.resetIn).toBe(90);
-    expect(status.resetAt).toBeInstanceOf(Date);
-    expect(storage.ttl).toHaveBeenCalledWith("ttl-key");
+    await expect(getRateLimitStatus("ttl-key", 100, storage)).rejects.toThrow(/resetAt timestamp/);
   });
 
   it("should work with custom storage implementation", async () => {
-    // Create a real custom storage for testing
-    const customStore = new Map<string, any>();
-    const customStorage: RateLimitStorage = {
-      set(key: string, value: any) {
-        customStore.set(key, value);
-      },
-      get(key: string) {
-        return customStore.get(key) || null;
-      },
-      delete(key: string) {
-        customStore.delete(key);
-      },
-      ttl(key: string) {
-        const record = customStore.get(key);
-        if (!record || !record.resetAt) return null;
-        const remainingMs = record.resetAt - Date.now();
-        return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
-      },
-    };
-
-    // Set up initial data
-    customStorage.set("api:user:456", {
-      count: 75,
-      resetAt: Date.now() + 45000, // 45 seconds
-    });
+    const { storage: customStorage } = createTestRateLimitStorage([
+      ["api:user:456", { count: 75, resetAt: Date.now() + 45_000 }],
+    ]);
 
     const status = await getRateLimitStatus("api:user:456", 100, customStorage);
 
@@ -888,25 +856,7 @@ describe("getRateLimitStatus", () => {
   });
 
   it("should integrate with actual rate limiter", async () => {
-    // Create custom storage for testing
-    const testStore = new Map<string, any>();
-    const testStorage: RateLimitStorage = {
-      set(key: string, value: any) {
-        testStore.set(key, value);
-      },
-      get(key: string) {
-        return testStore.get(key) || null;
-      },
-      delete(key: string) {
-        testStore.delete(key);
-      },
-      ttl(key: string) {
-        const record = testStore.get(key);
-        if (!record || !record.resetAt) return null;
-        const remainingMs = record.resetAt - Date.now();
-        return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
-      },
-    };
+    const { storage: testStorage } = createTestRateLimitStorage();
 
     const chain = middleware().rateLimit({
       requests: 5,

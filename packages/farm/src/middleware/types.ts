@@ -117,11 +117,24 @@ export interface CookieJar {
   getAll(): Record<string, string>;
 }
 
+export interface RateLimitIncrementResult {
+  count: number;
+  resetAt: number;
+}
+
 export interface RateLimitStorage {
-  get(key: string): Promise<any> | any;
-  set(key: string, value: any, ttl?: number): Promise<void> | void;
-  delete(key: string): Promise<void> | void;
-  ttl?(key: string): Promise<number | null> | number | null;
+  /** Atomically increment a key and create or retain its fixed expiry window. */
+  increment(
+    key: string,
+    windowMs: number,
+  ): Promise<RateLimitIncrementResult> | RateLimitIncrementResult;
+  /** Optional inspection support used by getRateLimitStatus(). */
+  get?(key: string): Promise<RateLimitIncrementResult | null> | RateLimitIncrementResult | null;
+}
+
+export interface MemoryRateLimitStorageOptions {
+  /** Maximum number of active keys retained by this process. */
+  maxEntries?: number;
 }
 
 export interface RateLimitConfig {

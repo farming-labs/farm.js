@@ -8,14 +8,14 @@ section: "Data and APIs"
 
 Farm's `@farm.js/core/storage` module is a **key/value API**. Every value is stored under a string key and read with operations such as `getItem`, `setItem`, `getKeys`, and `removeItem`.
 
-Use it for caches, feature flags, application settings, rate-limit counters, idempotency records, checkpoints, and object-backed values. Do not use it as a relational ORM for users, accounts, products, or other records that need model fields, relations, joins, or typed filters.
+Use it for caches, feature flags, application settings, idempotency records, checkpoints, and object-backed values. Do not use it as a relational ORM for users, accounts, products, or other records that need model fields, relations, joins, or typed filters. Request-rate enforcement uses a separate atomic counter contract described below.
 
 ## Choose the right data API
 
 | What you need                                     | Use                                                         |
 | ------------------------------------------------- | ----------------------------------------------------------- |
 | Cache entries, flags, settings, counters, or JSON | Farm KV storage through `getStorage(name)`                  |
-| Rate limiting shared across production instances  | A durable `ratelimit` mount under `storage.mounts`          |
+| Rate limiting shared across production instances  | An atomic adapter such as `redisRateLimitStorage(...)`      |
 | Files or values addressed by one key              | An object-backed KV helper such as `s3Storage(...)`         |
 | Application models, relations, joins, and filters | An application-owned `@farming-labs/orm` or another ORM     |
 | Models owned by a schema-backed Farm integration  | Farm's integration ORM through `ctx.args.db`                |
@@ -34,15 +34,11 @@ These paths do not convert into each other. In particular, a raw PostgreSQL pool
 **src/lib/storage.ts**
 
 ```ts
-import { redisStorage, sqliteStorage } from "@farm.js/core/storage";
+import { sqliteStorage } from "@farm.js/core/storage";
 
 export const appStorage = sqliteStorage({
   path: "./.farm/storage/app.sqlite",
   tableName: "app_store",
-});
-
-export const rateLimitStorage = redisStorage({
-  url: process.env.REDIS_URL!,
 });
 ```
 
@@ -54,13 +50,12 @@ KV helpers return ready-to-use clients, so application code can import and call 
 
 ```ts
 import { defineConfig } from "@farm.js/core";
-import { appStorage, rateLimitStorage } from "./src/lib/storage";
+import { appStorage } from "./src/lib/storage";
 
 export default defineConfig({
   storage: {
     mounts: {
       app: appStorage,
-      ratelimit: rateLimitStorage,
     },
   },
 });
@@ -69,12 +64,11 @@ export default defineConfig({
 Each property under `mounts` is a KV namespace:
 
 - `app` is an application-defined name. Farm does not attach special behavior to it.
-- `ratelimit` is a Farm convention. The built-in `.rateLimit()` middleware uses this namespace automatically.
 - You can add names such as `cache`, `sessions`, `uploads`, or `webhooks` when the application needs more stores.
 
 A mount name is not a URL, route, database table, or filesystem directory. It is the lookup name that connects configuration to later server-side calls.
 
-`getStorage(name)` always returns a namespaced key/value view. When the name matches a configured mount, operations use that mount's driver. When no matching mount exists, Farm uses the same namespace on the root store instead. The default root store is in memory, so a missing or misspelled production mount does not throw but may store data only for the lifetime of one process.
+`getStorage(name)` always returns a namespaced key/value view. When the name matches a configured mount, operations use that mount's driver. When no matching mount exists, Farm uses the same namespace on the root store instead. The default root store is in memory, so a missing or misspelled production mount does not throw but may store data only for the lifetime of one process. Rate-limit middleware is an exception: enforcement requires its dedicated atomic storage contract and never treats a generic KV mount as atomic.
 
 ## Use a mounted store
 
@@ -165,27 +159,37 @@ await appStore.clear();
 
 Use descriptive keys such as `settings:global`, `tenant:acme:flags`, or `webhook:event_123`. Namespaced keys make inspection and targeted cleanup easier.
 
-## How the rate-limit mount is used
+## Atomic rate-limit storage
 
-The `ratelimit` name is recognized by Farm's built-in rate-limit middleware. Once that mount is configured, middleware can use it without calling `getStorage("ratelimit")` directly:
+The built-in rate limiter uses an atomic `increment(key, windowMs)` contract. Its default adapter is atomic inside one process, which is useful for local development and a single long-running server. Production deployments with multiple processes or regions should pass a shared atomic adapter explicitly:
+
+```bash
+pnpm add @farm.js/cache-redis ioredis
+```
 
 **src/app/api/middleware.ts**
 
 ```ts
+import { redisRateLimitStorage } from "@farm.js/cache-redis";
 import { middleware } from "@farm.js/core/middleware";
+import Redis from "ioredis";
+
+const rateLimits = redisRateLimitStorage({
+  client: () => new Redis(process.env.REDIS_URL!),
+  prefix: "storefront-ratelimit",
+});
 
 export default middleware().rateLimit({
   requests: 100,
   window: "1m",
+  storage: rateLimits,
   keyGenerator: (ctx) => {
     return ctx.request.socket.remoteAddress ?? "unknown";
   },
 });
 ```
 
-For each key, Farm stores a request count and reset time in the `ratelimit` namespace, increments the count, applies the configured TTL, and returns `429` when the limit is reached.
-
-If no `ratelimit` mount is configured, the middleware still uses a `ratelimit` namespace on the root storage. The default root storage is in memory, which is useful for local development but is not shared between production instances and is cleared on restart. Use Redis, Upstash Redis, or another shared store for production rate limits.
+The Redis adapter uses one Lua operation to increment the counter and establish its expiry. A generic `get()` followed by `set()` adapter is rejected because concurrent requests can read the same count and overwrite each other. Limited responses include `Retry-After`; all responses include the [`RateLimit` and `RateLimit-Policy` fields from the current IETF draft](https://datatracker.ietf.org/doc/draft-ietf-httpapi-ratelimit-headers/).
 
 Choose a trusted rate-limit identity when possible. An authenticated user or tenant ID is usually more useful than an IP address for application-level limits:
 
@@ -200,22 +204,22 @@ export default middleware().rateLimit({
 });
 ```
 
-You can inspect the namespace manually with `getStorage("ratelimit")`, but normal middleware usage does not require it.
+Adapters may implement `get(key)` so `getRateLimitStatus()` can inspect a counter. Enforcement itself only depends on atomic `increment()`.
 
 ## Choosing mounts and drivers
 
 Mount names describe the responsibility; drivers decide where the values live:
 
-| Use case                                    | Suggested mount             | Typical driver                                        |
-| ------------------------------------------- | --------------------------- | ----------------------------------------------------- |
-| Application settings and durable JSON state | `app` or `settings`         | SQLite, Postgres, MySQL, or libSQL                    |
-| Shared cache entries                        | `cache`                     | Redis, Upstash Redis, or memory for local development |
-| Rate-limit counters                         | `ratelimit`                 | Redis or Upstash Redis                                |
-| Idempotency and webhook deduplication       | `webhooks` or `idempotency` | Redis or a durable SQL store                          |
-| Bucket-backed objects or metadata           | `uploads`                   | S3 or Vercel Blob                                     |
-| Tests and disposable local state            | Any descriptive name        | Memory or local filesystem                            |
+| Use case                                    | Suggested mount              | Typical driver                                        |
+| ------------------------------------------- | ---------------------------- | ----------------------------------------------------- |
+| Application settings and durable JSON state | `app` or `settings`          | SQLite, Postgres, MySQL, or libSQL                    |
+| Shared cache entries                        | `cache`                      | Redis, Upstash Redis, or memory for local development |
+| Rate-limit counters                         | Dedicated rate-limit adapter | `redisRateLimitStorage(...)` or another atomic store  |
+| Idempotency and webhook deduplication       | `webhooks` or `idempotency`  | Redis or a durable SQL store                          |
+| Bucket-backed objects or metadata           | `uploads`                    | S3 or Vercel Blob                                     |
+| Tests and disposable local state            | Any descriptive name         | Memory or local filesystem                            |
 
-The names are conventions chosen by the application, except for framework-owned names such as `ratelimit`. Two mounts may use the same driver type while remaining isolated, or use different drivers based on durability and latency requirements.
+The mount names are conventions chosen by the application. Two mounts may use the same driver type while remaining isolated, or use different drivers based on durability and latency requirements. A mount named `ratelimit` is still generic KV storage and is not accepted as proof of atomic increment support.
 
 ## Supported KV drivers
 
@@ -241,7 +245,7 @@ Import these helpers from `@farm.js/core/storage`:
 | `pgliteStorage(...)`                          | `pglite`                 | Embedded Postgres-compatible storage.                                             |
 | `planetscaleStorage(...)`                     | `planetscale`            | PlanetScale-backed durable storage.                                               |
 | `libsqlStorage(...)`                          | `libsql`                 | Local or remote libSQL/Turso-compatible storage.                                  |
-| `redisStorage(...)`                           | `redis`                  | Shared caches, rate limits, sessions, counters, and short-lived state.            |
+| `redisStorage(...)`                           | `redis`                  | Shared caches, sessions, counters, and short-lived state.                         |
 | `upstashStorage(...)`                         | `upstash`                | HTTP-based Redis storage for serverless and edge-style deployments.               |
 | `mongodbStorage(...)`                         | `mongodb`                | Durable document-backed key/value storage.                                        |
 | `s3Storage(...)`                              | `s3`                     | S3-compatible object-backed values.                                               |
@@ -320,7 +324,7 @@ Farm also accepts the built-in driver names exported by its installed `unstorage
 | Filesystem              | `local`, `fs-lite`, `fsLite`, `fs`                  | Persistent files. `local` is Farm's shorthand for `fs-lite`; `fs` adds watcher support. |
 | Remote HTTP             | `http`                                              | Read and write through an HTTP storage endpoint.                                        |
 | GitHub content          | `github`                                            | Read-only, cached repository content access.                                            |
-| Redis                   | `redis`                                             | Shared cache, counters, sessions, and rate limits.                                      |
+| Redis                   | `redis`                                             | Shared cache, counters, sessions, and short-lived state.                                |
 | Upstash Redis           | `upstash`                                           | REST-based Redis for serverless runtimes.                                               |
 | MongoDB                 | `mongodb`                                           | MongoDB collection-backed values.                                                       |
 | S3-compatible objects   | `s3`                                                | AWS S3, Cloudflare R2's S3 API, and compatible providers.                               |
@@ -401,7 +405,7 @@ See [Database and ORM Clients](/docs/integrations/orm-storage) for application-o
 | Config                                      | Use it for                                             |
 | ------------------------------------------- | ------------------------------------------------------ |
 | `sqliteStorage(...)`                        | Farm KV storage with a Farm storage client.            |
-| `redisStorage(...)`                         | Cache, rate-limit, or queue-like key/value data.       |
+| `redisStorage(...)`                         | Cache or queue-like key/value data.                    |
 | `storage.mounts`                            | Multiple named key/value stores.                       |
 | `storage.client` with a Farm storage client | Reuse a created Farm storage client as the root store. |
 | `storage.client` with a DB/runtime object   | Give integrations a runtime database client.           |

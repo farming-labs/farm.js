@@ -1,12 +1,13 @@
 {
   "name": "@farm.js/cache-redis",
   "version": "0.1.0-beta.3",
-  "description": "Distributed Redis cache adapter for Farm.js",
+  "description": "Distributed Redis cache and atomic rate-limit adapters for Farm.js",
   "keywords": [
     "cache",
     "farm.js",
     "isr",
     "ppr",
+    "rate-limit",
     "redis"
   ],
   "license": "MIT",

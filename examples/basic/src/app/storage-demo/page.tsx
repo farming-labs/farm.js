@@ -35,7 +35,7 @@ export const mysql = mysqlStorage({
   },
   {
     title: "redisStorage",
-    note: "Redis helper for rate limits, cache, and short-lived state.",
+    note: "Redis helper for cache and short-lived KV state.",
     code: `import { redisStorage } from "@farm.js/core/storage";
 
 export const redis = redisStorage({
@@ -117,7 +117,7 @@ export default defineConfig({
   storage: {
     mounts: {
       app: sqlite,
-      ratelimit: redis,
+      sessions: redis,
     },
   },
 });`}
