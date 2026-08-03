@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import ts from "typescript";
 import { generateRouteTypes } from "../routing/generate-route-types";
 
 describe("generateRouteTypes", () => {
@@ -41,6 +42,7 @@ describe("generateRouteTypes", () => {
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain("export type RoutePath =");
     expect(content).toContain("export type RoutePattern =");
+    expect(content).toContain("export type RouteModulePattern =");
     expect(content).toContain('"/"');
     expect(content).toContain('"/about"');
     expect(content).toContain('"/content"');
@@ -50,6 +52,8 @@ describe("generateRouteTypes", () => {
     expect(content).toContain('declare module "@farm.js/core/dist/client.js"');
     expect(content).toContain('_: import("./farm-routes").RoutePath');
     expect(content).toContain('pattern: import("./farm-routes").RoutePattern');
+    expect(content).toContain("namespace FarmJS");
+    expect(content).toContain("interface RouteRegistry");
   });
 
   it("types route-slot targets without exposing slot directory syntax", async () => {
@@ -87,7 +91,7 @@ describe("generateRouteTypes", () => {
     expect(content).not.toContain("(.)photo");
   });
 
-  it("when suppressLintOnLink is true, does not augment LinkDefaultRoute and route types are string", async () => {
+  it("when suppressLintOnLink is true, disables Link linting but keeps route module props typed", async () => {
     const outPath = await generateRouteTypes({
       root: tmpDir,
       srcDir: "src",
@@ -96,7 +100,8 @@ describe("generateRouteTypes", () => {
     const content = fs.readFileSync(outPath, "utf8");
     expect(content).toContain("export type RoutePath = string");
     expect(content).toContain("export type RoutePattern = string");
-    expect(content).not.toContain("declare module");
+    expect(content).toContain('export type RouteModulePattern = "/" | "/about"');
+    expect(content).toContain("interface RouteRegistry");
     expect(content).not.toContain("LinkDefaultRoute");
   });
 
@@ -196,6 +201,138 @@ export const ProductRoute = createRoute("/products/[id]", {
     expect(content).toContain('"/products/[id]"');
   });
 
+  it("types page, layout, metadata, state, and static params from generated routes", async () => {
+    const docsDir = path.join(tmpDir, "src", "app", "docs", "[[...slug]]");
+    const dashboardDir = path.join(tmpDir, "src", "app", "dashboard");
+    await fs.promises.mkdir(docsDir, { recursive: true });
+    await fs.promises.mkdir(dashboardDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(docsDir, "page.tsx"),
+      "export default function Docs() { return null; }",
+    );
+    await fs.promises.writeFile(
+      path.join(dashboardDir, "layout.tsx"),
+      "export default function DashboardLayout({ children }) { return children; }",
+    );
+    const reportsRoutePath = path.join(tmpDir, "src", "features", "reports.tsx");
+    await fs.promises.mkdir(path.dirname(reportsRoutePath), { recursive: true });
+    await fs.promises.writeFile(
+      reportsRoutePath,
+      `
+import { createRoute } from "@farm.js/core/routes";
+export const ReportsRoute = createRoute("/reports/[year]", {
+  component: () => null,
+});
+`,
+    );
+
+    const generatedTypesPath = await generateRouteTypes({ root: tmpDir, srcDir: "src" });
+    const typeTestPath = path.join(tmpDir, "route-props.type-test.ts");
+    await fs.promises.writeFile(
+      typeTestPath,
+      `
+import type {
+  AppRoutePattern,
+  ErrorProps,
+  GenerateStaticParams,
+  LayoutMetadataProps,
+  LayoutProps,
+  LoadingProps,
+  MetadataProps,
+  PageProps,
+} from "@farm.js/core";
+import type { PageProps as ClientPageProps } from "@farm.js/core/client";
+
+const route: AppRoutePattern = "/users/[id]";
+void route;
+// @ts-expect-error only generated route patterns are accepted
+const missingRoute: AppRoutePattern = "/missing";
+void missingRoute;
+
+declare const page: PageProps<"/users/[id]">;
+const pageId: string = page.params.id;
+void pageId;
+// @ts-expect-error only parameters declared by this route exist
+page.params.slug;
+
+declare const programmaticPage: PageProps<"/reports/[year]">;
+declare const clientPage: ClientPageProps<"/users/[id]">;
+const generatedIds: string[] = [programmaticPage.params.year, clientPage.params.id];
+void generatedIds;
+
+declare const layout: LayoutProps<"/users/[id]">;
+declare const layoutOnlyRoute: LayoutProps<"/dashboard">;
+declare const layoutMetadata: LayoutMetadataProps<"/users/[id]">;
+declare const metadata: MetadataProps<"/users/[id]">;
+declare const loading: LoadingProps<"/users/[id]">;
+declare const error: ErrorProps<"/users/[id]">;
+const typedIds: string[] = [
+  layout.params.id,
+  layoutMetadata.params.id,
+  metadata.params.id,
+  loading.params.id,
+  error.params.id,
+];
+void typedIds;
+void layoutOnlyRoute;
+
+declare const docs: PageProps<"/docs/[[...slug]]">;
+const docsSlug: string | undefined = docs.params.slug;
+void docsSlug;
+
+declare const legacyPage: PageProps;
+const unknownParam: string = legacyPage.params.anything;
+void unknownParam;
+
+const generateUsers: GenerateStaticParams<"/users/[id]"> = async () => [{ id: 1 }];
+const generateDocs: GenerateStaticParams<"/docs/[[...slug]]"> = () => [
+  {},
+  { slug: ["guides", "routing"] },
+];
+void generateUsers;
+void generateDocs;
+
+// @ts-expect-error dynamic static params require id
+const missingUserId: GenerateStaticParams<"/users/[id]"> = () => [{}];
+void missingUserId;
+// @ts-expect-error catch-all static params use path segment arrays
+const invalidDocsSlug: GenerateStaticParams<"/docs/[[...slug]]"> = () => [{ slug: "guides" }];
+void invalidDocsSlug;
+// @ts-expect-error route literals are checked against generated patterns
+type MissingPage = PageProps<"/missing">;
+declare const missingPage: MissingPage;
+void missingPage;
+`,
+    );
+
+    const program = ts.createProgram({
+      rootNames: [generatedTypesPath, typeTestPath],
+      options: {
+        strict: true,
+        noEmit: true,
+        skipLibCheck: true,
+        target: ts.ScriptTarget.ES2020,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+        jsx: ts.JsxEmit.ReactJSX,
+        baseUrl: process.cwd(),
+        paths: {
+          "@farm.js/core": ["./src/types.ts"],
+          "@farm.js/core/client": ["./types/client.d.ts"],
+          "@farm.js/core/routes": ["./src/routes.ts"],
+        },
+      },
+    });
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    const formattedDiagnostics = ts.formatDiagnosticsWithColorAndContext(diagnostics, {
+      getCanonicalFileName: (fileName) => fileName,
+      getCurrentDirectory: () => process.cwd(),
+      getNewLine: () => "\n",
+    });
+
+    expect(formattedDiagnostics).toBe("");
+  }, 30_000);
+
   it("writes a valid empty route union when no pages exist", async () => {
     const root = await fs.promises.mkdtemp(path.join(os.tmpdir(), "farm-empty-route-types-"));
     try {
@@ -208,6 +345,7 @@ export const ProductRoute = createRoute("/products/[id]", {
 
       expect(content).toContain("export type RoutePath = never;");
       expect(content).toContain("export type RoutePattern = never;");
+      expect(content).toContain("export type RouteModulePattern = never;");
     } finally {
       await fs.promises.rm(root, { recursive: true, force: true });
     }

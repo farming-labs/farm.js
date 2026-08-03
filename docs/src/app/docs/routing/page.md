@@ -80,14 +80,30 @@ intercepted slot in the current page.
 ```tsx
 import type { PageProps } from "@farm.js/core";
 
-export default function UserPage({ params }: PageProps) {
-  return <div>User: {params?.id}</div>;
+export default function UserPage({ params }: PageProps<"/users/[id]">) {
+  return <div>User: {params.id}</div>;
 }
+```
+
+The route literal is checked against the generated application routes and narrows `params` to
+`{ id: string }`. The same route-aware generic is available on `LayoutProps`, `LoadingProps`,
+`ErrorProps`, `MetadataProps`, and `LayoutMetadataProps`. Omitting the generic keeps the existing
+`Record<string, string>` behavior for gradual adoption.
+
+Use `GenerateStaticParams` to check build-time paths against the same route:
+
+```tsx
+import type { GenerateStaticParams } from "@farm.js/core";
+
+export const generateStaticParams: GenerateStaticParams<"/users/[id]"> = async () => [
+  { id: "ada" },
+  { id: "grace" },
+];
 ```
 
 ## Typed navigation
 
-Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs accept real routes, query strings, and hash fragments without widening everything to plain string.
+Farm writes the route union into the consolidated `src/farm.d.ts` declaration file. Link hrefs and route component props accept real routes without widening everything to plain string. Link hrefs can also include query strings and hash fragments.
 
 **Client navigation**
 
@@ -502,7 +518,7 @@ Export `metadata` for static head tags or `generateMetadata` when the values dep
 **src/app/products/[id]/page.tsx**
 
 ```tsx
-import type { PageProps } from "@farm.js/core";
+import type { MetadataProps } from "@farm.js/core";
 
 export const metadata = {
   description: "Product details",
@@ -512,7 +528,7 @@ export const metadata = {
   },
 };
 
-export async function generateMetadata({ params }: PageProps) {
+export async function generateMetadata({ params }: MetadataProps<"/products/[id]">) {
   const product = await getProduct(params.id);
 
   return {
@@ -736,8 +752,8 @@ Catch-all routes are useful for docs, CMS content, and nested marketing pages wh
 ```tsx
 import type { PageProps } from "@farm.js/core";
 
-export default function DocsPage({ params }: PageProps) {
-  const slug = params.slug?.split("/") ?? [];
+export default function DocsPage({ params }: PageProps<"/docs/[...slug]">) {
+  const slug = params.slug.split("/");
   return <main>Docs path: {slug.join(" / ")}</main>;
 }
 ```

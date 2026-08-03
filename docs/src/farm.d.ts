@@ -7,7 +7,8 @@ import "@farm.js/core/image";
 
 /**
  * Auto-generated route types from src/app.
- * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
+ * Link href and route component props are typed automatically from generated declarations.
+ * Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
 export type RoutePath =
@@ -27,6 +28,7 @@ export type RoutePath =
   | "/docs/docs-engine"
   | "/docs/environment-functions"
   | "/docs/examples"
+  | "/docs/fonts"
   | "/docs/getting-started"
   | "/docs/images"
   | "/docs/integrations"
@@ -92,6 +94,73 @@ export type RoutePattern =
   | "/docs/docs-engine"
   | "/docs/environment-functions"
   | "/docs/examples"
+  | "/docs/fonts"
+  | "/docs/getting-started"
+  | "/docs/images"
+  | "/docs/integrations"
+  | "/docs/integrations/auth"
+  | "/docs/integrations/auth/auth0"
+  | "/docs/integrations/auth/authjs"
+  | "/docs/integrations/auth/better-auth"
+  | "/docs/integrations/auth/clerk"
+  | "/docs/integrations/auth/supabase"
+  | "/docs/integrations/auth/workos"
+  | "/docs/integrations/autumn"
+  | "/docs/integrations/cf-agent"
+  | "/docs/integrations/custom"
+  | "/docs/integrations/email"
+  | "/docs/integrations/eve"
+  | "/docs/integrations/inngest"
+  | "/docs/integrations/jobs"
+  | "/docs/integrations/orm-storage"
+  | "/docs/integrations/polar"
+  | "/docs/integrations/stripe"
+  | "/docs/integrations/trigger"
+  | "/docs/integrations/ui-registry"
+  | "/docs/integrations/unkey"
+  | "/docs/internationalization"
+  | "/docs/layers"
+  | "/docs/layouts"
+  | "/docs/markdown"
+  | "/docs/middleware"
+  | "/docs/migrations"
+  | "/docs/migrations/nextjs"
+  | "/docs/migrations/nuxt"
+  | "/docs/migrations/sveltekit"
+  | "/docs/migrations/tanstack"
+  | "/docs/observability"
+  | "/docs/openapi"
+  | "/docs/plugins"
+  | "/docs/plugins/client"
+  | "/docs/plugins/create-plugin"
+  | "/docs/preview"
+  | "/docs/project-structure"
+  | "/docs/query"
+  | "/docs/reference"
+  | "/docs/route-runtime"
+  | "/docs/routing"
+  | "/docs/server-queries"
+  | "/docs/server-rendering"
+  | "/docs/storage"
+  | "/docs/testing";
+export type RouteModulePattern =
+  | "/"
+  | "/docs"
+  | "/docs/[...docs]"
+  | "/docs/after"
+  | "/docs/api-client"
+  | "/docs/api-routes"
+  | "/docs/auth"
+  | "/docs/cache-ppr"
+  | "/docs/cli"
+  | "/docs/configuration"
+  | "/docs/cron"
+  | "/docs/deployment"
+  | "/docs/devtools"
+  | "/docs/docs-engine"
+  | "/docs/environment-functions"
+  | "/docs/examples"
+  | "/docs/fonts"
   | "/docs/getting-started"
   | "/docs/images"
   | "/docs/integrations"
@@ -164,6 +233,14 @@ declare module "@farm.js/core/dist/client.js" {
   }
 }
 
+declare global {
+  namespace FarmJS {
+    interface RouteRegistry {
+      pattern: import("./farm").RouteModulePattern;
+    }
+  }
+}
+
 /**
  * Auto-generated env types from farm.config.
  * Regenerated on dev start, build, and farm generate.
@@ -189,3 +266,5 @@ declare module "@farm.js/core" {
     public: FarmResolvedEnv["public"];
   }
 }
+
+export {};
