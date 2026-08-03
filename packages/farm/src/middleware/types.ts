@@ -119,6 +119,7 @@ export interface CookieJar {
 
 export interface RateLimitIncrementResult {
   count: number;
+  /** Unix epoch timestamp in milliseconds when the fixed window resets. */
   resetAt: number;
 }
 

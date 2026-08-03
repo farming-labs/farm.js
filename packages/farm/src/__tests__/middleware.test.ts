@@ -482,17 +482,25 @@ describe("Middleware Chain", () => {
     }
   });
 
-  it("increments process-local counters atomically across concurrent requests", async () => {
+  it("enforces the exact process-local limit across a request burst", async () => {
     const storage = memoryRateLimitStorage();
-
-    const results = await Promise.all(
-      Array.from({ length: 250 }, () => storage.increment("concurrent", 60_000)),
+    const { handlers } = middleware()
+      .rateLimit({
+        requests: 100,
+        window: "1m",
+        keyGenerator: () => "burst",
+        storage,
+      })
+      .build();
+    const contexts = Array.from({ length: 250 }, () =>
+      createContext(createMockRequest("/burst"), createMockResponse()),
     );
 
-    expect(results.map((entry) => entry.count).sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 250 }, (_, index) => index + 1),
-    );
-    await expect(Promise.resolve(storage.get?.("concurrent"))).resolves.toMatchObject({
+    await Promise.all(contexts.map((ctx) => executeChain(handlers, ctx)));
+
+    expect(contexts.filter((ctx) => !ctx._handled)).toHaveLength(100);
+    expect(contexts.filter((ctx) => ctx._handled)).toHaveLength(150);
+    await expect(Promise.resolve(storage.get?.("burst"))).resolves.toMatchObject({
       count: 250,
     });
   });

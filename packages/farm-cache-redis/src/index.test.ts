@@ -38,22 +38,26 @@ describe("redisCache", () => {
 });
 
 describe("redisRateLimitStorage", () => {
-  it("increments a fixed-window counter atomically and exposes its status", async () => {
+  it("increments and initializes expiry in one Redis script operation", async () => {
     const client = new FakeRedis();
     const storage = redisRateLimitStorage({ client, prefix: "limits" });
 
-    const increments = await Promise.all(
-      Array.from({ length: 50 }, () => storage.increment("account:42", 60_000)),
-    );
+    await expect(storage.increment("account:42", 60_000)).resolves.toMatchObject({ count: 1 });
+    await expect(storage.increment("account:42", 60_000)).resolves.toMatchObject({ count: 2 });
 
-    expect(increments.map((entry) => entry.count).sort((a, b) => a - b)).toEqual(
-      Array.from({ length: 50 }, (_, index) => index + 1),
-    );
-    await expect(storage.get?.("account:42")).resolves.toMatchObject({ count: 50 });
+    expect(client.evalCalls).toHaveLength(2);
+    expect(client.evalCalls[0]).toMatchObject({
+      numberOfKeys: 1,
+      args: ["limits:account:42", "60000"],
+    });
+    expect(client.evalCalls[0].script).toContain('redis.call("INCR", KEYS[1])');
+    expect(client.evalCalls[0].script).toContain("ttl <= 0");
+    await expect(storage.get?.("account:42")).resolves.toMatchObject({ count: 2 });
   });
 });
 
 class FakeRedis implements FarmRedisClient {
+  readonly evalCalls: Array<{ script: string; numberOfKeys: number; args: string[] }> = [];
   private values = new Map<string, string>();
   private expiresAt = new Map<string, number>();
 
@@ -101,13 +105,15 @@ class FakeRedis implements FarmRedisClient {
     return Promise.all(keys.map((key) => this.get(key)));
   }
 
-  async eval(script: string, _numberOfKeys: number, key: string, arg: string): Promise<unknown> {
+  async eval(script: string, numberOfKeys: number, ...args: string[]): Promise<unknown> {
+    this.evalCalls.push({ script, numberOfKeys, args });
+    const [key, arg] = args;
     if (script.includes('redis.call("INCR"')) {
       const count = Number(this.read(key) ?? 0) + 1;
       this.values.set(key, String(count));
       const expiry = this.expiresAt.get(key);
       let ttl = expiry === undefined ? -1 : Math.max(0, expiry - Date.now());
-      if (count === 1 || ttl < 0) {
+      if (count === 1 || ttl <= 0) {
         ttl = Number(arg);
         this.expiresAt.set(key, Date.now() + ttl);
       }
