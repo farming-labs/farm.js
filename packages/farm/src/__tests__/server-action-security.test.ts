@@ -11,6 +11,11 @@ import {
   sanitizeServerActionError,
   validateServerActionRequest,
 } from "../server-action-security";
+import {
+  createServerFnTransportError,
+  ServerFnFailure,
+  ServerActionError,
+} from "../server-fn-error";
 
 const defaultConfig = resolveServerActionsConfig(undefined);
 
@@ -307,6 +312,47 @@ describe("server action failures and execution context", () => {
       name: "ServerActionError",
       message: "Server function failed",
     });
+  });
+
+  it("serializes only explicitly marked server function failures", () => {
+    const failure = new ServerFnFailure(
+      "NOT_FOUND",
+      { id: "product-1" },
+      {
+        status: 404,
+        message: "Product not found",
+      },
+    );
+    const serialized = sanitizeServerActionError(failure);
+
+    expect(serialized).toEqual({
+      name: "ServerFnFailure",
+      message: "Product not found",
+      code: "NOT_FOUND",
+      status: 404,
+      data: { id: "product-1" },
+    });
+
+    const transported = createServerFnTransportError(serialized);
+    expect(transported).toBeInstanceOf(ServerFnFailure);
+    expect(transported).toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+      data: { id: "product-1" },
+    });
+
+    const spoofed = sanitizeServerActionError({
+      name: "ServerFnFailure",
+      message: "leak",
+      code: "LEAK",
+      status: 400,
+      data: { secret: "must-not-cross" },
+    });
+    expect(spoofed).toEqual({
+      name: "ServerActionError",
+      message: "Server function failed",
+    });
+    expect(createServerFnTransportError(spoofed)).toBeInstanceOf(ServerActionError);
   });
 
   it("makes the request and its cancellation signal available during execution", async () => {

@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { subscribeFarmCacheInvalidation, subscribeFarmCacheTask } from "./cache-invalidation";
+import { serializeServerFnFailure, type SerializedServerFnFailure } from "./server-fn-error";
 
 export const DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT = 1_000_000;
 
@@ -22,10 +23,12 @@ export interface PreparedServerActionRequest {
   contentType: string;
 }
 
-export type SanitizedServerActionError = {
-  name: "ServerActionError";
-  message: "Server function failed";
-};
+export type SanitizedServerActionError =
+  | {
+      name: "ServerActionError";
+      message: "Server function failed";
+    }
+  | SerializedServerFnFailure;
 
 type ServerActionRequestErrorCode =
   | "BODY_TOO_LARGE"
@@ -186,7 +189,10 @@ export function createServerActionRequestErrorResponse(error: unknown): Response
   });
 }
 
-export function sanitizeServerActionError(_error: unknown): SanitizedServerActionError {
+export function sanitizeServerActionError(error: unknown): SanitizedServerActionError {
+  const declaredFailure = serializeServerFnFailure(error);
+  if (declaredFailure) return declaredFailure;
+
   return {
     name: "ServerActionError",
     message: "Server function failed",

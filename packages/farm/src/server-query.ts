@@ -14,6 +14,7 @@ import {
   type ServerFn,
   type ServerFnContext,
   type ServerFnHandler,
+  type ServerFnHandlerContext,
   type ServerFnMiddlewareContext,
   type ServerFnSchema,
   _parseServerFnSchema,
@@ -135,7 +136,7 @@ export function createServerQuery(options: AnyServerQueryOptions): ServerQuery<u
   )({
     input: options.input,
     middleware: options.middleware,
-    handler: async (context: ServerFnContext<any, any>) => {
+    handler: async (context: ServerFnHandlerContext<any, any>) => {
       const routeKey = await options.key(context);
       assertServerQueryKey(routeKey);
 

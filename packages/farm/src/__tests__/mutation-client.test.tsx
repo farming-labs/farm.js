@@ -137,6 +137,34 @@ describe("useMutation", () => {
     expect(container.textContent).toBe("success:Farm");
   });
 
+  it("infers declared server function failures", () => {
+    const removeProduct = createServerFn({
+      input: z.object({ id: z.string() }),
+      errors: {
+        NOT_FOUND: {
+          status: 404,
+          data: z.object({ id: z.string() }),
+        },
+      },
+      handler: ({ input, error }) => error("NOT_FOUND", { id: input.id }),
+    });
+
+    function App() {
+      const mutation = useMutation(removeProduct);
+      if (mutation.error?.name === "ServerFnFailure") {
+        expectTypeOf(mutation.error.code).toEqualTypeOf<"NOT_FOUND">();
+        expectTypeOf(mutation.error.data).toEqualTypeOf<{ id: string }>();
+        expectTypeOf(mutation.error.status).toEqualTypeOf<404>();
+      }
+      return null;
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+  });
+
   it("keeps the latest result after an older concurrent request settles", async () => {
     const first = createDeferred<string>();
     const second = createDeferred<string>();

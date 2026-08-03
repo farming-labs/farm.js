@@ -1,5 +1,36 @@
 import type { EntryContext } from "../types.js";
 
+export const serverFnTransportErrorClientRuntime = `function createFarmServerFnTransportError(value) {
+  const message = value && typeof value === 'object' && typeof value.message === 'string'
+    ? value.message
+    : 'Server function failed';
+  const error = new Error(message);
+
+  if (
+    value &&
+    typeof value === 'object' &&
+    value.name === 'ServerFnFailure' &&
+    typeof value.code === 'string' &&
+    Number.isInteger(value.status) &&
+    value.status >= 400 &&
+    value.status <= 599 &&
+    Object.prototype.hasOwnProperty.call(value, 'data')
+  ) {
+    error.name = 'ServerFnFailure';
+    error.code = value.code;
+    error.status = value.status;
+    error.data = value.data;
+    Object.defineProperty(error, Symbol.for('farm.server-fn.failure'), {
+      value: true,
+      enumerable: false,
+    });
+    return error;
+  }
+
+  error.name = 'ServerActionError';
+  return error;
+}`;
+
 /**
  * Generates the browser entry file.
  *
@@ -49,6 +80,8 @@ import {
   let actionSetup = "";
   if (ctx.actionsEnabled) {
     actionSetup = `
+${serverFnTransportErrorClientRuntime}
+
 // Ref for payload setter (used by server action callback and refetch)
 const setPayloadRef = { current: null };
 
@@ -100,9 +133,7 @@ setServerCallback(async (id, args) => {
   applyFarmCacheInvalidations(p.returnValue?.invalidations);
   if (!p.returnValue || !p.returnValue.ok) {
     debug('Server action failed:', id);
-    const error = new Error(p.returnValue?.data?.message || 'Server function failed');
-    error.name = 'ServerActionError';
-    throw error;
+    throw createFarmServerFnTransportError(p.returnValue?.data);
   }
   return completeFarmServerQueryAction(serverQueryInvocation, p.returnValue.data);
 });

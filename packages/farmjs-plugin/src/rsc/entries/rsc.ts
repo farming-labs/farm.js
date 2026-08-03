@@ -663,8 +663,11 @@ async function handleFarmRequest(request) {
         if (request.signal.aborted) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
-        console.error('[Farm.js] Server action failed:', e);
-        returnValue = { ok: false, data: sanitizeServerActionError(e) };
+        const actionError = sanitizeServerActionError(e);
+        if (actionError.name === 'ServerActionError') {
+          console.error('[Farm.js] Server action failed:', e);
+        }
+        returnValue = { ok: false, data: actionError };
         debug('Server action failed:', actionId, e);
       }
     } else {
@@ -695,10 +698,13 @@ async function handleFarmRequest(request) {
         if (request.signal.aborted) {
           return new Response(null, { status: 499, headers: { 'Cache-Control': 'no-store' } });
         }
-        console.error('[Farm.js] Form action failed:', e);
-        debug('Form action failed:', e);
-        return new Response('Server function failed', {
-          status: 500,
+        const actionError = sanitizeServerActionError(e);
+        if (actionError.name === 'ServerActionError') {
+          console.error('[Farm.js] Form action failed:', e);
+        }
+        debug('Form action failed:', actionError);
+        return new Response(actionError.message, {
+          status: actionError.name === 'ServerFnFailure' ? actionError.status : 500,
           headers: {
             'Cache-Control': 'no-store',
             'Content-Type': 'text/plain; charset=utf-8',
