@@ -10,44 +10,81 @@ import type {
   RateLimitConfig,
   RateLimitStorage,
   RateLimitStatus,
+  RateLimitIncrementResult,
+  MemoryRateLimitStorageOptions,
   MiddlewareResult,
 } from "./types";
-import { getStorage } from "../storage";
-import type { Storage } from "unstorage";
 
-interface RateLimitRecord {
-  count: number;
-  resetAt: number;
+const DEFAULT_MEMORY_RATE_LIMIT_ENTRIES = 100_000;
+
+export class UnsupportedRateLimitStorageError extends TypeError {
+  constructor() {
+    super(
+      "RateLimitStorage must implement atomic increment(key, windowMs). Legacy get/set adapters can lose increments under concurrency. Use memoryRateLimitStorage() for one process or redisRateLimitStorage() from @farm.js/cache-redis for production.",
+    );
+    this.name = "UnsupportedRateLimitStorageError";
+  }
 }
 
-function getRateLimitStorage(): Storage {
-  return getStorage("ratelimit");
-}
+/** Create an atomic, process-local fixed-window rate-limit store. */
+export function memoryRateLimitStorage(
+  options: MemoryRateLimitStorageOptions = {},
+): RateLimitStorage {
+  const maxEntries = options.maxEntries ?? DEFAULT_MEMORY_RATE_LIMIT_ENTRIES;
+  if (!Number.isSafeInteger(maxEntries) || maxEntries <= 0) {
+    throw new TypeError("memoryRateLimitStorage maxEntries must be a positive safe integer.");
+  }
 
-const defaultRateLimitStorage: RateLimitStorage = {
-  async get(key: string) {
-    const storage = getRateLimitStorage();
-    const value = await storage.getItem<RateLimitRecord>(key);
-    return value ?? null;
-  },
-  async set(key: string, value: any, ttl?: number) {
-    const storage = getRateLimitStorage();
-    await storage.setItem(key, value, ttl ? { ttl } : undefined);
-  },
-  async delete(key: string) {
-    const storage = getRateLimitStorage();
-    await storage.removeItem(key);
-  },
-  async ttl(key: string) {
-    const storage = getRateLimitStorage();
-    const record = await storage.getItem<RateLimitRecord>(key);
-    if (!record || !record.resetAt) {
+  const records = new Map<string, RateLimitIncrementResult>();
+
+  function read(key: string, now: number): RateLimitIncrementResult | null {
+    const record = records.get(key);
+    if (!record) return null;
+    if (record.resetAt <= now) {
+      records.delete(key);
       return null;
     }
-    const remainingMs = record.resetAt - Date.now();
-    return remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
-  },
-};
+    return record;
+  }
+
+  function pruneExpired(now: number): void {
+    for (const [key, record] of records) {
+      if (record.resetAt <= now) records.delete(key);
+    }
+  }
+
+  return {
+    increment(key, windowMs) {
+      if (!Number.isSafeInteger(windowMs) || windowMs <= 0) {
+        throw new TypeError("Rate-limit windowMs must be a positive safe integer.");
+      }
+      const now = Date.now();
+      const current = read(key, now);
+      if (current) {
+        const next = { count: current.count + 1, resetAt: current.resetAt };
+        records.set(key, next);
+        return next;
+      }
+
+      if (records.size >= maxEntries) pruneExpired(now);
+      if (records.size >= maxEntries) {
+        throw new Error(
+          `Process-local rate-limit storage reached its ${maxEntries} active-key capacity. Configure a shared production adapter or increase maxEntries.`,
+        );
+      }
+
+      const next = { count: 1, resetAt: now + windowMs };
+      records.set(key, next);
+      return next;
+    },
+    get(key) {
+      const record = read(key, Date.now());
+      return record ? { ...record } : null;
+    },
+  };
+}
+
+const defaultRateLimitStorage = memoryRateLimitStorage();
 
 function parseTimeWindow(window: string): number {
   const match = window.match(/^(\d+)(ms|s|m|h|d)$/);
@@ -64,60 +101,92 @@ function parseTimeWindow(window: string): number {
     d: 24 * 60 * 60 * 1000,
   };
 
-  return value * multipliers[unit];
+  const windowMs = value * multipliers[unit];
+  if (!Number.isSafeInteger(windowMs) || windowMs <= 0) {
+    throw new Error(`Invalid time window: ${window}`);
+  }
+  return windowMs;
 }
 
 function createRateLimitMiddleware(config: RateLimitConfig): MiddlewareFunction {
+  if (!Number.isSafeInteger(config.requests) || config.requests <= 0) {
+    throw new TypeError("Rate limit requests must be a positive safe integer.");
+  }
   const windowMs = parseTimeWindow(config.window);
   const storage = config.storage || defaultRateLimitStorage;
+  assertAtomicRateLimitStorage(storage);
 
   return async (ctx: MiddlewareContext, next) => {
     const key = config.keyGenerator
       ? config.keyGenerator(ctx)
       : `${ctx.request.socket.remoteAddress}:${ctx.pathname}`;
 
+    const current = await storage.increment(key, windowMs);
+    assertRateLimitIncrementResult(current);
     const now = Date.now();
-    const ttlSeconds = Math.ceil(windowMs / 1000);
-    const record = await storage.get(key);
+    const resetIn = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+    const remaining = Math.max(0, config.requests - current.count);
+    setRateLimitHeaders(ctx, config.requests, remaining, resetIn, Math.ceil(windowMs / 1000));
 
-    if (record && now > record.resetAt) {
-      await storage.delete(key);
-    }
-
-    const current = await storage.get(key);
-
-    if (!current) {
-      await storage.set(
-        key,
-        {
-          count: 1,
-          resetAt: now + windowMs,
-        },
-        ttlSeconds,
-      );
-      return next();
-    }
-
-    if (current.count >= config.requests) {
+    if (current.count > config.requests) {
+      setMiddlewareResponseHeader(ctx, "Retry-After", String(resetIn));
       if (config.onLimit) {
         const result = await config.onLimit(ctx);
-        if (result) return;
+        if (result) return result;
       }
 
       ctx.json(
         {
           error: "Rate limit exceeded",
-          retryAfter: Math.ceil((current.resetAt - now) / 1000),
+          retryAfter: resetIn,
         },
         429,
       );
       return;
     }
 
-    current.count++;
-    await storage.set(key, current, ttlSeconds);
     return next();
   };
+}
+
+function assertAtomicRateLimitStorage(storage: RateLimitStorage): void {
+  if (!storage || typeof storage.increment !== "function") {
+    throw new UnsupportedRateLimitStorageError();
+  }
+}
+
+function assertRateLimitIncrementResult(
+  result: RateLimitIncrementResult,
+): asserts result is RateLimitIncrementResult {
+  if (
+    !result ||
+    !Number.isSafeInteger(result.count) ||
+    result.count <= 0 ||
+    !Number.isFinite(result.resetAt) ||
+    result.resetAt <= 0
+  ) {
+    throw new TypeError(
+      "RateLimitStorage.increment() must return a positive integer count and a resetAt timestamp.",
+    );
+  }
+}
+
+function setRateLimitHeaders(
+  ctx: MiddlewareContext,
+  limit: number,
+  remaining: number,
+  resetIn: number,
+  windowSeconds: number,
+): void {
+  setMiddlewareResponseHeader(ctx, "RateLimit-Policy", `"farm";q=${limit};w=${windowSeconds}`);
+  setMiddlewareResponseHeader(ctx, "RateLimit", `"farm";r=${remaining};t=${resetIn}`);
+}
+
+function setMiddlewareResponseHeader(ctx: MiddlewareContext, name: string, value: string): void {
+  ctx.headers.set(name, value);
+  if (!ctx.response.headersSent && !ctx.response.writableEnded) {
+    ctx.response.setHeader(name, value);
+  }
 }
 
 function matchPattern(pattern: string | RegExp, pathname: string): boolean {
@@ -323,6 +392,15 @@ export async function getRateLimitStatus(
   limit: number,
   storage: RateLimitStorage = defaultRateLimitStorage,
 ): Promise<RateLimitStatus> {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new TypeError("Rate limit must be a positive safe integer.");
+  }
+  assertAtomicRateLimitStorage(storage);
+  if (typeof storage.get !== "function") {
+    throw new TypeError(
+      "getRateLimitStatus() requires a RateLimitStorage adapter that implements get(key).",
+    );
+  }
   const record = await storage.get(key);
 
   if (!record) {
@@ -335,6 +413,7 @@ export async function getRateLimitStatus(
       isLimited: false,
     };
   }
+  assertRateLimitIncrementResult(record);
 
   const now = Date.now();
 
@@ -360,9 +439,6 @@ export async function getRateLimitStatus(
     const remainingMs = record.resetAt - now;
     resetIn = remainingMs > 0 ? Math.ceil(remainingMs / 1000) : null;
     resetAt = new Date(record.resetAt);
-  } else if (storage.ttl) {
-    resetIn = await storage.ttl(key);
-    resetAt = resetIn ? new Date(now + resetIn * 1000) : null;
   }
 
   return {

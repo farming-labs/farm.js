@@ -136,11 +136,13 @@ declare module "@farm.js/core/middleware" {
    */
   export interface RateLimitConfig {
     /** Maximum number of requests */
-    max: number;
-    /** Time window in milliseconds */
-    windowMs: number;
+    requests: number;
+    /** Fixed window such as `500ms`, `10s`, `1m`, or `1h`. */
+    window: string;
     /** Optional custom key generator */
     keyGenerator?: (ctx: MiddlewareContext) => string;
+    /** Optional response customization when the limit is exceeded. */
+    onLimit?: (ctx: MiddlewareContext) => void | Response | Promise<void | Response>;
     /** Optional custom storage */
     storage?: RateLimitStorage;
   }
@@ -148,19 +150,33 @@ declare module "@farm.js/core/middleware" {
   /**
    * Rate limit storage interface
    */
+  export interface RateLimitIncrementResult {
+    count: number;
+    resetAt: number;
+  }
+
   export interface RateLimitStorage {
-    get(key: string): Promise<number | undefined>;
-    set(key: string, value: number, ttlMs: number): Promise<void>;
-    increment(key: string): Promise<number>;
+    increment(
+      key: string,
+      windowMs: number,
+    ): RateLimitIncrementResult | Promise<RateLimitIncrementResult>;
+    get?(key: string): RateLimitIncrementResult | null | Promise<RateLimitIncrementResult | null>;
+  }
+
+  export interface MemoryRateLimitStorageOptions {
+    maxEntries?: number;
   }
 
   /**
    * Rate limit status
    */
   export interface RateLimitStatus {
+    requests: number;
+    limit: number;
     remaining: number;
-    reset: number;
-    total: number;
+    resetIn: number | null;
+    resetAt: Date | null;
+    isLimited: boolean;
   }
 
   /**
@@ -206,12 +222,21 @@ declare module "@farm.js/core/middleware" {
   /**
    * Create a new middleware chain
    */
-  export function middleware(config?: MiddlewareConfig): MiddlewareChain;
+  export function middleware(basePath?: string): MiddlewareChain;
 
   /**
-   * Get rate limit status for current request
+   * Get rate limit status for a key
    */
-  export function getRateLimitStatus(ctx: MiddlewareContext): RateLimitStatus | undefined;
+  export function getRateLimitStatus(
+    key: string,
+    limit: number,
+    storage?: RateLimitStorage,
+  ): Promise<RateLimitStatus>;
+
+  /** Create an atomic, process-local fixed-window rate-limit store. */
+  export function memoryRateLimitStorage(options?: MemoryRateLimitStorageOptions): RateLimitStorage;
+
+  export class UnsupportedRateLimitStorageError extends TypeError {}
 
   /**
    * Create a middleware context from request/response

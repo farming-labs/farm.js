@@ -4,7 +4,12 @@
  * Export public API
  */
 
-export { middleware, getRateLimitStatus } from "./chain";
+export {
+  middleware,
+  getRateLimitStatus,
+  memoryRateLimitStorage,
+  UnsupportedRateLimitStorageError,
+} from "./chain";
 export { createContext } from "./context";
 export { MiddlewareManager } from "./manager";
 export {
@@ -33,8 +38,10 @@ export type {
   CookieJar,
   CookieOptions,
   RateLimitConfig,
+  RateLimitIncrementResult,
   RateLimitStorage,
   RateLimitStatus,
+  MemoryRateLimitStorageOptions,
   NextFunction,
   MiddlewareResult,
   FarmMiddlewareConfig,

@@ -141,7 +141,7 @@ fixTypeFile(
   /^middleware-.*\.d\.mts$/,
   "middleware.d.mts",
   "MiddlewareContext",
-  "export { middleware, getRateLimitStatus, createContext, MiddlewareManager, getMiddlewareData, getMiddlewareValue, unwrapMiddleware, getFromMiddleware, hasMiddlewareData };\nexport type { MiddlewareContext, MiddlewareFunction, MiddlewareChain, MiddlewareConfig, CookieJar, CookieOptions, RateLimitConfig, RateLimitStorage, RateLimitStatus, NextFunction };",
+  "export { middleware, getRateLimitStatus, memoryRateLimitStorage, UnsupportedRateLimitStorageError, createContext, MiddlewareManager, getMiddlewareData, getMiddlewareValue, unwrapMiddleware, getFromMiddleware, hasMiddlewareData };\nexport type { MiddlewareContext, MiddlewareFunction, MiddlewareChain, MiddlewareConfig, CookieJar, CookieOptions, RateLimitConfig, RateLimitIncrementResult, RateLimitStorage, RateLimitStatus, MemoryRateLimitStorageOptions, NextFunction };",
 );
 fixTypeFile(/^api-.*\.d\.mts$/, "api.d.mts");
 

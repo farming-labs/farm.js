@@ -257,7 +257,7 @@ describe("Storage", () => {
     },
   );
 
-  it("uses the configured ratelimit namespace for default rate limiting", async () => {
+  it("does not use a non-atomic KV mount for rate limiting", async () => {
     const dir = await createTempDir("farm-storage-ratelimit-");
 
     await initStorage({
@@ -284,8 +284,7 @@ describe("Storage", () => {
     await executeChain(handlers, createContext(secondReq, secondRes));
 
     expect(secondRes.writeHead).toHaveBeenCalledWith(429, expect.any(Object));
-    expect(await getStorage("ratelimit").getKeys()).not.toHaveLength(0);
-    expect(await readdir(dir)).not.toHaveLength(0);
+    expect(await getStorage("ratelimit").getKeys()).toHaveLength(0);
   });
 
   it.skipIf(!supportsNodeSqlite)(
