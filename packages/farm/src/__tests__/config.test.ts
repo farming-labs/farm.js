@@ -562,6 +562,38 @@ describe("resolveConfig", () => {
       },
     });
   });
+
+  it("applies security.csp after ordinary and route-rule headers", async () => {
+    const config = await resolveConfig(
+      {
+        root: process.cwd(),
+        headers: [{ source: "/*", headers: [{ key: "X-App", value: "farm" }] }],
+        security: {
+          csp: {
+            directives: {
+              defaultSrc: ["'self'"],
+              objectSrc: ["'none'"],
+            },
+          },
+        },
+      },
+      "production",
+    );
+
+    expect(config.security.csp).toEqual({
+      value: "default-src 'self'; object-src 'none'",
+      reportOnly: false,
+    });
+    expect((await config.headers()).at(-1)).toEqual({
+      source: "/*",
+      headers: [
+        {
+          key: "Content-Security-Policy",
+          value: "default-src 'self'; object-src 'none'",
+        },
+      ],
+    });
+  });
 });
 
 describe("resolveMigrationsConfig", () => {

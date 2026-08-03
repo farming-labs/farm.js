@@ -42,6 +42,9 @@ import { getCurrentRequest } from "@farm.js/core/request";
 export default {
   srcDir: "src",
   images: { provider: "none" },
+  security: {
+    csp: "default-src 'self'; object-src 'none'",
+  },
   middleware: [
     {
       matcher: "/configured",
@@ -425,6 +428,9 @@ describe("production SSG output", () => {
 
       const firstStatic = await fetch(`${production.origin}/static`);
       expect(firstStatic.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+      expect(firstStatic.headers.get("content-security-policy")).toBe(
+        "default-src 'self'; object-src 'none'",
+      );
       const firstStaticHtml = await firstStatic.text();
       await new Promise((resolve) => setTimeout(resolve, 25));
       const secondStaticHtml = await fetch(`${production.origin}/static`).then((response) =>
@@ -454,6 +460,9 @@ describe("production SSG output", () => {
 
       const firstConfigured = await fetch(`${production.origin}/configured`);
       expect(firstConfigured.headers.get("x-configured-middleware")).toBe("yes");
+      expect(firstConfigured.headers.get("content-security-policy")).toBe(
+        "default-src 'self'; object-src 'none'",
+      );
       const firstConfiguredHtml = await firstConfigured.text();
       await new Promise((resolve) => setTimeout(resolve, 25));
       const secondConfiguredHtml = await fetch(`${production.origin}/configured`).then((response) =>
@@ -518,6 +527,9 @@ describe("production SSG output", () => {
 
       const localAPIResponse = await fetch(`${production.origin}/api/local?via=local`);
       expect(localAPIResponse.status).toBe(200);
+      expect(localAPIResponse.headers.get("content-security-policy")).toBe(
+        "default-src 'self'; object-src 'none'",
+      );
       await expect(localAPIResponse.json()).resolves.toEqual({ source: "local-api" });
 
       const localAPIMethodResponse = await fetch(`${production.origin}/api/local`, {
