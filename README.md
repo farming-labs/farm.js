@@ -5,25 +5,42 @@
 </p>
 
 <p align="center">
-  A modern React meta-framework built on Vite with Next.js-like semantics, featuring React Server Components, Server Actions, and a blazing-fast development experience.
+  <strong>A modern React framework for building fast, full-stack, product-integrated applications.</strong>
 </p>
 
 <p align="center">
+  Farm.js combines Vite's instant development experience with a purpose-built React Server Components renderer, secure Server Actions, typed app-directory routing, and production-ready deployment output.
+</p>
+
+<p align="center">
+  <a href="https://farmjs.dev"><strong>Documentation</strong></a>
+  ·
+  <a href="./examples"><strong>Examples</strong></a>
+  ·
+  <a href="#-quick-start"><strong>Quick Start</strong></a>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@farm.js/core"><img src="https://img.shields.io/npm/v/%40farm.js%2Fcore?label=%40farm.js%2Fcore&color=black" alt="npm version" /></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT license" /></a>
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-Ready-blue.svg" alt="TypeScript ready" /></a>
 </p>
 
-## ✨ Features
+## ✨ Built for Modern React
 
-- 🚀 **Blazing Fast**: Built on Vite for instant server start and lightning-fast HMR
-- 🧪 Plugin Ecosystem like logging and infra related.
-- ⚛️ **React Server Components**: Full RSC support with streaming SSR
-- 🎯 **Next.js-like API**: Familiar file-based routing and app directory structure
-- 🔄 **Server Actions**: Seamless server-client data mutations
-- 📦 **Zero Config**: Works out of the box with sensible defaults
-- 🎨 **Tailwind CSS Built-in**: Pre-configured Tailwind - just use classes!
-- 🧪 **Type Safe**: Full TypeScript support throughout
-- 🤖 **AI-Friendly**: Clean, predictable code structure for AI code generation
+| Feature                            | What it gives you                                                                                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ⚛️ **Custom RSC renderer**         | A purpose-built RSC, streaming SSR, and client hydration pipeline with Suspense and progressive navigation.                                       |
+| 🔄 **Server Actions**              | Write mutations next to your components with `"use server"`, form actions, optional encrypted bound arguments, and configurable request security. |
+| ⚡ **Blazingly fast development**  | Vite-powered startup, on-demand transforms, and fast HMR keep the feedback loop nearly instant.                                                   |
+| 🧭 **Typed app-directory routing** | Pages, layouts, route groups, dynamic segments, loading states, error boundaries, middleware, and generated route types.                          |
+| 🧩 **Flexible rendering**          | Choose streaming SSR, static generation, ISR, PPR, or deferred hydration islands route by route.                                                  |
+| 🛠️ **Full-stack primitives**       | Build with API routes, server functions, middleware, caching, KV storage, cron handlers, OpenAPI, and post-response work.                         |
+| 🔌 **First-party integrations**    | Add authentication, billing, email, jobs, AI, API keys, databases, and provider-owned routes through one typed integration model.                 |
+| 🚀 **Production-ready output**     | Build deployable server and client output with Nitro-powered adapters and per-route runtime controls.                                             |
+| 🎨 **Great defaults**              | Start with TypeScript, Tailwind CSS, sensible conventions, and a clean project structure—without assembling the framework yourself.               |
+
+> **Experimental native rendering:** Farm.js can automatically send eligible, server-only React subtrees through the [Strata](https://github.com/farming-labs/strata) native renderer while safely falling back to normal React rendering for unsupported trees.
 
 ## 🚀 Quick Start
 
