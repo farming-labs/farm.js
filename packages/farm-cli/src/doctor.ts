@@ -305,7 +305,8 @@ async function createProjectReport(
         action: "Add farm.config.ts and export defineConfig({...}).",
       });
     } else {
-      config = await resolveConfig({ root, ...userConfig }, "development");
+      const configRoot = path.resolve(root, userConfig.root || ".");
+      config = await resolveConfig({ ...userConfig, root: configRoot }, "development");
       const configFile = findConfigFile(root, options.configPath);
       checks.push({
         status: "pass",
@@ -353,7 +354,7 @@ function applySafeProjectFixes(
 ): FarmDoctorFix[] {
   const fixes: FarmDoctorFix[] = [];
   if (checks.some((check) => check.code === "ROOT_LAYOUT_MISSING")) {
-    const layoutPath = path.join(root, config.srcDir, "app", "layout.tsx");
+    const layoutPath = path.join(config.root, config.srcDir, "app", "layout.tsx");
     if (!existsSync(layoutPath)) {
       mkdirSync(path.dirname(layoutPath), { recursive: true });
       writeFileSync(

@@ -25,7 +25,9 @@ export function getFarmPresetRuntime(preset: string): FarmPresetRuntime {
     preset === "aws-lambda" ||
     preset === "azure" ||
     preset === "firebase" ||
-    preset === "bun"
+    preset === "bun" ||
+    preset === "self-host" ||
+    preset === "farm"
   ) {
     return "node";
   }

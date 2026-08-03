@@ -149,6 +149,38 @@ test("applies only safe additive fixes", async () => {
   }
 });
 
+test("applies safe fixes inside a configured project root", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-root-"));
+  const projectRoot = path.join(root, "application");
+  const layoutPath = path.join(projectRoot, "src/app/layout.tsx");
+
+  try {
+    await mkdir(path.join(projectRoot, "src/app"), { recursive: true });
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { root: './application' };\n",
+    );
+    await writeFile(
+      path.join(root, "package.json"),
+      JSON.stringify({ name: "doctor-root-fixture" }),
+    );
+    await writeFile(path.join(projectRoot, "src/app/page.tsx"), "export default () => null;\n");
+
+    const report = await runFarmDoctor({ root, offline: true, fix: true });
+
+    assert.deepEqual(report.fixes, [
+      {
+        code: "ROOT_LAYOUT_CREATED",
+        title: "Created the missing root layout",
+        filePath: "application/src/app/layout.tsx",
+      },
+    ]);
+    assert.match(await readFile(layoutPath, "utf8"), /export default function RootLayout/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function createTempProject(options = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-"));
   const target = options.target || "node";

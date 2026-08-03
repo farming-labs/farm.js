@@ -38,6 +38,8 @@ export interface FarmDeployPlan {
 export interface CloudflareAgentDeployPlan {
   configPath: string;
   environment?: string;
+  /** The integration will create this config as part of the production build. */
+  generated?: boolean;
 }
 
 /**
@@ -83,7 +85,10 @@ export function formatFarmDeployPlan(plan: FarmDeployPlan): string {
     `2. ${plan.deploy.command}`,
     `   cwd: ${plan.deploy.cwd}`,
     ...(plan.cloudflareAgent
-      ? ["", `Cloudflare Agent config: ${plan.cloudflareAgent.configPath}`]
+      ? [
+          "",
+          `Cloudflare Agent config: ${plan.cloudflareAgent.configPath}${plan.cloudflareAgent.generated ? " (generated during build)" : ""}`,
+        ]
       : []),
   ].join("\n");
 }
@@ -119,7 +124,10 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
   const preset = deployConfig.preset || getPresetForDeployTarget(platform) || "node-server";
   const nitroOutput = resolveDeployOutputPath(root, deployConfig.outputDir);
   const cloudflareAgent =
-    platform === "cloudflare" ? resolveCloudflareAgentDeployPlan(root) : undefined;
+    platform === "cloudflare"
+      ? resolveCloudflareAgentDeployPlan(root) ||
+        resolveConfiguredCloudflareAgentDeployPlan(root, config.integrations)
+      : undefined;
   const deploy = createDeployCommand(
     platform,
     root,
@@ -134,7 +142,7 @@ async function resolveFarmDeployContext(options: DeployFarmOptions) {
     preset,
     runtime: getFarmPresetRuntime(preset),
     outputDir: nitroOutput,
-    production: Boolean(options.prod),
+    production: platform === "netlify" || Boolean(options.prod),
     build: {
       command: `farm build --preset ${preset}`,
       cwd: path.resolve(root),
@@ -494,6 +502,48 @@ export function resolveCloudflareAgentDeployPlan(
     configPath,
     ...(typeof environment === "string" ? { environment: environment.trim() } : {}),
   };
+}
+
+function resolveConfiguredCloudflareAgentDeployPlan(
+  root: string,
+  integrations: Record<string, unknown> | undefined,
+): CloudflareAgentDeployPlan | undefined {
+  const integration = Object.values(integrations || {}).find(
+    (value) =>
+      isRecord(value) &&
+      value.category === "agent" &&
+      value.type === "cloudflare" &&
+      value.serverRuntime === false,
+  );
+  if (!isRecord(integration) || !isRecord(integration.instance)) return undefined;
+
+  const configuredPath = integration.instance.config;
+  if (typeof configuredPath !== "string" || !configuredPath.trim()) return undefined;
+
+  const projectRoot = path.resolve(root);
+  const sourceConfigPath = path.resolve(projectRoot, configuredPath);
+  assertPathInsideProject(projectRoot, sourceConfigPath, "Cloudflare Agents source config");
+  const configPath = path.join(path.dirname(sourceConfigPath), ".farm-cf-agent.wrangler.jsonc");
+  const environment = integration.instance.environment;
+
+  return {
+    configPath,
+    ...(typeof environment === "string" && environment.trim()
+      ? { environment: environment.trim() }
+      : {}),
+    generated: true,
+  };
+}
+
+function assertPathInsideProject(projectRoot: string, candidate: string, label: string): void {
+  const relativePath = path.relative(projectRoot, candidate);
+  if (
+    relativePath === ".." ||
+    relativePath.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relativePath)
+  ) {
+    throw new Error(`${label} must stay inside the Farm project root.`);
+  }
 }
 
 function assertWranglerInstalled(root: string): void {

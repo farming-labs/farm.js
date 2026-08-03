@@ -240,10 +240,31 @@ describe("generateFarmTypeArtifacts", () => {
     expect(current.stalePaths).toEqual([]);
 
     const staleSource = "// deliberately stale\n";
-    writeFileSync(generated.apiTypesPath!, staleSource);
+    const checkedPaths = Array.from(
+      new Set(
+        [
+          generated.typesPath,
+          generated.routeTypesPath,
+          generated.apiTypesPath,
+          generated.envTypesPath,
+          generated.imageTypesPath,
+          generated.i18nTypesPath,
+        ].filter((filePath): filePath is string => Boolean(filePath)),
+      ),
+    );
+    for (const filePath of checkedPaths) writeFileSync(filePath, staleSource);
+    const preserved = new Map(
+      checkedPaths.map((filePath) => [
+        filePath,
+        { content: readFileSync(filePath, "utf8"), mtimeMs: statSync(filePath).mtimeMs },
+      ]),
+    );
     const stale = await generateFarmTypeArtifacts({ root, check: true });
 
-    expect(stale.stalePaths).toEqual([generated.apiTypesPath]);
-    expect(readFileSync(generated.apiTypesPath!, "utf8")).toBe(staleSource);
+    expect([...stale.stalePaths].sort()).toEqual([...checkedPaths].sort());
+    for (const filePath of checkedPaths) {
+      expect(readFileSync(filePath, "utf8")).toBe(preserved.get(filePath)!.content);
+      expect(statSync(filePath).mtimeMs).toBe(preserved.get(filePath)!.mtimeMs);
+    }
   });
 });

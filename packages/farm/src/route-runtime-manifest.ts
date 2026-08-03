@@ -102,6 +102,12 @@ export function validateFarmRouteRuntimeDeployment(
   for (const route of manifest.routes) {
     if (route.rendering === "static") continue;
 
+    if (runtime === "unknown" && route.runtime !== "auto") {
+      warnings.add(
+        `Preset "${preset}" has an unknown runtime, so Farm could not verify routes that explicitly require node or edge.`,
+      );
+    }
+
     if (runtime !== "unknown" && route.runtime !== "auto" && route.runtime !== runtime) {
       throw new Error(
         `Route "${route.pattern}" requires the ${route.runtime} runtime, but preset "${preset}" emits ${runtime} functions. Choose a compatible preset or change the route runtime.`,

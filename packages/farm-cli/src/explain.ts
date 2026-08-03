@@ -8,10 +8,11 @@ import {
   resolveFarmRouteRuleRuntimeConfig,
   resolveFarmRouteRuntimeConfig,
   resolveRouteRenderingConfig,
+  scanProgrammaticPagePaths,
   type FarmRouteRule,
   type FarmRouteRuntimeConfig,
 } from "@farm.js/core";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 
@@ -74,13 +75,17 @@ export interface FarmRouteExplanation {
 }
 
 type PageCandidate = {
-  appDirectory: string;
   filePath: string;
   pattern: string;
   params: Record<string, string | string[]>;
   source: string;
   priority: number;
   score: number;
+};
+
+type LayeredRouteFile = {
+  filePath: string;
+  pattern: string;
 };
 
 export async function explainFarmRoute(
@@ -100,18 +105,17 @@ export async function explainFarmRoute(
     throw new Error(`No Farm page route matches ${normalizedPathname}.`);
   }
 
-  const pageDirectory = path.dirname(page.filePath);
-  const layouts = collectInheritedFiles(
-    page.appDirectory,
-    pageDirectory,
+  const layouts = collectInheritedRouteFiles(
+    config,
+    normalizedPathname,
     "layout",
     ROUTE_EXTENSIONS,
   );
   const middleware = collectMiddleware(
     root,
     Boolean(userConfig?.middleware && Object.keys(userConfig.middleware).length),
-    page.appDirectory,
-    pageDirectory,
+    config,
+    normalizedPathname,
   );
   const pageSource = readFileSync(page.filePath, "utf8");
   const layoutSources = layouts.map((filePath) => ({
@@ -132,22 +136,21 @@ export async function explainFarmRoute(
   const rendering = resolveRendering(pageSource, matchingRules);
   const cache = resolveCaching(pageSource, matchingRules);
   const metadataSources = [...layoutSources, { filePath: page.filePath, source: pageSource }];
-  const openGraphImage = findNearestSocialImage(
-    page.appDirectory,
-    pageDirectory,
-    "opengraph-image",
-  );
-  const twitterImage = findNearestSocialImage(page.appDirectory, pageDirectory, "twitter-image");
+  const openGraphImage = findNearestSocialImage(config, normalizedPathname, "opengraph-image");
+  const twitterImage = findNearestSocialImage(config, normalizedPathname, "twitter-image");
   const preset = String(config.deploy.preset || config.preset || "node-server");
   const presetRuntime = getFarmPresetRuntime(preset);
   const compatible =
     rendering.mode === "static" ||
     rendering.mode === "client" ||
     runtime.runtime === "auto" ||
-    presetRuntime === "unknown" ||
-    runtime.runtime === presetRuntime;
+    (presetRuntime !== "unknown" && runtime.runtime === presetRuntime);
   const warnings: string[] = [];
-  if (!compatible) {
+  if (presetRuntime === "unknown" && runtime.runtime !== "auto") {
+    warnings.push(
+      `Farm cannot verify the ${runtime.runtime} route requirement because the ${preset} preset runtime is unknown.`,
+    );
+  } else if (!compatible) {
     warnings.push(
       `The route requires ${runtime.runtime}, but the ${preset} preset emits ${presetRuntime} functions.`,
     );
@@ -227,26 +230,54 @@ function discoverMatchingPages(
   const candidates: PageCandidate[] = [];
   for (const [priority, source] of getFarmSourceRoots(config).entries()) {
     const appDirectory = path.join(source.root, source.srcDir, "app");
-    if (!existsSync(appDirectory)) continue;
-    for (const filePath of walkFiles(appDirectory)) {
-      if (!/^page\.(?:tsx?|jsx?|mdx?)$/.test(path.basename(filePath))) continue;
-      const relativeDirectory = path.relative(appDirectory, path.dirname(filePath));
-      if (relativeDirectory.split(path.sep).includes("api")) continue;
-      const pattern = directoryToRoutePattern(relativeDirectory);
-      const match = matchRoutePattern(pattern, pathname);
-      if (!match) continue;
-      candidates.push({
-        appDirectory,
-        filePath,
-        pattern,
-        params: match.params,
-        score: match.score,
-        source: source.name,
-        priority,
-      });
+    if (existsSync(appDirectory)) {
+      for (const filePath of walkFiles(appDirectory)) {
+        if (!/^page\.(?:tsx?|jsx?|mdx?)$/.test(path.basename(filePath))) continue;
+        const relativeDirectory = path.relative(appDirectory, path.dirname(filePath));
+        if (
+          relativeDirectory.split(path.sep).includes("api") ||
+          isRouteSlotDirectory(relativeDirectory)
+        ) {
+          continue;
+        }
+        const pattern = directoryToRoutePattern(relativeDirectory);
+        const match = matchRoutePattern(pattern, pathname);
+        if (!match) continue;
+        candidates.push({
+          filePath,
+          pattern,
+          params: match.params,
+          score: match.score,
+          source: source.name,
+          priority,
+        });
+      }
+    }
+
+    const sourceDirectory = path.join(source.root, source.srcDir);
+    if (!existsSync(sourceDirectory)) continue;
+    for (const filePath of walkFiles(sourceDirectory)) {
+      if (!/\.(?:tsx?|jsx?)$/.test(filePath) || filePath.endsWith(".d.ts")) continue;
+      const moduleSource = readFileSync(filePath, "utf8");
+      for (const pattern of scanProgrammaticPagePaths(moduleSource)) {
+        const match = matchRoutePattern(pattern, pathname);
+        if (!match) continue;
+        candidates.push({
+          filePath,
+          pattern,
+          params: match.params,
+          score: match.score,
+          source: source.name,
+          priority,
+        });
+      }
     }
   }
   return candidates;
+}
+
+function isRouteSlotDirectory(relativeDirectory: string): boolean {
+  return relativeDirectory.split(path.sep).some((segment) => /^@[A-Za-z][\w-]*$/.test(segment));
 }
 
 function walkFiles(directory: string): string[] {
@@ -256,8 +287,12 @@ function walkFiles(directory: string): string[] {
     const current = pending.pop()!;
     for (const entry of readdirSync(current, { withFileTypes: true })) {
       const entryPath = path.join(current, entry.name);
-      if (entry.isDirectory()) pending.push(entryPath);
-      else files.push(entryPath);
+      if (entry.isDirectory()) {
+        if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+        pending.push(entryPath);
+        continue;
+      }
+      files.push(entryPath);
     }
   }
   return files;
@@ -309,66 +344,117 @@ function matchRoutePattern(pattern: string, pathname: string) {
   return pathIndex === pathSegments.length ? { params, score } : null;
 }
 
-function collectInheritedFiles(
-  appDirectory: string,
-  leafDirectory: string,
+function collectInheritedRouteFiles(
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+  pathname: string,
   baseName: string,
   extensions: readonly string[],
 ): string[] {
-  const directories: string[] = [];
-  let current = leafDirectory;
-  while (current === appDirectory || current.startsWith(`${appDirectory}${path.sep}`)) {
-    directories.unshift(current);
-    if (current === appDirectory) break;
-    current = path.dirname(current);
-  }
-  return directories
-    .map((directory) => findFile(directory, baseName, extensions))
-    .filter((filePath): filePath is string => Boolean(filePath));
+  return collectLayeredRouteFiles(config, baseName, extensions)
+    .filter((entry) => matchesRoutePrefix(entry.pattern, pathname))
+    .sort(compareInheritedRouteFiles)
+    .map((entry) => entry.filePath);
 }
 
 function collectMiddleware(
   root: string,
   hasConfigMiddleware: boolean,
-  appDirectory: string,
-  pageDirectory: string,
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+  pathname: string,
 ): FarmRouteExplanation["middleware"] {
-  const files = collectInheritedFiles(
-    appDirectory,
-    pageDirectory,
-    "middleware",
-    MIDDLEWARE_EXTENSIONS,
-  );
-  const sourceRoot = path.dirname(appDirectory);
-  const rootMiddleware = findFile(sourceRoot, "middleware", MIDDLEWARE_EXTENSIONS);
-  if (rootMiddleware) files.unshift(rootMiddleware);
-  const uniqueFiles = [...new Set(files)];
+  const rootMiddleware = new Map<string, LayeredRouteFile>();
+  for (const source of getFarmSourceRoots(config)) {
+    const filePath = findFile(
+      path.join(source.root, source.srcDir),
+      "middleware",
+      MIDDLEWARE_EXTENSIONS,
+    );
+    if (filePath) {
+      rootMiddleware.set("root", {
+        filePath,
+        pattern: "/",
+      });
+    }
+  }
+  const files = [
+    ...rootMiddleware.values(),
+    ...collectLayeredRouteFiles(config, "middleware", MIDDLEWARE_EXTENSIONS).filter((entry) =>
+      matchesRoutePrefix(entry.pattern, pathname),
+    ),
+  ]
+    .sort(compareInheritedRouteFiles)
+    .map((entry) => entry.filePath);
   return [
     ...(hasConfigMiddleware
       ? [{ source: "config" as const, filePath: "farm.config (middleware)" }]
       : []),
-    ...uniqueFiles.map((filePath) => ({
+    ...files.map((filePath) => ({
       source: "file" as const,
       filePath: toProjectPath(root, filePath),
     })),
   ];
 }
 
-function findNearestSocialImage(appDirectory: string, leafDirectory: string, baseName: string) {
-  let current = leafDirectory;
-  while (current === appDirectory || current.startsWith(`${appDirectory}${path.sep}`)) {
-    const filePath = findFile(current, baseName, SOCIAL_IMAGE_EXTENSIONS);
-    if (filePath) return filePath;
-    if (current === appDirectory) break;
-    current = path.dirname(current);
+function collectLayeredRouteFiles(
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+  baseName: string,
+  extensions: readonly string[],
+): LayeredRouteFile[] {
+  const files = new Map<string, LayeredRouteFile>();
+  const filePattern = new RegExp(
+    `^${escapeRegExp(baseName)}\\.(?:${extensions.map(escapeRegExp).join("|")})$`,
+  );
+
+  for (const source of getFarmSourceRoots(config)) {
+    const appDirectory = path.join(source.root, source.srcDir, "app");
+    if (!existsSync(appDirectory)) continue;
+    for (const filePath of walkFiles(appDirectory)) {
+      if (!filePattern.test(path.basename(filePath))) continue;
+      const relativeDirectory = path.relative(appDirectory, path.dirname(filePath));
+      const pattern = directoryToRoutePattern(relativeDirectory);
+      files.set(pattern, {
+        filePath,
+        pattern,
+      });
+    }
   }
-  return undefined;
+
+  return [...files.values()];
+}
+
+function findNearestSocialImage(
+  config: Awaited<ReturnType<typeof resolveConfig>>,
+  pathname: string,
+  baseName: string,
+) {
+  return collectLayeredRouteFiles(config, baseName, SOCIAL_IMAGE_EXTENSIONS)
+    .filter((entry) => matchesRoutePrefix(entry.pattern, pathname))
+    .sort((left, right) => compareInheritedRouteFiles(right, left))[0]?.filePath;
+}
+
+function compareInheritedRouteFiles(left: LayeredRouteFile, right: LayeredRouteFile): number {
+  return splitPath(left.pattern).length - splitPath(right.pattern).length;
+}
+
+function matchesRoutePrefix(pattern: string, pathname: string): boolean {
+  const patternSegments = splitPath(pattern);
+  const pathSegments = splitPath(pathname);
+  if (patternSegments.length > pathSegments.length) return false;
+
+  return patternSegments.every((segment, index) => {
+    if (/^\[{1,2}(?:\.\.\.)?.+\]{1,2}$/.test(segment)) return true;
+    return segment === pathSegments[index];
+  });
 }
 
 function findFile(directory: string, baseName: string, extensions: readonly string[]) {
   return extensions
     .map((extension) => path.join(directory, `${baseName}.${extension}`))
     .find(existsSync);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function readRuntimeExports(source: string): FarmRouteRuntimeConfig {
@@ -530,7 +616,15 @@ function splitPath(value: string) {
 }
 
 function toProjectPath(root: string, filePath: string) {
-  return path.relative(root, filePath).split(path.sep).join("/");
+  let relativePath = path.relative(root, filePath);
+  if (
+    (relativePath === ".." || relativePath.startsWith(`..${path.sep}`)) &&
+    existsSync(root) &&
+    existsSync(filePath)
+  ) {
+    relativePath = path.relative(realpathSync(root), realpathSync(filePath));
+  }
+  return relativePath.split(path.sep).join("/");
 }
 
 function formatParams(params: FarmRouteExplanation["params"]) {

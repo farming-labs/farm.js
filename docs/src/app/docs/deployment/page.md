@@ -277,7 +277,7 @@ export default defineConfig({
 
 For other Nitro presets, use the host's documented deploy command or CI workflow after `farm build` writes the Nitro output.
 
-Use `farm deploy --plan` before a release when you want to verify the selected target, preset, runtime, output directory, and provider command. Planning is read-only: it does not run the build, require a provider login, inspect existing output, or deploy anything.
+Use `farm deploy --plan` before a release when you want to verify the selected target, preset, runtime, output directory, and exact build and provider commands. Planning is read-only: it does not run the build, require a provider login, inspect existing output, or deploy anything.
 
 ## Environment variables
 

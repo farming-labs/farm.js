@@ -66,18 +66,23 @@ function collectDocsPages(directory) {
 
 function readHiddenFrontmatter(source) {
   const frontmatter = source.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] || "";
-  return /^\s*hidden:\s*true\s*$/m.test(frontmatter);
+  const value = frontmatter.match(
+    /^\s*hidden\s*:\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$/im,
+  );
+  return (value?.[1] || value?.[2] || value?.[3] || "").toLowerCase() === "true";
 }
 
 function readNavigationSlugs(filePath) {
   const source = readFileSync(filePath, "utf8");
-  const start = source.indexOf("const sidebar = [");
-  const end = source.indexOf("] satisfies FarmDocsSidebarItem[];", start);
-  if (start === -1 || end === -1) {
+  const declaration = /\bconst\s+sidebar\s*=\s*\[/.exec(source);
+  const end = declaration
+    ? /\]\s+satisfies\s+FarmDocsSidebarItem\s*\[\s*\]\s*;?/.exec(source.slice(declaration.index))
+    : null;
+  if (!declaration || !end) {
     throw new Error(`Could not locate the static sidebar declaration in ${filePath}.`);
   }
 
-  const sidebarSource = source.slice(start, end);
+  const sidebarSource = source.slice(declaration.index, declaration.index + end.index);
   const slugs = new Set();
   for (const match of sidebarSource.matchAll(/\bslug\s*:\s*["']([^"']*)["']/g)) {
     if (slugs.has(match[1])) {

@@ -66,6 +66,92 @@ test("prints route explanations as JSON through the CLI", async () => {
   }
 });
 
+test("discovers pages declared through the programmatic router", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-programmatic-"));
+
+  try {
+    await mkdir(path.join(root, "src"), { recursive: true });
+    await writeFile(path.join(root, "farm.config.mjs"), "export default {};\n");
+    await writeFile(
+      path.join(root, "src/farm.routes.ts"),
+      [
+        'import { defineRoutes, page } from "@farm.js/core";',
+        "const Product = () => null;",
+        'export default defineRoutes([page("/catalog/[id]", { component: Product })]);',
+        "",
+      ].join("\n"),
+    );
+
+    const explanation = await explainFarmRoute("/catalog/42", { root });
+
+    assert.equal(explanation.pattern, "/catalog/[id]");
+    assert.deepEqual(explanation.params, { id: "42" });
+    assert.equal(explanation.filePath, "src/farm.routes.ts");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("uses the virtual route graph when a project overrides layer boundaries", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-layers-"));
+  const layerRoot = path.join(root, "base");
+
+  try {
+    await mkdir(path.join(layerRoot, "src/app/products/[id]"), { recursive: true });
+    await mkdir(path.join(root, "src/app/products"), { recursive: true });
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      "export default { extends: ['./base'] };\n",
+    );
+    await writeFile(path.join(layerRoot, "farm.config.mjs"), "export default {};\n");
+    await writeFile(
+      path.join(layerRoot, "src/app/products/[id]/page.tsx"),
+      "export default () => null;\n",
+    );
+    await writeFile(path.join(layerRoot, "src/app/layout.tsx"), "export const runtime = 'node';\n");
+    await writeFile(
+      path.join(layerRoot, "src/app/products/layout.tsx"),
+      "export const metadata = {};\n",
+    );
+    await writeFile(path.join(root, "src/app/layout.tsx"), "export const metadata = {};\n");
+    await writeFile(
+      path.join(root, "src/app/products/layout.tsx"),
+      "export const runtime = 'edge';\nexport async function generateMetadata() { return {}; }\n",
+    );
+
+    const explanation = await explainFarmRoute("/products/42", { root });
+
+    assert.equal(explanation.filePath, "base/src/app/products/[id]/page.tsx");
+    assert.deepEqual(explanation.layouts, ["src/app/layout.tsx", "src/app/products/layout.tsx"]);
+    assert.equal(explanation.runtime.runtime, "edge");
+    assert.deepEqual(explanation.metadata.static, ["src/app/layout.tsx"]);
+    assert.deepEqual(explanation.metadata.dynamic, ["src/app/products/layout.tsx"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("does not select a route-slot page as the canonical URL", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-slot-"));
+
+  try {
+    await mkdir(path.join(root, "src/app/photo/[id]"), { recursive: true });
+    await mkdir(path.join(root, "src/app/feed/@modal/(.)photo/[id]"), { recursive: true });
+    await writeFile(path.join(root, "farm.config.mjs"), "export default {};\n");
+    await writeFile(path.join(root, "src/app/photo/[id]/page.tsx"), "export default () => null;\n");
+    await writeFile(
+      path.join(root, "src/app/feed/@modal/(.)photo/[id]/page.tsx"),
+      "export default () => null;\n",
+    );
+
+    const explanation = await explainFarmRoute("/photo/42", { root });
+
+    assert.equal(explanation.filePath, "src/app/photo/[id]/page.tsx");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function createExplainProject() {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-explain-"));
   const productDirectory = path.join(root, "src/app/products/[id]");
