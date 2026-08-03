@@ -11,9 +11,12 @@ export { buildFarm } from "./build";
 export {
   createFarmDeployPlan,
   deployFarm,
+  FarmDeployError,
   formatFarmDeployPlan,
   resolveCloudflareAgentDeployPlan,
   type CloudflareAgentDeployPlan,
+  type FarmDeployCommand,
+  type FarmDeployErrorCode,
   type FarmDeployPlan,
 } from "./deploy";
 export {

@@ -468,8 +468,10 @@ program
       const { deployFarm } = require("../dist/index.js");
       await deployFarm(options);
     } catch (error) {
-      console.error("Failed to deploy:", error);
-      process.exit(1);
+      const code = error?.name === "FarmDeployError" ? ` [${error.code}]` : "";
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Failed to deploy${code}: ${message}`);
+      process.exitCode = 1;
     }
   });
 

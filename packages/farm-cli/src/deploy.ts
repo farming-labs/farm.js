@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from "child_process";
+import { execFileSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import path from "path";
 import {
@@ -23,6 +23,31 @@ export interface DeployFarmOptions {
   plan?: boolean;
 }
 
+export type FarmDeployErrorCode =
+  | "CLI_NOT_INSTALLED"
+  | "CLI_NOT_AUTHENTICATED"
+  | "INVALID_BUILD_OUTPUT"
+  | "DEPLOY_FAILED";
+
+export class FarmDeployError extends Error {
+  readonly code: FarmDeployErrorCode;
+  readonly platform: FarmDeployPlan["target"];
+  readonly cause?: unknown;
+
+  constructor(
+    code: FarmDeployErrorCode,
+    platform: FarmDeployPlan["target"],
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message);
+    this.name = "FarmDeployError";
+    this.code = code;
+    this.platform = platform;
+    this.cause = options?.cause;
+  }
+}
+
 export interface FarmDeployPlan {
   root: string;
   target: "vercel" | "cloudflare" | "netlify";
@@ -31,8 +56,15 @@ export interface FarmDeployPlan {
   outputDir: string;
   production: boolean;
   build: { command: string; cwd: string };
-  deploy: { command: string; cwd: string };
+  deploy: FarmDeployCommand;
   cloudflareAgent?: CloudflareAgentDeployPlan;
+}
+
+export interface FarmDeployCommand {
+  command: string;
+  cwd: string;
+  executable: string;
+  args: string[];
 }
 
 export interface CloudflareAgentDeployPlan {
@@ -57,7 +89,11 @@ export async function deployFarm(options: DeployFarmOptions = {}) {
   await buildFarm({ root: plan.root, preset: plan.preset });
 
   if (!existsSync(plan.outputDir)) {
-    throw new Error(`Build output not found at ${plan.outputDir}. Please run 'farm build' first.`);
+    throw new FarmDeployError(
+      "INVALID_BUILD_OUTPUT",
+      plan.target,
+      `Build output not found at ${plan.outputDir}. Please run 'farm build' first.`,
+    );
   }
 
   await deployPlatform(plan.target, plan.root, plan.outputDir, deployConfig, options.prod);
@@ -163,30 +199,50 @@ function createDeployCommand(
   cloudflareAgent: CloudflareAgentDeployPlan | undefined,
 ): FarmDeployPlan["deploy"] {
   if (platform === "vercel") {
+    const args = ["deploy", "--prebuilt", "--yes", ...(prod ? ["--prod"] : [])];
     return {
-      command: `vercel deploy --prebuilt --yes${prod ? " --prod" : ""}`,
+      command: formatCommand("vercel", args),
       cwd: path.resolve(root),
+      executable: "vercel",
+      args,
     };
   }
   if (platform === "netlify") {
-    const site = deployConfig.netlify?.site;
+    const args = createNetlifyDeployArgs(deployConfig.netlify?.site);
     return {
-      command: `netlify deploy --prod --dir=.${site ? ` --site=${site}` : ""}`,
+      command: formatCommand("netlify", args),
       cwd: outputDir,
+      executable: "netlify",
+      args,
     };
   }
   if (cloudflareAgent) {
+    const args = [
+      "deploy",
+      "--config",
+      cloudflareAgent.configPath,
+      ...(cloudflareAgent.environment ? ["--env", cloudflareAgent.environment] : []),
+    ];
     return {
-      command: `wrangler deploy --config ${cloudflareAgent.configPath}${cloudflareAgent.environment ? ` --env ${cloudflareAgent.environment}` : ""}`,
+      command: formatCommand("wrangler", args),
       cwd: path.resolve(root),
+      executable: "wrangler",
+      args,
     };
   }
   const projectName =
     deployConfig.cloudflare?.projectName || deployConfig.projectName || "farm-app";
+  const args = ["pages", "deploy", ".", `--project-name=${projectName}`];
   return {
-    command: `wrangler pages deploy . --project-name=${projectName}`,
+    command: formatCommand("wrangler", args),
     cwd: outputDir,
+    executable: "wrangler",
+    args,
   };
+}
+
+function createNetlifyDeployArgs(site?: string): string[] {
+  return ["deploy", "--prod", "--dir=.", ...(site ? [`--site=${site}`] : [])];
 }
 
 /**
@@ -223,20 +279,25 @@ async function deployVercel(root: string, outputDir: string, prod?: boolean) {
   logger.info("🚀 Deploying to Vercel...");
 
   try {
-    execSync("vercel --version", { stdio: "ignore" });
-  } catch {
-    logger.error("❌ Vercel CLI is not installed.");
-    logger.info("💡 Install it with: npm i -g vercel");
-    process.exit(1);
+    execFileSync("vercel", ["--version"], { stdio: "ignore", cwd: root });
+  } catch (error) {
+    throw new FarmDeployError(
+      "CLI_NOT_INSTALLED",
+      "vercel",
+      "Vercel CLI is not installed. Install it with: npm i -g vercel",
+      { cause: error },
+    );
   }
 
   try {
-    execSync("vercel whoami", { stdio: "ignore" });
-  } catch {
-    logger.warn("⚠️  Not logged in to Vercel.");
-    logger.info("💡 Please run: vercel login");
-    logger.info("   Then run: farm deploy --vercel");
-    process.exit(1);
+    execFileSync("vercel", ["whoami"], { stdio: "ignore", cwd: root });
+  } catch (error) {
+    throw new FarmDeployError(
+      "CLI_NOT_AUTHENTICATED",
+      "vercel",
+      "Vercel CLI is not authenticated. Run 'vercel login', then retry the deployment.",
+      { cause: error },
+    );
   }
 
   try {
@@ -260,12 +321,18 @@ async function deployVercel(root: string, outputDir: string, prod?: boolean) {
 
     // Check functions directory
     if (!existsSync(functionsDir)) {
-      logger.error(`❌ Functions directory not found at ${functionsDir}`);
-      process.exit(1);
+      throw new FarmDeployError(
+        "INVALID_BUILD_OUTPUT",
+        "vercel",
+        `Functions directory not found at ${functionsDir}.`,
+      );
     }
     if (!existsSync(serverIndex)) {
-      logger.error(`❌ Server entry point not found at ${serverIndex}`);
-      process.exit(1);
+      throw new FarmDeployError(
+        "INVALID_BUILD_OUTPUT",
+        "vercel",
+        `Server entry point not found at ${serverIndex}.`,
+      );
     }
     logger.info(`✅ Functions directory: ${functionsDir}`);
 
@@ -393,16 +460,20 @@ async function deployVercel(root: string, outputDir: string, prod?: boolean) {
 
     // Deploy using --prebuilt flag so Vercel uses our build (required for monorepos;
     // building on Vercel would run pnpm install in the example folder and fail on workspace deps)
-    const prodFlag = prod ? " --prod" : "";
-    execSync(`vercel deploy --prebuilt --yes${prodFlag}`, {
+    execFileSync("vercel", ["deploy", "--prebuilt", "--yes", ...(prod ? ["--prod"] : [])], {
       stdio: "inherit",
       cwd: root,
     });
 
     logger.success("✅ Deployed to Vercel successfully!");
-  } catch (error: any) {
-    logger.error(`❌ Failed to deploy to Vercel: ${error.message}`);
-    process.exit(1);
+  } catch (error: unknown) {
+    if (error instanceof FarmDeployError) throw error;
+    throw new FarmDeployError(
+      "DEPLOY_FAILED",
+      "vercel",
+      `Failed to deploy to Vercel: ${getErrorMessage(error)}`,
+      { cause: error },
+    );
   }
 }
 
@@ -428,9 +499,13 @@ async function deployCloudflare(root: string, outputDir: string, projectName?: s
         },
       );
       logger.success("✅ Deployed Farm and Cloudflare Agents successfully!");
-    } catch (error: any) {
-      logger.error(`❌ Failed to deploy to Cloudflare: ${error.message}`);
-      process.exit(1);
+    } catch (error: unknown) {
+      throw new FarmDeployError(
+        "DEPLOY_FAILED",
+        "cloudflare",
+        `Failed to deploy to Cloudflare: ${getErrorMessage(error)}`,
+        { cause: error },
+      );
     }
     return;
   }
@@ -449,9 +524,13 @@ async function deployCloudflare(root: string, outputDir: string, projectName?: s
       },
     );
     logger.success("✅ Deployed to Cloudflare Pages successfully!");
-  } catch (error: any) {
-    logger.error(`❌ Failed to deploy to Cloudflare: ${error.message}`);
-    process.exit(1);
+  } catch (error: unknown) {
+    throw new FarmDeployError(
+      "DEPLOY_FAILED",
+      "cloudflare",
+      `Failed to deploy to Cloudflare: ${getErrorMessage(error)}`,
+      { cause: error },
+    );
   }
 }
 
@@ -549,10 +628,13 @@ function assertPathInsideProject(projectRoot: string, candidate: string, label: 
 function assertWranglerInstalled(root: string): void {
   try {
     execFileSync("wrangler", ["--version"], { stdio: "ignore", cwd: root });
-  } catch {
-    logger.error("❌ Wrangler CLI is not installed.");
-    logger.info("💡 Install it in this project with: npm i -D wrangler");
-    process.exit(1);
+  } catch (error) {
+    throw new FarmDeployError(
+      "CLI_NOT_INSTALLED",
+      "cloudflare",
+      "Wrangler CLI is not installed. Install it in this project with: npm i -D wrangler",
+      { cause: error },
+    );
   }
 }
 
@@ -568,20 +650,41 @@ async function deployNetlify(root: string, outputDir: string, site?: string) {
 
   // Check if Netlify CLI is installed
   try {
-    execSync("netlify --version", { stdio: "ignore" });
-  } catch {
-    logger.error("❌ Netlify CLI is not installed.");
-    logger.info("💡 Install it with: npm i -g netlify-cli");
-    process.exit(1);
+    execFileSync("netlify", ["--version"], { stdio: "ignore", cwd: root });
+  } catch (error) {
+    throw new FarmDeployError(
+      "CLI_NOT_INSTALLED",
+      "netlify",
+      "Netlify CLI is not installed. Install it with: npm i -g netlify-cli",
+      { cause: error },
+    );
   }
 
   try {
-    process.chdir(outputDir);
-    const siteFlag = site ? ` --site=${site}` : "";
-    execSync(`netlify deploy --prod --dir=.${siteFlag}`, { stdio: "inherit" });
+    execFileSync("netlify", createNetlifyDeployArgs(site), {
+      stdio: "inherit",
+      cwd: outputDir,
+    });
     logger.success("✅ Deployed to Netlify successfully!");
-  } catch (error: any) {
-    logger.error(`❌ Failed to deploy to Netlify: ${error.message}`);
-    process.exit(1);
+  } catch (error: unknown) {
+    throw new FarmDeployError(
+      "DEPLOY_FAILED",
+      "netlify",
+      `Failed to deploy to Netlify: ${getErrorMessage(error)}`,
+      { cause: error },
+    );
   }
+}
+
+function formatCommand(executable: string, args: string[]): string {
+  return [executable, ...args].map(formatCommandArgument).join(" ");
+}
+
+function formatCommandArgument(argument: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/.test(argument)) return argument;
+  return `'${argument.replace(/'/g, `'"'"'`)}'`;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
