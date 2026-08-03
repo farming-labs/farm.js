@@ -242,7 +242,7 @@ function createDeployCommand(
 }
 
 function createNetlifyDeployArgs(site?: string): string[] {
-  return ["deploy", "--prod", "--dir=.", ...(site ? ["--site", site] : [])];
+  return ["deploy", "--prod", "--dir=.", ...(site ? [`--site=${site}`] : [])];
 }
 
 /**
