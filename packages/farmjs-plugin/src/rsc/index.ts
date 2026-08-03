@@ -30,7 +30,7 @@ import type { FarmLayerEntry, ResolvedFarmLayer } from "@farm.js/core/server";
 import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
-import { generateClientEntry } from "./entries/client.js";
+import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
@@ -1040,6 +1040,7 @@ import {
   createFarmDeploymentRequestHeaders,
   isFarmDeploymentMismatchResponse,
 } from '@farm.js/core/deployment';
+${serverFnTransportErrorClientRuntime}
 const farmDeploymentId = ${JSON.stringify(entryContext.deploymentId)};
 setServerCallback(async (id, args) => {
   const refs = createTemporaryReferenceSet();
@@ -1066,9 +1067,7 @@ setServerCallback(async (id, args) => {
   if (!res.ok) throw new Error('Server action failed: ' + res.status);
   const p = await createFromReadableStream(res.body, { temporaryReferences: refs });
   if (p?.returnValue?.ok) return p.returnValue.data;
-  const error = new Error(p?.returnValue?.data?.message || 'Server function failed');
-  error.name = 'ServerActionError';
-  throw error;
+  throw createFarmServerFnTransportError(p?.returnValue?.data);
 });
 `
             : "";

@@ -16,11 +16,13 @@ export type InferMutationData<TTarget extends AnyMutationTarget> = TTarget exten
   ? TData
   : Awaited<ReturnType<TTarget>>;
 
-export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends (
-  ...args: any[]
-) => Promise<APIResult<any, infer TError>>
+export type InferMutationError<TTarget extends AnyMutationTarget> = TTarget extends {
+  readonly __farmServerFnError: infer TError;
+}
   ? TError
-  : Error;
+  : TTarget extends (...args: any[]) => Promise<APIResult<any, infer TError>>
+    ? TError
+    : Error;
 
 export type MutationOptimisticContext<TVariables, TData> = {
   variables: TVariables | undefined;

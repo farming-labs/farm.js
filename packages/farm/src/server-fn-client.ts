@@ -49,7 +49,7 @@ type ServerFnActionCallbacks<TResult, TError extends Error> = Pick<
 >;
 
 export function useServerFn<TInput, TResult, TError extends Error = Error>(
-  serverFn: ServerFn<TInput, TResult>,
+  serverFn: ServerFn<TInput, TResult, TError>,
   options: UseServerFnOptions<TResult, TError, TInput> = {},
 ): UseServerFnReturn<TInput, TResult, TError> {
   const { initialResult = null, resetOnSubmit = true } = options;

@@ -1,6 +1,16 @@
 import { getServerActionExecutionContext, getServerActionSignal } from "./server-action-security";
 import { _resolveCurrentRequest } from "./server/request-bridge";
 import { applyFarmCacheInvalidationTargets, type FarmCacheInvalidationTarget } from "./cache";
+import { ServerActionError, ServerFnFailure } from "./server-fn-error";
+
+export {
+  FARM_SERVER_FN_FAILURE_SYMBOL,
+  ServerActionError,
+  ServerFnFailure,
+  createServerFnTransportError,
+  isServerFnFailure,
+} from "./server-fn-error";
+export type { SerializedServerFnFailure } from "./server-fn-error";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -21,6 +31,44 @@ export type InferServerFnSchemaOutput<T> = T extends { _output: infer O }
   : T extends { parse: (data: unknown) => infer R }
     ? R
     : unknown;
+
+export type ServerFnErrorSchema = ServerFnSchema &
+  ({ parse: (data: unknown) => unknown } | { safeParse: (data: unknown) => unknown });
+
+export type ServerFnErrorDefinition<
+  TSchema extends ServerFnErrorSchema = ServerFnErrorSchema,
+  TStatus extends number = number,
+> = {
+  status: TStatus;
+  /** Schema for the public error payload exposed to callers. */
+  data: TSchema;
+  /** Public message safe to expose to callers. */
+  message?: string;
+};
+
+export type ServerFnErrorDefinitions = Record<
+  string,
+  ServerFnErrorDefinition<ServerFnErrorSchema, number>
+>;
+
+export type ServerFnDeclaredError<TErrors extends ServerFnErrorDefinitions> = {
+  [TCode in keyof TErrors]: ServerFnFailure<
+    TCode & string,
+    InferServerFnSchemaOutput<TErrors[TCode]["data"]>,
+    TErrors[TCode]["status"]
+  >;
+}[keyof TErrors];
+
+export type ServerFnError<TErrors extends ServerFnErrorDefinitions> = keyof TErrors extends never
+  ? Error
+  : ServerActionError | ServerFnDeclaredError<TErrors>;
+
+export type ServerFnErrorHandler<TErrors extends ServerFnErrorDefinitions> = <
+  TCode extends keyof TErrors & string,
+>(
+  code: TCode,
+  data: InferServerFnSchemaInput<TErrors[TCode]["data"]>,
+) => never;
 
 export type ServerFnFormInput = FormData;
 
@@ -66,9 +114,21 @@ export type ServerFnContext<TInput, TContext extends object = {}> = {
   context: Readonly<TContext>;
 };
 
-export type ServerFnHandler<TInput, TResult, TContext extends object = {}> = (
-  ctx: ServerFnContext<TInput, TContext>,
-) => MaybePromise<TResult>;
+export type ServerFnHandlerContext<
+  TInput,
+  TContext extends object = {},
+  TErrors extends ServerFnErrorDefinitions = {},
+> = ServerFnContext<TInput, TContext> & {
+  /** Return a declared, validated error from this server function. */
+  error: ServerFnErrorHandler<TErrors>;
+};
+
+export type ServerFnHandler<
+  TInput,
+  TResult,
+  TContext extends object = {},
+  TErrors extends ServerFnErrorDefinitions = {},
+> = (ctx: ServerFnHandlerContext<TInput, TContext, TErrors>) => MaybePromise<TResult>;
 
 export type ServerFnInvalidationContext<
   TInput,
@@ -120,10 +180,12 @@ export type ServerFnOptions<
   TSchema extends ServerFnSchema | undefined,
   TResult,
   TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+  TErrors extends ServerFnErrorDefinitions = {},
 > = {
   input?: TSchema;
   output?: undefined;
   middleware?: TMiddlewares;
+  errors?: TErrors;
   invalidates?: ServerFnInvalidations<
     TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
     Awaited<TResult>,
@@ -132,7 +194,8 @@ export type ServerFnOptions<
   handler: ServerFnHandler<
     TSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TSchema> : unknown,
     TResult,
-    ServerFnMiddlewareContext<TMiddlewares>
+    ServerFnMiddlewareContext<TMiddlewares>,
+    TErrors
   >;
 };
 
@@ -140,10 +203,12 @@ export type ServerFnOutputOptions<
   TInputSchema extends ServerFnSchema | undefined,
   TOutputSchema extends ServerFnSchema,
   TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+  TErrors extends ServerFnErrorDefinitions = {},
 > = {
   input?: TInputSchema;
   output: TOutputSchema;
   middleware?: TMiddlewares;
+  errors?: TErrors;
   invalidates?: ServerFnInvalidations<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
     Awaited<InferServerFnSchemaOutput<TOutputSchema>>,
@@ -152,17 +217,22 @@ export type ServerFnOutputOptions<
   handler: ServerFnHandler<
     TInputSchema extends ServerFnSchema ? InferServerFnSchemaOutput<TInputSchema> : unknown,
     unknown,
-    ServerFnMiddlewareContext<TMiddlewares>
+    ServerFnMiddlewareContext<TMiddlewares>,
+    TErrors
   >;
 };
 
-export type ServerFn<TInput, TResult> = ([unknown] extends [TInput]
+export type ServerFn<TInput, TResult, TError extends Error = Error> = ([unknown] extends [TInput]
   ? (input?: TInput | FormData) => Promise<TResult>
   : (input: TInput | FormData) => Promise<TResult>) & {
   readonly __farmServerFn: true;
   readonly __farmServerFnInput?: unknown;
   readonly __farmServerFnOutput?: unknown;
+  readonly __farmServerFnError: TError;
 };
+
+export type InferServerFnError<TServerFn> =
+  TServerFn extends ServerFn<any, any, infer TError> ? TError : Error;
 
 export const FARM_SERVER_FN_SYMBOL = Symbol.for("farm.server-fn");
 
@@ -198,42 +268,52 @@ export function createServerFn<
   TInputSchema extends ServerFnSchema,
   TOutputSchema extends ServerFnSchema,
   const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+  const TErrors extends ServerFnErrorDefinitions = {},
 >(
-  options: ServerFnOutputOptions<TInputSchema, TOutputSchema, TMiddlewares>,
+  options: ServerFnOutputOptions<TInputSchema, TOutputSchema, TMiddlewares, TErrors>,
 ): ServerFn<
   InferServerFnSchemaInput<TInputSchema>,
-  Awaited<InferServerFnSchemaOutput<TOutputSchema>>
+  Awaited<InferServerFnSchemaOutput<TOutputSchema>>,
+  ServerFnError<TErrors>
 >;
 export function createServerFn<
   TOutputSchema extends ServerFnSchema,
   const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+  const TErrors extends ServerFnErrorDefinitions = {},
 >(
-  options: ServerFnOutputOptions<undefined, TOutputSchema, TMiddlewares>,
-): ServerFn<unknown, Awaited<InferServerFnSchemaOutput<TOutputSchema>>>;
+  options: ServerFnOutputOptions<undefined, TOutputSchema, TMiddlewares, TErrors>,
+): ServerFn<unknown, Awaited<InferServerFnSchemaOutput<TOutputSchema>>, ServerFnError<TErrors>>;
 export function createServerFn<
   TSchema extends ServerFnSchema,
   TResult,
   const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
+  const TErrors extends ServerFnErrorDefinitions = {},
 >(
-  options: ServerFnOptions<TSchema, TResult, TMiddlewares>,
-): ServerFn<InferServerFnSchemaInput<TSchema>, Awaited<TResult>>;
+  options: ServerFnOptions<TSchema, TResult, TMiddlewares, TErrors>,
+): ServerFn<InferServerFnSchemaInput<TSchema>, Awaited<TResult>, ServerFnError<TErrors>>;
 export function createServerFn<
   TResult,
   const TMiddlewares extends readonly AnyServerFnMiddleware[] = readonly [],
->(options: ServerFnOptions<undefined, TResult, TMiddlewares>): ServerFn<unknown, Awaited<TResult>>;
+  const TErrors extends ServerFnErrorDefinitions = {},
+>(
+  options: ServerFnOptions<undefined, TResult, TMiddlewares, TErrors>,
+): ServerFn<unknown, Awaited<TResult>, ServerFnError<TErrors>>;
 export function createServerFn(options: {
   input?: ServerFnSchema;
   output?: ServerFnSchema;
   middleware?: readonly AnyServerFnMiddleware[];
+  errors?: ServerFnErrorDefinitions;
   invalidates?: ServerFnInvalidations<any, any, any>;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  handler: ServerFnHandler<any, any, any>;
+  handler: ServerFnHandler<any, any, any, any>;
 }) {
   if (!options || typeof options.handler !== "function") {
     throw new TypeError("createServerFn requires a handler function");
   }
 
   const middleware = resolveServerFnMiddleware(options.middleware);
+  const errors = normalizeServerFnErrors(options.errors);
+  const error = createServerFnErrorHandler(errors);
   const serverFn = async (value: unknown) => {
     const formData = isFormData(value) ? value : undefined;
     const rawInput = formData ? formDataToObject(formData) : value;
@@ -251,7 +331,7 @@ export function createServerFn(options: {
     let resolvedContext: Readonly<object> = Object.freeze(Object.create(null));
     const result = await runServerFnMiddleware(middleware, handlerContext, async (context) => {
       resolvedContext = context.context;
-      return options.handler(context);
+      return options.handler({ ...context, error });
     });
     const parsedResult = await _parseServerFnSchema(options.output, result, "output");
 
@@ -287,6 +367,10 @@ export function createServerFn(options: {
       value: options.output,
       enumerable: false,
     },
+    __farmServerFnError: {
+      value: undefined,
+      enumerable: false,
+    },
     __farmServerFnMiddleware: {
       value: middleware,
       enumerable: false,
@@ -297,7 +381,7 @@ export function createServerFn(options: {
     },
   });
 
-  return serverFn as ServerFn<unknown, unknown>;
+  return serverFn as ServerFn<unknown, unknown, Error>;
 }
 
 type ServerFnBaseContext = Omit<ServerFnContext<unknown, {}>, "context">;
@@ -305,7 +389,7 @@ type ServerFnBaseContext = Omit<ServerFnContext<unknown, {}>, "context">;
 async function runServerFnMiddleware(
   middleware: readonly AnyServerFnMiddleware[],
   handlerContext: ServerFnBaseContext,
-  handler: ServerFnHandler<any, any, any>,
+  handler: (context: ServerFnContext<any, any>) => MaybePromise<unknown>,
 ) {
   const dispatch = async (index: number, context: Readonly<object>): Promise<unknown> => {
     const current = middleware[index];
@@ -337,6 +421,98 @@ async function runServerFnMiddleware(
   };
 
   return dispatch(0, Object.freeze(Object.create(null)));
+}
+
+function normalizeServerFnErrors(
+  definitions: ServerFnErrorDefinitions | undefined,
+): Readonly<ServerFnErrorDefinitions> {
+  if (definitions === undefined) return Object.freeze({});
+  if (!isPlainServerFnObject(definitions)) {
+    throw new TypeError("createServerFn errors must be an object");
+  }
+
+  const normalized: ServerFnErrorDefinitions = Object.create(null);
+  for (const [code, definition] of Object.entries(definitions)) {
+    if (!code.trim()) {
+      throw new TypeError("Server function error codes cannot be empty");
+    }
+    if (!definition || typeof definition !== "object") {
+      throw new TypeError(`Server function error "${code}" must be an object`);
+    }
+    if (
+      !Number.isInteger(definition.status) ||
+      definition.status < 400 ||
+      definition.status > 599
+    ) {
+      throw new TypeError(
+        `Server function error "${code}" status must be an integer between 400 and 599`,
+      );
+    }
+    if (
+      !definition.data ||
+      (typeof definition.data.parse !== "function" &&
+        typeof definition.data.safeParse !== "function")
+    ) {
+      throw new TypeError(
+        `Server function error "${code}" data must provide synchronous parse() or safeParse()`,
+      );
+    }
+    if (definition.message !== undefined && typeof definition.message !== "string") {
+      throw new TypeError(`Server function error "${code}" message must be a string`);
+    }
+
+    normalized[code] = Object.freeze({ ...definition });
+  }
+
+  return Object.freeze(normalized);
+}
+
+function createServerFnErrorHandler(
+  definitions: Readonly<ServerFnErrorDefinitions>,
+): ServerFnErrorHandler<ServerFnErrorDefinitions> {
+  return ((code: string, data: unknown): never => {
+    const definition = definitions[code];
+    if (!definition) {
+      throw new TypeError(`Server function error "${code}" is not declared`);
+    }
+
+    const parsed = parseServerFnFailureData(code, definition.data, data);
+    throw new ServerFnFailure(code, parsed, {
+      status: definition.status,
+      message: definition.message ?? "Server function failed",
+    });
+  }) as ServerFnErrorHandler<ServerFnErrorDefinitions>;
+}
+
+function parseServerFnFailureData(code: string, schema: ServerFnSchema, value: unknown) {
+  if (typeof schema.safeParse === "function") {
+    const result = schema.safeParse(value);
+    if (isPromiseLike(result)) {
+      throw new TypeError(`Server function error "${code}" data schema must parse synchronously`);
+    }
+    return unwrapSafeParseResult(result);
+  }
+
+  const result = schema.parse!(value);
+  if (isPromiseLike(result)) {
+    throw new TypeError(`Server function error "${code}" data schema must parse synchronously`);
+  }
+  return result;
+}
+
+function isPlainServerFnObject(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return Boolean(
+    value &&
+    (typeof value === "object" || typeof value === "function") &&
+    "then" in value &&
+    typeof (value as PromiseLike<unknown>).then === "function",
+  );
 }
 
 function resolveServerFnMiddleware(

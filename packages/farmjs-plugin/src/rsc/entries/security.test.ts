@@ -71,7 +71,9 @@ describe("generated server action security", () => {
     expect(entry).toContain("credentials: 'same-origin'");
     expect(entry).toContain("redirect: 'error'");
     expect(entry).toContain("cache: 'no-store'");
-    expect(entry).toContain("error.name = 'ServerActionError'");
+    expect(entry).toContain("function createFarmServerFnTransportError(value)");
+    expect(entry).toContain("Symbol.for('farm.server-fn.failure')");
+    expect(entry).toContain("throw createFarmServerFnTransportError(p.returnValue?.data)");
     expect(entry).not.toContain("throw p.returnValue?.data");
   });
 

@@ -5,7 +5,12 @@ import { act, createElement } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { createServerFn } from "../server-fn";
+import {
+  createServerFn,
+  type InferServerFnError,
+  type ServerActionError,
+  type ServerFnFailure,
+} from "../server-fn";
 import { useServerFn, type UseServerFnReturn } from "../server-fn-client";
 
 describe("useServerFn", () => {
@@ -358,5 +363,51 @@ describe("useServerFn", () => {
     act(() => {
       root?.render(createElement(App));
     });
+  });
+
+  it("infers declared failures in client action state", async () => {
+    const updateProduct = createServerFn({
+      input: z.object({ id: z.string() }),
+      errors: {
+        NOT_FOUND: {
+          status: 404,
+          data: z.object({ id: z.string() }),
+        },
+      },
+      handler({ input, error }) {
+        if (input.id === "missing") return error("NOT_FOUND", { id: input.id });
+        return { id: input.id, updated: true as const };
+      },
+    });
+    type UpdateError = InferServerFnError<typeof updateProduct>;
+    let action!: UseServerFnReturn<{ id: string }, { id: string; updated: true }, UpdateError>;
+
+    function App() {
+      action = useServerFn(updateProduct);
+      expectTypeOf(action.error).toEqualTypeOf<
+        ServerActionError | ServerFnFailure<"NOT_FOUND", { id: string }, 404> | null
+      >();
+      if (action.error?.name === "ServerFnFailure") {
+        expectTypeOf(action.error.code).toEqualTypeOf<"NOT_FOUND">();
+        expectTypeOf(action.error.data).toEqualTypeOf<{ id: string }>();
+      }
+      return createElement("output", null, action.error?.name ?? action.status);
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    await act(async () => {
+      await expect(action.submit({ id: "missing" })).rejects.toMatchObject({
+        name: "ServerFnFailure",
+        code: "NOT_FOUND",
+        status: 404,
+        data: { id: "missing" },
+      });
+    });
+
+    expect(container.textContent).toBe("ServerFnFailure");
   });
 });

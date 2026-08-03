@@ -459,22 +459,51 @@ When the function is called from the browser, `request` is the underlying Web `R
 
 Farm validates action origin metadata, accepted form/RSC content types, action ID shape, and request size before decoding an action. Browser calls use same-origin credentials and refuse redirects. Unexpected thrown values are logged on the server but become a generic `ServerActionError` in the browser, so secrets and stack traces are not serialized.
 
-Return typed expected failures instead of throwing messages that the UI needs to display:
+### Typed server function errors
+
+Declare expected failures next to the input contract. `error` accepts only declared codes, validates
+the public payload, and preserves the code, status, and data across the RSC action transport:
 
 ```ts
-export const renameProject = createServerFn({
-  input: renameProjectSchema,
-  async handler({ input }) {
-    const session = await requireSession();
-    if (!session.canEdit(input.projectId)) {
-      return { ok: false as const, reason: "forbidden" as const };
+export const updateProduct = createServerFn({
+  input: updateProductSchema,
+
+  errors: {
+    NOT_FOUND: {
+      status: 404,
+      data: z.object({ id: z.string() }),
+    },
+  },
+
+  handler({ input, error }) {
+    const product = findProduct(input.id);
+
+    if (!product) {
+      return error("NOT_FOUND", { id: input.id });
     }
 
-    await updateProject(input);
-    return { ok: true as const };
+    return product;
   },
 });
 ```
+
+`useServerFn`, `useMutation`, and `useFetcher` infer the declared error union. Narrow by `name` and
+`code` to recover the exact payload:
+
+```tsx
+const update = useServerFn(updateProduct);
+
+if (update.error?.name === "ServerFnFailure" && update.error.code === "NOT_FOUND") {
+  // id is inferred as string.
+  showMissingProduct(update.error.data.id);
+}
+```
+
+Add an optional `message` only when it is safe to display publicly. Declared error data schemas must
+support synchronous `parse()` or `safeParse()` because `error()` throws immediately. Hydrated calls
+carry `status` inside the Flight error envelope; progressive form submissions also use it as the HTTP
+status. Unexpected exceptions remain sanitized as a generic `ServerActionError`, without their
+message, stack, or custom properties.
 
 Action references identify which function to execute; they are not authorization tokens. Check authentication, roles, tenant ownership, and resource access inside every action that reads or changes private data.
 

@@ -2,7 +2,13 @@
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { createServerFn, createServerMiddleware, FARM_SERVER_FN_SYMBOL } from "../server-fn";
+import {
+  createServerFn,
+  createServerMiddleware,
+  FARM_SERVER_FN_SYMBOL,
+  ServerFnFailure,
+  type InferServerFnError,
+} from "../server-fn";
 import {
   getServerActionInvalidations,
   runWithServerActionRequest,
@@ -149,6 +155,66 @@ describe("createServerFn", () => {
 
     expectTypeOf(signup).parameter(0).toEqualTypeOf<{ email: string } | FormData>();
     expectTypeOf(await signup({ email: "ada@example.com" })).toEqualTypeOf<{ ok: true }>();
+  });
+
+  it("returns declared, validated failures through a typed error helper", async () => {
+    const updateProduct = createServerFn({
+      input: z.object({ id: z.string() }),
+      errors: {
+        NOT_FOUND: {
+          status: 404,
+          message: "Product not found",
+          data: z.object({ id: z.string() }),
+        },
+        FORBIDDEN: {
+          status: 403,
+          data: z.object({ permission: z.string() }),
+        },
+      },
+      handler({ input, error }) {
+        if (input.id === "__typecheck__") {
+          // @ts-expect-error only declared server function error codes are accepted.
+          error("MISSING", {});
+          // @ts-expect-error NOT_FOUND requires a string id.
+          error("NOT_FOUND", { id: 123 });
+        }
+
+        return error("NOT_FOUND", { id: input.id });
+      },
+    });
+
+    type UpdateProductError = InferServerFnError<typeof updateProduct>;
+    type NotFoundError = Extract<UpdateProductError, { code: "NOT_FOUND" }>;
+    expectTypeOf<NotFoundError["data"]>().toEqualTypeOf<{ id: string }>();
+    expectTypeOf<NotFoundError["status"]>().toEqualTypeOf<404>();
+
+    await expect(updateProduct({ id: "product-1" })).rejects.toMatchObject({
+      name: "ServerFnFailure",
+      message: "Product not found",
+      code: "NOT_FOUND",
+      status: 404,
+      data: { id: "product-1" },
+    });
+
+    try {
+      await updateProduct({ id: "product-1" });
+    } catch (error) {
+      expect(error).toBeInstanceOf(ServerFnFailure);
+    }
+  });
+
+  it("validates declared server function error definitions", () => {
+    expect(() =>
+      createServerFn({
+        errors: {
+          INVALID: {
+            status: 200,
+            data: z.object({}),
+          },
+        },
+        handler: () => true,
+      }),
+    ).toThrow('Server function error "INVALID" status must be an integer between 400 and 599');
   });
 
   it("validates and filters handler results with an output schema", async () => {
