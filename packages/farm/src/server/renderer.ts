@@ -382,7 +382,7 @@ export class ServerRenderer {
         this.ssgManifest = JSON.parse(content);
         logger.info(`Loaded SSG manifest: ${this.ssgManifest.length} pages`);
       }
-    } catch (error) {
+    } catch {
       // No manifest in dev mode or first build
     }
   }
@@ -937,6 +937,47 @@ export class ServerRenderer {
         }),
       );
       const shouldHydrate = moduleMetadata.shouldHydrate;
+      const layoutHydrationMetadata = layouts.map((layout) => {
+        const manifestEntry = routeManifest.layouts.find(
+          (entry) => entry.pattern === layout.pattern,
+        ) as
+          | {
+              isClientComponent?: boolean;
+              shouldHydrate?: boolean;
+              islandStrategy?: "load" | "interaction" | "visible" | "idle" | null;
+            }
+          | undefined;
+        if (typeof manifestEntry?.shouldHydrate === "boolean") {
+          return {
+            isClientComponent: manifestEntry.isClientComponent === true,
+            shouldHydrate: manifestEntry.shouldHydrate,
+            islandStrategy: manifestEntry.islandStrategy ?? null,
+          };
+        }
+        return getClientModuleMetadata(layout.modulePath, this.config.root);
+      });
+      const shouldHydrateLayout = layoutHydrationMetadata.some(
+        (metadata) => metadata.shouldHydrate,
+      );
+      const clientLayouts = layouts.map((layout, index) => ({
+        pattern: layout.pattern,
+        modulePath: layout.modulePath.startsWith(this.config.root)
+          ? layout.modulePath.slice(this.config.root.length)
+          : layout.modulePath,
+        shouldHydrate: layoutHydrationMetadata[index]?.shouldHydrate === true,
+        islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
+      }));
+      const hydrationStrategies = [
+        ...(shouldHydrate && moduleMetadata.islandStrategy ? [moduleMetadata.islandStrategy] : []),
+        ...layoutHydrationMetadata.flatMap((metadata) =>
+          metadata.shouldHydrate && metadata.islandStrategy ? [metadata.islandStrategy] : [],
+        ),
+      ];
+      const hydrationIslandStrategy = hydrationStrategies.every(
+        (strategy) => strategy === hydrationStrategies[0],
+      )
+        ? (hydrationStrategies[0] ?? "load")
+        : "load";
       const hasHydratableRouteSlots = renderedRouteSlots.some(
         (slot) => slot.isClientComponent || slot.shouldHydrate,
       );
@@ -944,8 +985,11 @@ export class ServerRenderer {
       (req as any).__FARM_PAGE_PATH__ = route.modulePath;
       (req as any).__FARM_ROUTE__ = pathname;
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
-      (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate;
-      (req as any).__FARM_ISLAND_STRATEGY__ = moduleMetadata.islandStrategy;
+      (req as any).__FARM_PAGE_SHOULD_HYDRATE__ = shouldHydrate;
+      (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ = shouldHydrateLayout;
+      (req as any).__FARM_LAYOUTS__ = clientLayouts;
+      (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate || shouldHydrateLayout;
+      (req as any).__FARM_ISLAND_STRATEGY__ = hydrationIslandStrategy;
       (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ = hasHydratableRouteSlots;
       (req as any).__FARM_LOADING_MODULE_PATH__ = loadingBoundaryEntry?.modulePath
         ? loadingBoundaryEntry.modulePath.substring(
@@ -1046,14 +1090,15 @@ export class ServerRenderer {
 
             // Wrap hydratable pages in a targeted container so the client can attach
             // without re-hydrating the surrounding layout shell.
-            if (isClientComponent || shouldHydrate) {
+            if (isClientComponent || shouldHydrate || shouldHydrateLayout) {
               pageElement = React.createElement(
                 "div",
                 {
                   id: "__farm_page__",
-                  "data-farm-client": "true",
+                  "data-farm-client": isClientComponent || shouldHydrate ? "true" : "false",
+                  ...(shouldHydrateLayout ? { "data-farm-layout-client": "true" } : {}),
                   "data-farm-island": "page",
-                  "data-farm-island-strategy": moduleMetadata.islandStrategy ?? "load",
+                  "data-farm-island-strategy": hydrationIslandStrategy,
                 },
                 pageElement,
               );
@@ -1606,9 +1651,15 @@ export class ServerRenderer {
 
       // Convert layouts array to object
       for (const layoutEntry of manifest.layouts) {
+        const layoutMetadata =
+          typeof (layoutEntry as any).shouldHydrate === "boolean"
+            ? (layoutEntry as any)
+            : getClientModuleMetadata(layoutEntry.modulePath, this.config.root);
         clientManifest.layouts[layoutEntry.pattern] = {
           modulePath: layoutEntry.modulePath,
           pattern: layoutEntry.pattern,
+          shouldHydrate: layoutMetadata.shouldHydrate,
+          islandStrategy: layoutMetadata.islandStrategy,
           preloads: [layoutEntry.modulePath],
           assets: [],
         };
@@ -1643,6 +1694,13 @@ window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any)
 window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
 window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
 window.__FARM_IS_CLIENT__ = ${JSON.stringify(isClientComponent)};
+window.__FARM_PAGE_SHOULD_HYDRATE__ = ${JSON.stringify(
+        (req as any).__FARM_PAGE_SHOULD_HYDRATE__ === true,
+      )};
+window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify(
+        (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true,
+      )};
+window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
@@ -1673,7 +1731,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
-      const { pipe, abort } = renderToPipeableStream(streamRoot, {
+      const { pipe } = renderToPipeableStream(streamRoot, {
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
           emitFarmEvent({

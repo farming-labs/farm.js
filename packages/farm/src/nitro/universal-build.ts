@@ -1010,26 +1010,100 @@ async function buildClient(
     pattern: string;
     modulePath: string;
     relativePath: string;
+    pageShouldHydrate: boolean;
     islandStrategy: FarmIslandStrategy;
   }> = [];
 
-  for (const route of pageRoutes) {
-    if (isFarmMarkdownPageFile(route.modulePath)) {
-      continue;
-    }
+  const clientLayouts = layoutRoutes.map((layout) => {
     try {
-      const metadata = getClientModuleMetadata(route.modulePath, root);
-      if (metadata.shouldHydrate) {
+      const metadata = getClientModuleMetadata(layout.modulePath, root);
+      return {
+        ...layout,
+        shouldHydrate: metadata.shouldHydrate,
+        islandStrategy: metadata.islandStrategy,
+      };
+    } catch (error) {
+      logger.warn(`⚠️  Could not inspect layout file ${layout.modulePath}: ${error}`);
+      return {
+        ...layout,
+        shouldHydrate: false,
+        islandStrategy: null,
+      };
+    }
+  });
+
+  const layoutAppliesToRoute = (layoutPattern: string, routePattern: string) =>
+    layoutPattern === "/" ||
+    routePattern === layoutPattern ||
+    routePattern.startsWith(`${layoutPattern}/`);
+
+  for (const route of pageRoutes) {
+    try {
+      const metadata = isFarmMarkdownPageFile(route.modulePath)
+        ? {
+            isClientComponent: false,
+            shouldHydrate: false,
+            islandStrategy: null,
+          }
+        : getClientModuleMetadata(route.modulePath, root);
+      const applicableClientLayouts = clientLayouts.filter(
+        (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+      );
+      if (metadata.shouldHydrate || applicableClientLayouts.length > 0) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
+        const hydrationStrategies = [
+          ...(metadata.islandStrategy ? [metadata.islandStrategy] : []),
+          ...applicableClientLayouts.flatMap((layout) =>
+            layout.islandStrategy ? [layout.islandStrategy] : [],
+          ),
+        ];
+        const islandStrategy = hydrationStrategies.every(
+          (strategy) => strategy === hydrationStrategies[0],
+        )
+          ? (hydrationStrategies[0] ?? "load")
+          : "load";
         clientPages.push({
           ...route,
           relativePath,
-          islandStrategy: metadata.islandStrategy ?? "load",
+          pageShouldHydrate: metadata.shouldHydrate,
+          islandStrategy,
         });
         logger.info(`📱 Found hydratable route: ${route.pattern} -> ${route.modulePath}`);
       }
     } catch (error) {
       logger.warn(`⚠️  Could not inspect route file ${route.modulePath}: ${error}`);
+    }
+  }
+
+  if (config.docs?.enabled) {
+    const docsEntry =
+      `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+    const applicableClientLayouts = clientLayouts.filter(
+      (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, docsEntry),
+    );
+    if (applicableClientLayouts.length > 0) {
+      const hydrationStrategies = applicableClientLayouts.flatMap((layout) =>
+        layout.islandStrategy ? [layout.islandStrategy] : [],
+      );
+      const islandStrategy = hydrationStrategies.every(
+        (strategy) => strategy === hydrationStrategies[0],
+      )
+        ? (hydrationStrategies[0] ?? "load")
+        : "load";
+      const docsPatterns =
+        docsEntry === "/" ? ["/", "/[...slug]"] : [docsEntry, `${docsEntry}/[...slug]`];
+      const docsClientRoutes = docsPatterns.map((pattern) => ({
+        pattern,
+        modulePath: "",
+        relativePath: "",
+        pageShouldHydrate: false,
+        islandStrategy,
+      }));
+
+      // Docs requests take precedence over app page routes on the server, so
+      // their synthetic layout-only entries must take precedence in the client
+      // route table as well.
+      clientPages.unshift(...docsClientRoutes);
     }
   }
 
@@ -1043,7 +1117,7 @@ async function buildClient(
   });
 
   logger.info(
-    `📱 Total hydratable routes detected: ${clientPages.length} pages and ${clientRouteSlots.length} slots`,
+    `📱 Total hydratable routes detected: ${clientPages.length} pages, ${clientLayouts.filter((layout) => layout.shouldHydrate).length} layouts, and ${clientRouteSlots.length} slots`,
   );
 
   // Generate client hydration entry code
@@ -1055,12 +1129,13 @@ async function buildClient(
   const clientEntryPath = path.join(clientEntryDir, "farm-client-entry.tsx");
   const clientHydrationCode = generateClientHydrationEntry(
     clientPages,
-    layoutRoutes,
+    clientLayouts,
     clientRouteSlots,
     root,
     srcDir,
     isFarmDocsSearchEnabled(config.docs),
     resolveFarmDocsSearchClientModule(root),
+    config.docs?.enabled ? config.docs.entry : undefined,
     config.i18n,
     config.plugins,
   );
@@ -1442,14 +1517,21 @@ function generateClientHydrationEntry(
     pattern: string;
     modulePath: string;
     relativePath: string;
+    pageShouldHydrate: boolean;
     islandStrategy: FarmIslandStrategy;
   }>,
-  layoutRoutes: Array<{ pattern: string; modulePath: string }>,
+  layoutRoutes: Array<{
+    pattern: string;
+    modulePath: string;
+    shouldHydrate: boolean;
+    islandStrategy: FarmIslandStrategy | null;
+  }>,
   clientRouteSlots: UniversalRouteSlot[],
   root: string,
   srcDir: string,
   docsSearchEnabled: boolean,
   docsSearchModuleId: string | undefined,
+  docsEntryPath: string | undefined,
   i18nConfig: ResolvedFarmConfig["i18n"] = {
     enabled: false,
     locales: ["en"],
@@ -1489,7 +1571,7 @@ function generateClientHydrationEntry(
     const relativePath = toImportPath(layout.modulePath);
     layoutImportStatements.push(`import Layout${index} from "${relativePath}";`);
     layoutRegistrations.push(
-      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index} }`,
+      `  { pattern: ${JSON.stringify(layout.pattern)}, Component: Layout${index}, shouldHydrate: ${JSON.stringify(layout.shouldHydrate)}, islandStrategy: ${JSON.stringify(layout.islandStrategy)} }`,
     );
   });
 
@@ -1528,6 +1610,19 @@ function isFarmLocaleDocumentChange() {
   return false;
 }
 `;
+  const docsNavigationRuntime = docsEntryPath
+    ? `
+const farmDocsEntryPath = ${JSON.stringify(docsEntryPath)};
+function isFarmDocsPath(pathname) {
+  const normalizedPath = pathname.length > 1 ? pathname.replace(/\\/+$/, "") : pathname;
+  return normalizedPath === farmDocsEntryPath || normalizedPath.startsWith(farmDocsEntryPath + "/");
+}
+`
+    : `
+function isFarmDocsPath() {
+  return false;
+}
+`;
 
   if (clientPages.length === 0 && clientRouteSlots.length === 0) {
     // No client pages - just basic runtime with CSS and SPA navigation
@@ -1538,6 +1633,7 @@ ${layoutImports}
 import { createClientPluginManager, installChunkErrorRecovery } from "@farm.js/core/internal/client-runtime";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
+${docsNavigationRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 installChunkErrorRecovery();
@@ -1553,6 +1649,10 @@ ${generateUniversalRouterStateProperties()}
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) {
+      window.location.href = href;
+      return;
+    }
+    if (isFarmDocsPath(url.pathname)) {
       window.location.href = href;
       return;
     }
@@ -1630,6 +1730,7 @@ ${generateUniversalRouterStateProperties()}
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
+    if (doc.getElementById("nd-docs-layout")) return false;
     
     // Update title
     const newTitle = doc.querySelector("title");
@@ -1785,11 +1886,14 @@ document.addEventListener("click", function(e) {
   const routeSlotEntries: string[] = [];
 
   clientPages.forEach((page) => {
-    const importPath = toImportPath(page.modulePath);
+    const load = page.pageShouldHydrate
+      ? `() => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default)`
+      : "null";
     routeEntries.push(`  {
     pattern: ${JSON.stringify(page.pattern)},
+    pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
     islandStrategy: ${JSON.stringify(page.islandStrategy)},
-    load: () => import(${JSON.stringify(importPath)}).then((module) => module.default),
+    load: ${load},
   }`);
   });
   clientRouteSlots.forEach((slot, index) => {
@@ -1817,6 +1921,7 @@ import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslan
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
+${docsNavigationRuntime}
 
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
@@ -1860,6 +1965,12 @@ function getApplicableLayouts(pathname) {
   return applicable;
 }
 
+function hasHydratableLayout(pathname) {
+  return getApplicableLayouts(pathname).some(function(layout) {
+    return layout.shouldHydrate === true;
+  });
+}
+
 // Wrap a page element with applicable layouts
 function wrapWithLayouts(pageElement, pathname, params) {
   const layouts = getApplicableLayouts(pathname);
@@ -1876,6 +1987,22 @@ function wrapWithLayouts(pageElement, pathname, params) {
   return wrapped;
 }
 
+function createLayoutPageBoundary(route, pageElement, serverHtml) {
+  const props = {
+    id: "__farm_page__",
+    "data-farm-client": route.pageShouldHydrate ? "true" : "false",
+    "data-farm-layout-client": "true",
+    "data-farm-island": "page",
+    "data-farm-island-strategy": route.islandStrategy || "load",
+  };
+  if (typeof serverHtml === "string") {
+    props.suppressHydrationWarning = true;
+    props.dangerouslySetInnerHTML = { __html: serverHtml };
+    return React.createElement("div", props);
+  }
+  return React.createElement("div", props, pageElement);
+}
+
 // Match pathname to client route
 function matchRoute(pathname) {
   pathname = getFarmRoutePathname(pathname);
@@ -1887,9 +2014,37 @@ function matchRoute(pathname) {
 }
 
 async function loadRouteComponent(route) {
+  if (!route.load) return null;
   if (route.Component) return route.Component;
   route.Component = await route.load();
   return route.Component;
+}
+
+async function createMatchedHydrationElement(matched, pathname, searchParams) {
+  const hydrateLayouts = hasHydratableLayout(pathname);
+  const params = matched.params;
+  let pageElement = null;
+
+  if (matched.route.pageShouldHydrate) {
+    const Component = await loadRouteComponent(matched.route);
+    if (!Component) return null;
+    const props = { params: params, searchParams: Promise.resolve(searchParams) };
+    pageElement = React.createElement(Component, props);
+  } else if (hydrateLayouts) {
+    const serverPage = document.getElementById("__farm_page__");
+    pageElement = createLayoutPageBoundary(
+      matched.route,
+      null,
+      serverPage ? serverPage.innerHTML : "",
+    );
+  }
+
+  if (!pageElement) return null;
+  if (!hydrateLayouts) return pageElement;
+  if (matched.route.pageShouldHydrate) {
+    pageElement = createLayoutPageBoundary(matched.route, pageElement);
+  }
+  return wrapWithLayouts(pageElement, pathname, params);
 }
 
 function matchesRoutePrefix(pathname, pattern) {
@@ -2065,9 +2220,10 @@ async function hydrate() {
     return;
   }
   
-  const container =
-    document.getElementById("__farm_page__") ||
-    document.getElementById("root");
+  const rootContainer = document.getElementById("root");
+  const container = hasHydratableLayout(pathname)
+    ? rootContainer
+    : document.getElementById("__farm_page__") || rootContainer;
   if (!container) {
     console.error("[Farm.js] No root element found");
     return;
@@ -2084,7 +2240,6 @@ async function hydrate() {
       strategy: matched.route.islandStrategy,
       signal: hydrationController.signal,
       hydrate: async function() {
-        const Component = await loadRouteComponent(matched.route);
         if (
           hydrationController.signal.aborted ||
           !container.isConnected ||
@@ -2092,13 +2247,13 @@ async function hydrate() {
         ) {
           return;
         }
-        const params = matched.params;
         const searchParams = Object.fromEntries(new URLSearchParams(window.location.search));
-        const props = { params: params, searchParams: Promise.resolve(searchParams) };
-        const pageElement = React.createElement(Component, props);
-        const wrappedElement = container.id === "__farm_page__"
-          ? pageElement
-          : wrapWithLayouts(pageElement, pathname, params);
+        const wrappedElement = await createMatchedHydrationElement(
+          matched,
+          pathname,
+          searchParams,
+        );
+        if (!wrappedElement) return;
         const shouldHydrate = !isHydrated && Boolean(container.innerHTML.trim());
         const hydrationSession = await farmClientRuntime.beginHydration({
           container,
@@ -2147,6 +2302,10 @@ ${generateUniversalRouterStateProperties()}
   navigate: async function(href, options = {}) {
     const url = new URL(href, window.location.origin);
     if (url.origin !== window.location.origin) {
+      window.location.href = href;
+      return;
+    }
+    if (isFarmDocsPath(url.pathname)) {
       window.location.href = href;
       return;
     }
@@ -2231,14 +2390,17 @@ ${generateUniversalRouterStateProperties()}
         }
       }
 
-      if (matched) {
+      if (matched?.route.pageShouldHydrate) {
         // Navigation itself signals intent, so destination routes load eagerly even
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
         const params = matched.params;
         const searchParams = Object.fromEntries(url.searchParams);
         const props = { params: params, searchParams: Promise.resolve(searchParams) };
-        const pageElement = React.createElement(Component, props);
+        let pageElement = React.createElement(Component, props);
+        if (hasHydratableLayout(pathname)) {
+          pageElement = createLayoutPageBoundary(matched.route, pageElement);
+        }
         const wrappedElement = wrapWithLayouts(pageElement, pathname, params);
 
         await farmClientRuntime.markNavigationLoaded(clientNavigation, {
@@ -2332,6 +2494,7 @@ ${generateUniversalRouterStateProperties()}
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
     if (isFarmLocaleDocumentChange(doc)) return false;
+    if (doc.getElementById("nd-docs-layout")) return false;
     const nextRouteSlots = readRouteSlotPayload(doc);
     
     // Update title
@@ -2367,20 +2530,20 @@ ${generateUniversalRouterStateProperties()}
     const newPathname = targetUrl.pathname;
     const matched = matchRoute(newPathname);
     if (matched) {
-      // Re-hydrate the client component
-      const Component = await loadRouteComponent(matched.route);
-      const params = matched.params;
       const searchParams = Object.fromEntries(targetUrl.searchParams);
-      const props = { params: params, searchParams: Promise.resolve(searchParams) };
-      const pageElement = React.createElement(Component, props);
+      const hydrateLayouts = hasHydratableLayout(newPathname);
       const pageContainer =
-        document.getElementById("__farm_page__") || currentRoot;
-      const wrappedElement = pageContainer.id === "__farm_page__"
-        ? pageElement
-        : wrapWithLayouts(pageElement, newPathname, params);
-      reactRoot = hydrateRoot(pageContainer, wrappedElement);
-      reactRootContainer = pageContainer;
-      isHydrated = true;
+        hydrateLayouts ? currentRoot : document.getElementById("__farm_page__") || currentRoot;
+      const wrappedElement = await createMatchedHydrationElement(
+        matched,
+        newPathname,
+        searchParams,
+      );
+      if (wrappedElement) {
+        reactRoot = hydrateRoot(pageContainer, wrappedElement);
+        reactRootContainer = pageContainer;
+        isHydrated = true;
+      }
     }
     return true;
   },
@@ -2513,9 +2676,8 @@ document.addEventListener("click", function(e) {
 // Initial hydration
 if (isFarmDocsSearchPage()) {
   mountFarmDocsSearch();
-} else {
-  void hydrate();
 }
+void hydrate();
 `.trim();
 }
 
@@ -3028,11 +3190,14 @@ function generateVirtualEntryCode(
 
   layoutRoutes.forEach((layout, index) => {
     const varName = `layoutRoute${index}`;
+    const clientMetadata = getClientModuleMetadata(layout.modulePath, config.root);
     layoutImports.push(`import * as ${varName} from "${layout.modulePath}";`);
     layoutRegistrations.push(`
   {
     pattern: ${JSON.stringify(layout.pattern)},
     module: ${varName},
+    shouldHydrate: ${JSON.stringify(clientMetadata.shouldHydrate)},
+    islandStrategy: ${JSON.stringify(clientMetadata.islandStrategy)},
   }`);
   });
 
@@ -4487,6 +4652,91 @@ function getApplicableLayouts(pathname) {
   return applicable;
 }
 
+${
+  config.docs?.enabled
+    ? `async function wrapFarmDocsResponseWithLayouts(request, response) {
+  if (request.method === "HEAD") return response;
+
+  const pathname = getFarmRoutePathname(new URL(request.url).pathname);
+  const applicableLayouts = getApplicableLayouts(pathname);
+  if (!applicableLayouts.some((layout) => layout.shouldHydrate === true)) {
+    return response;
+  }
+
+  const source = await response.text();
+  const bodyMatch = source.match(/<body([^>]*)>([\\s\\S]*?)<\\/body>/i);
+  if (!bodyMatch) {
+    return new Response(source, {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+  }
+
+  const matchedRoute = matchPageRoute(pathname);
+  const params = matchedRoute?.params || {};
+  const hydrationStrategies = applicableLayouts.flatMap((layout) =>
+    layout.shouldHydrate && layout.islandStrategy ? [layout.islandStrategy] : [],
+  );
+  const islandStrategy = hydrationStrategies.every(
+    (strategy) => strategy === hydrationStrategies[0],
+  )
+    ? (hydrationStrategies[0] || "load")
+    : "load";
+  let wrappedElement = React.createElement("div", {
+    id: "__farm_page__",
+    "data-farm-client": "false",
+    "data-farm-layout-client": "true",
+    "data-farm-island": "page",
+    "data-farm-island-strategy": islandStrategy,
+    dangerouslySetInnerHTML: { __html: bodyMatch[2] },
+  });
+
+  for (let index = applicableLayouts.length - 1; index >= 0; index--) {
+    const LayoutComponent = applicableLayouts[index].module.default;
+    if (LayoutComponent) {
+      wrappedElement = React.createElement(LayoutComponent, {
+        children: wrappedElement,
+        params,
+      });
+    }
+  }
+
+  const rootMarkup = await renderFarmElementToString(
+    ReactDOMServer,
+    React.createElement("div", { id: "root" }, wrappedElement),
+  );
+  let html = source.replace(
+    bodyMatch[0],
+    "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>",
+  );
+  if (!html.includes('href="/farm-client.css"')) {
+    html = html.replace(
+      /<[/]head>/i,
+      '  <link rel="stylesheet" href="/farm-client.css">\\n</head>',
+    );
+  }
+  if (!html.includes('id="__farm_route_slots_data__"')) {
+    html = html.replace(/<[/]body>/i, renderFarmClientBootstrapScript() + "\\n</body>");
+  }
+  if (!html.includes('src="/farm-client.js"')) {
+    html = html.replace(
+      /<[/]body>/i,
+      '  <script type="module" src="/farm-client.js"></script>\\n</body>',
+    );
+  }
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("etag");
+  return new Response(html, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}`
+    : ""
+}
+
 const pprShellCache = getFarmDataCache();
 
 function resolvePPRConfig(routeModule) {
@@ -4693,11 +4943,15 @@ async function handleFarmRequestInContext(
       if (!docsResponse.headers.get("content-type")?.toLowerCase().includes("text/html")) {
         return docsResponse;
       }
-      const docsHeaders = new Headers(docsResponse.headers);
+      const wrappedDocsResponse = await wrapFarmDocsResponseWithLayouts(
+        request,
+        docsResponse,
+      );
+      const docsHeaders = new Headers(wrappedDocsResponse.headers);
       docsHeaders.set("x-farm-preload-buffered", "1");
-      return new Response(docsResponse.body, {
-        status: docsResponse.status,
-        statusText: docsResponse.statusText,
+      return new Response(wrappedDocsResponse.body, {
+        status: wrappedDocsResponse.status,
+        statusText: wrappedDocsResponse.statusText,
         headers: docsHeaders,
       });
     }
@@ -4865,6 +5119,20 @@ async function handleFarmRequestInContext(
       
       // Get applicable layouts for this page
       const applicableLayouts = getApplicableLayouts(routePathname);
+      const shouldHydrateLayout = applicableLayouts.some(
+        (layout) => layout.shouldHydrate === true,
+      );
+      const hydrationStrategies = [
+        ...(route.shouldHydrate && route.islandStrategy ? [route.islandStrategy] : []),
+        ...applicableLayouts.flatMap((layout) =>
+          layout.shouldHydrate && layout.islandStrategy ? [layout.islandStrategy] : [],
+        ),
+      ];
+      const hydrationIslandStrategy = hydrationStrategies.every(
+        (strategy) => strategy === hydrationStrategies[0],
+      )
+        ? (hydrationStrategies[0] || "load")
+        : "load";
       const selectedRouteSlots = matchRouteSlots(
         routePathname,
         request.headers.get("x-farm-intercept-from"),
@@ -5077,14 +5345,17 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
-            if (route.shouldHydrate) {
+            if (route.shouldHydrate || shouldHydrateLayout) {
               pageElement = React.createElement(
                 "div",
                 {
                   id: "__farm_page__",
-                  "data-farm-client": "true",
+                  "data-farm-client": route.shouldHydrate ? "true" : "false",
+                  ...(shouldHydrateLayout
+                    ? { "data-farm-layout-client": "true" }
+                    : {}),
                   "data-farm-island": "page",
-                  "data-farm-island-strategy": route.islandStrategy || "load",
+                  "data-farm-island-strategy": hydrationIslandStrategy,
                 },
                 pageElement,
               );
