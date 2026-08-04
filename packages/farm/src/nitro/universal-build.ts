@@ -5464,65 +5464,15 @@ async function handleFarmRequestInContext(
           className: "farm-default-not-found",
           "aria-labelledby": "farm-default-not-found-title",
         },
-          React.createElement("div", { className: "farm-default-not-found__shell" },
-            React.createElement("section", { className: "farm-default-not-found__panel" },
-              React.createElement("div", { className: "farm-default-not-found__status" },
-                React.createElement("span", {
-                  "aria-hidden": "true",
-                  className: "farm-default-not-found__status-dot",
-                }),
-                React.createElement("span", null, "404 / Route not found")
-              ),
-              React.createElement("div", { className: "farm-default-not-found__hero" },
-                React.createElement("p", {
-                  "aria-hidden": "true",
-                  className: "farm-default-not-found__code",
-                }, "404"),
-                React.createElement("span", {
-                  "aria-hidden": "true",
-                  className: "farm-default-not-found__divider",
-                }),
-                React.createElement("div", { className: "farm-default-not-found__message" },
-                  React.createElement("h1", {
-                    id: "farm-default-not-found-title",
-                    className: "farm-default-not-found__title",
-                  }, "Page not found"),
-                  React.createElement("p", {
-                    className: "farm-default-not-found__description",
-                  }, "The page you're looking for doesn't exist or may have moved.")
-                )
-              ),
-              pathname ? React.createElement("div", {
-                className: "farm-default-not-found__route",
-              },
-                React.createElement("span", {
-                  className: "farm-default-not-found__route-label",
-                }, "Requested route"),
-                React.createElement("code", {
-                  className: "farm-default-not-found__route-path",
-                  title: pathname,
-                }, pathname)
-              ) : null,
-              React.createElement("div", { className: "farm-default-not-found__actions" },
-                React.createElement("a", {
-                  className: "farm-default-not-found__home",
-                  href: "/",
-                },
-                  React.createElement("span", null, "Return home"),
-                  React.createElement("span", {
-                    "aria-hidden": "true",
-                    className: "farm-default-not-found__home-arrow",
-                  }, "→")
-                )
-              )
-            ),
-            React.createElement("footer", { className: "farm-default-not-found__footer" },
-              React.createElement("a", {
-                className: "farm-default-not-found__brand",
-                href: "https://farmjs.dev",
-              }, "Farm.js"),
-              React.createElement("span", null, "Route boundary")
-            )
+          React.createElement("div", { className: "farm-default-not-found__content" },
+            React.createElement("h1", {
+              id: "farm-default-not-found-title",
+              className: "farm-default-not-found__code",
+            }, "404"),
+            React.createElement("a", {
+              className: "farm-default-not-found__home",
+              href: "/",
+            }, "Go home")
           )
         )
       );
