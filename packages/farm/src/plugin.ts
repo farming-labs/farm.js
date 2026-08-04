@@ -10,8 +10,18 @@ import {
   hasRequestContext,
   setRequestContext,
 } from "./request-context";
+import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 
 type MaybePromise<T> = T | Promise<T>;
+
+export interface FarmPluginIntegrationContext<TInstance = any> {
+  /** Key used to register the integration in farm.config.ts. */
+  readonly key: string;
+  readonly category: string;
+  readonly type: string;
+  readonly instance: TInstance;
+  readonly serverRuntime: boolean;
+}
 
 export class FarmRuntimeShutdownError extends Error {
   readonly errors: readonly unknown[];
@@ -51,6 +61,8 @@ export interface FarmPluginContext {
   viteServer?: ViteDevServer;
   isDev: boolean;
   isProd: boolean;
+  /** The owning integration when this plugin is contributed through `integration.plugins`. */
+  readonly integration?: Readonly<FarmPluginIntegrationContext>;
   /** Register resource cleanup that must run when the application runtime closes. */
   lifecycle: FarmPluginLifecycle;
   /** @deprecated Use `ctx.req` inside request hooks. */
@@ -500,11 +512,22 @@ export class PluginManager {
     };
   }
 
-  private createRequestHookContext(target: FarmRequest | Request): FarmRequestPluginContext {
+  private createPluginHookContext(
+    plugin: FarmPlugin,
+    context: FarmPluginContext = this.context,
+  ): FarmPluginContext {
+    const integration = getFarmPluginIntegrationContext(plugin);
+    return integration ? { ...context, integration } : context;
+  }
+
+  private createRequestHookContext(
+    target: FarmRequest | Request,
+    plugin: FarmPlugin,
+  ): FarmRequestPluginContext {
     const requestContext = this.context.requestContext;
 
     return {
-      ...this.context,
+      ...this.createPluginHookContext(plugin),
       req: {
         set(key, value, options) {
           requestContext.set(target, key, value, options);
@@ -556,7 +579,7 @@ export class PluginManager {
     return {
       ...this.createStateHookContext(plugin),
       request,
-      req: this.createRequestHookContext(request).req,
+      req: this.createRequestHookContext(request, plugin).req,
       kind: options.kind ?? "request",
       route: options.route,
       signal: request.signal,
@@ -645,7 +668,7 @@ export class PluginManager {
     context: FarmPluginContext = this.context,
   ): FarmPluginStateContext {
     return {
-      ...context,
+      ...this.createPluginHookContext(plugin, context),
       state: this.pluginStates.get(plugin),
     };
   }
@@ -781,7 +804,11 @@ export class PluginManager {
     return hooks;
   }
 
-  private getHookContext(hookName: keyof FarmPlugin, args: any[]): FarmPluginContext {
+  private getHookContext(
+    plugin: FarmPlugin,
+    hookName: keyof FarmPlugin,
+    args: any[],
+  ): FarmPluginContext {
     if (
       hookName === "beforeRequest" ||
       hookName === "afterResponse" ||
@@ -789,11 +816,11 @@ export class PluginManager {
     ) {
       const target = args[0];
       if (target && typeof target === "object") {
-        return this.createRequestHookContext(target);
+        return this.createRequestHookContext(target, plugin);
       }
     }
 
-    return this.context;
+    return this.createPluginHookContext(plugin);
   }
 
   addPlugin(plugin: FarmPlugin) {
@@ -859,7 +886,7 @@ export class PluginManager {
     for (const plugin of this.getSortedPlugins()) {
       if (!plugin.setup) continue;
       const state = await plugin.setup({
-        ...this.context,
+        ...this.createPluginHookContext(plugin),
         env: getResolvedEnv(),
       });
       this.pluginStates.set(plugin, state);
@@ -1064,7 +1091,7 @@ export class PluginManager {
 
     for (const plugin of plugins) {
       for (const hook of this.getPluginHooks(plugin, hookName)) {
-        const hookContext = this.getHookContext(hookName, args);
+        const hookContext = this.getHookContext(plugin, hookName, args);
         const result = await (hook as any).apply(plugin, [...args, hookContext]);
         if (result !== undefined) {
           return result;
@@ -1084,7 +1111,7 @@ export class PluginManager {
     for (const plugin of plugins) {
       for (const hook of this.getPluginHooks(plugin, hookName)) {
         const hookArgs = [value, ...args];
-        const hookContext = this.getHookContext(hookName, hookArgs);
+        const hookContext = this.getHookContext(plugin, hookName, hookArgs);
         const result = await (hook as any).apply(plugin, [...hookArgs, hookContext]);
         if (result !== undefined) {
           if (
@@ -1148,7 +1175,7 @@ export class PluginManager {
             }
           }
 
-          const hookContext = this.getHookContext(hookName, args);
+          const hookContext = this.getHookContext(plugin, hookName, args);
           try {
             await (hook as any).apply(plugin, [...args, hookContext]);
           } catch (error) {
@@ -1173,7 +1200,7 @@ export class PluginManager {
       const promises: Promise<any>[] = [];
       for (const plugin of plugins) {
         for (const hook of this.getPluginHooks(plugin, hookName)) {
-          const hookContext = this.getHookContext(hookName, args);
+          const hookContext = this.getHookContext(plugin, hookName, args);
           promises.push((hook as any).apply(plugin, [...args, hookContext]));
         }
       }

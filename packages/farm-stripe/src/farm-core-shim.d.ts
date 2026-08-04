@@ -578,30 +578,16 @@ declare module "@farm.js/core" {
 
   export type FarmIntegrationLogger = (event: FarmIntegrationLogEvent) => void | Promise<void>;
 
-  export interface FarmIntegrationPluginContributionContext<TInstance = unknown> {
-    key: string;
-    category: FarmIntegrationCategory;
-    type: string;
-    instance: TInstance;
-    serverRuntime: boolean;
-  }
-
-  export type FarmIntegrationPluginContributions<TInstance = unknown> =
-    | readonly FarmPlugin[]
-    | ((context: FarmIntegrationPluginContributionContext<TInstance>) => readonly FarmPlugin[]);
-
   export interface FarmIntegration<
     TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
     TConfig = unknown,
-    TInstance = unknown,
   > {
     readonly kind: "farm-integration";
     category: FarmIntegrationCategory;
     /** @deprecated Use category instead. */
     slot?: FarmIntegrationCategory;
     type: string;
-    instance: TInstance;
-    serverRuntime?: boolean;
+    instance: unknown;
     api?: FarmIntegrationAPI;
     schema?: TSchema;
     config?: FarmIntegrationConfigInput<TConfig, TSchema>;
@@ -615,7 +601,7 @@ declare module "@farm.js/core" {
     middleware?: readonly FarmIntegrationMiddleware<TSchema>[];
     providers?: readonly FarmIntegrationProvider[];
     documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
-    plugins?: FarmIntegrationPluginContributions<TInstance>;
+    plugins?: readonly FarmPlugin[];
   }
 
   export type FarmIntegrationInput = Omit<

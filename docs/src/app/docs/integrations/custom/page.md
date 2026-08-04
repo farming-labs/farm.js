@@ -338,15 +338,7 @@ type IntegrationAuthoringShape = {
   ready?: (ctx: unknown) => void | Promise<void>;
   dispose?: (ctx: unknown) => void | Promise<void>;
   log?: (event: unknown) => void | Promise<void>;
-  plugins?:
-    | readonly unknown[]
-    | ((ctx: {
-        key: string;
-        category: string;
-        type: string;
-        instance: unknown;
-        serverRuntime: boolean;
-      }) => readonly unknown[]);
+  plugins?: readonly unknown[];
 };
 ```
 
@@ -355,52 +347,55 @@ In normal app code you do not need to write this type by hand. `defineIntegratio
 ## Compose integration and application plugins
 
 An integration can contribute the framework behavior it needs without asking every application to
-repeat that plugin in `farm.config.ts`. Use a `plugins` factory when the contribution needs the
-integration's registration key or shared instance.
+repeat that plugin in `farm.config.ts`. The contributed plugin is still a normal `definePlugin()`
+plugin. Farm binds the owning integration when it normalizes the config.
 
-**src/integrations/acme.ts**
+**src/integrations/better-auth.ts**
 
 ```ts
 import { defineIntegration, definePlugin } from "@farm.js/core";
+import { betterAuth } from "better-auth";
 
-const acmeClient = {
-  region: "eu-west",
-};
+export function betterAuthSessionPlugin() {
+  return definePlugin({
+    name: "better-auth:session",
+    runtime: {
+      async context({ request, integration }) {
+        if (!integration) {
+          throw new Error("better-auth:session must be registered by an integration");
+        }
 
-export const acme = defineIntegration({
-  category: "custom",
-  type: "acme",
-  instance: acmeClient,
-  plugins({ key, instance }) {
-    return [
-      definePlugin({
-        name: `acme:${key}:runtime`,
-        runtime: {
-          after({ response }) {
-            const headers = new Headers(response.headers);
-            headers.set("x-acme-region", instance.region);
+        return {
+          session: await integration.instance.api.getSession({
+            headers: request.headers,
+          }),
+        };
+      },
+    },
+  });
+}
 
-            return new Response(response.body, {
-              status: response.status,
-              statusText: response.statusText,
-              headers,
-            });
-          },
-        },
-      }),
-    ];
-  },
+export const auth = defineIntegration({
+  category: "auth",
+  type: "better-auth",
+  instance: betterAuth(),
+  plugins: [betterAuthSessionPlugin()],
 });
 ```
 
-The application can still add cross-cutting plugins globally. Both contributions participate in
-the same plugin pipeline:
+`integration` contains the registration `key`, `category`, `type`, shared `instance`, and
+`serverRuntime` ownership. It is available to `setup` and every server hook on plugins contributed
+through `integration.plugins`. Because a normal application plugin has no owner, the field is
+optional and remains `undefined` for global plugins.
+
+The application can still add cross-cutting plugins globally. Both kinds participate in the same
+plugin pipeline:
 
 **farm.config.ts**
 
 ```ts
 import { defineConfig, definePlugin } from "@farm.js/core";
-import { acme } from "./src/integrations/acme";
+import { auth } from "./src/integrations/better-auth";
 
 const requestId = definePlugin({
   name: "app:request-id",
@@ -420,7 +415,7 @@ const requestId = definePlugin({
 
 export default defineConfig({
   integrations: {
-    acme,
+    auth,
   },
   plugins: [requestId],
 });
@@ -428,13 +423,13 @@ export default defineConfig({
 
 Farm normalizes the integration lifecycle plugin, its contributed plugins, and the application's
 global plugins into one list. Normal plugin ordering still applies, including `enforce: "pre"` and
-`enforce: "post"`. A static `plugins: [plugin]` array remains supported when no context is needed.
+`enforce: "post"`. Contributed plugins inherit the integration's `serverRuntime` ownership, and Farm
+rejects duplicate plugin names within one integration. Diagnostic tooling can inspect provenance
+with `getFarmIntegrationPluginOwner(plugin)`.
 
-The contribution factory runs during config normalization and production build loading, so keep it
-deterministic and free of network or database side effects. Perform runtime work in plugin hooks.
-Contributed plugins inherit the integration's `serverRuntime` ownership and Farm rejects duplicate
-plugin names within one integration. Diagnostic tooling can inspect provenance with
-`getFarmIntegrationPluginOwner(plugin)`.
+The binding is server-only. Farm does not serialize the integration instance or private metadata
+into a client plugin bundle. Only data explicitly returned from `client.public` can cross that
+boundary.
 
 ## Config validation
 

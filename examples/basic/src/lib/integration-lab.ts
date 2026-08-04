@@ -47,6 +47,34 @@ const routeLabState = {
   ready: false,
 };
 
+function integrationLabResponsePlugin() {
+  return definePlugin({
+    name: 'integration-lab:response',
+    runtime: {
+      after({ kind, route, response, integration }) {
+        if (!integration) {
+          throw new Error('integration-lab:response must be registered by an integration');
+        }
+        if (kind !== 'integration' || route?.pattern !== '/api/route-lab/message') {
+          return;
+        }
+
+        const headers = new Headers(response.headers);
+        headers.set(
+          'x-integration-plugin',
+          `${integration.key}:${integration.instance.label}`,
+        );
+
+        return new Response(response.body, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      },
+    },
+  });
+}
+
 const routeLab = defineIntegration({
   category: 'custom',
   type: 'integration-routes-lab',
@@ -71,29 +99,7 @@ const routeLab = defineIntegration({
   ready() {
     routeLabState.ready = true;
   },
-  plugins({ key, instance }) {
-    return [
-      definePlugin({
-        name: `integration-lab:${key}:response`,
-        runtime: {
-          after({ kind, route, response }) {
-            if (kind !== 'integration' || route?.pattern !== '/api/route-lab/message') {
-              return;
-            }
-
-            const headers = new Headers(response.headers);
-            headers.set('x-integration-plugin', `${key}:${instance.label}`);
-
-            return new Response(response.body, {
-              status: response.status,
-              statusText: response.statusText,
-              headers,
-            });
-          },
-        },
-      }),
-    ];
-  },
+  plugins: [integrationLabResponsePlugin()],
   middleware: [
     {
       matcher: '/api/route-lab/message',

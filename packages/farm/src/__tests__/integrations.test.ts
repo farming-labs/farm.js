@@ -1,7 +1,7 @@
 import { EventEmitter } from "events";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { PluginManager } from "../plugin";
+import { definePlugin, PluginManager, type FarmPluginIntegrationContext } from "../plugin";
 import {
   defineIntegration,
   dispatchIntegrationRequest,
@@ -96,35 +96,43 @@ describe("integrations runtime", () => {
     ).toBe(true);
   });
 
-  it("resolves contextual integration plugin contributions with ownership metadata", () => {
+  it("binds integration context to normal contributed plugins", async () => {
     const state = {
       label: "billing",
     };
+    let setupIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
+    let requestIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
+    let globalIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
+
+    function billingPlugin() {
+      return definePlugin({
+        name: "billing:session",
+        setup({ integration }) {
+          setupIntegration = integration;
+        },
+        runtime: {
+          context({ integration }) {
+            requestIntegration = integration;
+            return {
+              billingLabel: integration?.instance.label,
+            };
+          },
+        },
+      });
+    }
+
     const integration = defineIntegration({
       category: "payment",
       type: "contextual-plugins",
       instance: state,
-      plugins({ key, category, type, instance, serverRuntime }) {
-        expect(key).toBe("checkout");
-        expect(category).toBe("payment");
-        expect(type).toBe("contextual-plugins");
-        expect(instance).toBe(state);
-        expectTypeOf(instance.label).toEqualTypeOf<string>();
-        expect(serverRuntime).toBe(true);
-
-        return [
-          {
-            name: `${key}:${instance.label}`,
-          },
-        ];
-      },
+      plugins: [billingPlugin()],
     });
 
     const plugins = resolveIntegrationPlugins({ checkout: integration });
 
     expect(plugins.map((plugin) => plugin.name)).toEqual([
       "farm:integration:payment:contextual-plugins",
-      "checkout:billing",
+      "billing:session",
     ]);
     expect(getFarmIntegrationPluginOwner(plugins[0])).toEqual({
       key: "checkout",
@@ -140,6 +148,34 @@ describe("integrations runtime", () => {
       source: "contribution",
       serverRuntime: true,
     });
+
+    const globalPlugin = definePlugin({
+      name: "global:request",
+      runtime: {
+        context({ integration }) {
+          globalIntegration = integration;
+          return {};
+        },
+      },
+    });
+    const manager = createManager();
+    manager.addPlugins([...plugins, globalPlugin]);
+
+    const response = await manager.runRuntimeRequest(
+      new Request("http://localhost/checkout"),
+      () => new Response("ok"),
+    );
+
+    expect(await response.text()).toBe("ok");
+    expect(setupIntegration).toMatchObject({
+      key: "checkout",
+      category: "payment",
+      type: "contextual-plugins",
+      serverRuntime: true,
+    });
+    expect(setupIntegration?.instance).toBe(state);
+    expect(requestIntegration).toBe(setupIntegration);
+    expect(globalIntegration).toBeUndefined();
   });
 
   it("keeps static plugin arrays compatible and propagates server ownership", () => {

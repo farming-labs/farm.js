@@ -170,6 +170,7 @@ export type {
   PluginRequestContext,
   FarmPlugin,
   FarmPluginContext,
+  FarmPluginIntegrationContext,
   FarmPluginLifecycle,
   FarmRequestPluginContext,
   FarmRequestStore,
