@@ -7,19 +7,45 @@ import "@farm.js/core/image";
 
 /**
  * Auto-generated route types from src/app.
- * Link href is typed automatically via module augmentation. Regenerated on dev start and when routes change.
+ * Link href and route component props are typed automatically from generated declarations.
+ * Regenerated on dev start and when routes change.
  * Set suppressLintOnLink: true in farm.config.ts to accept any string on Link href.
  */
-export type RoutePath = "/" | "/about" | "/api-demo" | `/blog/${string}` | "/dashboard" | "/products" | "/team";
+export type RoutePath =
+  | "/"
+  | "/about"
+  | "/api-demo"
+  | `/blog/${string}`
+  | "/dashboard"
+  | "/products"
+  | "/team";
+export type RoutePattern =
+  | "/"
+  | "/about"
+  | "/api-demo"
+  | "/blog/[slug]"
+  | "/dashboard"
+  | "/products"
+  | "/team";
+export type RouteModulePattern =
+  | "/"
+  | "/about"
+  | "/api-demo"
+  | "/blog/[slug]"
+  | "/dashboard"
+  | "/products"
+  | "/team";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
+    pattern: import("./farm").RoutePattern;
   }
 }
 
 declare module "@farm.js/core" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
+    pattern: import("./farm").RoutePattern;
   }
   // Ensure root import ("@farm.js/core") uses the same typed Link signature as client entry.
   const Link: typeof import("@farm.js/core/client").Link;
@@ -29,5 +55,42 @@ declare module "@farm.js/core" {
 declare module "@farm.js/core/dist/client.js" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;
+    pattern: import("./farm").RoutePattern;
   }
 }
+
+declare global {
+  namespace FarmJS {
+    interface RouteRegistry {
+      pattern: import("./farm").RouteModulePattern;
+    }
+  }
+}
+
+/**
+ * Auto-generated env types from farm.config.
+ * Regenerated on dev start, build, and farm generate.
+ */
+import type FarmConfig from "../farm.config";
+import type { InferEnv } from "@farm.js/core/env";
+
+type FarmConfigEnv = typeof FarmConfig extends { env?: infer TEnv } ? NonNullable<TEnv> : never;
+type FarmResolvedEnv = [FarmConfigEnv] extends [never]
+  ? { server: {}; public: {} }
+  : InferEnv<FarmConfigEnv>;
+
+declare module "@farm.js/core/env" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+declare module "@farm.js/core" {
+  interface FarmEnvTypes {
+    server: FarmResolvedEnv["server"];
+    public: FarmResolvedEnv["public"];
+  }
+}
+
+export {};

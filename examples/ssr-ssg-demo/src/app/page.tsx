@@ -10,6 +10,8 @@
  * - You need real-time data
  */
 
+import { aliasVerification } from "@/lib/alias-verification";
+
 // Simulate fetching real-time data
 async function getCurrentTime() {
   // In real app, this could be: await fetch('/api/time')
@@ -25,7 +27,7 @@ export default async function HomePage() {
   const currentTime = await getCurrentTime();
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8" data-alias-verification={aliasVerification}>
       <div className="bg-white rounded-lg shadow-md p-6">
         <div className="flex items-center gap-2 mb-4">
           <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
