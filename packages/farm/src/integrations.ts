@@ -10,7 +10,13 @@ import type {
   InferIntegrationAPIFromRoutes,
 } from "./integration-api";
 import type { InferFarmIntegrationOrmClient } from "./integration-orm";
-import type { FarmPlugin, FarmPluginContext, FarmRequestStore } from "./plugin";
+import { setFarmPluginIntegrationContext } from "./plugin-integration-context";
+import type {
+  FarmPlugin,
+  FarmPluginContext,
+  FarmPluginIntegrationContext,
+  FarmRequestStore,
+} from "./plugin";
 import {
   clearRequestContext,
   deleteRequestContext,
@@ -446,16 +452,25 @@ export interface FarmIntegrationLogEvent {
 
 export type FarmIntegrationLogger = (event: FarmIntegrationLogEvent) => void | Promise<void>;
 
+export interface FarmIntegrationPluginOwner {
+  key: string;
+  category: FarmIntegrationCategory;
+  type: string;
+  source: "lifecycle" | "contribution";
+  serverRuntime: boolean;
+}
+
 export interface FarmIntegration<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
   TConfig = unknown,
+  TInstance = unknown,
 > {
   readonly kind: "farm-integration";
   category: FarmIntegrationCategory;
   /** @deprecated Use category instead. */
   slot?: FarmIntegrationCategory;
   type: string;
-  instance: unknown;
+  instance: TInstance;
   /** Set to false when a platform adapter owns this integration's production routes. */
   serverRuntime?: boolean;
   api?: FarmIntegrationAPI;
@@ -471,21 +486,33 @@ export interface FarmIntegration<
   middleware?: readonly FarmIntegrationMiddleware<TSchema>[];
   providers?: readonly FarmIntegrationProvider[];
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
-  plugins?: readonly FarmPlugin[];
+  /** Additional Farm plugins owned and configured by this integration. */
+  plugins?: readonly FarmPlugin<any, any, any, any, NoInfer<TInstance>>[];
 }
 
-export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any> | undefined>;
+export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any, any> | undefined>;
 
 const FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME = Symbol.for(
   "@farm.js/core/integration-plugin-server-runtime",
 );
+const FARM_INTEGRATION_PLUGIN_OWNER = Symbol.for("@farm.js/core/integration-plugin-owner");
 
-/** @internal Identifies lifecycle plugins owned by platform-managed integrations. */
+/** @internal Identifies plugins owned by platform-managed integrations. */
 export function getFarmIntegrationPluginServerRuntime(plugin: FarmPlugin): boolean | undefined {
   const value = (plugin as FarmPlugin & Record<symbol, unknown>)[
     FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME
   ];
   return typeof value === "boolean" ? value : undefined;
+}
+
+/** Returns the integration that contributed a normalized plugin, when applicable. */
+export function getFarmIntegrationPluginOwner(
+  plugin: FarmPlugin,
+): Readonly<FarmIntegrationPluginOwner> | undefined {
+  const value = (plugin as FarmPlugin & Record<symbol, unknown>)[FARM_INTEGRATION_PLUGIN_OWNER];
+  return value && typeof value === "object"
+    ? (value as Readonly<FarmIntegrationPluginOwner>)
+    : undefined;
 }
 
 type IntegrationRouteBuilderOptions<
@@ -819,13 +846,16 @@ type FarmIntegrationEndpointsInput<
 type FarmIntegrationInput<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
   TConfig = unknown,
+  TInstance = unknown,
 > = Omit<
-  FarmIntegration<TSchema, TConfig>,
-  "kind" | "category" | "slot" | "config" | "routes" | "endpoints"
+  FarmIntegration<TSchema, TConfig, TInstance>,
+  "kind" | "category" | "slot" | "instance" | "config" | "routes" | "endpoints" | "plugins"
 > & {
+  instance: TInstance;
   config?: FarmIntegrationConfigInput<TConfig, TSchema>;
   routes?: FarmIntegrationRoutesInput<TSchema>;
   endpoints?: FarmIntegrationEndpointsInput<TSchema>;
+  plugins?: readonly FarmPlugin<any, any, any, any, NoInfer<TInstance>>[];
 } & (
     | {
         category: FarmIntegrationCategory;
@@ -988,16 +1018,18 @@ function flattenIntegrationEndpoints(
 export function defineIntegration<
   const TSchema extends FarmIntegrationSchema | undefined,
   const TConfig,
-  TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
+  TIntegration extends FarmIntegrationInput<TSchema, TConfig, any>,
 >(
-  integration: TIntegration & FarmIntegrationInput<TSchema, TConfig>,
+  integration: TIntegration &
+    FarmIntegrationInput<TSchema, TConfig, NoInfer<TIntegration["instance"]>>,
 ): DefinedIntegration<TIntegration, TSchema>;
 export function defineIntegration<
   const TSchema extends FarmIntegrationSchema | undefined,
   const TConfig,
-  TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
+  TIntegration extends FarmIntegrationInput<TSchema, TConfig, any>,
 >(
-  integration: TIntegration & FarmIntegrationInput<TSchema, TConfig>,
+  integration: TIntegration &
+    FarmIntegrationInput<TSchema, TConfig, NoInfer<TIntegration["instance"]>>,
 ): DefinedIntegration<TIntegration, TSchema> {
   const category = integration.category ?? integration.slot;
 
@@ -1072,14 +1104,90 @@ export function resolveIntegrationPlugins(
       continue;
     }
 
-    plugins.push(createIntegrationPlugin(key, integration));
-
-    if (integration.plugins?.length) {
-      plugins.push(...integration.plugins);
-    }
+    const owner = createIntegrationPluginOwner(key, integration, "lifecycle");
+    plugins.push(withIntegrationPluginOwner(createIntegrationPlugin(key, integration), owner));
+    plugins.push(...resolveIntegrationPluginContributions(key, integration));
   }
 
   return plugins;
+}
+
+function resolveIntegrationPluginContributions(
+  key: string,
+  integration: FarmIntegration<any, any>,
+): FarmPlugin[] {
+  const contributions = integration.plugins;
+  if (!contributions) return [];
+  if (!Array.isArray(contributions)) {
+    throw new TypeError(`Integration "${key}" plugins must be an array`);
+  }
+
+  const names = new Set<string>();
+  return contributions.map((plugin, index) => {
+    if (!plugin || typeof plugin !== "object" || typeof plugin.name !== "string") {
+      throw new TypeError(`Integration "${key}" plugin at index ${index} is invalid`);
+    }
+    const name = plugin.name.trim();
+    if (!name) {
+      throw new TypeError(`Integration "${key}" plugin at index ${index} requires a name`);
+    }
+    if (names.has(name)) {
+      throw new Error(`Integration "${key}" contributes duplicate plugin name "${name}"`);
+    }
+    names.add(name);
+
+    return withIntegrationPluginOwner(
+      plugin,
+      createIntegrationPluginOwner(key, integration, "contribution"),
+      createIntegrationPluginContext(key, integration),
+    );
+  });
+}
+
+function createIntegrationPluginOwner(
+  key: string,
+  integration: FarmIntegration<any, any>,
+  source: FarmIntegrationPluginOwner["source"],
+): Readonly<FarmIntegrationPluginOwner> {
+  return Object.freeze({
+    key,
+    category: integration.category,
+    type: integration.type,
+    source,
+    serverRuntime: integration.serverRuntime !== false,
+  });
+}
+
+function createIntegrationPluginContext(
+  key: string,
+  integration: FarmIntegration<any, any>,
+): Readonly<FarmPluginIntegrationContext> {
+  return Object.freeze({
+    key,
+    category: integration.category,
+    type: integration.type,
+    instance: integration.instance,
+    serverRuntime: integration.serverRuntime !== false,
+  });
+}
+
+function withIntegrationPluginOwner(
+  plugin: FarmPlugin,
+  owner: Readonly<FarmIntegrationPluginOwner>,
+  integration?: Readonly<FarmPluginIntegrationContext>,
+): FarmPlugin {
+  const descriptors = Object.getOwnPropertyDescriptors(plugin);
+  Reflect.deleteProperty(descriptors, FARM_INTEGRATION_PLUGIN_OWNER);
+  Reflect.deleteProperty(descriptors, FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME);
+  const ownedPlugin = Object.create(Object.getPrototypeOf(plugin), descriptors) as FarmPlugin;
+  Object.defineProperty(ownedPlugin, FARM_INTEGRATION_PLUGIN_OWNER, { value: owner });
+  Object.defineProperty(ownedPlugin, FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME, {
+    value: owner.serverRuntime,
+  });
+  if (integration) {
+    setFarmPluginIntegrationContext(ownedPlugin, integration);
+  }
+  return ownedPlugin;
 }
 
 export function getIntegrationProviders(

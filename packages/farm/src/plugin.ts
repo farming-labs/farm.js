@@ -10,8 +10,19 @@ import {
   hasRequestContext,
   setRequestContext,
 } from "./request-context";
+import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 
 type MaybePromise<T> = T | Promise<T>;
+declare const FARM_PLUGIN_INTEGRATION_INSTANCE: unique symbol;
+
+export interface FarmPluginIntegrationContext<TInstance = unknown> {
+  /** Key used to register the integration in farm.config.ts. */
+  readonly key: string;
+  readonly category: string;
+  readonly type: string;
+  readonly instance: TInstance;
+  readonly serverRuntime: boolean;
+}
 
 export class FarmRuntimeShutdownError extends Error {
   readonly errors: readonly unknown[];
@@ -46,11 +57,13 @@ export interface FarmRequestStore {
   snapshot(options?: { exposedOnly?: boolean }): Map<string, unknown>;
 }
 
-export interface FarmPluginContext {
+export interface FarmPluginContext<TIntegrationInstance = unknown> {
   config: FarmConfig;
   viteServer?: ViteDevServer;
   isDev: boolean;
   isProd: boolean;
+  /** The owning integration when this plugin is contributed through `integration.plugins`. */
+  readonly integration?: Readonly<FarmPluginIntegrationContext<TIntegrationInstance>>;
   /** Register resource cleanup that must run when the application runtime closes. */
   lifecycle: FarmPluginLifecycle;
   /** @deprecated Use `ctx.req` inside request hooks. */
@@ -65,7 +78,9 @@ export interface FarmPluginLifecycle {
   onShutdown(dispose: () => void | Promise<void>): () => void;
 }
 
-export interface FarmRequestPluginContext extends FarmPluginContext {
+export interface FarmRequestPluginContext<
+  TIntegrationInstance = unknown,
+> extends FarmPluginContext<TIntegrationInstance> {
   /** Request-scoped values for the current hook invocation. */
   readonly req: FarmRequestStore;
 }
@@ -170,17 +185,23 @@ export interface FarmPluginRouteRuntimePayload {
   params?: Record<string, string>;
 }
 
-export interface FarmPluginSetupContext extends FarmPluginContext {
+export interface FarmPluginSetupContext<
+  TIntegrationInstance = unknown,
+> extends FarmPluginContext<TIntegrationInstance> {
   env: ResolvedFarmEnv;
 }
 
-export interface FarmPluginStateContext<TState = unknown> extends FarmPluginContext {
+export interface FarmPluginStateContext<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+> extends FarmPluginContext<TIntegrationInstance> {
   state: TState;
 }
 
 export interface FarmPluginRuntimeBaseEvent<
   TState = unknown,
-> extends FarmPluginStateContext<TState> {
+  TIntegrationInstance = unknown,
+> extends FarmPluginStateContext<TState, TIntegrationInstance> {
   request: Request;
   /** Request-scoped values shared by plugin hooks. */
   req: FarmRequestStore;
@@ -190,19 +211,24 @@ export interface FarmPluginRuntimeBaseEvent<
   waitUntil(promise: Promise<unknown>): void;
 }
 
-export type FarmPluginRuntimeContextEvent<TState = unknown> = FarmPluginRuntimeBaseEvent<TState>;
+export type FarmPluginRuntimeContextEvent<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+> = FarmPluginRuntimeBaseEvent<TState, TIntegrationInstance>;
 
 export interface FarmPluginRuntimeBeforeEvent<
   TState = unknown,
   TRequestContext extends object = Record<string, unknown>,
-> extends FarmPluginRuntimeBaseEvent<TState> {
+  TIntegrationInstance = unknown,
+> extends FarmPluginRuntimeBaseEvent<TState, TIntegrationInstance> {
   ctx: Readonly<TRequestContext>;
 }
 
 export interface FarmPluginRuntimeAfterEvent<
   TState = unknown,
   TRequestContext extends object = Record<string, unknown>,
-> extends FarmPluginRuntimeBeforeEvent<TState, TRequestContext> {
+  TIntegrationInstance = unknown,
+> extends FarmPluginRuntimeBeforeEvent<TState, TRequestContext, TIntegrationInstance> {
   response: Response;
   durationMs: number;
 }
@@ -210,30 +236,39 @@ export interface FarmPluginRuntimeAfterEvent<
 export interface FarmPluginRuntimeErrorEvent<
   TState = unknown,
   TRequestContext extends object = Record<string, unknown>,
-> extends FarmPluginRuntimeBeforeEvent<TState, TRequestContext> {
+  TIntegrationInstance = unknown,
+> extends FarmPluginRuntimeBeforeEvent<TState, TRequestContext, TIntegrationInstance> {
   error: unknown;
   durationMs: number;
 }
 
-export type FarmPluginRuntimeStartEvent<TState = unknown> = FarmPluginStateContext<TState>;
+export type FarmPluginRuntimeStartEvent<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+> = FarmPluginStateContext<TState, TIntegrationInstance>;
 
-export interface FarmPluginRuntimeCloseEvent<TState = unknown>
-  extends FarmPluginStateContext<TState>, ShutdownPayload {}
+export interface FarmPluginRuntimeCloseEvent<TState = unknown, TIntegrationInstance = unknown>
+  extends FarmPluginStateContext<TState, TIntegrationInstance>, ShutdownPayload {}
 
 export interface FarmPluginRuntimeHooks<
   TState = unknown,
   TRequestContext extends object = Record<string, unknown>,
+  TIntegrationInstance = unknown,
 > {
-  start?(event: FarmPluginRuntimeStartEvent<TState>): MaybePromise<void>;
-  context?(event: FarmPluginRuntimeContextEvent<TState>): MaybePromise<TRequestContext>;
+  start?(event: FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>): MaybePromise<void>;
+  context?(
+    event: FarmPluginRuntimeContextEvent<TState, TIntegrationInstance>,
+  ): MaybePromise<TRequestContext>;
   before?(
-    event: FarmPluginRuntimeBeforeEvent<TState, TRequestContext>,
+    event: FarmPluginRuntimeBeforeEvent<TState, TRequestContext, TIntegrationInstance>,
   ): MaybePromise<Request | Response | void>;
   after?(
-    event: FarmPluginRuntimeAfterEvent<TState, TRequestContext>,
+    event: FarmPluginRuntimeAfterEvent<TState, TRequestContext, TIntegrationInstance>,
   ): MaybePromise<Response | void>;
-  error?(event: FarmPluginRuntimeErrorEvent<TState, TRequestContext>): MaybePromise<void>;
-  close?(event: FarmPluginRuntimeCloseEvent<TState>): MaybePromise<void>;
+  error?(
+    event: FarmPluginRuntimeErrorEvent<TState, TRequestContext, TIntegrationInstance>,
+  ): MaybePromise<void>;
+  close?(event: FarmPluginRuntimeCloseEvent<TState, TIntegrationInstance>): MaybePromise<void>;
 }
 
 export interface FarmPluginRuntimeRequestOptions {
@@ -258,46 +293,61 @@ export type FarmPluginDiscoveredRoute =
   | ({ kind: "middleware" } & MiddlewareDiscoveredPayload)
   | ({ kind: "api" } & APIRouteDiscoveredPayload);
 
-export interface FarmPluginRouterHooks<TState = unknown> {
+export interface FarmPluginRouterHooks<TState = unknown, TIntegrationInstance = unknown> {
   discovered?(
     route: FarmPluginDiscoveredRoute,
-    context: FarmPluginStateContext<TState>,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
   ): MaybePromise<void>;
   generated?(
     routes: RoutesGeneratedPayload,
-    context: FarmPluginStateContext<TState>,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
   ): MaybePromise<void>;
-  before?(route: RouteMatchPayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+  before?(
+    route: RouteMatchPayload,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+  ): MaybePromise<void>;
   after?(
     result: RouteMatchResultPayload,
-    context: FarmPluginStateContext<TState>,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
   ): MaybePromise<void>;
 }
 
-export interface FarmPluginRenderHooks<TState = unknown> {
+export interface FarmPluginRenderHooks<TState = unknown, TIntegrationInstance = unknown> {
   before?(
     render: RenderLifecyclePayload,
-    context: FarmPluginStateContext<TState>,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
   ): MaybePromise<void>;
   html?(
     html: string,
     render: RenderLifecyclePayload,
-    context: FarmPluginStateContext<TState>,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
   ): MaybePromise<string | void>;
 }
 
-export interface FarmPluginBuildHooks<TState = unknown> {
+export interface FarmPluginBuildHooks<TState = unknown, TIntegrationInstance = unknown> {
   before?(
     bundle: BundleLifecyclePayload,
-    context: FarmPluginStateContext<TState>,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
   ): MaybePromise<void>;
-  configure?(buildConfig: any, context: FarmPluginStateContext<TState>): MaybePromise<any>;
-  after?(result: BundleResultPayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+  configure?(
+    buildConfig: any,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+  ): MaybePromise<any>;
+  after?(
+    result: BundleResultPayload,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+  ): MaybePromise<void>;
 }
 
-export interface FarmPluginDevHooks<TState = unknown> {
-  server?(viteServer: ViteDevServer, context: FarmPluginStateContext<TState>): MaybePromise<void>;
-  update?(update: HMRUpdatePayload, context: FarmPluginStateContext<TState>): MaybePromise<void>;
+export interface FarmPluginDevHooks<TState = unknown, TIntegrationInstance = unknown> {
+  server?(
+    viteServer: ViteDevServer,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+  ): MaybePromise<void>;
+  update?(
+    update: HMRUpdatePayload,
+    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+  ): MaybePromise<void>;
 }
 
 export interface FarmPluginClientConfig<
@@ -313,129 +363,166 @@ export interface FarmPlugin<
   TRequestContext extends object = Record<string, unknown>,
   TClientState = any,
   TClientPublic = any,
+  TIntegrationInstance = unknown,
 > {
   name: string;
   version?: string;
   enforce?: "pre" | "post";
 
   /** Transform Farm config before it is resolved. */
-  configure?: (config: FarmConfig, context: FarmPluginContext) => MaybePromise<FarmConfig | void>;
+  configure?: (
+    config: FarmConfig,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => MaybePromise<FarmConfig | void>;
   /** Initialize private plugin state once for this plugin manager. */
-  setup?: (context: FarmPluginSetupContext) => MaybePromise<TState>;
+  setup?: (context: FarmPluginSetupContext<TIntegrationInstance>) => MaybePromise<TState>;
 
-  runtime?: FarmPluginRuntimeHooks<TState, TRequestContext>;
-  router?: FarmPluginRouterHooks<TState>;
-  render?: FarmPluginRenderHooks<TState>;
-  build?: FarmPluginBuildHooks<TState>;
-  dev?: FarmPluginDevHooks<TState>;
+  runtime?: FarmPluginRuntimeHooks<TState, TRequestContext, TIntegrationInstance>;
+  router?: FarmPluginRouterHooks<TState, TIntegrationInstance>;
+  render?: FarmPluginRenderHooks<TState, TIntegrationInstance>;
+  build?: FarmPluginBuildHooks<TState, TIntegrationInstance>;
+  dev?: FarmPluginDevHooks<TState, TIntegrationInstance>;
   /** Optional browser lifecycle for this logical plugin. */
   client?: FarmPluginClientConfig<TClientState, TClientPublic>;
 
+  /** @internal Carries the expected integration instance type without runtime data. */
+  readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
+
   /** @deprecated Use `setup` instead. */
-  init?: (context: FarmPluginContext) => void | Promise<void>;
+  init?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
   /** @deprecated Use `runtime.start` instead. */
-  ready?: (context: FarmPluginContext) => void | Promise<void>;
+  ready?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
   /** @deprecated Use `dev.server` instead. */
   devServerCreated?: (
     viteServer: ViteDevServer,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
 
   /** @deprecated Use `configure` instead. */
-  config?: (config: FarmConfig, context: FarmPluginContext) => FarmConfig | Promise<FarmConfig>;
-  configResolved?: (config: FarmConfig, context: FarmPluginContext) => void | Promise<void>;
+  config?: (
+    config: FarmConfig,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => FarmConfig | Promise<FarmConfig>;
+  configResolved?: (
+    config: FarmConfig,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => void | Promise<void>;
   /** @deprecated Use `build.before` instead. */
-  buildStart?: (context: FarmPluginContext) => void | Promise<void>;
+  buildStart?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
   /** @deprecated Use `build.after` instead. */
-  buildEnd?: (context: FarmPluginContext) => void | Promise<void>;
+  buildEnd?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
 
   /** @deprecated Use `router.discovered` instead. */
   routeDiscovered?: (
     route: RouteDiscoveredPayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.generated` instead. */
   routesGenerated?: (
     routes: RoutesGeneratedPayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.discovered` instead. */
   middlewareDiscovered?: (
     middleware: MiddlewareDiscoveredPayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.discovered` instead. */
   apiRouteDiscovered?: (
     route: APIRouteDiscoveredPayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.before` instead. */
-  beforeRouteMatch?: (route: RouteMatchPayload, context: FarmPluginContext) => void | Promise<void>;
+  beforeRouteMatch?: (
+    route: RouteMatchPayload,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => void | Promise<void>;
   /** @deprecated Use `router.after` instead. */
   afterRouteMatch?: (
     result: RouteMatchResultPayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `render.before` instead. */
   beforeRender?: (
     render: RenderLifecyclePayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `render.html` instead. */
   afterRender?: (
     html: string,
     render: RenderLifecyclePayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => string | Promise<string> | void | Promise<void>;
   /** @deprecated Use `runtime.before` instead. */
   beforeApiHandler?: (
     request: Request,
     api: APIHandlerLifecyclePayload,
-    context: FarmRequestPluginContext,
+    context: FarmRequestPluginContext<TIntegrationInstance>,
   ) => Request | Promise<Request> | void | Promise<void>;
   /** @deprecated Use `runtime.after` instead. */
   afterApiHandler?: (
     response: Response,
     api: APIHandlerLifecyclePayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => Response | Promise<Response> | void | Promise<void>;
-  onError?: (error: ErrorLifecyclePayload, context: FarmPluginContext) => void | Promise<void>;
+  onError?: (
+    error: ErrorLifecyclePayload,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => void | Promise<void>;
   /** @deprecated Use `dev.update` instead. */
-  hmrUpdate?: (update: HMRUpdatePayload, context: FarmPluginContext) => void | Promise<void>;
+  hmrUpdate?: (
+    update: HMRUpdatePayload,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => void | Promise<void>;
   /** @deprecated Use `build.before` instead. */
   beforeBundle?: (
     bundle: BundleLifecyclePayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `build.after` instead. */
-  afterBundle?: (result: BundleResultPayload, context: FarmPluginContext) => void | Promise<void>;
+  afterBundle?: (
+    result: BundleResultPayload,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => void | Promise<void>;
   /** @deprecated Use `build.configure` instead. */
-  beforeNitroBuild?: (nitroConfig: any, context: FarmPluginContext) => any | Promise<any>;
+  beforeNitroBuild?: (
+    nitroConfig: any,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => any | Promise<any>;
   afterNitroBuild?: (
     payload: NitroBuildLifecyclePayload,
-    context: FarmPluginContext,
+    context: FarmPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use `runtime.close` instead. */
-  shutdown?: (payload: ShutdownPayload, context: FarmPluginContext) => void | Promise<void>;
+  shutdown?: (
+    payload: ShutdownPayload,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => void | Promise<void>;
 
   /** @deprecated Use the Web Request based `runtime.before` hook instead. */
   beforeRequest?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmRequestPluginContext,
+    context: FarmRequestPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
   /** @deprecated Use the Web Response based `runtime.after` hook instead. */
   afterResponse?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmRequestPluginContext,
+    context: FarmRequestPluginContext<TIntegrationInstance>,
   ) => void | Promise<void>;
 
   // Transform hooks
   /** @deprecated Use `render.html` instead. */
-  transformHTML?: (html: string, context: FarmPluginContext) => string | Promise<string>;
+  transformHTML?: (
+    html: string,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => string | Promise<string>;
   /** @deprecated Use `render.before` or `render.html` instead. */
-  transformPage?: (component: any, context: FarmPluginContext) => any | Promise<any>;
+  transformPage?: (
+    component: any,
+    context: FarmPluginContext<TIntegrationInstance>,
+  ) => any | Promise<any>;
 }
 
 export class PluginManager {
@@ -500,11 +587,22 @@ export class PluginManager {
     };
   }
 
-  private createRequestHookContext(target: FarmRequest | Request): FarmRequestPluginContext {
+  private createPluginHookContext(
+    plugin: FarmPlugin,
+    context: FarmPluginContext = this.context,
+  ): FarmPluginContext {
+    const integration = getFarmPluginIntegrationContext(plugin);
+    return integration ? { ...context, integration } : context;
+  }
+
+  private createRequestHookContext(
+    target: FarmRequest | Request,
+    plugin: FarmPlugin,
+  ): FarmRequestPluginContext {
     const requestContext = this.context.requestContext;
 
     return {
-      ...this.context,
+      ...this.createPluginHookContext(plugin),
       req: {
         set(key, value, options) {
           requestContext.set(target, key, value, options);
@@ -556,7 +654,7 @@ export class PluginManager {
     return {
       ...this.createStateHookContext(plugin),
       request,
-      req: this.createRequestHookContext(request).req,
+      req: this.createRequestHookContext(request, plugin).req,
       kind: options.kind ?? "request",
       route: options.route,
       signal: request.signal,
@@ -645,7 +743,7 @@ export class PluginManager {
     context: FarmPluginContext = this.context,
   ): FarmPluginStateContext {
     return {
-      ...context,
+      ...this.createPluginHookContext(plugin, context),
       state: this.pluginStates.get(plugin),
     };
   }
@@ -781,7 +879,11 @@ export class PluginManager {
     return hooks;
   }
 
-  private getHookContext(hookName: keyof FarmPlugin, args: any[]): FarmPluginContext {
+  private getHookContext(
+    plugin: FarmPlugin,
+    hookName: keyof FarmPlugin,
+    args: any[],
+  ): FarmPluginContext {
     if (
       hookName === "beforeRequest" ||
       hookName === "afterResponse" ||
@@ -789,11 +891,11 @@ export class PluginManager {
     ) {
       const target = args[0];
       if (target && typeof target === "object") {
-        return this.createRequestHookContext(target);
+        return this.createRequestHookContext(target, plugin);
       }
     }
 
-    return this.context;
+    return this.createPluginHookContext(plugin);
   }
 
   addPlugin(plugin: FarmPlugin) {
@@ -859,7 +961,7 @@ export class PluginManager {
     for (const plugin of this.getSortedPlugins()) {
       if (!plugin.setup) continue;
       const state = await plugin.setup({
-        ...this.context,
+        ...this.createPluginHookContext(plugin),
         env: getResolvedEnv(),
       });
       this.pluginStates.set(plugin, state);
@@ -1064,7 +1166,7 @@ export class PluginManager {
 
     for (const plugin of plugins) {
       for (const hook of this.getPluginHooks(plugin, hookName)) {
-        const hookContext = this.getHookContext(hookName, args);
+        const hookContext = this.getHookContext(plugin, hookName, args);
         const result = await (hook as any).apply(plugin, [...args, hookContext]);
         if (result !== undefined) {
           return result;
@@ -1084,7 +1186,7 @@ export class PluginManager {
     for (const plugin of plugins) {
       for (const hook of this.getPluginHooks(plugin, hookName)) {
         const hookArgs = [value, ...args];
-        const hookContext = this.getHookContext(hookName, hookArgs);
+        const hookContext = this.getHookContext(plugin, hookName, hookArgs);
         const result = await (hook as any).apply(plugin, [...hookArgs, hookContext]);
         if (result !== undefined) {
           if (
@@ -1106,12 +1208,21 @@ export class PluginManager {
   }
 
   async runHookParallel<K extends keyof FarmPlugin>(hookName: K, ...args: any[]): Promise<boolean> {
+    return this.runHookParallelFiltered(hookName, () => true, ...args);
+  }
+
+  /** @internal Runs hooks for only the plugins selected by the runtime adapter. */
+  async runHookParallelFiltered<K extends keyof FarmPlugin>(
+    hookName: K,
+    include: (plugin: FarmPlugin) => boolean,
+    ...args: any[]
+  ): Promise<boolean> {
     if (hookName === "shutdown" && !this.runtimeShutdownHooksRunning) {
       await this.closeRuntime(args[0]?.reason);
       return false;
     }
 
-    const plugins = this.getSortedPlugins();
+    const plugins = this.getSortedPlugins().filter(include);
 
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([
@@ -1139,7 +1250,7 @@ export class PluginManager {
             }
           }
 
-          const hookContext = this.getHookContext(hookName, args);
+          const hookContext = this.getHookContext(plugin, hookName, args);
           try {
             await (hook as any).apply(plugin, [...args, hookContext]);
           } catch (error) {
@@ -1164,7 +1275,7 @@ export class PluginManager {
       const promises: Promise<any>[] = [];
       for (const plugin of plugins) {
         for (const hook of this.getPluginHooks(plugin, hookName)) {
-          const hookContext = this.getHookContext(hookName, args);
+          const hookContext = this.getHookContext(plugin, hookName, args);
           promises.push((hook as any).apply(plugin, [...args, hookContext]));
         }
       }
@@ -1191,9 +1302,32 @@ export function definePlugin<
   TRequestContext extends object = Record<string, never>,
   TClientState = unknown,
   TClientPublic = undefined,
+  TIntegrationInstance = unknown,
 >(
-  plugin: FarmPlugin<TState, TRequestContext, TClientState, TClientPublic>,
-): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic> {
+  plugin: FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance>,
+): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance> {
   return plugin;
+}
+
+export namespace definePlugin {
+  /** Bind an integration instance type while preserving inference for plugin state and context. */
+  export function forIntegration<TIntegrationInstance>() {
+    return function defineBoundPlugin<
+      TState = undefined,
+      TRequestContext extends object = Record<string, never>,
+      TClientState = unknown,
+      TClientPublic = undefined,
+    >(
+      plugin: FarmPlugin<
+        TState,
+        TRequestContext,
+        TClientState,
+        TClientPublic,
+        TIntegrationInstance
+      >,
+    ): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance> {
+      return plugin;
+    };
+  }
 }
 export { farmPlugin } from "./vite";

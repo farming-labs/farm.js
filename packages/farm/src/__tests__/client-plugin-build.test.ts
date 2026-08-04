@@ -3,6 +3,7 @@ import {
   generateFarmClientPluginEntryCode,
   resolveFarmClientPlugins,
 } from "../client-plugin-build";
+import { defineIntegration, resolveIntegrationPlugins } from "../integrations";
 import { definePlugin } from "../plugin";
 
 describe("client plugin build boundary", () => {
@@ -53,6 +54,35 @@ describe("client plugin build boundary", () => {
     expect(generated.registrations).toContain("storefront");
     expect(generated.registrations).not.toContain(serverSecret);
     expect(generated.registrations).not.toContain("source");
+  });
+
+  it("does not serialize an owning integration or its instance", () => {
+    const integration = defineIntegration({
+      category: "auth",
+      type: "private-instance",
+      instance: { secret: "integration-secret-must-stay-server-side" },
+      plugins: [
+        definePlugin({
+          name: "auth:client-lifecycle",
+          client: {
+            public: { enabled: true },
+            setup({ public: config }) {
+              return { enabled: config.enabled };
+            },
+          },
+        }),
+      ],
+    });
+
+    const generated = generateFarmClientPluginEntryCode(
+      resolveIntegrationPlugins({ auth: integration }),
+    );
+
+    const registrations = Function(`return ${generated.registrations}`)();
+    expect(generated.registrations).toContain('name: "auth:client-lifecycle"');
+    expect(registrations[0].public).toEqual({ enabled: true });
+    expect(generated.registrations).not.toContain("integration-secret-must-stay-server-side");
+    expect(generated.registrations).not.toContain("private-instance");
   });
 
   it("emits valid JavaScript for methods, functions, and arrows", async () => {

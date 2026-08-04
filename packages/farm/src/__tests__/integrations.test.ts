@@ -1,10 +1,11 @@
 import { EventEmitter } from "events";
 import { describe, expect, expectTypeOf, it, vi } from "vitest";
 import { z } from "zod";
-import { PluginManager } from "../plugin";
+import { definePlugin, PluginManager, type FarmPluginIntegrationContext } from "../plugin";
 import {
   defineIntegration,
   dispatchIntegrationRequest,
+  getFarmIntegrationPluginOwner,
   getFarmIntegrationPluginServerRuntime,
   getRegisteredIntegrationRuntime,
   getIntegrationDocumentNavigationMatchers,
@@ -93,6 +94,121 @@ describe("integrations runtime", () => {
     expect(
       getFarmIntegrationPluginServerRuntime(resolveIntegrationPlugins({ agent: serverOwned })[0]),
     ).toBe(true);
+  });
+
+  it("binds integration context to normal contributed plugins", async () => {
+    const state = {
+      label: "billing",
+    };
+    let setupIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
+    let requestIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
+    let globalIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
+
+    function billingPlugin() {
+      return definePlugin.forIntegration<typeof state>()({
+        name: "billing:session",
+        setup({ integration }) {
+          setupIntegration = integration;
+        },
+        runtime: {
+          context({ integration }) {
+            requestIntegration = integration;
+            return {
+              billingLabel: integration?.instance.label,
+            };
+          },
+        },
+      });
+    }
+
+    const integration = defineIntegration({
+      category: "payment",
+      type: "contextual-plugins",
+      instance: state,
+      plugins: [billingPlugin()],
+    });
+
+    const plugins = resolveIntegrationPlugins({ checkout: integration });
+
+    expect(plugins.map((plugin) => plugin.name)).toEqual([
+      "farm:integration:payment:contextual-plugins",
+      "billing:session",
+    ]);
+    expect(getFarmIntegrationPluginOwner(plugins[0])).toEqual({
+      key: "checkout",
+      category: "payment",
+      type: "contextual-plugins",
+      source: "lifecycle",
+      serverRuntime: true,
+    });
+    expect(getFarmIntegrationPluginOwner(plugins[1])).toEqual({
+      key: "checkout",
+      category: "payment",
+      type: "contextual-plugins",
+      source: "contribution",
+      serverRuntime: true,
+    });
+
+    const globalPlugin = definePlugin({
+      name: "global:request",
+      runtime: {
+        context({ integration }) {
+          globalIntegration = integration;
+          return {};
+        },
+      },
+    });
+    const manager = createManager();
+    manager.addPlugins([...plugins, globalPlugin]);
+
+    const response = await manager.runRuntimeRequest(
+      new Request("http://localhost/checkout"),
+      () => new Response("ok"),
+    );
+
+    expect(await response.text()).toBe("ok");
+    expect(setupIntegration).toMatchObject({
+      key: "checkout",
+      category: "payment",
+      type: "contextual-plugins",
+      serverRuntime: true,
+    });
+    expect(setupIntegration?.instance).toBe(state);
+    expect(requestIntegration).toBe(setupIntegration);
+    expect(globalIntegration).toBeUndefined();
+  });
+
+  it("keeps static plugin arrays compatible and propagates server ownership", () => {
+    const contributedPlugin = {
+      name: "platform:contribution",
+    };
+    const integration = defineIntegration({
+      category: "agent",
+      type: "platform-plugins",
+      instance: {},
+      serverRuntime: false,
+      plugins: [contributedPlugin],
+    });
+
+    const plugins = resolveIntegrationPlugins({ agent: integration });
+
+    expect(plugins[1]).not.toBe(contributedPlugin);
+    expect(plugins[1].name).toBe(contributedPlugin.name);
+    expect(getFarmIntegrationPluginServerRuntime(plugins[1])).toBe(false);
+    expect(getFarmIntegrationPluginOwner(plugins[1])?.source).toBe("contribution");
+  });
+
+  it("rejects duplicate plugin names from one integration", () => {
+    const integration = defineIntegration({
+      category: "custom",
+      type: "duplicate-plugins",
+      instance: {},
+      plugins: [{ name: "duplicate" }, { name: "duplicate" }],
+    });
+
+    expect(() => resolveIntegrationPlugins({ duplicate: integration })).toThrow(
+      'Integration "duplicate" contributes duplicate plugin name "duplicate"',
+    );
   });
 
   it("preserves optional integration schemas and exposes them through schema helpers", async () => {

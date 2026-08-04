@@ -1,4 +1,5 @@
 import { expectTypeOf } from "vitest";
+import { defineIntegration, type FarmIntegration } from "../integrations";
 import { definePlugin, type FarmPlugin, type FarmPluginRuntimeSession } from "../plugin";
 
 const inferredPlugin = definePlugin({
@@ -34,3 +35,87 @@ expectTypeOf(inferredPlugin).toMatchTypeOf<
 >();
 
 expectTypeOf<FarmPluginRuntimeSession["response"]>().toEqualTypeOf<Response | undefined>();
+
+interface AuthIntegrationInstance {
+  auth: {
+    api: {
+      getSession(input: { headers: Headers }): Promise<{ userId: string } | null>;
+    };
+  };
+}
+
+const authPlugin = definePlugin.forIntegration<AuthIntegrationInstance>()({
+  name: "typed-auth",
+  runtime: {
+    async context({ request, integration }) {
+      if (!integration) return {};
+
+      expectTypeOf(integration.instance.auth.api.getSession).toBeFunction();
+      // @ts-expect-error unknown instance methods must fail type checking
+      integration.instance.auth.api.missingMethod();
+
+      return {
+        session: await integration.instance.auth.api.getSession({ headers: request.headers }),
+      };
+    },
+  },
+});
+
+const authIntegration = defineIntegration({
+  category: "auth",
+  type: "typed-auth",
+  instance: {
+    auth: {
+      api: {
+        async getSession() {
+          return { userId: "user-1" };
+        },
+      },
+    },
+  },
+  plugins: [authPlugin],
+});
+
+expectTypeOf(authIntegration).toMatchTypeOf<
+  FarmIntegration<undefined, unknown, AuthIntegrationInstance>
+>();
+
+const unknownExplicitIntegration: FarmIntegration = {
+  kind: "farm-integration",
+  category: "auth",
+  type: "unknown-explicit-auth",
+  instance: authIntegration.instance,
+  plugins: [
+    // @ts-expect-error an explicit integration must declare its instance type to accept bound plugins
+    authPlugin,
+  ],
+};
+
+expectTypeOf(unknownExplicitIntegration.instance).toEqualTypeOf<unknown>();
+
+const incompatibleExplicitIntegration: FarmIntegration<
+  undefined,
+  unknown,
+  { auth: { enabled: boolean } }
+> = {
+  kind: "farm-integration",
+  category: "auth",
+  type: "incompatible-explicit-auth",
+  instance: { auth: { enabled: true } },
+  plugins: [
+    // @ts-expect-error explicitly typed integrations reject plugins requiring another instance
+    authPlugin,
+  ],
+};
+
+expectTypeOf(incompatibleExplicitIntegration.instance.auth.enabled).toEqualTypeOf<boolean>();
+
+defineIntegration({
+  category: "auth",
+  type: "wrong-auth-instance",
+  instance: { auth: { enabled: true } },
+  plugins: [
+    // @ts-expect-error the plugin requires an auth instance with api.getSession
+    authPlugin,
+  ],
+});

@@ -344,6 +344,115 @@ type IntegrationAuthoringShape = {
 
 In normal app code you do not need to write this type by hand. `defineIntegration` preserves the exact route, endpoint, config, and schema types for inference.
 
+## Compose integration and application plugins
+
+An integration can contribute the framework behavior it needs without asking every application to
+repeat that plugin in `farm.config.ts`. The contributed plugin is still a normal `definePlugin()`
+plugin. Farm binds the owning integration when it normalizes the config.
+
+**src/integrations/better-auth.ts**
+
+```ts
+import { defineIntegration, definePlugin } from "@farm.js/core";
+import { betterAuth } from "better-auth";
+
+type BetterAuthInstance = ReturnType<typeof betterAuth>;
+
+export function betterAuthSessionPlugin() {
+  return definePlugin.forIntegration<BetterAuthInstance>()({
+    name: "better-auth:session",
+    runtime: {
+      async context({ request, integration }) {
+        if (!integration) {
+          throw new Error("better-auth:session must be registered by an integration");
+        }
+
+        return {
+          session: await integration.instance.api.getSession({
+            headers: request.headers,
+          }),
+        };
+      },
+    },
+  });
+}
+
+export const auth = defineIntegration({
+  category: "auth",
+  type: "better-auth",
+  instance: betterAuth(),
+  plugins: [betterAuthSessionPlugin()],
+});
+```
+
+`integration` contains the registration `key`, `category`, `type`, shared `instance`, and
+`serverRuntime` ownership. It is available to `setup` and every server hook on plugins contributed
+through `integration.plugins`. Because a normal application plugin has no owner, the field is
+optional and remains `undefined` for global plugins.
+
+`forIntegration<T>()` is a type-only binding: it does not wrap the plugin or add runtime data. It gives
+every server hook the exact instance type and makes `defineIntegration` reject a plugin whose
+expected instance does not match the configured `instance`. If the configured value is
+`{ auth: betterAuth() }`, bind `{ auth: BetterAuthInstance }` and
+`integration.instance.auth.api` is fully checked and autocompleted.
+
+Prefer the return type inferred by `defineIntegration`. If a package must publish an explicit
+integration type, preserve the instance as the third `FarmIntegration` type argument so its plugin
+requirements remain checked:
+
+```ts
+import type { FarmIntegration } from "@farm.js/core";
+
+type AuthResources = { auth: BetterAuthInstance };
+type AuthIntegration = FarmIntegration<undefined, unknown, AuthResources>;
+```
+
+Using `FarmIntegration` without that instance argument intentionally leaves the instance unknown;
+it does not silently accept an integration-bound plugin.
+
+The application can still add cross-cutting plugins globally. Both kinds participate in the same
+plugin pipeline:
+
+**farm.config.ts**
+
+```ts
+import { defineConfig, definePlugin } from "@farm.js/core";
+import { auth } from "./src/integrations/better-auth";
+
+const requestId = definePlugin({
+  name: "app:request-id",
+  runtime: {
+    after({ response }) {
+      const headers = new Headers(response.headers);
+      headers.set("x-request-id-policy", "app");
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    },
+  },
+});
+
+export default defineConfig({
+  integrations: {
+    auth,
+  },
+  plugins: [requestId],
+});
+```
+
+Farm normalizes the integration lifecycle plugin, its contributed plugins, and the application's
+global plugins into one list. Normal plugin ordering still applies, including `enforce: "pre"` and
+`enforce: "post"`. Contributed plugins inherit the integration's `serverRuntime` ownership, and Farm
+rejects duplicate plugin names within one integration. Diagnostic tooling can inspect provenance
+with `getFarmIntegrationPluginOwner(plugin)`.
+
+The binding is server-only. Farm does not serialize the integration instance or private metadata
+into a client plugin bundle. Only data explicitly returned from `client.public` can cross that
+boundary.
+
 ## Config validation
 
 Use `config` when an integration needs secrets or user options. Farm resolves config in this order:
