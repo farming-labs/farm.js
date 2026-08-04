@@ -16,7 +16,7 @@ describe("DefaultNotFoundPage", () => {
     expect(html).toContain(">404</h1>");
     expect(html).toContain("Not found");
     expect(html).toContain('href="/"');
-    expect(html).toContain("Go home");
+    expect(html).toContain("GO HOME");
     expect(html).not.toContain("Requested route");
     expect(html).not.toContain("Page not found");
     expect(html).not.toContain("/missing/");
@@ -41,6 +41,6 @@ describe("DefaultNotFoundPage", () => {
     expect(html).not.toContain("Requested route");
     expect(html).toContain(">404</h1>");
     expect(html).toContain("Not found");
-    expect(html).toContain("Go home");
+    expect(html).toContain("GO HOME");
   });
 });

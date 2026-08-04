@@ -5477,7 +5477,7 @@ async function handleFarmRequestInContext(
             React.createElement("a", {
               className: "farm-default-not-found__home",
               href: "/",
-            }, "Go home")
+            }, "GO HOME")
           )
         )
       );

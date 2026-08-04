@@ -182,7 +182,7 @@ export function DefaultNotFoundPage(_props: NotFoundPageProps) {
             Not found
           </p>
           <a className="farm-default-not-found__home" href="/">
-            Go home
+            GO HOME
           </a>
         </div>
       </main>
