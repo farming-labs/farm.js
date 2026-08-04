@@ -4312,15 +4312,6 @@ async function hydrate() {
             return;
           }
 
-          // Layout code is only needed when this route boundary actually hydrates.
-          try {
-            const layoutModule = await import(/* @vite-ignore */ '/src/app/layout.tsx');
-            LayoutComponent = layoutModule.default;
-          } catch (e) {
-            console.warn('[Farm.js] Could not preload layout:', e);
-          }
-          if (hydrationController.signal.aborted || !pageContainer.isConnected) return;
-
           const hydrationSession = await farmClientRuntime.beginHydration({
             container: pageContainer,
             mode: shouldHydrate ? 'hydrate' : 'render',

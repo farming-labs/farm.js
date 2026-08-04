@@ -361,7 +361,13 @@ export function Chart() {}
     expect(source).toContain("for (const layout of layouts)");
     expect(source).toContain("function wrapWithLoadedLayouts(element, loadedLayouts, params)");
     expect(source).toContain("for (let index = loadedLayouts.length - 1; index >= 0; index--)");
+    expect(source).toContain("const layouts = findLayouts(window.location.pathname);");
+    expect(source).toMatch(
+      /tryHydrateImportedPage\(\s+pageContainer,[\s\S]*?layouts,[\s\S]*?layoutShouldHydrate,/,
+    );
     expect(source).not.toContain("layouts.find((layout) => layout.pattern === '/')");
+    expect(source).not.toContain("'/src/app/layout.tsx'");
+    expect(source).not.toContain("Could not preload layout:");
   });
 
   it("uses a document swap when generated SPA navigation leaves the app root", () => {
