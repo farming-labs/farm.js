@@ -1,4 +1,9 @@
 export { _runWithAfterRequest } from "../after";
+export {
+  bufferFarmRequestBody,
+  createFarmRequestBodyErrorResponse,
+  resolveFarmServerConfig,
+} from "../server-http";
 export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
 export {
   configureFarmCache,

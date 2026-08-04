@@ -9,6 +9,7 @@ import {
   createFarmWorkflowRequestHandler,
   defineCron,
   discoverFarmWorkflows,
+  prepareFarmWorkflowsForNitro,
   resolveWorkflowsConfig,
 } from "../workflows";
 
@@ -142,8 +143,15 @@ describe("Farm workflows", () => {
     const unauthorizedList = await handler(new Request("https://example.com/api/_farm/workflows"));
     expect(unauthorizedList?.status).toBe(401);
 
-    const list = await handler(
+    const querySecret = await handler(
       new Request("https://example.com/api/_farm/workflows?secret=test-secret"),
+    );
+    expect(querySecret?.status).toBe(401);
+
+    const list = await handler(
+      new Request("https://example.com/api/_farm/workflows", {
+        headers: { "x-farm-workflow-secret": "test-secret" },
+      }),
     );
     await expect(list?.json()).resolves.toEqual({
       workflows: [
@@ -158,9 +166,9 @@ describe("Farm workflows", () => {
     });
 
     const response = await handler(
-      new Request(
-        "https://example.com/api/_farm/workflows/sync-users?secret=test-secret&cursor=abc",
-      ),
+      new Request("https://example.com/api/_farm/workflows/sync-users?cursor=abc", {
+        headers: { authorization: "Bearer test-secret" },
+      }),
     );
 
     expect(response?.status).toBe(200);
@@ -174,6 +182,57 @@ describe("Farm workflows", () => {
       },
     });
     expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("rejects workflow bodies above the server request limit", async () => {
+    const workflow = {
+      id: "sync-users",
+      filePath: "/virtual/sync-users.ts",
+      schedule: [],
+      routePath: "/api/_farm/workflows/sync-users",
+    };
+    const run = vi.fn();
+    const handler = createFarmWorkflowRequestHandler({
+      workflows: [workflow],
+      config: resolveWorkflowsConfig({ secret: "test-secret" }),
+      server: { bodySizeLimit: 8 },
+      loadModule: async () => ({ default: { run } }),
+    });
+
+    const response = await handler(
+      new Request("https://example.com/api/_farm/workflows/sync-users", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer test-secret",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ cursor: "too-large" }),
+      }),
+    );
+
+    expect(response?.status).toBe(413);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("generates header-only Nitro workflow authentication with the server body limit", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-workflow-nitro-"));
+    await fs.mkdir(path.join(root, "src", "jobs"), { recursive: true });
+    await fs.writeFile(
+      path.join(root, "src", "jobs", "sync.mjs"),
+      "export default { async run() { return { ok: true }; } };",
+    );
+
+    const prepared = await prepareFarmWorkflowsForNitro({
+      root,
+      workflows: { secret: "test-secret" },
+      server: { bodySizeLimit: 1234 },
+    });
+    const handlerSource = await fs.readFile(prepared.handlerPath!, "utf8");
+
+    expect(handlerSource).toContain("const bodySizeLimit = 1234");
+    expect(handlerSource).toContain('getHeader(event, "x-farm-workflow-secret")');
+    expect(handlerSource).toContain("authorization.match(/^Bearer");
+    expect(handlerSource).not.toContain('searchParams.get("secret")');
   });
 
   it("adds scheduled workflows to Vercel crons without duplicating existing entries", () => {

@@ -13,6 +13,7 @@ import { emitFarmEvent } from "../observability";
 import { normalizeMiddlewareModule } from "./module";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import type { ResolvedFarmServerConfig } from "../server-http";
 
 export interface ProductionMiddlewareModuleEntry {
   path: string;
@@ -24,6 +25,7 @@ export interface ProductionMiddlewareRunnerOptions {
   config?: FarmMiddlewareConfig | null;
   modules?: ProductionMiddlewareModuleEntry[];
   i18n?: ResolvedFarmI18nConfig;
+  server?: Pick<ResolvedFarmServerConfig, "trustProxy">;
 }
 
 export interface ProductionMiddlewareResult {
@@ -45,8 +47,59 @@ interface ProductionMiddlewareEntry {
 
 interface WebMiddlewareContextState {
   ctx: MiddlewareContext;
+  headers: WebResponseHeaderMap;
   getRequest(): Request;
   getResponse(): Response | null;
+}
+
+const FARM_SET_COOKIE_HEADERS = Symbol("farm.setCookieHeaders");
+
+type InternalMiddlewareParent = MiddlewareContext["parent"] & {
+  [FARM_SET_COOKIE_HEADERS]?: string[];
+};
+
+class WebResponseHeaderMap extends Map<string, string> {
+  private setCookies: string[] = [];
+
+  override set(key: string, value: string): this {
+    if (key.toLowerCase() === "set-cookie") {
+      this.setCookies = [value];
+      super.set("Set-Cookie", value);
+      return this;
+    }
+    return super.set(key, value);
+  }
+
+  override delete(key: string): boolean {
+    if (key.toLowerCase() === "set-cookie") {
+      this.setCookies = [];
+      return super.delete("Set-Cookie") || super.delete("set-cookie");
+    }
+    return super.delete(key);
+  }
+
+  override clear(): void {
+    this.setCookies = [];
+    super.clear();
+  }
+
+  appendSetCookie(value: string): void {
+    this.setCookies.push(value);
+    super.set("Set-Cookie", value);
+  }
+
+  replaceSetCookies(values: readonly string[]): void {
+    this.setCookies = [...values];
+    super.delete("Set-Cookie");
+    super.delete("set-cookie");
+    if (this.setCookies.length > 0) {
+      super.set("Set-Cookie", this.setCookies[this.setCookies.length - 1]);
+    }
+  }
+
+  getSetCookies(): readonly string[] {
+    return this.setCookies;
+  }
 }
 
 function parseCookies(cookieHeader?: string | null): Record<string, string> {
@@ -83,11 +136,10 @@ function serializeCookie(name: string, value: string, options: CookieOptions = {
 
 class WebCookieJar implements CookieJar {
   private cookies: Record<string, string>;
-  private setCookies: string[] = [];
 
   constructor(
     request: Request,
-    private headers: Map<string, string>,
+    private headers: WebResponseHeaderMap,
   ) {
     this.cookies = parseCookies(request.headers.get("cookie"));
   }
@@ -99,8 +151,7 @@ class WebCookieJar implements CookieJar {
   set(name: string, value: string, options: CookieOptions = {}): void {
     this.cookies[name] = value;
     const cookieString = serializeCookie(name, value, options);
-    this.setCookies.push(cookieString);
-    this.headers.set("Set-Cookie", this.setCookies.join(", "));
+    this.headers.appendSetCookie(cookieString);
   }
 
   delete(name: string): void {
@@ -109,8 +160,7 @@ class WebCookieJar implements CookieJar {
       maxAge: 0,
       expires: new Date(0),
     });
-    this.setCookies.push(cookieString);
-    this.headers.set("Set-Cookie", this.setCookies.join(", "));
+    this.headers.appendSetCookie(cookieString);
   }
 
   getAll(): Record<string, string> {
@@ -118,14 +168,14 @@ class WebCookieJar implements CookieJar {
   }
 }
 
-function mapToHeaders(map: Map<string, string>): Headers {
+function mapToHeaders(map: WebResponseHeaderMap): Headers {
   const headers = new Headers();
   for (const [key, value] of map) {
-    if (key.toLowerCase() === "set-cookie") {
-      headers.append(key, value);
-    } else {
-      headers.set(key, value);
-    }
+    if (key.toLowerCase() === "set-cookie") continue;
+    headers.set(key, value);
+  }
+  for (const cookie of map.getSetCookies()) {
+    headers.append("Set-Cookie", cookie);
   }
   return headers;
 }
@@ -138,12 +188,16 @@ function isMiddlewareResponse(value: unknown): value is Response {
   return value instanceof Response;
 }
 
-function createResponseShim(headers: Map<string, string>): Record<string, any> {
+function createResponseShim(headers: WebResponseHeaderMap): Record<string, any> {
   return {
     headersSent: false,
     writableEnded: false,
     setHeader(name: string, value: string | string[]) {
-      headers.set(name, Array.isArray(value) ? value.join(", ") : String(value));
+      if (name.toLowerCase() === "set-cookie") {
+        headers.replaceSetCookies(Array.isArray(value) ? value.map(String) : [String(value)]);
+      } else {
+        headers.set(name, Array.isArray(value) ? value.join(", ") : String(value));
+      }
     },
     getHeader(name: string) {
       return headers.get(name);
@@ -163,13 +217,15 @@ function createResponseShim(headers: Map<string, string>): Record<string, any> {
   };
 }
 
-function withNodeRequestShape(request: Request): Request {
+function withNodeRequestShape(request: Request, trustProxy: boolean): Request {
   const requestWithShape = request as Request & {
     socket?: { remoteAddress?: string };
   };
 
   if (!requestWithShape.socket) {
-    const forwardedFor = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    const forwardedFor = trustProxy
+      ? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim()
+      : undefined;
     try {
       requestWithShape.socket = {
         remoteAddress: forwardedFor || "127.0.0.1",
@@ -185,15 +241,15 @@ function withNodeRequestShape(request: Request): Request {
 function createHandledResponse(
   body: BodyInit | null,
   init: ResponseInit,
-  headers: Map<string, string>,
+  headers: WebResponseHeaderMap,
 ): Response {
   const responseHeaders = new Headers(init.headers);
   for (const [key, value] of headers) {
-    if (key.toLowerCase() === "set-cookie") {
-      responseHeaders.append(key, value);
-    } else {
-      responseHeaders.set(key, value);
-    }
+    if (key.toLowerCase() === "set-cookie") continue;
+    responseHeaders.set(key, value);
+  }
+  for (const cookie of headers.getSetCookies()) {
+    responseHeaders.append("Set-Cookie", cookie);
   }
   return new Response(body, { ...init, headers: responseHeaders });
 }
@@ -201,19 +257,23 @@ function createHandledResponse(
 function createWebMiddlewareContext(
   request: Request,
   parent?: MiddlewareContext["parent"],
+  trustProxy = false,
 ): WebMiddlewareContextState {
-  let currentRequest = withNodeRequestShape(request);
+  let currentRequest = withNodeRequestShape(request, trustProxy);
   let handledResponse: Response | null = null;
   const url = new URL(currentRequest.url);
   const data = parent?.data ? new Map(parent.data) : new Map<string, any>();
   const locals = parent?.locals ? new Map(parent.locals) : new Map<string, any>();
-  const headers = new Map<string, string>();
+  const headers = new WebResponseHeaderMap();
 
   if (parent?.headers) {
     for (const [key, value] of Object.entries(parent.headers)) {
+      if (key.toLowerCase() === "set-cookie") continue;
       headers.set(key, value);
     }
   }
+  const parentCookies = (parent as InternalMiddlewareParent | undefined)?.[FARM_SET_COOKIE_HEADERS];
+  if (parentCookies) headers.replaceSetCookies(parentCookies);
 
   const ctx = {
     request: currentRequest as any,
@@ -256,7 +316,7 @@ function createWebMiddlewareContext(
     rewrite(rewriteUrl: string): void {
       ctx._rewriteUrl = rewriteUrl;
       const nextUrl = new URL(rewriteUrl, currentRequest.url);
-      currentRequest = withNodeRequestShape(new Request(nextUrl, currentRequest));
+      currentRequest = withNodeRequestShape(new Request(nextUrl, currentRequest), trustProxy);
       ctx.request = currentRequest as any;
       ctx.url = nextUrl;
       ctx.pathname = nextUrl.pathname;
@@ -309,6 +369,7 @@ function createWebMiddlewareContext(
 
   return {
     ctx,
+    headers,
     getRequest: () => currentRequest,
     getResponse: () => handledResponse,
   };
@@ -603,7 +664,11 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       return emptyResult(request);
     }
 
-    let contextState = createWebMiddlewareContext(request);
+    let contextState = createWebMiddlewareContext(
+      request,
+      undefined,
+      options.server?.trustProxy === true,
+    );
     let ctx = contextState.ctx;
     let currentRequest = contextState.getRequest();
     const initialPathname = options.i18n?.enabled
@@ -637,7 +702,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         response: null,
         data: new Map(ctx.data),
         context: new Map(ctx.locals),
-        headers: mapToHeaders(ctx.headers),
+        headers: mapToHeaders(contextState.headers),
         handled: false,
       };
     }
@@ -652,7 +717,11 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       }
 
       if (parentData) {
-        contextState = createWebMiddlewareContext(currentRequest, parentData);
+        contextState = createWebMiddlewareContext(
+          currentRequest,
+          parentData,
+          options.server?.trustProxy === true,
+        );
         ctx = contextState.ctx;
       }
 
@@ -678,7 +747,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
         if (returnedResponse) {
           const response = applyProductionMiddlewareHeaders(
             returnedResponse,
-            mapToHeaders(ctx.headers),
+            mapToHeaders(contextState.headers),
           );
           emitFarmEvent({
             type: "middleware.shortCircuit",
@@ -690,7 +759,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             response,
             data: new Map(ctx.data),
             context: new Map(ctx.locals),
-            headers: mapToHeaders(ctx.headers),
+            headers: mapToHeaders(contextState.headers),
             handled: true,
           };
         }
@@ -707,7 +776,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
             response,
             data: new Map(ctx.data),
             context: new Map(ctx.locals),
-            headers: mapToHeaders(ctx.headers),
+            headers: mapToHeaders(contextState.headers),
             handled: true,
           };
         }
@@ -729,8 +798,9 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       parentData = {
         data: new Map(ctx.data),
         locals: new Map(ctx.locals),
-        headers: headersToRecord(ctx.headers),
-      };
+        headers: headersToRecord(contextState.headers),
+        [FARM_SET_COOKIE_HEADERS]: [...contextState.headers.getSetCookies()],
+      } as InternalMiddlewareParent;
     }
 
     return {
@@ -738,7 +808,7 @@ export function createProductionMiddlewareRunner(options: ProductionMiddlewareRu
       response: null,
       data: new Map(ctx.data),
       context: new Map(ctx.locals),
-      headers: mapToHeaders(ctx.headers),
+      headers: mapToHeaders(contextState.headers),
       handled: false,
     };
   };
@@ -753,12 +823,19 @@ export function applyProductionMiddlewareHeaders(
   }
 
   const headers = new Headers(response.headers);
+  const getSetCookie = (middlewareHeaders as Headers & { getSetCookie?: () => string[] })
+    .getSetCookie;
+  const setCookies = getSetCookie
+    ? getSetCookie.call(middlewareHeaders)
+    : middlewareHeaders.get("set-cookie")
+      ? [middlewareHeaders.get("set-cookie")!]
+      : [];
   for (const [key, value] of middlewareHeaders) {
-    if (key.toLowerCase() === "set-cookie") {
-      headers.append(key, value);
-    } else {
-      headers.set(key, value);
-    }
+    if (key.toLowerCase() === "set-cookie") continue;
+    headers.set(key, value);
+  }
+  for (const cookie of setCookies) {
+    headers.append("Set-Cookie", cookie);
   }
 
   return new Response(response.body, {

@@ -5,6 +5,11 @@ import {
   FARM_CACHE_INVALIDATION_HEADER,
 } from "../cache-invalidation";
 import { isEndpointFailure, type EndpointFailure } from "./endpoint";
+import {
+  bufferFarmRequestBody,
+  createFarmRequestBodyErrorResponse,
+  DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
+} from "../server-http";
 
 export type APIRouteParamValue = string | string[];
 export type APIRouteParams = Record<string, APIRouteParamValue>;
@@ -45,7 +50,16 @@ export async function invokeAPIRouteEndpoint(
   endpoint: any,
   request: Request,
   params: APIRouteParams = {},
+  bodySizeLimit = DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
 ): Promise<Response> {
+  try {
+    request = await bufferFarmRequestBody(request, bodySizeLimit);
+  } catch (error) {
+    const response = createFarmRequestBodyErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
+
   return _runWithCurrentRequest(request, () =>
     invokeAPIRouteEndpointInContext(endpoint, request, params),
   );

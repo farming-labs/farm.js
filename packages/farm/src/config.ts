@@ -38,6 +38,11 @@ import {
   type ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
 import {
+  resolveFarmServerConfig,
+  type FarmServerConfig,
+  type ResolvedFarmServerConfig,
+} from "./server-http";
+import {
   loadFarmConfigFile,
   resolveFarmLayers,
   type FarmLayerEntry,
@@ -107,6 +112,7 @@ export type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
+export type { FarmServerConfig, ResolvedFarmServerConfig } from "./server-http";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 export type {
   FarmDevtoolsConfig,
@@ -284,6 +290,8 @@ export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;
   context?: BaseFarmConfig["context"];
+  /** Server ingress and trusted-proxy policy. */
+  server?: FarmServerConfig;
   serverActions?: FarmServerActionsConfig;
   /** Build identifier used to detect and recover from deployment version skew. */
   deploymentId?: string;
@@ -329,6 +337,7 @@ export interface ResolvedFarmConfig extends Required<
     | "cron"
     | "workflows"
     | "env"
+    | "server"
     | "serverActions"
     | "devtools"
     | "images"
@@ -352,6 +361,7 @@ export interface ResolvedFarmConfig extends Required<
   cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
   env: ResolvedFarmEnv;
+  server: ResolvedFarmServerConfig;
   serverActions: ResolvedFarmServerActionsConfig;
   devtools: ResolvedFarmDevtoolsConfig;
   images: ResolvedFarmImageConfig;
@@ -832,6 +842,7 @@ export async function resolveConfig(
     middleware: userConfig.middleware || {},
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),
+    server: resolveFarmServerConfig(userConfig.server),
     serverActions: resolveServerActionsConfig(userConfig.serverActions),
     security,
     deploymentId,

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { subscribeFarmCacheInvalidation, subscribeFarmCacheTask } from "./cache-invalidation";
 import { serializeServerFnFailure, type SerializedServerFnFailure } from "./server-fn-error";
+import { parseBodySizeLimit } from "./server-http";
 
 export const DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT = 1_000_000;
 
@@ -83,6 +84,7 @@ export function resolveServerActionsConfig(
   const allowedOrigins = (config?.allowedOrigins ?? []).map(normalizeAllowedOriginPattern);
   const bodySizeLimit = parseBodySizeLimit(
     config?.bodySizeLimit ?? DEFAULT_SERVER_ACTION_BODY_SIZE_LIMIT,
+    "serverActions.bodySizeLimit",
   );
 
   return Object.freeze({
@@ -257,44 +259,6 @@ function getFallbackAbortController(): AbortController {
     globalState[FALLBACK_ABORT_CONTROLLER_KEY] = new AbortController();
   }
   return globalState[FALLBACK_ABORT_CONTROLLER_KEY]!;
-}
-
-function parseBodySizeLimit(value: number | string): number {
-  if (typeof value === "number") {
-    if (!Number.isSafeInteger(value) || value <= 0) {
-      throw new TypeError("serverActions.bodySizeLimit must be a positive safe integer");
-    }
-    return value;
-  }
-
-  const match = value
-    .trim()
-    .toLowerCase()
-    .match(/^(\d+(?:\.\d+)?)\s*(b|kb|mb|gb|kib|mib|gib)?$/);
-  if (!match) {
-    throw new TypeError(
-      'serverActions.bodySizeLimit must be bytes or a size string such as "500kb" or "1mb"',
-    );
-  }
-
-  const amount = Number(match[1]);
-  const unit = match[2] ?? "b";
-  const multiplier: Record<string, number> = {
-    b: 1,
-    kb: 1_000,
-    mb: 1_000_000,
-    gb: 1_000_000_000,
-    kib: 1_024,
-    mib: 1_048_576,
-    gib: 1_073_741_824,
-  };
-  const bytes = Math.floor(amount * multiplier[unit]);
-
-  if (!Number.isSafeInteger(bytes) || bytes <= 0) {
-    throw new TypeError("serverActions.bodySizeLimit must resolve to a positive safe integer");
-  }
-
-  return bytes;
 }
 
 function normalizeAllowedOriginPattern(value: string): string {
