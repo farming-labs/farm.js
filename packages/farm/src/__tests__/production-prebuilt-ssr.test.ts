@@ -433,6 +433,150 @@ export default function DynamicPage({ params }) {
     }
   }, 120_000);
 
+  it("drains in-flight requests and closes production resources on SIGTERM", async () => {
+    const root = await createProductionFixture();
+    const markerPath = path.join(root, "production-lifecycle.log");
+    const apiDir = path.join(root, "src", "app", "api", "slow");
+    const serverConfig = {
+      gracefulShutdownTimeout: "3s" as const,
+      health: {
+        livenessPath: "/health/live",
+        readinessPath: "/health/ready",
+      },
+    };
+
+    try {
+      await fs.mkdir(apiDir, { recursive: true });
+      await fs.writeFile(
+        path.join(apiDir, "route.ts"),
+        `
+import { appendFile } from "node:fs/promises";
+import { setTimeout as delay } from "node:timers/promises";
+
+export async function GET() {
+  await appendFile(${JSON.stringify(markerPath)}, "request:start\\n");
+  await delay(300);
+  await appendFile(${JSON.stringify(markerPath)}, "request:finish\\n");
+  return new Response("drained response");
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `
+import { appendFile } from "node:fs/promises";
+import { defineConfig, definePlugin } from "@farm.js/core";
+
+const lifecyclePlugin = definePlugin({
+  name: "test:production-lifecycle",
+  setup(context) {
+    context.lifecycle.onShutdown(async () => {
+      await appendFile(${JSON.stringify(markerPath)}, "resource:closed\\n");
+    });
+  },
+  runtime: {
+    async start() {
+      await appendFile(${JSON.stringify(markerPath)}, "runtime:ready\\n");
+    },
+    async close({ reason }) {
+      await appendFile(${JSON.stringify(markerPath)}, \`runtime:closed:\${reason}\\n\`);
+    },
+  },
+});
+
+export default defineConfig({
+  images: { provider: "none" },
+  server: ${JSON.stringify(serverConfig)},
+  plugins: [lifecyclePlugin],
+});
+`.trim(),
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          server: serverConfig,
+          plugins: [
+            definePlugin({
+              name: "test:production-lifecycle-build-marker",
+              runtime: {
+                start() {},
+                close() {},
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      const port = await getAvailablePort();
+      const output: string[] = [];
+      const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
+        cwd: serverDir,
+        env: {
+          ...process.env,
+          HOST: "127.0.0.1",
+          PORT: String(port),
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
+      productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
+
+      try {
+        const healthResponse = await waitForServer(
+          `http://127.0.0.1:${port}/health/ready`,
+          () => output.join(""),
+          () => productionServer.exitCode !== null,
+        );
+        expect(healthResponse.status).toBe(200);
+        await expect(healthResponse.json()).resolves.toMatchObject({ status: "ok" });
+
+        const request = fetch(`http://127.0.0.1:${port}/api/slow`);
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const marker = await fs.readFile(markerPath, "utf8").catch(() => "");
+          if (marker.includes("request:start")) break;
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(await fs.readFile(markerPath, "utf8")).toContain("request:start");
+
+        productionServer.kill("SIGTERM");
+        const response = await request;
+        expect(response.status).toBe(200);
+        await expect(response.text()).resolves.toBe("drained response");
+
+        const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+          (resolve, reject) => {
+            const timeout = setTimeout(() => {
+              productionServer.kill("SIGKILL");
+              reject(new Error(`Production server did not shut down:\n${output.join("")}`));
+            }, 5_000);
+            productionServer.once("exit", (code, signal) => {
+              clearTimeout(timeout);
+              resolve({ code, signal });
+            });
+          },
+        );
+        expect(exit).toEqual({ code: 0, signal: null });
+        expect((await fs.readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
+          "runtime:ready",
+          "request:start",
+          "request:finish",
+          "runtime:closed:production-server-closed",
+          "resource:closed",
+        ]);
+      } finally {
+        if (productionServer.exitCode === null) productionServer.kill("SIGKILL");
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("keeps standalone production API failures generic", async () => {
     const root = await createProductionFixture();
 

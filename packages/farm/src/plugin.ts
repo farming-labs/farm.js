@@ -13,6 +13,16 @@ import {
 
 type MaybePromise<T> = T | Promise<T>;
 
+export class FarmRuntimeShutdownError extends Error {
+  readonly errors: readonly unknown[];
+
+  constructor(message: string, errors: readonly unknown[]) {
+    super(message);
+    this.name = "FarmRuntimeShutdownError";
+    this.errors = errors;
+  }
+}
+
 export interface PluginRequestContext {
   set: (
     target: FarmRequest | Request,
@@ -41,8 +51,18 @@ export interface FarmPluginContext {
   viteServer?: ViteDevServer;
   isDev: boolean;
   isProd: boolean;
+  /** Register resource cleanup that must run when the application runtime closes. */
+  lifecycle: FarmPluginLifecycle;
   /** @deprecated Use `ctx.req` inside request hooks. */
   requestContext: PluginRequestContext;
+}
+
+export interface FarmPluginLifecycle {
+  /**
+   * Register a database, storage, queue, or other resource disposer.
+   * Disposers run once in reverse registration order after plugin shutdown hooks.
+   */
+  onShutdown(dispose: () => void | Promise<void>): () => void;
 }
 
 export interface FarmRequestPluginContext extends FarmPluginContext {
@@ -430,12 +450,32 @@ export class PluginManager {
   private runtimeClosed = false;
   private runtimeStartPromise?: Promise<void>;
   private runtimeClosePromise?: Promise<void>;
+  private runtimeDisposers: Array<() => void | Promise<void>> = [];
   private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
   private failedRuntimeSessions = new WeakSet<FarmPluginRuntimeSession>();
 
-  constructor(context: Omit<FarmPluginContext, "requestContext">) {
+  constructor(context: Omit<FarmPluginContext, "requestContext" | "lifecycle">) {
     this.context = {
       ...context,
+      lifecycle: {
+        onShutdown: (dispose) => {
+          if (typeof dispose !== "function") {
+            throw new TypeError("Farm lifecycle.onShutdown requires a cleanup function");
+          }
+          if (this.runtimeClosePromise || this.runtimeClosed) {
+            throw new Error("Farm runtime cleanup cannot be registered after shutdown begins");
+          }
+
+          this.runtimeDisposers.push(dispose);
+          let registered = true;
+          return () => {
+            if (!registered) return;
+            registered = false;
+            const index = this.runtimeDisposers.indexOf(dispose);
+            if (index >= 0) this.runtimeDisposers.splice(index, 1);
+          };
+        },
+      },
       requestContext: {
         set(target, key, value, options) {
           setRequestContext(target as object, key, value, options);
@@ -850,18 +890,33 @@ export class PluginManager {
   }
 
   async closeRuntime(reason = "runtime-closed"): Promise<void> {
-    if (this.runtimeClosed) return;
     if (this.runtimeClosePromise) return this.runtimeClosePromise;
+    if (this.runtimeClosed) return;
 
-    this.runtimeClosePromise = this.runHookParallel("shutdown", {
-      reason,
-    }).then(() => undefined);
-    try {
-      await this.runtimeClosePromise;
-    } catch (error) {
-      this.runtimeClosePromise = undefined;
-      throw error;
-    }
+    this.runtimeClosePromise = (async () => {
+      const errors: unknown[] = [];
+      try {
+        await this.runHookParallel("shutdown", { reason });
+      } catch (error) {
+        if (error instanceof FarmRuntimeShutdownError) errors.push(...error.errors);
+        else errors.push(error);
+      }
+
+      const disposers = this.runtimeDisposers.splice(0).reverse();
+      for (const dispose of disposers) {
+        try {
+          await dispose();
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+
+      this.runtimeClosed = true;
+      if (errors.length > 0) {
+        throw new FarmRuntimeShutdownError("Farm runtime shutdown failed", errors);
+      }
+    })();
+    return this.runtimeClosePromise;
   }
 
   async beginRuntimeRequest(
@@ -1064,6 +1119,7 @@ export class PluginManager {
     ]);
 
     if (sequentialHooks.has(hookName)) {
+      const shutdownErrors: unknown[] = [];
       for (const plugin of plugins) {
         for (const hook of this.getPluginHooks(plugin, hookName)) {
           // Check if response is already sent (only for beforeRequest)
@@ -1075,7 +1131,12 @@ export class PluginManager {
           }
 
           const hookContext = this.getHookContext(hookName, args);
-          await (hook as any).apply(plugin, [...args, hookContext]);
+          try {
+            await (hook as any).apply(plugin, [...args, hookContext]);
+          } catch (error) {
+            if (hookName !== "shutdown") throw error;
+            shutdownErrors.push(error);
+          }
 
           // Check again after plugin execution (only for beforeRequest)
           if (hookName === "beforeRequest") {
@@ -1085,6 +1146,10 @@ export class PluginManager {
             }
           }
         }
+      }
+      if (hookName === "shutdown" && shutdownErrors.length > 0) {
+        this.runtimeClosed = true;
+        throw new FarmRuntimeShutdownError("Farm plugin shutdown hooks failed", shutdownErrors);
       }
     } else {
       // Run other hooks in parallel

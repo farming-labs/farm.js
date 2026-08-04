@@ -112,7 +112,13 @@ export type {
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
 } from "./server-action-security";
-export type { FarmServerConfig, ResolvedFarmServerConfig } from "./server-http";
+export type {
+  FarmServerConfig,
+  FarmServerDuration,
+  FarmServerHealthConfig,
+  ResolvedFarmServerConfig,
+  ResolvedFarmServerHealthConfig,
+} from "./server-http";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 export type {
   FarmDevtoolsConfig,

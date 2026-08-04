@@ -224,6 +224,14 @@ export default defineConfig({
   server: {
     bodySizeLimit: "10mb",
     trustProxy: false,
+    headersTimeout: "60s",
+    requestTimeout: "5m",
+    keepAliveTimeout: "5s",
+    gracefulShutdownTimeout: "30s",
+    health: {
+      livenessPath: "/_farm/health/live",
+      readinessPath: "/_farm/health/ready",
+    },
   },
 });
 ```
@@ -233,6 +241,17 @@ Farm checks `Content-Length` when present and also counts the received bytes, so
 `trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For` value. A directly exposed Farm server must leave it disabled so a client cannot spoof the address used by rate limits, logs, or access policy.
 
 Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
+
+The long-running Node adapter applies `headersTimeout`, `requestTimeout`, and `keepAliveTimeout` to its HTTP server. `headersTimeout` limits how long a client can occupy a connection while sending headers, and `requestTimeout` limits receipt of the complete request. These are transport timeouts, not limits on route-handler or database execution. Durations accept milliseconds or strings such as `"15s"`, `"2m"`, and `"1h"`.
+
+On `SIGTERM` or `SIGINT`, Node output immediately fails readiness, stops accepting connections, drains active responses and streams through Nitro, and then runs Farm integration and plugin cleanup. `gracefulShutdownTimeout` is the maximum drain period before remaining connections are forced closed. The process starts plugin and integration runtime state before it begins listening, so a successful readiness response means startup completed.
+
+Farm exposes two non-cacheable production health handlers by default:
+
+- `GET /_farm/health/live` reports whether the process is alive. It stays successful while the process drains.
+- `GET /_farm/health/ready` reports whether the instance should receive traffic. It returns `503` before startup completes and after shutdown begins.
+
+Customize both paths through `server.health`, or set `health: false` when an adapter supplies its own probes. Long-running Node output guarantees the shutdown sequence. Request-driven serverless and edge environments may not expose a reliable process shutdown event, so cleanup there remains platform-specific and must not be required for data correctness.
 
 ## Server action security
 

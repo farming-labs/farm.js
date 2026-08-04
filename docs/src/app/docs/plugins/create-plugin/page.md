@@ -356,7 +356,7 @@ Development hooks are not bundled into the production request lifecycle.
 
 ## Start and close resources
 
-Use `runtime.start` for runtime-only startup and `runtime.close` for best-effort cleanup.
+Use `runtime.start` for runtime-only startup and `runtime.close` for plugin cleanup. Long-running Node output completes startup before listening and invokes close after active requests and streams drain.
 
 ```ts
 export const queuePlugin = definePlugin({
@@ -379,7 +379,23 @@ export const queuePlugin = definePlugin({
 });
 ```
 
-Farm starts the runtime lazily in production. Some serverless hosts do not expose a shutdown event, so correctness must not depend solely on `runtime.close`.
+Use `context.lifecycle.onShutdown()` when setup creates a resource that should be disposed independently of the plugin's structured runtime hooks:
+
+```ts
+export const redisPlugin = definePlugin({
+  name: "acme:redis",
+
+  setup({ lifecycle }) {
+    const redis = createRedisClient();
+    lifecycle.onShutdown(() => redis.quit());
+    return { redis };
+  },
+});
+```
+
+Farm runs registered disposers once, in reverse registration order, after attempting every plugin shutdown hook. One failing hook does not prevent later hooks or resource disposers from running.
+
+Request-driven serverless and edge hosts may initialize lazily and may not expose a reliable shutdown event. Correctness must not depend solely on cleanup hooks there; use transactions, leases, and idempotent queue handling for externally visible work.
 
 ## Context rules
 

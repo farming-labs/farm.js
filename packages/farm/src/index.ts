@@ -7,7 +7,7 @@ export * from "./integration-api";
 export { createFarmApp } from "./app";
 export { FarmProvider } from "./provider";
 export { getCurrentRequest } from "./server/request";
-export { definePlugin, PluginManager } from "./plugin";
+export { definePlugin, FarmRuntimeShutdownError, PluginManager } from "./plugin";
 export {
   defineConfig,
   defineFarmConfig,
@@ -170,6 +170,7 @@ export type {
   PluginRequestContext,
   FarmPlugin,
   FarmPluginContext,
+  FarmPluginLifecycle,
   FarmRequestPluginContext,
   FarmRequestStore,
   FarmPluginRuntimeKind,
@@ -225,6 +226,11 @@ export type {
   ResolvedFarmI18nConfig,
   FarmServerActionsConfig,
   ResolvedFarmServerActionsConfig,
+  FarmServerConfig,
+  FarmServerDuration,
+  FarmServerHealthConfig,
+  ResolvedFarmServerConfig,
+  ResolvedFarmServerHealthConfig,
   OpenAPIConfig,
   MiddlewareConfig,
   FarmDeployConfig,

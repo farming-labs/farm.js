@@ -13,6 +13,49 @@ function createManager() {
 }
 
 describe("plugin lifecycle hooks", () => {
+  it("runs every shutdown hook and registered disposer exactly once", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "first-resource",
+        setup(context) {
+          context.lifecycle.onShutdown(() => {
+            calls.push("dispose:first");
+          });
+        },
+        shutdown() {
+          calls.push("shutdown:first");
+          throw new Error("first shutdown failed");
+        },
+      }),
+    );
+    manager.addPlugin(
+      definePlugin({
+        name: "second-resource",
+        setup(context) {
+          context.lifecycle.onShutdown(() => {
+            calls.push("dispose:second");
+          });
+        },
+        shutdown() {
+          calls.push("shutdown:second");
+        },
+      }),
+    );
+
+    await manager.startRuntime();
+    await expect(manager.closeRuntime("SIGTERM")).rejects.toMatchObject({
+      name: "FarmRuntimeShutdownError",
+    });
+    await expect(manager.closeRuntime("SIGINT")).rejects.toMatchObject({
+      name: "FarmRuntimeShutdownError",
+    });
+
+    expect(calls).toEqual(["shutdown:first", "shutdown:second", "dispose:second", "dispose:first"]);
+  });
+
   it("indexes request capabilities and invalidates them when plugins are added", () => {
     const manager = createManager();
 

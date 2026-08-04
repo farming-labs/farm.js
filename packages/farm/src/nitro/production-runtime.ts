@@ -4,6 +4,7 @@ export {
   createFarmRequestBodyErrorResponse,
   resolveFarmServerConfig,
 } from "../server-http";
+export { createFarmProductionLifecycle } from "../production-lifecycle";
 export { _runWithCurrentRequest, getCurrentRequest } from "../server/request";
 export {
   configureFarmCache,
