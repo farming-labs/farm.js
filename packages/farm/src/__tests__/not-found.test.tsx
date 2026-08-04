@@ -32,7 +32,7 @@ describe("DefaultNotFoundPage", () => {
     expect(DEFAULT_NOT_FOUND_STYLES).toContain("@media (prefers-reduced-motion: reduce)");
     expect(DEFAULT_NOT_FOUND_STYLES).toContain("border-radius: 0");
     expect(DEFAULT_NOT_FOUND_STYLES).toContain("-webkit-text-stroke: 2px");
-    expect(DEFAULT_NOT_FOUND_STYLES).toContain("box-shadow: 4px 4px 0");
+    expect(DEFAULT_NOT_FOUND_STYLES).not.toContain("box-shadow");
   });
 
   it("keeps the minimal markup when no pathname is available", () => {

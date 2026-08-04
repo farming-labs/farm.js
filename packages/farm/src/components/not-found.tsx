@@ -15,7 +15,6 @@ body {
   --farm-not-found-fg: #171717;
   --farm-not-found-muted: #737373;
   --farm-not-found-line: rgba(0, 0, 0, 0.16);
-  --farm-not-found-shadow: #a3a3a3;
   --farm-not-found-button-fg: #ffffff;
   min-height: 100vh;
   min-height: 100svh;
@@ -97,20 +96,17 @@ body {
   font-weight: 500;
   line-height: 1;
   text-decoration: none;
-  box-shadow: 4px 4px 0 var(--farm-not-found-shadow);
-  transition: opacity 150ms ease-out, transform 120ms ease-out, box-shadow 120ms ease-out;
+  transition: opacity 150ms ease-out, transform 100ms ease-out;
 }
 
 @media (hover: hover) and (pointer: fine) {
   .farm-default-not-found__home:hover {
-    transform: translate(-2px, -2px);
-    box-shadow: 6px 6px 0 var(--farm-not-found-shadow);
+    opacity: 0.78;
   }
 }
 
 .farm-default-not-found__home:active {
-  transform: translate(3px, 3px);
-  box-shadow: 1px 1px 0 var(--farm-not-found-shadow);
+  transform: translateY(1px);
 }
 
 .farm-default-not-found__home:focus-visible {
@@ -124,7 +120,6 @@ body {
     --farm-not-found-fg: #ededed;
     --farm-not-found-muted: #a1a1a1;
     --farm-not-found-line: rgba(255, 255, 255, 0.2);
-    --farm-not-found-shadow: #525252;
     --farm-not-found-button-fg: #0a0a0a;
     color-scheme: dark;
   }
@@ -137,7 +132,6 @@ body {
   --farm-not-found-fg: #ededed;
   --farm-not-found-muted: #a1a1a1;
   --farm-not-found-line: rgba(255, 255, 255, 0.2);
-  --farm-not-found-shadow: #525252;
   --farm-not-found-button-fg: #0a0a0a;
   color-scheme: dark;
 }
@@ -149,7 +143,6 @@ body {
   --farm-not-found-fg: #171717;
   --farm-not-found-muted: #737373;
   --farm-not-found-line: rgba(0, 0, 0, 0.16);
-  --farm-not-found-shadow: #a3a3a3;
   --farm-not-found-button-fg: #ffffff;
   color-scheme: light;
 }
