@@ -16,6 +16,8 @@ type MockResponse = FarmResponse & {
 };
 
 const routeModulePath = "/test/src/app/dashboard/page.tsx";
+const layoutModulePath = "/test/src/app/layout.tsx";
+const dashboardLayoutModulePath = "/test/src/app/dashboard/layout.tsx";
 const loadingModulePath = "/test/src/app/dashboard/loading.tsx";
 const errorModulePath = "/test/src/app/dashboard/error.tsx";
 const ogImageModulePath = "/test/src/app/dashboard/opengraph-image.tsx";
@@ -335,6 +337,72 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain('"isClientComponent":true');
     expect(response.body).toContain('"shouldHydrate":true');
   });
+
+  it("hydrates a client-aware layout without turning its server page into client code", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Server dashboard");
+          },
+        },
+        [layoutModulePath]: {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("section", { "data-layout": "root" }, children);
+          },
+        },
+      },
+      {
+        layoutMetadata: { shouldHydrate: true, islandStrategy: "load" },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.body).toContain('data-layout="root"');
+    expect(response.body).toContain('data-farm-client="false"');
+    expect(response.body).toContain('data-farm-layout-client="true"');
+    expect(response.body).toContain("window.__FARM_PAGE_SHOULD_HYDRATE__ = false");
+    expect(response.body).toContain("window.__FARM_LAYOUT_SHOULD_HYDRATE__ = true");
+    expect(response.body).toContain('"shouldHydrate":true');
+  });
+
+  it("bootstraps every matched layout when only a nested layout hydrates", async () => {
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: function DashboardPage() {
+            return React.createElement("main", null, "Nested server dashboard");
+          },
+        },
+        [layoutModulePath]: {
+          default: function RootLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("section", { "data-layout": "root" }, children);
+          },
+        },
+        [dashboardLayoutModulePath]: {
+          default: function DashboardLayout({ children }: { children: React.ReactNode }) {
+            return React.createElement("article", { "data-layout": "dashboard" }, children);
+          },
+        },
+      },
+      {
+        layoutMetadata: { shouldHydrate: false },
+        dashboardLayoutMetadata: { shouldHydrate: true, islandStrategy: "visible" },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.body).toContain('data-layout="root"');
+    expect(response.body).toContain('data-layout="dashboard"');
+    expect(response.body).toContain("window.__FARM_LAYOUT_SHOULD_HYDRATE__ = true");
+    expect(response.body).toContain(
+      'window.__FARM_LAYOUTS__ = [{"pattern":"/","modulePath":"/src/app/layout.tsx","shouldHydrate":false,"islandStrategy":null},{"pattern":"/dashboard","modulePath":"/src/app/dashboard/layout.tsx","shouldHydrate":true,"islandStrategy":"visible"}]',
+    );
+  });
 });
 
 function DeferredReviews({ reviews }: { reviews: Promise<string[]> }) {
@@ -352,6 +420,8 @@ function createRenderer(
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
     clientMetadata?: { isClientComponent: boolean; shouldHydrate: boolean };
+    layoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
+    dashboardLayoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
     onGenerateClientManifest?: () => void;
   } = {},
 ) {
@@ -386,13 +456,19 @@ function createRenderer(
       };
     },
     matchRoute() {
+      const layouts = [
+        ...(options.layoutMetadata ? [{ pattern: "/", modulePath: layoutModulePath }] : []),
+        ...(options.dashboardLayoutMetadata
+          ? [{ pattern: "/dashboard", modulePath: dashboardLayoutModulePath }]
+          : []),
+      ];
       return {
         route: {
           pattern: "/dashboard",
           modulePath: routeModulePath,
         },
         params: {},
-        layouts: [],
+        layouts,
       };
     },
     getMatchingLoading() {
@@ -438,6 +514,28 @@ function createRenderer(
     },
     generateClientManifest() {
       options.onGenerateClientManifest?.();
+      const layouts = [
+        ...(options.layoutMetadata
+          ? [
+              {
+                pattern: "/",
+                modulePath: layoutModulePath,
+                isClientComponent: false,
+                ...options.layoutMetadata,
+              },
+            ]
+          : []),
+        ...(options.dashboardLayoutMetadata
+          ? [
+              {
+                pattern: "/dashboard",
+                modulePath: dashboardLayoutModulePath,
+                isClientComponent: false,
+                ...options.dashboardLayoutMetadata,
+              },
+            ]
+          : []),
+      ];
       return {
         routes: [
           {
@@ -448,7 +546,7 @@ function createRenderer(
             segments: [{ segment: "dashboard", isDynamic: false }],
           },
         ],
-        layouts: [],
+        layouts,
       };
     },
   };

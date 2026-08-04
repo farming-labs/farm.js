@@ -5,7 +5,6 @@ import { logger, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
 import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
-import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
@@ -484,13 +483,11 @@ export function farmPlugin(
   });
   let farmApp: FarmApp;
   let server: ViteDevServer;
-  let hmrManager: HMRManager;
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
-  const pluginManager: PluginManager | undefined = initialPluginManager;
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
     try {
       const pc = require("picocolors");
@@ -783,9 +780,6 @@ export function farmPlugin(
         });
       });
 
-      // Initialize HMR manager
-      hmrManager = new HMRManager(server);
-
       // Initialize API route manager
       const appDirs = getFarmAppDirectories(farmConfig);
       const routeManager = farmApp.getRouteManager();
@@ -920,6 +914,129 @@ export function farmPlugin(
             fontStylesheetHref: "/@farm/fonts.css",
           })
         : null;
+      const wrapFarmDocsResponseWithLayouts = async (
+        request: Request,
+        response: Response,
+      ): Promise<Response> => {
+        if (
+          request.method === "HEAD" ||
+          !response.headers.get("content-type")?.toLowerCase().includes("text/html")
+        ) {
+          return response;
+        }
+
+        const pathname = new URL(request.url).pathname;
+        const matchedRoute = routeManager.matchRoute(pathname);
+        const layoutEntries = matchedRoute.layouts.map((layout) => ({
+          ...layout,
+          metadata: getClientModuleMetadata(layout.modulePath, farmConfig.root),
+        }));
+        if (!layoutEntries.some((layout) => layout.metadata.shouldHydrate)) {
+          return response;
+        }
+
+        const source = await response.text();
+        const bodyMatch = source.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+        if (!bodyMatch) {
+          return new Response(source, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          });
+        }
+
+        const [React, ReactDOMServer, layoutModules] = await Promise.all([
+          import("react"),
+          import("react-dom/server"),
+          Promise.all(
+            layoutEntries.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
+          ),
+        ]);
+        const hydrationStrategies = layoutEntries.flatMap((layout) =>
+          layout.metadata.shouldHydrate && layout.metadata.islandStrategy
+            ? [layout.metadata.islandStrategy]
+            : [],
+        );
+        const islandStrategy = hydrationStrategies.every(
+          (strategy) => strategy === hydrationStrategies[0],
+        )
+          ? (hydrationStrategies[0] ?? "load")
+          : "load";
+        const params = matchedRoute.params || {};
+        const toUrlPath = (absolutePath: string) =>
+          absolutePath.startsWith(farmConfig.root)
+            ? absolutePath.slice(farmConfig.root.length)
+            : absolutePath;
+        const clientLayouts = Object.fromEntries(
+          layoutEntries.map((layout) => [
+            layout.pattern,
+            {
+              modulePath: toUrlPath(layout.modulePath),
+              pattern: layout.pattern,
+              shouldHydrate: layout.metadata.shouldHydrate,
+              islandStrategy: layout.metadata.islandStrategy,
+              preloads: [toUrlPath(layout.modulePath)],
+              assets: [],
+            },
+          ]),
+        );
+        const inlineValue = (value: unknown) =>
+          JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+        const pageModulePath = matchedRoute.route?.modulePath
+          ? toUrlPath(matchedRoute.route.modulePath)
+          : "";
+        const bootstrapScript = `<script>
+window.__FARM_PROPS__ = ${inlineValue({ params })};
+window.__FARM_ROUTE_SLOTS__ = [];
+window.__FARM_DEPLOYMENT_ID__ = ${inlineValue(farmConfig.deploymentId)};
+window.__FARM_PATH__ = ${inlineValue(pathname)};
+window.__FARM_IS_CLIENT__ = false;
+window.__FARM_PAGE_SHOULD_HYDRATE__ = false;
+window.__FARM_LAYOUT_SHOULD_HYDRATE__ = true;
+window.__FARM_SHOULD_HYDRATE__ = true;
+window.__FARM_ISLAND_STRATEGY__ = ${inlineValue(islandStrategy)};
+window.__FARM_PAGE_MODULE__ = ${inlineValue(pageModulePath)};
+window.__FARM_LOADING_MODULE__ = null;
+window.__FARM_MANIFEST__ = ${inlineValue({
+          routes: {},
+          layouts: clientLayouts,
+          slots: [],
+          clientEntry: "/@farm/client.js",
+          sharedAssets: [],
+        })};
+</script>`;
+
+        let wrappedElement: any = React.createElement("div", {
+          id: "__farm_page__",
+          "data-farm-client": "false",
+          "data-farm-layout-client": "true",
+          "data-farm-island": "page",
+          "data-farm-island-strategy": islandStrategy,
+          dangerouslySetInnerHTML: { __html: bootstrapScript + bodyMatch[2] },
+        });
+        for (let index = layoutModules.length - 1; index >= 0; index--) {
+          const LayoutComponent = layoutModules[index].default;
+          if (LayoutComponent) {
+            wrappedElement = React.createElement(LayoutComponent, {
+              children: wrappedElement,
+              params,
+            });
+          }
+        }
+
+        const rootMarkup = ReactDOMServer.renderToString(
+          React.createElement("div", { id: "root" }, wrappedElement),
+        );
+        const html = source.replace(bodyMatch[0], `<body${bodyMatch[1]}>${rootMarkup}</body>`);
+        const headers = new Headers(response.headers);
+        headers.delete("content-length");
+        headers.delete("etag");
+        return new Response(html, {
+          status: response.status,
+          statusText: response.statusText,
+          headers,
+        });
+      };
       const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime
         ? farmDocsDevRuntime.createFarmDocsAPIHandler({
             rootDir: farmConfig.root,
@@ -930,23 +1047,6 @@ export function farmPlugin(
       const farmDocsFontAssets = new Map(
         farmDocsFontAssetList.map(({ url, sourcePath }) => [url, sourcePath]),
       );
-      // Built-in terminal logging (always enabled in development, independent of logger plugin)
-      const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
-        try {
-          const pc = require("picocolors");
-          const log = [
-            pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-            tag === "API" ? pc.gray("Requesting ") : pc.gray("Loading "),
-            pc.gray(urlPath),
-          ].join(" ");
-          console.log(log);
-        } catch {
-          console.log(`[FARM] [${tag}] [${method}] ${urlPath}`);
-        }
-      };
-
       const logResponse = (
         method: string,
         urlPath: string,
@@ -1110,14 +1210,16 @@ export function farmPlugin(
             }
           }
           if (farmDocsHandler) {
-            const docsResponse = await farmDocsHandler(
-              new Request(fullUrl, {
-                method: requestMethod,
-                headers: docsHeaders,
-              }),
-            );
+            const docsRequest = new Request(fullUrl, {
+              method: requestMethod,
+              headers: docsHeaders,
+            });
+            const docsResponse = await farmDocsHandler(docsRequest.clone());
             if (docsResponse) {
-              await sendWebResponse(res, docsResponse);
+              await sendWebResponse(
+                res,
+                await wrapFarmDocsResponseWithLayouts(docsRequest, docsResponse),
+              );
               return;
             }
           }
@@ -1384,9 +1486,6 @@ export function farmPlugin(
             const hasExplicitAPIRoute =
               hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
             if (apiHandler && hasExplicitAPIRoute) {
-              // Log API request
-              // logRequest(method, urlPath, "API");
-
               try {
                 // Convert Node.js request to Web Request
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
@@ -1636,6 +1735,27 @@ export function farmPlugin(
                 const layoutModules = await Promise.all(
                   layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
                 );
+                const layoutHydrationMetadata = layouts.map((layout) =>
+                  getClientModuleMetadata(layout.modulePath, server.config.root),
+                );
+                const shouldHydrateLayout = layoutHydrationMetadata.some(
+                  (metadata) => metadata.shouldHydrate,
+                );
+                const hydrationStrategies = [
+                  ...(shouldHydrate && moduleMetadata.islandStrategy
+                    ? [moduleMetadata.islandStrategy]
+                    : []),
+                  ...layoutHydrationMetadata.flatMap((metadata) =>
+                    metadata.shouldHydrate && metadata.islandStrategy
+                      ? [metadata.islandStrategy]
+                      : [],
+                  ),
+                ];
+                const hydrationIslandStrategy = hydrationStrategies.every(
+                  (strategy) => strategy === hydrationStrategies[0],
+                )
+                  ? (hydrationStrategies[0] ?? "load")
+                  : "load";
 
                 for (const layoutModule of layoutModules) {
                   if ((layoutModule as any).metadata) {
@@ -1759,10 +1879,13 @@ export function farmPlugin(
                   canonicalPath: (routeProps as any).__farmCanonicalPath,
                   modulePath: toUrlPath(route.modulePath),
                   isClientComponent: routeSlots.length > 0 ? false : isClientComponent,
+                  pageShouldHydrate: shouldHydrate,
+                  layoutShouldHydrate: shouldHydrateLayout,
                   shouldHydrate:
                     shouldHydrate ||
+                    shouldHydrateLayout ||
                     routeSlots.some((slot) => slot.isClientComponent || slot.shouldHydrate),
-                  islandStrategy: moduleMetadata.islandStrategy,
+                  islandStrategy: hydrationIslandStrategy,
                   metadata: {
                     title: mergedMetadata.title,
                     description: mergedMetadata.description,
@@ -1892,8 +2015,6 @@ export function farmPlugin(
               return;
             }
           }
-
-          // logRequest(method, urlPath, "PAGE");
 
           try {
             if (middlewareManager?.hasMiddleware()) {
@@ -2250,9 +2371,12 @@ export const getManifest = () => ({
 
         // Convert layouts array to object keyed by pattern
         for (const layout of manifest.layouts) {
+          const layoutMetadata = getClientModuleMetadata(layout.modulePath, server.config.root);
           fullManifest.layouts[layout.pattern] = {
             modulePath: layout.modulePath,
             pattern: layout.pattern,
+            shouldHydrate: layoutMetadata.shouldHydrate,
+            islandStrategy: layoutMetadata.islandStrategy,
             preloads: [layout.modulePath],
             assets: [],
           };
@@ -3391,8 +3515,9 @@ let currentPageComponent = null;
 let currentPageProps = {};
 let appRoot = null;
 
-// Layout component reference (loaded once, reused across navigations)
-let LayoutComponent = null;
+// Layout modules are cached independently so nested client-aware layouts are
+// composed with the same root-to-leaf structure that the server rendered.
+const layoutComponentCache = new Map();
 
 // Track if we've taken over rendering from SSR
 let hasClientTakenOver = false;
@@ -3607,22 +3732,38 @@ async function buildClientHydrationElement(PageComponent, pageProps) {
   return element;
 }
 
-async function ensureLayoutLoaded(layouts = []) {
-  if (LayoutComponent || layouts.length === 0) {
-    return LayoutComponent;
-  }
+async function loadLayoutComponents(layouts = []) {
+  const loadedLayouts = [];
 
-  try {
-    const rootLayout = layouts.find((layout) => layout.pattern === '/');
-    if (rootLayout) {
-      const layoutModule = await import(/* @vite-ignore */ rootLayout.modulePath);
-      LayoutComponent = layoutModule.default;
+  for (const layout of layouts) {
+    if (!layout?.modulePath) continue;
+    try {
+      let LayoutComponent = layoutComponentCache.get(layout.modulePath);
+      if (!LayoutComponent) {
+        const layoutModule = await import(/* @vite-ignore */ layout.modulePath);
+        LayoutComponent = layoutModule.default;
+        if (LayoutComponent) {
+          layoutComponentCache.set(layout.modulePath, LayoutComponent);
+        }
+      }
+      if (LayoutComponent) loadedLayouts.push({ ...layout, Component: LayoutComponent });
+    } catch (error) {
+      console.warn('[Farm.js] Could not load layout:', layout.modulePath, error);
     }
-  } catch (error) {
-    console.warn('[Farm.js] Could not load layout:', error);
   }
 
-  return LayoutComponent;
+  return loadedLayouts;
+}
+
+function wrapWithLoadedLayouts(element, loadedLayouts, params) {
+  let wrapped = element;
+  for (let index = loadedLayouts.length - 1; index >= 0; index--) {
+    wrapped = React.createElement(loadedLayouts[index].Component, {
+      children: wrapped,
+      params,
+    });
+  }
+  return wrapped;
 }
 
 function getCurrentSearchParams() {
@@ -3711,12 +3852,35 @@ async function moduleLooksClient(modulePath) {
 }
 
 async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = []) {
-  await ensureLayoutLoaded(layouts);
+  const loadedLayouts = await loadLayoutComponents(layouts);
   const pageElement = await buildClientHydrationElement(PageComponent, pageProps);
-  const wrappedTree = LayoutComponent
-    ? React.createElement(LayoutComponent, { children: pageElement })
-    : pageElement;
+  const wrappedTree = wrapWithLoadedLayouts(
+    pageElement,
+    loadedLayouts,
+    pageProps?.params || {},
+  );
   return wrapWithIntegrationProviders(wrappedTree);
+}
+
+function createLayoutPageBoundary(
+  pageShouldHydrate,
+  islandStrategy,
+  pageElement,
+  serverHtml,
+) {
+  const props = {
+    id: '__farm_page__',
+    'data-farm-client': pageShouldHydrate ? 'true' : 'false',
+    'data-farm-layout-client': 'true',
+    'data-farm-island': 'page',
+    'data-farm-island-strategy': islandStrategy || 'load',
+  };
+  if (typeof serverHtml === 'string') {
+    props.suppressHydrationWarning = true;
+    props.dangerouslySetInnerHTML = { __html: serverHtml };
+    return React.createElement('div', props);
+  }
+  return React.createElement('div', props, pageElement);
 }
 
 async function tryHydrateImportedPage(
@@ -3727,43 +3891,67 @@ async function tryHydrateImportedPage(
   useHydrate = false,
   existingProps = null,
   signal = null,
+  hydrationOptions = {},
 ) {
   const modulePath = route?.modulePath;
   if (!modulePath || signal?.aborted) {
     return false;
   }
 
-  let pageModule = pageModuleCache.get(modulePath);
-  if (!pageModule) {
-    pageModule = await import(/* @vite-ignore */ modulePath);
-    pageModuleCache.set(modulePath, pageModule);
+  const pageShouldHydrate = hydrationOptions.pageShouldHydrate !== false;
+  const layoutShouldHydrate = hydrationOptions.layoutShouldHydrate === true;
+  const islandStrategy = hydrationOptions.islandStrategy || route.islandStrategy || 'load';
+  let pageElement = null;
+
+  if (pageShouldHydrate) {
+    let pageModule = pageModuleCache.get(modulePath);
+    if (!pageModule) {
+      pageModule = await import(/* @vite-ignore */ modulePath);
+      pageModuleCache.set(modulePath, pageModule);
+    }
+    if (signal?.aborted || !container?.isConnected) return false;
+
+    const PageComponent = pageModule?.default;
+    if (!PageComponent) return false;
+
+    currentPageComponent = PageComponent;
+    currentPageProps = await buildRouteComponentProps(
+      pageModule,
+      params,
+      getCurrentSearchParams(),
+      window.location.pathname,
+      existingProps,
+    );
+    pageElement = await buildClientHydrationElement(PageComponent, currentPageProps);
+  } else if (layoutShouldHydrate) {
+    currentPageProps = existingProps || { params };
+    const serverPage = document.getElementById('__farm_page__');
+    pageElement = createLayoutPageBoundary(
+      false,
+      islandStrategy,
+      null,
+      serverPage ? serverPage.innerHTML : '',
+    );
   }
-  if (signal?.aborted || !container?.isConnected) return false;
+  if (signal?.aborted || !container?.isConnected || !pageElement) return false;
 
-  const PageComponent = pageModule?.default;
-  if (!PageComponent) {
-    return false;
+  let wrappedElement;
+  if (layoutShouldHydrate) {
+    const loadedLayouts = await loadLayoutComponents(layouts);
+    if (pageShouldHydrate) {
+      pageElement = createLayoutPageBoundary(true, islandStrategy, pageElement);
+    }
+    const wrappedTree = wrapWithLoadedLayouts(pageElement, loadedLayouts, params);
+    wrappedElement = wrapWithIntegrationProviders(wrappedTree);
+  } else if (useHydrate && container?.id === '__farm_page__') {
+    wrappedElement = wrapWithIntegrationProviders(pageElement);
+  } else {
+    wrappedElement = await buildWrappedHydrationElement(
+      currentPageComponent,
+      currentPageProps,
+      layouts,
+    );
   }
-
-  currentPageComponent = PageComponent;
-  currentPageProps = await buildRouteComponentProps(
-    pageModule,
-    params,
-    getCurrentSearchParams(),
-    window.location.pathname,
-    existingProps,
-  );
-  if (signal?.aborted || !container?.isConnected) return false;
-
-  const wrappedElement = useHydrate && container?.id === '__farm_page__'
-    ? wrapWithIntegrationProviders(
-        await buildClientHydrationElement(PageComponent, currentPageProps),
-      )
-    : await buildWrappedHydrationElement(
-        PageComponent,
-        currentPageProps,
-        layouts,
-      );
   if (signal?.aborted || !container?.isConnected) return false;
 
   if (useHydrate) {
@@ -3811,6 +3999,8 @@ async function renderPage(pageData) {
   const route = {
     modulePath: pageData.modulePath,
     isClientComponent: pageData.isClientComponent === true,
+    pageShouldHydrate: pageData.pageShouldHydrate === true,
+    layoutShouldHydrate: pageData.layoutShouldHydrate === true,
     shouldHydrate: pageData.shouldHydrate === true,
     islandStrategy: pageData.islandStrategy || 'load',
   };
@@ -3852,14 +4042,32 @@ async function renderPage(pageData) {
       const newTitle = doc.querySelector('title');
       if (newTitle) document.title = newTitle.textContent || document.title;
       
-      const shouldHydrate =
-        route.shouldHydrate === true ||
+      const pageShouldHydrate =
+        route.pageShouldHydrate === true ||
         route.isClientComponent ||
         await moduleLooksClient(route.modulePath);
+      const layoutShouldHydrate = route.layoutShouldHydrate === true;
+      const shouldHydrate =
+        route.shouldHydrate === true || pageShouldHydrate || layoutShouldHydrate;
       if (shouldHydrate) {
         try {
-          const hydrationContainer = document.getElementById('__farm_page__') || container;
-          await tryHydrateImportedPage(hydrationContainer, route, params, layouts, true);
+          const hydrationContainer = layoutShouldHydrate
+            ? container
+            : document.getElementById('__farm_page__') || container;
+          await tryHydrateImportedPage(
+            hydrationContainer,
+            route,
+            params,
+            layouts,
+            true,
+            pageData.props,
+            null,
+            {
+              pageShouldHydrate,
+              layoutShouldHydrate,
+              islandStrategy: route.islandStrategy,
+            },
+          );
         } catch (error) {
           // Keep the swapped server HTML when the page can only run on the server.
         }
@@ -4001,7 +4209,6 @@ spaRouter.setNavigationHandler(renderPage);
 async function hydrate() {
   if (isFarmDocsSearchPage()) {
     await mountFarmDocsSearch();
-    return;
   }
 
   const rootContainer = document.getElementById('root')
@@ -4024,10 +4231,15 @@ async function hydrate() {
     let pageProps = normalizeServerProps(window.__FARM_PROPS__);
     applyCanonicalPathFromProps(pageProps);
 
+    const pageShouldHydrate =
+      typeof window.__FARM_PAGE_SHOULD_HYDRATE__ === 'boolean'
+        ? window.__FARM_PAGE_SHOULD_HYDRATE__
+        : isClientComponent || await moduleLooksClient(modulePath);
+    const layoutShouldHydrate = window.__FARM_LAYOUT_SHOULD_HYDRATE__ === true;
     const shouldHydrate =
       window.__FARM_SHOULD_HYDRATE__ === true ||
-      isClientComponent ||
-      await moduleLooksClient(modulePath);
+      pageShouldHydrate ||
+      layoutShouldHydrate;
     const hydratedSlots = await hydrateInitialRouteSlots();
     if (!shouldHydrate) {
       if (hydratedSlots) replayPreHydrationClicks();
@@ -4049,10 +4261,14 @@ async function hydrate() {
     }
     currentPageProps = pageProps;
 
-    const layouts = findLayouts(window.location.pathname);
-    const pageContainer = shouldHydrate
-      ? document.getElementById('__farm_page__') || rootContainer
-      : rootContainer;
+    // Prefer the exact root-to-leaf layout chain selected by the server. The
+    // manifest lookup remains a fallback for generated/static responses.
+    const layouts = Array.isArray(window.__FARM_LAYOUTS__)
+      ? window.__FARM_LAYOUTS__
+      : findLayouts(window.location.pathname);
+    const pageContainer = layoutShouldHydrate
+      ? rootContainer
+      : document.getElementById('__farm_page__') || rootContainer;
 
     if (!pageContainer) {
       console.log('[Farm.js] Server component - SPA router ready')
@@ -4081,15 +4297,6 @@ async function hydrate() {
             return;
           }
 
-          // Layout code is only needed when this route boundary actually hydrates.
-          try {
-            const layoutModule = await import(/* @vite-ignore */ '/src/app/layout.tsx');
-            LayoutComponent = layoutModule.default;
-          } catch (e) {
-            console.warn('[Farm.js] Could not preload layout:', e);
-          }
-          if (hydrationController.signal.aborted || !pageContainer.isConnected) return;
-
           const hydrationSession = await farmClientRuntime.beginHydration({
             container: pageContainer,
             mode: shouldHydrate ? 'hydrate' : 'render',
@@ -4112,6 +4319,11 @@ async function hydrate() {
               shouldHydrate,
               currentPageProps,
               hydrationController.signal,
+              {
+                pageShouldHydrate,
+                layoutShouldHydrate,
+                islandStrategy,
+              },
             );
             if (hydrationController.signal.aborted || !pageContainer.isConnected) {
               await farmClientRuntime.failHydration(
