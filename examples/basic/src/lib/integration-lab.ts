@@ -1,5 +1,6 @@
 import {
   defineIntegration,
+  definePlugin,
   endpoint,
   integrationRoute,
   type FarmIntegrationHandlerContext,
@@ -69,6 +70,29 @@ const routeLab = defineIntegration({
   },
   ready() {
     routeLabState.ready = true;
+  },
+  plugins({ key, instance }) {
+    return [
+      definePlugin({
+        name: `integration-lab:${key}:response`,
+        runtime: {
+          after({ kind, route, response }) {
+            if (kind !== 'integration' || route?.pattern !== '/api/route-lab/message') {
+              return;
+            }
+
+            const headers = new Headers(response.headers);
+            headers.set('x-integration-plugin', `${key}:${instance.label}`);
+
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers,
+            });
+          },
+        },
+      }),
+    ];
   },
   middleware: [
     {

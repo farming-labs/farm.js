@@ -26,6 +26,7 @@ import {
 } from "./utils/client-component";
 import {
   dispatchIntegrationRequest,
+  getFarmIntegrationPluginOwner,
   getIntegrationDocumentNavigationMatchers,
   getIntegrationProviders,
   matchIntegrationRoute,
@@ -1242,7 +1243,15 @@ export function farmPlugin(
 
             try {
               if (pm) {
-                await pm.runHookParallel("beforeRequest", req, res);
+                await pm.runHookParallelFiltered(
+                  "beforeRequest",
+                  (plugin) => {
+                    const owner = getFarmIntegrationPluginOwner(plugin);
+                    return owner?.source !== "lifecycle" || owner.key !== matchedRoute.key;
+                  },
+                  req,
+                  res,
+                );
               }
 
               if (res.writableEnded) {
