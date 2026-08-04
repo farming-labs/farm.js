@@ -60,6 +60,7 @@ import { loadFarmProductionVite, type FarmProductionViteRuntime } from "../build
 import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 import { mergeFarmFontCss } from "../font-vite";
 import type { FarmIslandStrategy } from "../island";
+import { createFarmSourceAlias } from "../server/vite-config";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -2879,9 +2880,7 @@ async function buildSSRInMemory(
           }
         : undefined,
       resolve: {
-        alias: {
-          "@": path.resolve(root, "src"),
-        },
+        alias: createFarmSourceAlias(root, config.srcDir),
         // Programmatic route wrappers are created inside @farm.js/core. Resolve
         // their React imports from the application so React 18/19 elements and
         // the selected server renderer always share the same runtime instance.
