@@ -1,15 +1,50 @@
 export const DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT = 10_000_000;
+export const DEFAULT_FARM_SERVER_HEADERS_TIMEOUT = 60_000;
+export const DEFAULT_FARM_SERVER_REQUEST_TIMEOUT = 300_000;
+export const DEFAULT_FARM_SERVER_KEEP_ALIVE_TIMEOUT = 5_000;
+export const DEFAULT_FARM_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT = 30_000;
+const MAX_FARM_SERVER_TIMEOUT = 2_147_483_647;
+
+export type FarmServerDuration = number | `${number}${"ms" | "s" | "m" | "h"}`;
+
+export interface FarmServerHealthConfig {
+  /** Liveness endpoint. It remains healthy while a production process drains. */
+  livenessPath?: string;
+  /** Readiness endpoint. It returns 503 until startup completes and while draining. */
+  readinessPath?: string;
+}
+
+export interface ResolvedFarmServerHealthConfig {
+  enabled: boolean;
+  livenessPath: string;
+  readinessPath: string;
+}
 
 export interface FarmServerConfig {
   /** Maximum request body size for API routes, integrations, workflows, and uploads. */
   bodySizeLimit?: number | string;
   /** Trust proxy-provided client IP headers. Enable only behind a trusted proxy. */
   trustProxy?: boolean;
+  /** Maximum time for a Node client to send complete request headers. */
+  headersTimeout?: FarmServerDuration;
+  /** Maximum time for a Node client to send the complete request. */
+  requestTimeout?: FarmServerDuration;
+  /** How long an idle Node keep-alive connection remains open after a response. */
+  keepAliveTimeout?: FarmServerDuration;
+  /** Maximum time the Node adapter drains traffic before forcing shutdown. */
+  gracefulShutdownTimeout?: FarmServerDuration;
+  /** Production liveness and readiness endpoints. Set to false to disable them. */
+  health?: false | FarmServerHealthConfig;
 }
 
 export interface ResolvedFarmServerConfig {
   bodySizeLimit: number;
   trustProxy: boolean;
+  headersTimeout: number;
+  requestTimeout: number;
+  keepAliveTimeout: number;
+  gracefulShutdownTimeout: number;
+  health: ResolvedFarmServerHealthConfig;
 }
 
 export type FarmRequestBodyErrorCode = "BODY_TOO_LARGE" | "INVALID_CONTENT_LENGTH";
@@ -29,13 +64,105 @@ export class FarmRequestBodyError extends Error {
 export function resolveFarmServerConfig(
   config: FarmServerConfig | ResolvedFarmServerConfig | undefined,
 ): ResolvedFarmServerConfig {
+  const headersTimeout = parseFarmServerDuration(
+    config?.headersTimeout ?? DEFAULT_FARM_SERVER_HEADERS_TIMEOUT,
+    "server.headersTimeout",
+  );
+  const requestTimeout = parseFarmServerDuration(
+    config?.requestTimeout ?? DEFAULT_FARM_SERVER_REQUEST_TIMEOUT,
+    "server.requestTimeout",
+  );
+  if (headersTimeout > requestTimeout) {
+    throw new TypeError("server.headersTimeout must not exceed server.requestTimeout");
+  }
+
   return Object.freeze({
     bodySizeLimit: parseBodySizeLimit(
       config?.bodySizeLimit ?? DEFAULT_FARM_SERVER_BODY_SIZE_LIMIT,
       "server.bodySizeLimit",
     ),
     trustProxy: config?.trustProxy === true,
+    headersTimeout,
+    requestTimeout,
+    keepAliveTimeout: parseFarmServerDuration(
+      config?.keepAliveTimeout ?? DEFAULT_FARM_SERVER_KEEP_ALIVE_TIMEOUT,
+      "server.keepAliveTimeout",
+    ),
+    gracefulShutdownTimeout: parseFarmServerDuration(
+      config?.gracefulShutdownTimeout ?? DEFAULT_FARM_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT,
+      "server.gracefulShutdownTimeout",
+    ),
+    health: resolveFarmServerHealthConfig(config?.health),
   });
+}
+
+export function parseFarmServerDuration(
+  value: FarmServerDuration,
+  optionName = "duration",
+): number {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value <= 0) {
+      throw new TypeError(`${optionName} must be a positive safe integer`);
+    }
+    if (value > MAX_FARM_SERVER_TIMEOUT) {
+      throw new TypeError(`${optionName} must not exceed ${MAX_FARM_SERVER_TIMEOUT} milliseconds`);
+    }
+    return value;
+  }
+
+  const match = value
+    .trim()
+    .toLowerCase()
+    .match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)$/);
+  if (!match) {
+    throw new TypeError(`${optionName} must be milliseconds or a duration such as "30s" or "2m"`);
+  }
+
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const multiplier = unit === "ms" ? 1 : unit === "s" ? 1_000 : unit === "m" ? 60_000 : 3_600_000;
+  const milliseconds = Math.floor(amount * multiplier);
+  if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
+    throw new TypeError(`${optionName} must resolve to a positive safe integer`);
+  }
+  if (milliseconds > MAX_FARM_SERVER_TIMEOUT) {
+    throw new TypeError(`${optionName} must not exceed ${MAX_FARM_SERVER_TIMEOUT} milliseconds`);
+  }
+  return milliseconds;
+}
+
+function resolveFarmServerHealthConfig(
+  config: false | FarmServerHealthConfig | ResolvedFarmServerHealthConfig | undefined,
+): ResolvedFarmServerHealthConfig {
+  if (config === false || (config && "enabled" in config && config.enabled === false)) {
+    return Object.freeze({
+      enabled: false,
+      livenessPath: "/_farm/health/live",
+      readinessPath: "/_farm/health/ready",
+    });
+  }
+
+  const livenessPath = normalizeHealthPath(
+    config?.livenessPath ?? "/_farm/health/live",
+    "server.health.livenessPath",
+  );
+  const readinessPath = normalizeHealthPath(
+    config?.readinessPath ?? "/_farm/health/ready",
+    "server.health.readinessPath",
+  );
+  if (livenessPath === readinessPath) {
+    throw new TypeError("server.health livenessPath and readinessPath must be different");
+  }
+
+  return Object.freeze({ enabled: true, livenessPath, readinessPath });
+}
+
+function normalizeHealthPath(value: string, optionName: string): string {
+  const path = value.trim();
+  if (!path.startsWith("/") || path.includes("?") || path.includes("#") || path.includes("*")) {
+    throw new TypeError(`${optionName} must be an absolute pathname without a query or wildcard`);
+  }
+  return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
 }
 
 export function parseBodySizeLimit(value: number | string, optionName = "bodySizeLimit"): number {

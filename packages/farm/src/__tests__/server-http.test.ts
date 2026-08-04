@@ -14,11 +14,72 @@ describe("Farm server HTTP policy", () => {
     expect(resolveFarmServerConfig(undefined)).toEqual({
       bodySizeLimit: 10_000_000,
       trustProxy: false,
+      headersTimeout: 60_000,
+      requestTimeout: 300_000,
+      keepAliveTimeout: 5_000,
+      gracefulShutdownTimeout: 30_000,
+      health: {
+        enabled: true,
+        livenessPath: "/_farm/health/live",
+        readinessPath: "/_farm/health/ready",
+      },
     });
-    expect(resolveFarmServerConfig({ bodySizeLimit: "2 MiB", trustProxy: true })).toEqual({
+    expect(
+      resolveFarmServerConfig({
+        bodySizeLimit: "2 MiB",
+        trustProxy: true,
+        headersTimeout: "15s",
+        requestTimeout: "2m",
+        keepAliveTimeout: "10s",
+        gracefulShutdownTimeout: "45s",
+        health: {
+          livenessPath: "/health/live/",
+          readinessPath: "/health/ready/",
+        },
+      }),
+    ).toEqual({
       bodySizeLimit: 2_097_152,
       trustProxy: true,
+      headersTimeout: 15_000,
+      requestTimeout: 120_000,
+      keepAliveTimeout: 10_000,
+      gracefulShutdownTimeout: 45_000,
+      health: {
+        enabled: true,
+        livenessPath: "/health/live",
+        readinessPath: "/health/ready",
+      },
     });
+  });
+
+  it("rejects unsafe timeout and health configurations", () => {
+    expect(() => resolveFarmServerConfig({ headersTimeout: "2m", requestTimeout: "30s" })).toThrow(
+      "headersTimeout must not exceed",
+    );
+    expect(() => resolveFarmServerConfig({ requestTimeout: 0 })).toThrow(
+      "server.requestTimeout must be a positive safe integer",
+    );
+    expect(() => resolveFarmServerConfig({ gracefulShutdownTimeout: 2_147_483_648 })).toThrow(
+      "server.gracefulShutdownTimeout must not exceed 2147483647 milliseconds",
+    );
+    expect(() => resolveFarmServerConfig({ gracefulShutdownTimeout: "597h" })).toThrow(
+      "server.gracefulShutdownTimeout must not exceed 2147483647 milliseconds",
+    );
+    expect(() =>
+      resolveFarmServerConfig({
+        health: { livenessPath: "/health", readinessPath: "/health" },
+      }),
+    ).toThrow("must be different");
+    expect(
+      resolveFarmServerConfig({
+        health: { livenessPath: "///", readinessPath: "/health/ready" },
+      }).health,
+    ).toEqual({
+      enabled: true,
+      livenessPath: "/",
+      readinessPath: "/health/ready",
+    });
+    expect(resolveFarmServerConfig({ health: false }).health.enabled).toBe(false);
   });
 
   it("rejects streamed Web request bodies above the limit", async () => {

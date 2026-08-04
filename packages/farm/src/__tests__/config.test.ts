@@ -314,6 +314,15 @@ describe("resolveConfig", () => {
     expect(defaults.server).toEqual({
       bodySizeLimit: 10_000_000,
       trustProxy: false,
+      headersTimeout: 60_000,
+      requestTimeout: 300_000,
+      keepAliveTimeout: 5_000,
+      gracefulShutdownTimeout: 30_000,
+      health: {
+        enabled: true,
+        livenessPath: "/_farm/health/live",
+        readinessPath: "/_farm/health/ready",
+      },
     });
     expect(defaults.serverActions).toEqual({
       allowedOrigins: [],
@@ -340,6 +349,9 @@ describe("resolveConfig", () => {
         server: {
           bodySizeLimit: "25mb",
           trustProxy: true,
+          headersTimeout: "10s",
+          requestTimeout: "1m",
+          gracefulShutdownTimeout: "20s",
         },
       },
       "production",
@@ -347,6 +359,15 @@ describe("resolveConfig", () => {
     expect(server.server).toEqual({
       bodySizeLimit: 25_000_000,
       trustProxy: true,
+      headersTimeout: 10_000,
+      requestTimeout: 60_000,
+      keepAliveTimeout: 5_000,
+      gracefulShutdownTimeout: 20_000,
+      health: {
+        enabled: true,
+        livenessPath: "/_farm/health/live",
+        readinessPath: "/_farm/health/ready",
+      },
     });
   });
 

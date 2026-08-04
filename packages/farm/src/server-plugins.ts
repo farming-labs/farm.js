@@ -11,6 +11,7 @@ export {
 export type {
   FarmPlugin,
   FarmPluginContext,
+  FarmPluginLifecycle,
   FarmRequestPluginContext,
   FarmRequestStore,
 } from "./plugin";

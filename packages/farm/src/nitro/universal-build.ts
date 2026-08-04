@@ -52,6 +52,7 @@ import {
 import type { FarmRouteRuntimeManifest, FarmRouteRuntimeManifestEntry } from "../route-runtime";
 import { createFarmVercelRouteRuntimeFunctions } from "./vercel-route-runtime";
 import { createFarmVercelImmutableAssetRoute } from "./vercel-assets";
+import { createFarmNodeServerEntry } from "./node-server-entry";
 import { readFarmI18nCatalogs } from "../i18n/catalog";
 import type { FarmI18nCatalogs } from "../i18n/types";
 import { getFarmIntegrationPluginServerRuntime } from "../integrations";
@@ -148,6 +149,18 @@ const NITRO_EXTERNAL_MODULES = new Set([
 const FARM_SSR_PACKAGE_IMPORT = "#farm-ssr-entry";
 const FARM_SSR_OUTPUT_DIR = "farm-ssr";
 const FARM_CLIENT_BUILD_TARGET = ["es2020", "edge88", "firefox78", "chrome87", "safari14"];
+
+function resolveNitroRuntimeDependency(root: string, specifier: string): string {
+  const projectRequire = createRequire(path.join(root, "package.json"));
+  let runtimeRequire = projectRequire;
+  try {
+    runtimeRequire = createRequire(projectRequire.resolve("@farm.js/core"));
+  } catch {
+    // Source-only framework builds can resolve Nitro directly from the project.
+  }
+  const nitroEntry = runtimeRequire.resolve("nitro");
+  return createRequire(nitroEntry).resolve(specifier).split(path.sep).join("/");
+}
 
 function cloneConfigValue<T>(value: T, seen = new WeakMap<object, unknown>()): T {
   if (value === null || typeof value !== "object") return value;
@@ -3108,6 +3121,7 @@ function generateVirtualEntryCode(
   configureFarmObservability,
   createFarmCacheKey,
   createFarmLocaleCookie,
+  createFarmProductionLifecycle,
   createProductionMiddlewareRunner,
   emitFarmEvent,
   getFarmDataCache,
@@ -3369,6 +3383,11 @@ configureFarmObservability(farmObservabilityConfig);
 configureFarmCache(farmResolvedRuntimeConfig.cache);
 const farmI18nConfig = ${JSON.stringify(config.i18n)};
 const farmServerConfig = ${JSON.stringify(config.server)};
+export const farmProductionLifecycle = createFarmProductionLifecycle({
+  server: farmServerConfig,
+  start: () => farmPluginRuntime?.startRuntime(),
+  close: (reason) => farmPluginRuntime?.closeRuntime(reason),
+});
 const farmI18nRuntime = ${
     config.i18n.enabled
       ? `createFarmI18nRuntime(farmI18nConfig, ${JSON.stringify(i18nCatalogs)})`
@@ -5678,30 +5697,39 @@ async function applyFarmPreloadBudget(response, pathname) {
 
 // Export as Web Standard fetch API
 export async function fetch(request, context) {
-  const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
-  const runRequest = () => farmPluginRuntime
-    ? farmPluginRuntime.runRuntimeRequest(
-      request,
-        (runtimeRequest) =>
-          _runWithCurrentRequest(runtimeRequest, () =>
-            handleFarmPluginRequest(runtimeRequest, runtimeOptions)
-          ),
-        {
-          ...runtimeOptions,
-          waitUntil: typeof context?.waitUntil === "function"
-            ? context.waitUntil.bind(context)
-            : undefined,
-        },
-      )
-    : handleFarmRequest(request);
+  const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
+  if (healthResponse) return healthResponse;
 
-  const response = await _runWithCurrentRequest(request, () =>
-    _runWithAfterRequest(request, runRequest, context),
-  );
-  const pathname = new URL(request.url).pathname;
-  return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
+  return farmProductionLifecycle.runRequest(async () => {
+    const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
+    const runRequest = () => farmPluginRuntime
+      ? farmPluginRuntime.runRuntimeRequest(
+        request,
+          (runtimeRequest) =>
+            _runWithCurrentRequest(runtimeRequest, () =>
+              handleFarmPluginRequest(runtimeRequest, runtimeOptions)
+            ),
+          {
+            ...runtimeOptions,
+            waitUntil: typeof context?.waitUntil === "function"
+              ? context.waitUntil.bind(context)
+              : undefined,
+          },
+        )
+      : handleFarmRequest(request);
+
+    const response = await _runWithCurrentRequest(request, () =>
+      _runWithAfterRequest(request, runRequest, context),
+    );
+    const pathname = new URL(request.url).pathname;
+    return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
+  }, {
+    onResponseFinished: typeof context?.onResponseFinished === "function"
+      ? context.onResponseFinished
+      : undefined,
+  });
 }
-export default { fetch };
+export default { fetch, lifecycle: farmProductionLifecycle };
   `.trim();
 }
 
@@ -6042,7 +6070,15 @@ async function buildNitroUniversal(
 // Farm.js Nitro Entry
 // This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
-import handler from './${ssrEntryFile}'
+import { useNitroApp } from 'nitro/runtime'
+import handler, { farmProductionLifecycle } from './${ssrEntryFile}'
+
+export { farmProductionLifecycle }
+
+const farmNitroApp = useNitroApp()
+farmNitroApp.hooks.hook('close', () =>
+  farmProductionLifecycle.close('production-server-closed')
+)
 
 function mergeVaryHeaders(target, source) {
   const values = new Set(
@@ -6095,6 +6131,19 @@ export default async function farmNitroEventHandler(event) {
   `.trim();
 
   await fs.writeFile(nitroEntryPath, nitroEntryCode);
+  const farmNodeServerEntryPath =
+    preset === "node-server" ? path.join(ssrOutputDir, "farm-node-server-entry.mjs") : null;
+  if (farmNodeServerEntryPath) {
+    await fs.writeFile(
+      farmNodeServerEntryPath,
+      createFarmNodeServerEntry({
+        nitroEntryFile: path.basename(nitroEntryPath),
+        nodeHandlerModule: resolveNitroRuntimeDependency(root, "srvx/node"),
+        server: config.server,
+        websocketAdapterModule: resolveNitroRuntimeDependency(root, "crossws/adapters/node"),
+      }),
+    );
+  }
   const prebuiltSSRPlugin = createExternalSSRBundlePlugin(
     nitroEntryPath,
     ssrOutputDir,
@@ -6120,6 +6169,7 @@ export default async function farmNitroEventHandler(event) {
 
   let nitroConfig: NitroConfig = {
     preset,
+    ...(farmNodeServerEntryPath ? { entry: farmNodeServerEntryPath } : {}),
     rootDir: root,
     srcDir: root,
     buildDir: path.join(root, distDir, ".nitro"),
@@ -6306,6 +6356,14 @@ export default async function farmNitroEventHandler(event) {
 
   // Build with Nitro
   const nitroInstance = await nitro.createNitro(nitroConfig);
+  if (farmNodeServerEntryPath) {
+    // The custom entry is only for the final long-running Node server. Nitro
+    // derives its prerenderer config from this config, so remove the override
+    // and let the nitro-prerender preset provide appFetch/closePrerenderer.
+    nitroInstance.hooks.hook("prerender:config", (prerendererConfig) => {
+      delete prerendererConfig.entry;
+    });
+  }
   await nitro.prepare(nitroInstance);
   await nitro.copyPublicAssets(nitroInstance);
   if (prerenderRoutes.length > 0 && canReusePrebuiltSSR) {
