@@ -396,6 +396,20 @@ expected instance does not match the configured `instance`. If the configured va
 `{ auth: betterAuth() }`, bind `{ auth: BetterAuthInstance }` and
 `integration.instance.auth.api` is fully checked and autocompleted.
 
+Prefer the return type inferred by `defineIntegration`. If a package must publish an explicit
+integration type, preserve the instance as the third `FarmIntegration` type argument so its plugin
+requirements remain checked:
+
+```ts
+import type { FarmIntegration } from "@farm.js/core";
+
+type AuthResources = { auth: BetterAuthInstance };
+type AuthIntegration = FarmIntegration<undefined, unknown, AuthResources>;
+```
+
+Using `FarmIntegration` without that instance argument intentionally leaves the instance unknown;
+it does not silently accept an integration-bound plugin.
+
 The application can still add cross-cutting plugins globally. Both kinds participate in the same
 plugin pipeline:
 

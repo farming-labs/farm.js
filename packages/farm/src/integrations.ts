@@ -463,13 +463,14 @@ export interface FarmIntegrationPluginOwner {
 export interface FarmIntegration<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
   TConfig = unknown,
+  TInstance = unknown,
 > {
   readonly kind: "farm-integration";
   category: FarmIntegrationCategory;
   /** @deprecated Use category instead. */
   slot?: FarmIntegrationCategory;
   type: string;
-  instance: unknown;
+  instance: TInstance;
   /** Set to false when a platform adapter owns this integration's production routes. */
   serverRuntime?: boolean;
   api?: FarmIntegrationAPI;
@@ -486,10 +487,10 @@ export interface FarmIntegration<
   providers?: readonly FarmIntegrationProvider[];
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
   /** Additional Farm plugins owned and configured by this integration. */
-  plugins?: readonly FarmPlugin<any, any, any, any, any>[];
+  plugins?: readonly FarmPlugin<any, any, any, any, NoInfer<TInstance>>[];
 }
 
-export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any> | undefined>;
+export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any, any> | undefined>;
 
 const FARM_INTEGRATION_PLUGIN_SERVER_RUNTIME = Symbol.for(
   "@farm.js/core/integration-plugin-server-runtime",
@@ -847,7 +848,7 @@ type FarmIntegrationInput<
   TConfig = unknown,
   TInstance = unknown,
 > = Omit<
-  FarmIntegration<TSchema, TConfig>,
+  FarmIntegration<TSchema, TConfig, TInstance>,
   "kind" | "category" | "slot" | "instance" | "config" | "routes" | "endpoints" | "plugins"
 > & {
   instance: TInstance;
