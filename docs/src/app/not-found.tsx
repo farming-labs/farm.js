@@ -24,7 +24,7 @@ export default function NotFound() {
           className="inline-flex min-h-11 min-w-[132px] items-center justify-center border border-[#ededed] bg-[#ededed] px-5 text-sm font-medium leading-none text-[#0a0a0a] no-underline transition-[opacity,transform] duration-150 hover:opacity-[0.78] active:translate-y-px focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[3px] focus-visible:outline-[#ededed] motion-reduce:transition-none motion-reduce:active:translate-y-0"
           href="/"
         >
-          Go home
+          GO HOME
         </a>
       </div>
     </section>
