@@ -5,7 +5,6 @@ import { logger, toViteModuleId } from "./utils";
 import { defaultGlobalCSS } from "./default-styles";
 import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
-import { HMRManager } from "./hmr";
 import { APIRouteManager } from "./api/route-manager";
 import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
@@ -483,13 +482,11 @@ export function farmPlugin(
   });
   let farmApp: FarmApp;
   let server: ViteDevServer;
-  let hmrManager: HMRManager;
   let apiRouteManager: APIRouteManager;
   let openAPIManager: OpenAPIManager | null = null;
   let middlewareManager: MiddlewareManager;
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
-  const pluginManager: PluginManager | undefined = initialPluginManager;
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
     try {
       const pc = require("picocolors");
@@ -782,9 +779,6 @@ export function farmPlugin(
         });
       });
 
-      // Initialize HMR manager
-      hmrManager = new HMRManager(server);
-
       // Initialize API route manager
       const appDirs = getFarmAppDirectories(farmConfig);
       const routeManager = farmApp.getRouteManager();
@@ -1052,23 +1046,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       const farmDocsFontAssets = new Map(
         farmDocsFontAssetList.map(({ url, sourcePath }) => [url, sourcePath]),
       );
-      // Built-in terminal logging (always enabled in development, independent of logger plugin)
-      const logRequest = (method: string, urlPath: string, tag: "API" | "PAGE") => {
-        try {
-          const pc = require("picocolors");
-          const log = [
-            pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-            tag === "API" ? pc.gray("Requesting ") : pc.gray("Loading "),
-            pc.gray(urlPath),
-          ].join(" ");
-          console.log(log);
-        } catch {
-          console.log(`[FARM] [${tag}] [${method}] ${urlPath}`);
-        }
-      };
-
       const logResponse = (
         method: string,
         urlPath: string,
@@ -1500,9 +1477,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const hasExplicitAPIRoute =
               hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
             if (apiHandler && hasExplicitAPIRoute) {
-              // Log API request
-              // logRequest(method, urlPath, "API");
-
               try {
                 // Convert Node.js request to Web Request
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
@@ -2032,8 +2006,6 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               return;
             }
           }
-
-          // logRequest(method, urlPath, "PAGE");
 
           try {
             if (middlewareManager?.hasMiddleware()) {
@@ -4280,7 +4252,11 @@ async function hydrate() {
     }
     currentPageProps = pageProps;
 
-    const layouts = findLayouts(window.location.pathname);
+    // Prefer the exact root-to-leaf layout chain selected by the server. The
+    // manifest lookup remains a fallback for generated/static responses.
+    const layouts = Array.isArray(window.__FARM_LAYOUTS__)
+      ? window.__FARM_LAYOUTS__
+      : findLayouts(window.location.pathname);
     const pageContainer = layoutShouldHydrate
       ? rootContainer
       : document.getElementById('__farm_page__') || rootContainer;

@@ -196,6 +196,34 @@ describe("client component path resolution", () => {
     expect(getClientModuleMetadata(layoutFile, root).shouldHydrate).toBe(true);
   });
 
+  it("follows extensionless package directory re-exports to a client boundary", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-directory-"));
+    tempDirs.push(root);
+
+    const layoutFile = path.join(root, "src", "app", "layout.tsx");
+    const packageRoot = path.join(root, "node_modules", "directory-client");
+    fs.mkdirSync(path.join(packageRoot, "dist", "client"), { recursive: true });
+    fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({ name: "directory-client", exports: "./dist/index.js" }),
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "index.js"),
+      'export { DirectoryClient } from "./client";\n',
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "client", "index.js"),
+      '"use client";\nexport function DirectoryClient() { return null; }\n',
+    );
+    fs.writeFileSync(
+      layoutFile,
+      'import { DirectoryClient } from "directory-client";\nexport default function Layout() { return <DirectoryClient />; }\n',
+    );
+
+    expect(getClientModuleMetadata(layoutFile, root).shouldHydrate).toBe(true);
+  });
+
   it("resolves package entries selected by the node export condition", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-node-"));
     tempDirs.push(root);
@@ -224,6 +252,37 @@ describe("client component path resolution", () => {
     expect(getClientModuleMetadata(pageFile, root).shouldHydrate).toBe(true);
   });
 
+  it("prefers browser package exports even when node is declared first", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-browser-"));
+    tempDirs.push(root);
+
+    const layoutFile = path.join(root, "src", "app", "layout.tsx");
+    const packageRoot = path.join(root, "node_modules", "conditional-client");
+    fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+    fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "conditional-client",
+        exports: {
+          node: "./dist/node.js",
+          browser: "./dist/browser.js",
+        },
+      }),
+    );
+    fs.writeFileSync(path.join(packageRoot, "dist", "node.js"), "export {};\n");
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "browser.js"),
+      '"use client";\nexport function BrowserClient() { return null; }\n',
+    );
+    fs.writeFileSync(
+      layoutFile,
+      'import { BrowserClient } from "conditional-client";\nexport default function Layout() { return <BrowserClient />; }\n',
+    );
+
+    expect(getClientModuleMetadata(layoutFile, root).shouldHydrate).toBe(true);
+  });
+
   it("ignores type-only and non-code package import examples", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-types-"));
     tempDirs.push(root);
@@ -244,11 +303,14 @@ describe("client component path resolution", () => {
       pageFile,
       [
         'import type { ClientWidget } from "client-types";',
+        'import { type ClientWidget as NamedClientWidget, } from "client-types";',
         'export type { ClientWidget as ExportedWidget } from "client-types";',
         '// import { ClientWidget } from "client-types";',
         "const quoted = 'import { ClientWidget } from \"client-types\";';",
         'const example = `import { ClientWidget } from "client-types";`;',
-        "export default function Page() { return quoted + example; }",
+        'const pattern = /import { ClientWidget } from "client-types"/;',
+        'function Example() { return <p>import { ClientWidget } from "client-types"</p>; }',
+        "export default function Page() { return quoted + example + String(pattern) + String(Example); }",
       ].join("\n"),
     );
 
@@ -361,7 +423,9 @@ export function Chart() {}
     expect(source).toContain("for (const layout of layouts)");
     expect(source).toContain("function wrapWithLoadedLayouts(element, loadedLayouts, params)");
     expect(source).toContain("for (let index = loadedLayouts.length - 1; index >= 0; index--)");
-    expect(source).toContain("const layouts = findLayouts(window.location.pathname);");
+    expect(source).toContain("const layouts = Array.isArray(window.__FARM_LAYOUTS__)");
+    expect(source).toContain("? window.__FARM_LAYOUTS__");
+    expect(source).toContain(": findLayouts(window.location.pathname);");
     expect(source).toMatch(
       /tryHydrateImportedPage\(\s+pageContainer,[\s\S]*?layouts,[\s\S]*?layoutShouldHydrate,/,
     );

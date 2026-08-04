@@ -381,7 +381,7 @@ export class ServerRenderer {
         this.ssgManifest = JSON.parse(content);
         logger.info(`Loaded SSG manifest: ${this.ssgManifest.length} pages`);
       }
-    } catch (error) {
+    } catch {
       // No manifest in dev mode or first build
     }
   }
@@ -958,6 +958,14 @@ export class ServerRenderer {
       const shouldHydrateLayout = layoutHydrationMetadata.some(
         (metadata) => metadata.shouldHydrate,
       );
+      const clientLayouts = layouts.map((layout, index) => ({
+        pattern: layout.pattern,
+        modulePath: layout.modulePath.startsWith(this.config.root)
+          ? layout.modulePath.slice(this.config.root.length)
+          : layout.modulePath,
+        shouldHydrate: layoutHydrationMetadata[index]?.shouldHydrate === true,
+        islandStrategy: layoutHydrationMetadata[index]?.islandStrategy ?? null,
+      }));
       const hydrationStrategies = [
         ...(shouldHydrate && moduleMetadata.islandStrategy ? [moduleMetadata.islandStrategy] : []),
         ...layoutHydrationMetadata.flatMap((metadata) =>
@@ -978,6 +986,7 @@ export class ServerRenderer {
       (req as any).__FARM_IS_CLIENT_COMPONENT__ = isClientComponent;
       (req as any).__FARM_PAGE_SHOULD_HYDRATE__ = shouldHydrate;
       (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ = shouldHydrateLayout;
+      (req as any).__FARM_LAYOUTS__ = clientLayouts;
       (req as any).__FARM_SHOULD_HYDRATE__ = shouldHydrate || shouldHydrateLayout;
       (req as any).__FARM_ISLAND_STRATEGY__ = hydrationIslandStrategy;
       (req as any).__FARM_HAS_HYDRATABLE_ROUTE_SLOTS__ = hasHydratableRouteSlots;
@@ -1690,6 +1699,7 @@ window.__FARM_PAGE_SHOULD_HYDRATE__ = ${JSON.stringify(
 window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify(
         (req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true,
       )};
+window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
 window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
 window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
 window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
@@ -1720,7 +1730,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
-      const { pipe, abort } = renderToPipeableStream(streamRoot, {
+      const { pipe } = renderToPipeableStream(streamRoot, {
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
           emitFarmEvent({

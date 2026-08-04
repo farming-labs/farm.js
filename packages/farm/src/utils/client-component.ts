@@ -103,6 +103,82 @@ interface ModuleSourceToken {
   line: number;
 }
 
+const REGEXP_PREFIX_PUNCTUATION = new Set([
+  "(",
+  "[",
+  "{",
+  ",",
+  ";",
+  ":",
+  "=",
+  "!",
+  "?",
+  "&",
+  "|",
+  "+",
+  "-",
+  "*",
+  "%",
+  "^",
+  "~",
+  ">",
+]);
+const REGEXP_PREFIX_KEYWORDS = new Set([
+  "await",
+  "case",
+  "delete",
+  "do",
+  "else",
+  "in",
+  "instanceof",
+  "new",
+  "of",
+  "return",
+  "throw",
+  "typeof",
+  "void",
+  "yield",
+]);
+
+function canStartRegularExpression(previous: ModuleSourceToken | undefined): boolean {
+  if (!previous) return true;
+  return previous.kind === "identifier"
+    ? REGEXP_PREFIX_KEYWORDS.has(previous.value)
+    : REGEXP_PREFIX_PUNCTUATION.has(previous.value);
+}
+
+function skipRegularExpression(content: string, startIndex: number): number | null {
+  let index = startIndex + 1;
+  let inCharacterClass = false;
+
+  while (index < content.length) {
+    const character = content[index];
+    if (character === "\n" || character === "\r") return null;
+    if (character === "\\") {
+      index += 2;
+      continue;
+    }
+    if (character === "[") {
+      inCharacterClass = true;
+      index++;
+      continue;
+    }
+    if (character === "]" && inCharacterClass) {
+      inCharacterClass = false;
+      index++;
+      continue;
+    }
+    if (character === "/" && !inCharacterClass) {
+      index++;
+      while (index < content.length && /[A-Za-z]/.test(content[index])) index++;
+      return index;
+    }
+    index++;
+  }
+
+  return null;
+}
+
 function tokenizeModuleSource(content: string): ModuleSourceToken[] {
   const tokens: ModuleSourceToken[] = [];
   let index = 0;
@@ -132,6 +208,14 @@ function tokenizeModuleSource(content: string): ModuleSourceToken[] {
         index++;
       }
       continue;
+    }
+
+    if (character === "/" && canStartRegularExpression(tokens[tokens.length - 1])) {
+      const endIndex = skipRegularExpression(content, index);
+      if (endIndex !== null) {
+        index = endIndex;
+        continue;
+      }
     }
 
     if (character === '"' || character === "'") {
@@ -393,9 +477,19 @@ function getImportSpecifiers(content: string | null): string[] {
 
   const tokens = tokenizeModuleSource(content);
   const matches = new Set<string>();
+  let braceDepth = 0;
 
   for (let index = 0; index < tokens.length; index++) {
     const keyword = tokens[index];
+    if (keyword.value === "{") {
+      braceDepth++;
+      continue;
+    }
+    if (keyword.value === "}") {
+      braceDepth = Math.max(0, braceDepth - 1);
+      continue;
+    }
+    if (braceDepth !== 0) continue;
     if (keyword.kind !== "identifier" || !["import", "export"].includes(keyword.value)) {
       continue;
     }
@@ -447,10 +541,15 @@ function isTypeOnlyNamedClause(
 ): boolean {
   if (tokens[startIndex]?.value !== "{") return false;
 
+  const closingBraceIndex = tokens.findIndex(
+    (token, index) => index > startIndex && index < endIndex && token.value === "}",
+  );
+  if (closingBraceIndex === -1) return false;
+
   let entryStartsAt = startIndex + 1;
-  for (let index = entryStartsAt; index <= endIndex; index++) {
-    if (index !== endIndex && tokens[index]?.value !== ",") continue;
-    const entry = tokens.slice(entryStartsAt, index).filter((token) => token.value !== "}");
+  for (let index = entryStartsAt; index <= closingBraceIndex; index++) {
+    if (index !== closingBraceIndex && tokens[index]?.value !== ",") continue;
+    const entry = tokens.slice(entryStartsAt, index);
     if (entry.length > 0 && entry[0].value !== "type") return false;
     entryStartsAt = index + 1;
   }
@@ -474,18 +573,7 @@ function resolveImportedModuleSourcePath(
       : path.resolve(specifier);
 
   candidates.add(basePath);
-  for (const extension of RESOLVABLE_SOURCE_EXTENSIONS) {
-    candidates.add(`${basePath}${extension}`);
-    candidates.add(path.join(basePath, `index${extension}`));
-  }
-
-  for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
-      return candidate;
-    }
-  }
-
-  return null;
+  return resolveSourceCandidate(candidates);
 }
 
 function resolvePackageModuleSourcePath(
@@ -608,17 +696,12 @@ function resolveConditionalExportTarget(value: unknown): string | null {
   }
   if (!value || typeof value !== "object") return null;
 
-  const supportedConditions = new Set([
-    "browser",
-    "node",
-    "import",
-    "module",
-    "default",
-    "require",
-  ]);
-  for (const [condition, target] of Object.entries(value as Record<string, unknown>)) {
-    if (!supportedConditions.has(condition)) continue;
-    const resolved = resolveConditionalExportTarget(target);
+  const conditions = value as Record<string, unknown>;
+  // This metadata controls browser hydration, so prefer client-facing exports
+  // regardless of declaration order while retaining Node-only package support.
+  for (const condition of ["browser", "import", "module", "node", "default", "require"]) {
+    if (conditions[condition] === undefined) continue;
+    const resolved = resolveConditionalExportTarget(conditions[condition]);
     if (resolved) return resolved;
   }
   return null;
