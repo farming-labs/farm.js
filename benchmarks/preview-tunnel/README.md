@@ -7,7 +7,7 @@ Compares the direct local target, the TypeScript persistent preview agent, and t
 Build the independent Rust package first:
 
 ```bash
-cd ../farm-preview-agent-rs
+cd ../tunnel
 npm install
 npm run build
 ```
@@ -21,7 +21,7 @@ pnpm benchmark:preview
 Override the Rust package path when it is not a sibling of `farm.js`:
 
 ```bash
-FARM_PREVIEW_RUST_PACKAGE=/absolute/path/to/farm-preview-agent-rs pnpm benchmark:preview
+FARM_PREVIEW_RUST_PACKAGE=/absolute/path/to/tunnel pnpm benchmark:preview
 ```
 
 The benchmark validates POST bodies, query strings, response status and headers, and automatic route invalidation before recording latency and throughput. Both agents use the same relay, target server, 4 KiB payload, warmup, and concurrency settings.

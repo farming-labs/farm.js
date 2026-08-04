@@ -10,9 +10,7 @@ import {
 } from "../../packages/farm-preview-tunnel/dist/index.js";
 
 const require = createRequire(import.meta.url);
-const defaultRustPackage = fileURLToPath(
-  new URL("../../../farm-preview-agent-rs", import.meta.url),
-);
+const defaultRustPackage = fileURLToPath(new URL("../../../tunnel", import.meta.url));
 const rustPackage = process.env.FARM_PREVIEW_RUST_PACKAGE || defaultRustPackage;
 const { activePreviewAgentCount, startPreviewAgent, stopPreviewAgent } = require(rustPackage);
 
@@ -44,6 +42,7 @@ const targetAddress = target.address();
 const targetUrl = `http://127.0.0.1:${targetAddress.port}`;
 const relay = createPersistentPreviewRelay({ requestTimeoutMs: 10_000 });
 const relayAddress = await relay.listen();
+reportStage(`Target ${targetUrl} and relay ${relayAddress.websocketUrl} are ready.`);
 
 const results = [];
 let typescriptAgent;
@@ -52,6 +51,7 @@ let targetClosed = false;
 
 try {
   await verifyEndpoint(targetUrl);
+  reportStage("Direct target correctness verified.");
   results.push(await benchmarkEndpoint("Direct localhost", targetUrl));
 
   typescriptAgent = await startTypeScriptPreviewAgent({
@@ -59,22 +59,27 @@ try {
     name: "benchmark-typescript",
     targetUrl,
   });
+  reportStage(`TypeScript agent registered at ${typescriptAgent.publicUrl}.`);
   await verifyEndpoint(typescriptAgent.publicUrl);
   results.push(await benchmarkEndpoint("TypeScript persistent agent", typescriptAgent.publicUrl));
   await typescriptAgent.close();
   typescriptAgent = undefined;
   await expectInactive(`${relayAddress.httpUrl}/preview/benchmark-typescript`);
+  reportStage("TypeScript forwarding and shutdown verified.");
 
   rustSession = await startPreviewAgent(relayAddress.websocketUrl, "benchmark-rust", targetUrl);
+  reportStage(`Rust agent registered at ${rustSession.publicUrl}.`);
   assert.equal(activePreviewAgentCount(), 1);
   await verifyEndpoint(rustSession.publicUrl);
   results.push(await benchmarkEndpoint("Rust N-API persistent agent", rustSession.publicUrl));
+  reportStage("Rust forwarding verified; stopping the local target.");
   await close(target);
   targetClosed = true;
   await expectInactive(`${relayAddress.httpUrl}/preview/benchmark-rust`, 4_000);
   assert.equal(await stopPreviewAgent(rustSession.sessionId), true);
   rustSession = undefined;
   assert.equal(activePreviewAgentCount(), 0);
+  reportStage("Rust automatic shutdown verified.");
 
   printResults(results);
 } finally {
@@ -219,6 +224,10 @@ function readPositiveInteger(name, fallback) {
   return value;
 }
 
+function reportStage(message) {
+  console.error(`[preview-benchmark] ${message}`);
+}
+
 function listen(server) {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -230,5 +239,6 @@ function close(server) {
   if (!server.listening) return Promise.resolve();
   return new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
+    server.closeAllConnections?.();
   });
 }
