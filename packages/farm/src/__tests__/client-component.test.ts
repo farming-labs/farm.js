@@ -168,6 +168,97 @@ describe("client component path resolution", () => {
     });
   });
 
+  it("follows package-relative re-exports to a client boundary", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-reexport-"));
+    tempDirs.push(root);
+
+    const layoutFile = path.join(root, "src", "app", "layout.tsx");
+    const packageRoot = path.join(root, "node_modules", "analytics-react");
+    fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+    fs.mkdirSync(path.dirname(layoutFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({ name: "analytics-react", exports: "./dist/index.js" }),
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "index.js"),
+      'export { Analytics } from "./client.js";\n',
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "client.js"),
+      '"use client";\nexport function Analytics() { return null; }\n',
+    );
+    fs.writeFileSync(
+      layoutFile,
+      'import { Analytics } from "analytics-react";\nexport default function Layout() { return <Analytics />; }\n',
+    );
+
+    expect(getClientModuleMetadata(layoutFile, root).shouldHydrate).toBe(true);
+  });
+
+  it("resolves package entries selected by the node export condition", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-node-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const packageRoot = path.join(root, "node_modules", "node-conditioned-client");
+    fs.mkdirSync(path.join(packageRoot, "dist"), { recursive: true });
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "node-conditioned-client",
+        exports: { node: "./dist/node.js", default: "./dist/default.js" },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "node.js"),
+      '"use client";\nexport function NodeClient() { return null; }\n',
+    );
+    fs.writeFileSync(path.join(packageRoot, "dist", "default.js"), "export {};\n");
+    fs.writeFileSync(
+      pageFile,
+      'import { NodeClient } from "node-conditioned-client";\nexport default function Page() { return <NodeClient />; }\n',
+    );
+
+    expect(getClientModuleMetadata(pageFile, root).shouldHydrate).toBe(true);
+  });
+
+  it("ignores type-only and non-code package import examples", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-types-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "page.tsx");
+    const packageRoot = path.join(root, "node_modules", "client-types");
+    fs.mkdirSync(packageRoot, { recursive: true });
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({ name: "client-types", exports: "./index.js" }),
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "index.js"),
+      '"use client";\nexport function ClientWidget() { return null; }\n',
+    );
+    fs.writeFileSync(
+      pageFile,
+      [
+        'import type { ClientWidget } from "client-types";',
+        'export type { ClientWidget as ExportedWidget } from "client-types";',
+        '// import { ClientWidget } from "client-types";',
+        "const quoted = 'import { ClientWidget } from \"client-types\";';",
+        'const example = `import { ClientWidget } from "client-types";`;',
+        "export default function Page() { return quoted + example; }",
+      ].join("\n"),
+    );
+
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: false,
+      islandStrategy: null,
+    });
+  });
+
   it("reads a static island strategy from client modules", () => {
     expect(
       getIslandStrategyExport(
@@ -260,6 +351,17 @@ export function Chart() {}
     expect(source).toMatch(
       /return \{\s+\.\.\.\(existingProps \|\| \{\}\),\s+params: parsedParams,/,
     );
+  });
+
+  it("composes every applicable layout in the development hydration runtime", () => {
+    const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
+
+    expect(source).toContain("const layoutComponentCache = new Map();");
+    expect(source).toContain("async function loadLayoutComponents(layouts = [])");
+    expect(source).toContain("for (const layout of layouts)");
+    expect(source).toContain("function wrapWithLoadedLayouts(element, loadedLayouts, params)");
+    expect(source).toContain("for (let index = loadedLayouts.length - 1; index >= 0; index--)");
+    expect(source).not.toContain("layouts.find((layout) => layout.pattern === '/')");
   });
 
   it("uses a document swap when generated SPA navigation leaves the app root", () => {

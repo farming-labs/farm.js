@@ -1033,8 +1033,7 @@ async function buildClient(
           }
         : getClientModuleMetadata(route.modulePath, root);
       const applicableClientLayouts = clientLayouts.filter(
-        (layout) =>
-          layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
+        (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
       );
       if (metadata.shouldHydrate || applicableClientLayouts.length > 0) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
@@ -1059,6 +1058,38 @@ async function buildClient(
       }
     } catch (error) {
       logger.warn(`⚠️  Could not inspect route file ${route.modulePath}: ${error}`);
+    }
+  }
+
+  if (config.docs?.enabled) {
+    const docsEntry =
+      `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
+    const applicableClientLayouts = clientLayouts.filter(
+      (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, docsEntry),
+    );
+    if (applicableClientLayouts.length > 0) {
+      const hydrationStrategies = applicableClientLayouts.flatMap((layout) =>
+        layout.islandStrategy ? [layout.islandStrategy] : [],
+      );
+      const islandStrategy = hydrationStrategies.every(
+        (strategy) => strategy === hydrationStrategies[0],
+      )
+        ? (hydrationStrategies[0] ?? "load")
+        : "load";
+      const docsPatterns =
+        docsEntry === "/" ? ["/", "/[...slug]"] : [docsEntry, `${docsEntry}/[...slug]`];
+      const docsClientRoutes = docsPatterns.map((pattern) => ({
+        pattern,
+        modulePath: "",
+        relativePath: "",
+        pageShouldHydrate: false,
+        islandStrategy,
+      }));
+
+      // Docs requests take precedence over app page routes on the server, so
+      // their synthetic layout-only entries must take precedence in the client
+      // route table as well.
+      clientPages.unshift(...docsClientRoutes);
     }
   }
 
@@ -4655,10 +4686,25 @@ ${
     ReactDOMServer,
     React.createElement("div", { id: "root" }, wrappedElement),
   );
-  const html = source.replace(
+  let html = source.replace(
     bodyMatch[0],
     "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>",
   );
+  if (!html.includes('href="/farm-client.css"')) {
+    html = html.replace(
+      /<[/]head>/i,
+      '  <link rel="stylesheet" href="/farm-client.css">\\n</head>',
+    );
+  }
+  if (!html.includes('id="__farm_route_slots_data__"')) {
+    html = html.replace(/<[/]body>/i, renderFarmClientBootstrapScript() + "\\n</body>");
+  }
+  if (!html.includes('src="/farm-client.js"')) {
+    html = html.replace(
+      /<[/]body>/i,
+      '  <script type="module" src="/farm-client.js"></script>\\n</body>',
+    );
+  }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
   headers.delete("etag");

@@ -293,6 +293,10 @@ export default function Page() {
       );
       await fs.writeFile(
         path.join(analyticsRoot, "dist", "react", "index.mjs"),
+        `export { AnalyticsBoundary } from "./boundary.mjs";`,
+      );
+      await fs.writeFile(
+        path.join(analyticsRoot, "dist", "react", "boundary.mjs"),
         `
 "use client";
 
@@ -330,7 +334,7 @@ export default function RootLayout({ children }) {
         {
           root,
           srcDir: "src",
-          docs: { entry: "/docs" },
+          docs: { entry: "/docs", search: false },
           images: { provider: "none" },
           generateBuildId: () => "layout-client-boundary-test",
         },
@@ -343,6 +347,7 @@ export default function RootLayout({ children }) {
         "utf8",
       );
       expect(clientBundle).toContain("layout-effect-fired");
+      expect(clientBundle).toContain("/docs/[...slug]");
 
       await runProductionRequest(
         path.join(root, ".farm", ".output", "server"),
@@ -366,6 +371,9 @@ export default function RootLayout({ children }) {
           expect(html).toContain('id="__farm_page__"');
           expect(html).toContain('data-farm-client="false"');
           expect(html).toContain('data-farm-layout-client="true"');
+          expect(html).toContain('id="__farm_route_slots_data__"');
+          expect(html.match(/src="\/farm-client\.js"/g)).toHaveLength(1);
+          expect(html.match(/href="\/farm-client\.css"/g)).toHaveLength(1);
         },
         "/docs",
       );

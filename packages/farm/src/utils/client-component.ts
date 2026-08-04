@@ -316,7 +316,7 @@ function inspectClientModuleMetadata(
     const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
     const importedMetadata =
       !specifier.startsWith(".") && !specifier.startsWith("/")
-        ? inspectPackageClientBoundary(importedPath)
+        ? inspectPackageClientBoundary(importedPath, root, visited)
         : inspectClientModuleMetadata(importedPath, root, visited, false);
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
@@ -341,35 +341,120 @@ function inspectClientModuleMetadata(
   };
 }
 
-function inspectPackageClientBoundary(resolvedPath: string | null): ClientModuleMetadata {
-  const parsed = parseClientModuleMetadata(
-    resolvedPath ? readIfExists(resolvedPath) : null,
-    false,
-  );
-  const shouldHydrate = parsed.isClientComponent || parsed.hasHydrateExport;
+function inspectPackageClientBoundary(
+  resolvedPath: string | null,
+  root: string | undefined,
+  visited: Set<string>,
+): ClientModuleMetadata {
+  if (!resolvedPath || visited.has(resolvedPath)) {
+    return {
+      isClientComponent: false,
+      shouldHydrate: false,
+      islandStrategy: null,
+    };
+  }
+
+  visited.add(resolvedPath);
+  const content = readIfExists(resolvedPath);
+  const parsed = parseClientModuleMetadata(content, false);
+  let importsClientBoundary = false;
+  let importedIslandStrategy: FarmIslandStrategy | null = null;
+
+  // Package entry points commonly re-export their React implementation from a
+  // relative file. Follow only files inside that package entry graph: scanning
+  // bare dependencies here would incorrectly turn server package APIs into
+  // client boundaries because of unrelated transitive imports.
+  for (const specifier of getImportSpecifiers(content)) {
+    if (!specifier.startsWith(".") && !specifier.startsWith("/")) continue;
+    const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
+    const importedMetadata = inspectPackageClientBoundary(importedPath, root, visited);
+    if (!importedMetadata.shouldHydrate) continue;
+    importsClientBoundary = true;
+    if (importedIslandStrategy === null) {
+      importedIslandStrategy = importedMetadata.islandStrategy;
+    } else if (importedIslandStrategy !== importedMetadata.islandStrategy) {
+      importedIslandStrategy = "load";
+    }
+  }
+
+  const shouldHydrate =
+    parsed.isClientComponent || parsed.hasHydrateExport || importsClientBoundary;
   return {
     isClientComponent: parsed.isClientComponent,
     shouldHydrate,
-    islandStrategy: shouldHydrate ? (parsed.islandStrategy ?? "load") : null,
+    islandStrategy: shouldHydrate
+      ? (parsed.islandStrategy ?? importedIslandStrategy ?? "load")
+      : null,
   };
 }
 
 function getImportSpecifiers(content: string | null): string[] {
-  if (!content) {
-    return [];
-  }
+  if (!content) return [];
 
-  const pattern =
-    /(?:^|\n)\s*(?:import|export)\s+(?:type\s+)?(?:[^"'`]+?\s+from\s+)?["']([^"']+)["']/g;
+  const tokens = tokenizeModuleSource(content);
   const matches = new Set<string>();
-  for (const match of content.matchAll(pattern)) {
-    const specifier = match[1];
+
+  for (let index = 0; index < tokens.length; index++) {
+    const keyword = tokens[index];
+    if (keyword.kind !== "identifier" || !["import", "export"].includes(keyword.value)) {
+      continue;
+    }
+
+    const previous = tokens[index - 1];
+    if (previous?.value === ".") continue;
+
+    const first = tokens[index + 1];
+    if (!first || first.value === "type" || first.value === "(" || first.value === ".") {
+      continue;
+    }
+
+    let specifier: string | undefined;
+    if (keyword.value === "import" && first.kind === "string") {
+      specifier = first.value;
+    } else {
+      if (keyword.value === "export" && first.value !== "{" && first.value !== "*") {
+        continue;
+      }
+
+      let fromIndex = -1;
+      for (let cursor = index + 1; cursor < tokens.length; cursor++) {
+        const token = tokens[cursor];
+        if (token.value === ";") break;
+        if (token.value === "from" && tokens[cursor + 1]?.kind === "string") {
+          fromIndex = cursor;
+          break;
+        }
+      }
+      if (fromIndex === -1 || isTypeOnlyNamedClause(tokens, index + 1, fromIndex)) {
+        continue;
+      }
+      specifier = tokens[fromIndex + 1].value;
+    }
+
     if (!specifier || specifier.startsWith("node:") || specifier.includes("?")) {
       continue;
     }
     matches.add(specifier);
   }
+
   return Array.from(matches);
+}
+
+function isTypeOnlyNamedClause(
+  tokens: ModuleSourceToken[],
+  startIndex: number,
+  endIndex: number,
+): boolean {
+  if (tokens[startIndex]?.value !== "{") return false;
+
+  let entryStartsAt = startIndex + 1;
+  for (let index = entryStartsAt; index <= endIndex; index++) {
+    if (index !== endIndex && tokens[index]?.value !== ",") continue;
+    const entry = tokens.slice(entryStartsAt, index).filter((token) => token.value !== "}");
+    if (entry.length > 0 && entry[0].value !== "type") return false;
+    entryStartsAt = index + 1;
+  }
+  return true;
 }
 
 function resolveImportedModuleSourcePath(
@@ -523,10 +608,17 @@ function resolveConditionalExportTarget(value: unknown): string | null {
   }
   if (!value || typeof value !== "object") return null;
 
-  const conditions = value as Record<string, unknown>;
-  for (const condition of ["browser", "import", "module", "default", "require"]) {
-    if (conditions[condition] === undefined) continue;
-    const resolved = resolveConditionalExportTarget(conditions[condition]);
+  const supportedConditions = new Set([
+    "browser",
+    "node",
+    "import",
+    "module",
+    "default",
+    "require",
+  ]);
+  for (const [condition, target] of Object.entries(value as Record<string, unknown>)) {
+    if (!supportedConditions.has(condition)) continue;
+    const resolved = resolveConditionalExportTarget(target);
     if (resolved) return resolved;
   }
   return null;

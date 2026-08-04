@@ -954,9 +954,7 @@ export function farmPlugin(
           import("react"),
           import("react-dom/server"),
           Promise.all(
-            layoutEntries.map((layout) =>
-              routeManager.loadLayoutModule(layout.modulePath),
-            ),
+            layoutEntries.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
           ),
         ]);
         const hydrationStrategies = layoutEntries.flatMap((layout) =>
@@ -1034,10 +1032,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const rootMarkup = ReactDOMServer.renderToString(
           React.createElement("div", { id: "root" }, wrappedElement),
         );
-        const html = source.replace(
-          bodyMatch[0],
-          `<body${bodyMatch[1]}>${rootMarkup}</body>`,
-        );
+        const html = source.replace(bodyMatch[0], `<body${bodyMatch[1]}>${rootMarkup}</body>`);
         const headers = new Headers(response.headers);
         headers.delete("content-length");
         headers.delete("etag");
@@ -3539,8 +3534,9 @@ let currentPageComponent = null;
 let currentPageProps = {};
 let appRoot = null;
 
-// Layout component reference (loaded once, reused across navigations)
-let LayoutComponent = null;
+// Layout modules are cached independently so nested client-aware layouts are
+// composed with the same root-to-leaf structure that the server rendered.
+const layoutComponentCache = new Map();
 
 // Track if we've taken over rendering from SSR
 let hasClientTakenOver = false;
@@ -3755,22 +3751,38 @@ async function buildClientHydrationElement(PageComponent, pageProps) {
   return element;
 }
 
-async function ensureLayoutLoaded(layouts = []) {
-  if (LayoutComponent || layouts.length === 0) {
-    return LayoutComponent;
-  }
+async function loadLayoutComponents(layouts = []) {
+  const loadedLayouts = [];
 
-  try {
-    const rootLayout = layouts.find((layout) => layout.pattern === '/');
-    if (rootLayout) {
-      const layoutModule = await import(/* @vite-ignore */ rootLayout.modulePath);
-      LayoutComponent = layoutModule.default;
+  for (const layout of layouts) {
+    if (!layout?.modulePath) continue;
+    try {
+      let LayoutComponent = layoutComponentCache.get(layout.modulePath);
+      if (!LayoutComponent) {
+        const layoutModule = await import(/* @vite-ignore */ layout.modulePath);
+        LayoutComponent = layoutModule.default;
+        if (LayoutComponent) {
+          layoutComponentCache.set(layout.modulePath, LayoutComponent);
+        }
+      }
+      if (LayoutComponent) loadedLayouts.push({ ...layout, Component: LayoutComponent });
+    } catch (error) {
+      console.warn('[Farm.js] Could not load layout:', layout.modulePath, error);
     }
-  } catch (error) {
-    console.warn('[Farm.js] Could not load layout:', error);
   }
 
-  return LayoutComponent;
+  return loadedLayouts;
+}
+
+function wrapWithLoadedLayouts(element, loadedLayouts, params) {
+  let wrapped = element;
+  for (let index = loadedLayouts.length - 1; index >= 0; index--) {
+    wrapped = React.createElement(loadedLayouts[index].Component, {
+      children: wrapped,
+      params,
+    });
+  }
+  return wrapped;
 }
 
 function getCurrentSearchParams() {
@@ -3859,14 +3871,13 @@ async function moduleLooksClient(modulePath) {
 }
 
 async function buildWrappedHydrationElement(PageComponent, pageProps, layouts = []) {
-  await ensureLayoutLoaded(layouts);
+  const loadedLayouts = await loadLayoutComponents(layouts);
   const pageElement = await buildClientHydrationElement(PageComponent, pageProps);
-  const wrappedTree = LayoutComponent
-    ? React.createElement(LayoutComponent, {
-        children: pageElement,
-        params: pageProps?.params || {},
-      })
-    : pageElement;
+  const wrappedTree = wrapWithLoadedLayouts(
+    pageElement,
+    loadedLayouts,
+    pageProps?.params || {},
+  );
   return wrapWithIntegrationProviders(wrappedTree);
 }
 
@@ -3945,13 +3956,11 @@ async function tryHydrateImportedPage(
 
   let wrappedElement;
   if (layoutShouldHydrate) {
-    await ensureLayoutLoaded(layouts);
+    const loadedLayouts = await loadLayoutComponents(layouts);
     if (pageShouldHydrate) {
       pageElement = createLayoutPageBoundary(true, islandStrategy, pageElement);
     }
-    const wrappedTree = LayoutComponent
-      ? React.createElement(LayoutComponent, { children: pageElement, params })
-      : pageElement;
+    const wrappedTree = wrapWithLoadedLayouts(pageElement, loadedLayouts, params);
     wrappedElement = wrapWithIntegrationProviders(wrappedTree);
   } else if (useHydrate && container?.id === '__farm_page__') {
     wrappedElement = wrapWithIntegrationProviders(pageElement);

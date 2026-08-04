@@ -424,9 +424,7 @@ function createRenderer(
           modulePath: routeModulePath,
         },
         params: {},
-        layouts: options.layoutMetadata
-          ? [{ pattern: "/", modulePath: layoutModulePath }]
-          : [],
+        layouts: options.layoutMetadata ? [{ pattern: "/", modulePath: layoutModulePath }] : [],
       };
     },
     getMatchingLoading() {

@@ -959,9 +959,7 @@ export class ServerRenderer {
         (metadata) => metadata.shouldHydrate,
       );
       const hydrationStrategies = [
-        ...(shouldHydrate && moduleMetadata.islandStrategy
-          ? [moduleMetadata.islandStrategy]
-          : []),
+        ...(shouldHydrate && moduleMetadata.islandStrategy ? [moduleMetadata.islandStrategy] : []),
         ...layoutHydrationMetadata.flatMap((metadata) =>
           metadata.shouldHydrate && metadata.islandStrategy ? [metadata.islandStrategy] : [],
         ),
@@ -1087,11 +1085,8 @@ export class ServerRenderer {
                 "div",
                 {
                   id: "__farm_page__",
-                  "data-farm-client":
-                    isClientComponent || shouldHydrate ? "true" : "false",
-                  ...(shouldHydrateLayout
-                    ? { "data-farm-layout-client": "true" }
-                    : {}),
+                  "data-farm-client": isClientComponent || shouldHydrate ? "true" : "false",
+                  ...(shouldHydrateLayout ? { "data-farm-layout-client": "true" } : {}),
                   "data-farm-island": "page",
                   "data-farm-island-strategy": hydrationIslandStrategy,
                 },
