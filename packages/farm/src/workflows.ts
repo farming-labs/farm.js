@@ -1,3 +1,11 @@
+import {
+  createFarmRequestBodyErrorResponse,
+  readFarmRequestBody,
+  resolveFarmServerConfig,
+  type FarmServerConfig,
+  type ResolvedFarmServerConfig,
+} from "./server-http";
+
 export type FarmWorkflowSchedule = string | string[];
 
 export interface FarmWorkflowsUserConfig {
@@ -78,6 +86,7 @@ export interface FarmWorkflowHTTPHandlerOptions {
   workflows: FarmDiscoveredWorkflow[];
   config: FarmWorkflowsResolvedConfig;
   loadModule: (workflow: FarmDiscoveredWorkflow) => Promise<Record<string, any>>;
+  server?: FarmServerConfig | ResolvedFarmServerConfig;
 }
 
 export const DEFAULT_FARM_WORKFLOW_DIRS = ["src/jobs", "src/workflows", "src/cron"];
@@ -211,7 +220,17 @@ export function createFarmWorkflowRequestHandler(options: FarmWorkflowHTTPHandle
     const secretError = verifyWorkflowSecret(request, options.config);
     if (secretError) return secretError;
 
-    const payload = await readWorkflowPayload(request);
+    let payload: unknown;
+    try {
+      payload = await readWorkflowPayload(
+        request,
+        resolveFarmServerConfig(options.server).bodySizeLimit,
+      );
+    } catch (error) {
+      const response = createFarmRequestBodyErrorResponse(error);
+      if (response) return response;
+      throw error;
+    }
     const module = await options.loadModule(workflow);
     const result = await runFarmWorkflowModule(module, {
       id: workflow.id,
@@ -263,6 +282,7 @@ export async function prepareFarmWorkflowsForNitro(config: {
   root?: string;
   distDir?: string;
   workflows?: FarmWorkflowsResolvedConfig | FarmWorkflowsUserConfig | boolean;
+  server?: FarmServerConfig | ResolvedFarmServerConfig;
 }): Promise<PreparedFarmWorkflows> {
   const workflowConfig = isResolvedWorkflowConfig(config.workflows)
     ? config.workflows
@@ -302,7 +322,11 @@ export async function prepareFarmWorkflowsForNitro(config: {
   const handlerPath = path.join(generatedDir, "http-handler.mjs");
   await fs.writeFile(
     handlerPath,
-    createNitroWorkflowHTTPHandler(workflowConfig, workflows),
+    createNitroWorkflowHTTPHandler(
+      workflowConfig,
+      workflows,
+      resolveFarmServerConfig(config.server),
+    ),
     "utf8",
   );
 
@@ -560,14 +584,20 @@ export default defineTask({
 function createNitroWorkflowHTTPHandler(
   config: FarmWorkflowsResolvedConfig,
   workflows: FarmDiscoveredWorkflow[],
+  server: ResolvedFarmServerConfig,
 ): string {
   return `
 import { H3 } from "h3";
 import { runTask } from "nitro/runtime";
+import {
+  createFarmRequestBodyErrorResponse,
+  readFarmRequestBody
+} from "@farm.js/core/internal/production-runtime";
 
 const route = ${JSON.stringify(config.route)};
 const secretEnv = ${JSON.stringify(config.secretEnv)};
 const inlineSecret = ${JSON.stringify(config.secret || "")};
+const bodySizeLimit = ${JSON.stringify(server.bodySizeLimit)};
 const workflows = ${JSON.stringify(workflows.map(toWorkflowMetadata))};
 const workflowIds = new Set(workflows.map((workflow) => workflow.id));
 
@@ -591,19 +621,19 @@ function verifySecret(event) {
   if (!secret) return null;
   const authorization = getHeader(event, "authorization") || "";
   const headerSecret = getHeader(event, "x-farm-workflow-secret") || "";
-  const querySecret = event.url.searchParams.get("secret") || "";
-  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
-  if (headerSecret === secret || querySecret === secret || bearer === secret) return null;
+  const bearer = authorization.match(/^Bearer\\s+(.+)$/i)?.[1] || "";
+  if (headerSecret === secret || bearer === secret) return null;
   return json({ error: "Unauthorized workflow request." }, 401);
 }
 
 async function readPayload(event) {
   if (event.req.method === "GET" || event.req.method === "HEAD") {
-    const payload = Object.fromEntries(event.url.searchParams.entries());
-    delete payload.secret;
-    return payload;
+    return Object.fromEntries(event.url.searchParams.entries());
   }
-  return await event.req.json().catch(() => ({}));
+  const bytes = await readFarmRequestBody(event.req, bodySizeLimit);
+  const text = new TextDecoder().decode(bytes);
+  if (!text) return {};
+  return JSON.parse(text);
 }
 
 export default new H3()
@@ -621,7 +651,15 @@ export default new H3()
     const unauthorized = verifySecret(event);
     if (unauthorized) return unauthorized;
 
-    const payload = await readPayload(event);
+    let payload;
+    try {
+      payload = await readPayload(event);
+    } catch (error) {
+      const response = createFarmRequestBodyErrorResponse(error);
+      if (response) return response;
+      if (error instanceof SyntaxError) return json({ error: "Invalid workflow request body." }, 400);
+      throw error;
+    }
     const result = await runTask(id, {
       payload,
       context: {
@@ -651,20 +689,24 @@ function toWorkflowMetadata(workflow: FarmDiscoveredWorkflow) {
   };
 }
 
-async function readWorkflowPayload(request: Request): Promise<unknown> {
+async function readWorkflowPayload(request: Request, bodySizeLimit: number): Promise<unknown> {
   const url = new URL(request.url);
   if (request.method === "GET" || request.method === "HEAD") {
-    const payload = Object.fromEntries(url.searchParams.entries());
-    delete payload.secret;
-    return payload;
+    return Object.fromEntries(url.searchParams.entries());
   }
 
+  const bytes = await readFarmRequestBody(request, bodySizeLimit);
+  const text = new TextDecoder().decode(bytes);
+  if (!text) return {};
   const contentType = request.headers.get("content-type") || "";
   if (contentType.includes("application/json")) {
-    return await request.json().catch(() => ({}));
+    try {
+      return JSON.parse(text);
+    } catch {
+      return {};
+    }
   }
 
-  const text = await request.text().catch(() => "");
   return text ? { text } : {};
 }
 
@@ -681,12 +723,10 @@ function verifyWorkflowSecret(
   const secret = config.secret || process.env[config.secretEnv] || "";
   if (!secret) return null;
 
-  const url = new URL(request.url);
   const authorization = request.headers.get("authorization") || "";
-  const bearer = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const bearer = authorization.match(/^Bearer\s+(.+)$/i)?.[1] || "";
   const headerSecret = request.headers.get("x-farm-workflow-secret") || "";
-  const querySecret = url.searchParams.get("secret") || "";
-  if (bearer === secret || headerSecret === secret || querySecret === secret) return null;
+  if (bearer === secret || headerSecret === secret) return null;
 
   return Response.json({ error: "Unauthorized workflow request." }, { status: 401 });
 }

@@ -26,6 +26,7 @@ export interface APIRoute extends FarmRouteRuntimeConfig {
 export interface APIRouteManagerOptions {
   throwOnLoadError?: boolean;
   i18n?: FarmI18nRuntime;
+  bodySizeLimit?: number;
 }
 
 export const API_ROUTE_METHODS = [
@@ -44,6 +45,7 @@ export class APIRouteManager {
   private appDirs: string[];
   private throwOnLoadError: boolean;
   private i18n?: FarmI18nRuntime;
+  private bodySizeLimit?: number;
 
   constructor(
     appDir: string | readonly string[],
@@ -54,6 +56,7 @@ export class APIRouteManager {
     this.viteServer = viteServer;
     this.throwOnLoadError = options.throwOnLoadError === true;
     this.i18n = options.i18n;
+    this.bodySizeLimit = options.bodySizeLimit;
   }
 
   /**
@@ -314,7 +317,7 @@ export class APIRouteManager {
 
       const invoke = async () => {
         try {
-          return await invokeAPIRouteEndpoint(endpoint, request, params);
+          return await invokeAPIRouteEndpoint(endpoint, request, params, this.bodySizeLimit);
         } catch (error: any) {
           console.error(`[API Error] ${pathname}:`, error);
           return new Response(JSON.stringify({ error: "Internal Server Error" }), {

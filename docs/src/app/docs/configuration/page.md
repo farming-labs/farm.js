@@ -213,6 +213,27 @@ You can also pass an already serialized policy as `csp: "default-src 'self'; obj
 
 Farm currently emits small inline hydration and route-state bootstraps, so the compatible example allows inline scripts and styles. A stricter policy must supply correct hashes or renderer-generated nonces for every trusted inline bootstrap. Start with `reportOnly`, inspect violations, and enforce only after the deployed HTML and every third-party integration satisfy the policy.
 
+## Server HTTP policy
+
+Farm applies one request-body limit to API routes, integrations, workflow HTTP triggers, and uploads handled by those surfaces. The default is 10 MB.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  server: {
+    bodySizeLimit: "10mb",
+    trustProxy: false,
+  },
+});
+```
+
+Farm checks `Content-Length` when present and also counts the received bytes, so chunked requests cannot bypass `bodySizeLimit`. Oversized requests receive `413 Payload Too Large` before the route or integration handler runs. Server Actions keep their separate, tighter `serverActions.bodySizeLimit` setting.
+
+`trustProxy` defaults to `false`. Enable it only when the app is behind a trusted reverse proxy that removes client-supplied forwarding headers and writes its own `X-Forwarded-For` value. A directly exposed Farm server must leave it disabled so a client cannot spoof the address used by rate limits, logs, or access policy.
+
+Workflow runner secrets are accepted only through `Authorization: Bearer <secret>` or `X-Farm-Workflow-Secret`. Farm does not accept secrets in query strings because URLs are commonly retained in logs, browser history, and referrer data.
+
 ## Server action security
 
 Server actions are same-origin application RPC endpoints. Farm rejects cross-origin action requests by default and limits the encoded request body to 1 MB.

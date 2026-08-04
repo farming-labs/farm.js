@@ -111,6 +111,7 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
       {
         throwOnLoadError: true,
         i18n: farmApp.getI18nRuntime(),
+        bodySizeLimit: config.server.bodySizeLimit,
       },
     );
     const [, apiDiscovery] = await Promise.allSettled([

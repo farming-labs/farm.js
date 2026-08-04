@@ -11,6 +11,7 @@ import { initStorage } from "./storage";
 import { configureFarmObservability } from "./observability";
 import { normalizeRouteRules } from "./route-rules";
 import { resolveServerActionsConfig } from "./server-action-security";
+import { resolveFarmServerConfig } from "./server-http";
 import { resolveFarmImageConfig, type ResolvedFarmImageConfig } from "./image-config";
 import { getFarmAppDirectories, getFarmSourceRoots } from "./layers";
 import { RouteManager } from "./routing/route-manager";
@@ -141,6 +142,7 @@ export class FarmApp {
       middleware: config.middleware || {},
       routeRules: normalizeRouteRules(config.routeRules),
       context: config.context || (() => undefined),
+      server: resolveFarmServerConfig(config.server),
       serverActions: resolveServerActionsConfig(config.serverActions),
       security: resolveFarmSecurityConfig(config.security),
       images: resolveFarmImageConfig(config.images),

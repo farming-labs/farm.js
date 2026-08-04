@@ -3230,7 +3230,12 @@ async function handleAPIRequest(request) {
   }
 
   try {
-    return await invokeAPIRouteEndpoint(endpoint, request, params);
+    return await invokeAPIRouteEndpoint(
+      endpoint,
+      request,
+      params,
+      farmServerConfig.bodySizeLimit,
+    );
   } catch (error) {
     console.error(\`[API Error] \${url.pathname}:\`, error);
     return new Response(
@@ -3362,6 +3367,7 @@ const farmObservabilityConfig = farmUserConfig?.observability ?? ${JSON.stringif
 configureFarmObservability(farmObservabilityConfig);
 configureFarmCache(farmResolvedRuntimeConfig.cache);
 const farmI18nConfig = ${JSON.stringify(config.i18n)};
+const farmServerConfig = ${JSON.stringify(config.server)};
 const farmI18nRuntime = ${
     config.i18n.enabled
       ? `createFarmI18nRuntime(farmI18nConfig, ${JSON.stringify(i18nCatalogs)})`
@@ -4201,6 +4207,7 @@ const farmMiddlewareRunner = ${
   config: farmUserConfig?.middleware,
   modules: fileMiddlewareModules,
   i18n: farmI18nConfig,
+  server: farmServerConfig,
 })`
       : "null"
   };

@@ -64,6 +64,11 @@ import {
   createFarmSourceAlias,
 } from "./server/vite-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
+import {
+  createFarmRequestBodyErrorResponse,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+} from "./server-http";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -233,6 +238,13 @@ function createRequestFromNodeRequest(
     method: req.method || "GET",
     headers,
   });
+}
+
+function toRequestBody(body: Buffer | undefined): ArrayBuffer | undefined {
+  if (!body) return undefined;
+  const copy = new Uint8Array(body.byteLength);
+  copy.set(body);
+  return copy.buffer;
 }
 
 function applyWebRequestToNodeRequest(
@@ -564,6 +576,7 @@ export function farmPlugin(
       await farmApp.initialize();
 
       const farmConfig = farmApp.getConfig();
+      const serverConfig = resolveFarmServerConfig(farmConfig.server);
       let imageHandler: FarmImageHandler | null = null;
       if (farmConfig.images.provider !== "none") {
         const { createNodeImageUrlValidator, createSharpImageTransformer } =
@@ -807,6 +820,7 @@ export function farmPlugin(
 
       apiRouteManager = new APIRouteManager(appDirs, server, {
         i18n: farmApp.getI18nRuntime(),
+        bodySizeLimit: serverConfig.bodySizeLimit,
       });
       await apiRouteManager.discoverRoutes();
       let discoveredWorkflows: FarmDiscoveredWorkflow[] = [];
@@ -831,6 +845,7 @@ export function farmPlugin(
             config: workflowConfig,
             loadModule: async (workflow: FarmDiscoveredWorkflow) =>
               server.ssrLoadModule(workflow.filePath) as Promise<Record<string, any>>,
+            server: farmConfig.server,
           });
           logger.success(`✅ Discovered ${discoveredWorkflows.length} Farm workflow task(s)`);
         }
@@ -980,6 +995,7 @@ export function farmPlugin(
           const parsedRequestUrl = new URL(fullUrl);
           const requestPathname = parsedRequestUrl.pathname;
           const currentConfig = farmApp?.getConfig() ?? options;
+          const currentServerConfig = resolveFarmServerConfig(currentConfig.server);
 
           if (imageHandler && requestPathname === farmConfig.images.path) {
             const imageResponse = await imageHandler(
@@ -1183,23 +1199,25 @@ export function farmPlugin(
             (requestPathname === workflowConfig.route ||
               requestPathname.startsWith(`${workflowConfig.route}/`))
           ) {
-            let workflowBody: string | undefined;
-            if (requestMethod !== "GET" && requestMethod !== "HEAD") {
-              workflowBody = await new Promise<string>((resolve) => {
-                let data = "";
-                req.on("data", (chunk) => {
-                  data += chunk;
-                });
-                req.on("end", () => {
-                  resolve(data);
-                });
-              });
+            let workflowBody: Buffer | undefined;
+            try {
+              if (requestMethod !== "GET" && requestMethod !== "HEAD") {
+                workflowBody = await readNodeRequestBody(
+                  req as any,
+                  currentServerConfig.bodySizeLimit,
+                );
+              }
+            } catch (error) {
+              const response = createFarmRequestBodyErrorResponse(error);
+              if (!response) throw error;
+              await sendWebResponse(res, response);
+              return;
             }
             const workflowResponse = await workflowHandler(
               new Request(fullUrl, {
                 method: requestMethod,
                 headers: docsHeaders,
-                body: workflowBody || undefined,
+                body: toRequestBody(workflowBody),
               }),
             );
             if (workflowResponse) {
@@ -1240,23 +1258,15 @@ export function farmPlugin(
                 }
               }
 
-              let body: string | undefined;
+              let body: Buffer | undefined;
               if (req.method !== "GET" && req.method !== "HEAD") {
-                body = await new Promise<string>((resolve) => {
-                  let data = "";
-                  req.on("data", (chunk) => {
-                    data += chunk;
-                  });
-                  req.on("end", () => {
-                    resolve(data);
-                  });
-                });
+                body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
               }
 
               const integrationRequest = new Request(fullUrl, {
                 method: req.method,
                 headers,
-                body: body || undefined,
+                body: toRequestBody(body),
               });
 
               const dispatchIntegration = async (request: Request) => {
@@ -1294,6 +1304,11 @@ export function farmPlugin(
               await sendWebResponse(res, response);
               return true;
             } catch (error) {
+              const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+              if (bodyErrorResponse) {
+                await sendWebResponse(res, bodyErrorResponse);
+                return true;
+              }
               const duration = Date.now() - startTime;
               logResponse(requestMethod, requestUrl, 500, duration, "API");
               await emitPluginError("integration-handler", error, {
@@ -1374,23 +1389,15 @@ export function farmPlugin(
                 }
 
                 // Get body for POST/PUT/PATCH
-                let body: string | undefined;
+                let body: Buffer | undefined;
                 if (req.method !== "GET" && req.method !== "HEAD") {
-                  body = await new Promise<string>((resolve) => {
-                    let data = "";
-                    req.on("data", (chunk) => {
-                      data += chunk;
-                    });
-                    req.on("end", () => {
-                      resolve(data);
-                    });
-                  });
+                  body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
                 }
 
                 const request = new Request(url, {
                   method: req.method,
                   headers,
-                  body: body || undefined,
+                  body: toRequestBody(body),
                 });
 
                 const apiLifecyclePayload = {
@@ -1432,6 +1439,11 @@ export function farmPlugin(
                 await sendWebResponse(res, handledResponse);
                 return;
               } catch (error) {
+                const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+                if (bodyErrorResponse) {
+                  await sendWebResponse(res, bodyErrorResponse);
+                  return;
+                }
                 await emitPluginError("api-handler", error, {
                   urlPath,
                   method,
@@ -1454,23 +1466,15 @@ export function farmPlugin(
                   }
                 }
 
-                let body: string | undefined;
+                let body: Buffer | undefined;
                 if (req.method !== "GET" && req.method !== "HEAD") {
-                  body = await new Promise<string>((resolve) => {
-                    let data = "";
-                    req.on("data", (chunk) => {
-                      data += chunk;
-                    });
-                    req.on("end", () => {
-                      resolve(data);
-                    });
-                  });
+                  body = await readNodeRequestBody(req as any, currentServerConfig.bodySizeLimit);
                 }
 
                 const request = new Request(url, {
                   method: req.method,
                   headers,
-                  body: body || undefined,
+                  body: toRequestBody(body),
                 });
 
                 const apiLifecyclePayload = {
@@ -1510,6 +1514,11 @@ export function farmPlugin(
                   return;
                 }
               } catch (error) {
+                const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+                if (bodyErrorResponse) {
+                  await sendWebResponse(res, bodyErrorResponse);
+                  return;
+                }
                 await emitPluginError("docs-api-handler", error, {
                   urlPath,
                   method,

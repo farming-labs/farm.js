@@ -21,6 +21,12 @@ import {
 } from "./request-context";
 import { sendWebResponse } from "./server/response";
 import type { FarmRequest } from "./types";
+import {
+  bufferFarmRequestBody,
+  createFarmRequestBodyErrorResponse,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+} from "./server-http";
 
 export { api, defineIntegrationAPI, defineIntegrationAPIOperation } from "./integration-api";
 export type {
@@ -1694,15 +1700,25 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
         if (!bodyLoaded) {
           bodyLoaded = true;
           if (req.method && req.method !== "GET" && req.method !== "HEAD") {
-            requestBody = await readRequestBody(req);
+            requestBody = await readNodeRequestBody(
+              req,
+              resolveFarmServerConfig(context.config.server).bodySizeLimit,
+            );
           }
         }
 
         return requestBody;
       };
 
-      const createHandlerRequest = async () => {
-        return createWebRequest(req, fullUrl, await getRequestBody());
+      const createHandlerRequest = async (): Promise<Request | null> => {
+        try {
+          return createWebRequest(req, fullUrl, await getRequestBody());
+        } catch (error) {
+          const response = createFarmRequestBodyErrorResponse(error);
+          if (!response) throw error;
+          await sendWebResponse(res, response);
+          return null;
+        }
       };
 
       for (const entry of middleware) {
@@ -1712,6 +1728,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
         }
 
         const request = await createHandlerRequest();
+        if (!request) return;
         const handlerContext = createIntegrationHandlerContext({
           integration,
           route: {
@@ -1810,6 +1827,7 @@ function createIntegrationPlugin(integrationKey: string, integration: FarmIntegr
         }
 
         const request = await createHandlerRequest();
+        if (!request) return;
         const handlerContext = createIntegrationHandlerContext({
           integration,
           route: {
@@ -2506,6 +2524,17 @@ export async function dispatchIntegrationRequest(
     internal?: boolean;
   } = {},
 ): Promise<Response | null> {
+  try {
+    request = await bufferFarmRequestBody(
+      request,
+      resolveFarmServerConfig(runtime.config.server).bodySizeLimit,
+    );
+  } catch (error) {
+    const response = createFarmRequestBodyErrorResponse(error);
+    if (response) return response;
+    throw error;
+  }
+
   const integration = runtime.integration;
   const url = new URL(request.url);
   const pathname = url.pathname;
@@ -3062,19 +3091,6 @@ function getRequestId(req: FarmRequest): string {
     return headerValue[0] || String(Date.now());
   }
   return headerValue || String(Date.now());
-}
-
-async function readRequestBody(req: FarmRequest): Promise<Buffer> {
-  return await new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on("data", (chunk) => {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-    });
-    req.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-    req.on("error", reject);
-  });
 }
 
 function normalizeMatcher(matcher: string | readonly string[] | undefined): string {

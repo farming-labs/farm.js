@@ -766,6 +766,42 @@ describe("integrations runtime", () => {
     });
   });
 
+  it("rejects integration request bodies above the server limit", async () => {
+    const handler = vi.fn(() => Response.json({ ok: true }));
+    const manager = new PluginManager({
+      config: { server: { bodySizeLimit: 8 } },
+      isDev: true,
+      isProd: false,
+    });
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        limited: defineIntegration({
+          category: "custom",
+          type: "limited",
+          instance: {},
+          routes: [
+            integrationRoute.post("/api/limited", {
+              handler,
+            }),
+          ],
+        }),
+      }),
+    );
+    await manager.runHookParallel("init");
+
+    const runtime = getRegisteredIntegrationRuntime("limited");
+    const response = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/limited", {
+        method: "POST",
+        body: "request-too-large",
+      }),
+    );
+
+    expect(response?.status).toBe(413);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("runs route-level middleware in order before the route handler", async () => {
     const manager = createManager();
     manager.addPlugins(
