@@ -23,7 +23,10 @@ describe("Farm production Node entry", () => {
     expect(source).toContain("server.headersTimeout = farmServerConfig.headersTimeout");
     expect(source).toContain("server.requestTimeout = farmServerConfig.requestTimeout");
     expect(source).toContain("server.keepAliveTimeout = farmServerConfig.keepAliveTimeout");
-    expect(source).toContain("await farmProductionLifecycle.start()");
+    expect(source).toContain("startupSignalPromise");
+    expect(source).toContain("await Promise.race([");
+    expect(source).toContain("() => farmProductionLifecycle.start()");
+    expect(source).toContain("Runtime shutdown during startup timed out");
     expect(source).toContain("farmProductionLifecycle.beginDrain(signal)");
     expect(source).toContain('nitroApp.hooks.hook("close"');
     expect(source).toContain("process.env.NITRO_SHUTDOWN_TIMEOUT = String");

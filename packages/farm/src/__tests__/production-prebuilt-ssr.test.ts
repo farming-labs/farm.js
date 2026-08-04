@@ -341,6 +341,9 @@ export default function DynamicPage({ params }) {
       const nodeEnvBeforeBuild = process.env.NODE_ENV;
       await build(config, { root, preset: "node-server" });
       expect(process.env.NODE_ENV).toBe(nodeEnvBeforeBuild);
+      await expect(
+        fs.readFile(path.join(root, ".farm", "ssr", "nitro-entry.mjs"), "utf8"),
+      ).resolves.toContain("farmNitroApp.hooks.hook('close'");
 
       const clientBundle = await fs.readFile(
         path.join(root, ".farm", "client", "farm-client.js"),
@@ -567,6 +570,115 @@ export default defineConfig({
           "request:start",
           "request:finish",
           "runtime:closed:production-server-closed",
+          "resource:closed",
+        ]);
+      } finally {
+        if (productionServer.exitCode === null) productionServer.kill("SIGKILL");
+      }
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
+  it("shuts down when SIGTERM interrupts runtime startup", async () => {
+    const root = await createProductionFixture();
+    const markerPath = path.join(root, "production-startup-signal.log");
+    const serverConfig = { gracefulShutdownTimeout: "500ms" as const };
+
+    try {
+      await fs.writeFile(
+        path.join(root, "farm.config.ts"),
+        `
+import { appendFile } from "node:fs/promises";
+import { defineConfig, definePlugin } from "@farm.js/core";
+
+const lifecyclePlugin = definePlugin({
+  name: "test:startup-signal",
+  setup({ lifecycle }) {
+    lifecycle.onShutdown(async () => {
+      await appendFile(${JSON.stringify(markerPath)}, "resource:closed\\n");
+    });
+  },
+  runtime: {
+    async start() {
+      await appendFile(${JSON.stringify(markerPath)}, "runtime:starting\\n");
+      await new Promise(() => setInterval(() => {}, 1_000));
+    },
+    async close({ reason }) {
+      await appendFile(${JSON.stringify(markerPath)}, \`runtime:closed:\${reason}\\n\`);
+    },
+  },
+});
+
+export default defineConfig({
+  images: { provider: "none" },
+  server: ${JSON.stringify(serverConfig)},
+  plugins: [lifecyclePlugin],
+});
+`.trim(),
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          images: { provider: "none" },
+          server: serverConfig,
+          plugins: [
+            definePlugin({
+              name: "test:startup-signal-build-marker",
+              runtime: {
+                start() {},
+                close() {},
+              },
+            }),
+          ],
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const serverDir = path.join(root, ".farm", ".output", "server");
+      const output: string[] = [];
+      const productionServer = spawn(process.execPath, [path.join(serverDir, "index.mjs")], {
+        cwd: serverDir,
+        env: { ...process.env, HOST: "127.0.0.1", PORT: String(await getAvailablePort()) },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      productionServer.stdout.on("data", (chunk) => output.push(String(chunk)));
+      productionServer.stderr.on("data", (chunk) => output.push(String(chunk)));
+
+      try {
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const marker = await fs.readFile(markerPath, "utf8").catch(() => "");
+          if (marker.includes("runtime:starting")) break;
+          if (productionServer.exitCode !== null) {
+            throw new Error(`Production server exited during startup:\n${output.join("")}`);
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        expect(await fs.readFile(markerPath, "utf8")).toContain("runtime:starting");
+
+        const exitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+          (resolve) => {
+            productionServer.once("exit", (code, signal) => resolve({ code, signal }));
+          },
+        );
+        productionServer.kill("SIGTERM");
+        const exit = await Promise.race([
+          exitPromise,
+          new Promise<never>((_resolve, reject) =>
+            setTimeout(
+              () => reject(new Error(`Production startup did not stop:\n${output.join("")}`)),
+              2_000,
+            ),
+          ),
+        ]);
+
+        expect(exit).toEqual({ code: 0, signal: null });
+        expect((await fs.readFile(markerPath, "utf8")).trim().split("\n")).toEqual([
+          "runtime:starting",
+          "runtime:closed:SIGTERM",
           "resource:closed",
         ]);
       } finally {

@@ -6116,9 +6116,15 @@ async function buildNitroUniversal(
 // Farm.js Nitro Entry
 // This file adapts Farm's Web fetch handler to Nitro's event handler contract.
 
+import { useNitroApp } from 'nitro/runtime'
 import handler, { farmProductionLifecycle } from './${ssrEntryFile}'
 
 export { farmProductionLifecycle }
+
+const farmNitroApp = useNitroApp()
+farmNitroApp.hooks.hook('close', () =>
+  farmProductionLifecycle.close('production-server-closed')
+)
 
 function mergeVaryHeaders(target, source) {
   const values = new Set(

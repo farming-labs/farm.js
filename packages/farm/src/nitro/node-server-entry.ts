@@ -44,11 +44,18 @@ nitroApp.hooks.hook("close", async () => {
 });
 
 let startupSignal;
+let resolveStartupSignal;
+const startupSignalPromise = new Promise((resolve) => {
+  resolveStartupSignal = resolve;
+});
 const startupSignalListeners = new Map();
 if (!shutdownConfig.disabled) {
   for (const signal of shutdownConfig.signals) {
     const listener = (receivedSignal) => {
-      startupSignal ||= receivedSignal;
+      if (!startupSignal) {
+        startupSignal = receivedSignal;
+        resolveStartupSignal(receivedSignal);
+      }
       farmProductionLifecycle.beginDrain(receivedSignal);
     };
     startupSignalListeners.set(signal, listener);
@@ -57,7 +64,10 @@ if (!shutdownConfig.disabled) {
 }
 
 try {
-  await farmProductionLifecycle.start();
+  await Promise.race([
+    Promise.resolve().then(() => farmProductionLifecycle.start()),
+    startupSignalPromise,
+  ]);
 } catch (error) {
   await farmProductionLifecycle.close("production-start-failed").catch((closeError) => {
     console.error("[Farm] Runtime cleanup after startup failure failed:", closeError);
@@ -70,10 +80,25 @@ try {
 }
 
 if (startupSignal) {
-  try {
-    await farmProductionLifecycle.close(startupSignal);
-  } catch (error) {
-    console.error("[Farm] Runtime shutdown during startup failed:", error);
+  let startupCloseTimer;
+  const startupCloseCompleted = await Promise.race([
+    Promise.resolve()
+      .then(() => farmProductionLifecycle.close(startupSignal))
+      .then(
+        () => true,
+        (error) => {
+          console.error("[Farm] Runtime shutdown during startup failed:", error);
+          process.exitCode = 1;
+          return true;
+        },
+      ),
+    new Promise((resolve) => {
+      startupCloseTimer = setTimeout(() => resolve(false), farmServerConfig.gracefulShutdownTimeout);
+    }),
+  ]);
+  clearTimeout(startupCloseTimer);
+  if (!startupCloseCompleted) {
+    console.error("[Farm] Runtime shutdown during startup timed out");
     process.exitCode = 1;
   }
   process.exit(process.exitCode || 0);

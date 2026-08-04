@@ -56,6 +56,36 @@ describe("plugin lifecycle hooks", () => {
     expect(calls).toEqual(["shutdown:first", "shutdown:second", "dispose:second", "dispose:first"]);
   });
 
+  it("routes direct shutdown hook calls through runtime cleanup", async () => {
+    const manager = createManager();
+    const calls: string[] = [];
+
+    manager.addPlugin(
+      definePlugin({
+        name: "direct-shutdown-resource",
+        setup({ lifecycle }) {
+          lifecycle.onShutdown(() => {
+            calls.push("dispose");
+          });
+        },
+        shutdown() {
+          calls.push("shutdown");
+          throw new Error("direct shutdown failed");
+        },
+      }),
+    );
+
+    await manager.startRuntime();
+    await expect(manager.runHookParallel("shutdown", { reason: "direct" })).rejects.toMatchObject({
+      name: "FarmRuntimeShutdownError",
+    });
+    await expect(manager.closeRuntime("second-close")).rejects.toMatchObject({
+      name: "FarmRuntimeShutdownError",
+    });
+
+    expect(calls).toEqual(["shutdown", "dispose"]);
+  });
+
   it("indexes request capabilities and invalidates them when plugins are added", () => {
     const manager = createManager();
 

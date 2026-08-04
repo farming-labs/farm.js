@@ -51,15 +51,17 @@ export function createFarmProductionLifecycle(
       throw new Error("Farm production runtime failed to start");
     }
 
-    startPromise = Promise.resolve(options.start?.()).then(
-      () => {
-        if (state === "starting") state = "ready";
-      },
-      (error) => {
-        state = "failed";
-        throw error;
-      },
-    );
+    startPromise = Promise.resolve()
+      .then(() => options.start?.())
+      .then(
+        () => {
+          if (state === "starting") state = "ready";
+        },
+        (error) => {
+          state = "failed";
+          throw error;
+        },
+      );
     return startPromise;
   };
 
@@ -92,15 +94,17 @@ export function createFarmProductionLifecycle(
   const close = async (reason = "production-server-closed") => {
     if (closePromise) return closePromise;
     beginDrain(reason);
-    closePromise = Promise.resolve(options.close?.(reason)).then(
-      () => {
-        state = "closed";
-      },
-      (error) => {
-        state = "closed";
-        throw error;
-      },
-    );
+    closePromise = Promise.resolve()
+      .then(() => options.close?.(reason))
+      .then(
+        () => {
+          state = "closed";
+        },
+        (error) => {
+          state = "closed";
+          throw error;
+        },
+      );
     return closePromise;
   };
 
@@ -217,7 +221,7 @@ function trackResponseCompletion(
     }
   }
 
-  if (!response.body) {
+  if (!response.body || response.bodyUsed || response.body.locked) {
     finish();
     return response;
   }

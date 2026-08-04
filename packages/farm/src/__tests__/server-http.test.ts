@@ -59,11 +59,26 @@ describe("Farm server HTTP policy", () => {
     expect(() => resolveFarmServerConfig({ requestTimeout: 0 })).toThrow(
       "server.requestTimeout must be a positive safe integer",
     );
+    expect(() => resolveFarmServerConfig({ gracefulShutdownTimeout: 2_147_483_648 })).toThrow(
+      "server.gracefulShutdownTimeout must not exceed 2147483647 milliseconds",
+    );
+    expect(() => resolveFarmServerConfig({ gracefulShutdownTimeout: "597h" })).toThrow(
+      "server.gracefulShutdownTimeout must not exceed 2147483647 milliseconds",
+    );
     expect(() =>
       resolveFarmServerConfig({
         health: { livenessPath: "/health", readinessPath: "/health" },
       }),
     ).toThrow("must be different");
+    expect(
+      resolveFarmServerConfig({
+        health: { livenessPath: "///", readinessPath: "/health/ready" },
+      }).health,
+    ).toEqual({
+      enabled: true,
+      livenessPath: "/",
+      readinessPath: "/health/ready",
+    });
     expect(resolveFarmServerConfig({ health: false }).health.enabled).toBe(false);
   });
 

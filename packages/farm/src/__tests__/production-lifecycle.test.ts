@@ -29,6 +29,27 @@ describe("Farm production lifecycle", () => {
     expect(start).toHaveBeenCalledTimes(1);
   });
 
+  it("records synchronous startup failures and does not retry them", async () => {
+    const startError = new Error("synchronous startup failed");
+    const start = vi.fn(() => {
+      throw startError;
+    });
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+      start,
+    });
+
+    await expect(lifecycle.start()).rejects.toBe(startError);
+    await expect(lifecycle.start()).rejects.toBe(startError);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(lifecycle.state).toBe("failed");
+
+    const liveness = await lifecycle.handleHealthRequest(
+      new Request("https://example.com/_farm/health/live"),
+    );
+    expect(liveness?.status).toBe(503);
+  });
+
   it("fails readiness and rejects new work while draining", async () => {
     const handler = vi.fn(async () => new Response("should not run"));
     const lifecycle = createFarmProductionLifecycle({
@@ -92,6 +113,23 @@ describe("Farm production lifecycle", () => {
     expect(lifecycle.activeRequests).toBe(0);
   });
 
+  it("finishes tracking when a returned response body is already consumed or locked", async () => {
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+    });
+    const consumedResponse = new Response("consumed");
+    await consumedResponse.text();
+
+    await expect(lifecycle.runRequest(() => consumedResponse)).resolves.toBe(consumedResponse);
+    expect(lifecycle.activeRequests).toBe(0);
+
+    const lockedResponse = new Response("locked");
+    const reader = lockedResponse.body!.getReader();
+    await expect(lifecycle.runRequest(() => lockedResponse)).resolves.toBe(lockedResponse);
+    expect(lifecycle.activeRequests).toBe(0);
+    reader.releaseLock();
+  });
+
   it("closes the underlying runtime exactly once", async () => {
     const close = vi.fn(async () => {});
     const lifecycle = createFarmProductionLifecycle({
@@ -101,6 +139,24 @@ describe("Farm production lifecycle", () => {
     await lifecycle.start();
 
     await Promise.all([lifecycle.close("SIGTERM"), lifecycle.close("SIGINT")]);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledWith("SIGTERM");
+    expect(lifecycle.state).toBe("closed");
+  });
+
+  it("memoizes synchronous close failures and still reaches closed", async () => {
+    const closeError = new Error("synchronous close failed");
+    const close = vi.fn(() => {
+      throw closeError;
+    });
+    const lifecycle = createFarmProductionLifecycle({
+      server: resolveFarmServerConfig(undefined),
+      close,
+    });
+    await lifecycle.start();
+
+    await expect(lifecycle.close("SIGTERM")).rejects.toBe(closeError);
+    await expect(lifecycle.close("SIGINT")).rejects.toBe(closeError);
     expect(close).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledWith("SIGTERM");
     expect(lifecycle.state).toBe("closed");

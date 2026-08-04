@@ -450,6 +450,7 @@ export class PluginManager {
   private runtimeClosed = false;
   private runtimeStartPromise?: Promise<void>;
   private runtimeClosePromise?: Promise<void>;
+  private runtimeShutdownHooksRunning = false;
   private runtimeDisposers: Array<() => void | Promise<void>> = [];
   private runtimeRequestContexts = new WeakMap<Request, Readonly<Record<string, unknown>>>();
   private failedRuntimeSessions = new WeakSet<FarmPluginRuntimeSession>();
@@ -895,11 +896,14 @@ export class PluginManager {
 
     this.runtimeClosePromise = (async () => {
       const errors: unknown[] = [];
+      this.runtimeShutdownHooksRunning = true;
       try {
         await this.runHookParallel("shutdown", { reason });
       } catch (error) {
         if (error instanceof FarmRuntimeShutdownError) errors.push(...error.errors);
         else errors.push(error);
+      } finally {
+        this.runtimeShutdownHooksRunning = false;
       }
 
       const disposers = this.runtimeDisposers.splice(0).reverse();
@@ -1102,6 +1106,11 @@ export class PluginManager {
   }
 
   async runHookParallel<K extends keyof FarmPlugin>(hookName: K, ...args: any[]): Promise<boolean> {
+    if (hookName === "shutdown" && !this.runtimeShutdownHooksRunning) {
+      await this.closeRuntime(args[0]?.reason);
+      return false;
+    }
+
     const plugins = this.getSortedPlugins();
 
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
@@ -1148,7 +1157,6 @@ export class PluginManager {
         }
       }
       if (hookName === "shutdown" && shutdownErrors.length > 0) {
-        this.runtimeClosed = true;
         throw new FarmRuntimeShutdownError("Farm plugin shutdown hooks failed", shutdownErrors);
       }
     } else {
@@ -1165,7 +1173,6 @@ export class PluginManager {
 
     if (hookName === "init") this.initialized = true;
     if (hookName === "ready") this.runtimeReady = true;
-    if (hookName === "shutdown") this.runtimeClosed = true;
 
     return false;
   }

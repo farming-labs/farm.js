@@ -3,6 +3,7 @@ export const DEFAULT_FARM_SERVER_HEADERS_TIMEOUT = 60_000;
 export const DEFAULT_FARM_SERVER_REQUEST_TIMEOUT = 300_000;
 export const DEFAULT_FARM_SERVER_KEEP_ALIVE_TIMEOUT = 5_000;
 export const DEFAULT_FARM_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT = 30_000;
+const MAX_FARM_SERVER_TIMEOUT = 2_147_483_647;
 
 export type FarmServerDuration = number | `${number}${"ms" | "s" | "m" | "h"}`;
 
@@ -103,6 +104,9 @@ export function parseFarmServerDuration(
     if (!Number.isSafeInteger(value) || value <= 0) {
       throw new TypeError(`${optionName} must be a positive safe integer`);
     }
+    if (value > MAX_FARM_SERVER_TIMEOUT) {
+      throw new TypeError(`${optionName} must not exceed ${MAX_FARM_SERVER_TIMEOUT} milliseconds`);
+    }
     return value;
   }
 
@@ -120,6 +124,9 @@ export function parseFarmServerDuration(
   const milliseconds = Math.floor(amount * multiplier);
   if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
     throw new TypeError(`${optionName} must resolve to a positive safe integer`);
+  }
+  if (milliseconds > MAX_FARM_SERVER_TIMEOUT) {
+    throw new TypeError(`${optionName} must not exceed ${MAX_FARM_SERVER_TIMEOUT} milliseconds`);
   }
   return milliseconds;
 }
@@ -155,7 +162,7 @@ function normalizeHealthPath(value: string, optionName: string): string {
   if (!path.startsWith("/") || path.includes("?") || path.includes("#") || path.includes("*")) {
     throw new TypeError(`${optionName} must be an absolute pathname without a query or wildcard`);
   }
-  return path.length > 1 ? path.replace(/\/+$/, "") : path;
+  return path.length > 1 ? path.replace(/\/+$/, "") || "/" : path;
 }
 
 export function parseBodySizeLimit(value: number | string, optionName = "bodySizeLimit"): number {
