@@ -5463,12 +5463,17 @@ async function handleFarmRequestInContext(
         React.createElement("main", {
           className: "farm-default-not-found",
           "aria-labelledby": "farm-default-not-found-title",
+          "aria-describedby": "farm-default-not-found-description",
         },
           React.createElement("div", { className: "farm-default-not-found__content" },
             React.createElement("h1", {
               id: "farm-default-not-found-title",
               className: "farm-default-not-found__code",
             }, "404"),
+            React.createElement("p", {
+              id: "farm-default-not-found-description",
+              className: "farm-default-not-found__description",
+            }, "Not found"),
             React.createElement("a", {
               className: "farm-default-not-found__home",
               href: "/",

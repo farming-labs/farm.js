@@ -13,6 +13,7 @@ body {
 .farm-default-not-found {
   --farm-not-found-bg: #fafafa;
   --farm-not-found-fg: #171717;
+  --farm-not-found-muted: #737373;
   --farm-not-found-button-fg: #ffffff;
   min-height: 100vh;
   min-height: 100svh;
@@ -34,7 +35,6 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 32px;
 }
 
 .farm-default-not-found__code {
@@ -45,6 +45,13 @@ body {
   letter-spacing: -0.08em;
 }
 
+.farm-default-not-found__description {
+  margin: 22px 0 30px;
+  color: var(--farm-not-found-muted);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
 .farm-default-not-found__home {
   min-height: 44px;
   display: inline-flex;
@@ -52,7 +59,7 @@ body {
   justify-content: center;
   padding: 0 20px;
   border: 1px solid var(--farm-not-found-fg);
-  border-radius: 7px;
+  border-radius: 0;
   color: var(--farm-not-found-button-fg);
   background: var(--farm-not-found-fg);
   font-size: 14px;
@@ -81,6 +88,7 @@ body {
   .farm-default-not-found {
     --farm-not-found-bg: #0a0a0a;
     --farm-not-found-fg: #ededed;
+    --farm-not-found-muted: #a1a1a1;
     --farm-not-found-button-fg: #0a0a0a;
     color-scheme: dark;
   }
@@ -91,6 +99,7 @@ body {
 [data-color-scheme="dark"] .farm-default-not-found {
   --farm-not-found-bg: #0a0a0a;
   --farm-not-found-fg: #ededed;
+  --farm-not-found-muted: #a1a1a1;
   --farm-not-found-button-fg: #0a0a0a;
   color-scheme: dark;
 }
@@ -100,6 +109,7 @@ body {
 [data-color-scheme="light"] .farm-default-not-found {
   --farm-not-found-bg: #fafafa;
   --farm-not-found-fg: #171717;
+  --farm-not-found-muted: #737373;
   --farm-not-found-button-fg: #ffffff;
   color-scheme: light;
 }
@@ -123,11 +133,21 @@ export function DefaultNotFoundPage(_props: NotFoundPageProps) {
   return (
     <>
       <style>{DEFAULT_NOT_FOUND_STYLES}</style>
-      <main className="farm-default-not-found" aria-labelledby="farm-default-not-found-title">
+      <main
+        className="farm-default-not-found"
+        aria-labelledby="farm-default-not-found-title"
+        aria-describedby="farm-default-not-found-description"
+      >
         <div className="farm-default-not-found__content">
           <h1 id="farm-default-not-found-title" className="farm-default-not-found__code">
             404
           </h1>
+          <p
+            id="farm-default-not-found-description"
+            className="farm-default-not-found__description"
+          >
+            Not found
+          </p>
           <a className="farm-default-not-found__home" href="/">
             Go home
           </a>
