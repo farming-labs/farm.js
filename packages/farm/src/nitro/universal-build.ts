@@ -61,6 +61,7 @@ import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 import { mergeFarmFontCss } from "../font-vite";
 import type { FarmIslandStrategy } from "../island";
 import { createFarmSourceAlias } from "../server/vite-config";
+import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -5464,75 +5465,28 @@ async function handleFarmRequestInContext(
   try {
     // Default 404 page component
     function Default404Page() {
-      return React.createElement("div", {
-        style: {
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          minHeight: "100vh",
-          fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-          backgroundColor: "#f9fafb",
-          padding: "20px",
-          textAlign: "center",
-        }
-      },
-        React.createElement("div", {
-          style: {
-            backgroundColor: "white",
-            borderRadius: "12px",
-            padding: "48px",
-            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-            maxWidth: "500px",
-            width: "100%",
-          }
+      return React.createElement(React.Fragment, null,
+        React.createElement("style", null, ${JSON.stringify(DEFAULT_NOT_FOUND_STYLES)}),
+        React.createElement("main", {
+          className: "farm-default-not-found",
+          "aria-labelledby": "farm-default-not-found-title",
+          "aria-describedby": "farm-default-not-found-description",
         },
-          React.createElement("h1", {
-            style: {
-              fontSize: "96px",
-              fontWeight: "bold",
-              color: "#22c55e",
-              margin: "0 0 16px 0",
-              lineHeight: "1",
-            }
-          }, "404"),
-          React.createElement("h2", {
-            style: {
-              fontSize: "24px",
-              fontWeight: "600",
-              color: "#1f2937",
-              margin: "0 0 16px 0",
-            }
-          }, "Page Not Found"),
-          React.createElement("p", {
-            style: {
-              fontSize: "16px",
-              color: "#6b7280",
-              margin: "0 0 24px 0",
-            }
-          }, "The page ", React.createElement("code", {
-            style: { backgroundColor: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }
-          }, pathname), " doesn't exist."),
-          React.createElement("a", {
-            href: "/",
-            style: {
-              display: "inline-block",
-              backgroundColor: "#22c55e",
-              color: "white",
-              padding: "12px 24px",
-              borderRadius: "8px",
-              textDecoration: "none",
-              fontWeight: "500",
-            }
-          }, "Go Home")
-        ),
-        React.createElement("p", {
-          style: {
-            marginTop: "24px",
-            fontSize: "14px",
-            color: "#9ca3af",
-          }
-        }, "Powered by Farm.js")
+          React.createElement("div", { className: "farm-default-not-found__content" },
+            React.createElement("h1", {
+              id: "farm-default-not-found-title",
+              className: "farm-default-not-found__code",
+            }, "404"),
+            React.createElement("p", {
+              id: "farm-default-not-found-description",
+              className: "farm-default-not-found__description",
+            }, "Not found"),
+            React.createElement("a", {
+              className: "farm-default-not-found__home",
+              href: "/",
+            }, "GO HOME")
+          )
+        )
       );
     }
     

@@ -5,106 +5,188 @@ export interface NotFoundPageProps {
   pathname?: string;
 }
 
+export const DEFAULT_NOT_FOUND_STYLES = `
+body {
+  margin: 0;
+}
+
+.farm-default-not-found {
+  --farm-not-found-bg: #fafafa;
+  --farm-not-found-fg: #171717;
+  --farm-not-found-muted: #737373;
+  --farm-not-found-line: rgba(0, 0, 0, 0.16);
+  --farm-not-found-button-fg: #ffffff;
+  min-height: 100vh;
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  color: var(--farm-not-found-fg);
+  background: var(--farm-not-found-bg);
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+.farm-default-not-found,
+.farm-default-not-found * {
+  box-sizing: border-box;
+}
+
+.farm-default-not-found__content {
+  width: min(100%, 280px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.farm-default-not-found__code {
+  margin: 0;
+  color: var(--farm-not-found-fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: clamp(88px, 20vw, 140px);
+  font-weight: 800;
+  line-height: 0.75;
+  letter-spacing: -0.1em;
+  transform: translateX(-3px);
+}
+
+@supports (-webkit-text-stroke: 1px currentColor) {
+  .farm-default-not-found__code {
+    color: var(--farm-not-found-bg);
+    -webkit-text-stroke: 2px var(--farm-not-found-fg);
+    text-shadow: 5px 5px 0 var(--farm-not-found-fg);
+  }
+}
+
+.farm-default-not-found__description {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 34px 0 30px;
+  color: var(--farm-not-found-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.farm-default-not-found__description::before,
+.farm-default-not-found__description::after {
+  content: "";
+  height: 1px;
+  flex: 1 1 auto;
+  background: var(--farm-not-found-line);
+}
+
+.farm-default-not-found__home {
+  min-width: 132px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 20px;
+  border: 1px solid var(--farm-not-found-fg);
+  border-radius: 0;
+  color: var(--farm-not-found-button-fg);
+  background: var(--farm-not-found-fg);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
+  transition: opacity 150ms ease-out, transform 100ms ease-out;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .farm-default-not-found__home:hover {
+    opacity: 0.78;
+  }
+}
+
+.farm-default-not-found__home:active {
+  transform: translateY(1px);
+}
+
+.farm-default-not-found__home:focus-visible {
+  outline: 2px solid var(--farm-not-found-fg);
+  outline-offset: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .farm-default-not-found {
+    --farm-not-found-bg: #0a0a0a;
+    --farm-not-found-fg: #ededed;
+    --farm-not-found-muted: #a1a1a1;
+    --farm-not-found-line: rgba(255, 255, 255, 0.2);
+    --farm-not-found-button-fg: #0a0a0a;
+    color-scheme: dark;
+  }
+}
+
+.dark .farm-default-not-found,
+[data-theme="dark"] .farm-default-not-found,
+[data-color-scheme="dark"] .farm-default-not-found {
+  --farm-not-found-bg: #0a0a0a;
+  --farm-not-found-fg: #ededed;
+  --farm-not-found-muted: #a1a1a1;
+  --farm-not-found-line: rgba(255, 255, 255, 0.2);
+  --farm-not-found-button-fg: #0a0a0a;
+  color-scheme: dark;
+}
+
+.light .farm-default-not-found,
+[data-theme="light"] .farm-default-not-found,
+[data-color-scheme="light"] .farm-default-not-found {
+  --farm-not-found-bg: #fafafa;
+  --farm-not-found-fg: #171717;
+  --farm-not-found-muted: #737373;
+  --farm-not-found-line: rgba(0, 0, 0, 0.16);
+  --farm-not-found-button-fg: #ffffff;
+  color-scheme: light;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .farm-default-not-found__home {
+    transition: none;
+  }
+
+  .farm-default-not-found__home:active {
+    transform: none;
+  }
+}
+`;
+
 /**
- * Default 404 Not Found page component
- * Users can override this with their own component via the notFound config option
+ * Default 404 Not Found page component.
+ * Users can override this with their own component via the notFound config option.
  */
-export function DefaultNotFoundPage({ pathname }: NotFoundPageProps) {
+export function DefaultNotFoundPage(_props: NotFoundPageProps) {
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-        fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
-        backgroundColor: "#f9fafb",
-        padding: "20px",
-        textAlign: "center",
-      }}
-    >
-      <div
-        style={{
-          backgroundColor: "white",
-          borderRadius: "12px",
-          padding: "48px",
-          boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)",
-          maxWidth: "500px",
-          width: "100%",
-        }}
+    <>
+      <style>{DEFAULT_NOT_FOUND_STYLES}</style>
+      <main
+        className="farm-default-not-found"
+        aria-labelledby="farm-default-not-found-title"
+        aria-describedby="farm-default-not-found-description"
       >
-        <h1
-          style={{
-            fontSize: "96px",
-            fontWeight: "bold",
-            color: "#22c55e",
-            margin: "0 0 16px 0",
-            lineHeight: "1",
-          }}
-        >
-          404
-        </h1>
-        <h2
-          style={{
-            fontSize: "24px",
-            fontWeight: "600",
-            color: "#1f2937",
-            margin: "0 0 16px 0",
-          }}
-        >
-          Page Not Found
-        </h2>
-        <p
-          style={{
-            fontSize: "16px",
-            color: "#6b7280",
-            margin: "0 0 24px 0",
-          }}
-        >
-          {pathname ? (
-            <>
-              The page{" "}
-              <code style={{ backgroundColor: "#f3f4f6", padding: "2px 6px", borderRadius: "4px" }}>
-                {pathname}
-              </code>{" "}
-              doesn't exist.
-            </>
-          ) : (
-            "The page you're looking for doesn't exist or has been moved."
-          )}
-        </p>
-        <a
-          href="/"
-          style={{
-            display: "inline-block",
-            backgroundColor: "#22c55e",
-            color: "white",
-            padding: "12px 24px",
-            borderRadius: "8px",
-            textDecoration: "none",
-            fontWeight: "500",
-            transition: "background-color 0.2s",
-          }}
-          onMouseOver={(e) => (e.currentTarget.style.backgroundColor = "#16a34a")}
-          onMouseOut={(e) => (e.currentTarget.style.backgroundColor = "#22c55e")}
-        >
-          Go Home
-        </a>
-      </div>
-      <p
-        style={{
-          marginTop: "24px",
-          fontSize: "14px",
-          color: "#9ca3af",
-        }}
-      >
-        Powered by{" "}
-        <a href="https://farmjs.dev" style={{ color: "#22c55e", textDecoration: "none" }}>
-          Farm.js
-        </a>
-      </p>
-    </div>
+        <div className="farm-default-not-found__content">
+          <h1 id="farm-default-not-found-title" className="farm-default-not-found__code">
+            404
+          </h1>
+          <p
+            id="farm-default-not-found-description"
+            className="farm-default-not-found__description"
+          >
+            Not found
+          </p>
+          <a className="farm-default-not-found__home" href="/">
+            GO HOME
+          </a>
+        </div>
+      </main>
+    </>
   );
 }
 
