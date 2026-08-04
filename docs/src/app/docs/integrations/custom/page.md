@@ -338,11 +338,103 @@ type IntegrationAuthoringShape = {
   ready?: (ctx: unknown) => void | Promise<void>;
   dispose?: (ctx: unknown) => void | Promise<void>;
   log?: (event: unknown) => void | Promise<void>;
-  plugins?: readonly unknown[];
+  plugins?:
+    | readonly unknown[]
+    | ((ctx: {
+        key: string;
+        category: string;
+        type: string;
+        instance: unknown;
+        serverRuntime: boolean;
+      }) => readonly unknown[]);
 };
 ```
 
 In normal app code you do not need to write this type by hand. `defineIntegration` preserves the exact route, endpoint, config, and schema types for inference.
+
+## Compose integration and application plugins
+
+An integration can contribute the framework behavior it needs without asking every application to
+repeat that plugin in `farm.config.ts`. Use a `plugins` factory when the contribution needs the
+integration's registration key or shared instance.
+
+**src/integrations/acme.ts**
+
+```ts
+import { defineIntegration, definePlugin } from "@farm.js/core";
+
+const acmeClient = {
+  region: "eu-west",
+};
+
+export const acme = defineIntegration({
+  category: "custom",
+  type: "acme",
+  instance: acmeClient,
+  plugins({ key, instance }) {
+    return [
+      definePlugin({
+        name: `acme:${key}:runtime`,
+        runtime: {
+          after({ response }) {
+            const headers = new Headers(response.headers);
+            headers.set("x-acme-region", instance.region);
+
+            return new Response(response.body, {
+              status: response.status,
+              statusText: response.statusText,
+              headers,
+            });
+          },
+        },
+      }),
+    ];
+  },
+});
+```
+
+The application can still add cross-cutting plugins globally. Both contributions participate in
+the same plugin pipeline:
+
+**farm.config.ts**
+
+```ts
+import { defineConfig, definePlugin } from "@farm.js/core";
+import { acme } from "./src/integrations/acme";
+
+const requestId = definePlugin({
+  name: "app:request-id",
+  runtime: {
+    after({ response }) {
+      const headers = new Headers(response.headers);
+      headers.set("x-request-id-policy", "app");
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    },
+  },
+});
+
+export default defineConfig({
+  integrations: {
+    acme,
+  },
+  plugins: [requestId],
+});
+```
+
+Farm normalizes the integration lifecycle plugin, its contributed plugins, and the application's
+global plugins into one list. Normal plugin ordering still applies, including `enforce: "pre"` and
+`enforce: "post"`. A static `plugins: [plugin]` array remains supported when no context is needed.
+
+The contribution factory runs during config normalization and production build loading, so keep it
+deterministic and free of network or database side effects. Perform runtime work in plugin hooks.
+Contributed plugins inherit the integration's `serverRuntime` ownership and Farm rejects duplicate
+plugin names within one integration. Diagnostic tooling can inspect provenance with
+`getFarmIntegrationPluginOwner(plugin)`.
 
 ## Config validation
 

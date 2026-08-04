@@ -1106,12 +1106,21 @@ export class PluginManager {
   }
 
   async runHookParallel<K extends keyof FarmPlugin>(hookName: K, ...args: any[]): Promise<boolean> {
+    return this.runHookParallelFiltered(hookName, () => true, ...args);
+  }
+
+  /** @internal Runs hooks for only the plugins selected by the runtime adapter. */
+  async runHookParallelFiltered<K extends keyof FarmPlugin>(
+    hookName: K,
+    include: (plugin: FarmPlugin) => boolean,
+    ...args: any[]
+  ): Promise<boolean> {
     if (hookName === "shutdown" && !this.runtimeShutdownHooksRunning) {
       await this.closeRuntime(args[0]?.reason);
       return false;
     }
 
-    const plugins = this.getSortedPlugins();
+    const plugins = this.getSortedPlugins().filter(include);
 
     // Run selected hooks sequentially for deterministic execution and short-circuiting.
     const sequentialHooks = new Set<keyof FarmPlugin>([

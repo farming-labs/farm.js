@@ -421,6 +421,8 @@ test.describe("Framework feature integration", () => {
     });
     expect(directRoute.status()).toBe(200);
     expect(directRoute.headers()["x-integration-after"]).toBe("routes");
+    expect(directRoute.headers()["x-integration-plugin"]).toBe("routeLab:configured");
+    expect(directRoute.headers()["x-farm-runtime-plugin"]).toBe("/api/route-lab/message");
     await expect(directRoute.json()).resolves.toEqual(
       expect.objectContaining({
         source: "routes",
