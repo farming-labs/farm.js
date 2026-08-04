@@ -350,18 +350,18 @@ const integrationCodeTabs = [
     id: "integrations",
     label: "integrations.ts",
     language: "ts",
-    highlightLines: [4, 5, 6, 7, 10, 11],
-    code: `import { createUnkeyClient, unkey } from "@farm.js/integrations/unkey";
+    highlightLines: [1, 5, 7],
+    code: `import Stripe from "stripe";
 import { stripe } from "@farm.js/integrations/stripe";
+import { unkey } from "@farm.js/integrations/unkey";
 
-const unkeyClient = createUnkeyClient({
-    rootKey: process.env.UNKEY_ROOT_KEY,
-    apiId: process.env.UNKEY_API_ID,
-});
-
+const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!);
 export const integrations = {
-    keys: unkey({ instance: unkeyClient }),
-    billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }),
+    billing: stripe({ instance: stripeClient }),
+    keys: unkey({
+        rootKey: process.env.UNKEY_ROOT_KEY,
+        apiId: process.env.UNKEY_API_ID,
+    }),
 };`,
   },
   {
