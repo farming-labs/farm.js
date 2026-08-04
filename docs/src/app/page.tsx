@@ -348,39 +348,35 @@ data?.users[0]?.name;
 const integrationCodeTabs = [
   {
     id: "integrations",
-    label: "farm.config.ts",
+    label: "integrations.ts",
     language: "ts",
-    highlightLines: [5, 6, 7, 8, 9, 10],
-    code: `import { defineConfig } from "@farm.js/core";
-import { resend, stripe } from "@farm.js/integrations";
-import { emailTemplates } from "./email";
-export default defineConfig({
-    integrations: {
-        billing: stripe({ secretKey: process.env.STRIPE_SECRET_KEY }),
-        email: resend({
-            apiKey: process.env.RESEND_API_KEY,
-            templates: emailTemplates,
-        }),
-    },
-});`,
+    highlightLines: [1, 5, 7],
+    code: `import Stripe from "stripe";
+import { stripe } from "@farm.js/integrations/stripe";
+import { unkey } from "@farm.js/integrations/unkey";
+
+const stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY!);
+export const integrations = {
+    billing: stripe({ instance: stripeClient }),
+    keys: unkey({
+        rootKey: process.env.UNKEY_ROOT_KEY,
+        apiId: process.env.UNKEY_API_ID,
+    }),
+};`,
   },
   {
     id: "apis",
-    label: "Billing and email APIs",
+    label: "Typed integration calls",
     language: "ts",
-    highlightLines: [3, 7, 9],
+    highlightLines: [3, 4, 7, 8],
     code: `import { api, apiClient } from "@/lib/api";
+
+const key = await api.keys.create.post({
+    body: { name: "Production key" },
+});
 
 const checkout = await apiClient.billing.checkout.post({
     body: { productId: "pro" },
-});
-
-await api.email.send.post({
-    body: {
-        template: "welcome",
-        to: "ada@example.com",
-        data: { name: "Ada" },
-    },
 });`,
   },
 ] as const satisfies readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
@@ -1127,12 +1123,12 @@ function DeveloperExperienceGrid() {
         <TypedApiVisual />
       </FeatureCell>
       <FeatureCell
-        body="Configure billing and email once, then use their typed APIs from client and server code."
+        body="Connect billing, API keys, and more in one place. Pass existing provider instances and call every service through typed APIs."
         className="border-t border-white/12"
         icon={Plug}
         index="01.3"
-        label="Billing + email"
-        title="Start built in. Extend when needed."
+        label="Integrations"
+        title="Connect once. Keep full control."
       >
         <IntegrationVisual />
       </FeatureCell>

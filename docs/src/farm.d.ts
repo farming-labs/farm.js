@@ -266,5 +266,3 @@ declare module "@farm.js/core" {
     public: FarmResolvedEnv["public"];
   }
 }
-
-export {};
