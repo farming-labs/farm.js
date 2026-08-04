@@ -311,6 +311,10 @@ describe("resolveConfig", () => {
 
   it("resolves secure server action defaults and overrides", async () => {
     const defaults = await resolveConfig({}, "production");
+    expect(defaults.server).toEqual({
+      bodySizeLimit: 10_000_000,
+      trustProxy: false,
+    });
     expect(defaults.serverActions).toEqual({
       allowedOrigins: [],
       bodySizeLimit: 1_000_000,
@@ -329,6 +333,20 @@ describe("resolveConfig", () => {
     expect(configured.serverActions).toEqual({
       allowedOrigins: ["https://app.example.com", "*.proxy.example.com"],
       bodySizeLimit: 2_000_000,
+    });
+
+    const server = await resolveConfig(
+      {
+        server: {
+          bodySizeLimit: "25mb",
+          trustProxy: true,
+        },
+      },
+      "production",
+    );
+    expect(server.server).toEqual({
+      bodySizeLimit: 25_000_000,
+      trustProxy: true,
     });
   });
 

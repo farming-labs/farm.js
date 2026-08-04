@@ -12,6 +12,7 @@ import type { FarmCronResolvedConfig, FarmCronUserConfig } from "./cron";
 import type { FarmEnvConfig, ResolvedFarmEnv } from "./env";
 import type { FarmRouteRules } from "./route-rules";
 import type { FarmServerActionsConfig } from "./server-action-security";
+import type { FarmServerConfig } from "./server-http";
 import type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 import type { FarmRouteMaxDuration, FarmRouteRegions, FarmRouteRuntime } from "./route-runtime";
 import type { FarmDevtoolsUserConfig } from "./devtools-config";
@@ -179,6 +180,8 @@ export interface FarmConfig {
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;
   context?: FarmContextFactory<any>;
+  /** Server ingress and trusted-proxy policy. */
+  server?: FarmServerConfig;
   serverActions?: FarmServerActionsConfig;
   /** App-wide HTTP security policy. */
   security?: FarmSecurityConfig | ResolvedFarmSecurityConfig;

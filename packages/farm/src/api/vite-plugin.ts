@@ -22,12 +22,19 @@ import { _withAfterNodeMiddleware } from "../after";
 import { getProgrammaticRouteManifest, isProgrammaticRoutesFileName } from "../routes";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
 import { toViteModuleId } from "../utils";
+import {
+  createFarmRequestBodyErrorResponse,
+  readNodeRequestBody,
+  resolveFarmServerConfig,
+} from "../server-http";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
   srcDir?: string;
   /** Enable debug logging */
   debug?: boolean;
+  /** Maximum request body size, for example `"10mb"`. */
+  bodySizeLimit?: number | string;
 }
 
 export interface ApiRoute {
@@ -43,6 +50,9 @@ export interface ApiRoute {
 export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
   const srcDir = options.srcDir ?? "src";
   const debug = options.debug ?? false;
+  const bodySizeLimit = resolveFarmServerConfig({
+    bodySizeLimit: options.bodySizeLimit,
+  }).bodySizeLimit;
 
   // API routes cache
   let apiRoutesCache: Map<string, ApiRoute> = new Map();
@@ -132,7 +142,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         }
 
         try {
-          return await invokeAPIRouteEndpoint(endpoint, request, params);
+          return await invokeAPIRouteEndpoint(endpoint, request, params, bodySizeLimit);
         } catch (error: any) {
           return new Response(JSON.stringify({ error: error.message || "Internal Server Error" }), {
             status: 500,
@@ -351,23 +361,20 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
                 }
               }
 
-              let body: string | undefined;
+              let body: Buffer | undefined;
               if (method !== "GET" && method !== "HEAD") {
-                body = await new Promise<string>((resolve) => {
-                  let data = "";
-                  req.on("data", (chunk: any) => {
-                    data += chunk;
-                  });
-                  req.on("end", () => {
-                    resolve(data);
-                  });
-                });
+                body = await readNodeRequestBody(req as any, bodySizeLimit);
               }
 
               const request = new Request(fullUrl, {
                 method,
                 headers,
-                body: body || undefined,
+                body: body
+                  ? (body.buffer.slice(
+                      body.byteOffset,
+                      body.byteOffset + body.byteLength,
+                    ) as ArrayBuffer)
+                  : undefined,
               });
 
               const response = await apiRouterHandler(request);
@@ -377,6 +384,11 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
               await sendWebResponse(res, response);
             } catch (error: any) {
+              const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
+              if (bodyErrorResponse) {
+                await sendWebResponse(res, bodyErrorResponse);
+                return;
+              }
               const duration = Date.now() - startTime;
               logResponse(method, pathname, 500, duration);
               console.error("[FARM] API error:", error);
