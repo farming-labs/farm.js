@@ -28,6 +28,15 @@ export type {
   ResolvedFarmPerformanceConfig,
   ResolvedFarmPreloadConfig,
 } from "./preload";
+export type {
+  FarmCspConfig,
+  FarmCspDirectives,
+  FarmCspDirectiveValue,
+  FarmCspOptions,
+  FarmSecurityConfig,
+  ResolvedFarmCspConfig,
+  ResolvedFarmSecurityConfig,
+} from "./security";
 export type { FarmIslandStrategy } from "./island";
 export type { FarmLayerEntry, ResolvedFarmLayer } from "./layers";
 export {

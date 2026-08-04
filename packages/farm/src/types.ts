@@ -22,6 +22,7 @@ import type { FarmCacheUserConfig } from "./cache";
 import type { FarmAuthUserConfig, ResolvedFarmAuthConfig } from "./auth-config";
 import type { FarmPerformanceConfig } from "./preload";
 import type { FarmLayoutFonts } from "./font";
+import type { FarmSecurityConfig, ResolvedFarmSecurityConfig } from "./security";
 
 declare global {
   namespace FarmJS {
@@ -179,6 +180,8 @@ export interface FarmConfig {
   routeRules?: FarmRouteRules;
   context?: FarmContextFactory<any>;
   serverActions?: FarmServerActionsConfig;
+  /** App-wide HTTP security policy. */
+  security?: FarmSecurityConfig | ResolvedFarmSecurityConfig;
   images?: FarmImageConfig;
   /** Browser resource scheduling and preload budgets. */
   performance?: FarmPerformanceConfig;

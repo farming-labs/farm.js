@@ -97,6 +97,7 @@ mount, and shortcut together.
 | deploy        | Selecting a target, preset, and output directory.                                 |
 | deploymentId  | Detecting stale browser requests during rolling deployments.                      |
 | routeRules    | Applying rendering, cache, redirect, CORS, and header behavior to route patterns. |
+| security      | Applying an app-wide CSP with an enforcing or report-only response header.        |
 | serverActions | Restricting trusted action origins and request body size.                         |
 | images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
 | performance   | Budgeting image and font preload hints without changing the rendered resources.   |
@@ -164,6 +165,53 @@ export default defineConfig({
 ```
 
 A layer may contain an optional plain `farm.config.ts` plus its own `src/app`, components, middleware, APIs, and programmatic routes. It does not use a separate layer registration function. See [Layers](/docs/layers) for package structure, merge rules, aliases, generated types, and override behavior.
+
+## Content Security Policy
+
+Configure an app-wide Content Security Policy under `security.csp`. Farm applies it to pages, API responses, and pre-rendered output through the same response-header pipeline in development and production.
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  security: {
+    csp: {
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'none'"],
+        formAction: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:", "blob:"],
+        fontSrc: ["'self'", "data:"],
+        connectSrc: ["'self'", "https:", "wss:"],
+      },
+    },
+  },
+});
+```
+
+Directive names may use camelCase or kebab-case. Farm rejects duplicate normalized names, newlines, and directive values containing semicolons so configuration cannot accidentally create a second policy directive.
+
+Use report-only mode while auditing an existing application:
+
+```ts
+security: {
+  csp: {
+    reportOnly: true,
+    directives: {
+      defaultSrc: ["'self'"],
+      reportTo: ["csp-endpoint"],
+    },
+  },
+}
+```
+
+You can also pass an already serialized policy as `csp: "default-src 'self'; object-src 'none'"`. The longer `contentSecurityPolicy` config name is intentionally unsupported; use `csp`.
+
+Farm currently emits small inline hydration and route-state bootstraps, so the compatible example allows inline scripts and styles. A stricter policy must supply correct hashes or renderer-generated nonces for every trusted inline bootstrap. Start with `reportOnly`, inspect violations, and enforce only after the deployed HTML and every third-party integration satisfy the policy.
 
 ## Server action security
 

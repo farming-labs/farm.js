@@ -315,7 +315,7 @@ import { routePolicyPlugin } from "./src/plugins/route-policy";
 
 export default defineConfig({
   plugins: [
-    securityPlugin({ contentSecurityPolicy: true }),
+    securityPlugin({ csp: true }),
     tracingPlugin({ service: "storefront" }),
     routePolicyPlugin,
   ],

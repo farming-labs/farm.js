@@ -61,6 +61,17 @@ import {
   type ResolvedFarmAuthConfig,
 } from "./auth-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
+import {
+  getFarmSecurityHeader,
+  resolveFarmSecurityConfig,
+  type FarmCspConfig,
+  type FarmCspDirectives,
+  type FarmCspDirectiveValue,
+  type FarmCspOptions,
+  type FarmSecurityConfig,
+  type ResolvedFarmCspConfig,
+  type ResolvedFarmSecurityConfig,
+} from "./security";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -133,6 +144,15 @@ export type {
   FarmAuthUserConfig,
   ResolvedFarmAuthConfig,
 } from "./auth-config";
+export type {
+  FarmCspConfig,
+  FarmCspDirectives,
+  FarmCspDirectiveValue,
+  FarmCspOptions,
+  FarmSecurityConfig,
+  ResolvedFarmCspConfig,
+  ResolvedFarmSecurityConfig,
+} from "./security";
 
 export interface RedirectConfig {
   source: string;
@@ -315,6 +335,7 @@ export interface ResolvedFarmConfig extends Required<
     | "i18n"
     | "auth"
     | "performance"
+    | "security"
   >
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
@@ -337,6 +358,7 @@ export interface ResolvedFarmConfig extends Required<
   i18n: ResolvedFarmI18nConfig;
   auth: ResolvedFarmAuthConfig;
   performance: ResolvedFarmPerformanceConfig;
+  security: ResolvedFarmSecurityConfig;
   routeRules: FarmRouteRules;
 }
 
@@ -723,6 +745,8 @@ export async function resolveConfig(
   const routeRules = normalizeRouteRules(userConfig.routeRules);
   const routeRuleRedirects = routeRulesToRedirects(routeRules);
   const routeRuleHeaders = routeRulesToHeaders(routeRules);
+  const security = resolveFarmSecurityConfig(userConfig.security);
+  const securityHeader = getFarmSecurityHeader(security);
 
   const deploy = resolveDeployConfig(userConfig);
   const root = userConfig.root || process.cwd();
@@ -786,7 +810,11 @@ export async function resolveConfig(
     trailingSlash: userConfig.trailingSlash ?? false,
     redirects: () => [...redirects, ...routeRuleRedirects],
     rewrites: () => rewrites,
-    headers: () => [...headers, ...routeRuleHeaders],
+    headers: () => [
+      ...headers,
+      ...routeRuleHeaders,
+      ...(securityHeader ? [{ source: "/*", headers: [securityHeader] }] : []),
+    ],
     routeRules,
     images: resolveFarmImageConfig(userConfig.images),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
@@ -805,6 +833,7 @@ export async function resolveConfig(
     notFound: userConfig.notFound || {},
     context: userConfig.context || (() => undefined),
     serverActions: resolveServerActionsConfig(userConfig.serverActions),
+    security,
     deploymentId,
     output: userConfig.output || "standalone",
     distDir: userConfig.distDir || ".farm",
