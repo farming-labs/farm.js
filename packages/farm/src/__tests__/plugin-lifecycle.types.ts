@@ -1,4 +1,5 @@
 import { expectTypeOf } from "vitest";
+import { defineIntegration } from "../integrations";
 import { definePlugin, type FarmPlugin, type FarmPluginRuntimeSession } from "../plugin";
 
 const inferredPlugin = definePlugin({
@@ -34,3 +35,53 @@ expectTypeOf(inferredPlugin).toMatchTypeOf<
 >();
 
 expectTypeOf<FarmPluginRuntimeSession["response"]>().toEqualTypeOf<Response | undefined>();
+
+interface AuthIntegrationInstance {
+  auth: {
+    api: {
+      getSession(input: { headers: Headers }): Promise<{ userId: string } | null>;
+    };
+  };
+}
+
+const authPlugin = definePlugin.forIntegration<AuthIntegrationInstance>()({
+  name: "typed-auth",
+  runtime: {
+    async context({ request, integration }) {
+      if (!integration) return {};
+
+      expectTypeOf(integration.instance.auth.api.getSession).toBeFunction();
+      // @ts-expect-error unknown instance methods must fail type checking
+      integration.instance.auth.api.missingMethod();
+
+      return {
+        session: await integration.instance.auth.api.getSession({ headers: request.headers }),
+      };
+    },
+  },
+});
+
+defineIntegration({
+  category: "auth",
+  type: "typed-auth",
+  instance: {
+    auth: {
+      api: {
+        async getSession() {
+          return { userId: "user-1" };
+        },
+      },
+    },
+  },
+  plugins: [authPlugin],
+});
+
+defineIntegration({
+  category: "auth",
+  type: "wrong-auth-instance",
+  instance: { auth: { enabled: true } },
+  plugins: [
+    // @ts-expect-error the plugin requires an auth instance with api.getSession
+    authPlugin,
+  ],
+});

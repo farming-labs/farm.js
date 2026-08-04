@@ -105,7 +105,7 @@ describe("integrations runtime", () => {
     let globalIntegration: Readonly<FarmPluginIntegrationContext> | undefined;
 
     function billingPlugin() {
-      return definePlugin({
+      return definePlugin.forIntegration<typeof state>()({
         name: "billing:session",
         setup({ integration }) {
           setupIntegration = integration;

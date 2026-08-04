@@ -845,13 +845,16 @@ type FarmIntegrationEndpointsInput<
 type FarmIntegrationInput<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
   TConfig = unknown,
+  TInstance = unknown,
 > = Omit<
   FarmIntegration<TSchema, TConfig>,
-  "kind" | "category" | "slot" | "config" | "routes" | "endpoints"
+  "kind" | "category" | "slot" | "instance" | "config" | "routes" | "endpoints" | "plugins"
 > & {
+  instance: TInstance;
   config?: FarmIntegrationConfigInput<TConfig, TSchema>;
   routes?: FarmIntegrationRoutesInput<TSchema>;
   endpoints?: FarmIntegrationEndpointsInput<TSchema>;
+  plugins?: readonly FarmPlugin<any, any, any, any, NoInfer<TInstance>>[];
 } & (
     | {
         category: FarmIntegrationCategory;
@@ -1014,16 +1017,18 @@ function flattenIntegrationEndpoints(
 export function defineIntegration<
   const TSchema extends FarmIntegrationSchema | undefined,
   const TConfig,
-  TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
+  TIntegration extends FarmIntegrationInput<TSchema, TConfig, any>,
 >(
-  integration: TIntegration & FarmIntegrationInput<TSchema, TConfig>,
+  integration: TIntegration &
+    FarmIntegrationInput<TSchema, TConfig, NoInfer<TIntegration["instance"]>>,
 ): DefinedIntegration<TIntegration, TSchema>;
 export function defineIntegration<
   const TSchema extends FarmIntegrationSchema | undefined,
   const TConfig,
-  TIntegration extends FarmIntegrationInput<TSchema, TConfig>,
+  TIntegration extends FarmIntegrationInput<TSchema, TConfig, any>,
 >(
-  integration: TIntegration & FarmIntegrationInput<TSchema, TConfig>,
+  integration: TIntegration &
+    FarmIntegrationInput<TSchema, TConfig, NoInfer<TIntegration["instance"]>>,
 ): DefinedIntegration<TIntegration, TSchema> {
   const category = integration.category ?? integration.slot;
 

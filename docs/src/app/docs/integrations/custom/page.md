@@ -356,8 +356,10 @@ plugin. Farm binds the owning integration when it normalizes the config.
 import { defineIntegration, definePlugin } from "@farm.js/core";
 import { betterAuth } from "better-auth";
 
+type BetterAuthInstance = ReturnType<typeof betterAuth>;
+
 export function betterAuthSessionPlugin() {
-  return definePlugin({
+  return definePlugin.forIntegration<BetterAuthInstance>()({
     name: "better-auth:session",
     runtime: {
       async context({ request, integration }) {
@@ -387,6 +389,12 @@ export const auth = defineIntegration({
 `serverRuntime` ownership. It is available to `setup` and every server hook on plugins contributed
 through `integration.plugins`. Because a normal application plugin has no owner, the field is
 optional and remains `undefined` for global plugins.
+
+`forIntegration<T>()` is a type-only binding: it does not wrap the plugin or add runtime data. It gives
+every server hook the exact instance type and makes `defineIntegration` reject a plugin whose
+expected instance does not match the configured `instance`. If the configured value is
+`{ auth: betterAuth() }`, bind `{ auth: BetterAuthInstance }` and
+`integration.instance.auth.api` is fully checked and autocompleted.
 
 The application can still add cross-cutting plugins globally. Both kinds participate in the same
 plugin pipeline:

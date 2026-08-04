@@ -48,7 +48,7 @@ const routeLabState = {
 };
 
 function integrationLabResponsePlugin() {
-  return definePlugin({
+  return definePlugin.forIntegration<typeof routeLabState>()({
     name: 'integration-lab:response',
     runtime: {
       after({ kind, route, response, integration }) {
