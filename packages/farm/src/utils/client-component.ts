@@ -312,9 +312,12 @@ function inspectClientModuleMetadata(
 
   let importsClientBoundary = false;
   let importedIslandStrategy: FarmIslandStrategy | null = null;
-  for (const specifier of getRelativeImportSpecifiers(content)) {
+  for (const specifier of getImportSpecifiers(content)) {
     const importedPath = resolveImportedModuleSourcePath(resolvedPath, specifier, root);
-    const importedMetadata = inspectClientModuleMetadata(importedPath, root, visited, false);
+    const importedMetadata =
+      !specifier.startsWith(".") && !specifier.startsWith("/")
+        ? inspectPackageClientBoundary(importedPath)
+        : inspectClientModuleMetadata(importedPath, root, visited, false);
     if (importedMetadata.isClientComponent || importedMetadata.shouldHydrate) {
       importsClientBoundary = true;
       if (importedIslandStrategy === null) {
@@ -338,7 +341,20 @@ function inspectClientModuleMetadata(
   };
 }
 
-function getRelativeImportSpecifiers(content: string | null): string[] {
+function inspectPackageClientBoundary(resolvedPath: string | null): ClientModuleMetadata {
+  const parsed = parseClientModuleMetadata(
+    resolvedPath ? readIfExists(resolvedPath) : null,
+    false,
+  );
+  const shouldHydrate = parsed.isClientComponent || parsed.hasHydrateExport;
+  return {
+    isClientComponent: parsed.isClientComponent,
+    shouldHydrate,
+    islandStrategy: shouldHydrate ? (parsed.islandStrategy ?? "load") : null,
+  };
+}
+
+function getImportSpecifiers(content: string | null): string[] {
   if (!content) {
     return [];
   }
@@ -348,7 +364,7 @@ function getRelativeImportSpecifiers(content: string | null): string[] {
   const matches = new Set<string>();
   for (const match of content.matchAll(pattern)) {
     const specifier = match[1];
-    if (!specifier || (!specifier.startsWith(".") && !specifier.startsWith("/"))) {
+    if (!specifier || specifier.startsWith("node:") || specifier.includes("?")) {
       continue;
     }
     matches.add(specifier);
@@ -361,6 +377,10 @@ function resolveImportedModuleSourcePath(
   specifier: string,
   root?: string,
 ): string | null {
+  if (!specifier.startsWith(".") && !specifier.startsWith("/")) {
+    return resolvePackageModuleSourcePath(importerPath, specifier, root);
+  }
+
   const candidates = new Set<string>();
   const basePath = specifier.startsWith(".")
     ? path.resolve(path.dirname(importerPath), specifier)
@@ -380,5 +400,151 @@ function resolveImportedModuleSourcePath(
     }
   }
 
+  return null;
+}
+
+function resolvePackageModuleSourcePath(
+  importerPath: string,
+  specifier: string,
+  root?: string,
+): string | null {
+  const packageParts = specifier.split("/");
+  const packageName = specifier.startsWith("@")
+    ? packageParts.slice(0, 2).join("/")
+    : packageParts[0];
+  const packageSubpath = packageParts.slice(packageName.startsWith("@") ? 2 : 1).join("/");
+  const packageDirectory = findPackageDirectory(importerPath, packageName, root);
+  if (!packageDirectory) return null;
+
+  const packageJsonPath = path.join(packageDirectory, "package.json");
+  const packageJson = readPackageJson(packageJsonPath);
+  const exportKey = packageSubpath ? `./${packageSubpath}` : ".";
+  const exportTarget = resolvePackageExport(packageJson?.exports, exportKey);
+  const candidates = new Set<string>();
+
+  if (exportTarget?.startsWith("./")) {
+    candidates.add(path.resolve(packageDirectory, exportTarget));
+  }
+  if (packageSubpath) {
+    candidates.add(path.join(packageDirectory, packageSubpath));
+  } else {
+    for (const entry of [packageJson?.browser, packageJson?.module, packageJson?.main]) {
+      if (typeof entry === "string") candidates.add(path.resolve(packageDirectory, entry));
+    }
+    candidates.add(path.join(packageDirectory, "index"));
+  }
+
+  return resolveSourceCandidate(candidates);
+}
+
+function findPackageDirectory(
+  importerPath: string,
+  packageName: string,
+  root?: string,
+): string | null {
+  const searchRoots = new Set<string>();
+  let current = path.dirname(importerPath);
+  while (true) {
+    searchRoots.add(current);
+    const parent = path.dirname(current);
+    if (parent === current) break;
+    current = parent;
+  }
+  if (root) {
+    current = path.resolve(root);
+    while (true) {
+      searchRoots.add(current);
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+
+  for (const searchRoot of searchRoots) {
+    const packageDirectory = path.join(searchRoot, "node_modules", packageName);
+    if (fs.existsSync(path.join(packageDirectory, "package.json"))) {
+      return packageDirectory;
+    }
+  }
+  return null;
+}
+
+function readPackageJson(packageJsonPath: string): Record<string, any> | null {
+  try {
+    return JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function resolvePackageExport(exportsField: unknown, exportKey: string): string | null {
+  if (typeof exportsField === "string") {
+    return exportKey === "." ? exportsField : null;
+  }
+  if (Array.isArray(exportsField)) {
+    for (const candidate of exportsField) {
+      const resolved = resolvePackageExport(candidate, exportKey);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+  if (!exportsField || typeof exportsField !== "object") return null;
+
+  const entries = Object.entries(exportsField as Record<string, unknown>);
+  const subpathExports = entries.some(([key]) => key.startsWith("."));
+  if (subpathExports) {
+    const exact = (exportsField as Record<string, unknown>)[exportKey];
+    if (exact !== undefined) return resolveConditionalExportTarget(exact);
+
+    for (const [key, value] of entries) {
+      const wildcardIndex = key.indexOf("*");
+      if (wildcardIndex === -1) continue;
+      const prefix = key.slice(0, wildcardIndex);
+      const suffix = key.slice(wildcardIndex + 1);
+      if (!exportKey.startsWith(prefix) || !exportKey.endsWith(suffix)) continue;
+      const wildcard = exportKey.slice(prefix.length, exportKey.length - suffix.length);
+      const target = resolveConditionalExportTarget(value);
+      return target?.replace("*", wildcard) ?? null;
+    }
+    return null;
+  }
+
+  return exportKey === "." ? resolveConditionalExportTarget(exportsField) : null;
+}
+
+function resolveConditionalExportTarget(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    for (const candidate of value) {
+      const resolved = resolveConditionalExportTarget(candidate);
+      if (resolved) return resolved;
+    }
+    return null;
+  }
+  if (!value || typeof value !== "object") return null;
+
+  const conditions = value as Record<string, unknown>;
+  for (const condition of ["browser", "import", "module", "default", "require"]) {
+    if (conditions[condition] === undefined) continue;
+    const resolved = resolveConditionalExportTarget(conditions[condition]);
+    if (resolved) return resolved;
+  }
+  return null;
+}
+
+function resolveSourceCandidate(candidates: Iterable<string>): string | null {
+  for (const candidate of candidates) {
+    const paths = [candidate];
+    for (const extension of RESOLVABLE_SOURCE_EXTENSIONS) {
+      paths.push(`${candidate}${extension}`, path.join(candidate, `index${extension}`));
+    }
+    for (const sourcePath of paths) {
+      try {
+        if (fs.statSync(sourcePath).isFile()) return sourcePath;
+      } catch {
+        // Continue to the next candidate.
+      }
+    }
+  }
   return null;
 }

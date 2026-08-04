@@ -269,6 +269,111 @@ export default function Page() {
     }
   }, 120_000);
 
+  it("includes package client boundaries imported by a server layout in route hydration", async () => {
+    const root = await createProductionFixture();
+
+    try {
+      const analyticsRoot = path.join(root, "node_modules", "@fixture", "analytics");
+      await fs.mkdir(path.join(analyticsRoot, "dist", "react"), { recursive: true });
+      await fs.writeFile(
+        path.join(analyticsRoot, "package.json"),
+        JSON.stringify(
+          {
+            name: "@fixture/analytics",
+            type: "module",
+            exports: {
+              "./react": {
+                import: "./dist/react/index.mjs",
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+      await fs.writeFile(
+        path.join(analyticsRoot, "dist", "react", "index.mjs"),
+        `
+"use client";
+
+import { useEffect } from "react";
+
+export function AnalyticsBoundary() {
+  useEffect(() => {
+    document.documentElement.dataset.layoutEffect = "layout-effect-fired";
+  }, []);
+  return null;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "layout.tsx"),
+        `
+import { AnalyticsBoundary } from "@fixture/analytics/react";
+
+export default function RootLayout({ children }) {
+  return <div data-layout="root"><AnalyticsBoundary />{children}</div>;
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "page.tsx"),
+        `export default function Page() { return <main>layout boundary page</main>; }`,
+      );
+      await fs.mkdir(path.join(root, "src", "app", "docs"), { recursive: true });
+      await fs.writeFile(
+        path.join(root, "src", "app", "docs", "page.md"),
+        `# Layout boundary docs\n\nServer-rendered documentation content.`,
+      );
+
+      const config = await resolveConfig(
+        {
+          root,
+          srcDir: "src",
+          docs: { entry: "/docs" },
+          images: { provider: "none" },
+          generateBuildId: () => "layout-client-boundary-test",
+        },
+        "production",
+      );
+      await build(config, { root, preset: "node-server" });
+
+      const clientBundle = await fs.readFile(
+        path.join(root, ".farm", "client", "farm-client.js"),
+        "utf8",
+      );
+      expect(clientBundle).toContain("layout-effect-fired");
+
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toContain('data-layout="root"');
+          expect(html).toContain("layout boundary page");
+          expect(html).toContain('id="__farm_page__"');
+          expect(html).toContain('data-farm-client="false"');
+          expect(html).toContain('data-farm-layout-client="true"');
+        },
+      );
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          const html = await response.text();
+          expect(html).toContain("Layout boundary docs");
+          expect(html).toContain('id="root"');
+          expect(html).toContain('id="__farm_page__"');
+          expect(html).toContain('data-farm-client="false"');
+          expect(html).toContain('data-farm-layout-client="true"');
+        },
+        "/docs",
+      );
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  }, 120_000);
+
   it("boots standalone Node output through the package import mapping", async () => {
     const root = await createProductionFixture();
     const isolatedRoot = await fs.mkdtemp(path.join(os.tmpdir(), "farm-standalone-prebuilt-"));

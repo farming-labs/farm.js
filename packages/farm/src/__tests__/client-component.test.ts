@@ -131,6 +131,43 @@ describe("client component path resolution", () => {
     expect(shouldHydrateModule(pageFile, root)).toBe(true);
   });
 
+  it("detects client boundaries exposed by package export maps", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-package-import-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "layout.tsx");
+    const packageRoot = path.join(root, "node_modules", "@acme", "analytics");
+    fs.mkdirSync(path.join(packageRoot, "dist", "react"), { recursive: true });
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "@acme/analytics",
+        type: "module",
+        exports: {
+          "./react": {
+            types: "./dist/react/index.d.ts",
+            import: "./dist/react/index.mjs",
+          },
+        },
+      }),
+    );
+    fs.writeFileSync(
+      path.join(packageRoot, "dist", "react", "index.mjs"),
+      `'use client';\nexport function Analytics() { return null; }\n`,
+    );
+    fs.writeFileSync(
+      pageFile,
+      `import { Analytics } from "@acme/analytics/react";\nexport default function Layout({ children }) { return <><Analytics />{children}</>; }\n`,
+    );
+
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: true,
+      islandStrategy: "load",
+    });
+  });
+
   it("reads a static island strategy from client modules", () => {
     expect(
       getIslandStrategyExport(
@@ -269,7 +306,9 @@ export function Chart() {}
     expect(source).toContain("reactRootContainer !== container");
     expect(source).toContain('document.getElementById("__farm_page__") || currentRoot');
     expect(source).toContain("Navigation itself signals intent");
-    expect(source).toContain("load: () => import(");
+    expect(source).toContain("pageShouldHydrate:");
+    expect(source).toContain("page.pageShouldHydrate");
+    expect(source).toContain("load: ${load}");
     expect(source).not.toContain("imports.push(`import Page${index}");
   });
 
