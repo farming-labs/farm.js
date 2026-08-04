@@ -153,14 +153,14 @@ Both hooks receive Farm's plugin context. `setup` additionally receives the reso
 
 ### Runtime hooks
 
-| Hook              | Runs                                                             | May return                                                       |
-| ----------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `runtime.start`   | Once when the runtime manager starts.                            | Nothing.                                                         |
-| `runtime.context` | At the start of every request.                                   | A plain object merged into typed request `ctx`.                  |
-| `runtime.before`  | Before Farm invokes the matched handler.                         | A replacement `Request`, a short-circuit `Response`, or nothing. |
-| `runtime.after`   | After a handler or short circuit produces a response.            | A replacement `Response` or nothing.                             |
-| `runtime.error`   | When runtime context, before, handler, or after work throws.     | Nothing.                                                         |
-| `runtime.close`   | During graceful shutdown in long-running Node output.             | Nothing.                                                         |
+| Hook              | Runs                                                         | May return                                                       |
+| ----------------- | ------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `runtime.start`   | Once when the runtime manager starts.                        | Nothing.                                                         |
+| `runtime.context` | At the start of every request.                               | A plain object merged into typed request `ctx`.                  |
+| `runtime.before`  | Before Farm invokes the matched handler.                     | A replacement `Request`, a short-circuit `Response`, or nothing. |
+| `runtime.after`   | After a handler or short circuit produces a response.        | A replacement `Response` or nothing.                             |
+| `runtime.error`   | When runtime context, before, handler, or after work throws. | Nothing.                                                         |
+| `runtime.close`   | During graceful shutdown in long-running Node output.        | Nothing.                                                         |
 
 Runtime hooks apply to page, API, server-action, integration, docs, asset, and general requests. Use the event's `kind` and `route` values when behavior should apply only to part of the application.
 
