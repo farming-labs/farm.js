@@ -1,5 +1,5 @@
 import { expectTypeOf } from "vitest";
-import { defineIntegration } from "../integrations";
+import { defineIntegration, type FarmIntegration } from "../integrations";
 import { definePlugin, type FarmPlugin, type FarmPluginRuntimeSession } from "../plugin";
 
 const inferredPlugin = definePlugin({
@@ -61,7 +61,7 @@ const authPlugin = definePlugin.forIntegration<AuthIntegrationInstance>()({
   },
 });
 
-defineIntegration({
+const authIntegration = defineIntegration({
   category: "auth",
   type: "typed-auth",
   instance: {
@@ -75,6 +75,8 @@ defineIntegration({
   },
   plugins: [authPlugin],
 });
+
+expectTypeOf(authIntegration).toMatchTypeOf<FarmIntegration<any, any>>();
 
 defineIntegration({
   category: "auth",

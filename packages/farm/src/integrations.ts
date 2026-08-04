@@ -486,7 +486,7 @@ export interface FarmIntegration<
   providers?: readonly FarmIntegrationProvider[];
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
   /** Additional Farm plugins owned and configured by this integration. */
-  plugins?: readonly FarmPlugin[];
+  plugins?: readonly FarmPlugin<any, any, any, any, any>[];
 }
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any> | undefined>;
