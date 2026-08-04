@@ -12,7 +12,7 @@ import { generateFarmTypeArtifacts } from "../type-artifacts";
 import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import { farmFontImportsPlugin } from "../font-vite";
-import { mergeFarmViteConfig } from "../server/vite-config";
+import { createFarmSourceAlias, mergeFarmViteConfig } from "../server/vite-config";
 import {
   canUseRolldownForRouteDiscovery,
   loadFarmProductionVite,
@@ -215,6 +215,9 @@ async function createProjectModuleServer(
       server: {
         middlewareMode: true,
         hmr: false,
+      },
+      resolve: {
+        alias: createFarmSourceAlias(root, config.srcDir),
       },
       optimizeDeps: {
         noDiscovery: true,

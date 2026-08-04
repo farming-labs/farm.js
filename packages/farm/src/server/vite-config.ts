@@ -58,7 +58,18 @@ export function createFarmClientOptimizeDepsConfig(
   };
 }
 
+/**
+ * Farm's application-source alias. Keep this shared by development, route
+ * discovery, and production bundling so `@/…` always follows `srcDir`.
+ */
+export function createFarmSourceAlias(projectRoot: string, srcDir = "src"): Record<string, string> {
+  return {
+    "@": path.resolve(projectRoot, srcDir),
+  };
+}
+
 type ViteNoExternal = NonNullable<NonNullable<ViteUserConfig["ssr"]>["noExternal"]>;
+type ViteAlias = NonNullable<NonNullable<ViteUserConfig["resolve"]>["alias"]>;
 
 function mergeNoExternal(
   farmValue: ViteNoExternal | undefined,
@@ -70,6 +81,27 @@ function mergeNoExternal(
     value == null || value === true ? [] : Array.isArray(value) ? value : [value];
 
   return Array.from(new Set([...normalize(farmValue), ...normalize(userValue)]));
+}
+
+function mergeAlias(farmValue: ViteAlias | undefined, userValue: ViteAlias | undefined): ViteAlias {
+  if (!farmValue) return userValue || {};
+  if (!userValue) return farmValue;
+
+  if (!Array.isArray(farmValue) && !Array.isArray(userValue)) {
+    return {
+      ...farmValue,
+      ...userValue,
+    };
+  }
+
+  const normalize = (value: ViteAlias): Exclude<ViteAlias, Record<string, string>> =>
+    Array.isArray(value)
+      ? [...value]
+      : Object.entries(value).map(([find, replacement]) => ({ find, replacement }));
+
+  // Vite uses the first matching array entry. Put application entries first
+  // so an explicit user alias can intentionally override a Farm default.
+  return [...normalize(userValue), ...normalize(farmValue)];
 }
 
 export function mergeFarmViteConfig(
@@ -94,6 +126,7 @@ export function mergeFarmViteConfig(
     resolve: {
       ...farmConfig.resolve,
       ...userConfig.resolve,
+      alias: mergeAlias(farmConfig.resolve?.alias, userConfig.resolve?.alias),
       dedupe: Array.from(
         new Set([...(farmConfig.resolve?.dedupe || []), ...(userConfig.resolve?.dedupe || [])]),
       ),

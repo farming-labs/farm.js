@@ -96,6 +96,13 @@ test("generates a buildable starter application", async () => {
     );
     assert.doesNotMatch(generatedConfig, /srcDir/);
 
+    const generatedTsconfig = JSON.parse(
+      await readFile(path.join(tempDir, "generated-app/tsconfig.json"), "utf8"),
+    );
+    assert.deepEqual(generatedTsconfig.compilerOptions.paths, {
+      "@/*": ["./src/*"],
+    });
+
     const generatedGitignore = await readFile(
       path.join(tempDir, "generated-app/.gitignore"),
       "utf8",

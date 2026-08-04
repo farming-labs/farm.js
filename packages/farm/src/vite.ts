@@ -61,6 +61,7 @@ import type { FarmI18nClientSnapshot } from "./i18n/types";
 import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
+  createFarmSourceAlias,
 } from "./server/vite-config";
 import { resolveFarmDocsFontAssets, toFarmDocsPublicFontAssets } from "./docs/fonts";
 
@@ -4464,7 +4465,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
       // Stub out problematic server-only modules during dev mode
       alias: {
         ...getFarmLayerAliases(config.layers),
-        "@": path.resolve(appRoot, "src"),
+        ...createFarmSourceAlias(appRoot, config.srcDir),
         // Nitro internals that should not be resolved in browser
         "supports-color":
           "data:text/javascript,export default false; export const supportsColor = false; export const stdout = false; export const stderr = false;",

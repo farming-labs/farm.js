@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   createFarmClientOptimizeDepsConfig,
   createFarmClientOptimizeDepsEntries,
+  createFarmSourceAlias,
   FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE,
   mergeFarmViteConfig,
 } from "../server/vite-config";
@@ -40,6 +41,12 @@ describe("mergeFarmViteConfig", () => {
     expect(createFarmClientOptimizeDepsConfig(entries)?.entries).toEqual(entries);
   });
 
+  it("maps @ to the configured application source directory", () => {
+    expect(createFarmSourceAlias("/workspace/app", "web")).toEqual({
+      "@": "/workspace/app/web",
+    });
+  });
+
   it("preserves Farm plugins and dependency safeguards when user Vite config is merged", () => {
     const farmPlugin = { name: "farm:framework" };
     const userPlugin = { name: "app:plugin" };
@@ -48,7 +55,10 @@ describe("mergeFarmViteConfig", () => {
       {
         plugins: [farmPlugin],
         server: { middlewareMode: false, port: 3000, strictPort: true },
-        resolve: { dedupe: ["react", "react-dom"] },
+        resolve: {
+          alias: { "@": "/workspace/app/src", "farm-runtime": "/farm/runtime" },
+          dedupe: ["react", "react-dom"],
+        },
         optimizeDeps: {
           noDiscovery: true,
           entries: ["src/app/**/page.tsx"],
@@ -60,7 +70,10 @@ describe("mergeFarmViteConfig", () => {
       {
         plugins: [userPlugin],
         server: { port: 4100, strictPort: false },
-        resolve: { dedupe: ["react-dom", "react-is"] },
+        resolve: {
+          alias: { "@": "/workspace/app/custom-src", "app-only": "/app/only" },
+          dedupe: ["react-dom", "react-is"],
+        },
         optimizeDeps: {
           entries: ["src/browser-entry.ts"],
           include: ["react", "react-dom"],
@@ -77,6 +90,11 @@ describe("mergeFarmViteConfig", () => {
       strictPort: false,
     });
     expect(merged.resolve?.dedupe).toEqual(["react", "react-dom", "react-is"]);
+    expect(merged.resolve?.alias).toEqual({
+      "@": "/workspace/app/custom-src",
+      "farm-runtime": "/farm/runtime",
+      "app-only": "/app/only",
+    });
     expect(merged.optimizeDeps).toMatchObject({
       noDiscovery: true,
       entries: ["src/browser-entry.ts"],

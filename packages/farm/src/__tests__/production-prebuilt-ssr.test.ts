@@ -24,6 +24,7 @@ async function createProductionFixture(): Promise<string> {
   });
   await fs.symlink(packageRoot, path.join(root, "node_modules", "@farm.js", "core"), "dir");
   await fs.mkdir(path.join(root, "src", "app"), { recursive: true });
+  await fs.mkdir(path.join(root, "src", "lib"), { recursive: true });
   await fs.writeFile(
     path.join(root, "package.json"),
     JSON.stringify({ private: true, type: "module" }, null, 2),
@@ -39,12 +40,17 @@ export default function RootLayout({ children }) {
   );
   await fs.writeFile(path.join(root, "src", "app", "prebuilt-ssr-marker.txt"), "copied SSR asset");
   await fs.writeFile(
+    path.join(root, "src", "lib", "alias-marker.ts"),
+    `export const aliasMarker = "src alias resolved";`,
+  );
+  await fs.writeFile(
     path.join(root, "src", "app", "page.tsx"),
     `
 import markerAsset from "./prebuilt-ssr-marker.txt?url";
+import { aliasMarker } from "@/lib/alias-marker";
 
 export default function Page() {
-  return <main data-prebuilt-ssr="ready" data-marker-asset={markerAsset}>prebuilt SSR output</main>;
+  return <main data-prebuilt-ssr="ready" data-marker-asset={markerAsset}>prebuilt SSR output: {aliasMarker}</main>;
 }
 `.trim(),
   );
@@ -366,7 +372,9 @@ export default function DynamicPage({ params }) {
         expect(response.status).toBe(200);
         expect(response.headers.get("x-production-header")).toBe("standalone");
         expect(response.headers.get("cache-control")).toBe("private, no-store");
-        await expect(response.text()).resolves.toContain("prebuilt SSR output");
+        const html = await response.text();
+        expect(html).toContain("prebuilt SSR output");
+        expect(html).toContain("src alias resolved");
 
         const staticUrl = new URL("/static-page", response.url);
         const staticResponse = await fetch(staticUrl);
