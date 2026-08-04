@@ -58,6 +58,16 @@ https://checkout-test.preview.farming-labs.dev
 
 Keep both terminals running while you test. Stop the preview with `Ctrl+C`.
 
+## Automatic Shutdown
+
+The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, `farm preview` automatically closes the hosted gateway session and exits:
+
+```txt
+Local preview target http://localhost:4324 is no longer reachable. Closing preview session.
+```
+
+The public URL is invalidated as soon as the session closes, so later requests return `404`. You do not need to run a separate command to stop or clean up the tunnel.
+
 ## Commands
 
 ```bash

@@ -1,0 +1,42 @@
+{
+  "name": "@farm.js/preview-tunnel",
+  "version": "0.1.0-beta.19",
+  "description": "Persistent preview tunnel protocol, relay, and TypeScript agent for Farm.js",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-preview-tunnel"
+  },
+  "files": [
+    "dist"
+  ],
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "test": "tsdown && node --test test/*.test.mjs",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "@types/ws": "^8.18.1",
+    "tsdown": "^0.15.7",
+    "typescript": "^5.3.3"
+  }
+}

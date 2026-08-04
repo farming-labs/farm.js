@@ -1599,6 +1599,25 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  packages/farm-preview-tunnel:
+    dependencies:
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
+      tsdown:
+        specifier: ^0.15.7
+        version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   packages/farm-stripe:
     dependencies:
       '@farm.js/core':
