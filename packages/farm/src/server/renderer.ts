@@ -50,6 +50,7 @@ import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
+import { DefaultNotFoundPage } from "../components/not-found";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -1884,20 +1885,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       logger.warn(`Failed to render custom 404 page: ${error}`);
     }
 
-    // Fallback to default styled 404 page
-    const defaultContent = `
-      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui,-apple-system,sans-serif;background:#f9fafb;padding:20px;text-align:center;">
-        <div style="background:white;border-radius:12px;padding:48px;box-shadow:0 4px 6px rgba(0,0,0,0.1);max-width:500px;width:100%;">
-          <h1 style="font-size:96px;font-weight:bold;color:#22c55e;margin:0 0 16px;line-height:1;">404</h1>
-          <h2 style="font-size:24px;font-weight:600;color:#1f2937;margin:0 0 16px;">Page Not Found</h2>
-          <p style="font-size:16px;color:#6b7280;margin:0 0 24px;">
-            The page <code style="background:#f3f4f6;padding:2px 6px;border-radius:4px;">${pathname}</code> doesn't exist.
-          </p>
-          <a href="/" style="display:inline-block;background:#22c55e;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:500;">Go Home</a>
-        </div>
-        <p style="margin-top:24px;font-size:14px;color:#9ca3af;">Powered by Farm.js</p>
-      </div>
-    `;
+    // Render the shared adaptive fallback when the app does not provide its own page.
+    const ReactDOMServer = await import("react-dom/server");
+    const defaultContent = ReactDOMServer.renderToString(
+      React.createElement(DefaultNotFoundPage, { pathname }),
+    );
 
     const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
