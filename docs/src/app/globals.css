@@ -1,3 +1,5 @@
+@import "@farming-labs/theme/pixel-border/css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

@@ -716,6 +716,20 @@ describe("resolveDeployConfig", () => {
 });
 
 describe("resolveDocsConfig", () => {
+  it("preserves an external adapter descriptor outside public docs config", async () => {
+    const adapter = {
+      id: "@farming-labs/farmjs",
+      protocol: 1,
+      server: "@farming-labs/farmjs/server",
+      react: "@farming-labs/farmjs/react",
+      vite: "@farming-labs/farmjs/vite",
+    };
+    const docs = await resolveDocsConfig({ entry: "/docs", adapter });
+
+    expect(docs.adapter).toEqual(adapter);
+    expect(docs.config).not.toHaveProperty("adapter");
+  });
+
   it("normalizes a Farm docs entry route into docs config shape", async () => {
     const docs = await resolveDocsConfig({
       entry: "/docs",

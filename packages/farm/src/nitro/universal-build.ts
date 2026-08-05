@@ -3608,6 +3608,7 @@ const farmDocsHandler = ${
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
   fontStylesheetHref: "/farm-fonts.css",
+  globalStylesheetHref: "/assets/globals.css",
 })`
       : "null"
   };

@@ -912,6 +912,7 @@ export function farmPlugin(
               return resolveFarmLayoutFonts(layoutModules);
             },
             fontStylesheetHref: "/@farm/fonts.css",
+            globalStylesheetHref: "/src/app/globals.css",
           })
         : null;
       const wrapFarmDocsResponseWithLayouts = async (

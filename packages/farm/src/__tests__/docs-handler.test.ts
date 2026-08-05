@@ -556,12 +556,14 @@ describe("createFarmDocsHandler", () => {
         };
       },
       fontStylesheetHref: "/farm-fonts.css",
+      globalStylesheetHref: "/assets/globals.css",
     });
 
     const response = await handler(new Request("http://farm.test/docs"));
     const html = (await response?.text()) || "";
 
     expect(html).toContain('<link rel="stylesheet" href="/farm-fonts.css">');
+    expect(html).toContain('<link rel="stylesheet" href="/assets/globals.css">');
     expect(html).toContain('--fd-layout-font-body: "Product Sans", system-ui, sans-serif;');
     expect(html).toContain('--fd-layout-font-code: "Product Mono", ui-monospace, monospace;');
     expect(html).not.toContain('<link rel="preload"');
