@@ -6,6 +6,7 @@ import type {
   TunnelRequestMessage,
   TunnelResponseMessage,
 } from "./protocol.js";
+import { isRelayToAgentMessage } from "./protocol.js";
 
 const HOP_BY_HOP_HEADERS = new Set([
   "connection",
@@ -27,6 +28,7 @@ export interface TypeScriptPreviewAgentOptions {
   connectTimeoutMs?: number;
   localProbeIntervalMs?: number;
   localProbeTimeoutMs?: number;
+  requestTimeoutMs?: number;
 }
 
 export interface TypeScriptPreviewAgent {
@@ -39,14 +41,45 @@ export async function startTypeScriptPreviewAgent(
   options: TypeScriptPreviewAgentOptions,
 ): Promise<TypeScriptPreviewAgent> {
   const socket = new WebSocket(options.relayUrl);
-  const ready = await waitForReady(socket, options);
+  const onSocketError = () => {
+    // WebSocket errors are followed by close; keep a listener for the socket's full lifetime.
+  };
+  socket.on("error", onSocketError);
+
+  let ready: ReadyMessage;
+  try {
+    ready = await waitForReady(socket, options);
+  } catch (error) {
+    socket.off("error", onSocketError);
+    throw error;
+  }
+
+  const inFlight = new Map<string, AbortController>();
   const stopWatchingTarget = watchLocalTarget(socket, options);
+  const abortInFlight = () => {
+    for (const controller of inFlight.values()) controller.abort();
+    inFlight.clear();
+  };
 
   socket.on("message", (data) => {
-    const message = JSON.parse(data.toString()) as RelayToAgentMessage;
-    if (message.type === "request") {
-      void forwardRequest(socket, options.targetUrl, message);
+    const message = parseRelayMessage(data);
+    if (!message) {
+      socket.close(1008, "Invalid relay message");
+      return;
     }
+    if (message.type === "request") {
+      const controller = new AbortController();
+      inFlight.get(message.id)?.abort();
+      inFlight.set(message.id, controller);
+      void forwardRequest(socket, options, message, controller).finally(() => {
+        if (inFlight.get(message.id) === controller) inFlight.delete(message.id);
+      });
+    }
+  });
+  socket.once("close", () => {
+    stopWatchingTarget();
+    abortInFlight();
+    socket.off("error", onSocketError);
   });
 
   return {
@@ -54,6 +87,7 @@ export async function startTypeScriptPreviewAgent(
     publicUrl: ready.publicUrl,
     async close() {
       stopWatchingTarget();
+      abortInFlight();
       await closeSocket(socket);
     },
   };
@@ -62,23 +96,33 @@ export async function startTypeScriptPreviewAgent(
 function watchLocalTarget(socket: WebSocket, options: TypeScriptPreviewAgentOptions) {
   let stopped = false;
   let timer: NodeJS.Timeout | undefined;
+  let probeController: AbortController | undefined;
   const intervalMs = options.localProbeIntervalMs ?? 2_000;
   const timeoutMs = options.localProbeTimeoutMs ?? 1_000;
 
   const stop = () => {
     stopped = true;
     if (timer) clearTimeout(timer);
+    probeController?.abort();
   };
   const probe = async () => {
     if (stopped) return;
+    const controller = new AbortController();
+    probeController = controller;
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      await fetch(options.targetUrl, { signal: AbortSignal.timeout(timeoutMs) });
+      const response = await fetch(options.targetUrl, { signal: controller.signal });
+      await response.body?.cancel();
       timer = setTimeout(probe, intervalMs);
     } catch {
+      if (stopped) return;
       stop();
       if (socket.readyState === socket.OPEN) {
         socket.close(1001, "Local preview target stopped");
       }
+    } finally {
+      clearTimeout(timeout);
+      if (probeController === controller) probeController = undefined;
     }
   };
 
@@ -99,7 +143,12 @@ function waitForReady(socket: WebSocket, options: TypeScriptPreviewAgentOptions)
       socket.send(JSON.stringify({ type: "register", name: options.name }));
     };
     const onMessage = (data: WebSocket.RawData) => {
-      const message = JSON.parse(data.toString()) as RelayToAgentMessage;
+      const message = parseRelayMessage(data);
+      if (!message) {
+        cleanup();
+        reject(new Error("Persistent preview relay sent an invalid handshake message."));
+        return;
+      }
       if (message.type === "ready") {
         cleanup();
         resolve(message);
@@ -131,15 +180,26 @@ function waitForReady(socket: WebSocket, options: TypeScriptPreviewAgentOptions)
   });
 }
 
-async function forwardRequest(socket: WebSocket, targetUrl: string, request: TunnelRequestMessage) {
+async function forwardRequest(
+  socket: WebSocket,
+  options: TypeScriptPreviewAgentOptions,
+  request: TunnelRequestMessage,
+  controller: AbortController,
+) {
   let response: TunnelResponseMessage;
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, options.requestTimeoutMs ?? 30_000);
+
   try {
     const headers = new Headers();
     for (const [name, value] of Object.entries(request.headers)) {
       if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) headers.set(name, value);
     }
     const method = request.method.toUpperCase();
-    const result = await fetch(new URL(request.path, ensureTrailingSlash(targetUrl)), {
+    const result = await fetch(resolveTargetUrl(options.targetUrl, request.path), {
       method,
       headers,
       body:
@@ -147,11 +207,21 @@ async function forwardRequest(socket: WebSocket, targetUrl: string, request: Tun
           ? undefined
           : Buffer.from(request.body, "base64"),
       redirect: "manual",
+      signal: controller.signal,
     });
-    const responseHeaders: Record<string, string> = {};
+    const responseHeaders: Record<string, string | string[]> = {};
     for (const [name, value] of result.headers) {
-      if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) responseHeaders[name] = value;
+      const normalizedName = name.toLowerCase();
+      if (
+        normalizedName !== "content-encoding" &&
+        normalizedName !== "set-cookie" &&
+        !HOP_BY_HOP_HEADERS.has(normalizedName)
+      ) {
+        responseHeaders[name] = value;
+      }
     }
+    const setCookies = getSetCookies(result.headers);
+    if (setCookies.length) responseHeaders["set-cookie"] = setCookies;
     response = {
       type: "response",
       id: request.id,
@@ -160,16 +230,47 @@ async function forwardRequest(socket: WebSocket, targetUrl: string, request: Tun
       body: Buffer.from(await result.arrayBuffer()).toString("base64"),
     };
   } catch (error) {
+    const unsafePath = error instanceof UnsafePreviewPathError;
     response = {
       type: "response",
       id: request.id,
-      status: 502,
+      status: timedOut ? 504 : unsafePath ? 400 : 502,
       headers: { "content-type": "text/plain; charset=utf-8" },
       body: Buffer.from(error instanceof Error ? error.message : String(error)).toString("base64"),
     };
+  } finally {
+    clearTimeout(timeout);
   }
 
   if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(response));
+}
+
+function parseRelayMessage(data: WebSocket.RawData): RelayToAgentMessage | undefined {
+  try {
+    const value: unknown = JSON.parse(data.toString());
+    return isRelayToAgentMessage(value) ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveTargetUrl(targetUrl: string, requestPath: string) {
+  if (!requestPath.startsWith("/") || /^[/\\]{2}/.test(requestPath)) {
+    throw new UnsafePreviewPathError();
+  }
+
+  const base = new URL(ensureTrailingSlash(targetUrl));
+  if (base.protocol !== "http:" && base.protocol !== "https:") {
+    throw new UnsafePreviewPathError();
+  }
+  const resolved = new URL(requestPath, base);
+  if (resolved.origin !== base.origin) throw new UnsafePreviewPathError();
+  return resolved;
+}
+
+function getSetCookies(headers: Headers) {
+  const getSetCookie = (headers as Headers & { getSetCookie?: () => string[] }).getSetCookie;
+  return getSetCookie?.call(headers) || [];
 }
 
 function ensureTrailingSlash(value: string) {
@@ -182,4 +283,10 @@ function closeSocket(socket: WebSocket) {
     socket.once("close", () => resolve());
     socket.close(1000, "Preview agent stopped");
   });
+}
+
+class UnsafePreviewPathError extends Error {
+  constructor() {
+    super("Preview request path cannot change the local target authority.");
+  }
 }

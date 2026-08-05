@@ -3,8 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { WebSocketServer, type WebSocket } from "ws";
 
 import {
+  isAgentToRelayMessage,
   normalizePreviewName,
-  type AgentToRelayMessage,
   type ReadyMessage,
   type TunnelRequestMessage,
   type TunnelResponseMessage,
@@ -26,6 +26,7 @@ export interface PersistentPreviewRelayOptions {
   host?: string;
   port?: number;
   publicBaseUrl?: string;
+  publicWebSocketUrl?: string;
   requestTimeoutMs?: number;
   maxBodyBytes?: number;
 }
@@ -45,6 +46,7 @@ interface AgentSession {
 
 interface PendingRequest {
   response: ServerResponse;
+  sessionId: string;
   timeout: NodeJS.Timeout;
 }
 
@@ -77,8 +79,26 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         );
       }
 
-      const body = await readRequestBody(request, maxBodyBytes);
       const id = randomUUID();
+      const uploadController = new AbortController();
+      const timeout = setTimeout(() => {
+        uploadController.abort();
+        pending.delete(id);
+        if (!response.headersSent) {
+          sendText(response, 504, "The persistent preview agent did not respond in time.");
+        }
+      }, requestTimeoutMs);
+
+      let body: Buffer;
+      try {
+        body = await readRequestBody(request, maxBodyBytes, uploadController.signal);
+      } catch (error) {
+        if (uploadController.signal.aborted) return;
+        clearTimeout(timeout);
+        throw error;
+      }
+
+      if (uploadController.signal.aborted || response.writableEnded) return;
       const message: TunnelRequestMessage = {
         type: "request",
         id,
@@ -88,15 +108,16 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         ...(body.length ? { body: body.toString("base64") } : {}),
       };
 
-      const timeout = setTimeout(() => {
+      pending.set(id, { response, sessionId: session.id, timeout });
+      try {
+        session.socket.send(JSON.stringify(message), (error) => {
+          if (error) failPendingRequest(id, session.id, pending);
+        });
+      } catch (error) {
         pending.delete(id);
-        if (!response.headersSent) {
-          sendText(response, 504, "The persistent preview agent did not respond in time.");
-        }
-      }, requestTimeoutMs);
-
-      pending.set(id, { response, timeout });
-      session.socket.send(JSON.stringify(message));
+        clearTimeout(timeout);
+        throw error;
+      }
     } catch (error) {
       const status = error instanceof BodyLimitError ? 413 : 500;
       sendText(response, status, error instanceof Error ? error.message : String(error));
@@ -118,16 +139,24 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
     let session: AgentSession | undefined;
 
     socket.on("message", (data) => {
-      let message: AgentToRelayMessage;
+      let message: unknown;
       try {
-        message = JSON.parse(data.toString()) as AgentToRelayMessage;
+        message = JSON.parse(data.toString());
       } catch {
-        socket.send(JSON.stringify({ type: "error", message: "Invalid tunnel message." }));
+        rejectSocketMessage(socket, "Invalid tunnel message.");
+        return;
+      }
+
+      if (!isAgentToRelayMessage(message)) {
+        rejectSocketMessage(socket, "Invalid tunnel message.");
         return;
       }
 
       if (message.type === "register") {
-        if (session) return;
+        if (session) {
+          rejectSocketMessage(socket, "The preview agent is already registered.");
+          return;
+        }
         const name = normalizePreviewName(message.name);
         if (!name) {
           socket.send(
@@ -148,7 +177,7 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
 
         session = { id: randomUUID(), name, socket };
         agents.set(name, session);
-        const baseUrl = options.publicBaseUrl || address?.httpUrl;
+        const baseUrl = trimTrailingSlash(options.publicBaseUrl || address?.httpUrl || "");
         if (!baseUrl) {
           socket.close(1011, "Relay is not listening");
           return;
@@ -163,13 +192,18 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
       }
 
       if (message.type === "response") {
-        completePendingRequest(message, pending);
+        if (!session) {
+          rejectSocketMessage(socket, "Register the preview agent before sending responses.");
+          return;
+        }
+        completePendingRequest(message, session.id, pending);
       }
     });
 
     socket.on("close", () => {
       if (session && agents.get(session.name)?.id === session.id) {
         agents.delete(session.name);
+        failPendingRequestsForSession(session.id, pending);
       }
     });
   });
@@ -184,11 +218,13 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
         throw new Error("Persistent preview relay did not expose a TCP address.");
       }
       const displayHost = host === "0.0.0.0" ? "127.0.0.1" : host;
+      const localHttpUrl = `http://${displayHost}:${serverAddress.port}`;
       address = {
         host,
         port: serverAddress.port,
-        httpUrl: `http://${displayHost}:${serverAddress.port}`,
-        websocketUrl: `ws://${displayHost}:${serverAddress.port}/agent`,
+        httpUrl: localHttpUrl,
+        websocketUrl:
+          options.publicWebSocketUrl || `ws://${displayHost}:${serverAddress.port}/agent`,
       };
       return address;
     },
@@ -218,10 +254,11 @@ function resolvePublicRoute(request: IncomingMessage) {
 
 function completePendingRequest(
   message: TunnelResponseMessage,
+  sessionId: string,
   pending: Map<string, PendingRequest>,
 ) {
   const entry = pending.get(message.id);
-  if (!entry) return;
+  if (!entry || entry.sessionId !== sessionId) return;
   pending.delete(message.id);
   clearTimeout(entry.timeout);
 
@@ -236,16 +273,71 @@ function completePendingRequest(
   entry.response.end(message.body ? Buffer.from(message.body, "base64") : undefined);
 }
 
-async function readRequestBody(request: IncomingMessage, maxBodyBytes: number) {
-  const chunks: Buffer[] = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-    size += buffer.length;
-    if (size > maxBodyBytes) throw new BodyLimitError(maxBodyBytes);
-    chunks.push(buffer);
+function failPendingRequestsForSession(sessionId: string, pending: Map<string, PendingRequest>) {
+  for (const [id, entry] of pending) {
+    if (entry.sessionId !== sessionId) continue;
+    pending.delete(id);
+    clearTimeout(entry.timeout);
+    sendText(entry.response, 502, "The persistent preview agent disconnected.");
   }
-  return Buffer.concat(chunks);
+}
+
+function failPendingRequest(id: string, sessionId: string, pending: Map<string, PendingRequest>) {
+  const entry = pending.get(id);
+  if (!entry || entry.sessionId !== sessionId) return;
+  pending.delete(id);
+  clearTimeout(entry.timeout);
+  sendText(entry.response, 502, "The persistent preview agent disconnected.");
+}
+
+function readRequestBody(request: IncomingMessage, maxBodyBytes: number, signal: AbortSignal) {
+  return new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+
+    const cleanup = () => {
+      signal.removeEventListener("abort", onAbort);
+      request.off("data", onData);
+      request.off("end", onEnd);
+      request.off("error", onError);
+      request.off("aborted", onRequestAborted);
+    };
+    const onAbort = () => {
+      cleanup();
+      request.resume();
+      reject(new RequestTimeoutError());
+    };
+    const onData = (chunk: Buffer | string) => {
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      size += buffer.length;
+      if (size > maxBodyBytes) {
+        cleanup();
+        request.resume();
+        reject(new BodyLimitError(maxBodyBytes));
+        return;
+      }
+      chunks.push(buffer);
+    };
+    const onEnd = () => {
+      cleanup();
+      resolve(Buffer.concat(chunks));
+    };
+    const onError = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+    const onRequestAborted = () => {
+      cleanup();
+      reject(new Error("Preview request upload was aborted."));
+    };
+
+    if (signal.aborted) return onAbort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    request.on("data", onData);
+    request.once("end", onEnd);
+    request.once("error", onError);
+    request.once("aborted", onRequestAborted);
+  });
 }
 
 function normalizeIncomingHeaders(headers: IncomingMessage["headers"]) {
@@ -264,10 +356,25 @@ function sendJson(response: ServerResponse, status: number, value: unknown) {
 }
 
 function sendText(response: ServerResponse, status: number, value: string) {
-  if (response.writableEnded) return;
+  if (response.writableEnded || response.destroyed) return;
+  if (response.headersSent) {
+    response.end();
+    return;
+  }
   response.statusCode = status;
   response.setHeader("content-type", "text/plain; charset=utf-8");
   response.end(value);
+}
+
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, "");
+}
+
+function rejectSocketMessage(socket: WebSocket, message: string) {
+  if (socket.readyState !== socket.OPEN) return;
+  socket.send(JSON.stringify({ type: "error", message }), () => {
+    socket.close(1008, "Invalid tunnel message");
+  });
 }
 
 function listen(server: Server, port: number, host: string) {
@@ -294,5 +401,11 @@ function closeWebSocketServer(server: WebSocketServer) {
 class BodyLimitError extends Error {
   constructor(maxBodyBytes: number) {
     super(`Preview request body exceeds ${maxBodyBytes} bytes.`);
+  }
+}
+
+class RequestTimeoutError extends Error {
+  constructor() {
+    super("Preview request upload timed out.");
   }
 }

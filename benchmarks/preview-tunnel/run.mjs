@@ -29,6 +29,7 @@ const target = createServer(async (request, response) => {
     response.statusCode = 202;
     response.setHeader("content-type", "application/octet-stream");
     response.setHeader("x-preview-target", "farm-benchmark");
+    response.setHeader("x-preview-request-url", request.url);
     response.end(Buffer.concat(chunks));
     return;
   }
@@ -36,6 +37,7 @@ const target = createServer(async (request, response) => {
   response.statusCode = 200;
   response.setHeader("content-type", "application/octet-stream");
   response.setHeader("x-preview-target", "farm-benchmark");
+  response.setHeader("x-preview-request-url", request.url || "/");
   response.end(payload);
 });
 
@@ -100,6 +102,7 @@ async function verifyEndpoint(baseUrl) {
   });
   assert.equal(response.status, 202);
   assert.equal(response.headers.get("x-preview-target"), "farm-benchmark");
+  assert.equal(response.headers.get("x-preview-request-url"), "/echo?mode=verify");
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), body);
 }
 
@@ -107,7 +110,9 @@ async function expectInactive(url, timeoutMs = 1_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const response = await fetch(url);
-    if (response.status === 404) return;
+    const status = response.status;
+    await response.arrayBuffer();
+    if (status === 404) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.fail(`Preview route remained active after its agent stopped: ${url}`);
@@ -155,8 +160,10 @@ async function checkedFetch(url) {
   const response = await fetch(url);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-preview-target"), "farm-benchmark");
+  const requestUrl = new URL(url);
+  assert.equal(response.headers.get("x-preview-request-url"), `/payload${requestUrl.search}`);
   const body = Buffer.from(await response.arrayBuffer());
-  assert.equal(body.length, payload.length);
+  assert.deepEqual(body, payload);
 }
 
 function summarize(samples, elapsedMs) {

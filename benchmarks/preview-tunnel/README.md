@@ -4,15 +4,17 @@ Compares the direct local target, the TypeScript persistent preview agent, and t
 
 ## Prerequisites
 
-Build the independent Rust package first:
+From the Farm.js repository root, build the independent Rust package in the sibling
+`tunnel` repository first:
 
 ```bash
 cd ../tunnel
 npm install
 npm run build
+cd ../farm.js
 ```
 
-Then run the benchmark from the Farm.js repository:
+Then run the benchmark:
 
 ```bash
 pnpm benchmark:preview

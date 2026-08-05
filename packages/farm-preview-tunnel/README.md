@@ -19,6 +19,18 @@ const agent = await startTypeScriptPreviewAgent({
 console.log(agent.publicUrl);
 ```
 
+When the relay binds to all interfaces behind a public reverse proxy, configure the
+externally reachable HTTP and WebSocket URLs independently:
+
+```ts
+const relay = createPersistentPreviewRelay({
+  host: "0.0.0.0",
+  port: 4400,
+  publicBaseUrl: "https://preview.example.com",
+  publicWebSocketUrl: "wss://preview.example.com/agent",
+});
+```
+
 The agent closes automatically when the local target becomes unreachable. The relay then removes its public route.
 
 ## Rust agent
