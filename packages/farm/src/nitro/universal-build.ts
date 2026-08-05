@@ -4711,10 +4711,12 @@ ${
     "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>",
   );
   if (!html.includes('href="/farm-client.css"')) {
-    html = html.replace(
-      /<[/]head>/i,
-      '  <link rel="stylesheet" href="/farm-client.css">\\n</head>',
-    );
+    const clientStylesheet = '  <link rel="stylesheet" href="/farm-client.css">\\n';
+    const firstStyleIndex = html.search(/<style(?:\\s|>)/i);
+    html =
+      firstStyleIndex >= 0
+        ? html.slice(0, firstStyleIndex) + clientStylesheet + html.slice(firstStyleIndex)
+        : html.replace(/<[/]head>/i, clientStylesheet + "</head>");
   }
   if (!html.includes('id="__farm_route_slots_data__"')) {
     html = html.replace(/<[/]body>/i, renderFarmClientBootstrapScript() + "\\n</body>");

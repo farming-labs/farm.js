@@ -46,11 +46,11 @@ export const fonts = defineLayoutFonts({
 export default function RootLayout({ children }: LayoutProps) {
   return (
     <>
-      <main
-        className={`${geistSans.variable} ${geistMono.variable} ${geistPixel.variable} ${geistMono.className} min-h-screen bg-black text-white`}
+      <div
+        className={`${geistSans.variable} ${geistMono.variable} ${geistPixel.variable} ${geistSans.className} min-h-screen bg-black text-white`}
       >
         {children}
-      </main>
+      </div>
       <Databuddy clientId="0af7dbbd-628a-44c9-8814-df4138a061b0" trackWebVitals={true} />
     </>
   );

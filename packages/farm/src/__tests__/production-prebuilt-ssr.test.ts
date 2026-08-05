@@ -313,12 +313,17 @@ export function AnalyticsBoundary() {
       await fs.writeFile(
         path.join(root, "src", "app", "layout.tsx"),
         `
+import "./globals.css";
 import { AnalyticsBoundary } from "@fixture/analytics/react";
 
 export default function RootLayout({ children }) {
   return <div data-layout="root"><AnalyticsBoundary />{children}</div>;
 }
 `.trim(),
+      );
+      await fs.writeFile(
+        path.join(root, "src", "app", "globals.css"),
+        "h1 { font-family: monospace; font-weight: 400; }",
       );
       await fs.writeFile(
         path.join(root, "src", "app", "page.tsx"),
@@ -374,6 +379,12 @@ export default function RootLayout({ children }) {
           expect(html).toContain('id="__farm_route_slots_data__"');
           expect(html.match(/src="\/farm-client\.js"/g)).toHaveLength(1);
           expect(html.match(/href="\/farm-client\.css"/g)).toHaveLength(1);
+          const clientStylesheetIndex = html.indexOf(
+            '<link rel="stylesheet" href="/farm-client.css">',
+          );
+          const docsThemeIndex = html.indexOf("<style>");
+          expect(clientStylesheetIndex).toBeGreaterThan(-1);
+          expect(docsThemeIndex).toBeGreaterThan(clientStylesheetIndex);
         },
         "/docs",
       );
