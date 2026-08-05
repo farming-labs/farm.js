@@ -1,36 +1,39 @@
 # Farm docs integration example
 
-This example shows Farm's docs runtime and the docs API surface inspired by
-`@farming-labs/docs`. Enabling docs in `farm.config.ts` automatically serves both the human docs
-entry and `/api/docs/*` machine routes.
+This example shows Farm using the official `@farming-labs/farmjs` adapter. Enabling the adapter in
+`farm.config.ts` automatically serves both the human docs entry and `/api/docs/*` machine routes.
 
 ```ts
 // farm.config.ts
 import { defineConfig } from '@farm.js/core';
+import { withDocs } from '@farming-labs/farmjs/config';
 
-export default defineConfig({
-  docs: {
-    entry: '/docs',
-    metadata: {
-      description: 'Farm docs integration example',
-    },
-    nav: {
-      title: 'Farm Docs',
-    },
-    search: {
-      provider: 'simple',
-      enabled: true,
-    },
-    pageActions: {
-      copyMarkdown: {
+export default withDocs(
+  defineConfig({
+    deploy: { target: 'vercel' },
+  }),
+  {
+    config: {
+      entry: '/docs',
+      metadata: {
+        description: 'Farm docs integration example',
+      },
+      nav: {
+        title: 'Farm Docs',
+      },
+      search: {
+        provider: 'simple',
         enabled: true,
       },
+      pageActions: {
+        copyMarkdown: { enabled: true },
+      },
+      llmsTxt: true,
+      sitemap: true,
+      robots: true,
     },
-    llmsTxt: true,
-    sitemap: true,
-    robots: true,
   },
-});
+);
 ```
 
 Place markdown in `src/app/docs`. The folder structure becomes the docs URL structure, so
