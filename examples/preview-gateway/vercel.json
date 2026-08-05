@@ -1,10 +1,11 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "pnpm run build",
+  "installCommand": "pnpm install --filter farm-preview-gateway-vercel... --frozen-lockfile",
+  "outputDirectory": "public",
   "regions": ["iad1"],
   "functions": {
     "api/index.ts": {
-      "maxDuration": 60
+      "maxDuration": 1800
     }
   },
   "routes": [

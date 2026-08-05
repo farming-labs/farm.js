@@ -26,8 +26,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsdown",
-    "test": "tsdown && node --test test/*.test.mjs",
+    "build": "tsdown && tsc --noEmit false --emitDeclarationOnly",
+    "test": "pnpm run build && node --test test/*.test.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

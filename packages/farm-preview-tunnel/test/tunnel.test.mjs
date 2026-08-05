@@ -150,6 +150,111 @@ test("advertises explicit public HTTP and WebSocket endpoints", async () => {
   }
 });
 
+test("routes wildcard preview hosts and advertises the matching public URL", async () => {
+  const relay = createPersistentPreviewRelay({
+    publicBaseUrl: "https://preview.example.com",
+    publicDomain: "preview.example.com",
+  });
+  const address = await relay.listen();
+  const target = createServer((request, response) => response.end(request.url));
+  await listen(target);
+  const targetAddress = target.address();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: `ws://127.0.0.1:${address.port}/agent`,
+    name: "wildcard-agent",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    assert.equal(agent.publicUrl, "https://wildcard-agent.preview.example.com");
+    const response = await requestWithHost(
+      `${address.httpUrl}/nested/path?from=wildcard`,
+      "wildcard-agent.preview.example.com",
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.body, "/nested/path?from=wildcard");
+  } finally {
+    await agent.close();
+    await relay.close();
+    await close(target);
+  }
+});
+
+test("falls through to an existing HTTP gateway when no native session matches", async () => {
+  const fallbackRequests = [];
+  const relay = createPersistentPreviewRelay({
+    publicDomain: "preview.example.com",
+    healthPath: "/api/tunnel/health",
+    fallbackHandler(request, response) {
+      fallbackRequests.push({ host: request.headers.host, url: request.url });
+      response.statusCode = 202;
+      response.end("polling fallback");
+    },
+  });
+  const address = await relay.listen();
+
+  try {
+    const response = await requestWithHost(
+      `${address.httpUrl}/fallback?transport=polling`,
+      "missing.preview.example.com",
+    );
+    assert.equal(response.status, 202);
+    assert.equal(response.body, "polling fallback");
+    assert.deepEqual(fallbackRequests, [
+      {
+        host: "missing.preview.example.com",
+        url: "/fallback?transport=polling",
+      },
+    ]);
+
+    const health = await fetch(`${address.httpUrl}/api/tunnel/health`);
+    assert.equal(health.status, 200);
+    assert.equal((await health.json()).transport, "websocket");
+  } finally {
+    await relay.close();
+  }
+});
+
+test("coordinates requests across separate relay instances", async () => {
+  const coordinator = new MemoryRelayCoordinator();
+  const relayA = createPersistentPreviewRelay({
+    publicBaseUrl: "https://preview.example.com",
+    publicDomain: "preview.example.com",
+    coordinator,
+    coordinatorSessionTtlMs: 150,
+    requestTimeoutMs: 2_000,
+  });
+  const relayB = createPersistentPreviewRelay({
+    publicBaseUrl: "https://preview.example.com",
+    publicDomain: "preview.example.com",
+    coordinator,
+    coordinatorSessionTtlMs: 150,
+    requestTimeoutMs: 2_000,
+  });
+  const [addressA, addressB] = await Promise.all([relayA.listen(), relayB.listen()]);
+  const target = createServer((request, response) => response.end(`shared:${request.url}`));
+  await listen(target);
+  const targetAddress = target.address();
+  const agent = await startTypeScriptPreviewAgent({
+    relayUrl: addressA.websocketUrl,
+    name: "shared-agent",
+    targetUrl: `http://127.0.0.1:${targetAddress.port}`,
+  });
+
+  try {
+    const response = await requestWithHost(
+      `${addressB.httpUrl}/from/another/instance?coordinated=true`,
+      "shared-agent.preview.example.com",
+    );
+    assert.equal(response.status, 200);
+    assert.equal(response.body, "shared:/from/another/instance?coordinated=true");
+  } finally {
+    await agent.close();
+    await Promise.all([relayA.close(), relayB.close()]);
+    await close(target);
+  }
+});
+
 test("rejects preview paths that could replace the local target authority", async () => {
   let sensitiveRequests = 0;
   const sensitive = createServer((_request, response) => {
@@ -326,6 +431,102 @@ function startStalledUpload(value) {
   });
 }
 
+function requestWithHost(value, host) {
+  const url = new URL(value);
+  return new Promise((resolve, reject) => {
+    const request = createRequest(
+      {
+        host: url.hostname,
+        port: url.port,
+        path: `${url.pathname}${url.search}`,
+        headers: { host },
+      },
+      (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.once("end", () => {
+          resolve({
+            status: response.statusCode,
+            body: Buffer.concat(chunks).toString(),
+          });
+        });
+      },
+    );
+    request.once("error", reject);
+    request.end();
+  });
+}
+
 function closeWebSocketServer(server) {
   return new Promise((resolve) => server.close(() => resolve()));
+}
+
+class MemoryRelayCoordinator {
+  sessions = new Map();
+  requests = new Map();
+  responses = new Map();
+
+  async claimSession(session, ttlMs) {
+    const existing = await this.findSession(session.name);
+    if (existing) return false;
+    this.sessions.set(session.name, { ...session, expiresAt: Date.now() + ttlMs });
+    return true;
+  }
+
+  async findSession(name) {
+    const session = this.sessions.get(name);
+    if (!session) return undefined;
+    if (session.expiresAt <= Date.now()) {
+      this.sessions.delete(name);
+      return undefined;
+    }
+    return { id: session.id, name: session.name };
+  }
+
+  async touchSession(session, ttlMs) {
+    const existing = this.sessions.get(session.name);
+    if (existing?.id !== session.id) return false;
+    existing.expiresAt = Date.now() + ttlMs;
+    return true;
+  }
+
+  async releaseSession(session) {
+    if (this.sessions.get(session.name)?.id === session.id) this.sessions.delete(session.name);
+  }
+
+  async publishRequest(sessionId, request) {
+    pushQueue(this.requests, sessionId, request);
+  }
+
+  async takeRequest(sessionId, timeoutMs) {
+    return await takeQueue(this.requests, sessionId, timeoutMs);
+  }
+
+  async publishResponse(sessionId, response) {
+    pushQueue(this.responses, `${sessionId}:${response.id}`, response);
+  }
+
+  async takeResponse(sessionId, requestId, timeoutMs) {
+    return await takeQueue(this.responses, `${sessionId}:${requestId}`, timeoutMs);
+  }
+}
+
+function pushQueue(queues, key, value) {
+  const queue = queues.get(key) || [];
+  queue.push(value);
+  queues.set(key, queue);
+}
+
+async function takeQueue(queues, key, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const queue = queues.get(key);
+    const value = queue?.shift();
+    if (value) {
+      if (!queue.length) queues.delete(key);
+      return value;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  } while (Date.now() < deadline);
+  return undefined;
 }

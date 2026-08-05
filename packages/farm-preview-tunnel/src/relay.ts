@@ -26,9 +26,39 @@ export interface PersistentPreviewRelayOptions {
   host?: string;
   port?: number;
   publicBaseUrl?: string;
+  publicDomain?: string;
   publicWebSocketUrl?: string;
+  healthPath?: string;
+  fallbackHandler?: PersistentPreviewRelayFallbackHandler;
+  coordinator?: PersistentPreviewRelayCoordinator;
+  coordinatorSessionTtlMs?: number;
   requestTimeoutMs?: number;
   maxBodyBytes?: number;
+}
+
+export type PersistentPreviewRelayFallbackHandler = (
+  request: IncomingMessage,
+  response: ServerResponse,
+) => void | Promise<void>;
+
+export interface PersistentPreviewRelayCoordinatorSession {
+  id: string;
+  name: string;
+}
+
+export interface PersistentPreviewRelayCoordinator {
+  claimSession(session: PersistentPreviewRelayCoordinatorSession, ttlMs: number): Promise<boolean>;
+  findSession(name: string): Promise<PersistentPreviewRelayCoordinatorSession | undefined>;
+  touchSession(session: PersistentPreviewRelayCoordinatorSession, ttlMs: number): Promise<boolean>;
+  releaseSession(session: PersistentPreviewRelayCoordinatorSession): Promise<void>;
+  publishRequest(sessionId: string, request: TunnelRequestMessage): Promise<void>;
+  takeRequest(sessionId: string, timeoutMs: number): Promise<TunnelRequestMessage | undefined>;
+  publishResponse(sessionId: string, response: TunnelResponseMessage): Promise<void>;
+  takeResponse(
+    sessionId: string,
+    requestId: string,
+    timeoutMs: number,
+  ): Promise<TunnelResponseMessage | undefined>;
 }
 
 export interface PersistentPreviewRelayAddress {
@@ -55,69 +85,53 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
   const pending = new Map<string, PendingRequest>();
   const websocketServer = new WebSocketServer({ noServer: true });
   const host = options.host || "127.0.0.1";
+  const publicDomain = normalizeDomain(options.publicDomain);
+  const healthPath = options.healthPath || "/api/health";
+  const coordinatorSessionTtlMs = options.coordinatorSessionTtlMs ?? 60_000;
   const requestTimeoutMs = options.requestTimeoutMs ?? 30_000;
   const maxBodyBytes = options.maxBodyBytes ?? 5 * 1024 * 1024;
   let address: PersistentPreviewRelayAddress | undefined;
 
   const server = createServer(async (request, response) => {
     try {
-      if (request.url === "/api/health") {
-        return sendJson(response, 200, { ok: true, transport: "websocket", agents: agents.size });
+      const url = new URL(request.url || "/", "http://localhost");
+      if (url.pathname === healthPath) {
+        return sendJson(response, 200, {
+          ok: true,
+          transport: "websocket",
+          coordination: options.coordinator ? "shared" : "local",
+          agents: agents.size,
+        });
       }
 
-      const route = resolvePublicRoute(request);
+      const route = resolvePublicRoute(request, publicDomain);
       if (!route) {
-        return sendText(response, 404, "Preview route not found.");
+        return handleFallback(request, response, options.fallbackHandler);
       }
 
-      const session = agents.get(route.name);
-      if (!session || session.socket.readyState !== session.socket.OPEN) {
-        return sendText(
-          response,
-          404,
-          `No active persistent preview is running for "${route.name}".`,
+      const localSession = agents.get(route.name);
+      const activeLocalSession =
+        localSession?.socket.readyState === localSession?.socket.OPEN ? localSession : undefined;
+      const coordinatedSession = activeLocalSession
+        ? undefined
+        : await options.coordinator?.findSession(route.name);
+      if (!activeLocalSession && !coordinatedSession) {
+        return handleFallback(request, response, options.fallbackHandler, () =>
+          sendText(response, 404, `No active persistent preview is running for "${route.name}".`),
         );
       }
 
-      const id = randomUUID();
-      const uploadController = new AbortController();
-      const timeout = setTimeout(() => {
-        uploadController.abort();
-        pending.delete(id);
-        if (!response.headersSent) {
-          sendText(response, 504, "The persistent preview agent did not respond in time.");
-        }
-      }, requestTimeoutMs);
-
-      let body: Buffer;
-      try {
-        body = await readRequestBody(request, maxBodyBytes, uploadController.signal);
-      } catch (error) {
-        if (uploadController.signal.aborted) return;
-        clearTimeout(timeout);
-        throw error;
-      }
-
-      if (uploadController.signal.aborted || response.writableEnded) return;
-      const message: TunnelRequestMessage = {
-        type: "request",
-        id,
-        method: request.method || "GET",
+      await forwardPublicRequest({
+        request,
+        response,
         path: route.path,
-        headers: normalizeIncomingHeaders(request.headers),
-        ...(body.length ? { body: body.toString("base64") } : {}),
-      };
-
-      pending.set(id, { response, sessionId: session.id, timeout });
-      try {
-        session.socket.send(JSON.stringify(message), (error) => {
-          if (error) failPendingRequest(id, session.id, pending);
-        });
-      } catch (error) {
-        pending.delete(id);
-        clearTimeout(timeout);
-        throw error;
-      }
+        localSession: activeLocalSession,
+        coordinatedSession,
+        coordinator: options.coordinator,
+        pending,
+        requestTimeoutMs,
+        maxBodyBytes,
+      });
     } catch (error) {
       const status = error instanceof BodyLimitError ? 413 : 500;
       sendText(response, status, error instanceof Error ? error.message : String(error));
@@ -137,73 +151,102 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
 
   websocketServer.on("connection", (socket) => {
     let session: AgentSession | undefined;
+    let registering = false;
 
     socket.on("message", (data) => {
-      let message: unknown;
-      try {
-        message = JSON.parse(data.toString());
-      } catch {
-        rejectSocketMessage(socket, "Invalid tunnel message.");
-        return;
-      }
-
-      if (!isAgentToRelayMessage(message)) {
-        rejectSocketMessage(socket, "Invalid tunnel message.");
-        return;
-      }
-
-      if (message.type === "register") {
-        if (session) {
-          rejectSocketMessage(socket, "The preview agent is already registered.");
-          return;
-        }
-        const name = normalizePreviewName(message.name);
-        if (!name) {
-          socket.send(
-            JSON.stringify({ type: "error", message: "A valid preview name is required." }),
-          );
-          socket.close(1008, "Invalid preview name");
+      void (async () => {
+        let message: unknown;
+        try {
+          message = JSON.parse(data.toString());
+        } catch {
+          rejectSocketMessage(socket, "Invalid tunnel message.");
           return;
         }
 
-        const existing = agents.get(name);
-        if (existing && existing.socket.readyState === existing.socket.OPEN) {
-          socket.send(
-            JSON.stringify({ type: "error", message: `Preview name "${name}" is already active.` }),
-          );
-          socket.close(1008, "Preview name unavailable");
+        if (!isAgentToRelayMessage(message)) {
+          rejectSocketMessage(socket, "Invalid tunnel message.");
           return;
         }
 
-        session = { id: randomUUID(), name, socket };
-        agents.set(name, session);
-        const baseUrl = trimTrailingSlash(options.publicBaseUrl || address?.httpUrl || "");
-        if (!baseUrl) {
-          socket.close(1011, "Relay is not listening");
-          return;
-        }
-        const ready: ReadyMessage = {
-          type: "ready",
-          sessionId: session.id,
-          publicUrl: `${baseUrl}/preview/${name}`,
-        };
-        socket.send(JSON.stringify(ready));
-        return;
-      }
+        if (message.type === "register") {
+          if (session || registering) {
+            rejectSocketMessage(socket, "The preview agent is already registered.");
+            return;
+          }
+          registering = true;
+          try {
+            const name = normalizePreviewName(message.name);
+            if (!name) {
+              socket.send(
+                JSON.stringify({ type: "error", message: "A valid preview name is required." }),
+              );
+              socket.close(1008, "Invalid preview name");
+              return;
+            }
 
-      if (message.type === "response") {
-        if (!session) {
-          rejectSocketMessage(socket, "Register the preview agent before sending responses.");
+            const existing = agents.get(name);
+            if (existing && existing.socket.readyState === existing.socket.OPEN) {
+              rejectPreviewName(socket, name);
+              return;
+            }
+
+            const nextSession = { id: randomUUID(), name, socket };
+            if (
+              options.coordinator &&
+              !(await options.coordinator.claimSession(nextSession, coordinatorSessionTtlMs))
+            ) {
+              rejectPreviewName(socket, name);
+              return;
+            }
+            if (socket.readyState !== socket.OPEN) {
+              await options.coordinator?.releaseSession(nextSession);
+              return;
+            }
+
+            session = nextSession;
+            agents.set(name, session);
+            const baseUrl = trimTrailingSlash(options.publicBaseUrl || address?.httpUrl || "");
+            if (!baseUrl) {
+              socket.close(1011, "Relay is not listening");
+              return;
+            }
+            const ready: ReadyMessage = {
+              type: "ready",
+              sessionId: session.id,
+              publicUrl: createPublicUrl(baseUrl, publicDomain, name),
+            };
+            socket.send(JSON.stringify(ready));
+            if (options.coordinator) {
+              void pumpCoordinatedRequests(
+                session,
+                agents,
+                options.coordinator,
+                coordinatorSessionTtlMs,
+              );
+            }
+          } finally {
+            registering = false;
+          }
           return;
         }
-        completePendingRequest(message, session.id, pending);
-      }
+
+        if (message.type === "response") {
+          if (!session) {
+            rejectSocketMessage(socket, "Register the preview agent before sending responses.");
+            return;
+          }
+          if (!completePendingRequest(message, session.id, pending)) {
+            await options.coordinator?.publishResponse(session.id, message);
+          }
+        }
+      })().catch(() => socket.close(1011, "Preview relay coordination failed"));
     });
 
     socket.on("close", () => {
       if (session && agents.get(session.name)?.id === session.id) {
         agents.delete(session.name);
         failPendingRequestsForSession(session.id, pending);
+        void options.coordinator?.releaseSession(session).catch(() => undefined);
       }
     });
   });
@@ -243,13 +286,168 @@ export function createPersistentPreviewRelay(options: PersistentPreviewRelayOpti
   };
 }
 
-function resolvePublicRoute(request: IncomingMessage) {
+interface ForwardPublicRequestOptions {
+  request: IncomingMessage;
+  response: ServerResponse;
+  path: string;
+  localSession?: AgentSession;
+  coordinatedSession?: PersistentPreviewRelayCoordinatorSession;
+  coordinator?: PersistentPreviewRelayCoordinator;
+  pending: Map<string, PendingRequest>;
+  requestTimeoutMs: number;
+  maxBodyBytes: number;
+}
+
+async function forwardPublicRequest(options: ForwardPublicRequestOptions) {
+  const id = randomUUID();
+  const uploadController = new AbortController();
+  const deadline = Date.now() + options.requestTimeoutMs;
+  const timeout = setTimeout(() => {
+    uploadController.abort();
+    options.pending.delete(id);
+    if (!options.response.headersSent) {
+      sendText(options.response, 504, "The persistent preview agent did not respond in time.");
+    }
+  }, options.requestTimeoutMs);
+
+  let body: Buffer;
+  try {
+    body = await readRequestBody(options.request, options.maxBodyBytes, uploadController.signal);
+  } catch (error) {
+    if (uploadController.signal.aborted) return;
+    clearTimeout(timeout);
+    throw error;
+  }
+
+  if (uploadController.signal.aborted || options.response.writableEnded) return;
+  const message: TunnelRequestMessage = {
+    type: "request",
+    id,
+    method: options.request.method || "GET",
+    path: options.path,
+    headers: normalizeIncomingHeaders(options.request.headers),
+    ...(body.length ? { body: body.toString("base64") } : {}),
+  };
+
+  const localSession = options.localSession;
+  if (localSession) {
+    options.pending.set(id, {
+      response: options.response,
+      sessionId: localSession.id,
+      timeout,
+    });
+    try {
+      localSession.socket.send(JSON.stringify(message), (error) => {
+        if (error) failPendingRequest(id, localSession.id, options.pending);
+      });
+    } catch (error) {
+      options.pending.delete(id);
+      clearTimeout(timeout);
+      throw error;
+    }
+    return;
+  }
+
+  if (!options.coordinator || !options.coordinatedSession) {
+    clearTimeout(timeout);
+    throw new Error("Persistent preview relay coordination is unavailable.");
+  }
+
+  await options.coordinator.publishRequest(options.coordinatedSession.id, message);
+  const remainingMs = Math.max(1, deadline - Date.now());
+  const coordinatedResponse = await options.coordinator.takeResponse(
+    options.coordinatedSession.id,
+    id,
+    remainingMs,
+  );
+  clearTimeout(timeout);
+  if (options.response.writableEnded) return;
+  if (!coordinatedResponse) {
+    sendText(options.response, 504, "The persistent preview agent did not respond in time.");
+    return;
+  }
+  writeTunnelResponse(options.response, coordinatedResponse);
+}
+
+async function pumpCoordinatedRequests(
+  session: AgentSession,
+  agents: Map<string, AgentSession>,
+  coordinator: PersistentPreviewRelayCoordinator,
+  sessionTtlMs: number,
+) {
+  const waitMs = Math.max(50, Math.min(15_000, Math.floor(sessionTtlMs / 3)));
+  try {
+    while (
+      agents.get(session.name)?.id === session.id &&
+      session.socket.readyState === session.socket.OPEN
+    ) {
+      if (!(await coordinator.touchSession(session, sessionTtlMs))) {
+        session.socket.close(1011, "Preview session ownership was lost");
+        return;
+      }
+      const request = await coordinator.takeRequest(session.id, waitMs);
+      if (!request) continue;
+      if (
+        agents.get(session.name)?.id !== session.id ||
+        session.socket.readyState !== session.socket.OPEN
+      ) {
+        return;
+      }
+      session.socket.send(JSON.stringify(request));
+    }
+  } catch {
+    session.socket.close(1011, "Preview relay coordination failed");
+  }
+}
+
+function resolvePublicRoute(request: IncomingMessage, publicDomain: string | undefined) {
   const url = new URL(request.url || "/", "http://localhost");
   const match = url.pathname.match(/^\/preview\/([^/]+)(\/.*)?$/);
-  if (!match) return undefined;
-  const name = normalizePreviewName(match[1]);
-  const path = `${match[2] || "/"}${url.search}`;
-  return name ? { name, path } : undefined;
+  if (match) {
+    const name = normalizePreviewName(match[1]);
+    const path = `${match[2] || "/"}${url.search}`;
+    return name ? { name, path } : undefined;
+  }
+
+  if (!publicDomain) return undefined;
+  const host = normalizeHost(request.headers.host);
+  const suffix = `.${publicDomain}`;
+  if (!host?.endsWith(suffix)) return undefined;
+
+  const subdomain = host.slice(0, -suffix.length);
+  const name = normalizePreviewName(subdomain);
+  if (!name || name !== subdomain || subdomain.includes(".")) return undefined;
+  return { name, path: `${url.pathname || "/"}${url.search}` };
+}
+
+async function handleFallback(
+  request: IncomingMessage,
+  response: ServerResponse,
+  fallbackHandler: PersistentPreviewRelayFallbackHandler | undefined,
+  onMissing = () => sendText(response, 404, "Preview route not found."),
+) {
+  if (fallbackHandler) return await fallbackHandler(request, response);
+  return onMissing();
+}
+
+function createPublicUrl(baseUrl: string, publicDomain: string | undefined, name: string) {
+  if (!publicDomain) return `${baseUrl}/preview/${name}`;
+  const url = new URL(baseUrl);
+  return `${url.protocol}//${name}.${publicDomain}`;
+}
+
+function normalizeDomain(value: string | undefined) {
+  if (!value) return undefined;
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/[:/].*$/, "");
+}
+
+function normalizeHost(value: string | string[] | undefined) {
+  const host = Array.isArray(value) ? value[0] : value;
+  return host?.split(":", 1)[0].trim().toLowerCase().replace(/\.$/, "");
 }
 
 function completePendingRequest(
@@ -258,19 +456,24 @@ function completePendingRequest(
   pending: Map<string, PendingRequest>,
 ) {
   const entry = pending.get(message.id);
-  if (!entry || entry.sessionId !== sessionId) return;
+  if (!entry || entry.sessionId !== sessionId) return false;
   pending.delete(message.id);
   clearTimeout(entry.timeout);
 
+  writeTunnelResponse(entry.response, message);
+  return true;
+}
+
+function writeTunnelResponse(response: ServerResponse, message: TunnelResponseMessage) {
   for (const [name, value] of Object.entries(message.headers)) {
     if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
-      entry.response.setHeader(name, value);
+      response.setHeader(name, value);
     }
   }
-  entry.response.setHeader("cache-control", "no-store");
-  entry.response.setHeader("x-farm-preview-transport", "websocket");
-  entry.response.statusCode = message.status;
-  entry.response.end(message.body ? Buffer.from(message.body, "base64") : undefined);
+  response.setHeader("cache-control", "no-store");
+  response.setHeader("x-farm-preview-transport", "websocket");
+  response.statusCode = message.status;
+  response.end(message.body ? Buffer.from(message.body, "base64") : undefined);
 }
 
 function failPendingRequestsForSession(sessionId: string, pending: Map<string, PendingRequest>) {
@@ -375,6 +578,14 @@ function rejectSocketMessage(socket: WebSocket, message: string) {
   socket.send(JSON.stringify({ type: "error", message }), () => {
     socket.close(1008, "Invalid tunnel message");
   });
+}
+
+function rejectPreviewName(socket: WebSocket, name: string) {
+  if (socket.readyState !== socket.OPEN) return;
+  socket.send(
+    JSON.stringify({ type: "error", message: `Preview name "${name}" is already active.` }),
+  );
+  socket.close(1008, "Preview name unavailable");
 }
 
 function listen(server: Server, port: number, host: string) {

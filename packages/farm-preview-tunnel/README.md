@@ -1,8 +1,8 @@
 # `@farm.js/preview-tunnel`
 
-Experimental persistent preview relay and TypeScript agent for Farm.js.
+Persistent preview relay protocol and TypeScript reference agent for Farm.js.
 
-Unlike the current hosted preview gateway, this package keeps requests out of remote object storage. The agent opens one outbound WebSocket to the relay, and the relay multiplexes HTTP requests and responses over that connection.
+The agent opens one outbound WebSocket to the relay, and the relay multiplexes HTTP requests and responses over that connection. The hosted gateway uses this transport first and keeps its HTTPS polling gateway as a compatibility fallback.
 
 ```ts
 import { createPersistentPreviewRelay, startTypeScriptPreviewAgent } from "@farm.js/preview-tunnel";
@@ -27,9 +27,12 @@ const relay = createPersistentPreviewRelay({
   host: "0.0.0.0",
   port: 4400,
   publicBaseUrl: "https://preview.example.com",
+  publicDomain: "preview.example.com",
   publicWebSocketUrl: "wss://preview.example.com/agent",
 });
 ```
+
+When the relay can run on multiple server instances, provide a shared `PersistentPreviewRelayCoordinator`. Same-instance requests continue to use the direct in-memory path; the coordinator carries requests and responses only when the HTTP request lands on another instance. The hosted Vercel gateway uses Redis lists and expiring session ownership for this path.
 
 The agent closes automatically when the local target becomes unreachable. The relay then removes its public route.
 
@@ -42,6 +45,6 @@ The independent `@farm.js/tunnel` N-API package implements the same protocol and
 - Request and response bodies are buffered and base64-encoded in JSON.
 - Authentication and reconnect/resume are not implemented yet.
 - WebSocket upgrade forwarding and Vite HMR are not implemented yet.
-- The relay must run on infrastructure that supports long-lived WebSockets.
+- The relay must run on infrastructure that supports long-lived WebSockets. Clients do not reconnect when the infrastructure's maximum connection duration is reached yet.
 
 See `benchmarks/preview-tunnel` for the correctness and performance harness.
