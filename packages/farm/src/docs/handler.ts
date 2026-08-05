@@ -1,5 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { createRequire } from "node:module";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import {
   buildDocsAgentDiscoverySpec,
   buildDocsSitemapManifest,
@@ -29,7 +31,6 @@ import {
   type FarmDocsPublicFontAsset,
 } from "./fonts";
 import { resolveFarmDocsPageLastModified } from "./last-modified";
-import { farmDocsPixelBorderCss } from "./pixel-border-css";
 import { generateFarmDocsSearchBootstrapRuntime, isFarmDocsSearchEnabled } from "./search-client";
 import {
   createFarmDocsSocialImageDescriptor,
@@ -54,6 +55,8 @@ export interface FarmDocsHandlerOptions {
   fontStylesheetHref?: string;
   /** Application-owned global stylesheet, including the selected docs theme CSS import. */
   globalStylesheetHref?: string;
+  /** Adapter-owned presentation CSS override, primarily for tests and custom runtimes. */
+  presentationCss?: string;
 }
 
 export interface FarmDocsPage {
@@ -88,6 +91,25 @@ function normalizeEntry(entry: string | undefined): string {
 
 function normalizeSlug(value: string): string {
   return trimSlashes(decodeURIComponent(value)).replace(/\.(mdx?|markdown)$/i, "");
+}
+
+async function loadFarmDocsAdapterPresentationCss(
+  docs: FarmDocsResolvedConfig,
+  root: string,
+): Promise<string> {
+  const serverEntry = docs.adapter?.server;
+  if (!serverEntry) return "";
+
+  const runtimeEntry = serverEntry.endsWith("/server")
+    ? `${serverEntry.slice(0, -"/server".length)}/runtime`
+    : serverEntry;
+  const requireFromApp = createRequire(path.join(path.resolve(root), "package.json"));
+  const resolvedRuntime = requireFromApp.resolve(runtimeEntry);
+  const runtime = (await import(pathToFileURL(resolvedRuntime).href)) as {
+    farmDocsPresentationCss?: unknown;
+  };
+
+  return typeof runtime.farmDocsPresentationCss === "string" ? runtime.farmDocsPresentationCss : "";
 }
 
 function resolveFarmDocsFavicon(
@@ -1614,6 +1636,7 @@ function renderFarmDocsBridgeCss(
   docs: FarmDocsResolvedConfig,
   fontAssets: readonly FarmDocsPublicFontAsset[],
   layoutFonts?: FarmLayoutFonts,
+  presentationCss = "",
 ): string {
   const sidebarWidth = getThemeLayoutValue(docs, "sidebarWidth", 320);
   const contentWidth = getThemeLayoutValue(docs, "contentWidth", 860);
@@ -1825,7 +1848,7 @@ function renderFarmDocsBridgeCss(
       #nd-docs-layout figure.shiki.code-block-plain pre, .code-block-plain pre { padding: 16px 44px 16px 14px !important; line-height: 1.65; }
       .sh__line { min-height: 1.6em; }
     }
-${farmDocsPixelBorderCss}
+${presentationCss}
 ${fontCss}
   `;
 }
@@ -1879,6 +1902,7 @@ function renderPixelDocsHtml(
   layoutFonts?: FarmLayoutFonts,
   fontStylesheetHref?: string,
   globalStylesheetHref?: string,
+  presentationCss = "",
 ): string {
   const navTitle =
     typeof docs.config.nav === "object" && docs.config.nav && "title" in docs.config.nav
@@ -1908,7 +1932,7 @@ function renderPixelDocsHtml(
   ${globalStylesheetHref ? `<link rel="stylesheet" href="${escapeAttribute(globalStylesheetHref)}">` : ""}
   ${description ? `<meta name="description" content="${escapeHtml(description)}">` : ""}
   ${socialMetadata}
-  <style>${renderFarmDocsBridgeCss(docs, fontAssets, layoutFonts)}</style>
+  <style>${renderFarmDocsBridgeCss(docs, fontAssets, layoutFonts, presentationCss)}</style>
   ${searchEnabled ? renderDocsSearchBootstrapScript() : ""}
 </head>
 <body>
@@ -2033,6 +2057,8 @@ export function createFarmDocsHandler(
 
     const pathname = new URL(request.url).pathname;
     const layoutFonts = await options.resolveLayoutFonts?.(pathname);
+    const presentationCss =
+      options.presentationCss ?? (await loadFarmDocsAdapterPresentationCss(docs, options.root));
     const usesLayoutFonts = Boolean(layoutFonts?.body || layoutFonts?.code);
     const activeFontAssets = usesLayoutFonts ? [] : fontAssets;
     const fontPreloadHeader = usesLayoutFonts
@@ -2051,6 +2077,7 @@ export function createFarmDocsHandler(
         layoutFonts,
         usesLayoutFonts ? options.fontStylesheetHref : undefined,
         options.globalStylesheetHref,
+        presentationCss,
       ),
       {
         status: 200,
