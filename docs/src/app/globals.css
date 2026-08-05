@@ -10,6 +10,8 @@
     --farm-line: rgb(255 255 255 / 0.12);
     --farm-line-soft: rgb(255 255 255 / 0.055);
     --farm-rule: rgb(255 255 255 / 0.09);
+    /* Farm's docs use wider hatched gutters to create the double sidebar rails. */
+    --fd-pixel-rail-width: 24px !important;
   }
 
   html {
