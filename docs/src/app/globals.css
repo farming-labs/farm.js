@@ -12,6 +12,8 @@
     --farm-rule: rgb(255 255 255 / 0.09);
     /* Farm's docs use wider hatched gutters to create the double sidebar rails. */
     --fd-pixel-rail-width: 24px !important;
+    /* Keep theme utilities on the compiled layout font instead of ui-monospace. */
+    --font-geist-mono: "Geist Mono", ui-monospace, monospace !important;
   }
 
   html {
