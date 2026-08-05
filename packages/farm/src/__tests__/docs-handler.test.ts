@@ -186,11 +186,7 @@ describe("createFarmDocsHandler", () => {
 
   it("serves docs markdown files as HTML", async () => {
     const { root, docs } = await createDocsFixture();
-    const handler = createFarmDocsHandler(docs, {
-      root,
-      srcDir: "src",
-      presentationCss: "/* adapter-owned presentation */",
-    });
+    const handler = createFarmDocsHandler(docs, { root, srcDir: "src" });
 
     const response = await handler(
       new Request("http://farm.test/docs", {
@@ -216,8 +212,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<meta property="og:image:height" content="630">');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(html).toContain('data-docs-theme="farm-docs"');
-    expect(html).toContain("/* adapter-owned presentation */");
-    expect(html).toContain('id="nd-docs-layout"');
+    expect(html).toContain('id="nd-docs-layout" class="grid" data-fd-framework="farm"');
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
