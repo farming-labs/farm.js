@@ -30,6 +30,38 @@
 }
 
 @layer components {
+  #nd-docs-layout aside#nd-sidebar {
+    background-color: var(--color-fd-background, #000) !important;
+    background-image:
+      linear-gradient(var(--color-fd-border), var(--color-fd-border)),
+      linear-gradient(var(--color-fd-border), var(--color-fd-border)),
+      repeating-linear-gradient(
+        -45deg,
+        color-mix(in srgb, var(--color-fd-border) 2%, transparent),
+        color-mix(in srgb, var(--color-fd-foreground) 7%, transparent) 1px,
+        transparent 1px,
+        transparent 6px
+      ),
+      repeating-linear-gradient(
+        -45deg,
+        color-mix(in srgb, var(--color-fd-border) 2%, transparent),
+        color-mix(in srgb, var(--color-fd-foreground) 7%, transparent) 1px,
+        transparent 1px,
+        transparent 6px
+      ) !important;
+    background-position:
+      var(--fd-pixel-rail-width) 0,
+      calc(100% - var(--fd-pixel-rail-width)) 0,
+      left top,
+      right top !important;
+    background-repeat: repeat-y !important;
+    background-size:
+      1px 100%,
+      1px 100%,
+      var(--fd-pixel-rail-width) 100%,
+      var(--fd-pixel-rail-width) 100% !important;
+  }
+
   .farm-announcement {
     background: #000;
   }
