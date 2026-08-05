@@ -1910,7 +1910,7 @@ function renderPixelDocsHtml(
   ${searchEnabled ? renderDocsSearchBootstrapScript() : ""}
 </head>
 <body>
-  <div id="nd-docs-layout" class="grid" data-fd-framework="farm">
+  <div id="nd-docs-layout" class="grid">
     <header class="mobile-topbar" aria-label="Mobile docs navigation">
       <button class="fd-mobile-nav-btn" type="button" data-sidebar-toggle aria-controls="nd-sidebar" aria-expanded="false" aria-label="Open menu">
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>

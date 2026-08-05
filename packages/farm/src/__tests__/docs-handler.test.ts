@@ -212,7 +212,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<meta property="og:image:height" content="630">');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(html).toContain('data-docs-theme="farm-docs"');
-    expect(html).toContain('id="nd-docs-layout" class="grid" data-fd-framework="farm"');
+    expect(html).toContain('id="nd-docs-layout" class="grid"');
+    expect(html).not.toContain("data-fd-framework");
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
