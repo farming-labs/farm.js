@@ -55,14 +55,14 @@ importers:
         specifier: workspace:*
         version: link:../packages/farm
       '@farming-labs/docs':
-        specifier: ^0.2.94
-        version: 0.2.94(react@19.2.8)(supports-color@10.2.2)
+        specifier: ^0.2.95
+        version: 0.2.95(react@19.2.8)(supports-color@10.2.2)
       '@farming-labs/farmjs':
-        specifier: ^0.2.94
-        version: 0.2.94(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.94)(@farming-labs/theme@0.2.94)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2)
+        specifier: ^0.2.95
+        version: 0.2.95(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.95)(@farming-labs/theme@0.2.95)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2)
       '@farming-labs/theme':
-        specifier: ^0.2.94
-        version: 0.2.94(@farming-labs/docs@0.2.94)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+        specifier: ^0.2.95
+        version: 0.2.95(@farming-labs/docs@0.2.95)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@prisma/client':
         specifier: 6.7.0
         version: 6.7.0(prisma@6.7.0)(typescript@5.9.3)
@@ -387,14 +387,14 @@ importers:
         specifier: workspace:*
         version: link:../../packages/farm
       '@farming-labs/docs':
-        specifier: ^0.2.94
-        version: 0.2.94(react@19.2.8)(supports-color@10.2.2)
+        specifier: ^0.2.95
+        version: 0.2.95(react@19.2.8)(supports-color@10.2.2)
       '@farming-labs/farmjs':
-        specifier: ^0.2.94
-        version: 0.2.94(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.94)(@farming-labs/theme@0.2.94)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2)
+        specifier: ^0.2.95
+        version: 0.2.95(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.95)(@farming-labs/theme@0.2.95)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2)
       '@farming-labs/theme':
-        specifier: ^0.2.94
-        version: 0.2.94(@farming-labs/docs@0.2.94)(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)
+        specifier: ^0.2.95
+        version: 0.2.95(@farming-labs/docs@0.2.95)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       react:
         specifier: 19.2.8
         version: 19.2.8
@@ -4148,8 +4148,8 @@ packages:
       - supports-color
     dev: false
 
-  /@farming-labs/docs@0.2.94(react@19.2.8)(supports-color@10.2.2):
-    resolution: {integrity: sha512-qgOGgsFroiBWx3RVccpzLjg+QtnuFPc/VrAtuitM7hyfFqhjUBo7AP0SFaDVTHxxQi4/0wwCEy5N+y/iX2IJNA==}
+  /@farming-labs/docs@0.2.95(react@19.2.8)(supports-color@10.2.2):
+    resolution: {integrity: sha512-18jJgMG1nlX7F/OLOdvBUwNqeCa8yyqN38wTf+hm78jOi41+rejf0rnittmn5vUSLuBz6QUeN2/DbPj9agvRUw==}
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -4178,8 +4178,8 @@ packages:
       - supports-color
     dev: false
 
-  /@farming-labs/farmjs@0.2.94(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.94)(@farming-labs/theme@0.2.94)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2):
-    resolution: {integrity: sha512-TtGiyqdFDSke+5iCfaC2x0fKdDdWTvd9VCG1bx3esBG7XT8nolUEoAd4KZPFDY9Ggue6lB+AduxcEq7JpyD9Jw==}
+  /@farming-labs/farmjs@0.2.95(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.95)(@farming-labs/theme@0.2.95)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2):
+    resolution: {integrity: sha512-G5LTEl02MGKAi+yE9bt7ff+wxf9dztK55cByB/vzEY2T1sUwRI1/0foSP2q0bDFkOjXHxu8zPYGknNUrZgr/HQ==}
     peerDependencies:
       '@farm.js/core': ^0.1.0-beta.19
       '@farming-labs/docs': '*'
@@ -4187,58 +4187,17 @@ packages:
       react: ^18.2.0 || ^19.0.0
     dependencies:
       '@farm.js/core': link:packages/farm
-      '@farming-labs/docs': 0.2.94(react@19.2.8)(supports-color@10.2.2)
-      '@farming-labs/theme': 0.2.94(@farming-labs/docs@0.2.94)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
+      '@farming-labs/docs': 0.2.95(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/theme': 0.2.95(@farming-labs/docs@0.2.95)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18)
       '@mdx-js/rollup': 3.1.1(rollup@4.62.4)(supports-color@10.2.2)
       '@scalar/core': 0.4.6
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
+      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.4.3)
       gray-matter: 4.0.3
       react: 19.2.8
       remark-frontmatter: 5.0.0(supports-color@10.2.2)
       remark-gfm: 4.0.1(supports-color@10.2.2)
       remark-mdx-frontmatter: 5.2.0
-      zod: 4.3.6
-    transitivePeerDependencies:
-      - '@mdx-js/mdx'
-      - '@mixedbread/sdk'
-      - '@orama/core'
-      - '@oramacloud/client'
-      - '@tanstack/react-router'
-      - '@types/estree-jsx'
-      - '@types/hast'
-      - '@types/mdast'
-      - '@types/react'
-      - algoliasearch
-      - flexsearch
-      - lucide-react
-      - next
-      - react-dom
-      - react-router
-      - rollup
-      - supports-color
-      - waku
-    dev: false
-
-  /@farming-labs/farmjs@0.2.94(@farm.js/core@packages+farm)(@farming-labs/docs@0.2.94)(@farming-labs/theme@0.2.94)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(rollup@4.62.4)(supports-color@10.2.2):
-    resolution: {integrity: sha512-TtGiyqdFDSke+5iCfaC2x0fKdDdWTvd9VCG1bx3esBG7XT8nolUEoAd4KZPFDY9Ggue6lB+AduxcEq7JpyD9Jw==}
-    peerDependencies:
-      '@farm.js/core': ^0.1.0-beta.19
-      '@farming-labs/docs': '*'
-      '@farming-labs/theme': '*'
-      react: ^18.2.0 || ^19.0.0
-    dependencies:
-      '@farm.js/core': link:packages/farm
-      '@farming-labs/docs': 0.2.94(react@19.2.8)(supports-color@10.2.2)
-      '@farming-labs/theme': 0.2.94(@farming-labs/docs@0.2.94)(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)
-      '@mdx-js/rollup': 3.1.1(rollup@4.62.4)(supports-color@10.2.2)
-      '@scalar/core': 0.4.6
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
-      gray-matter: 4.0.3
-      react: 19.2.8
-      remark-frontmatter: 5.0.0(supports-color@10.2.2)
-      remark-gfm: 4.0.1(supports-color@10.2.2)
-      remark-mdx-frontmatter: 5.2.0
-      zod: 4.3.6
+      zod: 4.4.3
     transitivePeerDependencies:
       - '@mdx-js/mdx'
       - '@mixedbread/sdk'
@@ -4598,8 +4557,8 @@ packages:
       '@farming-labs/strata-win32-x64-msvc': 0.1.2
     dev: false
 
-  /@farming-labs/theme@0.2.94(@farming-labs/docs@0.2.94)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
-    resolution: {integrity: sha512-/pi0QZJTY9/tb1avgbNVr9lslBqdaNQF2stnX0deanrPtXKsRFxCwFzdIIKUk/mMPC/n7/0pzR3sk9dmafSXWg==}
+  /@farming-labs/theme@0.2.95(@farming-labs/docs@0.2.95)(@types/react-dom@18.3.7)(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(tailwindcss@3.4.18):
+    resolution: {integrity: sha512-WKLAnCc8Srv2XxN8QLfM1q3rwIGHmT5W+vwbu9FleIUTIfqGz9PV7kI7pm3LkalB8GbKkHHLkXWwL0hAXlI1vg==}
     peerDependencies:
       '@farming-labs/docs': '>=0.0.1'
       next: '>=16.0.0'
@@ -4613,58 +4572,11 @@ packages:
       react-dom:
         optional: true
     dependencies:
-      '@farming-labs/docs': 0.2.94(react@19.2.8)(supports-color@10.2.2)
+      '@farming-labs/docs': 0.2.95(react@19.2.8)(supports-color@10.2.2)
       fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.3.6)
       fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(tailwindcss@3.4.18)
       gray-matter: 4.0.3
       next: 16.3.0(@playwright/test@1.58.2)(@types/node@20.19.21)(react-dom@19.2.8)(react@19.2.8)
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-      sugar-high: 0.9.5
-      zod: 4.4.3
-    transitivePeerDependencies:
-      - '@emotion/is-prop-valid'
-      - '@mdx-js/mdx'
-      - '@mixedbread/sdk'
-      - '@orama/core'
-      - '@oramacloud/client'
-      - '@tailwindcss/oxide'
-      - '@takumi-rs/image-response'
-      - '@tanstack/react-router'
-      - '@types/estree-jsx'
-      - '@types/hast'
-      - '@types/mdast'
-      - '@types/mdx'
-      - '@types/react'
-      - '@types/react-dom'
-      - algoliasearch
-      - flexsearch
-      - lucide-react
-      - react-router
-      - supports-color
-      - tailwindcss
-      - waku
-    dev: false
-
-  /@farming-labs/theme@0.2.94(@farming-labs/docs@0.2.94)(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2):
-    resolution: {integrity: sha512-/pi0QZJTY9/tb1avgbNVr9lslBqdaNQF2stnX0deanrPtXKsRFxCwFzdIIKUk/mMPC/n7/0pzR3sk9dmafSXWg==}
-    peerDependencies:
-      '@farming-labs/docs': '>=0.0.1'
-      next: '>=16.0.0'
-      react: '>=19.2.0'
-      react-dom: '>=19.2.0'
-    peerDependenciesMeta:
-      next:
-        optional: true
-      react:
-        optional: true
-      react-dom:
-        optional: true
-    dependencies:
-      '@farming-labs/docs': 0.2.94(react@19.2.8)(supports-color@10.2.2)
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.4.3)
-      fumadocs-ui: 16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(react-dom@19.2.8)(react@19.2.8)
-      gray-matter: 4.0.3
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
       sugar-high: 0.9.5
@@ -7434,7 +7346,7 @@ packages:
       rollup:
         optional: true
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
       estree-walker: 2.0.2
       picomatch: 4.0.5
       rollup: 4.62.4
@@ -11469,7 +11381,7 @@ packages:
   /estree-util-value-to-estree@3.5.0:
     resolution: {integrity: sha512-aMV56R27Gv3QmfmF1MY12GWkGzzeAezAX+UplqHVASfjc9wNzI/X6hC0S9oxq61WT4aQesLGslWP9tKk6ghRZQ==}
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
     dev: false
 
   /estree-util-visit@2.0.0:
@@ -12151,58 +12063,6 @@ packages:
       lucide-react: 1.23.0(react@19.2.8)
       motion: 12.42.2(react-dom@19.2.8)(react@19.2.8)
       next: 16.3.0(@playwright/test@1.58.2)(@types/node@20.19.21)(react-dom@19.2.8)(react@19.2.8)
-      next-themes: 0.4.6(react-dom@19.2.8)(react@19.2.8)
-      react: 19.2.8
-      react-dom: 19.2.8(react@19.2.8)
-      react-remove-scroll: 2.7.2(@types/react@18.3.26)(react@19.2.8)
-      rehype-raw: 7.0.0
-      scroll-into-view-if-needed: 3.1.0
-      shiki: 4.3.1
-      tailwind-merge: 3.6.0
-      unist-util-visit: 5.1.0
-    transitivePeerDependencies:
-      - '@emotion/is-prop-valid'
-      - '@tailwindcss/oxide'
-      - '@types/react-dom'
-      - tailwindcss
-    dev: false
-
-  /fumadocs-ui@16.7.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(fumadocs-core@16.7.16)(react-dom@19.2.8)(react@19.2.8):
-    resolution: {integrity: sha512-NFWH8GuVV0O6OQnGb0TCS6jsdgyB7/5phQm8YjtIkyjkxAkERwA76N5RYCpS27p41NdtWdQw4eFIEve1Aq9Siw==}
-    peerDependencies:
-      '@takumi-rs/image-response': '*'
-      '@types/mdx': '*'
-      '@types/react': '*'
-      fumadocs-core: 16.7.16
-      next: 16.x.x
-      react: ^19.2.0
-      react-dom: ^19.2.0
-    peerDependenciesMeta:
-      '@takumi-rs/image-response':
-        optional: true
-      '@types/mdx':
-        optional: true
-      '@types/react':
-        optional: true
-      next:
-        optional: true
-    dependencies:
-      '@fumadocs/tailwind': 0.0.5(tailwindcss@3.4.18)
-      '@radix-ui/react-accordion': 1.2.15(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-collapsible': 1.1.15(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-dialog': 1.1.18(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-direction': 1.1.2(@types/react@18.3.26)(react@19.2.8)
-      '@radix-ui/react-navigation-menu': 1.2.17(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-popover': 1.1.18(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-presence': 1.1.6(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-scroll-area': 1.2.13(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@radix-ui/react-slot': 1.3.0(@types/react@18.3.26)(react@19.2.8)
-      '@radix-ui/react-tabs': 1.1.16(@types/react-dom@18.3.7)(@types/react@18.3.26)(react-dom@19.2.8)(react@19.2.8)
-      '@types/react': 18.3.26
-      class-variance-authority: 0.7.1
-      fumadocs-core: 16.7.16(@types/react@18.3.26)(lucide-react@1.23.0)(next@16.3.0)(react-dom@19.2.8)(react@19.2.8)(supports-color@10.2.2)(zod@4.4.3)
-      lucide-react: 1.23.0(react@19.2.8)
-      motion: 12.42.2(react-dom@19.2.8)(react@19.2.8)
       next-themes: 0.4.6(react-dom@19.2.8)(react@19.2.8)
       react: 19.2.8
       react-dom: 19.2.8(react@19.2.8)
@@ -17612,7 +17472,7 @@ packages:
   /unist-util-mdx-define@1.1.2:
     resolution: {integrity: sha512-9ncH7i7TN5Xn7/tzX5bE3rXgz1X/u877gYVAUB3mLeTKYJmQHmqKTDBi6BTGXV7AeolBCI9ErcVsOt2qryoD0g==}
     dependencies:
-      '@types/estree': 1.0.8
+      '@types/estree': 1.0.9
       '@types/hast': 3.0.4
       '@types/mdast': 4.0.4
       estree-util-is-identifier-name: 3.0.0
