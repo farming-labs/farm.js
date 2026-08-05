@@ -40,6 +40,11 @@ export {
   type PreviewGatewaySession,
 } from "./preview-gateway";
 export {
+  runNativePreviewTunnel,
+  type NativeTunnelRuntime,
+  type RunNativePreviewTunnelOptions,
+} from "./preview-native";
+export {
   FarmGeneratedArtifactsStaleError,
   generateFarmArtifacts,
   type GenerateFarmOptions,

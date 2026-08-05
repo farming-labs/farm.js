@@ -38,17 +38,19 @@ Open a preview in another terminal:
 farm preview --port 4324 --name checkout-test
 ```
 
-Farm prints the local target, hosted gateway, and public URL:
+Farm prints the local target, persistent relay, and public URL:
 
 ```txt
 Creating public preview for the running app...
 Local:  http://localhost:4324
-Gateway: https://preview.farming-labs.dev
-Opening Farm preview gateway session...
+Relay: wss://preview.farming-labs.dev/agent
+Opening native Farm preview tunnel...
 Preview URL ready.
 Public: https://checkout-test.preview.farming-labs.dev
-Forwarding requests until Ctrl+C. Remote traffic will be logged below.
+Forwarding requests through the native tunnel until Ctrl+C.
 ```
+
+During the relay rollout, the CLI warns and falls back to compatibility gateway polling if the hosted endpoint cannot accept the native WebSocket connection. An explicitly configured `FARM_PREVIEW_RELAY_URL` is tried first as well.
 
 Open the public URL from another browser, device, webhook provider, or test runner:
 
@@ -60,11 +62,7 @@ Keep both terminals running while you test. Stop the preview with `Ctrl+C`.
 
 ## Automatic Shutdown
 
-The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, `farm preview` automatically closes the hosted gateway session and exits:
-
-```txt
-Local preview target http://localhost:4324 is no longer reachable. Closing preview session.
-```
+The preview lifecycle is tied to the local app. When `farm dev` stops or the configured local target becomes unreachable, the native tunnel closes its hosted relay session and `farm preview` exits. The compatibility path closes its gateway session the same way.
 
 The public URL is invalidated as soon as the session closes, so later requests return `404`. You do not need to run a separate command to stop or clean up the tunnel.
 
@@ -204,20 +202,19 @@ The default gateway is operated by Farming Labs:
 https://preview.farming-labs.dev
 ```
 
-Regular Farm apps do not need Vercel, DNS, Redis, ngrok, `cloudflared`, or a local tunnel binary. The CLI opens outbound HTTPS requests to the gateway, polls for queued public requests, forwards them to the local app, and uploads the response.
+Regular Farm apps do not need Vercel, DNS, Redis, ngrok, `cloudflared`, or a separately installed tunnel binary. The CLI loads `@farm.js/tunnel`, tries to open one outbound WebSocket to the gateway, and forwards requests through its native Rust transport. Compatibility gateway polling keeps previews available while the hosted relay is being rolled out.
 
 The hosted gateway owns:
 
 - TLS for `*.preview.farming-labs.dev`.
 - Session creation and expiry.
-- Public request queueing.
-- Response relay.
+- Request and response relay over the persistent WebSocket or compatibility polling path.
 - Stale session cleanup.
 
 The local CLI owns:
 
 - Local target detection.
-- Local reachability checks.
+- Native tunnel lifecycle and local reachability checks.
 - Forwarding requests to `localhost`.
 - Request and response logging.
 - Closing the preview when the local app exits.
@@ -270,6 +267,7 @@ Use this path only when the hosted Farm gateway is not appropriate for your envi
 | Variable                      | Purpose                                                   |
 | ----------------------------- | --------------------------------------------------------- |
 | `FARM_PREVIEW_GATEWAY_URL`    | Override the hosted gateway URL.                          |
+| `FARM_PREVIEW_RELAY_URL`      | Override the persistent WebSocket relay URL.              |
 | `FARM_PREVIEW_DOMAIN`         | Override the preview domain used for generated hostnames. |
 | `FARM_PREVIEW_NAME`           | Provide a default readable preview name.                  |
 | `FARM_PREVIEW_PROVIDER`       | Select `farm` or `local`.                                 |

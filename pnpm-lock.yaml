@@ -1448,6 +1448,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+      '@farm.js/tunnel':
+        specifier: 0.1.0
+        version: 0.1.0
       commander:
         specifier: ^11.1.0
         version: 11.1.0
@@ -3976,6 +3979,92 @@ packages:
     os: [win32]
     requiresBuild: true
     optional: true
+
+  /@farm.js/tunnel-darwin-arm64@0.1.0:
+    resolution: {integrity: sha512-QY2GqvBeGhJXnI+0M2E6cQQbTYgxT2t7qYZQZohB5AP1IzKivyl+AM8e3e3DWuevoS6qbehqxnyg+yqCBk94Rw==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-darwin-x64@0.1.0:
+    resolution: {integrity: sha512-iniAHaEQ0mP5fbBv9UD+uC6ZJKiy33OszOaGzS50fWDxgpUpfkf++TgU2ASW7h2B8G48mpKMSO8t0yxhKcjH8Q==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-arm64-gnu@0.1.0:
+    resolution: {integrity: sha512-X9jwnZPv6xyY8+uS781qv7gmp7n0tAee/EN67piFSiUv3+BZdC7YXMc3NrT29hUEhIsG5vmYr+TDyr8j1ynqsA==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-arm64-musl@0.1.0:
+    resolution: {integrity: sha512-oAiHgXXj1GEVIe5YZKY0PBFEdFOssgWEF4gUuDKP8GIFqXEc/Jqe7udYInsVniuBxkMYM5zS5j862KNeUNFACw==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-x64-gnu@0.1.0:
+    resolution: {integrity: sha512-Btzqj2G7RPmGl7GWH0WXZWdwqovMsqTol0qkbMsqJILLXHi/wRjKbQ8cTL8dV3u1pVWlJGAvQyoB5esCnADnfQ==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-x64-musl@0.1.0:
+    resolution: {integrity: sha512-HeQJaPaPLXp5OpthCwHb9SvGXJPG01/DWk5Y0zxhxGo7+lxSkXFNyM5HQY2TqavkcbTKoHX7KcKaJqAfU4dh2g==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-win32-arm64-msvc@0.1.0:
+    resolution: {integrity: sha512-VzIHitxt2oot9Ob3TD/EQxKFZoZnou2QyI5/Y3eOExP4JwrlWhN7dskpKU566IIoB5Yv1ubcXJN+KE255zWAlA==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-win32-x64-msvc@0.1.0:
+    resolution: {integrity: sha512-pchzMhRSr6XJ6C5Hd5DfdR0dd4NIAy9FMoojrfuMaR+YovXAU/MbwHfleIqnlAU0SrM9XQMzEH0RkR8ZvclD+Q==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel@0.1.0:
+    resolution: {integrity: sha512-03KDpHY71+Z2FM2MVfrricXJP9y0uZfhdcDiT9eBi5v6wMjW2znaOoINoikGi82Gd4vCJMbeib6SD5GhD7rm3Q==}
+    engines: {node: '>=20.0.0'}
+    optionalDependencies:
+      '@farm.js/tunnel-darwin-arm64': 0.1.0
+      '@farm.js/tunnel-darwin-x64': 0.1.0
+      '@farm.js/tunnel-linux-arm64-gnu': 0.1.0
+      '@farm.js/tunnel-linux-arm64-musl': 0.1.0
+      '@farm.js/tunnel-linux-x64-gnu': 0.1.0
+      '@farm.js/tunnel-linux-x64-musl': 0.1.0
+      '@farm.js/tunnel-win32-arm64-msvc': 0.1.0
+      '@farm.js/tunnel-win32-x64-msvc': 0.1.0
+    dev: false
 
   /@farming-labs/docs@0.2.44(react@19.2.8)(supports-color@10.2.2):
     resolution: {integrity: sha512-Y+qC2lC4sG36QeMAUXUQE8hYseNpFhkA2bCWjCxXdGAT4Mhw3pf1WwiT1umZFc2jvluN9ywVW1ShyN/BVMQxVA==}

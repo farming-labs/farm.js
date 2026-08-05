@@ -5,6 +5,7 @@ import type { PreviewFarmOptions, PreviewTarget } from "./preview";
 export interface PreviewGatewayPlan {
   provider: "farm-gateway";
   gatewayUrl: string;
+  relayUrl: string;
   target: PreviewTarget;
   requestedName: string;
   requestedHostname: string;
@@ -71,12 +72,14 @@ export function createPreviewGatewayPlan(
   const gatewayUrl = normalizeGatewayUrl(
     options.gatewayUrl || process.env.FARM_PREVIEW_GATEWAY_URL || DEFAULT_GATEWAY_URL,
   );
+  const relayUrl = normalizeRelayUrl(process.env.FARM_PREVIEW_RELAY_URL || gatewayUrl);
   const domain = normalizePreviewDomain(process.env.FARM_PREVIEW_DOMAIN || DEFAULT_PREVIEW_DOMAIN);
   const requestedHostname = `${requestedName}.${domain}`;
 
   return {
     provider: "farm-gateway",
     gatewayUrl,
+    relayUrl,
     target,
     requestedName,
     requestedHostname,
@@ -353,6 +356,7 @@ async function closeGatewaySession(plan: PreviewGatewayPlan, session: PreviewGat
 export function formatGatewayPlan(plan: PreviewGatewayPlan) {
   return [
     `Gateway: ${plan.gatewayUrl}`,
+    `Relay:   ${plan.relayUrl}`,
     `Local:   ${plan.target.localUrl}`,
     `Public:  ${plan.requestedPublicUrl}`,
   ].join("\n");
@@ -368,6 +372,20 @@ function formatRequestPath(path: string) {
 
 function normalizeGatewayUrl(value: string) {
   return value.replace(/\/+$/, "");
+}
+
+function normalizeRelayUrl(value: string) {
+  const url = new URL(value);
+  if (url.protocol === "http:") url.protocol = "ws:";
+  if (url.protocol === "https:") url.protocol = "wss:";
+  if (url.protocol !== "ws:" && url.protocol !== "wss:") {
+    throw new Error(`Preview relay must use ws or wss, received ${url.protocol}`);
+  }
+  const pathname = url.pathname.replace(/\/+$/, "");
+  url.pathname = pathname.endsWith("/agent") ? pathname : `${pathname}/agent`;
+  url.search = "";
+  url.hash = "";
+  return url.toString();
 }
 
 function normalizePreviewDomain(value: string) {

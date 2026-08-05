@@ -12,7 +12,9 @@ import {
 const require = createRequire(import.meta.url);
 const defaultRustPackage = fileURLToPath(new URL("../../../tunnel", import.meta.url));
 const rustPackage = process.env.FARM_PREVIEW_RUST_PACKAGE || defaultRustPackage;
-const { activePreviewAgentCount, startPreviewAgent, stopPreviewAgent } = require(rustPackage);
+const { activePreviewAgentCount, startPreviewAgent, stopPreviewAgent, waitPreviewAgent } = require(
+  rustPackage,
+);
 
 const warmupRequests = readPositiveInteger("FARM_PREVIEW_BENCH_WARMUP", 25);
 const sequentialRequests = readPositiveInteger("FARM_PREVIEW_BENCH_SEQUENTIAL", 150);
@@ -76,7 +78,7 @@ try {
   await close(target);
   targetClosed = true;
   await expectInactive(`${relayAddress.httpUrl}/preview/benchmark-rust`, 4_000);
-  assert.equal(await stopPreviewAgent(rustSession.sessionId), true);
+  assert.equal(await waitPreviewAgent(rustSession.sessionId), true);
   rustSession = undefined;
   assert.equal(activePreviewAgentCount(), 0);
   reportStage("Rust automatic shutdown verified.");

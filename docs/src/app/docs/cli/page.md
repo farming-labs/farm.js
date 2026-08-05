@@ -146,7 +146,7 @@ farm preview --dry-run
 
 `farm preview` exposes the app that is already running locally. It does not build or deploy the app. Use it when a teammate, webhook provider, OAuth provider, mobile device, or browser automation tool needs a public URL for the current `farm dev` session.
 
-Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. By default it connects to the hosted Farm Preview gateway and returns a URL such as `https://stripe-webhook.preview.farming-labs.dev`.
+Farm detects the running app on common local ports, or you can pass `--port` / `--url` when the app is running somewhere specific. By default `@farm.js/tunnel` tries to open one outbound WebSocket to the hosted Farm Preview relay and returns a URL such as `https://stripe-webhook.preview.farming-labs.dev`. During the relay rollout, the CLI falls back to compatibility gateway polling if the native connection is unavailable.
 
 The preview terminal logs forwarded traffic:
 

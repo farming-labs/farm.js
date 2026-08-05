@@ -23,7 +23,7 @@ The agent closes automatically when the local target becomes unreachable. The re
 
 ## Rust agent
 
-The independent `@farm.js/tunnel` N-API package implements the same protocol and can replace `startTypeScriptPreviewAgent` as an optional native fast path. The TypeScript agent remains the portable fallback and protocol reference.
+The independent `@farm.js/tunnel` N-API package implements the same protocol and is the native agent used by `farm preview`. The TypeScript agent remains the portable protocol reference and fallback.
 
 ## Prototype limitations
 
