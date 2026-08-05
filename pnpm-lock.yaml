@@ -695,9 +695,15 @@ importers:
       '@farm.js/preview-gateway':
         specifier: 0.1.0-beta.2
         version: link:../../packages/farm-preview-gateway
+      '@farm.js/preview-tunnel':
+        specifier: 0.1.0-beta.19
+        version: link:../../packages/farm-preview-tunnel
       '@vercel/blob':
         specifier: ^2.6.1
         version: 2.6.1
+      ioredis:
+        specifier: ^5.9.3
+        version: 5.11.1
     devDependencies:
       '@types/node':
         specifier: ^20.10.5
@@ -1448,6 +1454,9 @@ importers:
       '@farm.js/core':
         specifier: workspace:*
         version: link:../farm
+      '@farm.js/tunnel':
+        specifier: 0.1.0
+        version: 0.1.0
       commander:
         specifier: ^11.1.0
         version: 11.1.0
@@ -1592,6 +1601,25 @@ importers:
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.21
+      tsdown:
+        specifier: ^0.15.7
+        version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
+  packages/farm-preview-tunnel:
+    dependencies:
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.21
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       tsdown:
         specifier: ^0.15.7
         version: 0.15.7(supports-color@10.2.2)(typescript@5.9.3)
@@ -3957,6 +3985,92 @@ packages:
     os: [win32]
     requiresBuild: true
     optional: true
+
+  /@farm.js/tunnel-darwin-arm64@0.1.0:
+    resolution: {integrity: sha512-QY2GqvBeGhJXnI+0M2E6cQQbTYgxT2t7qYZQZohB5AP1IzKivyl+AM8e3e3DWuevoS6qbehqxnyg+yqCBk94Rw==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-darwin-x64@0.1.0:
+    resolution: {integrity: sha512-iniAHaEQ0mP5fbBv9UD+uC6ZJKiy33OszOaGzS50fWDxgpUpfkf++TgU2ASW7h2B8G48mpKMSO8t0yxhKcjH8Q==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [darwin]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-arm64-gnu@0.1.0:
+    resolution: {integrity: sha512-X9jwnZPv6xyY8+uS781qv7gmp7n0tAee/EN67piFSiUv3+BZdC7YXMc3NrT29hUEhIsG5vmYr+TDyr8j1ynqsA==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-arm64-musl@0.1.0:
+    resolution: {integrity: sha512-oAiHgXXj1GEVIe5YZKY0PBFEdFOssgWEF4gUuDKP8GIFqXEc/Jqe7udYInsVniuBxkMYM5zS5j862KNeUNFACw==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-x64-gnu@0.1.0:
+    resolution: {integrity: sha512-Btzqj2G7RPmGl7GWH0WXZWdwqovMsqTol0qkbMsqJILLXHi/wRjKbQ8cTL8dV3u1pVWlJGAvQyoB5esCnADnfQ==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-linux-x64-musl@0.1.0:
+    resolution: {integrity: sha512-HeQJaPaPLXp5OpthCwHb9SvGXJPG01/DWk5Y0zxhxGo7+lxSkXFNyM5HQY2TqavkcbTKoHX7KcKaJqAfU4dh2g==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [linux]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-win32-arm64-msvc@0.1.0:
+    resolution: {integrity: sha512-VzIHitxt2oot9Ob3TD/EQxKFZoZnou2QyI5/Y3eOExP4JwrlWhN7dskpKU566IIoB5Yv1ubcXJN+KE255zWAlA==}
+    engines: {node: '>=20.0.0'}
+    cpu: [arm64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel-win32-x64-msvc@0.1.0:
+    resolution: {integrity: sha512-pchzMhRSr6XJ6C5Hd5DfdR0dd4NIAy9FMoojrfuMaR+YovXAU/MbwHfleIqnlAU0SrM9XQMzEH0RkR8ZvclD+Q==}
+    engines: {node: '>=20.0.0'}
+    cpu: [x64]
+    os: [win32]
+    requiresBuild: true
+    dev: false
+    optional: true
+
+  /@farm.js/tunnel@0.1.0:
+    resolution: {integrity: sha512-03KDpHY71+Z2FM2MVfrricXJP9y0uZfhdcDiT9eBi5v6wMjW2znaOoINoikGi82Gd4vCJMbeib6SD5GhD7rm3Q==}
+    engines: {node: '>=20.0.0'}
+    optionalDependencies:
+      '@farm.js/tunnel-darwin-arm64': 0.1.0
+      '@farm.js/tunnel-darwin-x64': 0.1.0
+      '@farm.js/tunnel-linux-arm64-gnu': 0.1.0
+      '@farm.js/tunnel-linux-arm64-musl': 0.1.0
+      '@farm.js/tunnel-linux-x64-gnu': 0.1.0
+      '@farm.js/tunnel-linux-x64-musl': 0.1.0
+      '@farm.js/tunnel-win32-arm64-msvc': 0.1.0
+      '@farm.js/tunnel-win32-x64-msvc': 0.1.0
+    dev: false
 
   /@farming-labs/docs@0.2.44(react@19.2.8)(supports-color@10.2.2):
     resolution: {integrity: sha512-Y+qC2lC4sG36QeMAUXUQE8hYseNpFhkA2bCWjCxXdGAT4Mhw3pf1WwiT1umZFc2jvluN9ywVW1ShyN/BVMQxVA==}
@@ -17355,4 +17469,49 @@ packages:
 
   /yoga-layout@3.2.1:
     resolution: {integrity: sha512-0LPOt3AxKqMdFBZA3HBAt/t/8vIKq7VaQYbuA8WxCgung+p9TVyKRYdpvCb80HcdTN2NkbIKbhNwKUfm3tQywQ==}
+    dev: false
+
+  /@ioredis/commands@1.10.0:
+    resolution: {integrity: sha512-UmeW7z4LfctwoQ5wkhVzgq8tXkreED2xZGpX+Bg+zA+WJFZCT6c062AfCK/Dfk81xZnnwdhJCUMkitihRaoC2Q==}
+    dev: false
+
+  /cluster-key-slot@1.1.1:
+    resolution: {integrity: sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw==}
+    engines: {node: '>=0.10.0'}
+    dev: false
+
+  /denque@2.1.0:
+    resolution: {integrity: sha512-HVQE3AAb/pxF8fQAoiqpvg9i3evqug3hoiwakOyZAwJm+6vZehbkYXZ0l4JxS+I3QxM97v5aaRNhj8v5oBhekw==}
+    engines: {node: '>=0.10'}
+    dev: false
+
+  /ioredis@5.11.1:
+    resolution: {integrity: sha512-ehuGcf94bQXhfagULNXrJdfnWO38v070jxSx/qE87Kjzmu2fU7ro5EFAb+OPituLqgfyuQaym5DlrNydW2sJ9A==}
+    engines: {node: '>=12.22.0'}
+    dependencies:
+      '@ioredis/commands': 1.10.0
+      cluster-key-slot: 1.1.1
+      debug: 4.4.3(supports-color@10.2.2)
+      denque: 2.1.0
+      redis-errors: 1.2.0
+      redis-parser: 3.0.0
+      standard-as-callback: 2.1.0
+    transitivePeerDependencies:
+      - supports-color
+    dev: false
+
+  /redis-errors@1.2.0:
+    resolution: {integrity: sha512-1qny3OExCf0UvUV/5wpYKf2YwPcOqXzkwKKSmKHiE6ZMQs5heeE/c8eXK+PNllPvmjgAbfnsbpkGZWy8cBpn9w==}
+    engines: {node: '>=4'}
+    dev: false
+
+  /redis-parser@3.0.0:
+    resolution: {integrity: sha512-DJnGAeenTdpMEH6uAJRK/uiyEIH9WVsUmoLwzudwGJUwZPp80PDBWPHXSAGNPwNvIXAbe7MSUB1zQFugFml66A==}
+    engines: {node: '>=4'}
+    dependencies:
+      redis-errors: 1.2.0
+    dev: false
+
+  /standard-as-callback@2.1.0:
+    resolution: {integrity: sha512-qoRRSyROncaz1z0mvYqIE4lCd9p2R90i6GxW3uZv5ucSu8tU7B5HXUP1gG8pVZsYNVaXjk8ClXHPttLyxAL48A==}
     dev: false

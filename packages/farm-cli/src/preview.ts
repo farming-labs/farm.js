@@ -1,6 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { setTimeout as delay } from "node:timers/promises";
 import { loadConfig, logger } from "@farm.js/core";
+import type { PreviewAgentSession } from "@farm.js/tunnel";
 import {
   createPreviewGatewayPlan,
   formatGatewayPlan,
@@ -8,6 +9,7 @@ import {
   type PreviewGatewayPlan,
   type PreviewGatewaySession,
 } from "./preview-gateway";
+import { runNativePreviewTunnel } from "./preview-native";
 
 export interface PreviewFarmOptions {
   root?: string;
@@ -43,7 +45,7 @@ export interface PreviewFarmResult {
   target: PreviewTarget;
   plan: PreviewTunnelPlan | PreviewGatewayPlan;
   publicUrl?: string;
-  session?: PreviewGatewaySession;
+  session?: PreviewAgentSession | PreviewGatewaySession;
 }
 
 const DEFAULT_PREVIEW_PORTS = [3000, 4319, 5173, 4173, 8080];
@@ -64,12 +66,20 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
       return { target, plan };
     }
 
-    logger.info(`Gateway: ${plan.gatewayUrl}`);
-    logger.info("Opening Farm preview gateway session...");
-    const session = await runPreviewGateway(plan, {
-      timeoutMs: options.timeoutMs,
-    });
-    return { target, plan, publicUrl: session.publicUrl, session };
+    logger.info(`Relay: ${plan.relayUrl}`);
+    logger.info("Opening native Farm preview tunnel...");
+    try {
+      const session = await runNativePreviewTunnel(plan);
+      return { target, plan, publicUrl: session.publicUrl, session };
+    } catch (error) {
+      logger.warn(
+        `Native preview relay unavailable; using compatibility gateway polling.${formatPreviewError(error)}`,
+      );
+      const session = await runPreviewGateway(plan, {
+        timeoutMs: options.timeoutMs,
+      });
+      return { target, plan, publicUrl: session.publicUrl, session };
+    }
   }
 
   const plan = createPreviewTunnelPlan(target, options);
@@ -83,6 +93,10 @@ export async function previewFarm(options: PreviewFarmOptions = {}): Promise<Pre
   logger.info("Opening public tunnel...");
   const publicUrl = await runPreviewTunnel(plan, options.timeoutMs ?? 30000);
   return { target, plan, publicUrl };
+}
+
+function formatPreviewError(error: unknown) {
+  return error instanceof Error && error.message ? ` ${error.message}` : "";
 }
 
 function shouldUseManagedGateway(options: PreviewFarmOptions) {

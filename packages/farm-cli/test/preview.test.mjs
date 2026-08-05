@@ -13,7 +13,9 @@ const {
   createPreviewTunnelPlan,
   forwardGatewayRequest,
   parsePreviewPublicUrl,
+  previewFarm,
   resolvePreviewTarget,
+  runNativePreviewTunnel,
   runPreviewGateway,
 } = require("../dist/index.js");
 const execFileAsync = promisify(execFile);
@@ -106,11 +108,63 @@ test("creates a managed gateway preview plan by default", () => {
 
     assert.equal(plan.provider, "farm-gateway");
     assert.equal(plan.gatewayUrl, "https://preview.farming-labs.dev");
+    assert.equal(plan.relayUrl, "wss://preview.farming-labs.dev/agent");
     assert.equal(plan.requestedPublicUrl, "https://stripe-webhook.preview.farming-labs.dev");
   } finally {
     restoreEnv("FARM_PREVIEW_GATEWAY_URL", previousGateway);
     restoreEnv("FARM_PREVIEW_DOMAIN", previousDomain);
   }
+});
+
+test("runs the managed preview through the native tunnel lifecycle", async () => {
+  let resolveWait;
+  const wait = new Promise((resolve) => {
+    resolveWait = resolve;
+  });
+  const calls = [];
+  const runtime = {
+    async startPreviewAgent(...args) {
+      calls.push(["start", ...args]);
+      return {
+        sessionId: "native-session",
+        publicUrl: "https://native.preview.farming-labs.dev",
+      };
+    },
+    async stopPreviewAgent(sessionId) {
+      calls.push(["stop", sessionId]);
+      return false;
+    },
+    async waitPreviewAgent(sessionId) {
+      calls.push(["wait", sessionId]);
+      return await wait;
+    },
+  };
+  const plan = {
+    provider: "farm-gateway",
+    gatewayUrl: "https://preview.farming-labs.dev",
+    relayUrl: "wss://preview.farming-labs.dev/agent",
+    target: {
+      localUrl: "http://localhost:3000",
+      host: "localhost",
+      port: 3000,
+      source: "port",
+    },
+    requestedName: "native",
+    requestedHostname: "native.preview.farming-labs.dev",
+    requestedPublicUrl: "https://native.preview.farming-labs.dev",
+  };
+
+  const running = runNativePreviewTunnel(plan, { runtime });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(calls, [
+    ["start", "wss://preview.farming-labs.dev/agent", "native", "http://localhost:3000"],
+    ["wait", "native-session"],
+  ]);
+
+  resolveWait(true);
+  const session = await running;
+  assert.equal(session.sessionId, "native-session");
+  assert.deepEqual(calls.at(-1), ["stop", "native-session"]);
 });
 
 test("forwards a gateway request to the local target", async () => {
@@ -187,6 +241,39 @@ test("closes the gateway session when the local target stops", async () => {
     assert.equal(gateway.deletedSessions.length, 1);
     assert.equal(gateway.deletedSessions[0], "sess_watch");
   } finally {
+    await app.close().catch(() => undefined);
+    await gateway.close();
+  }
+});
+
+test("falls back to gateway polling while the hosted native relay is unavailable", async () => {
+  const app = await createTestServer();
+  const gateway = await createPreviewGatewayTestServer();
+  const previousRelay = process.env.FARM_PREVIEW_RELAY_URL;
+  process.env.FARM_PREVIEW_RELAY_URL = "ws://127.0.0.1:1/agent";
+
+  try {
+    const preview = previewFarm({
+      port: app.port,
+      gatewayUrl: gateway.url,
+      name: "fallback-check",
+      timeoutMs: 1000,
+    });
+
+    await gateway.waitForSession();
+    await app.close();
+
+    const result = await Promise.race([
+      preview,
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("fallback preview did not stop")), 4000),
+      ),
+    ]);
+
+    assert.equal(result.session.id, "sess_watch");
+    assert.equal(gateway.deletedSessions.length, 1);
+  } finally {
+    restoreEnv("FARM_PREVIEW_RELAY_URL", previousRelay);
     await app.close().catch(() => undefined);
     await gateway.close();
   }

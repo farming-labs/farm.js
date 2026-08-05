@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
+    "@farm.js/tunnel": "0.1.0",
     "commander": "^11.1.0",
     "croner": "9.1.0",
     "picocolors": "^1.0.0"

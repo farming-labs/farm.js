@@ -5,7 +5,10 @@ import {
   type PreviewGatewaySession,
   type PreviewGatewayStore,
 } from "@farm.js/preview-gateway";
+import { createPersistentPreviewRelay } from "@farm.js/preview-tunnel";
 import { del, get, list, put } from "@vercel/blob";
+
+import { createRedisPreviewRelayCoordinator } from "../lib/redis-coordinator.js";
 
 interface ExpiringValue<T> {
   expiresAt: number;
@@ -201,12 +204,25 @@ function isMissingBlobError(error: unknown) {
 }
 
 export const config = {
-  maxDuration: 60,
+  maxDuration: 1800,
 };
 
-export default createNodePreviewGatewayHandler({
-  domain: process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev",
+const domain = process.env.FARM_PREVIEW_DOMAIN || "preview.farming-labs.dev";
+const coordinator = createRedisPreviewRelayCoordinator();
+const pollingGateway = createNodePreviewGatewayHandler({
+  domain,
   baseUrl: process.env.FARM_PREVIEW_GATEWAY_URL,
   clientHeartbeatTimeoutMs: 1000 * 60 * 30,
   store: createVercelBlobStore(),
 });
+
+const persistentRelay = createPersistentPreviewRelay({
+  publicBaseUrl: process.env.FARM_PREVIEW_GATEWAY_URL || `https://${domain}`,
+  publicDomain: domain,
+  publicWebSocketUrl: `wss://${domain}/agent`,
+  healthPath: "/api/tunnel/health",
+  fallbackHandler: pollingGateway,
+  coordinator,
+});
+
+export default persistentRelay.server;
