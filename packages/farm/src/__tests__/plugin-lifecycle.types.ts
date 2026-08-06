@@ -1,10 +1,19 @@
 import { expectTypeOf } from "vitest";
+import { defineConfig } from "../config";
 import { defineIntegration, type FarmIntegration } from "../integrations";
-import { definePlugin, type FarmPlugin, type FarmPluginRuntimeSession } from "../plugin";
+import {
+  definePlugin,
+  type FarmPlugin,
+  type FarmPluginIntegrationContext,
+  type FarmPluginRuntimeSession,
+} from "../plugin";
 
 const inferredPlugin = definePlugin({
   name: "typed-runtime",
-  setup() {
+  setup({ integration }) {
+    expectTypeOf(integration).toEqualTypeOf<
+      Readonly<FarmPluginIntegrationContext<unknown>> | undefined
+    >();
     return {
       tracer: {
         start(pathname: string) {
@@ -34,6 +43,8 @@ expectTypeOf(inferredPlugin).toMatchTypeOf<
   FarmPlugin<{ tracer: { start(pathname: string): { id: string } } }, { trace: { id: string } }>
 >();
 
+defineConfig({ plugins: [inferredPlugin] });
+
 expectTypeOf<FarmPluginRuntimeSession["response"]>().toEqualTypeOf<Response | undefined>();
 
 interface AuthIntegrationInstance {
@@ -44,12 +55,23 @@ interface AuthIntegrationInstance {
   };
 }
 
+const authInstance: AuthIntegrationInstance = {
+  auth: {
+    api: {
+      async getSession() {
+        return { userId: "user-1" };
+      },
+    },
+  },
+};
+
 const authPlugin = definePlugin.forIntegration<AuthIntegrationInstance>()({
   name: "typed-auth",
   runtime: {
     async context({ request, integration }) {
-      if (!integration) return {};
-
+      expectTypeOf(integration).toEqualTypeOf<
+        Readonly<FarmPluginIntegrationContext<AuthIntegrationInstance>>
+      >();
       expectTypeOf(integration.instance.auth.api.getSession).toBeFunction();
       // @ts-expect-error unknown instance methods must fail type checking
       integration.instance.auth.api.missingMethod();
@@ -61,18 +83,17 @@ const authPlugin = definePlugin.forIntegration<AuthIntegrationInstance>()({
   },
 });
 
+defineConfig({
+  plugins: [
+    // @ts-expect-error integration-bound plugins must be contributed by an integration
+    authPlugin,
+  ],
+});
+
 const authIntegration = defineIntegration({
   category: "auth",
   type: "typed-auth",
-  instance: {
-    auth: {
-      api: {
-        async getSession() {
-          return { userId: "user-1" };
-        },
-      },
-    },
-  },
+  instance: authInstance,
   plugins: [authPlugin],
 });
 
