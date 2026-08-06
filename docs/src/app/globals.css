@@ -10,6 +10,10 @@
     --farm-line: rgb(255 255 255 / 0.12);
     --farm-line-soft: rgb(255 255 255 / 0.055);
     --farm-rule: rgb(255 255 255 / 0.09);
+    /* Keep Farm's hatched double rails at the reference's compact CSS width. */
+    --fd-pixel-rail-width: 12px !important;
+    /* Keep theme utilities on the compiled layout font instead of ui-monospace. */
+    --font-geist-mono: "Geist Mono", ui-monospace, monospace !important;
   }
 
   html {
@@ -28,12 +32,54 @@
 }
 
 @layer components {
+  #nd-docs-layout aside#nd-sidebar {
+    background-color: var(--color-fd-background, #000) !important;
+    background-image:
+      linear-gradient(var(--color-fd-border), var(--color-fd-border)),
+      linear-gradient(var(--color-fd-border), var(--color-fd-border)),
+      repeating-linear-gradient(
+        -45deg,
+        color-mix(in srgb, var(--color-fd-border) 2%, transparent),
+        color-mix(in srgb, var(--color-fd-foreground) 7%, transparent) 1px,
+        transparent 1px,
+        transparent 6px
+      ),
+      repeating-linear-gradient(
+        -45deg,
+        color-mix(in srgb, var(--color-fd-border) 2%, transparent),
+        color-mix(in srgb, var(--color-fd-foreground) 7%, transparent) 1px,
+        transparent 1px,
+        transparent 6px
+      ) !important;
+    background-position:
+      var(--fd-pixel-rail-width) 0,
+      calc(100% - var(--fd-pixel-rail-width)) 0,
+      left top,
+      right top !important;
+    background-repeat: repeat-y !important;
+    background-size:
+      1px 100%,
+      1px 100%,
+      var(--fd-pixel-rail-width) 100%,
+      var(--fd-pixel-rail-width) 100% !important;
+  }
+
   .farm-announcement {
     background: #000;
   }
 
   .farm-home .font-mono {
+    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
     letter-spacing: 0;
+  }
+
+  .farm-home,
+  .farm-home * {
+    border-color: rgb(229 231 235);
+  }
+
+  .farm-home footer > .grid > :first-child {
+    border-bottom-width: 0 !important;
   }
 
   .farm-home .font-geist-pixel {

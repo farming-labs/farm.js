@@ -18,18 +18,6 @@ import {
   FARM_DOCS_LAST_MODIFIED_MANIFEST,
 } from "../docs/last-modified";
 import { resolveFarmDocsFontAssets } from "../docs/fonts";
-import { farmDocsPixelBorderCss } from "../docs/pixel-border-css";
-
-describe("farmDocsPixelBorderCss", () => {
-  it("bundles the search dialog layout for production adapters", () => {
-    expect(farmDocsPixelBorderCss).toContain(".omni-overlay {\n  position: fixed;");
-    expect(farmDocsPixelBorderCss).toContain(
-      ".omni-content {\n  --omni-content-top: clamp(5rem, 16vh, 7rem);\n  position: fixed;",
-    );
-    expect(farmDocsPixelBorderCss).toContain(".omni-search-input {\n  width: 0;\n  flex: 1;");
-  });
-});
-
 describe("getFarmDocsDocumentNavigationMatchers", () => {
   it("routes enabled docs trees through document navigation", () => {
     expect(
@@ -224,7 +212,8 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<meta property="og:image:height" content="630">');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(html).toContain('data-docs-theme="farm-docs"');
-    expect(html).toContain('id="nd-docs-layout"');
+    expect(html).toContain('id="nd-docs-layout" class="grid"');
+    expect(html).not.toContain("data-fd-framework");
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
@@ -281,17 +270,13 @@ describe("createFarmDocsHandler", () => {
     expect(sidebarBrand).toContain('class="sidebar-brand-logo"');
     expect(sidebarBrand).toContain('<span class="sidebar-brand-title">Docs</span>');
     expect(sidebarBrand).not.toContain("sidebar-brand-suffix");
-    expect(html).toContain("--fd-nav-height: 44px");
-    expect(html).toContain("--omni-content-top: 1rem");
-    expect(html).toContain("max-height: calc(100vh - 2rem)");
-    expect(html).toContain("width: 56px");
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
-    expect(html).toContain("width: min(720px, calc(100% - 1rem))");
-    expect(html).toContain("width: calc(100% - 1rem)");
-    expect(html).toContain(".omni-overlay {\n  position: fixed;");
-    expect(html).toContain(".omni-content {\n  --omni-content-top:");
-    expect(html).toContain(".omni-footer-hints {");
-    expect(html).toContain("font-size: 1.125rem");
+    expect(html).toContain(".prose ul { list-style: disc outside; }");
+    expect(html).toContain(".prose ol { list-style: decimal outside; }");
+    expect(html).toContain(".fd-docs-search-trigger { display: inline-flex; width: 56px;");
+    expect(html).toContain("#nd-docs-layout .fd-page-nav-title { display: inline-flex;");
+    expect(html).toContain("#nd-docs-layout .fd-page-nav-description { display: block;");
+    expect(html).toContain("grid-column: 2 / -1; grid-row: 1; width: 100%;");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
@@ -327,9 +312,6 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(".fd-last-updated-inline,");
     expect(html).toContain(".fd-last-updated-footer {");
     expect(html).toContain("font-family: var(--fd-docs-font-mono);");
-    expect(html).toContain("font-size: 0.6875rem;");
-    expect(html).toContain("letter-spacing: 0.04em;");
-    expect(html).toContain("text-transform: uppercase;");
     expect(html).not.toContain('href="/sitemap.md"');
     expect(html).not.toContain('href="/AGENTS.md"');
     expect(html).not.toContain(">Markdown</a>");
@@ -404,12 +386,9 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('class="fd-page-nav-title fd-page-nav-title-next"');
     expect(html).toContain('<span class="fd-page-nav-description">Next Page</span>');
     expect(html).not.toContain('class="fd-page-nav-label"');
-    expect(html).toContain("--color-fd-background: #000 !important;");
-    expect(html).toContain("min-height: 98px;");
     expect(html).toContain("border-radius: 0 !important;");
     expect(html).toContain("font-size: 0.875rem; font-weight: 500; line-height: 1.5;");
     expect(html).toContain('href="/docs/guide"');
-    expect(html).toContain("Farm docs pixel-border bridge");
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
   });
