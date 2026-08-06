@@ -129,20 +129,8 @@
     top: -1px;
   }
 
-  .farm-home footer .farm-top-rule::before {
-    background: var(--farm-line-soft);
-  }
-
   .farm-home footer > .grid > :first-child {
-    border-bottom: 1px solid var(--farm-line-soft) !important;
-  }
-
-  .farm-home footer > .grid > :first-child + :not([hidden]) {
-    border-top-width: 0 !important;
-  }
-
-  .farm-home footer > .grid > :not([hidden]) ~ :not([hidden]) {
-    border-color: var(--farm-line-soft) !important;
+    border-bottom-width: 0 !important;
   }
 
   .farm-full-rule::after,
