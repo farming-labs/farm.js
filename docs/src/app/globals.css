@@ -69,8 +69,17 @@
   }
 
   .farm-home .font-mono {
-    font-family: var(--font-geist-mono) !important;
+    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
     letter-spacing: 0;
+  }
+
+  .farm-home,
+  .farm-home * {
+    border-color: rgb(229 231 235);
+  }
+
+  .farm-home footer > .grid > :first-child {
+    border-bottom-width: 0 !important;
   }
 
   .farm-home .font-geist-pixel {
@@ -127,10 +136,6 @@
 
   .farm-top-rule::before {
     top: -1px;
-  }
-
-  .farm-home footer > .grid > :first-child {
-    border-bottom-width: 0 !important;
   }
 
   .farm-full-rule::after,
