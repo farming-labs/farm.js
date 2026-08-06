@@ -129,6 +129,10 @@
     top: -1px;
   }
 
+  .farm-home footer .farm-top-rule::before {
+    background: var(--farm-line-soft);
+  }
+
   .farm-full-rule::after,
   .farm-wide-rule::after {
     bottom: -1px;
