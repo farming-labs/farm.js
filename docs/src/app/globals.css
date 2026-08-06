@@ -134,7 +134,11 @@
   }
 
   .farm-home footer > .grid > :first-child {
-    border-bottom-width: 0 !important;
+    border-bottom: 1px solid var(--farm-line-soft) !important;
+  }
+
+  .farm-home footer > .grid > :first-child + :not([hidden]) {
+    border-top-width: 0 !important;
   }
 
   .farm-home footer > .grid > :not([hidden]) ~ :not([hidden]) {
