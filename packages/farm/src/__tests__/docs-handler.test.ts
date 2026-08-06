@@ -342,13 +342,13 @@ describe("createFarmDocsHandler", () => {
       ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
     );
     expect(html).toContain(
-      ".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap) + 0.5px);",
+      ".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap) + 8px);",
     );
     expect(html).toContain(
-      ".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap) + 0.5px); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap) - 0.5px);",
+      ".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap) + 8px); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap) - 8px);",
     );
     expect(html).toContain(
-      ".sidebar-subgroup-content a[data-active]::after { left: calc(var(--fd-sidebar-sub-guide-x) + 0.5px);",
+      ".sidebar-subgroup-content a[data-active]::after { left: calc(var(--fd-sidebar-sub-guide-x) + 8px);",
     );
     expect(html).toContain(
       "--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);",
