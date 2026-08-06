@@ -212,11 +212,41 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain('<meta property="og:image:height" content="630">');
     expect(html).toContain('<meta name="twitter:card" content="summary_large_image">');
     expect(html).toContain('data-docs-theme="farm-docs"');
-    expect(html).toContain('id="nd-docs-layout" class="grid"');
-    expect(html).not.toContain("data-fd-framework");
+
+    // Farm emits the adapter markup contract; the imported unified theme owns presentation.
+    expect(html).toContain('id="nd-docs-layout" class="fd-layout" data-fd-framework="farmjs"');
+    expect(html).toContain('class="mobile-topbar fd-header"');
+    expect(html).toContain('class="fd-mobile-nav-btn fd-menu-btn"');
+    expect(html).toContain('class="fd-header-title"');
+    expect(html).toContain('id="nd-sidebar" class="fd-sidebar"');
+    expect(html).toContain('class="sidebar-brand fd-sidebar-header"');
+    expect(html).toContain('class="fd-sidebar-title"');
+    expect(html).toContain('class="fd-sidebar-search"');
+    expect(html).toContain('class="fd-docs-search-trigger fd-sidebar-search-btn"');
+    expect(html).toContain('class="sidebar-scroll overscroll-contain fd-sidebar-nav"');
+    expect(html).toContain("fd-sidebar-folder");
+    expect(html).toContain("fd-sidebar-folder-trigger");
+    expect(html).toContain("fd-sidebar-folder-content");
+    expect(html).toContain("fd-sidebar-link-active");
+    expect(html).toContain("fd-sidebar-icon");
+    expect(html).toContain('class="sidebar-backdrop fd-sidebar-overlay"');
+    expect(html).toContain('class="fd-main"');
+    expect(html).toContain('class="fd-page"');
+    expect(html).toContain('class="prose fd-page-article fd-page-body fd-docs-content"');
     expect(html).toContain('id="nd-toc"');
     expect(html).toContain('class="fd-toc sticky');
     expect(html).toContain('class="fd-toc-title inline-flex');
+    expect(htmlText.indexOf('id="nd-sidebar"')).toBeLessThan(
+      htmlText.indexOf('class="sidebar-backdrop fd-sidebar-overlay"'),
+    );
+    expect(htmlText.indexOf('class="sidebar-backdrop fd-sidebar-overlay"')).toBeLessThan(
+      htmlText.indexOf('class="fd-main"'),
+    );
+    expect(html).not.toContain("<style>");
+    expect(html).not.toContain("--fd-sidebar-guide-x");
+    expect(html).not.toContain("#nd-docs-layout aside#nd-sidebar");
+    expect(html).not.toContain('class="topbar"');
+
     expect(html).toContain("window.__farmDocsRuntime");
     expect(html).toContain("farmdocs:sidebar-scroll");
     expect(html).toContain("window.sessionStorage");
@@ -228,10 +258,10 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("history.pushState");
     expect(html).toContain("farmDocsNavigating");
     expect(html).toContain("farmDocsRuntimeId");
-    expect(html).toContain('class="mobile-topbar"');
+    expect(html).toContain('sidebar.classList.toggle("fd-sidebar-open",open)');
+    expect(html).toContain('link.classList.toggle("fd-toc-link-active",selected)');
     expect(html).toContain("data-sidebar-toggle");
     expect(html).toContain("data-sidebar-backdrop");
-    expect(html).toContain('class="fd-docs-search-trigger"');
     expect(html).toContain('data-search-full=""');
     expect(html).toContain('aria-keyshortcuts="Meta+K Control+K"');
     expect(html).not.toContain("fd-docs-search-trigger-label");
@@ -245,38 +275,6 @@ describe("createFarmDocsHandler", () => {
       htmlText.indexOf("<body>"),
     );
     expect(html).toContain('<script type="module" src="/farm-client.js"></script>');
-    const topbar = htmlText.slice(
-      htmlText.indexOf('<header class="topbar">'),
-      htmlText.indexOf("</header>", htmlText.indexOf('<header class="topbar">')),
-    );
-    const sidebarBrand = htmlText.slice(
-      htmlText.indexOf('<div class="sidebar-brand">'),
-      htmlText.indexOf("</div>", htmlText.indexOf('<div class="sidebar-brand">')),
-    );
-    const mobileTopbar = htmlText.slice(
-      htmlText.indexOf('<header class="mobile-topbar"'),
-      htmlText.indexOf("</header>", htmlText.indexOf('<header class="mobile-topbar"')),
-    );
-    expect(topbar).toContain('data-search-full=""');
-    expect(topbar).not.toContain("<svg");
-    expect(topbar).not.toContain(">Farm.js</a>");
-    expect(mobileTopbar).toContain("<svg");
-    expect(mobileTopbar).not.toContain("mobile-topbar-brand");
-    expect(topbar.indexOf('data-search-full=""')).toBeLessThan(topbar.indexOf('href="/llms.txt"'));
-    expect(mobileTopbar.indexOf('data-search-full=""')).toBeLessThan(
-      mobileTopbar.indexOf('href="/llms.txt"'),
-    );
-    expect(sidebarBrand).not.toContain('data-search-full=""');
-    expect(sidebarBrand).toContain('class="sidebar-brand-logo"');
-    expect(sidebarBrand).toContain('<span class="sidebar-brand-title">Docs</span>');
-    expect(sidebarBrand).not.toContain("sidebar-brand-suffix");
-    expect(html).toContain("font-family: var(--fd-docs-font-mono)");
-    expect(html).toContain(".prose ul { list-style: disc outside; }");
-    expect(html).toContain(".prose ol { list-style: decimal outside; }");
-    expect(html).toContain(".fd-docs-search-trigger { display: inline-flex; width: 56px;");
-    expect(html).toContain("#nd-docs-layout .fd-page-nav-title { display: inline-flex;");
-    expect(html).toContain("#nd-docs-layout .fd-page-nav-description { display: block;");
-    expect(html).toContain("grid-column: 2 / -1; grid-row: 1; width: 100%;");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
@@ -287,11 +285,7 @@ describe("createFarmDocsHandler", () => {
     );
     expect(html).toContain("initMobileSidebar");
     expect(html).toContain("closeMobileSidebar");
-    expect(html).toContain('data-farm-docs-sidebar="open"');
-    expect(html).toContain('#nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar');
-    expect(html).toContain("#nd-docs-layout aside#nd-sidebar { position: fixed;");
-    expect(html).toContain(".topbar { display: none !important; }");
-    expect(html).toContain("#nd-docs-layout .fd-toc { display: none !important; }");
+
     expect(html).toContain("window.__farmDocsPageActionsRuntime");
     expect(html).toContain('data-page-action="copy-markdown"');
     expect(html).toContain('data-markdown-url="/docs.md"');
@@ -301,97 +295,27 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("navigator.clipboard");
     expect(html).toContain("try{await navigator.clipboard.writeText(text);return}catch{}");
     expect(html).toContain("4500");
-    expect(html).toContain("--font-geist-mono: ui-monospace, monospace");
-    expect(html).not.toContain('font-family: "Geist Sans"');
-    expect(html).not.toContain('font-family: "Geist Mono"');
-    expect(html).not.toContain("/node_modules/geist/");
-    expect(html).not.toContain("/assets/Geist-Variable-CrgPqtmy.woff2");
-    expect(html).not.toContain("/assets/GeistMono-Variable-BNLlm6Cd.woff2");
     expect(html).toContain('class="fd-page-meta-item">1 min read</span>');
     expect(html).toContain('class="not-prose fd-page-footer"');
     expect(html).toContain("Last updated at");
-    expect(html).toContain(".fd-last-updated-inline,");
-    expect(html).toContain(".fd-last-updated-footer {");
-    expect(html).toContain("font-family: var(--fd-docs-font-mono);");
     expect(html).not.toContain('href="/sitemap.md"');
     expect(html).not.toContain('href="/AGENTS.md"');
     expect(html).not.toContain(">Markdown</a>");
     expect(html).not.toContain('class="route-pill"');
     expect(html).toContain('data-sidebar-icon="sparkles"');
     expect(html).toContain('data-sidebar-icon="brand-stripe"');
-    expect(html).toContain('.sidebar-icon[data-sidebar-icon^="brand-"] svg');
     expect(html).toContain('<span class="sidebar-label-text">Why?</span>');
     expect(html).toContain('data-sidebar-subgroup="payment"');
-    expect(html).toContain("--fd-sidebar-line-color");
-    expect(html).toContain("--fd-sidebar-branch-gap: 0px");
-    expect(html).toContain("--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px)");
-    expect(html).toContain("--fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px)");
-    expect(html).toContain("--fd-sidebar-nested-icon-gap: 0px");
-    expect(html).toContain(
-      '.sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; }',
-    );
-    expect(html).not.toContain(
-      '.sidebar-tree a[data-active="true"], .sidebar-tree a[data-active="true"]:hover { color: var(--color-fd-primary, oklch(0.985 0.001 106.423)) !important; font-weight: 600; }',
-    );
-    expect(html).toContain(
-      ".sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }",
-    );
-    expect(html).toContain(
-      ".sidebar-tree > .sidebar-folder { margin: 0 !important; padding: 0 !important; }",
-    );
-    expect(html).toContain(
-      '.sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 0; bottom: 0;',
-    );
-    expect(html).toContain(
-      ".sidebar-folder-content > a[data-active]::after, .sidebar-subgroup-title::after, .sidebar-subgroup-content a[data-active]::after",
-    );
-    expect(html).toContain(
-      ".sidebar-folder-content > a[data-active]::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap) + 8px);",
-    );
-    expect(html).toContain(
-      ".sidebar-subgroup-title::after { left: calc(var(--fd-sidebar-guide-x) + var(--fd-sidebar-branch-gap) + 8px); width: calc(var(--fd-sidebar-sub-guide-x) - var(--fd-sidebar-guide-x) - var(--fd-sidebar-branch-gap) - 8px);",
-    );
-    expect(html).toContain(
-      ".sidebar-subgroup-content a[data-active]::after { left: calc(var(--fd-sidebar-sub-guide-x) + 8px);",
-    );
-    expect(html).toContain(
-      "--fd-sidebar-sub-guide-x: calc(var(--fd-sidebar-link-x) + 7px); --fd-sidebar-sub-link-x: calc(var(--fd-sidebar-sub-guide-x) + 28px);",
-    );
-    expect(html).toContain(
-      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after',
-    );
-    expect(html).toContain(
-      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { background: var(--color-fd-primary, oklch(0.985 0.001 106.423)); }',
-    );
-    expect(html).not.toContain(
-      '.sidebar-folder-content > a[data-active="true"]::after, .sidebar-subgroup-content a[data-active="true"]::after { height: 2px;',
-    );
-    expect(html).not.toContain(
-      "transition: background-color 150ms ease, height 150ms ease, box-shadow 150ms ease;",
-    );
-    expect(html).toContain("var(--fd-sidebar-nested-icon-gap)");
-    expect(html).toContain(".sidebar-subgroup-title { position: relative;");
-    expect(html).toContain("font-size: 13.5px; font-weight: 400;");
-    expect(html).toContain(".sidebar-subgroup::before");
     expect(html).not.toContain("data-active-marker");
-    expect(html).not.toContain('.sidebar-tree a[data-active="true"]::before');
     expect(html).not.toContain('href="/docs">Farm Docs</a>');
     expect(html).not.toContain('class="page-kicker"');
     expect(html).not.toContain("DOCUMENTATION / OVERVIEW");
-    expect(html).toContain("article#nd-page .fd-breadcrumb");
-    expect(html).toContain(
-      "article#nd-page .fd-breadcrumb { display: flex; min-width: 0; align-items: center; gap: 0; margin: 0 0 0.5rem; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-family: var(--fd-docs-font-mono);",
-    );
-    expect(html).toContain("--fd-docs-font-mono: var(--fd-layout-font-code, var(--font-geist-mono");
-    expect(html).toContain("text-transform: uppercase");
     expect(html).toContain('id="farm-docs"');
     expect(html).toContain('href="#farm-docs"');
     expect(html).toContain('class="fd-page-nav-card fd-page-nav-next"');
     expect(html).toContain('class="fd-page-nav-title fd-page-nav-title-next"');
     expect(html).toContain('<span class="fd-page-nav-description">Next Page</span>');
     expect(html).not.toContain('class="fd-page-nav-label"');
-    expect(html).toContain("border-radius: 0 !important;");
-    expect(html).toContain("font-size: 0.875rem; font-weight: 500; line-height: 1.5;");
     expect(html).toContain('href="/docs/guide"');
     expect(html).toContain('class="toc-scroll"');
     expect(html).toContain('class="toc-empty"');
@@ -500,13 +424,11 @@ describe("createFarmDocsHandler", () => {
       expect(html).toContain(
         `<link rel="preload" href="${url}" as="font" type="font/woff2" crossorigin>`,
       );
-      expect(html).toContain(`font-family: "${family}"`);
-      expect(html).toContain(`src: url("${url}") format("woff2")`);
+      expect(html).not.toContain(`font-family: "${family}"`);
+      expect(html).not.toContain(`src: url("${url}") format("woff2")`);
     }
-    expect(html).toContain('--font-geist-sans: "Geist Sans"');
-    expect(html).toContain('--font-geist-mono: "Geist Mono"');
-    expect(html).toContain("font-display: block");
-    expect(html).toContain("font-synthesis: none");
+    expect(html).not.toContain("@font-face");
+    expect(html).not.toContain("font-display: block");
     expect(response?.headers.get("link")).toBe(
       assets
         .map(({ url }) => `<${url}>; rel=preload; as=font; type=font/woff2; crossorigin`)
@@ -547,8 +469,8 @@ describe("createFarmDocsHandler", () => {
 
     expect(html).toContain('<link rel="stylesheet" href="/farm-fonts.css">');
     expect(html).toContain('<link rel="stylesheet" href="/assets/globals.css">');
-    expect(html).toContain('--fd-layout-font-body: "Product Sans", system-ui, sans-serif;');
-    expect(html).toContain('--fd-layout-font-code: "Product Mono", ui-monospace, monospace;');
+    expect(html).not.toContain('--fd-layout-font-body: "Product Sans", system-ui, sans-serif;');
+    expect(html).not.toContain('--fd-layout-font-code: "Product Mono", ui-monospace, monospace;');
     expect(html).not.toContain('<link rel="preload"');
     expect(html).not.toContain("@font-face");
     expect(response?.headers.get("link")).toBe(
@@ -730,31 +652,15 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("sh__token--keyword");
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('class="code-copy-check"');
-    expect(html).toContain('data-copied="true"');
     expect(html).toContain("4500");
     expect(html).toContain("querySelector('code').innerText");
     expect(html).toContain(
       'class="fd-table-wrapper table-wrap relative overflow-auto prose-no-margin my-6"',
     );
     expect(html).toContain("data-toc-thumb");
-    expect(html).toContain('class="toc-track"');
-    expect(html).toContain('class="toc-link" data-active="true" data-toc-item');
+    expect(html).toContain('class="toc-track fd-toc-list"');
+    expect(html).toContain('class="toc-link fd-toc-link fd-toc-link-active"');
     expect(html).toContain('data-active="true" data-toc-item');
-    expect(html).toContain(".code-block pre { margin: 0; max-width: 100%;");
-    expect(html).toContain("background: var(--fd-code-body-bg);");
-    expect(html).toContain(
-      ".code-block code { display: block; min-width: max-content; border: 0 !important;",
-    );
-    expect(html).toContain(
-      "#nd-docs-layout figure.shiki.code-block > .code-copy-floating { opacity: 0.72;",
-    );
-    expect(html).toContain("color-mix(in srgb, var(--color-fd-foreground, #fff) 4%, transparent)");
-    expect(html).toContain("@media (max-width: 640px)");
-    expect(html).toContain(".code-block-header { min-height: 30px;");
-    expect(html).toContain("padding: 12px !important; font-size: 12px;");
-    expect(html).toContain(".code-block-plain pre { padding: 16px 44px 16px 14px !important;");
-    expect(html).toContain("text-transform: lowercase");
-    expect(html).toContain('.code-copy[data-copied="true"] .code-copy-check { display: block; }');
     expect(html).not.toContain('<span class="code-block-title">bash</span>');
     expect(html).not.toContain(">Copy</button>");
     expect(html).not.toContain('</span>\n<span class="sh__line"');
@@ -828,7 +734,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(
       '<span class="sidebar-brand-title">Farm<span class="sidebar-brand-suffix">.js</span></span>',
     );
-    expect(html).toContain(".sidebar-brand-suffix { opacity: 0.52; }");
+    expect(html).not.toContain(".sidebar-brand-suffix { opacity: 0.52; }");
   });
 });
 
