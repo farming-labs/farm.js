@@ -289,6 +289,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain("closeMobileSidebar");
     expect(html).toContain('data-farm-docs-sidebar="open"');
     expect(html).toContain('#nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar');
+    expect(html).toContain("#nd-docs-layout aside#nd-sidebar { position: fixed;");
     expect(html).toContain(".topbar { display: none !important; }");
     expect(html).toContain("#nd-docs-layout .fd-toc { display: none !important; }");
     expect(html).toContain("window.__farmDocsPageActionsRuntime");

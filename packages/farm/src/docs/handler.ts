@@ -1810,9 +1810,9 @@ function renderFarmDocsBridgeCss(
       .topbar { display: none !important; }
       .sidebar-backdrop { position: fixed; inset: 0; z-index: 70; display: block; background: color-mix(in srgb, var(--color-fd-background, #000) 72%, transparent); opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
       #nd-docs-layout[data-sidebar-open="true"] .sidebar-backdrop { opacity: 1; pointer-events: auto; }
-      aside#nd-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 90; width: min(342px, calc(100vw - 42px)); height: 100dvh; max-height: none; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 0; transform: translate3d(-100%, 0, 0); transition: transform 180ms ease; will-change: transform; }
+      #nd-docs-layout aside#nd-sidebar { position: fixed; inset: 0 auto 0 0; z-index: 90; width: min(342px, calc(100vw - 42px)); height: 100dvh; max-height: none; overflow-y: auto; overscroll-behavior: contain; border-right: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-bottom: 0; transform: translate3d(-100%, 0, 0); transition: transform 180ms ease; will-change: transform; }
       #nd-docs-layout[data-sidebar-open="true"] aside#nd-sidebar { transform: translate3d(0, 0, 0); }
-      aside#nd-sidebar::before, aside#nd-sidebar::after { display: none; }
+      #nd-docs-layout aside#nd-sidebar::before, #nd-docs-layout aside#nd-sidebar::after { display: none; }
       .sidebar-brand { min-height: var(--fd-nav-height, 44px); margin-top: 0; }
       main { padding: 34px 20px 64px; }
       article#nd-page { width: 100%; margin: 0; }
