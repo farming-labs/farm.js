@@ -271,6 +271,9 @@ describe("createFarmDocsHandler", () => {
     expect(sidebarBrand).toContain('<span class="sidebar-brand-title">Docs</span>');
     expect(sidebarBrand).not.toContain("sidebar-brand-suffix");
     expect(html).toContain("font-family: var(--fd-docs-font-mono)");
+    expect(html).toContain(".prose ul { list-style: disc outside; }");
+    expect(html).toContain(".prose ol { list-style: decimal outside; }");
+    expect(html).toContain(".fd-docs-search-trigger { display: inline-flex; width: 56px;");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");

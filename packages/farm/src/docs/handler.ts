@@ -1655,6 +1655,12 @@ function renderFarmDocsBridgeCss(
     .topbar a { text-decoration: none; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); }
     .topbar a:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
     .topbar-actions, .mobile-topbar-actions { display: flex; height: 100%; min-width: 0; align-items: stretch; margin-left: auto; }
+    .fd-docs-search-trigger { display: inline-flex; width: 56px; min-width: 56px; height: 100%; flex: 0 0 56px; align-items: center; justify-content: center; overflow: hidden; border: 0; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: transparent; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); cursor: pointer; padding: 0 10px; font-family: var(--fd-docs-font-mono); appearance: none; }
+    .fd-docs-search-trigger:hover, .fd-docs-search-trigger:focus-visible, .fd-docs-search-trigger[aria-expanded="true"] { background: color-mix(in srgb, var(--color-fd-foreground, #fff) 6%, transparent); color: var(--color-fd-foreground, #fff); }
+    .fd-docs-search-trigger:focus-visible { outline: 1px solid var(--color-fd-foreground, #fff); outline-offset: -3px; }
+    .fd-docs-search-trigger svg { width: 13px; height: 13px; flex: 0 0 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    .fd-docs-search-trigger kbd { display: inline-flex; min-width: 36px; height: 19px; min-height: 19px; align-items: center; justify-content: center; gap: 4px; border: 1px solid color-mix(in srgb, var(--color-fd-foreground, #fff) 14%, transparent); background: color-mix(in srgb, var(--color-fd-foreground, #fff) 5%, transparent); padding: 0 5px; color: currentColor; font-family: inherit; font-size: 9px; font-weight: 500; line-height: 1; }
+    .fd-docs-search-trigger svg + kbd { display: none; }
     .topbar-llms-link { display: inline-flex; height: 100%; align-items: center; border-left: 1px solid var(--color-fd-border, hsl(0 0% 15%)); padding: 0 22px; }
     .mobile-topbar { display: none; }
     .sidebar-backdrop { display: none; }
@@ -1735,6 +1741,10 @@ function renderFarmDocsBridgeCss(
     .heading-anchor:hover { text-decoration: underline; text-underline-offset: 4px; }
     .prose p { margin: 14px 0; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 74%, transparent); font-size: 15.6px; line-height: 1.8; }
     .prose ul, .prose ol { margin: 16px 0; padding-left: 24px; color: color-mix(in srgb, var(--color-fd-foreground, oklch(0.985 0.001 106.423)) 78%, transparent); line-height: 1.75; }
+    .prose ul { list-style: disc outside; }
+    .prose ol { list-style: decimal outside; }
+    .prose ul ul { list-style-type: circle; }
+    .prose ul ul ul { list-style-type: square; }
     .prose li { margin: 6px 0; }
     .prose code:not(pre code) { border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: var(--color-fd-card, hsl(0 0% 4%)); padding: 1px 5px; font-family: var(--fd-docs-font-mono); font-size: 0.88em; overflow-wrap: break-word; word-break: break-word; }
     .sh-code { --sh-class: #e5c07b; --sh-identifier: #c8ccd4; --sh-string: #98c379; --sh-keyword: #c678dd; --sh-comment: #5c6370; --sh-property: #e06c75; --sh-sign: #c8ccd4; --sh-space: inherit; }
@@ -1793,6 +1803,9 @@ function renderFarmDocsBridgeCss(
       body { overflow-x: hidden; }
       #nd-docs-layout { display: block !important; min-height: 100dvh; border-top: 0; padding-top: var(--fd-mobile-nav-height, 56px); }
       .mobile-topbar { position: fixed; inset: 0 0 auto 0; z-index: 80; display: flex; height: var(--fd-mobile-nav-height, 56px); align-items: stretch; border-bottom: 1px solid var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-background, hsl(0 0% 2%)) 94%, transparent); backdrop-filter: blur(12px); }
+      .mobile-topbar-actions .fd-docs-search-trigger { width: 44px; min-width: 44px; flex-basis: 44px; padding: 0; }
+      .mobile-topbar-actions .fd-docs-search-trigger svg { display: block; }
+      .mobile-topbar-actions .fd-docs-search-trigger kbd { display: none; }
       .mobile-topbar a:hover, .fd-mobile-nav-btn:hover { color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); }
       .topbar { display: none !important; }
       .sidebar-backdrop { position: fixed; inset: 0; z-index: 70; display: block; background: color-mix(in srgb, var(--color-fd-background, #000) 72%, transparent); opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
