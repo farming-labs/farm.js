@@ -1773,14 +1773,14 @@ function renderFarmDocsBridgeCss(
     .fd-table-wrapper tr:last-child td { border-bottom: 0; }
     hr { border: 0; border-top: 1px solid var(--color-fd-border, hsl(0 0% 15%)); margin: 28px 0; }
     img { max-width: 100%; height: auto; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); }
-    .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; border-top: 0; padding-top: 0; }
-    .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #nd-docs-layout .fd-page-nav { display: grid; width: 100%; max-width: 100%; grid-template-columns: 1fr; gap: 16px; margin-top: 16px; border-top: 0; padding-top: 0; }
+    #nd-docs-layout .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #nd-docs-layout .fd-page-nav-card { display: flex; min-width: 0; min-height: 98px; flex-direction: column; justify-content: flex-start; gap: 8px; border: 1px solid var(--color-fd-border, hsl(0 0% 15%)); border-radius: 0 !important; background: transparent; padding: 16px; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); text-decoration: none; transition: background-color 150ms ease, border-color 150ms ease; }
-    .fd-page-nav-card:hover { border-color: var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-muted, hsl(0 0% 10%)) 80%, transparent); }
-    .fd-page-nav-next { align-items: flex-end; text-align: right; }
-    .fd-page-nav-title { display: inline-flex; max-width: 100%; min-height: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
-    .fd-page-nav-title svg { width: 1rem; height: 1rem; flex-shrink: 0; }
-    .fd-page-nav-description { display: block; max-width: 100%; min-height: 0; overflow: hidden; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 15.6px; font-weight: 400; line-height: 1.8; text-overflow: ellipsis; white-space: nowrap; }
+    #nd-docs-layout .fd-page-nav-card:hover { border-color: var(--color-fd-border, hsl(0 0% 15%)); background: color-mix(in srgb, var(--color-fd-muted, hsl(0 0% 10%)) 80%, transparent); }
+    #nd-docs-layout .fd-page-nav-next { align-items: flex-end; text-align: right; }
+    #nd-docs-layout .fd-page-nav-title { display: inline-flex; max-width: 100%; min-height: 0; align-items: center; gap: 6px; overflow: hidden; color: var(--color-fd-foreground, oklch(0.985 0.001 106.423)); font-size: 0.875rem; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
+    #nd-docs-layout .fd-page-nav-title svg { width: 1rem; height: 1rem; flex-shrink: 0; }
+    #nd-docs-layout .fd-page-nav-description { display: block; max-width: 100%; min-height: 0; overflow: hidden; color: var(--color-fd-muted-foreground, hsl(0 0% 55%)); font-size: 15.6px; font-weight: 400; line-height: 1.8; text-overflow: ellipsis; white-space: nowrap; }
     .fd-below-title-block { display: flex; flex-direction: column; align-items: flex-start; gap: 0.625rem; margin: 0 0 1.25rem; }
     .fd-page-actions { display: flex; width: 100%; align-items: center; gap: 0.5rem; }
     .fd-page-actions[data-actions-alignment="right"] { justify-content: flex-end; }
@@ -1825,8 +1825,8 @@ function renderFarmDocsBridgeCss(
       .code-copy-floating { top: 6px; right: 6px; }
       #nd-docs-layout figure.shiki.code-block pre, .code-block pre { padding: 12px 11px !important; font-size: 12px; line-height: 1.5; }
       .sh__line { min-height: 1.5em; }
-      .fd-page-nav { grid-template-columns: 1fr !important; }
-      .fd-page-nav-next { align-items: flex-start; text-align: left; }
+      #nd-docs-layout .fd-page-nav { grid-template-columns: 1fr !important; }
+      #nd-docs-layout .fd-page-nav-next { align-items: flex-start; text-align: left; }
       .fd-page-footer { align-items: flex-start; flex-direction: column; }
       .fd-page-footer .fd-last-updated-footer { margin-left: 0; }
     }
