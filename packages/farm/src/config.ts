@@ -261,7 +261,8 @@ export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output
 export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "env" | "layers"> {
   /** Reusable Farm directories or installed packages, applied from left to right. */
   extends?: readonly FarmLayerEntry[];
-  plugins?: FarmPlugin[];
+  /** Global plugins. Integration-bound plugins must be contributed through an integration. */
+  plugins?: FarmPlugin<any, any, any, any, unknown, false>[];
   integrations?: FarmIntegrationsUserConfig;
   /**
    * Farm-native authentication. `true` enables email/password auth with

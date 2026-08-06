@@ -114,7 +114,7 @@ describe("integrations runtime", () => {
           context({ integration }) {
             requestIntegration = integration;
             return {
-              billingLabel: integration?.instance.label,
+              billingLabel: integration.instance.label,
             };
           },
         },
