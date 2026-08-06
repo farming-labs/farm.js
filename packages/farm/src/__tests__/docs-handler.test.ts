@@ -276,6 +276,7 @@ describe("createFarmDocsHandler", () => {
     expect(html).toContain(".fd-docs-search-trigger { display: inline-flex; width: 56px;");
     expect(html).toContain("#nd-docs-layout .fd-page-nav-title { display: inline-flex;");
     expect(html).toContain("#nd-docs-layout .fd-page-nav-description { display: block;");
+    expect(html).toContain("grid-column: 2 / -1; grid-row: 1; width: 100%;");
     expect(html).not.toContain('id="farm-docs-search-dialog"');
     expect(html).not.toContain("window.__farmDocsSearchRuntime");
     expect(html).toContain("window.__farmDocsHashRuntime");
