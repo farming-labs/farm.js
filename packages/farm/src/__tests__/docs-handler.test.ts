@@ -336,6 +336,9 @@ describe("createFarmDocsHandler", () => {
       ".sidebar-folder-content { position: relative; padding: 8px 0; overflow: hidden; }",
     );
     expect(html).toContain(
+      ".sidebar-tree > .sidebar-folder { margin: 0 !important; padding: 0 !important; }",
+    );
+    expect(html).toContain(
       '.sidebar-folder-content::before { content: ""; position: absolute; left: var(--fd-sidebar-guide-x); top: 0; bottom: 0;',
     );
     expect(html).toContain(
