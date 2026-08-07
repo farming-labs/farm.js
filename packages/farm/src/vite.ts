@@ -69,6 +69,7 @@ import {
   readNodeRequestBody,
   resolveFarmServerConfig,
 } from "./server-http";
+import { createCliColors } from "./cli-colors";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -489,18 +490,14 @@ export function farmPlugin(
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
-    try {
-      const pc = require("picocolors");
-      const log = [
-        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.yellow("UPDATE")) + pc.dim("]"),
-        pc.gray(message),
-      ].join(" ");
-      console.log(log);
-    } catch {
-      console.log(`[FARM] [${tag}] [UPDATE] ${message}`);
-    }
+    const pc = createCliColors();
+    const log = [
+      pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.yellow("UPDATE")) + pc.dim("]"),
+      pc.gray(message),
+    ].join(" ");
+    console.log(log);
   };
 
   return {
@@ -1065,26 +1062,22 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         }
         (logResponse as any).__last = { key: dedupeKey, ts: now };
 
-        try {
-          const pc = require("picocolors");
-          let statusColor = pc.green;
-          if (status >= 500) statusColor = pc.red;
-          else if (status >= 400) statusColor = pc.yellow;
-          else if (status >= 300) statusColor = pc.cyan;
+        const pc = createCliColors();
+        let statusColor = pc.green;
+        if (status >= 500) statusColor = pc.red;
+        else if (status >= 400) statusColor = pc.yellow;
+        else if (status >= 300) statusColor = pc.cyan;
 
-          const log = [
-            pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-            pc.gray(urlPath),
-            pc.dim("-"),
-            statusColor(status.toString()),
-            pc.dim(`(${duration}ms)`),
-          ].join(" ");
-          console.log(log);
-        } catch {
-          console.log(`[FARM] [${tag}] [${method}] ${urlPath} - ${status} (${duration}ms)`);
-        }
+        const log = [
+          pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+          pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+          pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+          pc.gray(urlPath),
+          pc.dim("-"),
+          statusColor(status.toString()),
+          pc.dim(`(${duration}ms)`),
+        ].join(" ");
+        console.log(log);
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
@@ -4554,7 +4547,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
   };
 
   // Custom logger to replace Vite's default logs with Farm.js branding
-  const pc = await import("picocolors").then((m) => m.default);
+  const pc = createCliColors();
   let serverStarted = false;
   let startTime = Date.now();
 
