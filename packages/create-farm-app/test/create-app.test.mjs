@@ -111,6 +111,21 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedGitignore, /^\.env\.local$/m);
     assert.match(generatedGitignore, /^\*\.sqlite$/m);
     assert.match(generatedGitignore, /^\*\.sqlite-\*$/m);
+
+    const templatePnpmWorkspace = await readFile(
+      path.join(packageDir, "templates/basic/pnpm-workspace.yaml"),
+      "utf8",
+    );
+    const generatedPnpmWorkspace = await readFile(
+      path.join(tempDir, "generated-app/pnpm-workspace.yaml"),
+      "utf8",
+    );
+    assert.equal(generatedPnpmWorkspace, templatePnpmWorkspace);
+    assert.match(generatedPnpmWorkspace, /^allowBuilds:$/m);
+    assert.match(generatedPnpmWorkspace, /^  "@prisma\/client": true$/m);
+    assert.match(generatedPnpmWorkspace, /^  esbuild: true$/m);
+    assert.match(generatedPnpmWorkspace, /^  sharp: true$/m);
+    assert.match(generatedPnpmWorkspace, /^  vue-demi: true$/m);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

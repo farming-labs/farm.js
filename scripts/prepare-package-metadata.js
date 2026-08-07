@@ -32,7 +32,7 @@ for (const directoryName of fs.readdirSync(packagesRoot).sort()) {
   const description = packageJson.description || "A package in the Farm.js framework.";
   const installCommand =
     packageJson.name === "@farm.js/create-app"
-      ? "npx @farm.js/create-app@latest my-app"
+      ? "npx @farm.js/create-app@beta my-app"
       : `npm install ${packageJson.name}@beta`;
 
   const readme = `# ${packageJson.name}

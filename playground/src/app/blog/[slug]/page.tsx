@@ -58,7 +58,7 @@ export default function BlogPostPage({ params, searchParams }: PageProps) {
         <p>Ready to build your first Farm.js application? Let's get started!</p>
         
         <h2>Installation</h2>
-        <pre><code>pnpm create @farm.js/app my-app
+        <pre><code>pnpm create @farm.js/app@beta my-app
 cd my-app
 pnpm dev</code></pre>
         

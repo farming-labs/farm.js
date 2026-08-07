@@ -47,7 +47,7 @@
 ### Create a New App
 
 ```bash
-pnpm create @farm.js/app my-app
+pnpm create @farm.js/app@beta my-app
 cd my-app
 pnpm dev
 ```
@@ -57,11 +57,11 @@ Your app will be running at `http://localhost:3000`!
 ### Manual Installation
 
 ```bash
-npm install @farm.js/core react react-dom
+npm install @farm.js/core@beta react react-dom
 # or
-pnpm add @farm.js/core react react-dom
+pnpm add @farm.js/core@beta react react-dom
 # or
-yarn add @farm.js/core react react-dom
+yarn add @farm.js/core@beta react react-dom
 ```
 
 Create a `farm.config.ts`:
