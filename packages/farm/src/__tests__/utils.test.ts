@@ -1,6 +1,17 @@
 import path from "path";
 import { describe, it, expect } from "vitest";
 import { parseRoutePath, matchRoute, segmentsToPattern, toViteModuleId } from "../utils";
+import { createCliColors } from "../cli-colors";
+
+describe("createCliColors", () => {
+  it("emits ANSI styles for interactive terminals", () => {
+    expect(createCliColors(true).green("Farm.js")).toContain("\u001b[32m");
+  });
+
+  it("keeps redirected output plain", () => {
+    expect(createCliColors(false).green("Farm.js")).toBe("Farm.js");
+  });
+});
 
 describe("toViteModuleId", () => {
   it("uses root URLs for project files and /@fs URLs for external files", () => {

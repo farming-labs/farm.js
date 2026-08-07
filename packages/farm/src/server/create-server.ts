@@ -21,6 +21,7 @@ import {
 } from "./vite-config";
 import { FARM_VERSION } from "../version";
 import { getFarmAppDirectories } from "../layers";
+import { createCliColors } from "../cli-colors";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -28,22 +29,6 @@ export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 function createBrandingPlugin() {
   let serverStarted = false;
   let startTime = Date.now();
-
-  const getColors = () => {
-    const id = (s: string) => s;
-    try {
-      const pc = typeof require === "function" ? require("picocolors") : null;
-      if (pc && typeof pc.createColors === "function") return pc.createColors(true);
-      if (pc) return pc;
-    } catch {}
-    return {
-      dim: id,
-      bold: id,
-      green: id,
-      cyan: id,
-      gray: id,
-    };
-  };
 
   return {
     name: "farm:branding",
@@ -63,7 +48,7 @@ function createBrandingPlugin() {
               ? address.port
               : server.config.server.port || port || 3000;
 
-          const pc = getColors();
+          const pc = createCliColors();
           console.log("");
           console.log(
             `  ${pc.bold(pc.green("Farm.js"))} ${pc.dim(`v${FARM_VERSION}`)} ${pc.dim(`ready in ${elapsed}ms`)}`,

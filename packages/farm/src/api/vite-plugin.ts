@@ -27,6 +27,7 @@ import {
   readNodeRequestBody,
   resolveFarmServerConfig,
 } from "../server-http";
+import { createCliColors } from "../cli-colors";
 
 export interface FarmApiPluginOptions {
   /** Source directory containing the api folder (default: 'src') */
@@ -62,26 +63,22 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
 
   const log = (_message: string) => {};
   const logResponse = (method: string, urlPath: string, status: number, duration: number) => {
-    try {
-      const pc = require("picocolors");
-      let statusColor = pc.green;
-      if (status >= 500) statusColor = pc.red;
-      else if (status >= 400) statusColor = pc.yellow;
-      else if (status >= 300) statusColor = pc.cyan;
+    const pc = createCliColors();
+    let statusColor = pc.green;
+    if (status >= 500) statusColor = pc.red;
+    else if (status >= 400) statusColor = pc.yellow;
+    else if (status >= 300) statusColor = pc.cyan;
 
-      const logMsg = [
-        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.cyan("API")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-        pc.gray(urlPath),
-        pc.dim("-"),
-        statusColor(status.toString()),
-        pc.dim(`(${duration}ms)`),
-      ].join(" ");
-      console.log(logMsg);
-    } catch {
-      console.log(`[FARM] [API] [${method}] ${urlPath} - ${status} (${duration}ms)`);
-    }
+    const logMsg = [
+      pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.cyan("API")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+      pc.gray(urlPath),
+      pc.dim("-"),
+      statusColor(status.toString()),
+      pc.dim(`(${duration}ms)`),
+    ].join(" ");
+    console.log(logMsg);
   };
 
   const addEndpoint = (
