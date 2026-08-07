@@ -1046,10 +1046,10 @@ async function buildClient(
   const isAdapterDocsRoute = (routePattern: string) =>
     Boolean(
       adapterOwnsDocsRuntime &&
-        adapterDocsEntry &&
-        (adapterDocsEntry === "/" ||
-          routePattern === adapterDocsEntry ||
-          routePattern.startsWith(`${adapterDocsEntry}/`)),
+      adapterDocsEntry &&
+      (adapterDocsEntry === "/" ||
+        routePattern === adapterDocsEntry ||
+        routePattern.startsWith(`${adapterDocsEntry}/`)),
     );
 
   for (const route of pageRoutes) {
@@ -6681,8 +6681,7 @@ export default async function farmNitroEventHandler(event) {
     // Function-name helpers are unsafe for provider scripts that serialize a
     // function with toString(); the helper is outside the emitted script scope.
     keepNames:
-      configuredEsbuildOptions.keepNames ??
-      !(config.docs?.enabled && config.docs.adapter?.server),
+      configuredEsbuildOptions.keepNames ?? !(config.docs?.enabled && config.docs.adapter?.server),
   };
   const effectiveMinify = configuredEsbuildOptions.minify ?? shouldMinify;
   const useFarmEsbuildMinifier =

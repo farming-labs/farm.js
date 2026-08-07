@@ -1,10 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it, vi } from "vitest";
-import {
-  createFarmDocsAdapterHandler,
-  hasFarmDocsRuntimeAdapter,
-} from "../docs/adapter";
+import { createFarmDocsAdapterHandler, hasFarmDocsRuntimeAdapter } from "../docs/adapter";
 import type { FarmDocsResolvedConfig } from "../docs/types";
 
 function createAdapterDocs(): FarmDocsResolvedConfig {
@@ -29,10 +26,12 @@ describe("Farm docs runtime adapters", () => {
     expect(hasFarmDocsRuntimeAdapter(docs)).toBe(true);
     expect(hasFarmDocsRuntimeAdapter({ ...docs, enabled: false })).toBe(false);
     expect(hasFarmDocsRuntimeAdapter({ ...docs, adapter: undefined })).toBe(false);
-    expect(hasFarmDocsRuntimeAdapter({
-      ...docs,
-      adapter: { ...docs.adapter!, react: undefined },
-    })).toBe(false);
+    expect(
+      hasFarmDocsRuntimeAdapter({
+        ...docs,
+        adapter: { ...docs.adapter!, react: undefined },
+      }),
+    ).toBe(false);
   });
 
   it("passes only host assets and loaders to the adapter-owned handler", async () => {

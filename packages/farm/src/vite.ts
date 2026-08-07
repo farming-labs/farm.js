@@ -1061,12 +1061,12 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       };
       const farmDocsAPIHandler: FarmDocsAPIHandler | null =
         farmDocsDevRuntime && !farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
-        ? farmDocsDevRuntime.createFarmDocsAPIHandler({
-            rootDir: farmConfig.root,
-            srcDir: farmConfig.srcDir,
-            docs: farmConfig.docs,
-          })
-        : null;
+          ? farmDocsDevRuntime.createFarmDocsAPIHandler({
+              rootDir: farmConfig.root,
+              srcDir: farmConfig.srcDir,
+              docs: farmConfig.docs,
+            })
+          : null;
       const farmDocsFontAssets = new Map(
         farmDocsFontAssetList.map(({ url, sourcePath }) => [url, sourcePath]),
       );
