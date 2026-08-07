@@ -363,8 +363,13 @@ const config = {
     position: "footer",
   },
   pageActions: {
+    position: "below-title",
     copyMarkdown: {
       enabled: true,
+    },
+    openDocs: {
+      enabled: true,
+      target: "markdown",
     },
     alignment: "right",
   },
