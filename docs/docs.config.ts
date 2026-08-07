@@ -338,6 +338,10 @@ const config = {
     title: "Farm.js",
     url: "/",
   },
+  github: {
+    url: "https://github.com/farming-labs/farm.js",
+    directory: "docs",
+  },
   search: {
     provider: "simple",
     enabled: true,
