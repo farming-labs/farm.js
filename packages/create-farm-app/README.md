@@ -5,7 +5,7 @@ Create a new Farm.js application
 Farm.js is currently in beta.
 
 ```bash
-pnpm create @farm.js/app my-app
+pnpm create @farm.js/app@beta my-app
 cd my-app
 pnpm dev
 ```
