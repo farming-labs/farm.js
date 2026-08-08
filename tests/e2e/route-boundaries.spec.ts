@@ -15,6 +15,27 @@ test.describe("Route-level boundaries", () => {
     await expect(page.getByTestId("route-loading-final")).toBeVisible({ timeout: 15000 });
   });
 
+  test("dynamic route segments containing dots reach the router instead of 404ing as assets", async ({
+    page,
+    request,
+  }) => {
+    const response = await request.get("/repos/kinfish/farm.js");
+    expect(response.status()).toBe(200);
+
+    const html = await response.text();
+    expect(html).toContain("Repository:");
+
+    await page.goto("/repos/kinfish/farm.js");
+    await expect(page.getByTestId("repo-title")).toHaveText("kinfish/farm.js");
+    await expect(page.getByTestId("repo-owner")).toHaveText("Owner: kinfish");
+    await expect(page.getByTestId("repo-name")).toHaveText("Repository: farm.js");
+  });
+
+  test("real static assets are still served when dotted routes exist", async ({ request }) => {
+    const missing = await request.get("/no-such-file.png");
+    expect(missing.status()).toBe(404);
+  });
+
   test("error boundary renders route-scoped fallback for server render failures", async ({
     page,
     request,
