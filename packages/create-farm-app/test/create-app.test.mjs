@@ -107,6 +107,7 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedStyles, /@fontsource-variable\/geist\/wght\.css/);
     assert.match(generatedStyles, /@fontsource-variable\/geist-mono\/wght\.css/);
     assert.match(generatedStyles, /--paper: #000000/);
+    assert.match(generatedStyles, /\.hero-section \{[^}]*min-height: 100vh/s);
     assert.match(generatedStyles, /align-items: center/);
     assert.match(generatedStyles, /justify-content: flex-start/);
     assert.match(generatedStyles, /\.resource-icon/);
@@ -272,6 +273,7 @@ for (const template of [
       assert.match(generatedStyles, /@fontsource-variable\/geist\/wght\.css/);
       assert.match(generatedStyles, /@fontsource-variable\/geist-mono\/wght\.css/);
       assert.match(generatedStyles, /background: rgb\(255 255 255 \/ 0\.025\)/);
+      assert.match(generatedStyles, /\.hero-section \{[^}]*min-height: 100vh/s);
       assert.match(generatedStyles, /align-items: center/);
       assert.match(generatedStyles, /justify-content: flex-start/);
       assert.match(generatedStyles, /\.resource-icon/);

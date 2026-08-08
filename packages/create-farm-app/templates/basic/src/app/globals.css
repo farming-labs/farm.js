@@ -67,7 +67,7 @@ code {
   position: relative;
   isolation: isolate;
   width: 100%;
-  min-height: 100svh;
+  min-height: 100vh;
   overflow: hidden;
   background: var(--paper);
 }
@@ -75,8 +75,9 @@ code {
 .hero-section {
   position: relative;
   display: flex;
+  width: 100%;
   overflow: hidden;
-  min-height: 100svh;
+  min-height: 100vh;
   align-items: center;
   justify-content: flex-start;
   padding: clamp(2rem, 6vh, 4rem) clamp(1.25rem, 7vw, 6rem);
@@ -108,7 +109,7 @@ code {
 
 .hero-copy {
   width: min(100%, 680px);
-  margin-block: auto;
+  margin: 0;
 }
 
 .eyebrow-row {
