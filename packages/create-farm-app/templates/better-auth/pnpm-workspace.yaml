@@ -1,0 +1,13 @@
+packages:
+  - "."
+
+allowBuilds:
+  "@prisma/client": true
+  esbuild: true
+  sharp: true
+  vue-demi: true
+minimumReleaseAgeExclude:
+  - "@farm.js/better-auth"
+  - "@farm.js/cli"
+  - "@farm.js/core"
+  - "@farm.js/integration-utils"

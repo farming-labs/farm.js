@@ -1,3 +1,6 @@
+packages:
+  - "."
+
 allowBuilds:
   "@prisma/client": true
   esbuild: true

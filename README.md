@@ -47,7 +47,7 @@
 ### Create a New App
 
 ```bash
-pnpm create @farm.js/app@beta my-app
+pnpm create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```

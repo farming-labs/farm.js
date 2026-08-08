@@ -10,6 +10,39 @@ interface CreateAppOptions {
   skipInstall?: boolean;
 }
 
+const templateDetails: Record<
+  string,
+  {
+    title: string;
+    description: string;
+    instructions: string[];
+  }
+> = {
+  basic: {
+    title: "FARMJS Basic",
+    description: "A minimal FARMJS app with built-in Tailwind support",
+    instructions: [
+      "Tailwind is enabled by default. You only need postcss config for custom plugins.",
+    ],
+  },
+  auth: {
+    title: "FARMJS Auth",
+    description: "FARMJS-native auth with local SQLite, secure sessions, and protected routes",
+    instructions: [
+      "FARMJS Auth uses local SQLite automatically; no auth environment variables are needed locally.",
+      "For production, set FARM_AUTH_URL, FARM_AUTH_SECRET, and DATABASE_URL, then run the auth:migrate script.",
+    ],
+  },
+  "better-auth": {
+    title: "FARMJS Better Auth",
+    description: "Better Auth with Postgres, secure sessions, and protected routes",
+    instructions: [
+      "Before starting, copy .env.example to .env.local and set DATABASE_URL and BETTER_AUTH_SECRET.",
+      "Better Auth migrations run automatically when the auth instance starts.",
+    ],
+  },
+};
+
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
 
 export interface PackageManager {
@@ -57,12 +90,14 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
       type: "select",
       name: "template",
       message: "Which template would you like to use?",
-      choices: templates.map((name) => ({
-        title: prettifyTemplateName(name),
-        value: name,
-        description:
-          name === "basic" ? "A simple Farm.js app with built-in Tailwind support" : undefined,
-      })),
+      choices: templates.map((name) => {
+        const details = templateDetails[name];
+        return {
+          title: details?.title ?? prettifyTemplateName(name),
+          value: name,
+          description: details?.description,
+        };
+      }),
       initial: 0,
     });
 
@@ -112,7 +147,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     }
   }
 
-  logger.info(`Creating Farm.js app in ${projectPath}`);
+  logger.info(`Creating FARMJS app in ${projectPath}`);
 
   await fs.mkdir(projectPath, { recursive: true });
 
@@ -136,7 +171,9 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   }
   logger.info(`  ${getDevCommand(packageManager.name)}`);
   logger.info("");
-  logger.info("Tailwind is enabled by default. You only need postcss config for custom plugins.");
+  for (const instruction of templateDetails[template!]?.instructions ?? []) {
+    logger.info(instruction);
+  }
 }
 
 async function copyTemplate(template: string, projectPath: string, useTypeScript: boolean) {
@@ -234,10 +271,17 @@ function prettifyTemplateName(name: string): string {
 async function getAvailableTemplates(): Promise<string[]> {
   const templatesRoot = path.join(__dirname, "..", "templates");
   const entries = await fs.readdir(templatesRoot, { withFileTypes: true });
+  const templateOrder = Object.keys(templateDetails);
   return entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
     .map((entry) => entry.name)
-    .sort();
+    .sort((left, right) => {
+      const leftIndex = templateOrder.indexOf(left);
+      const rightIndex = templateOrder.indexOf(right);
+      const normalizedLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+      const normalizedRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+      return normalizedLeft - normalizedRight || left.localeCompare(right);
+    });
 }
 
 async function updatePackageJson(

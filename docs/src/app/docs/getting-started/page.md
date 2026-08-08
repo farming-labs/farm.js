@@ -15,13 +15,16 @@ Farm keeps the first project small: an app directory, a config file, package met
 **Terminal**
 
 ```bash
-pnpm create @farm.js/app@beta my-app
+pnpm create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
 
-The scaffolder installs React and all other starter dependencies automatically. Use
-`--skip-install` if you only want it to generate the project files.
+This command follows the current `beta` dist-tag and explicitly selects the minimal Basic starter.
+Use `pnpm create`, not `pnpm add`: pnpm resolves the `@farm.js/app` initializer name to the
+published `@farm.js/create-app` package. The scaffolder installs React and all other starter
+dependencies automatically. Use `--skip-install` if you only want it to generate the project
+files.
 
 ## What you get
 
