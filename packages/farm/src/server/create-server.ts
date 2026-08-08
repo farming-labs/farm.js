@@ -22,6 +22,7 @@ import {
 import { FARM_VERSION } from "../version";
 import { getFarmAppDirectories } from "../layers";
 import { createCliColors } from "../cli-colors";
+import { createFarmThemeCssPlugin } from "../theme/vite";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -195,6 +196,7 @@ export async function createServer(config: FarmConfig = {}) {
           root: projectRoot,
           css: shouldUseProjectPostcss ? undefined : { postcss: { plugins: [] } },
           plugins: [
+            createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),

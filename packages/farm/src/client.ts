@@ -84,6 +84,8 @@ export type {
   IntegrationServerRequestLike,
 } from "./integration-client";
 export { createStore } from "./store";
+export { getTheme, setTheme, toggleTheme, useTheme } from "./theme/client";
+export type { UseThemeResult } from "./theme/client";
 export type {
   Store,
   StoreApi,

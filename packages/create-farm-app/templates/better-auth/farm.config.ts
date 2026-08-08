@@ -4,6 +4,9 @@ import { auth } from "./src/lib/auth.ts";
 
 export default defineConfig({
   srcDir: "src",
+  theme: {
+    default: "dark",
+  },
   experimental: {
     serverComponents: true,
   },

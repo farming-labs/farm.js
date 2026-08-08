@@ -43,6 +43,7 @@ import { getCurrentRequest } from "@farm.js/core/request";
 export default {
   srcDir: "src",
   images: { provider: "none" },
+  theme: { default: "dark" },
   security: {
     csp: ${JSON.stringify(testCspPolicy)},
   },
@@ -407,6 +408,9 @@ describe("production SSG output", () => {
         "utf8",
       );
       expect(staticArtifact).toContain("pure-static-page");
+      expect(staticArtifact).toContain('data-theme="dark"');
+      expect(staticArtifact).toContain('id="farm-theme-script"');
+      expect(staticArtifact).not.toContain("__name");
       expect(dynamicArtifact).toContain("blog-");
       expect(dynamicArtifact).toContain("built");
       await expect(

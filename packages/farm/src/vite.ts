@@ -70,6 +70,7 @@ import {
   resolveFarmServerConfig,
 } from "./server-http";
 import { createCliColors } from "./cli-colors";
+import { createFarmThemeCssPlugin } from "./theme/vite";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -4073,14 +4074,22 @@ async function renderPage(pageData) {
     if (!doc.documentElement || !doc.body) return false;
 
     resetReactRoots();
+    const activeFarmTheme =
+      window.__FARM_THEME__?.snapshot?.resolvedTheme ||
+      document.documentElement.getAttribute('data-theme');
     Array.from(document.documentElement.attributes).forEach(function(attr) {
+      if (attr.name === 'data-theme') return;
       if (!doc.documentElement.hasAttribute(attr.name)) {
         document.documentElement.removeAttribute(attr.name);
       }
     });
     Array.from(doc.documentElement.attributes).forEach(function(attr) {
+      if (attr.name === 'data-theme') return;
       document.documentElement.setAttribute(attr.name, attr.value);
     });
+    if (activeFarmTheme) {
+      document.documentElement.setAttribute('data-theme', activeFarmTheme);
+    }
 
     document.head.innerHTML = doc.head ? doc.head.innerHTML : '';
     document.body.innerHTML = doc.body.innerHTML;
@@ -4089,6 +4098,7 @@ async function renderPage(pageData) {
 
     setTimeout(function() {
       Array.from(document.querySelectorAll('script')).forEach(function(script) {
+        if (script.id === 'farm-theme-script') return;
         const freshScript = document.createElement('script');
         Array.from(script.attributes).forEach(function(attr) {
           freshScript.setAttribute(attr.name, attr.value);
@@ -4634,6 +4644,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
 
   return {
     plugins: [
+      createFarmThemeCssPlugin(config.theme, config.basePath),
       tailwindcss(),
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
