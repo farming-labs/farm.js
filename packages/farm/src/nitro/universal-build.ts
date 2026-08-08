@@ -63,6 +63,7 @@ import { mergeFarmFontCss } from "../font-vite";
 import type { FarmIslandStrategy } from "../island";
 import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found";
+import { createFarmThemeCssPlugin } from "../theme/vite";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -1231,6 +1232,7 @@ async function buildClient(
         },
       },
       plugins: [
+        createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
@@ -2990,6 +2992,7 @@ async function buildSSRInMemory(
         __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
       },
       plugins: [
+        createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
         ...(!useExternalMetadataImageRuntime &&
         metadataImageRoutes.some((image) => image.sourceType === "module")
@@ -3279,15 +3282,19 @@ function generateVirtualEntryCode(
   _runWithCurrentRequest,
   _runWithMiddlewareContext,
   _runWithMiddlewareData,
+  _setDefaultFarmThemeConfig,
   addMetadataImageReference,
+  applyFarmThemeDocument,
   appendFarmLinkHeader,
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
   createFarmCacheKey,
+  createFarmThemeDocumentParts,
   createFarmLocaleCookie,
   createFarmProductionLifecycle,
   createProductionMiddlewareRunner,
+  getTheme as getFarmTheme,
   emitFarmEvent,
   getFarmDataCache,
   getFarmLocaleVaryHeaders,
@@ -3548,6 +3555,8 @@ configureFarmObservability(farmObservabilityConfig);
 configureFarmCache(farmResolvedRuntimeConfig.cache);
 const farmI18nConfig = ${JSON.stringify(config.i18n)};
 const farmServerConfig = ${JSON.stringify(config.server)};
+const farmThemeConfig = ${JSON.stringify(config.theme)};
+_setDefaultFarmThemeConfig(farmThemeConfig);
 export const farmProductionLifecycle = createFarmProductionLifecycle({
   server: farmServerConfig,
   start: () => farmPluginRuntime?.startRuntime(),
@@ -5474,7 +5483,13 @@ async function handleFarmRequestInContext(
           !farmI18nSnapshot &&
           !pprCacheKey
         ) {
+          const farmThemeDocument = createFarmThemeDocumentParts(
+            farmThemeConfig,
+            farmResolvedRuntimeConfig.basePath,
+            getFarmTheme(request)
+          );
           const streamPrefix = '<!DOCTYPE html>\\n<html lang="en">\\n<head>\\n' +
+            farmThemeDocument.head + '\\n' +
             '  <meta charset="utf-8">\\n' +
             '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
@@ -5490,9 +5505,13 @@ async function handleFarmRequestInContext(
             ) + '\\n' +
             '  <script type="module" src="/farm-client.js"></script>\\n' +
             '</body>\\n</html>';
+          const themedStreamPrefix = streamPrefix.replace(
+            '<html lang="en">',
+            '<html lang="en"' + farmThemeDocument.attributes + '>'
+          );
           const streamedDocument = createFarmDocumentStream(
             renderedPage.stream,
-            streamPrefix,
+            themedStreamPrefix,
             streamSuffix,
             function() {
               if (pprBypassReason === "refresh") {
@@ -5575,6 +5594,12 @@ async function handleFarmRequestInContext(
 </html>\`;
         }
         fullHtml = applyFarmI18nDocument(fullHtml, pathname, farmI18nSnapshot);
+        fullHtml = applyFarmThemeDocument(
+          fullHtml,
+          farmThemeConfig,
+          farmResolvedRuntimeConfig.basePath,
+          getFarmTheme(request)
+        );
 
         if (pageStatus === 200 && pprCacheKey && request.method.toUpperCase() !== "HEAD") {
           await pprShellCache.setAsync(
@@ -5705,10 +5730,15 @@ async function handleFarmRequestInContext(
           )`
               : "await renderErrorElement()"
           };
-          const errorDocument = applyFarmI18nDocument(
-            createFarmErrorDocument(errorHtml, "Application Error"),
-            pathname,
-            getFarmI18nSnapshot()
+          const errorDocument = applyFarmThemeDocument(
+            applyFarmI18nDocument(
+              createFarmErrorDocument(errorHtml, "Application Error"),
+              pathname,
+              getFarmI18nSnapshot()
+            ),
+            farmThemeConfig,
+            farmResolvedRuntimeConfig.basePath,
+            getFarmTheme(request)
           );
           emitFarmEvent({
             type: "render.complete",
@@ -5733,10 +5763,15 @@ async function handleFarmRequestInContext(
       const errorMessage = "Internal Server Error";
       const fallbackHtml = '<main><h1>Application Error</h1><p>' +
         escapeFarmHtmlAttribute(errorMessage) + '</p></main>';
-      const fallbackDocument = applyFarmI18nDocument(
-        createFarmErrorDocument(fallbackHtml, "Application Error"),
-        pathname,
-        getFarmI18nSnapshot()
+      const fallbackDocument = applyFarmThemeDocument(
+        applyFarmI18nDocument(
+          createFarmErrorDocument(fallbackHtml, "Application Error"),
+          pathname,
+          getFarmI18nSnapshot()
+        ),
+        farmThemeConfig,
+        farmResolvedRuntimeConfig.basePath,
+        getFarmTheme(request)
       );
       return applyProductionMiddlewareHeaders(new Response(
         fallbackDocument,
@@ -5834,6 +5869,12 @@ async function handleFarmRequestInContext(
 </html>\`;
     }
     fullHtml = applyFarmI18nDocument(fullHtml, pathname, getFarmI18nSnapshot());
+    fullHtml = applyFarmThemeDocument(
+      fullHtml,
+      farmThemeConfig,
+      farmResolvedRuntimeConfig.basePath,
+      getFarmTheme(request)
+    );
     
     emitFarmEvent({
       type: "render.complete",
@@ -5852,8 +5893,14 @@ async function handleFarmRequestInContext(
     }), middlewareHeaders);
   } catch (error) {
     console.error("404 render error:", error);
-    return applyProductionMiddlewareHeaders(new Response(
+    const fallbackDocument = applyFarmThemeDocument(
       \`<!DOCTYPE html><html><head><title>404</title></head><body><h1>404 - Page Not Found</h1><p>The page \${pathname} doesn't exist.</p><a href="/">Go Home</a></body></html>\`,
+      farmThemeConfig,
+      farmResolvedRuntimeConfig.basePath,
+      getFarmTheme(request)
+    );
+    return applyProductionMiddlewareHeaders(new Response(
+      fallbackDocument,
       {
         status: 404,
         headers: { "Content-Type": "text/html", "x-farm-preload-buffered": "1" },

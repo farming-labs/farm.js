@@ -142,6 +142,7 @@ test("generates a buildable starter application", async () => {
       "utf8",
     );
     assert.doesNotMatch(generatedConfig, /srcDir/);
+    assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
 
     const generatedTsconfig = JSON.parse(
       await readFile(path.join(tempDir, "generated-app/tsconfig.json"), "utf8"),
@@ -333,6 +334,8 @@ for (const template of [
 
       const generatedGitignore = await readFile(path.join(generatedDir, ".gitignore"), "utf8");
       assert.match(generatedGitignore, /^\.env\.local$/m);
+      const generatedConfig = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+      assert.match(generatedConfig, /theme:\s*\{\s*default: "dark"/s);
       await readFile(path.join(generatedDir, ".env.example"), "utf8");
       const generatedReadme = await readFile(path.join(generatedDir, "README.md"), "utf8");
       assert.match(generatedReadme, /^# FARMJS /);

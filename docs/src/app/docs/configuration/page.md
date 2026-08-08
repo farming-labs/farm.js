@@ -29,6 +29,9 @@ export default defineConfig({
   mdx: {
     components: "./src/markdown-components.tsx",
   },
+  theme: {
+    default: "system",
+  },
 });
 ```
 
@@ -87,6 +90,7 @@ mount, and shortcut together.
 | srcDir        | Changing the app source folder from the default src.                              |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
+| theme         | Enabling light, dark, and system modes with client and server APIs.               |
 | storage       | Configuring KV drivers/mounts and, in the current beta, an integration DB client. |
 | migrations    | Running one-shot schema/provider commands with `farm migrate`.                    |
 | cron          | Mapping portable UTC schedules to ordinary GET API routes.                        |
