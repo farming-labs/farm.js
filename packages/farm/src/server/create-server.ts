@@ -182,7 +182,6 @@ export async function createServer(config: FarmConfig = {}) {
       try {
         const tailwindcss = (await import("@tailwindcss/vite")).default;
         tailwindVitePlugin = tailwindcss();
-        logger.info("📦 Enabled built-in Tailwind support (@tailwindcss/vite)");
       } catch (error) {
         logger.warn(
           `Tailwind plugin auto-enable failed; continuing without it: ${(error as Error).message}`,
