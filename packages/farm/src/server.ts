@@ -10,6 +10,7 @@ export * from "./after";
 export * from "./server-query";
 export { createServer, DEFAULT_FARM_DEV_SERVER_PORT, startDevServer } from "./server/create-server";
 export { getCurrentRequest } from "./server/request";
+export { getTheme, getThemeSnapshot } from "./theme/server";
 export * from "./server-action-security";
 export * from "./layers";
 export * from "./environment";

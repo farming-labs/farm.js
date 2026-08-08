@@ -118,6 +118,7 @@ export * from "./workflows";
 export * from "./cron";
 export * from "./env";
 export * from "./env-types";
+export * from "./theme";
 export * from "./environment";
 export * from "./font";
 export * from "./type-artifacts";

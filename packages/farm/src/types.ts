@@ -24,6 +24,7 @@ import type { FarmAuthUserConfig, ResolvedFarmAuthConfig } from "./auth-config";
 import type { FarmPerformanceConfig } from "./preload";
 import type { FarmLayoutFonts } from "./font";
 import type { FarmSecurityConfig, ResolvedFarmSecurityConfig } from "./security";
+import type { FarmThemeConfig, ResolvedFarmThemeConfig } from "./theme/types";
 
 declare global {
   namespace FarmJS {
@@ -188,6 +189,8 @@ export interface FarmConfig {
   images?: FarmImageConfig;
   /** Browser resource scheduling and preload budgets. */
   performance?: FarmPerformanceConfig;
+  /** Built-in light, dark, and system color-mode runtime. */
+  theme?: FarmThemeConfig | ResolvedFarmThemeConfig | false;
   i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;

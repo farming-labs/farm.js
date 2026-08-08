@@ -154,6 +154,7 @@ const sidebar = [
       { label: "Built-in Authentication", slug: "auth", icon: "lock" },
       { label: "Images", slug: "images", icon: "image" },
       { label: "Fonts", slug: "fonts", icon: "file" },
+      { label: "Themes", slug: "themes", icon: "sparkles" },
       { label: "Environment Functions", slug: "environment-functions", icon: "code" },
       { label: "Middleware", slug: "middleware", icon: "shield" },
     ],

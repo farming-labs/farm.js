@@ -31,10 +31,13 @@ import { configureFarmCache } from "./cache";
 import { resolveFarmAuthConfig, type ResolvedFarmAuthConfig } from "./auth-config";
 import { resolveFarmPerformanceConfig, type ResolvedFarmPerformanceConfig } from "./preload";
 import { resolveFarmSecurityConfig, type ResolvedFarmSecurityConfig } from "./security";
+import { resolveFarmThemeConfig } from "./theme/config";
+import { _setDefaultFarmThemeConfig } from "./theme/server";
+import type { ResolvedFarmThemeConfig } from "./theme/types";
 
 type NormalizedFarmConfig = Omit<
   Required<FarmConfig>,
-  "devtools" | "images" | "i18n" | "performance" | "security"
+  "devtools" | "images" | "i18n" | "performance" | "security" | "theme"
 > & {
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
@@ -47,6 +50,7 @@ type NormalizedFarmConfig = Omit<
   auth: ResolvedFarmAuthConfig;
   performance: ResolvedFarmPerformanceConfig;
   security: ResolvedFarmSecurityConfig;
+  theme: ResolvedFarmThemeConfig;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -75,6 +79,7 @@ export class FarmApp {
   constructor(config: FarmConfig = {}, viteServer?: ViteDevServer) {
     this.config = this.normalizeConfig(config);
     configureFarmObservability(this.config.observability);
+    _setDefaultFarmThemeConfig(this.config.theme);
     this.i18nRuntime = createFarmI18nRuntime(this.config.i18n);
     _setDefaultFarmI18nRuntime(this.i18nRuntime);
     this.viteServer = viteServer;
@@ -147,6 +152,7 @@ export class FarmApp {
       security: resolveFarmSecurityConfig(config.security),
       images: resolveFarmImageConfig(config.images),
       performance: resolveFarmPerformanceConfig(config.performance),
+      theme: resolveFarmThemeConfig(config.theme, config.basePath || "/"),
       i18n: isResolvedI18nConfig(config.i18n)
         ? config.i18n
         : resolveFarmI18nConfig(config.i18n, {
