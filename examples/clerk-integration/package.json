@@ -11,13 +11,13 @@
   "dependencies": {
     "@clerk/backend": "^3.2.0",
     "@clerk/react": "^6.1.0",
-    "@farm.js/clerk": "0.1.0-beta.2",
-    "@farm.js/core": "0.1.0-beta.2",
+    "@farm.js/clerk": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.2",
+    "@farm.js/cli": "workspace:*",
     "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",

@@ -695,6 +695,7 @@ export async function resolveDocsConfig(
   const inlineDocsConfig = sanitizeDocsConfig(docsOptions.config || {});
   const directDocsConfig = sanitizeDocsConfig({
     ...docsOptions,
+    adapter: undefined,
     enabled: undefined,
     config: undefined,
     configPath: undefined,
@@ -723,6 +724,7 @@ export async function resolveDocsConfig(
   return {
     enabled: true,
     entry: entryRoute,
+    ...(docsOptions.adapter ? { adapter: docsOptions.adapter } : {}),
     contentDir,
     configPath: loadedConfig?.configPath,
     config: {

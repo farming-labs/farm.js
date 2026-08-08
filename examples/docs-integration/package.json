@@ -9,12 +9,15 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.0-beta.2",
+    "@farm.js/core": "workspace:*",
+    "@farming-labs/docs": "https://pkg.pr.new/farming-labs/docs/@farming-labs/docs@781b1ec",
+    "@farming-labs/farmjs": "https://pkg.pr.new/farming-labs/docs/@farming-labs/farmjs@781b1ec",
+    "@farming-labs/theme": "https://pkg.pr.new/farming-labs/docs/@farming-labs/theme@781b1ec",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.2",
+    "@farm.js/cli": "workspace:*",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "typescript": "^5.5.3",

@@ -10,16 +10,16 @@
     "generate": "farm generate"
   },
   "dependencies": {
-    "@farm.js/autumn": "0.1.0-beta.2",
-    "@farm.js/better-auth": "0.1.0-beta.2",
-    "@farm.js/core": "0.1.0-beta.2",
+    "@farm.js/autumn": "workspace:*",
+    "@farm.js/better-auth": "workspace:*",
+    "@farm.js/core": "workspace:*",
     "better-auth": "^1.5.5",
     "better-sqlite3": "^12.8.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.2",
+    "@farm.js/cli": "workspace:*",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",

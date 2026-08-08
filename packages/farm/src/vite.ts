@@ -39,6 +39,7 @@ import {
 } from "./devtools-config";
 import * as fs from "fs";
 import * as path from "path";
+import { pathToFileURL } from "node:url";
 import type { FarmUserConfig } from "./config";
 import { getFarmAppDirectories, getFarmLayerAliases, getFarmSourceRoots } from "./layers";
 import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
@@ -895,21 +896,41 @@ export function farmPlugin(
       const farmDocsFontAssetList = farmDocsDevRuntime
         ? resolveFarmDocsFontAssets(farmConfig.root)
         : [];
+      const resolveDocsLayoutFonts = async (pathname: string) => {
+        const layouts = routeManager.matchRoute(pathname).layouts;
+        const layoutModules = await Promise.all(
+          layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
+        );
+        return resolveFarmLayoutFonts(layoutModules);
+      };
       const farmDocsHandler = farmDocsDevRuntime
-        ? farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
-            root: farmConfig.root,
-            srcDir: farmConfig.srcDir,
-            clientEntry: "/@farm/client.js",
-            fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList),
-            resolveLayoutFonts: async (pathname) => {
-              const layouts = routeManager.matchRoute(pathname).layouts;
-              const layoutModules = await Promise.all(
-                layouts.map((layout) => routeManager.loadLayoutModule(layout.modulePath)),
-              );
-              return resolveFarmLayoutFonts(layoutModules);
-            },
-            fontStylesheetHref: "/@farm/fonts.css",
-          })
+        ? farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
+          ? await farmDocsDevRuntime.createFarmDocsAdapterHandler(farmConfig.docs, {
+              root: farmConfig.root,
+              srcDir: farmConfig.srcDir,
+              clientEntry: "/@farm/client.js",
+              resolveLayoutFonts: resolveDocsLayoutFonts,
+              fontStylesheetHref: "/@farm/fonts.css",
+              globalStylesheetHref: "/src/app/globals.css",
+              loadModule: async (specifier) => {
+                const resolved = await server.pluginContainer.resolveId(specifier, undefined, {
+                  ssr: true,
+                });
+                if (specifier === farmConfig.docs.adapter?.server && resolved?.id) {
+                  return import(/* @vite-ignore */ pathToFileURL(resolved.id).href);
+                }
+                return server.ssrLoadModule(resolved?.id ?? specifier);
+              },
+            })
+          : farmDocsDevRuntime.createFarmDocsHandler(farmConfig.docs, {
+              root: farmConfig.root,
+              srcDir: farmConfig.srcDir,
+              clientEntry: "/@farm/client.js",
+              fontAssets: toFarmDocsPublicFontAssets(farmDocsFontAssetList),
+              resolveLayoutFonts: resolveDocsLayoutFonts,
+              fontStylesheetHref: "/@farm/fonts.css",
+              globalStylesheetHref: "/src/app/globals.css",
+            })
         : null;
       const wrapFarmDocsResponseWithLayouts = async (
         request: Request,
@@ -917,6 +938,7 @@ export function farmPlugin(
       ): Promise<Response> => {
         if (
           request.method === "HEAD" ||
+          response.headers.has("x-farm-docs-adapter") ||
           !response.headers.get("content-type")?.toLowerCase().includes("text/html")
         ) {
           return response;
@@ -1034,13 +1056,14 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           headers,
         });
       };
-      const farmDocsAPIHandler: FarmDocsAPIHandler | null = farmDocsDevRuntime
-        ? farmDocsDevRuntime.createFarmDocsAPIHandler({
-            rootDir: farmConfig.root,
-            srcDir: farmConfig.srcDir,
-            docs: farmConfig.docs,
-          })
-        : null;
+      const farmDocsAPIHandler: FarmDocsAPIHandler | null =
+        farmDocsDevRuntime && !farmDocsDevRuntime.hasFarmDocsRuntimeAdapter(farmConfig.docs)
+          ? farmDocsDevRuntime.createFarmDocsAPIHandler({
+              rootDir: farmConfig.root,
+              srcDir: farmConfig.srcDir,
+              docs: farmConfig.docs,
+            })
+          : null;
       const farmDocsFontAssets = new Map(
         farmDocsFontAssetList.map(({ url, sourcePath }) => [url, sourcePath]),
       );
@@ -2277,10 +2300,11 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         const integrations = resolvedConfig?.integrations || options.integrations;
         const root = resolvedConfig?.root || server?.config.root || process.cwd();
         const docs = resolvedConfig?.docs;
+        const adapterOwnsDocsRuntime = Boolean(docs?.adapter?.server && docs.adapter.react);
         const devtools = resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production");
         const [docsRuntime, docsSearchRuntime, devtoolsClientRuntime] = await Promise.all([
           docs?.enabled ? loadFarmDocsDevRuntime() : null,
-          docs?.enabled ? loadFarmDocsSearchDevRuntime() : null,
+          docs?.enabled && !adapterOwnsDocsRuntime ? loadFarmDocsSearchDevRuntime() : null,
           devtools.enabled ? loadFarmDevtoolsClientRuntime() : null,
         ]);
         const docsSearchEnabled = docsSearchRuntime?.isFarmDocsSearchEnabled(docs) ?? false;
@@ -2306,6 +2330,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           generatedDevtoolsClientRuntime,
           resolvedConfig?.plugins || [],
           root,
+          docs?.adapter?.react,
         );
       }
 
@@ -3106,12 +3131,29 @@ function generateClientCode(
   devtoolsClientRuntime = "",
   plugins: readonly FarmPlugin[] = [],
   root = process.cwd(),
+  docsAdapterReact?: string,
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
     ? `import { ClerkProvider } from '@clerk/react';`
     : "";
   const clientPluginEntry = generateFarmClientPluginEntryCode(plugins, root);
+  const docsAdapterImportBlock = docsAdapterReact
+    ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
+
+async function hydrateFarmDocsAdapterRuntime() {
+  const runtime = window.__FARM_DOCS_ADAPTER__;
+  if (!runtime) return false;
+  if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== 'function') {
+    throw new Error('The configured Farm docs adapter does not export hydrateFarmDocs().');
+  }
+  FarmDocsAdapterReact.hydrateFarmDocs({
+    config: runtime.config || {},
+    data: runtime.data,
+  });
+  return true;
+}`
+    : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
 
   return `
 import React from 'react'
@@ -3129,6 +3171,7 @@ ${providerImportBlock}
 ${clientPluginEntry.imports}
 ${docsSearchClientRuntime}
 ${devtoolsClientRuntime}
+${docsAdapterImportBlock}
 
 // ⭐ Farm.js SPA Client Runtime (TanStack Start pattern)
 // Uses manifest-based chunk loading - NO HTML fetching!
@@ -4202,6 +4245,11 @@ spaRouter.setNavigationHandler(renderPage);
 async function hydrate() {
   if (isFarmDocsSearchPage()) {
     await mountFarmDocsSearch();
+  }
+
+  if (await hydrateFarmDocsAdapterRuntime()) {
+    console.log('[Farm.js] ✅ Hydrated docs adapter');
+    return;
   }
 
   const rootContainer = document.getElementById('root')
