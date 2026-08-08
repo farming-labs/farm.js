@@ -77,6 +77,20 @@ interface PPRShellCacheOptions {
   revalidate?: number;
 }
 
+const warnedSuppressedAsyncHydrationModules = new Set<string>();
+
+function warnSuppressedAsyncHydrationOnce(modulePath: string): void {
+  if (warnedSuppressedAsyncHydrationModules.has(modulePath)) return;
+  warnedSuppressedAsyncHydrationModules.add(modulePath);
+  logger.warn(
+    `${modulePath} is an async server component that imports client components. ` +
+      `React cannot hydrate async components in the browser, so this route stays ` +
+      `server-rendered and its client imports are not interactive. Move the ` +
+      `interactive UI into a "use client" child rendered by a synchronous page, ` +
+      `or enable experimental server components support.`,
+  );
+}
+
 function hasRequestHeader(req: FarmRequest, name: string): boolean {
   const value = req.headers[name.toLowerCase()];
   return Array.isArray(value) ? value.length > 0 : Boolean(value);
@@ -939,6 +953,9 @@ export class ServerRenderer {
         }),
       );
       const shouldHydrate = moduleMetadata.shouldHydrate;
+      if (moduleMetadata.suppressedAsyncHydration) {
+        warnSuppressedAsyncHydrationOnce(route.modulePath);
+      }
       const layoutHydrationMetadata = layouts.map((layout) => {
         const manifestEntry = routeManifest.layouts.find(
           (entry) => entry.pattern === layout.pattern,

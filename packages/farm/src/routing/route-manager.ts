@@ -427,6 +427,7 @@ export class RouteManager {
       shouldHydrate: boolean;
       isClientComponent: boolean;
       islandStrategy: FarmIslandStrategy | null;
+      suppressedAsyncHydration?: true;
       search?: ProgrammaticRouteSearchClientOptions;
       segments: Array<{
         segment: string;
@@ -472,6 +473,7 @@ export class RouteManager {
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
         islandStrategy: metadata.islandStrategy,
+        suppressedAsyncHydration: metadata.suppressedAsyncHydration,
         search: getProgrammaticRouteSearchClientOptions(programmaticPage?.search),
         segments: entry.route.segments.map((seg) => ({
           segment: seg.segment,

@@ -164,6 +164,16 @@ React root cannot schedule those children independently. Keep interactive leaves
 future compiler boundary can reuse the same export for independently hydrated nested component
 islands.
 
+### Async pages stay server-only
+
+React cannot hydrate an `async` component in the browser. When a page's default export is `async`
+and it imports client components (or exports `hydrate = true`), Farm keeps the route
+server-rendered instead of hydrating it: the SSR HTML stays visible, but the imported client
+components are not interactive on that route. Farm logs a warning pointing at the module when this
+happens. To make the interactivity work, fetch data in a synchronous page (for example through a
+route loader) and render the `"use client"` component from there, or enable experimental server
+components support.
+
 ## Automatic optimized boundaries
 
 Farm can experimentally render large, non-interactive Server Component regions through the native
