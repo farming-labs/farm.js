@@ -107,6 +107,8 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
     assert.match(generatedResourceLinks, /className="resource-separator"/);
     assert.match(generatedResourceLinks, /aria-hidden="true"/);
+    assert.match(generatedResourceLinks, /href="https:\/\/farmjs\.dev"/);
+    assert.doesNotMatch(generatedResourceLinks, /farm\.js\.dev/);
     assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
 
     const generatedStyles = await readFile(
@@ -273,7 +275,16 @@ for (const template of [
       assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
       assert.match(generatedResourceLinks, /className="resource-separator"/);
       assert.match(generatedResourceLinks, /aria-hidden="true"/);
+      assert.match(generatedResourceLinks, /href="https:\/\/farmjs\.dev"/);
+      assert.doesNotMatch(generatedResourceLinks, /farm\.js\.dev/);
       assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
+
+      const generatedSiteHeader = await readFile(
+        path.join(generatedDir, "src/components/site-header.tsx"),
+        "utf8",
+      );
+      assert.match(generatedSiteHeader, /href="https:\/\/farmjs\.dev"/);
+      assert.doesNotMatch(generatedSiteHeader, /farm\.js\.dev/);
 
       const generatedStyles = await readFile(
         path.join(generatedDir, "src/app/globals.css"),
