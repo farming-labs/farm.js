@@ -6,7 +6,7 @@ const { version } = require("../package.json");
 
 program
   .name("create-farm-app")
-  .description("Create a new Farm.js application")
+  .description("Create a new FARMJS application")
   .version(version)
   .argument("[project-name]", "Name of the project")
   .option("-t, --template <template>", "Template to use")

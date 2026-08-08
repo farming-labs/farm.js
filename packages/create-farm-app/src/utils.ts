@@ -22,6 +22,6 @@ export function showBanner() {
   for (const line of art) {
     console.log(pc.cyan(line));
   }
-  console.log(pc.bold(pc.green("Create Farm.js App")) + pc.dim("  modern React meta-framework"));
+  console.log(pc.bold(pc.green("Create FARMJS App")) + pc.dim("  modern React meta-framework"));
   console.log("");
 }

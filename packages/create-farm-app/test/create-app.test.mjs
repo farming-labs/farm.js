@@ -46,6 +46,14 @@ test("generates a buildable starter application", async () => {
       templatePackage.dependencies["@farm.js/core"],
     );
     assert.equal(
+      generatedPackage.dependencies["@fontsource-variable/geist"],
+      templatePackage.dependencies["@fontsource-variable/geist"],
+    );
+    assert.equal(
+      generatedPackage.dependencies["@fontsource-variable/geist-mono"],
+      templatePackage.dependencies["@fontsource-variable/geist-mono"],
+    );
+    assert.equal(
       generatedPackage.devDependencies["@farm.js/cli"],
       templatePackage.devDependencies["@farm.js/cli"],
     );
@@ -71,11 +79,39 @@ test("generates a buildable starter application", async () => {
       path.join(tempDir, "generated-app/src/app/page.tsx"),
       "utf8",
     );
-    assert.match(generatedHomePage, /from "@farm\.js\/core\/client"/);
-    assert.match(generatedHomePage, /from "@farm\.js\/core\/version"/);
-    assert.match(generatedHomePage, /Welcome to Farm\.js v\{FARM_VERSION\}/);
-    assert.doesNotMatch(generatedHomePage, /Welcome to Farm\.js v?\d+\.\d+\.\d+/);
+    assert.doesNotMatch(generatedHomePage, /from "@farm\.js\/core\/version"/);
+    assert.match(generatedHomePage, /Edit <code>page\.tsx<\/code> to begin/);
+    assert.match(generatedHomePage, /<code>page\.tsx<\/code>/);
+    assert.match(generatedHomePage, /FARMJS \/ Basic starter/);
+    assert.match(generatedHomePage, /className="command-list"/);
+    assert.match(generatedHomePage, /className="resource-links"/);
+    assert.doesNotMatch(generatedHomePage, /<header/);
+    assert.doesNotMatch(generatedHomePage, /hero-description/);
     assert.doesNotMatch(generatedHomePage, /from "farm\//);
+
+    const generatedResourceLinks = await readFile(
+      path.join(tempDir, "generated-app/src/components/resource-links.tsx"),
+      "utf8",
+    );
+    assert.match(generatedResourceLinks, /function DocsIcon\(\)/);
+    assert.match(generatedResourceLinks, /function GitHubIcon\(\)/);
+    assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
+    assert.match(generatedResourceLinks, /className="resource-separator"/);
+    assert.match(generatedResourceLinks, /aria-hidden="true"/);
+    assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
+
+    const generatedStyles = await readFile(
+      path.join(tempDir, "generated-app/src/app/globals.css"),
+      "utf8",
+    );
+    assert.match(generatedStyles, /@fontsource-variable\/geist\/wght\.css/);
+    assert.match(generatedStyles, /@fontsource-variable\/geist-mono\/wght\.css/);
+    assert.match(generatedStyles, /--paper: #000000/);
+    assert.match(generatedStyles, /\.hero-section \{[^}]*min-height: 100vh/s);
+    assert.match(generatedStyles, /align-items: center/);
+    assert.match(generatedStyles, /justify-content: flex-start/);
+    assert.match(generatedStyles, /\.resource-icon/);
+    assert.doesNotMatch(generatedStyles, /background-image:/);
 
     const generatedLayout = await readFile(
       path.join(tempDir, "generated-app/src/app/layout.tsx"),
@@ -121,6 +157,7 @@ test("generates a buildable starter application", async () => {
       "utf8",
     );
     assert.equal(generatedPnpmWorkspace, templatePnpmWorkspace);
+    assert.match(generatedPnpmWorkspace, /^packages:\n  - "\."$/m);
     assert.match(generatedPnpmWorkspace, /^allowBuilds:$/m);
     assert.match(generatedPnpmWorkspace, /^  "@prisma\/client": true$/m);
     assert.match(generatedPnpmWorkspace, /^  esbuild: true$/m);
@@ -130,6 +167,165 @@ test("generates a buildable starter application", async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+for (const template of [
+  {
+    name: "auth",
+    dependency: "@farm.js/auth",
+    homePagePattern: /auth\.session\(\)/,
+    brandPattern: /FARMJS \/ Auth starter/,
+    instructionPattern: /FARMJS Auth uses local SQLite automatically/,
+    betterCall: "1.3.2",
+    workspacePackage: "@farm.js/auth",
+  },
+  {
+    name: "better-auth",
+    dependency: "@farm.js/better-auth",
+    homePagePattern: /getServerSession\(\)/,
+    brandPattern: /FARMJS \/ Better Auth starter/,
+    instructionPattern: /copy \.env\.example to \.env\.local/,
+    betterCall: "1.3.7",
+    workspacePackage: "@farm.js/better-auth",
+  },
+]) {
+  test(`generates the ${template.name} starter with setup guidance`, async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), `create-farm-app-${template.name}-`));
+
+    try {
+      const output = execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          "generated-app",
+          "--template",
+          template.name,
+          "--typescript",
+          "--skip-install",
+        ],
+        {
+          cwd: tempDir,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            npm_config_user_agent: "pnpm/11.18.0 npm/? node/v22.0.0",
+          },
+        },
+      );
+
+      const templateDir = path.join(packageDir, "templates", template.name);
+      const generatedDir = path.join(tempDir, "generated-app");
+      const templatePackage = JSON.parse(
+        await readFile(path.join(templateDir, "package.json"), "utf8"),
+      );
+      const generatedPackage = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+
+      assert.equal(generatedPackage.name, "generated-app");
+      assert.equal(generatedPackage.packageManager, "pnpm@11.18.0");
+      assert.equal(
+        generatedPackage.dependencies[template.dependency],
+        templatePackage.dependencies[template.dependency],
+      );
+      assert.equal(
+        generatedPackage.dependencies["@farm.js/core"],
+        templatePackage.dependencies["@farm.js/core"],
+      );
+      assert.equal(
+        generatedPackage.dependencies["@fontsource-variable/geist"],
+        templatePackage.dependencies["@fontsource-variable/geist"],
+      );
+      assert.equal(
+        generatedPackage.dependencies["@fontsource-variable/geist-mono"],
+        templatePackage.dependencies["@fontsource-variable/geist-mono"],
+      );
+      assert.equal(generatedPackage.dependencies["better-call"], template.betterCall);
+      assert.equal(
+        generatedPackage.devDependencies["@farm.js/cli"],
+        templatePackage.devDependencies["@farm.js/cli"],
+      );
+
+      const generatedHomePage = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
+      assert.match(generatedHomePage, template.homePagePattern);
+      assert.match(generatedHomePage, template.brandPattern);
+      assert.match(generatedHomePage, /className="hero-section"/);
+      assert.match(generatedHomePage, /className="command-list"/);
+      assert.match(generatedHomePage, /className="resource-links"/);
+      assert.doesNotMatch(generatedHomePage, /SiteHeader/);
+      assert.doesNotMatch(generatedHomePage, /hero-description/);
+      assert.doesNotMatch(generatedHomePage, /className="flow-section"/);
+
+      const generatedResourceLinks = await readFile(
+        path.join(generatedDir, "src/components/resource-links.tsx"),
+        "utf8",
+      );
+      assert.match(generatedResourceLinks, /function DocsIcon\(\)/);
+      assert.match(generatedResourceLinks, /function GitHubIcon\(\)/);
+      assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
+      assert.match(generatedResourceLinks, /className="resource-separator"/);
+      assert.match(generatedResourceLinks, /aria-hidden="true"/);
+      assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
+
+      const generatedStyles = await readFile(
+        path.join(generatedDir, "src/app/globals.css"),
+        "utf8",
+      );
+      assert.match(generatedStyles, /@fontsource-variable\/geist\/wght\.css/);
+      assert.match(generatedStyles, /@fontsource-variable\/geist-mono\/wght\.css/);
+      assert.match(generatedStyles, /background: rgb\(255 255 255 \/ 0\.025\)/);
+      assert.match(generatedStyles, /\.hero-section \{[^}]*min-height: 100vh/s);
+      assert.match(generatedStyles, /align-items: center/);
+      assert.match(generatedStyles, /justify-content: flex-start/);
+      assert.match(generatedStyles, /\.resource-icon/);
+      assert.doesNotMatch(generatedStyles, /background-image:/);
+
+      const generatedAuthShell = await readFile(
+        path.join(generatedDir, "src/components/auth-shell.tsx"),
+        "utf8",
+      );
+      assert.match(generatedAuthShell, /className="auth-home-link"/);
+      assert.match(generatedAuthShell, /className="auth-resource-links"/);
+      assert.match(generatedAuthShell, template.brandPattern);
+      assert.doesNotMatch(generatedAuthShell, /auth-context/);
+
+      const generatedAuthForm = await readFile(
+        path.join(generatedDir, "src/components/auth-form.tsx"),
+        "utf8",
+      );
+      assert.match(generatedAuthForm, /01 \/ SIGN UP/);
+      assert.match(generatedAuthForm, /Create account\./);
+      assert.doesNotMatch(generatedAuthForm, /Add social providers/);
+
+      const generatedWorkspace = await readFile(
+        path.join(generatedDir, "pnpm-workspace.yaml"),
+        "utf8",
+      );
+      assert.match(generatedWorkspace, /^packages:\n  - "\."$/m);
+      assert.match(generatedWorkspace, /^allowBuilds:$/m);
+      assert.match(generatedWorkspace, /^minimumReleaseAgeExclude:$/m);
+      assert.match(
+        generatedWorkspace,
+        new RegExp(
+          `^  - "${template.workspacePackage.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"$`,
+          "m",
+        ),
+      );
+
+      const generatedGitignore = await readFile(path.join(generatedDir, ".gitignore"), "utf8");
+      assert.match(generatedGitignore, /^\.env\.local$/m);
+      await readFile(path.join(generatedDir, ".env.example"), "utf8");
+      const generatedReadme = await readFile(path.join(generatedDir, "README.md"), "utf8");
+      assert.match(generatedReadme, /^# FARMJS /);
+
+      assert.match(output, /Create FARMJS App/);
+      assert.match(output, template.instructionPattern);
+      assert.match(output, /pnpm install/);
+      assert.match(output, /pnpm dev/);
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("installs dependencies with the invoking package manager", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-install-"));
