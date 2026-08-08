@@ -60,6 +60,13 @@ export interface ClientModuleMetadata {
   isClientComponent: boolean;
   shouldHydrate: boolean;
   islandStrategy: FarmIslandStrategy | null;
+  /**
+   * Set when the module would hydrate (client imports or an explicit hydrate
+   * export) but its default export is an async server component, which React
+   * cannot run in a client root. Hydration is suppressed so the
+   * server-rendered HTML stays intact instead of crashing to a blank page.
+   */
+  suppressedAsyncHydration?: true;
 }
 
 interface ParsedClientModuleMetadata {
@@ -331,6 +338,60 @@ export function stripUseClientDirective(content: string): string {
   return content.replace(/^\s*(["'])use client\1\s*;?\s*/, "");
 }
 
+/**
+ * Best-effort static detection of an async default export, e.g.
+ * `export default async function Page() {}`. Covers direct async
+ * function/arrow default exports and `export default X` where `X` is a local
+ * `async function X` or `X = async ...` declaration. Wrapped exports such as
+ * `export default withAuth(Page)` cannot be resolved statically; the client
+ * runtime guards against those at hydration time.
+ */
+export function hasAsyncDefaultExport(content: string | null): boolean {
+  if (!content) return false;
+
+  const tokens = tokenizeModuleSource(content);
+  for (let index = 0; index < tokens.length - 2; index++) {
+    const token = tokens[index];
+    if (token.kind !== "identifier" || token.value !== "export") continue;
+    if (tokens[index - 1]?.value === ".") continue;
+    if (tokens[index + 1]?.value !== "default") continue;
+
+    const exported = tokens[index + 2];
+    if (exported.kind === "identifier" && exported.value === "async") {
+      return true;
+    }
+    if (
+      exported.kind === "identifier" &&
+      !["function", "class"].includes(exported.value) &&
+      tokens[index + 3]?.value !== "(" &&
+      isAsyncLocalDeclaration(tokens, exported.value)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isAsyncLocalDeclaration(tokens: ModuleSourceToken[], name: string): boolean {
+  for (let index = 0; index < tokens.length - 2; index++) {
+    if (
+      tokens[index].value === "async" &&
+      tokens[index + 1]?.value === "function" &&
+      tokens[index + 2]?.value === name
+    ) {
+      return true;
+    }
+    if (
+      tokens[index].value === name &&
+      tokens[index + 1]?.value === "=" &&
+      tokens[index + 2]?.value === "async"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function parseClientModuleMetadata(
   content: string | null,
   inspectIslandExport: boolean,
@@ -415,6 +476,19 @@ function inspectClientModuleMetadata(
   }
 
   const shouldHydrate = parsed.hasHydrateExport || importsClientBoundary;
+
+  // React cannot run an async component in a client root: hydrating the route
+  // module would throw, blank the server-rendered HTML, and re-run the page's
+  // data fetching in a loop. Keep async server pages server-only even when
+  // they import client components.
+  if (shouldHydrate && hasAsyncDefaultExport(content)) {
+    return {
+      isClientComponent: false,
+      shouldHydrate: false,
+      islandStrategy: null,
+      suppressedAsyncHydration: true,
+    };
+  }
 
   return {
     isClientComponent: false,

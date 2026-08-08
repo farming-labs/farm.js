@@ -321,6 +321,100 @@ describe("client component path resolution", () => {
     });
   });
 
+  it("keeps an async server page server-only when it imports a client component", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-import-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+    const clientFile = path.join(root, "src", "app", "demo", "star-button.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(clientFile, '"use client";\nexport function StarButton() { return null; }\n');
+    fs.writeFileSync(
+      pageFile,
+      'import { StarButton } from "./star-button";\nexport default async function Page() { const data = await fetch("/api/repo"); return <StarButton data={data} />; }\n',
+    );
+
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: false,
+      islandStrategy: null,
+      suppressedAsyncHydration: true,
+    });
+    expect(shouldHydrateModule(pageFile, root)).toBe(false);
+  });
+
+  it("detects async arrow and indirect async default exports", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-variants-"));
+    tempDirs.push(root);
+
+    const appDir = path.join(root, "src", "app", "demo");
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(appDir, "widget.tsx"),
+      '"use client";\nexport function Widget() { return null; }\n',
+    );
+
+    const arrowPage = path.join(appDir, "arrow.tsx");
+    fs.writeFileSync(
+      arrowPage,
+      'import { Widget } from "./widget";\nexport default async () => { await Promise.resolve(); return <Widget />; };\n',
+    );
+    expect(shouldHydrateModule(arrowPage, root)).toBe(false);
+
+    const indirectPage = path.join(appDir, "indirect.tsx");
+    fs.writeFileSync(
+      indirectPage,
+      'import { Widget } from "./widget";\nasync function Page() { return <Widget />; }\nexport default Page;\n',
+    );
+    expect(shouldHydrateModule(indirectPage, root)).toBe(false);
+
+    const constPage = path.join(appDir, "const.tsx");
+    fs.writeFileSync(
+      constPage,
+      'import { Widget } from "./widget";\nconst Page = async () => <Widget />;\nexport default Page;\n',
+    );
+    expect(shouldHydrateModule(constPage, root)).toBe(false);
+  });
+
+  it("suppresses an explicit hydrate export on async server pages", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-async-hydrate-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(
+      pageFile,
+      "export const hydrate = true;\nexport default async function Page() { return null; }\n",
+    );
+
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: false,
+      islandStrategy: null,
+      suppressedAsyncHydration: true,
+    });
+  });
+
+  it("still hydrates synchronous pages whose imports include client components", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-sync-import-"));
+    tempDirs.push(root);
+
+    const pageFile = path.join(root, "src", "app", "demo", "page.tsx");
+    const clientFile = path.join(root, "src", "app", "demo", "widget.tsx");
+    fs.mkdirSync(path.dirname(pageFile), { recursive: true });
+    fs.writeFileSync(clientFile, '"use client";\nexport function Widget() { return null; }\n');
+    fs.writeFileSync(
+      pageFile,
+      'import { Widget } from "./widget";\nasync function loadData() { return fetch("/api"); }\nexport default function Page() { return <Widget loader={loadData} />; }\n',
+    );
+
+    expect(getClientModuleMetadata(pageFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: true,
+      islandStrategy: "load",
+    });
+  });
+
   it("reads a static island strategy from client modules", () => {
     expect(
       getIslandStrategyExport(

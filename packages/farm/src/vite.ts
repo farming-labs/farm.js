@@ -3908,6 +3908,19 @@ async function tryHydrateImportedPage(
     const PageComponent = pageModule?.default;
     if (!PageComponent) return false;
 
+    if (
+      typeof PageComponent === 'function' &&
+      PageComponent.constructor &&
+      PageComponent.constructor.name === 'AsyncFunction'
+    ) {
+      console.warn(
+        '[Farm.js] Skipping hydration for ' + modulePath +
+        ': async server components cannot run in the browser. ' +
+        'Server-rendered HTML is preserved; move interactive UI into a "use client" child of a synchronous page.'
+      );
+      return false;
+    }
+
     currentPageComponent = PageComponent;
     currentPageProps = await buildRouteComponentProps(
       pageModule,

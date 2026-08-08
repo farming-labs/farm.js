@@ -1050,6 +1050,13 @@ async function buildClient(
       const applicableClientLayouts = clientLayouts.filter(
         (layout) => layout.shouldHydrate && layoutAppliesToRoute(layout.pattern, route.pattern),
       );
+      if (metadata.suppressedAsyncHydration) {
+        logger.warn(
+          `⚠️  ${route.pattern} is an async server component that imports client components; ` +
+            `React cannot hydrate async components, so the route stays server-rendered ` +
+            `and its client imports are not interactive.`,
+        );
+      }
       if (metadata.shouldHydrate || applicableClientLayouts.length > 0) {
         const relativePath = route.modulePath.replace(root, "").replace(/^\//, "");
         const hydrationStrategies = [
@@ -2030,6 +2037,13 @@ async function createMatchedHydrationElement(matched, pathname, searchParams) {
   if (matched.route.pageShouldHydrate) {
     const Component = await loadRouteComponent(matched.route);
     if (!Component) return null;
+    if (typeof Component === "function" && Component.constructor && Component.constructor.name === "AsyncFunction") {
+      console.warn(
+        "[Farm.js] Skipping hydration for " + pathname +
+        ": async server components cannot run in the browser. Server-rendered HTML is preserved."
+      );
+      return null;
+    }
     const props = { params: params, searchParams: Promise.resolve(searchParams) };
     pageElement = React.createElement(Component, props);
   } else if (hydrateLayouts) {
