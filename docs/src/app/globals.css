@@ -1019,7 +1019,6 @@
 }
 
 @media (min-width: 1024px) {
-
   #nd-docs-layout.grid:not([data-fd-framework]) {
     --fd-header-height: 44px;
     grid-template:
@@ -1201,8 +1200,7 @@
     overflow: hidden;
   }
 
-  #nd-docs-layout:has([data-fd-tablet-sidebar-state="open"])
-    [data-sidebar-placeholder] {
+  #nd-docs-layout:has([data-fd-tablet-sidebar-state="open"]) [data-sidebar-placeholder] {
     position: fixed;
     inset: 0 auto 0 0;
     z-index: 100;
@@ -1212,9 +1210,7 @@
     pointer-events: auto;
   }
 
-  #nd-docs-layout:has([data-fd-tablet-sidebar-state="open"])
-    [data-sidebar-placeholder]
-    > aside {
+  #nd-docs-layout:has([data-fd-tablet-sidebar-state="open"]) [data-sidebar-placeholder] > aside {
     position: absolute;
     inset: 0;
     width: 100% !important;
@@ -1228,9 +1224,7 @@
     width: 100% !important;
   }
 
-  #nd-docs-layout:has([data-fd-tablet-sidebar-state="open"])
-    aside#nd-sidebar
-    > div:first-child {
+  #nd-docs-layout:has([data-fd-tablet-sidebar-state="open"]) aside#nd-sidebar > div:first-child {
     height: 56px;
     min-height: 56px;
     max-height: 56px;
@@ -1365,10 +1359,7 @@
     letter-spacing: 0.03em;
   }
 
-  aside#nd-sidebar-mobile
-    > div:first-child
-    > div
-    > button[aria-label="Open Sidebar"]:last-child {
+  aside#nd-sidebar-mobile > div:first-child > div > button[aria-label="Open Sidebar"]:last-child {
     position: relative;
     width: 44px;
     height: 44px;
@@ -1549,8 +1540,7 @@ aside#nd-sidebar > div:first-child > div:first-child > a::before {
   background:
     linear-gradient(currentColor 0 0) 0 0 / 6px 6px no-repeat,
     linear-gradient(currentColor 0 0) 8px 0 / 8px 6px no-repeat,
-    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 0 8px / 6px 6px
-      no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 0 8px / 6px 6px no-repeat,
     linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 8px 8px / 8px 6px
       no-repeat;
 }
@@ -1560,9 +1550,7 @@ aside#nd-sidebar > div:first-child button[data-search-full] {
   display: none !important;
 }
 
-#nd-docs-layout:not([data-fd-framework])
-  aside#nd-sidebar
-  > div:last-child:not(.sidebar-scroll) {
+#nd-docs-layout:not([data-fd-framework]) aside#nd-sidebar > div:last-child:not(.sidebar-scroll) {
   display: none !important;
 }
 
@@ -1670,10 +1658,7 @@ aside div.overflow-hidden[data-state] button[aria-expanded]::after {
   background: color-mix(in srgb, var(--color-fd-border) 88%, transparent);
 }
 
-aside
-  div.overflow-hidden[data-state]
-  div.overflow-hidden[data-state]
-  a[data-active] {
+aside div.overflow-hidden[data-state] div.overflow-hidden[data-state] a[data-active] {
   padding-inline-start: 103px !important;
 }
 
@@ -1700,17 +1685,12 @@ aside div.overflow-hidden[data-state]::before {
   margin: 0 !important;
 }
 
-aside
-  div.overflow-hidden[data-state]
-  div.overflow-hidden[data-state]
-  a[data-active]::after {
+aside div.overflow-hidden[data-state] div.overflow-hidden[data-state] a[data-active]::after {
   inset-inline-start: 75px;
   width: 28px;
 }
 
-aside
-  div.overflow-hidden[data-state]
-  div.overflow-hidden[data-state]::before {
+aside div.overflow-hidden[data-state] div.overflow-hidden[data-state]::before {
   content: none !important;
 }
 
@@ -1886,8 +1866,7 @@ figure.shiki button[aria-label="Copy Text"],
 }
 
 #nd-docs-layout .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next),
-#nd-docs-layout[data-fd-framework]
-  .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next) {
+#nd-docs-layout[data-fd-framework] .fd-page-nav:has(.fd-page-nav-prev):has(.fd-page-nav-next) {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
