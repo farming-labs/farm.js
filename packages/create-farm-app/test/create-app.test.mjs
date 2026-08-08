@@ -8,6 +8,15 @@ import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+test("uses Farm.js branding for CLI template choices", async () => {
+  const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
+
+  assert.match(source, /title: "Farm\.js Basic"/);
+  assert.match(source, /title: "Farm\.js Auth"/);
+  assert.match(source, /title: "Farm\.js Better Auth"/);
+  assert.doesNotMatch(source, /title: "FARMJS/);
+});
+
 test("generates a buildable starter application", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-"));
 

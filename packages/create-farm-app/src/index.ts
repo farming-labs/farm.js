@@ -19,22 +19,22 @@ const templateDetails: Record<
   }
 > = {
   basic: {
-    title: "FARMJS Basic",
-    description: "A minimal FARMJS app with built-in Tailwind support",
+    title: "Farm.js Basic",
+    description: "A minimal Farm.js app with built-in Tailwind support",
     instructions: [
       "Tailwind is enabled by default. You only need postcss config for custom plugins.",
     ],
   },
   auth: {
-    title: "FARMJS Auth",
-    description: "FARMJS-native auth with local SQLite, secure sessions, and protected routes",
+    title: "Farm.js Auth",
+    description: "Farm.js-native auth with local SQLite, secure sessions, and protected routes",
     instructions: [
       "FARMJS Auth uses local SQLite automatically; no auth environment variables are needed locally.",
       "For production, set FARM_AUTH_URL, FARM_AUTH_SECRET, and DATABASE_URL, then run the auth:migrate script.",
     ],
   },
   "better-auth": {
-    title: "FARMJS Better Auth",
+    title: "Farm.js Better Auth",
     description: "Better Auth with Postgres, secure sessions, and protected routes",
     instructions: [
       "Before starting, copy .env.example to .env.local and set DATABASE_URL and BETTER_AUTH_SECRET.",
