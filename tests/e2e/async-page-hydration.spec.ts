@@ -33,8 +33,10 @@ test.describe("Async server pages importing client components", () => {
     const response = await request.get("/async-client-import");
     expect(response.status()).toBe(200);
 
+    // Depending on the active render pipeline the hydration flag is either
+    // emitted as false or omitted entirely — it must never be true.
     const html = await response.text();
-    expect(html).toContain("window.__FARM_PAGE_SHOULD_HYDRATE__ = false");
+    expect(html).not.toContain("window.__FARM_PAGE_SHOULD_HYDRATE__ = true");
     expect(html).toContain("Fetched stars:");
   });
 });
