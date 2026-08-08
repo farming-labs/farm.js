@@ -57,7 +57,7 @@ No install needed: [open the playground on StackBlitz](https://stackblitz.com/gi
 ### Create a New App
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```

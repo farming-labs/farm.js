@@ -20,7 +20,7 @@ This project was generated from the FARMJS Auth template included with `@farm.js
 ## Quick start
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template auth --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template auth --typescript
 cd my-app
 pnpm dev
 ```
