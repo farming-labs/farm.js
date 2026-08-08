@@ -40,7 +40,7 @@ export default async function HomePage() {
             className="resource-links"
             primary={{
               href: session ? "/dashboard" : "/sign-up",
-              label: session ? "Dashboard →" : "Get started →",
+              label: session ? "Dashboard" : "Get started",
             }}
           />
         </div>

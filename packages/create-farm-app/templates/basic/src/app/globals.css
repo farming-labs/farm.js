@@ -178,12 +178,24 @@ code {
 .resource-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 1.25rem;
+  gap: 0.65rem;
   margin-top: 1.5rem;
   color: var(--ink-soft);
   font-family: var(--font-mono);
   font-size: 0.68rem;
   text-transform: uppercase;
+}
+
+.resource-link-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.65rem;
+  white-space: nowrap;
+}
+
+.resource-separator {
+  color: var(--ink-faint);
+  user-select: none;
 }
 
 .resource-links a {

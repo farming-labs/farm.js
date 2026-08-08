@@ -41,22 +41,38 @@ function GitHubIcon() {
   );
 }
 
+function ResourceSeparator() {
+  return (
+    <span className="resource-separator" aria-hidden="true">
+      /
+    </span>
+  );
+}
+
 export function ResourceLinks({ className, primary }: ResourceLinksProps) {
   return (
     <nav className={className} aria-label="Starter resources">
       {primary ? (
-        <a className="resource-link-primary" href={primary.href}>
-          {primary.label}
-        </a>
+        <span className="resource-link-item">
+          <a className="resource-link-primary" href={primary.href}>
+            {primary.label}
+          </a>
+        </span>
       ) : null}
-      <a href="https://farm.js.dev">
-        <DocsIcon />
-        <span>Docs ↗</span>
-      </a>
-      <a href="https://github.com/farming-labs/farm.js">
-        <GitHubIcon />
-        <span>GitHub ↗</span>
-      </a>
+      <span className="resource-link-item">
+        {primary ? <ResourceSeparator /> : null}
+        <a href="https://farm.js.dev">
+          <DocsIcon />
+          <span>Docs</span>
+        </a>
+      </span>
+      <span className="resource-link-item">
+        <ResourceSeparator />
+        <a href="https://github.com/farming-labs/farm.js">
+          <GitHubIcon />
+          <span>GitHub</span>
+        </a>
+      </span>
     </nav>
   );
 }

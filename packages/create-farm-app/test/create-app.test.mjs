@@ -95,7 +95,10 @@ test("generates a buildable starter application", async () => {
     );
     assert.match(generatedResourceLinks, /function DocsIcon\(\)/);
     assert.match(generatedResourceLinks, /function GitHubIcon\(\)/);
+    assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
+    assert.match(generatedResourceLinks, /className="resource-separator"/);
     assert.match(generatedResourceLinks, /aria-hidden="true"/);
+    assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
 
     const generatedStyles = await readFile(
       path.join(tempDir, "generated-app/src/app/globals.css"),
@@ -257,7 +260,10 @@ for (const template of [
       );
       assert.match(generatedResourceLinks, /function DocsIcon\(\)/);
       assert.match(generatedResourceLinks, /function GitHubIcon\(\)/);
+      assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
+      assert.match(generatedResourceLinks, /className="resource-separator"/);
       assert.match(generatedResourceLinks, /aria-hidden="true"/);
+      assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
 
       const generatedStyles = await readFile(
         path.join(generatedDir, "src/app/globals.css"),
