@@ -8,6 +8,15 @@ import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+test("uses Farm.js branding for CLI template choices", async () => {
+  const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
+
+  assert.match(source, /title: "Farm\.js Basic"/);
+  assert.match(source, /title: "Farm\.js Auth"/);
+  assert.match(source, /title: "Farm\.js Better Auth"/);
+  assert.doesNotMatch(source, /title: "FARMJS/);
+});
+
 test("generates a buildable starter application", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-"));
 
@@ -98,6 +107,8 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
     assert.match(generatedResourceLinks, /className="resource-separator"/);
     assert.match(generatedResourceLinks, /aria-hidden="true"/);
+    assert.match(generatedResourceLinks, /href="https:\/\/farmjs\.dev"/);
+    assert.doesNotMatch(generatedResourceLinks, /farm\.js\.dev/);
     assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
 
     const generatedStyles = await readFile(
@@ -264,7 +275,16 @@ for (const template of [
       assert.match(generatedResourceLinks, /function ResourceSeparator\(\)/);
       assert.match(generatedResourceLinks, /className="resource-separator"/);
       assert.match(generatedResourceLinks, /aria-hidden="true"/);
+      assert.match(generatedResourceLinks, /href="https:\/\/farmjs\.dev"/);
+      assert.doesNotMatch(generatedResourceLinks, /farm\.js\.dev/);
       assert.doesNotMatch(generatedResourceLinks, /Docs ↗|GitHub ↗/);
+
+      const generatedSiteHeader = await readFile(
+        path.join(generatedDir, "src/components/site-header.tsx"),
+        "utf8",
+      );
+      assert.match(generatedSiteHeader, /href="https:\/\/farmjs\.dev"/);
+      assert.doesNotMatch(generatedSiteHeader, /farm\.js\.dev/);
 
       const generatedStyles = await readFile(
         path.join(generatedDir, "src/app/globals.css"),
