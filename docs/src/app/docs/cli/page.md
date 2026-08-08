@@ -8,6 +8,18 @@ section: "Reference"
 
 Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and add integrations.
 
+## Create an app
+
+```bash
+pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
+pnpm create @farm.js/app@beta --list-templates
+```
+
+The create-app CLI includes Basic, Farm.js Auth, Better Auth, and one ready-to-configure starter
+for every provider supported by `farm add integration --ui`. See [Getting Started](/docs/getting-started#choose-a-starter)
+for the complete template catalog.
+
 ## Common commands
 
 | Command                          | Purpose                                                              |
@@ -63,7 +75,9 @@ farm add integration better-auth --ui
 farm add integration jobs-trigger
 ```
 
-Without `--ui`, the CLI installs integration wiring. With `--ui`, it also installs app-owned shadcn-style components for the selected provider.
+Without `--ui`, the CLI installs the selected first-party provider package and its integration
+wiring. With `--ui`, it also installs app-owned shadcn-style components for that provider. Farm
+package versions follow the app's installed `@farm.js/core` version, including beta releases.
 
 ## Generate types
 

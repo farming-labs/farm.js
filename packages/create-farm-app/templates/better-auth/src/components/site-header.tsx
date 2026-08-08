@@ -21,7 +21,7 @@ export function SiteHeader({ user }: SiteHeaderProps) {
       </a>
 
       <nav className="header-nav" aria-label="Primary navigation">
-        <a href="https://farmjs.dev">Docs</a>
+        <a href="https://farm.js.dev">Docs</a>
         {user ? (
           <a className="header-account" href="/dashboard">
             <span className="avatar" aria-hidden="true">

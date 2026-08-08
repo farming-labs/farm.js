@@ -2,22 +2,33 @@ import prompts from "prompts";
 import path from "path";
 import fs from "fs/promises";
 import { spawn } from "node:child_process";
+import {
+  addFarmIntegration,
+  type AddFarmIntegrationResult,
+  type FarmIntegrationProvider,
+} from "@farm.js/cli/add-integration";
 import { logger, showBanner } from "./utils";
 
 interface CreateAppOptions {
   template?: string;
   typescript?: boolean;
   skipInstall?: boolean;
+  listTemplates?: boolean;
 }
 
-const templateDetails: Record<
-  string,
-  {
-    title: string;
-    description: string;
-    instructions: string[];
-  }
-> = {
+interface TemplateDetails {
+  title: string;
+  description: string;
+  instructions: string[];
+  integration?: {
+    provider: FarmIntegrationProvider;
+    label: string;
+    route: string;
+    docsPath: string;
+  };
+}
+
+const templateDetails: Record<string, TemplateDetails> = {
   basic: {
     title: "Farm.js Basic",
     description: "A minimal Farm.js app with built-in Tailwind support",
@@ -41,7 +52,130 @@ const templateDetails: Record<
       "Better Auth migrations run automatically when the auth instance starts.",
     ],
   },
+  ai: integrationTemplate({
+    title: "Farm.js AI",
+    description: "AI SDK chat route with a ready-to-use chat interface",
+    provider: "ai",
+    label: "AI",
+    route: "/integrations/ai",
+    docsPath: "/docs/integrations",
+  }),
+  auth0: integrationTemplate({
+    title: "Farm.js Auth0",
+    description: "Auth0 login, sessions, protected routes, and account controls",
+    provider: "auth0",
+    label: "Auth0",
+    route: "/integrations/auth0",
+    docsPath: "/docs/integrations/auth/auth0",
+  }),
+  authjs: integrationTemplate({
+    title: "Farm.js Auth.js",
+    description: "Auth.js with GitHub OAuth and Farm-owned route mounting",
+    provider: "authjs",
+    label: "Auth.js",
+    route: "/integrations/authjs",
+    docsPath: "/docs/integrations/auth/authjs",
+  }),
+  autumn: integrationTemplate({
+    title: "Farm.js Autumn",
+    description: "Autumn products, checkout, billing state, and customer portal",
+    provider: "autumn",
+    label: "Autumn",
+    route: "/integrations/autumn",
+    docsPath: "/docs/integrations/autumn",
+  }),
+  clerk: integrationTemplate({
+    title: "Farm.js Clerk",
+    description: "Clerk authentication, account entry points, and protected routes",
+    provider: "clerk",
+    label: "Clerk",
+    route: "/integrations/clerk",
+    docsPath: "/docs/integrations/auth/clerk",
+  }),
+  "jobs-inngest": integrationTemplate({
+    title: "Farm.js Inngest",
+    description: "Typed background jobs backed by Inngest",
+    provider: "jobs-inngest",
+    label: "Inngest",
+    route: "/integrations/jobs-inngest",
+    docsPath: "/docs/integrations/inngest",
+  }),
+  "jobs-trigger": integrationTemplate({
+    title: "Farm.js Trigger.dev",
+    description: "Typed background jobs backed by Trigger.dev",
+    provider: "jobs-trigger",
+    label: "Trigger.dev",
+    route: "/integrations/jobs-trigger",
+    docsPath: "/docs/integrations/trigger",
+  }),
+  polar: integrationTemplate({
+    title: "Farm.js Polar",
+    description: "Polar products, checkout, billing state, and customer portal",
+    provider: "polar",
+    label: "Polar",
+    route: "/integrations/polar",
+    docsPath: "/docs/integrations/polar",
+  }),
+  resend: integrationTemplate({
+    title: "Farm.js Resend",
+    description: "Resend templates, delivery, scheduling, and webhooks",
+    provider: "resend",
+    label: "Resend",
+    route: "/integrations/resend",
+    docsPath: "/docs/integrations/email",
+  }),
+  stripe: integrationTemplate({
+    title: "Farm.js Stripe",
+    description: "Stripe products, checkout, billing portal, and webhooks",
+    provider: "stripe",
+    label: "Stripe",
+    route: "/integrations/stripe",
+    docsPath: "/docs/integrations/stripe",
+  }),
+  supabase: integrationTemplate({
+    title: "Farm.js Supabase",
+    description: "Supabase authentication, sessions, OAuth, and protected routes",
+    provider: "supabase",
+    label: "Supabase",
+    route: "/integrations/supabase",
+    docsPath: "/docs/integrations/auth/supabase",
+  }),
+  unkey: integrationTemplate({
+    title: "Farm.js Unkey",
+    description: "Unkey API key creation, verification, and route protection",
+    provider: "unkey",
+    label: "Unkey",
+    route: "/integrations/unkey",
+    docsPath: "/docs/integrations/unkey",
+  }),
+  workos: integrationTemplate({
+    title: "Farm.js WorkOS",
+    description: "WorkOS AuthKit, organization sessions, and protected routes",
+    provider: "workos",
+    label: "WorkOS",
+    route: "/integrations/workos",
+    docsPath: "/docs/integrations/auth/workos",
+  }),
 };
+
+function integrationTemplate(
+  input: NonNullable<TemplateDetails["integration"]> & {
+    title: string;
+    description: string;
+  },
+): TemplateDetails {
+  return {
+    title: input.title,
+    description: input.description,
+    instructions: [],
+    integration: {
+      provider: input.provider,
+      label: input.label,
+      route: input.route,
+      docsPath: input.docsPath,
+    },
+  };
+}
 
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
 
@@ -57,6 +191,15 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   if (templates.length === 0) {
     logger.error("No templates are available in this package.");
     process.exit(1);
+  }
+
+  if (options.listTemplates) {
+    logger.info("Available templates");
+    for (const template of templates) {
+      const details = templateDetails[template];
+      logger.info(`  ${template.padEnd(14)} ${details?.description ?? ""}`.trimEnd());
+    }
+    return;
   }
 
   // Get project name if not provided
@@ -151,7 +294,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
 
   await fs.mkdir(projectPath, { recursive: true });
 
-  await copyTemplate(template!, projectPath, useTypeScript!);
+  const integrationResult = await copyTemplate(template!, projectPath, useTypeScript!);
 
   await updatePackageJson(projectPath, projectName!, packageManager);
 
@@ -174,10 +317,30 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   for (const instruction of templateDetails[template!]?.instructions ?? []) {
     logger.info(instruction);
   }
+  if (integrationResult) {
+    const details = templateDetails[template!].integration!;
+    logger.info(`Open ${details.route} for the ${details.label} starter.`);
+    if (integrationResult.env.length) {
+      logger.info("Copy .env.example to .env.local and add your provider credentials.");
+    }
+    for (const note of integrationResult.notes) {
+      logger.info(note);
+    }
+  }
 }
 
-async function copyTemplate(template: string, projectPath: string, useTypeScript: boolean) {
-  const templatePath = path.join(__dirname, "..", "templates", template);
+async function copyTemplate(
+  template: string,
+  projectPath: string,
+  useTypeScript: boolean,
+): Promise<AddFarmIntegrationResult | undefined> {
+  const details = templateDetails[template];
+  const templatePath = path.join(
+    __dirname,
+    "..",
+    "templates",
+    details?.integration ? "basic" : template,
+  );
 
   // Copy base template files
   await copyDir(templatePath, projectPath);
@@ -189,6 +352,143 @@ async function copyTemplate(template: string, projectPath: string, useTypeScript
       await copyDir(tsTemplatePath, projectPath);
     }
   }
+
+  if (!details?.integration) {
+    return undefined;
+  }
+
+  const result = await addFarmIntegration({
+    root: projectPath,
+    provider: details.integration.provider,
+    ui: true,
+  });
+  await writeEnvironmentExample(projectPath, result.env);
+  await writeIntegrationHomePage(projectPath, details.integration, result.env.length > 0);
+  await writeIntegrationReadme(projectPath, details.integration, result.env);
+  return result;
+}
+
+async function writeEnvironmentExample(projectPath: string, keys: string[]) {
+  if (keys.length === 0) {
+    return;
+  }
+
+  const envPath = path.join(projectPath, ".env.example");
+  let current = "";
+  try {
+    current = await fs.readFile(envPath, "utf8");
+  } catch {
+    // The provider has no setup-owned environment file yet.
+  }
+
+  const existingKeys = new Set(
+    current
+      .split(/\r?\n/)
+      .map((line) => line.match(/^([A-Z][A-Z0-9_]*)=/)?.[1])
+      .filter((key): key is string => Boolean(key)),
+  );
+  const additions = keys
+    .filter((key) => !existingKeys.has(key))
+    .map((key) => `${key}=${environmentExampleValue(key)}`);
+
+  if (additions.length > 0) {
+    await fs.writeFile(
+      envPath,
+      `${current.trimEnd()}${current.trim() ? "\n" : ""}${additions.join("\n")}\n`,
+      "utf8",
+    );
+  }
+}
+
+function environmentExampleValue(key: string) {
+  if (key === "APP_BASE_URL") {
+    return "http://localhost:3000";
+  }
+  if (key === "AUTH_SECRET") {
+    return "replace-with-at-least-32-random-characters";
+  }
+  if (key === "UNKEY_BASE_URL") {
+    return "https://api.unkey.com";
+  }
+  return "";
+}
+
+async function writeIntegrationHomePage(
+  projectPath: string,
+  integration: NonNullable<TemplateDetails["integration"]>,
+  hasEnvironment: boolean,
+) {
+  const commands = [...(hasEnvironment ? ["cp .env.example .env.local"] : []), "pnpm dev"];
+  const commandRows = commands
+    .map(
+      (command, index) => `            <div className="command-row">
+              <span>${String(index + 1).padStart(2, "0")}</span>
+              <code>${command}</code>
+            </div>`,
+    )
+    .join("\n");
+  const source = `import { ResourceLinks } from "../components/resource-links";
+
+export default function HomePage() {
+  return (
+    <main className="landing-main">
+      <section className="hero-section">
+        <div className="hero-copy">
+          <div className="eyebrow-row">
+            <span>00</span>
+            <span>FARMJS / ${integration.label} starter</span>
+          </div>
+
+          <h1>
+            Start at <code>${integration.route}</code>.
+          </h1>
+
+          <div className="command-list" aria-label="Getting started commands">
+${commandRows}
+          </div>
+
+          <ResourceLinks
+            className="resource-links"
+            primary={{ href: "${integration.route}", label: "Get started" }}
+          />
+        </div>
+      </section>
+    </main>
+  );
+}
+`;
+
+  await fs.writeFile(path.join(projectPath, "src", "app", "page.tsx"), source, "utf8");
+}
+
+async function writeIntegrationReadme(
+  projectPath: string,
+  integration: NonNullable<TemplateDetails["integration"]>,
+  env: string[],
+) {
+  const environmentSetup = env.length
+    ? `cp .env.example .env.local\n# Add values for: ${env.join(", ")}\n`
+    : "";
+  const wiring =
+    integration.provider === "ai"
+      ? "The AI route lives in `src/app/api/chat/route.ts` and its local UI lives under `src/components/farm`."
+      : "The provider wiring lives in `src/lib/integrations` and is registered from `farm.config.ts`.";
+  const source = `# FARMJS ${integration.label} Starter
+
+## Getting started
+
+\`\`\`bash
+pnpm install
+${environmentSetup}pnpm dev
+\`\`\`
+
+Open [${integration.route}](http://localhost:3000${integration.route}) for the integration UI.
+
+${wiring}
+See the [${integration.label} integration guide](https://farm.js.dev${integration.docsPath}) for provider setup and production guidance.
+`;
+
+  await fs.writeFile(path.join(projectPath, "README.md"), source, "utf8");
 }
 
 async function copyDir(src: string, dest: string) {
@@ -272,16 +572,20 @@ async function getAvailableTemplates(): Promise<string[]> {
   const templatesRoot = path.join(__dirname, "..", "templates");
   const entries = await fs.readdir(templatesRoot, { withFileTypes: true });
   const templateOrder = Object.keys(templateDetails);
-  return entries
+  const directoryTemplates = entries
     .filter((entry) => entry.isDirectory() && !entry.name.startsWith("_"))
-    .map((entry) => entry.name)
-    .sort((left, right) => {
-      const leftIndex = templateOrder.indexOf(left);
-      const rightIndex = templateOrder.indexOf(right);
-      const normalizedLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
-      const normalizedRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
-      return normalizedLeft - normalizedRight || left.localeCompare(right);
-    });
+    .map((entry) => entry.name);
+  const generatedTemplates = Object.entries(templateDetails)
+    .filter(([, details]) => Boolean(details.integration))
+    .map(([name]) => name);
+
+  return [...new Set([...directoryTemplates, ...generatedTemplates])].sort((left, right) => {
+    const leftIndex = templateOrder.indexOf(left);
+    const rightIndex = templateOrder.indexOf(right);
+    const normalizedLeft = leftIndex === -1 ? Number.MAX_SAFE_INTEGER : leftIndex;
+    const normalizedRight = rightIndex === -1 ? Number.MAX_SAFE_INTEGER : rightIndex;
+    return normalizedLeft - normalizedRight || left.localeCompare(right);
+  });
 }
 
 async function updatePackageJson(
