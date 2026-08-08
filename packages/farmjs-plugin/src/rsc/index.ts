@@ -37,6 +37,7 @@ import { resolveRscBuildOutputPath } from "./build-paths.js";
 import { assertRscPackageCompatibility } from "./compatibility.js";
 import fs from "fs/promises";
 import path from "path";
+import { devServableFileExists } from "../dev-static.js";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 // Use API and middleware plugins from @farm.js/core (require so CJS build resolves when ESM .mjs is missing)
@@ -1148,13 +1149,17 @@ if (document.readyState === 'loading') {
             const pathname = url.split("?")[0];
             const method = req.method || "GET";
 
+            // Dotted paths only skip RSC rendering when they map to a real
+            // file on disk — route segments may legitimately contain dots.
             if (
               pathname.startsWith("/@") ||
               pathname.startsWith("/__") ||
               pathname.startsWith("/node_modules") ||
               pathname.startsWith("/src/") ||
               pathname.startsWith("/api/") ||
-              (pathname.includes(".") && !pathname.endsWith("/"))
+              (pathname.includes(".") &&
+                !pathname.endsWith("/") &&
+                devServableFileExists(pathname, [server.config.publicDir, server.config.root]))
             ) {
               return next();
             }

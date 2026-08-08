@@ -90,6 +90,16 @@ describe("matchRoute", () => {
     expect(result.params).toEqual({ id: "123" });
   });
 
+  it("should match dynamic segments containing dots", () => {
+    const segments = [
+      { segment: "user", isDynamic: true, isOptional: false, isCatchAll: false },
+      { segment: "repo", isDynamic: true, isOptional: false, isCatchAll: false },
+    ];
+    const result = matchRoute("/kinfish/farm.js", segments);
+    expect(result.matches).toBe(true);
+    expect(result.params).toEqual({ user: "kinfish", repo: "farm.js" });
+  });
+
   it("should match catch-all routes", () => {
     const segments = [
       { segment: "blog", isDynamic: false, isOptional: false, isCatchAll: false },
