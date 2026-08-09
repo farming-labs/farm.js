@@ -164,7 +164,7 @@ export function aiChatUIFeature(): UIFeatureDefinition {
     notes: ['Open "/integrations/ai" to try the generated chat UI.'],
     files: () => [
       componentFile("ai-chat.tsx", aiChatTemplate()),
-      integrationPageFile("ai", "AIChat"),
+      integrationPageFile("ai", "AIChat", "ai-chat"),
     ],
   };
 }
@@ -195,41 +195,29 @@ export function workosAuthUIFeature(): UIFeatureDefinition {
           key: input.key,
           provider: "WorkOS",
           componentName: "WorkOSAuthPanel",
-          statusCall: "session.get",
-          logoutCall: "logout.post",
+          statusCall: "session",
+          statusMethod: "get",
+          logoutCall: "logout",
+          logoutMethod: "post",
           loginHref: "/login?returnTo=/dashboard",
           signupHref: "/signup?returnTo=/dashboard",
           statusLabel: "Session",
         }),
       ),
-      integrationPageFile("workos", "WorkOSAuthPanel"),
+      integrationPageFile("workos", "WorkOSAuthPanel", "workos-auth-panel"),
     ],
   };
 }
 
 export function auth0AuthUIFeature(): UIFeatureDefinition {
-  return {
-    name: "auth0-auth",
-    description: "Auth0 auth UI",
-    components: ["badge", "button", "card"],
-    notes: ['Open "/integrations/auth0" to try the generated auth UI.'],
-    files: (input) => [
-      componentFile(
-        "auth0-auth-panel.tsx",
-        hostedAuthTemplate({
-          key: input.key,
-          provider: "Auth0",
-          componentName: "Auth0AuthPanel",
-          statusCall: "profile.get",
-          logoutCall: "logout.get",
-          loginHref: "/auth/login?returnTo=/dashboard",
-          signupHref: "/auth/signup?returnTo=/dashboard",
-          statusLabel: "Profile",
-        }),
-      ),
-      integrationPageFile("auth0", "Auth0AuthPanel"),
-    ],
-  };
+  return authRouteShellUIFeature({
+    provider: "auth0",
+    label: "Auth0",
+    componentName: "Auth0AuthPanel",
+    signInHref: "/auth/login?returnTo=/dashboard",
+    signUpHref: "/auth/signup?returnTo=/dashboard",
+    sessionHref: "/auth/profile",
+  });
 }
 
 export function clerkAuthUIFeature(): UIFeatureDefinition {
@@ -306,12 +294,17 @@ export function jobsUIFeature(provider: "inngest" | "trigger"): UIFeatureDefinit
 export function unkeyApiKeysUIFeature(): UIFeatureDefinition {
   return {
     name: "unkey-api-keys",
-    description: "Unkey API key console UI",
-    components: ["badge", "button", "card", "input", "label"],
-    notes: ['Open "/integrations/unkey" to try the generated API key UI.'],
-    files: (input) => [
-      componentFile("unkey-api-keys-console.tsx", unkeyApiKeysTemplate(input.key)),
+    description: "Unkey protected route UI",
+    components: ["badge", "card"],
+    needsApiClient: false,
+    notes: ['Open "/integrations/unkey" to test the generated protected API route.'],
+    files: () => [
+      componentFile("unkey-api-keys-console.tsx", unkeyApiKeysTemplate()),
       integrationPageFile("unkey", "UnkeyApiKeysConsole"),
+      {
+        path: path.join("src", "app", "api", "protected", "route.ts"),
+        source: unkeyProtectedRouteTemplate(),
+      },
     ],
   };
 }
@@ -343,7 +336,7 @@ function billingUIFeature(input: {
 }
 
 function authRouteShellUIFeature(input: {
-  provider: "authjs" | "better-auth" | "clerk";
+  provider: "auth0" | "authjs" | "better-auth" | "clerk";
   label: string;
   componentName: string;
   signInHref: string;
@@ -354,6 +347,7 @@ function authRouteShellUIFeature(input: {
     name: `${input.provider}-auth`,
     description: `${input.label} auth UI`,
     components: ["badge", "button", "card"],
+    needsApiClient: false,
     notes: [`Open "/integrations/${input.provider}" to try the generated auth UI.`],
     files: () => [
       componentFile(
@@ -366,7 +360,11 @@ function authRouteShellUIFeature(input: {
           sessionHref: input.sessionHref,
         }),
       ),
-      integrationPageFile(input.provider, input.componentName),
+      integrationPageFile(
+        input.provider,
+        input.componentName,
+        input.provider === "authjs" ? "authjs-auth-panel" : undefined,
+      ),
     ],
   };
 }
@@ -378,12 +376,14 @@ function componentFile(fileName: string, source: string): UIFeatureFile {
   };
 }
 
-function integrationPageFile(provider: string, componentName: string): UIFeatureFile {
-  const fileName = kebabCase(componentName);
-
+function integrationPageFile(
+  provider: string,
+  componentName: string,
+  sourceFileName = kebabCase(componentName),
+): UIFeatureFile {
   return {
     path: path.join("src", "app", "integrations", provider, "page.tsx"),
-    source: `import { ${componentName} } from "@/components/farm/${fileName}";
+    source: `import { ${componentName} } from "@/components/farm/${sourceFileName}";
 
 export default function ${componentName}Page() {
   return <${componentName} />;
@@ -622,7 +622,7 @@ const UI_DEPENDENCIES = {
   tailwindcss: "^4.1.18",
 } as const;
 
-const SHADCN_THEME_CSS = `@custom-variant dark (&:is(.dark *));
+const SHADCN_THEME_CSS = `@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 @theme inline {
   --color-background: var(--background);
@@ -648,7 +648,8 @@ const SHADCN_THEME_CSS = `@custom-variant dark (&:is(.dark *));
   --radius-lg: var(--radius);
 }
 
-:root {
+:root,
+[data-theme="light"] {
   --radius: 0.5rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -670,7 +671,7 @@ const SHADCN_THEME_CSS = `@custom-variant dark (&:is(.dark *));
   --ring: oklch(0.708 0 0);
 }
 
-.dark {
+[data-theme="dark"] {
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -1299,12 +1300,17 @@ export function SupabaseAuthPanel() {
   }
 
   async function logout() {
-    const response = await apiClient.${key}.logout.post({ body: { returnTo: "/" } });
-    if (response.data?.redirectTo) {
-      window.location.assign(response.data.redirectTo);
+    const response = await fetch("/auth/logout", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ returnTo: "/" }),
+    });
+    const data = (await response.json()) as { redirectTo?: string; error?: string };
+    if (data.redirectTo) {
+      window.location.assign(data.redirectTo);
       return;
     }
-    setStatus(response.error?.message ?? "Signed out");
+    setStatus(data.error ?? "Signed out");
   }
 
   return (
@@ -1354,7 +1360,9 @@ function hostedAuthTemplate(input: {
   provider: string;
   componentName: string;
   statusCall: string;
+  statusMethod: "get" | "post";
   logoutCall: string;
+  logoutMethod: "get" | "post";
   loginHref: string;
   signupHref: string;
   statusLabel: string;
@@ -1373,7 +1381,7 @@ export function ${input.componentName}() {
 
   async function refreshStatus() {
     setPending(true);
-    const response = await apiClient.${input.key}.${input.statusCall}();
+    const response = await apiClient.${input.key}.${input.statusCall}.${input.statusMethod}();
     if (response.error) {
       setStatus(response.error.message);
     } else {
@@ -1384,7 +1392,7 @@ export function ${input.componentName}() {
 
   async function logout() {
     setPending(true);
-    const response = await apiClient.${input.key}.${input.logoutCall}();
+    const response = await apiClient.${input.key}.${input.logoutCall}.${input.logoutMethod}();
     if (response.data?.redirectTo) {
       window.location.assign(response.data.redirectTo);
       return;
@@ -1657,17 +1665,20 @@ import { apiClient } from "@/lib/api";
 export function ResendEmailConsole() {
   const [to, setTo] = React.useState("");
   const [name, setName] = React.useState("Ada");
-  const [templateId, setTemplateId] = React.useState("welcome");
+  const templateId = "welcome" as const;
   const [status, setStatus] = React.useState("Idle");
   const [previewHtml, setPreviewHtml] = React.useState("");
 
   async function loadTemplates() {
-    const response = await apiClient.${key}.templates.get();
-    setStatus(response.error ? response.error.message : "Templates: " + (response.data ?? []).map((item) => item.id).join(", "));
+    const response = await apiClient.${key}.templates();
+    const templates = Array.isArray(response.data)
+      ? (response.data as Array<{ id: string }>)
+      : [];
+    setStatus(response.error ? response.error.message : "Templates: " + templates.map((item) => item.id).join(", "));
   }
 
   async function preview() {
-    const response = await apiClient.${key}.preview.post({
+    const response = await apiClient.${key}.preview({
       body: {
         templateId,
         data: { name },
@@ -1682,7 +1693,7 @@ export function ResendEmailConsole() {
   }
 
   async function send() {
-    const response = await apiClient.${key}.send.post({
+    const response = await apiClient.${key}.send({
       body: {
         templateId,
         to,
@@ -1705,11 +1716,7 @@ export function ResendEmailConsole() {
             <CardDescription>Template previews and delivery controls.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-3">
-              <div className="space-y-2">
-                <Label htmlFor="templateId">Template</Label>
-                <Input id="templateId" value={templateId} onChange={(event) => setTemplateId(event.target.value)} />
-              </div>
+            <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="to">To</Label>
                 <Input id="to" value={to} onChange={(event) => setTo(event.target.value)} />
@@ -1838,47 +1845,11 @@ export function ${componentName}() {
 `;
 }
 
-function unkeyApiKeysTemplate(key: string) {
-  return `"use client";
-
-import * as React from "react";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+function unkeyApiKeysTemplate() {
+  return `import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { apiClient } from "@/lib/api";
 
 export function UnkeyApiKeysConsole() {
-  const [name, setName] = React.useState("Development key");
-  const [prefix, setPrefix] = React.useState("farm");
-  const [apiKey, setApiKey] = React.useState("");
-  const [status, setStatus] = React.useState("Idle");
-
-  async function createKey() {
-    const response = await apiClient.${key}.createKey.post({
-      body: {
-        name,
-        prefix,
-      },
-    });
-    if (response.error) {
-      setStatus(response.error.message);
-      return;
-    }
-    setApiKey(response.data?.key ?? "");
-    setStatus("Created " + (response.data?.keyId ?? "key"));
-  }
-
-  async function verifyKey() {
-    const response = await apiClient.${key}.verifyKey.post({
-      body: {
-        key: apiKey,
-      },
-    });
-    setStatus(response.error ? response.error.message : response.data?.valid ? "Valid key" : "Invalid key");
-  }
-
   return (
     <main className="min-h-screen bg-background px-6 py-12 text-foreground">
       <section className="mx-auto flex w-full max-w-3xl flex-col gap-6">
@@ -1888,34 +1859,31 @@ export function UnkeyApiKeysConsole() {
         </div>
         <Card>
           <CardHeader>
-            <CardTitle className="text-xl">Key console</CardTitle>
-            <CardDescription>API key lifecycle controls.</CardDescription>
+            <CardTitle className="text-xl">Protected API</CardTitle>
+            <CardDescription>Requests are verified by Unkey before the route runs.</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="space-y-2">
-                <Label htmlFor="name">Name</Label>
-                <Input id="name" value={name} onChange={(event) => setName(event.target.value)} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="prefix">Prefix</Label>
-                <Input id="prefix" value={prefix} onChange={(event) => setPrefix(event.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="apiKey">API key</Label>
-              <Input id="apiKey" value={apiKey} onChange={(event) => setApiKey(event.target.value)} />
-            </div>
-            <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm">{status}</p>
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" onClick={() => void createKey()}>Create key</Button>
-              <Button type="button" variant="outline" onClick={() => void verifyKey()}>Verify</Button>
-            </div>
+          <CardContent className="space-y-3">
+            <code className="block overflow-x-auto rounded-md border bg-muted/30 p-3 text-xs">
+              curl http://localhost:3000/api/protected -H &quot;Authorization: Bearer YOUR_KEY&quot;
+            </code>
+            <p className="text-sm text-muted-foreground">
+              Create and rotate keys from trusted server code or the Unkey dashboard.
+            </p>
           </CardContent>
         </Card>
       </section>
     </main>
   );
+}
+`;
+}
+
+function unkeyProtectedRouteTemplate() {
+  return `export function GET() {
+  return Response.json({
+    ok: true,
+    message: "Valid Unkey API key.",
+  });
 }
 `;
 }

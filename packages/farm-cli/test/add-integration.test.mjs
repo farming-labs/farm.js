@@ -56,7 +56,7 @@ test("adds a supabase integration to a new app", async () => {
 
     assert.equal(result.provider, "supabase");
     assert.equal(result.key, "auth");
-    assert.equal(packageJson.dependencies["@farm.js/integrations"], "workspace:*");
+    assert.equal(packageJson.dependencies["@farm.js/supabase"], "workspace:*");
     assert.match(registry, /import \{ supabaseIntegration \}/);
     assert.match(registry, /auth: supabaseIntegration/);
     assert.match(component, /supabase\(\{/);
@@ -118,7 +118,7 @@ export default defineConfig({
     const component = await readFile(path.join(root, "src/lib/integrations/stripe.ts"), "utf8");
     const config = await readFile(path.join(root, "farm.config.ts"), "utf8");
 
-    assert.equal(packageJson.dependencies["@farm.js/integrations"], "latest");
+    assert.equal(packageJson.dependencies["@farm.js/stripe"], "^0.1.0");
     assert.match(registry, /existing: existingIntegration/);
     assert.match(registry, /payments: stripeIntegration/);
     assert.match(component, /secretKey: process\.env\.STRIPE_SECRET_KEY/);
@@ -203,7 +203,7 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
       components: ["badge", "button", "card"],
       files: result.ui.files,
     });
-    assert.equal(packageJson.dependencies["@farm.js/integrations"], "workspace:*");
+    assert.equal(packageJson.dependencies["@farm.js/stripe"], "workspace:*");
     assert.equal(packageJson.dependencies["class-variance-authority"], "^0.7.1");
     assert.equal(packageJson.dependencies.clsx, "^2.1.1");
     assert.equal(packageJson.dependencies["tailwind-merge"], "^3.3.1");
@@ -213,6 +213,9 @@ test("adds a stripe integration with the shadcn UI feature pack", async () => {
     assert.deepEqual(tsconfig.compilerOptions.paths["@/*"], ["./src/*"]);
     assert.match(globals, /--color-background/);
     assert.match(globals, /^@import "tailwindcss";/);
+    assert.match(globals, /@custom-variant dark \(&:where\(\[data-theme="dark"\]/);
+    assert.match(globals, /\[data-theme="dark"\] \{/);
+    assert.doesNotMatch(globals, /^\.dark \{/m);
     assert.match(globals, /body \{ margin: 0; \}/);
     assert.match(api, /createIntegrations<AppIntegrations>/);
     assert.match(pricing, /apiClient\.billing\.products/);
@@ -278,15 +281,52 @@ test("writes syntactically valid integration and UI files for every provider", a
       const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
 
       assert.equal(
-        packageJson.dependencies["@farm.js/integrations"],
+        packageJson.dependencies[provider.packageName],
         "workspace:*",
-        `${provider.name} should install @farm.js/integrations`,
+        `${provider.name} should install ${provider.packageName}`,
       );
+      assert.equal(packageJson.dependencies["@farm.js/integrations"], undefined);
 
       for (const file of result.created.filter((file) => /\.[cm]?[jt]sx?$/.test(file))) {
         const source = await readFile(file, "utf8");
         assertTypeScriptSyntax(source, file);
         assert.doesNotMatch(source, /(["'])@\//, `${file} should use portable relative imports`);
+        if (file.includes(path.join("src", "app", "integrations")) && file.endsWith("page.tsx")) {
+          const importPath = source.match(/from "([^"]+)"/)?.[1];
+          assert.ok(importPath, `${file} should import its feature component`);
+          await readFile(path.resolve(path.dirname(file), `${importPath}.tsx`), "utf8");
+        }
+      }
+
+      if (provider.name === "auth0") {
+        const auth0Panel = await readFile(
+          path.join(root, "src/components/farm/auth0-auth-panel.tsx"),
+          "utf8",
+        );
+        assert.match(auth0Panel, /\/auth\/profile/);
+        assert.doesNotMatch(auth0Panel, /apiClient/);
+      }
+      if (provider.name === "supabase") {
+        assert.match(
+          await readFile(path.join(root, "src/components/farm/supabase-auth-panel.tsx"), "utf8"),
+          /apiClient\.auth\.login\.post/,
+        );
+      }
+      if (provider.name === "workos") {
+        assert.match(
+          await readFile(path.join(root, "src/components/farm/workos-auth-panel.tsx"), "utf8"),
+          /apiClient\.auth\.session\.get\(\)/,
+        );
+      }
+      if (provider.name === "unkey") {
+        assert.doesNotMatch(
+          await readFile(path.join(root, "src/components/farm/unkey-api-keys-console.tsx"), "utf8"),
+          /apiClient/,
+        );
+        assert.match(
+          await readFile(path.join(root, "src/app/api/protected/route.ts"), "utf8"),
+          /Valid Unkey API key/,
+        );
       }
 
       if (result.mode === "integration") {
@@ -361,6 +401,36 @@ test("scaffolds a working Better Auth starter with its UI dependencies", async (
   }
 });
 
+test("scaffolds a complete Auth.js instance with matching dependencies", async () => {
+  const root = await createTempProject({
+    packageJson: {
+      type: "module",
+      dependencies: {
+        "@farm.js/core": "0.1.0-beta.23",
+      },
+    },
+  });
+
+  try {
+    const result = await addFarmIntegration({
+      root,
+      provider: "authjs",
+      ui: true,
+    });
+    const packageJson = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+    const auth = await readFile(path.join(root, "src/lib/auth.ts"), "utf8");
+
+    assert.equal(packageJson.dependencies["@farm.js/authjs"], "0.1.0-beta.23");
+    assert.equal(packageJson.dependencies["@auth/core"], "0.34.3");
+    assert.match(auth, /import \{ Auth \} from "@auth\/core"/);
+    assert.match(auth, /GitHub\(\{/);
+    assert.match(auth, /handlers:\s*\{\s*GET: handler,\s*POST: handler/s);
+    assert.deepEqual(result.env, ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("runs farm add integration stripe --ui through the CLI", async () => {
   const root = await createTempProject({
     packageJson: {
@@ -420,8 +490,8 @@ test("adds a Vercel AI SDK chat route template", async () => {
     assert.equal(result.routeFile, routeFile);
     assert.equal(result.routePath, "/api/chat");
     assert.deepEqual(result.env, ["AI_GATEWAY_API_KEY"]);
-    assert.equal(packageJson.dependencies["@farm.js/integrations"], "workspace:*");
-    assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/integrations\/ai"/);
+    assert.equal(packageJson.dependencies["@farm.js/ai"], "workspace:*");
+    assert.match(route, /import \{ aiChatRoute \} from "@farm.js\/ai"/);
     assert.match(route, /export const POST = aiChatRoute/);
     assert.match(route, /model: "openai\/gpt-4o-mini"/);
     await assert.rejects(() => readFile(path.join(root, "src/lib/integrations.ts"), "utf8"));

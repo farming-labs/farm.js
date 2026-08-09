@@ -26,6 +26,38 @@ published `@farm.js/create-app` package. The scaffolder installs React and all o
 dependencies automatically. Use `--skip-install` if you only want it to generate the project
 files.
 
+## Choose a starter
+
+Use `--list-templates` to see the same catalog in the terminal. Provider templates include the
+integration wiring, an app-owned UI feature, `.env.example`, and a minimal dark home page.
+
+| Template       | Included integration      |
+| -------------- | ------------------------- |
+| `basic`        | Minimal Farm.js app       |
+| `auth`         | Farm.js Auth              |
+| `better-auth`  | Better Auth               |
+| `ai`           | AI SDK chat               |
+| `auth0`        | Auth0                     |
+| `authjs`       | Auth.js with GitHub OAuth |
+| `autumn`       | Autumn billing            |
+| `clerk`        | Clerk                     |
+| `jobs-inngest` | Inngest jobs              |
+| `jobs-trigger` | Trigger.dev jobs          |
+| `polar`        | Polar billing             |
+| `resend`       | Resend email              |
+| `stripe`       | Stripe billing            |
+| `supabase`     | Supabase Auth             |
+| `unkey`        | Unkey API keys            |
+| `workos`       | WorkOS AuthKit            |
+
+For example:
+
+```bash
+pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
+```
+
+The generated README lists the required environment values and links to the provider guide.
+
 ## What you get
 
 - File-based routes in src/app.

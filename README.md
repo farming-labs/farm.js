@@ -54,6 +54,9 @@ pnpm dev
 
 Your app will be running at `http://localhost:3000`!
 
+Use `--list-templates` to choose a ready-to-configure Auth0, Auth.js, Autumn, Clerk, Inngest,
+Trigger.dev, Polar, Resend, Stripe, Supabase, Unkey, WorkOS, or AI starter.
+
 ### Manual Installation
 
 ```bash

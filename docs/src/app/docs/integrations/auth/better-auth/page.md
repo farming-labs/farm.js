@@ -78,7 +78,8 @@ export const appIntegrations = {
 } as const;
 ```
 
-The direct `@farm.js/better-auth` package import remains supported as well. The `@farm.js/integrations/better-auth` path is the compatibility export used by `farm add integration better-auth`.
+The direct `@farm.js/better-auth` package import is what `farm add integration better-auth` writes.
+The `@farm.js/integrations/better-auth` compatibility export remains supported for existing apps.
 
 Farm mounts the instance handler for both methods:
 

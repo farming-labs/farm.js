@@ -10,6 +10,7 @@ program
   .version(version)
   .argument("[project-name]", "Name of the project")
   .option("-t, --template <template>", "Template to use")
+  .option("--list-templates", "List all available starter templates")
   .option("--typescript", "Use TypeScript template")
   .option("--skip-install", "Skip installing dependencies")
   .action(async (projectName, options) => {
