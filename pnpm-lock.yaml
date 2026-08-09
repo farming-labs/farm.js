@@ -119,10 +119,10 @@ importers:
   examples/auth0-integration:
     dependencies:
       '@farm.js/auth0':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-auth0
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -132,7 +132,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -153,10 +153,10 @@ importers:
   examples/authjs-integration:
     dependencies:
       '@farm.js/authjs':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-authjs
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -166,7 +166,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -187,13 +187,13 @@ importers:
   examples/autumn-integration:
     dependencies:
       '@farm.js/autumn':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-autumn
       '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       better-auth:
         specifier: ^1.5.5
@@ -209,7 +209,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -233,7 +233,7 @@ importers:
   examples/basic:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       better-call:
         specifier: ^1.0.19
@@ -249,7 +249,7 @@ importers:
         version: 4.1.12
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^19.0.0
@@ -304,10 +304,10 @@ importers:
   examples/cf-agent:
     dependencies:
       '@farm.js/cf-agent':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cf-agent
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       agents:
         specifier: 0.17.4
@@ -323,7 +323,7 @@ importers:
         specifier: ^5.20260710.1
         version: 5.20260716.1
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -353,10 +353,10 @@ importers:
         specifier: ^6.1.0
         version: 6.1.0(react-dom@19.2.8)(react@19.2.8)
       '@farm.js/clerk':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-clerk
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -366,7 +366,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -387,7 +387,7 @@ importers:
   examples/deployment-presets:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -397,7 +397,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^18.2.45
@@ -415,7 +415,7 @@ importers:
   examples/docs-integration:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -425,7 +425,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^18.2.45
@@ -443,10 +443,10 @@ importers:
   examples/email-integrations/resend-example:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm
       '@farm.js/email':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-email
       '@react-email/components':
         specifier: ^1.0.12
@@ -459,7 +459,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -480,10 +480,10 @@ importers:
   examples/eve-agent:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/eve':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-eve
       ai:
         specifier: ^7.0.26
@@ -499,7 +499,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^19.0.0
@@ -517,7 +517,7 @@ importers:
   examples/i18n:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 19.2.8
@@ -527,7 +527,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^19.0.0
@@ -545,10 +545,10 @@ importers:
   examples/jobs-inngest:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/jobs':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-jobs
       react:
         specifier: 19.2.8
@@ -558,7 +558,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -579,10 +579,10 @@ importers:
   examples/jobs-integration:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/jobs':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-jobs
       react:
         specifier: 19.2.8
@@ -592,7 +592,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -613,10 +613,10 @@ importers:
   examples/jobs-trigger:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/jobs':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-jobs
       react:
         specifier: 19.2.8
@@ -626,7 +626,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -647,13 +647,13 @@ importers:
   examples/polar-integration:
     dependencies:
       '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/polar':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-polar
       better-auth:
         specifier: ^1.5.5
@@ -669,7 +669,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -693,7 +693,7 @@ importers:
   examples/preview-gateway:
     dependencies:
       '@farm.js/preview-gateway':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-preview-gateway
       '@farm.js/preview-tunnel':
         specifier: 0.1.0-beta.19
@@ -715,7 +715,7 @@ importers:
   examples/rsc-demo:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       picocolors:
         specifier: ^1.0.0
@@ -734,7 +734,7 @@ importers:
         version: 4.1.12
     devDependencies:
       '@farm.js/plugin':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farmjs-plugin
       '@rollup/plugin-terser':
         specifier: ^0.4.4
@@ -770,7 +770,7 @@ importers:
   examples/simple-demo:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       react:
         specifier: 18.3.1
@@ -786,7 +786,7 @@ importers:
   examples/ssr-ssg-demo:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       better-call:
         specifier: ^1.0.19
@@ -802,7 +802,7 @@ importers:
         version: 3.24.1
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/react':
         specifier: ^18.2.45
@@ -823,10 +823,10 @@ importers:
   examples/stripe-integration:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/stripe':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-stripe
       react:
         specifier: 19.2.8
@@ -839,7 +839,7 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -863,13 +863,13 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-stripe
       better-auth:
         specifier: ^1.3.1
@@ -891,7 +891,7 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -921,13 +921,13 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-stripe
       '@prisma/client':
         specifier: ^6.7.0
@@ -949,7 +949,7 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -979,13 +979,13 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-stripe
       '@prisma/client':
         specifier: ^6.7.0
@@ -1007,7 +1007,7 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1037,13 +1037,13 @@ importers:
         specifier: ^1.3.1
         version: 1.5.5(@better-auth/core@1.5.5)(@better-auth/utils@0.3.1)(@better-fetch/fetch@1.1.21)(better-auth@1.5.5)(better-call@1.3.2)(nanostores@1.2.0)
       '@farm.js/better-auth':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-better-auth
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm
       '@farm.js/stripe':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-stripe
       better-auth:
         specifier: ^1.3.1
@@ -1062,7 +1062,7 @@ importers:
         version: 20.4.1(@types/node@20.19.21)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../../packages/farm-cli
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1086,10 +1086,10 @@ importers:
   examples/supabase-integration:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/supabase':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-supabase
       react:
         specifier: 19.2.8
@@ -1099,7 +1099,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -1120,10 +1120,10 @@ importers:
   examples/workos-integration:
     dependencies:
       '@farm.js/core':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm
       '@farm.js/workos':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-workos
       react:
         specifier: 19.2.8
@@ -1133,7 +1133,7 @@ importers:
         version: 19.2.8(react@19.2.8)
     devDependencies:
       '@farm.js/cli':
-        specifier: 0.1.0-beta.2
+        specifier: workspace:*
         version: link:../../packages/farm-cli
       '@types/node':
         specifier: ^20.10.5
@@ -1163,9 +1163,6 @@ importers:
         specifier: ^2.4.2
         version: 2.4.2
     devDependencies:
-      '@farm.js/cli':
-        specifier: workspace:*
-        version: link:../farm-cli
       '@types/node':
         specifier: ^20.10.5
         version: 20.19.21

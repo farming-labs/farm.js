@@ -9,7 +9,7 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/preview-gateway": "0.1.0-beta.2",
+    "@farm.js/preview-gateway": "workspace:*",
     "@farm.js/preview-tunnel": "0.1.0-beta.19",
     "@vercel/blob": "^2.6.1",
     "ioredis": "^5.9.3"
