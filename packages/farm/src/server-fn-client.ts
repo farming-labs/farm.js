@@ -1,6 +1,14 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  createElement,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type FormHTMLAttributes,
+} from "react";
 import type { ServerFn } from "./server-fn";
 
 export type ServerFnActionStatus = "idle" | "pending" | "success" | "error";
@@ -33,6 +41,26 @@ export type UseServerFnReturn<TInput, TResult, TError extends Error = Error> = {
   error: TError | null;
   submit: ServerFnSubmit<TInput, TResult>;
   formAction: (formData: FormData) => Promise<void>;
+  reset: () => void;
+};
+
+export type UseActionFormProps = Omit<FormHTMLAttributes<HTMLFormElement>, "action">;
+
+export type RouteActionTarget<TServerFn extends ServerFn<any, any, any>> = {
+  readonly action: TServerFn;
+};
+
+export type UseActionReturn<TInput, TResult, TError extends Error = Error> = ServerFnSubmit<
+  TInput,
+  TResult
+> & {
+  pending: boolean;
+  status: ServerFnActionStatus;
+  data: TResult | null;
+  result: TResult | null;
+  error: TError | null;
+  formAction: (formData: FormData) => Promise<void>;
+  Form: ComponentType<UseActionFormProps>;
   reset: () => void;
 };
 
@@ -206,6 +234,73 @@ export function useServerFn<TInput, TResult, TError extends Error = Error>(
       reset,
     }),
     [formAction, reset, state.error, state.pendingCount, state.result, state.status, submit],
+  );
+}
+
+/**
+ * Wrap a server function, or a route's default server function, as a callable
+ * RPC with React mutation state.
+ */
+export function useAction<TInput, TResult, TError extends Error = Error>(
+  route: RouteActionTarget<ServerFn<TInput, TResult, TError>>,
+  options?: UseServerFnOptions<TResult, TError, TInput>,
+): UseActionReturn<TInput, TResult, TError>;
+export function useAction<TInput, TResult, TError extends Error = Error>(
+  serverFn: ServerFn<TInput, TResult, TError>,
+  options?: UseServerFnOptions<TResult, TError, TInput>,
+): UseActionReturn<TInput, TResult, TError>;
+export function useAction<TInput, TResult, TError extends Error = Error>(
+  target: ServerFn<TInput, TResult, TError> | RouteActionTarget<ServerFn<TInput, TResult, TError>>,
+  options: UseServerFnOptions<TResult, TError, TInput> = {},
+): UseActionReturn<TInput, TResult, TError> {
+  const serverFn = resolveServerFnTarget(target);
+  const action = useServerFn(serverFn, options);
+
+  const Form = useMemo(() => {
+    const ActionForm = (props: UseActionFormProps) =>
+      createElement("form", {
+        ...props,
+        action: action.formAction,
+      });
+
+    ActionForm.displayName = "FarmActionForm";
+    return ActionForm;
+  }, [action.formAction]);
+
+  return useMemo(() => {
+    const call = ((input?: TInput | FormData) =>
+      action.submit(input as TInput | FormData)) as ServerFnSubmit<TInput, TResult>;
+
+    return Object.assign(call, {
+      pending: action.pending,
+      status: action.status,
+      data: action.result,
+      result: action.result,
+      error: action.error,
+      formAction: action.formAction,
+      Form,
+      reset: action.reset,
+    });
+  }, [
+    Form,
+    action.error,
+    action.formAction,
+    action.pending,
+    action.reset,
+    action.result,
+    action.status,
+    action.submit,
+  ]);
+}
+
+function resolveServerFnTarget<TInput, TResult, TError extends Error>(
+  target: ServerFn<TInput, TResult, TError> | RouteActionTarget<ServerFn<TInput, TResult, TError>>,
+): ServerFn<TInput, TResult, TError> {
+  if (typeof target === "function") return target;
+  if (target && typeof target.action === "function") return target.action;
+
+  throw new TypeError(
+    "useAction requires a server function or a route with at least one declared action",
   );
 }
 

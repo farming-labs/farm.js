@@ -69,6 +69,13 @@ export type {
   UseFetcherOptions,
   UseFetcherReturn,
 } from "../fetcher-client";
+export { useAction } from "../server-fn-client";
+export type {
+  RouteActionTarget,
+  UseActionFormProps,
+  UseActionReturn,
+  UseServerFnOptions,
+} from "../server-fn-client";
 export {
   getRouter,
   navigateTo,

@@ -2,6 +2,7 @@ import fs from "fs";
 import os from "os";
 import path from "path";
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
+import { z } from "zod";
 import { getFarmDataCache, invalidate, revalidatePath } from "../cache";
 import { defer, isDeferred, type Deferred } from "../deferred";
 import { notFound, redirect } from "../navigation";
@@ -15,8 +16,10 @@ import {
   createRouteModuleFromProgrammaticPage,
   defineRoutes,
   type InferProgrammaticRouteData,
+  type ProgrammaticPageRoute,
 } from "../routes";
 import { RouteManager } from "../routing/route-manager";
+import { createServerFn } from "../server-fn";
 import type { FarmConfig } from "../types";
 
 const tempDirs: string[] = [];
@@ -51,6 +54,53 @@ function createConfig(root: string): Required<FarmConfig> {
 }
 
 describe("programmatic routes", () => {
+  it("owns typed named actions and resolves a default action", async () => {
+    const update = createServerFn({
+      input: z.object({ id: z.string(), name: z.string() }),
+      handler: async ({ input }) => ({ ...input, saved: true as const }),
+    });
+    const publish = createServerFn({
+      input: z.object({ id: z.string() }),
+      handler: async ({ input }) => ({ id: input.id, published: true as const }),
+    });
+
+    const route = createRoute("/products/[id]", {
+      actions: { update, publish },
+      defaultAction: "update",
+      component: () => null,
+    });
+
+    expect(route.actions).toEqual({ update, publish });
+    expect(route.defaultAction).toBe("update");
+    expect(route.action).toBe(update);
+    await expect(route.action({ id: "p1", name: "Keyboard" })).resolves.toEqual({
+      id: "p1",
+      name: "Keyboard",
+      saved: true,
+    });
+    expectTypeOf(route.action).toEqualTypeOf(update);
+    expectTypeOf(route.actions.publish).toEqualTypeOf(publish);
+  });
+
+  it("uses the first named action by default and rejects an unknown default", () => {
+    const update = createServerFn({ handler: async () => ({ saved: true as const }) });
+    const route = createRoute("/products", {
+      actions: { update },
+      component: () => null,
+    });
+
+    expect(route.defaultAction).toBe("update");
+    expect(route.action).toBe(update);
+
+    expect(() =>
+      createRoute("/invalid", {
+        actions: { update },
+        defaultAction: "remove",
+        component: () => null,
+      } as any),
+    ).toThrow('defaultAction "remove" does not match a declared action');
+  });
+
   it("infers params, search, before data, main data, and component props", () => {
     const paramsSchema = {
       parse: (_value: unknown) => ({ id: "product-1" }),
@@ -748,7 +798,9 @@ describe("programmatic routes", () => {
   });
 });
 
-function createRouteModuleFromProgrammaticPageForTest(route: ReturnType<typeof createRoute>) {
+function createRouteModuleFromProgrammaticPageForTest(
+  route: ProgrammaticPageRoute<any, any, any, any>,
+) {
   return createRouteModuleFromProgrammaticPage(route);
 }
 

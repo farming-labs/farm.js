@@ -31,6 +31,7 @@ import { farmEnvironmentFunctionsPlugin } from "@farm.js/core/environment/vite";
 import { generateRscEntry } from "./entries/rsc.js";
 import { generateSsrEntry } from "./entries/ssr.js";
 import { generateClientEntry, serverFnTransportErrorClientRuntime } from "./entries/client.js";
+import { transformFarmRouteActionClients } from "./route-action-transform.js";
 import { transformFarmServerFns } from "./server-fn-transform.js";
 import { transformAutomaticOptimizedBoundaries } from "./automatic-optimized-boundary.js";
 import { resolveRscBuildOutputPath } from "./build-paths.js";
@@ -906,6 +907,25 @@ export default function farmRsc(options: FarmRscPluginOptions = {}): Plugin[] {
           );
         }
         return { code: result.code, map: null };
+      },
+    },
+
+    {
+      name: "@farm.js/plugin/rsc:route-action-clients",
+      enforce: "pre",
+
+      transform(code, id) {
+        if (!rscEnabled || !actionsEnabled) return null;
+        const environmentName = (this as { environment?: { name?: string } }).environment?.name;
+        if (environmentName !== "client") return null;
+
+        const result = transformFarmRouteActionClients(code, id);
+        if (!result) return null;
+
+        return {
+          code: result.code,
+          map: null,
+        };
       },
     },
 

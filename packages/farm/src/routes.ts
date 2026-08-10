@@ -8,6 +8,7 @@ import {
 } from "./cache";
 import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
+import type { ServerFn } from "./server-fn";
 import type {
   FarmAppContext,
   LayoutProps,
@@ -69,6 +70,36 @@ export type InferProgrammaticRouteSearch<TSearch, TFallback> =
 export type ProgrammaticRouteParamsFallback = Record<string, string>;
 export type ProgrammaticRouteSearchFallback = Record<string, string | string[] | undefined>;
 export type ProgrammaticRouteMaybePromise<T> = T | Promise<T>;
+export type ProgrammaticRouteAction = ServerFn<any, any, any>;
+export type ProgrammaticRouteActions = Readonly<Record<string, ProgrammaticRouteAction>>;
+export type ProgrammaticRouteDefaultAction<
+  TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined,
+> = [TDefaultAction] extends [undefined]
+  ? TActions[keyof TActions]
+  : TActions[Extract<TDefaultAction, keyof TActions>];
+export type ProgrammaticRouteActionContract<
+  TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined,
+> = keyof TActions extends never
+  ? {
+      actions?: undefined;
+      defaultAction?: undefined;
+      action?: undefined;
+    }
+  : {
+      actions: Readonly<TActions>;
+      defaultAction: [TDefaultAction] extends [undefined]
+        ? keyof TActions
+        : Extract<TDefaultAction, keyof TActions>;
+      action: ProgrammaticRouteDefaultAction<TActions, TDefaultAction>;
+    };
+export type ProgrammaticRouteWithActions<
+  TRoute extends ProgrammaticPageRoute<any, any, any, any>,
+  TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined,
+> = Omit<TRoute, "actions" | "defaultAction" | "action"> &
+  ProgrammaticRouteActionContract<TActions, TDefaultAction>;
 export type ProgrammaticRouteDataStaleTime =
   | number
   | false
@@ -195,6 +226,12 @@ export interface ProgrammaticPageRoute<
   search?: ProgrammaticRouteSearchConfig<TSearch>;
   guard?: ProgrammaticRouteGuard<TParams, TSearch, TContext>;
   data?: TDataHooks;
+  /** Named server functions owned by this route. */
+  actions?: ProgrammaticRouteActions;
+  /** Named action selected by `useAction(route)`. The first action is used when omitted. */
+  defaultAction?: string;
+  /** Resolved default server function for client and server calls. */
+  action?: ProgrammaticRouteAction;
   pending?: ComponentType<ProgrammaticRoutePendingComponentProps<TParams, TSearch>>;
   error?: ComponentType<ProgrammaticRouteErrorComponentProps<TParams, TSearch>>;
   notFound?: ComponentType<ProgrammaticRouteErrorComponentProps<TParams, TSearch>>;
@@ -280,7 +317,7 @@ type CreateRouteSharedOptions<
   TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined,
 > = Omit<
   ProgrammaticPageRoute<CreateRouteParams<TParamsSchema>, CreateRouteSearch<TSearchConfig>>,
-  "kind" | "path" | "component" | "params" | "search" | "data" | "guard"
+  "kind" | "path" | "component" | "params" | "search" | "data" | "guard" | "action"
 > & {
   params?: TParamsSchema;
   search?: TSearchConfig;
@@ -398,6 +435,13 @@ export type CreateRouteOptions<
   | CreateRouteOptionsWithBefore<TParamsSchema, TSearchConfig, TBefore, TData>
   | CreateRouteOptionsWithoutBefore<TParamsSchema, TSearchConfig, TData>
   | CreateRouteOptionsWithoutData<TParamsSchema, TSearchConfig>;
+
+type CreateRouteActionOptions<
+  TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined,
+> = keyof TActions extends never
+  ? { actions?: undefined; defaultAction?: undefined }
+  : { actions: TActions; defaultAction?: TDefaultAction };
 
 const FARM_ROUTES_BRAND = Symbol.for("farm.routes");
 export const PROGRAMMATIC_ROUTE_FILE_NAMES = [
@@ -642,6 +686,8 @@ function normalizeComparableValue(value: unknown): unknown {
 }
 
 export function createRoute<
+  const TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined = undefined,
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
   TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
   TBeforeResult = unknown,
@@ -651,8 +697,9 @@ export function createRoute<
   path: string,
   options: Omit<
     CreateRouteOptionsWithBefore<TParamsSchema, TSearchConfig, TBeforeResult, TMainResult>,
-    "component"
+    "component" | "actions" | "defaultAction" | "action"
   > &
+    CreateRouteActionOptions<TActions, TDefaultAction> &
     CreateRouteComponentOption<
       TComponent,
       ProgrammaticRouteComponentProps<
@@ -661,15 +708,108 @@ export function createRoute<
         Awaited<TMainResult>
       >
     >,
-): ProgrammaticPageRoute<
-  CreateRouteParams<TParamsSchema>,
-  CreateRouteSearch<TSearchConfig>,
-  CreateRouteDataHooksWithBefore<
+): ProgrammaticRouteWithActions<
+  ProgrammaticPageRoute<
     CreateRouteParams<TParamsSchema>,
     CreateRouteSearch<TSearchConfig>,
-    TBeforeResult,
-    TMainResult
-  >
+    CreateRouteDataHooksWithBefore<
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      TBeforeResult,
+      TMainResult
+    >
+  >,
+  TActions,
+  TDefaultAction
+>;
+export function createRoute<
+  const TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined = undefined,
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
+  TMainResult = unknown,
+  TComponent extends ComponentType<any> = ComponentType<any>,
+>(
+  path: string,
+  options: Omit<
+    CreateRouteOptionsWithoutBefore<TParamsSchema, TSearchConfig, TMainResult>,
+    "component" | "actions" | "defaultAction" | "action"
+  > &
+    CreateRouteActionOptions<TActions, TDefaultAction> &
+    CreateRouteComponentOption<
+      TComponent,
+      ProgrammaticRouteComponentProps<
+        CreateRouteParams<TParamsSchema>,
+        CreateRouteSearch<TSearchConfig>,
+        Awaited<TMainResult>
+      >
+    >,
+): ProgrammaticRouteWithActions<
+  ProgrammaticPageRoute<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    CreateRouteDataHooksWithoutBefore<
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      TMainResult
+    >
+  >,
+  TActions,
+  TDefaultAction
+>;
+export function createRoute<
+  const TActions extends ProgrammaticRouteActions,
+  TDefaultAction extends keyof TActions | undefined = undefined,
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
+>(
+  path: string,
+  options: Omit<
+    CreateRouteOptionsWithoutData<TParamsSchema, TSearchConfig>,
+    "actions" | "defaultAction" | "action"
+  > &
+    CreateRouteActionOptions<TActions, TDefaultAction>,
+): ProgrammaticRouteWithActions<
+  ProgrammaticPageRoute<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    undefined
+  >,
+  TActions,
+  TDefaultAction
+>;
+export function createRoute<
+  TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
+  TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
+  TBeforeResult = unknown,
+  TMainResult = unknown,
+  TComponent extends ComponentType<any> = ComponentType<any>,
+>(
+  path: string,
+  options: Omit<
+    CreateRouteOptionsWithBefore<TParamsSchema, TSearchConfig, TBeforeResult, TMainResult>,
+    "component" | "actions" | "defaultAction" | "action"
+  > & { actions?: undefined; defaultAction?: undefined } & CreateRouteComponentOption<
+      TComponent,
+      ProgrammaticRouteComponentProps<
+        CreateRouteParams<TParamsSchema>,
+        CreateRouteSearch<TSearchConfig>,
+        Awaited<TMainResult>
+      >
+    >,
+): ProgrammaticRouteWithActions<
+  ProgrammaticPageRoute<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    CreateRouteDataHooksWithBefore<
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      TBeforeResult,
+      TMainResult
+    >
+  >,
+  {},
+  undefined
 >;
 export function createRoute<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
@@ -680,9 +820,8 @@ export function createRoute<
   path: string,
   options: Omit<
     CreateRouteOptionsWithoutBefore<TParamsSchema, TSearchConfig, TMainResult>,
-    "component"
-  > &
-    CreateRouteComponentOption<
+    "component" | "actions" | "defaultAction" | "action"
+  > & { actions?: undefined; defaultAction?: undefined } & CreateRouteComponentOption<
       TComponent,
       ProgrammaticRouteComponentProps<
         CreateRouteParams<TParamsSchema>,
@@ -690,24 +829,35 @@ export function createRoute<
         Awaited<TMainResult>
       >
     >,
-): ProgrammaticPageRoute<
-  CreateRouteParams<TParamsSchema>,
-  CreateRouteSearch<TSearchConfig>,
-  CreateRouteDataHooksWithoutBefore<
+): ProgrammaticRouteWithActions<
+  ProgrammaticPageRoute<
     CreateRouteParams<TParamsSchema>,
     CreateRouteSearch<TSearchConfig>,
-    TMainResult
-  >
+    CreateRouteDataHooksWithoutBefore<
+      CreateRouteParams<TParamsSchema>,
+      CreateRouteSearch<TSearchConfig>,
+      TMainResult
+    >
+  >,
+  {},
+  undefined
 >;
 export function createRoute<
   TParamsSchema extends ProgrammaticRouteSchema<any> | undefined = undefined,
   TSearchConfig extends ProgrammaticRouteSearchConfig<any> | undefined = undefined,
 >(
   path: string,
-  options: CreateRouteOptionsWithoutData<TParamsSchema, TSearchConfig>,
-): ProgrammaticPageRoute<
-  CreateRouteParams<TParamsSchema>,
-  CreateRouteSearch<TSearchConfig>,
+  options: Omit<
+    CreateRouteOptionsWithoutData<TParamsSchema, TSearchConfig>,
+    "actions" | "defaultAction" | "action"
+  > & { actions?: undefined; defaultAction?: undefined },
+): ProgrammaticRouteWithActions<
+  ProgrammaticPageRoute<
+    CreateRouteParams<TParamsSchema>,
+    CreateRouteSearch<TSearchConfig>,
+    undefined
+  >,
+  {},
   undefined
 >;
 export function createRoute(path: string, options: any): any {
@@ -1260,13 +1410,55 @@ function normalizeProgrammaticRoute(
     };
   }
 
+  const routeActions = route.kind === "page" ? normalizeProgrammaticRouteActions(route) : undefined;
+
   return {
     ...route,
+    ...routeActions,
     ...normalizeFarmRouteRuntimeConfig(
       route,
       `${route.kind === "layout" ? "Layout" : "Route"} "${route.path}"`,
     ),
     path: normalizeRoutePath(route.path),
+  };
+}
+
+function normalizeProgrammaticRouteActions(route: ProgrammaticPageRoute): {
+  actions?: ProgrammaticRouteActions;
+  defaultAction?: string;
+  action?: ProgrammaticRouteAction;
+} {
+  const entries = Object.entries(route.actions ?? {});
+
+  if (entries.length === 0) {
+    if (route.defaultAction !== undefined) {
+      throw new TypeError(
+        `Route "${route.path}" declares defaultAction without declaring any actions.`,
+      );
+    }
+    return {};
+  }
+
+  for (const [name, action] of entries) {
+    if (typeof action !== "function") {
+      throw new TypeError(`Route "${route.path}" action "${name}" must be a server function.`);
+    }
+  }
+
+  const defaultAction = route.defaultAction ?? entries[0]![0];
+  const actions = Object.freeze({ ...route.actions });
+  const action = actions[defaultAction];
+
+  if (!action) {
+    throw new TypeError(
+      `Route "${route.path}" defaultAction "${defaultAction}" does not match a declared action.`,
+    );
+  }
+
+  return {
+    actions,
+    defaultAction,
+    action,
   };
 }
 
