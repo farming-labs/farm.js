@@ -1025,8 +1025,14 @@
 /* Farm is dark-only. Apply the adapter-emitted dark Shiki palette directly so
    syntax colors survive the browser theme bootstrap and Pixel Border cascade. */
 html[data-farm-docs-runtime="true"] figure.shiki {
+  --padding-left: 0px;
+  --padding-right: 0px;
   color: var(--shiki-dark, #fff) !important;
   background-color: var(--shiki-dark-bg, #101010) !important;
+}
+
+html[data-farm-docs-runtime="true"] figure.shiki pre {
+  padding: 0.75rem 0.875rem !important;
 }
 
 html[data-farm-docs-runtime="true"] figure.shiki code span {
@@ -1035,6 +1041,12 @@ html[data-farm-docs-runtime="true"] figure.shiki code span {
   font-style: var(--shiki-dark-font-style, inherit);
   font-weight: var(--shiki-dark-font-weight, inherit);
   text-decoration: var(--shiki-dark-text-decoration, inherit);
+}
+
+@media (max-width: 767.98px) {
+  html[data-farm-docs-runtime="true"] figure.shiki pre {
+    padding: 0.625rem 0.6875rem !important;
+  }
 }
 
 /* Pixel Border 0.2.99 hides the desktop sidebar's last child to remove its
