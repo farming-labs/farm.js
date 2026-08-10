@@ -1197,6 +1197,12 @@ html[data-farm-docs-runtime="true"] .fd-page-action-menu-item:last-child {
   background: color-mix(in srgb, var(--color-fd-foreground) 6%, transparent) !important;
 }
 
+/* Keep agent discovery routes available without advertising them as reader UI. */
+html[data-farm-docs-runtime="true"] .fd-agent-llms-directive[data-visible-in-header],
+html[data-farm-docs-runtime="true"] .fd-llms-txt-links {
+  display: none !important;
+}
+
 #nd-docs-layout[data-fd-framework] .fd-llms-txt-link,
 #nd-docs-layout[data-fd-framework] .fd-last-updated-footer {
   border-radius: 0;

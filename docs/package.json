@@ -14,7 +14,7 @@
     "@databuddy/sdk": "2.6.0",
     "@farm.js/core": "workspace:*",
     "@farming-labs/docs": "0.2.99",
-    "@farming-labs/farmjs": "0.2.102",
+    "@farming-labs/farmjs": "0.2.103",
     "@farming-labs/theme": "0.2.99",
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",
