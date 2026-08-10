@@ -13,9 +13,9 @@
   "dependencies": {
     "@databuddy/sdk": "2.6.0",
     "@farm.js/core": "workspace:*",
-    "@farming-labs/docs": "https://pkg.pr.new/farming-labs/docs/@farming-labs/docs@781b1ec",
-    "@farming-labs/farmjs": "https://pkg.pr.new/farming-labs/docs/@farming-labs/farmjs@781b1ec",
-    "@farming-labs/theme": "https://pkg.pr.new/farming-labs/docs/@farming-labs/theme@781b1ec",
+    "@farming-labs/docs": "^0.2.99",
+    "@farming-labs/farmjs": "^0.2.99",
+    "@farming-labs/theme": "^0.2.99",
     "@prisma/client": "6.7.0",
     "better-call": "^1.0.19",
     "lucide-react": "1.23.0",
