@@ -8,16 +8,16 @@ import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-test("uses Farm.js branding for CLI template choices", async () => {
+test("uses concise labels for CLI template choices", async () => {
   const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
 
-  assert.match(source, /title: "Farm\.js Basic"/);
-  assert.match(source, /title: "Farm\.js Auth"/);
-  assert.match(source, /title: "Farm\.js Better Auth"/);
-  assert.match(source, /title: "Farm\.js Stripe"/);
-  assert.match(source, /title: "Farm\.js Supabase"/);
-  assert.match(source, /title: "Farm\.js Trigger\.dev"/);
-  assert.doesNotMatch(source, /title: "FARMJS/);
+  assert.match(source, /title: "Basic starter"/);
+  assert.match(source, /title: "Auth starter"/);
+  assert.match(source, /title: "Better Auth starter"/);
+  assert.match(source, /title: "Stripe starter"/);
+  assert.match(source, /title: "Supabase starter"/);
+  assert.match(source, /title: "Trigger\.dev starter"/);
+  assert.doesNotMatch(source, /title: "(?:Farm\.js|FARMJS)/);
 });
 
 test("lists every integration starter from the CLI", () => {
