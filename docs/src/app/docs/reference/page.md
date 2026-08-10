@@ -13,7 +13,7 @@ A compact map of the main package exports and where to learn more.
 | Export area                 | What it covers                                                                       |
 | --------------------------- | ------------------------------------------------------------------------------------ |
 | @farm.js/core               | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
-| @farm.js/core/client        | Link, router helpers, API client, integration client.                                |
+| @farm.js/core/client        | Link, router helpers, callable route actions, API client, integration client.        |
 | @farm.js/core/plugin/client | Advanced browser lifecycle manager and client plugin event types.                    |
 | @farm.js/core/navigation    | Next-compatible redirect, notFound, and client navigation hooks.                     |
 | @farm.js/core/headers       | Next-compatible request headers and cookies helpers.                                 |
@@ -43,7 +43,7 @@ A compact map of the main package exports and where to learn more.
 | `@farm.js/core/theme/server`     | `getTheme` and `getThemeSnapshot` for cookie-backed server rendering.                                      |
 | `@farm.js/core/cron`             | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                        |
 | `@farm.js/core/workflows`        | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
-| `@farm.js/core/client`           | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`.              |
+| `@farm.js/core/client`           | `useAction`, `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`. |
 | `@farm.js/core/plugin/client`    | `createClientPluginManager` and browser lifecycle types for advanced tooling.                              |
 | `@farm.js/core/navigation`       | `redirect`, `permanentRedirect`, `notFound`, `useRouter`, `usePathname`, `useSearchParams`.                |
 | `@farm.js/core/font`             | Build-time `localFont` and `remoteFont` loaders with generated CSS, hashed assets, and preload hints.      |

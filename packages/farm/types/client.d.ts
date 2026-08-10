@@ -17,6 +17,7 @@ import type {
   RefAttributes,
 } from "react";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "@farm.js/core/cache";
+import type { ServerFn } from "@farm.js/core/server-fn";
 
 declare global {
   namespace FarmJS {
@@ -770,6 +771,61 @@ declare module "@farm.js/core/client" {
     RouteRef<InferEndpointOutput<T>, InferEndpointInput<T>>;
 
   export type MutationStatus = "idle" | "pending" | "success" | "error";
+
+  export type ServerFnActionStatus = "idle" | "pending" | "success" | "error";
+
+  export type ServerFnSubmit<TInput, TResult> = [unknown] extends [TInput]
+    ? (input?: TInput | FormData) => Promise<TResult>
+    : (input: TInput | FormData) => Promise<TResult>;
+
+  export type ServerFnOptimisticContext<TInput, TResult> = {
+    input: TInput | FormData | undefined;
+    formData?: FormData;
+    current: TResult | null;
+  };
+
+  export type UseServerFnOptions<TResult, TError extends Error = Error, TInput = unknown> = {
+    initialResult?: TResult | null;
+    resetOnSubmit?: boolean;
+    throwOnFormError?: boolean;
+    optimistic?: (
+      context: ServerFnOptimisticContext<TInput, TResult>,
+    ) => TResult | null | undefined;
+    rollbackOnError?: boolean;
+    onSuccess?: (result: TResult) => void;
+    onError?: (error: TError) => void;
+    onSettled?: (result: TResult | null, error: TError | null) => void;
+  };
+
+  export type UseActionFormProps = Omit<FormHTMLAttributes<HTMLFormElement>, "action">;
+
+  export type RouteActionTarget<TServerFn extends ServerFn<any, any, any>> = {
+    readonly action: TServerFn;
+  };
+
+  export type UseActionReturn<TInput, TResult, TError extends Error = Error> = ServerFnSubmit<
+    TInput,
+    TResult
+  > & {
+    pending: boolean;
+    status: ServerFnActionStatus;
+    data: TResult | null;
+    result: TResult | null;
+    error: TError | null;
+    formAction: (formData: FormData) => Promise<void>;
+    Form: ComponentType<UseActionFormProps>;
+    reset: () => void;
+  };
+
+  export function useAction<TInput, TResult, TError extends Error = Error>(
+    route: RouteActionTarget<ServerFn<TInput, TResult, TError>>,
+    options?: UseServerFnOptions<TResult, TError, TInput>,
+  ): UseActionReturn<TInput, TResult, TError>;
+
+  export function useAction<TInput, TResult, TError extends Error = Error>(
+    serverFn: ServerFn<TInput, TResult, TError>,
+    options?: UseServerFnOptions<TResult, TError, TInput>,
+  ): UseActionReturn<TInput, TResult, TError>;
 
   export type AnyMutationTarget = (...args: any[]) => Promise<any>;
 

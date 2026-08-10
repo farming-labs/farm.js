@@ -282,6 +282,131 @@ export const ProductRoute = createRoute("/products/[id]", {
 
 Cache keys are part of your data security model. If data depends on the current user, role, tenant, locale, or draft mode, include that value in `key` or avoid caching that route. Route cache invalidation improves freshness, but API routes and server functions still need their own authorization checks.
 
+## Route actions
+
+With React Server Components and Server Actions enabled, a programmatic route can own named server
+functions. Keep the functions in a dedicated server module so Farm can replace the route with an
+action-only proxy when a Client Component imports it. The proxy contains no loader, component, or
+database code.
+
+**src/features/products/actions.ts**
+
+```ts
+import { createServerFn } from "@farm.js/core/server-fn";
+import { z } from "zod";
+import { db } from "./db";
+
+export const updateProduct = createServerFn({
+  input: z.object({
+    id: z.string(),
+    name: z.string().min(2),
+  }),
+  invalidates: ({ input }) => [{ key: ["product", input.id] }],
+  async handler({ input }) {
+    return db.product.update({
+      where: { id: input.id },
+      data: { name: input.name },
+    });
+  },
+});
+
+export const publishProduct = createServerFn({
+  input: z.object({ id: z.string() }),
+  async handler({ input }) {
+    return db.product.update({
+      where: { id: input.id },
+      data: { published: true },
+    });
+  },
+});
+```
+
+Attach the imported functions to the route. `defaultAction` selects the function returned by
+`route.action` and used by `useAction(route)`. When the route has one action, or no explicit default,
+Farm selects the first declared action.
+
+**src/features/products/product.route.tsx**
+
+```tsx
+import { createRoute } from "@farm.js/core/routes";
+import { ProductPage } from "./product-page";
+import { publishProduct, updateProduct } from "./actions";
+import { db } from "./db";
+
+export const ProductRoute = createRoute("/products/[id]", {
+  data: {
+    key: ({ params }) => ["product", params.id],
+    async main({ params }) {
+      return { product: await db.product.findUniqueOrThrow({ where: { id: params.id } }) };
+    },
+  },
+  actions: {
+    update: updateProduct,
+    publish: publishProduct,
+  },
+  defaultAction: "update",
+  component: ProductPage,
+});
+```
+
+Server code calls either the default or a named action as a normal typed function. Direct calls run
+in process, while input/output validation, middleware, declared errors, and invalidation keep their
+server-function behavior.
+
+```ts
+await ProductRoute.action({ id: "p1", name: "Keyboard" });
+await ProductRoute.actions.publish({ id: "p1" });
+```
+
+In a Client Component, `useAction(ProductRoute)` wraps the default function in a callable RPC and
+adds React state. Call the wrapper itself; no `.submit()` method is required.
+
+```tsx
+"use client";
+
+import { useAction } from "@farm.js/core/client";
+import { ProductRoute } from "./product.route";
+
+export function RenameProduct({ id }: { id: string }) {
+  const update = useAction(ProductRoute);
+
+  return (
+    <button disabled={update.pending} onClick={() => update({ id, name: "Keyboard" })}>
+      {update.pending ? "Saving…" : "Rename"}
+    </button>
+  );
+}
+```
+
+The wrapper exposes `pending`, `status`, `data`, `error`, `reset`, `formAction`, and `Form`. It keeps
+the action's input, result, and declared error types. Choose another named action explicitly when
+needed:
+
+```tsx
+const publish = useAction(ProductRoute.actions.publish);
+const result = await publish({ id: "p1" });
+```
+
+The same wrapper supports progressive forms. The form performs a native server action before
+hydration and uses the tracked RPC lifecycle after hydration:
+
+```tsx
+const update = useAction(ProductRoute);
+
+return (
+  <update.Form>
+    <input type="hidden" name="id" value={product.id} />
+    <input name="name" defaultValue={product.name} />
+    <button disabled={update.pending}>Save</button>
+  </update.Form>
+);
+```
+
+Route action entries must be imported identifiers such as `{ update }` or
+`{ update: updateProduct }`. Do not create them inline inside `createRoute`; the separate module is
+the server boundary Farm uses to generate safe browser references. When provided, `defaultAction`
+must be a string literal matching one of those entries.
+
 ## Deferred route data
 
 Use `defer()` for secondary data that should not delay the route shell. Farm returns the value from `data.main` as soon as its directly awaited work finishes, then streams explicitly deferred fields into nested React Suspense boundaries.

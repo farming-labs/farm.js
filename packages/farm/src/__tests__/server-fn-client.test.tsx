@@ -11,7 +11,13 @@ import {
   type ServerActionError,
   type ServerFnFailure,
 } from "../server-fn";
-import { useServerFn, type UseServerFnReturn } from "../server-fn-client";
+import { createRoute } from "../routes";
+import {
+  useAction,
+  useServerFn,
+  type UseActionReturn,
+  type UseServerFnReturn,
+} from "../server-fn-client";
 
 describe("useServerFn", () => {
   let container: HTMLDivElement;
@@ -34,6 +40,69 @@ describe("useServerFn", () => {
     container.remove();
     root = undefined;
     delete (globalThis as any).IS_REACT_ACT_ENVIRONMENT;
+  });
+
+  it("returns a typed callable RPC for a route's default action", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const update = createServerFn({
+      input: z.object({ id: z.string(), name: z.string() }),
+      async handler({ input }) {
+        await gate;
+        return { ...input, saved: true as const };
+      },
+    });
+    const publish = createServerFn({
+      input: z.object({ id: z.string() }),
+      async handler({ input }) {
+        return { id: input.id, published: true as const };
+      },
+    });
+    const route = createRoute("/products/[id]", {
+      actions: { update, publish },
+      defaultAction: "update",
+      component: () => null,
+    });
+
+    let action!: UseActionReturn<
+      { id: string; name: string },
+      { id: string; name: string; saved: true }
+    >;
+
+    function App() {
+      action = useAction(route);
+      const explicitAction = useAction(route.actions.publish);
+      expectTypeOf(explicitAction).toBeCallableWith({ id: "p1" });
+
+      return createElement(
+        "output",
+        null,
+        `${action.pending}:${action.status}:${action.data?.name ?? ""}`,
+      );
+    }
+
+    root = createRoot(container);
+    act(() => {
+      root?.render(createElement(App));
+    });
+
+    let promise!: Promise<{ id: string; name: string; saved: true }>;
+    act(() => {
+      promise = action({ id: "p1", name: "Keyboard" });
+    });
+
+    expect(container.textContent).toBe("true:pending:");
+
+    await act(async () => {
+      release();
+      await promise;
+    });
+
+    expect(container.textContent).toBe("false:success:Keyboard");
+    expect(action.result).toEqual({ id: "p1", name: "Keyboard", saved: true });
+    expect(action.Form).toBeTypeOf("function");
   });
 
   it("tracks pending, result, and callbacks for imperative submissions", async () => {
