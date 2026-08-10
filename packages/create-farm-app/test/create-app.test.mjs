@@ -8,6 +8,23 @@ import { fileURLToPath } from "node:url";
 
 const packageDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+test("spaces the CLI banner and matches the website hero copy", async () => {
+  const { showBanner } = await import("../dist/utils.mjs");
+  const lines = [];
+  const originalLog = console.log;
+  console.log = (...values) => lines.push(values.join(" "));
+
+  try {
+    showBanner();
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.equal(lines[8], "");
+  assert.match(lines[9], /Create FARMJS App.*a framework for product-integrated apps/);
+  assert.doesNotMatch(lines.join("\n"), /modern React meta-framework/);
+});
+
 test("uses concise labels for CLI template choices", async () => {
   const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
 
