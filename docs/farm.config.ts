@@ -21,4 +21,10 @@ export default withDocs(
       target: "vercel",
     },
   }),
+  {
+    codeBlockThemes: {
+      light: "github-light-default",
+      dark: "vesper",
+    },
+  },
 );

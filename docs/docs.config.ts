@@ -378,7 +378,14 @@ const config = {
   navigation: {
     sidebar,
   },
-  theme: pixelBorder(),
+  theme: pixelBorder({
+    ui: {
+      codeBlock: {
+        theme: "github-light-default",
+        darkTheme: "vesper",
+      },
+    },
+  }),
   themeToggle: {
     enabled: false,
     default: "dark",
