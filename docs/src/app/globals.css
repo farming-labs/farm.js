@@ -1022,6 +1022,21 @@
   --color-fd-background: #000;
 }
 
+/* Farm is dark-only. Apply the adapter-emitted dark Shiki palette directly so
+   syntax colors survive the browser theme bootstrap and Pixel Border cascade. */
+html[data-farm-docs-runtime="true"] figure.shiki {
+  color: var(--shiki-dark, #fff) !important;
+  background-color: var(--shiki-dark-bg, #101010) !important;
+}
+
+html[data-farm-docs-runtime="true"] figure.shiki code span {
+  color: var(--shiki-dark, inherit) !important;
+  background-color: transparent !important;
+  font-style: var(--shiki-dark-font-style, inherit);
+  font-weight: var(--shiki-dark-font-weight, inherit);
+  text-decoration: var(--shiki-dark-text-decoration, inherit);
+}
+
 /* Pixel Border 0.2.99 hides the desktop sidebar's last child to remove its
    theme switcher. With themeToggle disabled, the Radix scroll viewport becomes
    that last child, so keep the actual navigation viewport visible. */
