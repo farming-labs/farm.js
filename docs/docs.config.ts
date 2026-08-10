@@ -379,6 +379,10 @@ const config = {
     sidebar,
   },
   theme: pixelBorder(),
+  themeToggle: {
+    enabled: false,
+    default: "dark",
+  },
 } satisfies FarmDocsSerializableConfig;
 
 export default {

@@ -1022,24 +1022,48 @@
   --color-fd-background: #000;
 }
 
+#nd-docs-layout aside#nd-sidebar > div:first-child {
+  padding-inline: calc(var(--fd-pixel-rail-width, 12px) + 18px);
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-right: 8px;
+  background:
+    linear-gradient(currentColor 0 0) 0 0 / 4px 4px no-repeat,
+    linear-gradient(currentColor 0 0) 6px 0 / 10px 4px no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 0 6px / 4px 4px no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 6px 6px / 10px 4px
+      no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 34%, transparent) 0 0) 0 12px / 4px 4px
+      no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 34%, transparent) 0 0) 6px 12px / 6px 4px
+      no-repeat;
+}
+
 #nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child > a {
-  gap: 8px;
-  font-size: 12px;
+  gap: 0;
+  font-size: 0;
   font-weight: 500;
   text-transform: uppercase;
 }
 
 #nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child > a::before {
-  content: "";
-  width: 16px;
-  height: 16px;
-  flex: 0 0 16px;
-  background:
-    linear-gradient(currentColor 0 0) 0 0 / 6px 6px no-repeat,
-    linear-gradient(currentColor 0 0) 8px 0 / 8px 6px no-repeat,
-    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 0 8px / 6px 6px no-repeat,
-    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 8px 8px / 8px 6px
-      no-repeat;
+  content: "FARM";
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  background: none;
+  font-size: 12px;
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child > a::after {
+  content: ".JS";
+  font-size: 12px;
+  opacity: 0.52;
 }
 
 #nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child::after {
