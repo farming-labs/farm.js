@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A modern React framework for building fast, full-stack, product-integrated applications.</strong>
+  <strong>A framework for building fast, full-stack, product-integrated applications.</strong>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-Ready-blue.svg" alt="TypeScript ready" /></a>
 </p>
 
-## ✨ Built for Modern React
+## ✨ Built for Full-Stack Products
 
 | Feature                            | What it gives you                                                                                                                                                                               |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

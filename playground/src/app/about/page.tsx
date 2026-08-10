@@ -15,9 +15,8 @@ export default function AboutPage({ params, searchParams }: PageProps) {
         }}
       >
         <p style={{ lineHeight: "1.6", marginBottom: "1.5rem" }}>
-          Farm.js is a modern React meta-framework that brings together the best of both worlds: the
-          lightning-fast development experience of Vite and the familiar, powerful semantics of
-          Next.js.
+          Farm.js is a full-stack framework that brings together the lightning-fast development
+          experience of Vite and familiar, powerful app-directory semantics.
         </p>
 
         <h2 style={{ marginBottom: "1rem" }}>Key Features</h2>

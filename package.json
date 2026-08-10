@@ -1,7 +1,7 @@
 {
   "name": "farm.js",
   "private": true,
-  "description": "A modern React meta-framework that human and ai could understand",
+  "description": "A full-stack framework for product-integrated applications",
   "workspaces": [
     "packages/*",
     "examples/*",

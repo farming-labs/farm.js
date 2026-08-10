@@ -4,9 +4,9 @@ import { Databuddy } from "@databuddy/sdk/react";
 import "./globals.css";
 
 export const metadata = {
-  title: "farmjs.dev - React framework for integrated apps",
+  title: "farmjs.dev - Framework for integrated apps",
   description:
-    "Farm.js is an easy and fast React framework that blends app foundations and external services into one flow so teams can ship products faster.",
+    "Farm.js is an easy and fast full-stack framework that blends app foundations and external services into one flow so teams can ship products faster.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
   },

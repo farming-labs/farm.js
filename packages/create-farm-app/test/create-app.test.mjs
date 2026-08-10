@@ -22,7 +22,7 @@ test("spaces the CLI banner and matches the website hero copy", async () => {
 
   assert.equal(lines[8], "");
   assert.match(lines[9], /Create FARMJS App.*a framework for product-integrated apps/);
-  assert.doesNotMatch(lines.join("\n"), /modern React meta-framework/);
+  assert.doesNotMatch(lines.join("\n"), /React (?:meta-)?framework/i);
 });
 
 test("uses concise labels for CLI template choices", async () => {

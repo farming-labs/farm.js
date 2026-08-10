@@ -4,7 +4,7 @@ This document provides an overview of the Farm.js framework architecture and des
 
 ## 🏗️ High-Level Architecture
 
-Farm.js is built as a monorepo containing multiple packages that work together to provide a complete React meta-framework experience.
+Farm.js is built as a monorepo containing multiple packages that work together to provide a complete full-stack framework experience.
 
 ```
 ┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
@@ -247,4 +247,4 @@ For developers wanting to understand or contribute to Farm.js:
 4. **Run tests** - Understand expected behavior
 5. **Check documentation** - Comprehensive guides and API reference
 
-This architecture provides a solid foundation for a modern React meta-framework while maintaining simplicity and extensibility.
+This architecture provides a solid foundation for a modern full-stack framework while maintaining simplicity and extensibility.

@@ -9,7 +9,7 @@ export default function BlogPostPage({ params, searchParams }: PageProps) {
     "hello-world": {
       title: "Hello World from Farm.js",
       content: `
-        <p>Welcome to Farm.js, a modern React meta-framework that combines the best of Vite's lightning-fast development experience with Next.js-like semantics!</p>
+        <p>Welcome to Farm.js, a full-stack framework that combines Vite's lightning-fast development experience with familiar app-directory semantics!</p>
         
         <h2>What makes Farm.js special?</h2>
         <ul>
@@ -28,7 +28,7 @@ export default function BlogPostPage({ params, searchParams }: PageProps) {
     "why-farm-js": {
       title: "Why We Built Farm.js",
       content: `
-        <p>The React ecosystem is rich with frameworks, so why did we decide to build another one?</p>
+        <p>The application framework ecosystem is rich with options, so why did we decide to build another one?</p>
         
         <h2>The Problem</h2>
         <p>While working with existing frameworks, we encountered several pain points:</p>
