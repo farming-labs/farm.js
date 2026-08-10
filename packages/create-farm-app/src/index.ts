@@ -30,14 +30,14 @@ interface TemplateDetails {
 
 const templateDetails: Record<string, TemplateDetails> = {
   basic: {
-    title: "Farm.js Basic",
+    title: "Basic starter",
     description: "A minimal Farm.js app with built-in Tailwind support",
     instructions: [
       "Tailwind is enabled by default. You only need postcss config for custom plugins.",
     ],
   },
   auth: {
-    title: "Farm.js Auth",
+    title: "Auth starter",
     description: "Farm.js-native auth with local SQLite, secure sessions, and protected routes",
     instructions: [
       "FARMJS Auth uses local SQLite automatically; no auth environment variables are needed locally.",
@@ -45,7 +45,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     ],
   },
   "better-auth": {
-    title: "Farm.js Better Auth",
+    title: "Better Auth starter",
     description: "Better Auth with Postgres, secure sessions, and protected routes",
     instructions: [
       "Before starting, copy .env.example to .env.local and set DATABASE_URL and BETTER_AUTH_SECRET.",
@@ -53,7 +53,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     ],
   },
   ai: integrationTemplate({
-    title: "Farm.js AI",
+    title: "AI starter",
     description: "AI SDK chat route with a ready-to-use chat interface",
     provider: "ai",
     label: "AI",
@@ -61,7 +61,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations",
   }),
   auth0: integrationTemplate({
-    title: "Farm.js Auth0",
+    title: "Auth0 starter",
     description: "Auth0 login, sessions, protected routes, and account controls",
     provider: "auth0",
     label: "Auth0",
@@ -69,7 +69,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/auth/auth0",
   }),
   authjs: integrationTemplate({
-    title: "Farm.js Auth.js",
+    title: "Auth.js starter",
     description: "Auth.js with GitHub OAuth and Farm-owned route mounting",
     provider: "authjs",
     label: "Auth.js",
@@ -77,7 +77,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/auth/authjs",
   }),
   autumn: integrationTemplate({
-    title: "Farm.js Autumn",
+    title: "Autumn starter",
     description: "Autumn products, checkout, billing state, and customer portal",
     provider: "autumn",
     label: "Autumn",
@@ -85,7 +85,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/autumn",
   }),
   clerk: integrationTemplate({
-    title: "Farm.js Clerk",
+    title: "Clerk starter",
     description: "Clerk authentication, account entry points, and protected routes",
     provider: "clerk",
     label: "Clerk",
@@ -93,7 +93,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/auth/clerk",
   }),
   "jobs-inngest": integrationTemplate({
-    title: "Farm.js Inngest",
+    title: "Inngest starter",
     description: "Typed background jobs backed by Inngest",
     provider: "jobs-inngest",
     label: "Inngest",
@@ -101,7 +101,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/inngest",
   }),
   "jobs-trigger": integrationTemplate({
-    title: "Farm.js Trigger.dev",
+    title: "Trigger.dev starter",
     description: "Typed background jobs backed by Trigger.dev",
     provider: "jobs-trigger",
     label: "Trigger.dev",
@@ -109,7 +109,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/trigger",
   }),
   polar: integrationTemplate({
-    title: "Farm.js Polar",
+    title: "Polar starter",
     description: "Polar products, checkout, billing state, and customer portal",
     provider: "polar",
     label: "Polar",
@@ -117,7 +117,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/polar",
   }),
   resend: integrationTemplate({
-    title: "Farm.js Resend",
+    title: "Resend starter",
     description: "Resend templates, delivery, scheduling, and webhooks",
     provider: "resend",
     label: "Resend",
@@ -125,7 +125,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/email",
   }),
   stripe: integrationTemplate({
-    title: "Farm.js Stripe",
+    title: "Stripe starter",
     description: "Stripe products, checkout, billing portal, and webhooks",
     provider: "stripe",
     label: "Stripe",
@@ -133,7 +133,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/stripe",
   }),
   supabase: integrationTemplate({
-    title: "Farm.js Supabase",
+    title: "Supabase starter",
     description: "Supabase authentication, sessions, OAuth, and protected routes",
     provider: "supabase",
     label: "Supabase",
@@ -141,7 +141,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/auth/supabase",
   }),
   unkey: integrationTemplate({
-    title: "Farm.js Unkey",
+    title: "Unkey starter",
     description: "Unkey API key creation, verification, and route protection",
     provider: "unkey",
     label: "Unkey",
@@ -149,7 +149,7 @@ const templateDetails: Record<string, TemplateDetails> = {
     docsPath: "/docs/integrations/unkey",
   }),
   workos: integrationTemplate({
-    title: "Farm.js WorkOS",
+    title: "WorkOS starter",
     description: "WorkOS AuthKit, organization sessions, and protected routes",
     provider: "workos",
     label: "WorkOS",
