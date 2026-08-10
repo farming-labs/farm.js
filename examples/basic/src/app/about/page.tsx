@@ -8,7 +8,7 @@ import { Link } from "@farm.js/core/client"
 
 export const metadata: Metadata = {
   title: "About | Farm.js",
-  description: "Learn about Farm.js - a modern React meta-framework built on Vite",
+  description: "Learn about Farm.js - a full-stack framework built on Vite",
 };
 
 export default function AboutPage({ params, searchParams }: PageProps) {
@@ -94,4 +94,3 @@ function Feature({ title, description }: { title: string; description: string })
     </div>
   )
 }
-

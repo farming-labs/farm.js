@@ -4,7 +4,7 @@ export default function HomePage() {
   return React.createElement('div', { className: 'container' },
     React.createElement('div', { className: 'emoji' }, '🚜'),
     React.createElement('h1', null, 'Farm.js is Live!'),
-    React.createElement('p', null, 'Your Vite-powered React framework is running successfully.'),
+    React.createElement('p', null, 'Your Vite-powered full-stack app is running successfully.'),
     React.createElement('div', { className: 'features' },
       React.createElement('h3', null, '✨ What\'s Working:'),
       React.createElement('ul', null,

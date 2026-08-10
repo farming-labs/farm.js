@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "FARMJS App",
-  description: "A modern React meta-framework built on Vite",
+  description: "A framework for product-integrated apps",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml", sizes: "any" }],
   },

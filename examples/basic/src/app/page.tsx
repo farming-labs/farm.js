@@ -10,7 +10,7 @@ import { FARM_VERSION } from '@farm.js/core/version'
 
 export const metadata: Metadata = {
   title: "Home | Farm.js",
-  description: "A modern React meta-framework built on Vite with Next.js-like semantics",
+  description: "A full-stack framework built on Vite with app-directory semantics",
   keywords: ["react", "vite", "meta-framework", "ssr", "farm.js"],
 };
 
@@ -23,7 +23,7 @@ export default function HomePage({ params, searchParams }: PageProps) {
         </h1>
         
         <p className="text-xl text-gray-600 max-w-2xl mx-auto">
-          A modern React meta-framework built on Vite with Next.js-like semantics
+          A full-stack framework built on Vite with app-directory semantics
         </p>
       </div>
 
