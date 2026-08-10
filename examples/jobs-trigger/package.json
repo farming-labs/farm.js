@@ -9,13 +9,13 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "@farm.js/core": "0.1.0-beta.2",
-    "@farm.js/jobs": "0.1.0-beta.2",
+    "@farm.js/core": "workspace:*",
+    "@farm.js/jobs": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@farm.js/cli": "0.1.0-beta.2",
+    "@farm.js/cli": "workspace:*",
     "@types/node": "^20.10.5",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
