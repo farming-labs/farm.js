@@ -1,5 +1,13 @@
 import type { DocsConfig } from "@farming-labs/docs";
 
+export interface FarmDocsAdapterDescriptor {
+  id: string;
+  protocol: number;
+  server: string;
+  react?: string;
+  vite?: string;
+}
+
 export interface FarmDocsSidebarItem {
   label?: string;
   title?: string;
@@ -55,6 +63,8 @@ export type FarmDocsRuntimeConfig = Partial<DocsConfig> & {
 };
 
 export type FarmDocsConfigInput = FarmDocsRuntimeConfig & {
+  /** Versioned runtime descriptor supplied by an external docs adapter. */
+  adapter?: FarmDocsAdapterDescriptor;
   /**
    * Farm public route for docs, e.g. "/docs". When passed through
    * `config`, this is converted to the docs package's folder-style `entry`.
@@ -77,6 +87,7 @@ export type FarmDocsUserConfig = boolean | FarmDocsConfigInput;
 export interface FarmDocsResolvedConfig {
   enabled: boolean;
   entry: string;
+  adapter?: FarmDocsAdapterDescriptor;
   contentDir?: string;
   configPath?: string;
   config: FarmDocsRuntimeConfig & Pick<DocsConfig, "entry">;

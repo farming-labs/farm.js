@@ -10,6 +10,9 @@
   },
   "dependencies": {
     "@farm.js/core": "workspace:*",
+    "@farming-labs/docs": "^0.2.99",
+    "@farming-labs/farmjs": "^0.2.99",
+    "@farming-labs/theme": "^0.2.99",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },

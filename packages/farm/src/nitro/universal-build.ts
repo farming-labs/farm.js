@@ -1038,7 +1038,27 @@ async function buildClient(
     routePattern === layoutPattern ||
     routePattern.startsWith(`${layoutPattern}/`);
 
+  const adapterOwnsDocsRuntime = Boolean(
+    config.docs?.enabled && config.docs.adapter?.server && config.docs.adapter.react,
+  );
+  const adapterDocsEntry = config.docs?.enabled
+    ? `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/"
+    : null;
+  const isAdapterDocsRoute = (routePattern: string) =>
+    Boolean(
+      adapterOwnsDocsRuntime &&
+      adapterDocsEntry &&
+      (adapterDocsEntry === "/" ||
+        routePattern === adapterDocsEntry ||
+        routePattern.startsWith(`${adapterDocsEntry}/`)),
+    );
+
   for (const route of pageRoutes) {
+    // The adapter imports and hydrates its compiled MDX modules itself. Keeping
+    // the same files in Farm's generic route table duplicates the docs runtime
+    // and can pull server-only Markdown dependencies into the browser bundle.
+    if (isAdapterDocsRoute(route.pattern)) continue;
+
     try {
       const metadata = isFarmMarkdownPageFile(route.modulePath)
         ? {
@@ -1083,7 +1103,7 @@ async function buildClient(
     }
   }
 
-  if (config.docs?.enabled) {
+  if (config.docs?.enabled && !adapterOwnsDocsRuntime) {
     const docsEntry =
       `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/";
     const applicableClientLayouts = clientLayouts.filter(
@@ -1141,9 +1161,10 @@ async function buildClient(
     clientRouteSlots,
     root,
     srcDir,
-    isFarmDocsSearchEnabled(config.docs),
-    resolveFarmDocsSearchClientModule(root),
+    adapterOwnsDocsRuntime ? false : isFarmDocsSearchEnabled(config.docs),
+    adapterOwnsDocsRuntime ? undefined : resolveFarmDocsSearchClientModule(root),
     config.docs?.enabled ? config.docs.entry : undefined,
+    adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
     config.i18n,
     config.plugins,
   );
@@ -1241,6 +1262,7 @@ async function buildClient(
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(config.vite.plugins || []),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
           name: "farm-client-only-imports",
@@ -1541,6 +1563,7 @@ function generateClientHydrationEntry(
   docsSearchEnabled: boolean,
   docsSearchModuleId: string | undefined,
   docsEntryPath: string | undefined,
+  docsAdapterReact: string | undefined,
   i18nConfig: ResolvedFarmConfig["i18n"] = {
     enabled: false,
     locales: ["en"],
@@ -1632,6 +1655,28 @@ function isFarmDocsPath() {
   return false;
 }
 `;
+  const docsAdapterRuntime = docsAdapterReact
+    ? `
+import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
+
+async function hydrateFarmDocsAdapterRuntime() {
+  const runtime = window.__FARM_DOCS_ADAPTER__;
+  if (!runtime) return false;
+  if (typeof FarmDocsAdapterReact.hydrateFarmDocs !== "function") {
+    throw new Error("The configured Farm docs adapter does not export hydrateFarmDocs().");
+  }
+  FarmDocsAdapterReact.hydrateFarmDocs({
+    config: runtime.config || {},
+    data: runtime.data,
+  });
+  return true;
+}
+`
+    : `
+async function hydrateFarmDocsAdapterRuntime() {
+  return false;
+}
+`;
 
   if (clientPages.length === 0 && clientRouteSlots.length === 0) {
     // No client pages - just basic runtime with CSS and SPA navigation
@@ -1643,6 +1688,7 @@ import { createClientPluginManager, installChunkErrorRecovery } from "@farm.js/c
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
+${docsAdapterRuntime}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
 
 installChunkErrorRecovery();
@@ -1853,6 +1899,8 @@ void farmClientRuntime.start();
 // Expose router globally
 window.__FARM_SPA_ROUTER__ = spaRouter;
 
+void hydrateFarmDocsAdapterRuntime();
+
 window.addEventListener("beforeunload", function(event) {
   if (spaRouter.blockers.size > 0) {
     event.preventDefault();
@@ -1931,6 +1979,7 @@ import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
 ${i18nClientRuntime}
 ${docsNavigationRuntime}
+${docsAdapterRuntime}
 
 ${imports.join("\n")}
 ${generateFarmDocsSearchClientRuntime(docsSearchEnabled, docsSearchModuleId)}
@@ -2228,6 +2277,10 @@ function resetReactRoot() {
 
 // Hydrate client components
 async function hydrate() {
+  if (await hydrateFarmDocsAdapterRuntime()) {
+    return;
+  }
+
   const pathname = window.location.pathname;
   const matched = matchRoute(pathname);
   hydrateInitialRouteSlots();
@@ -2952,7 +3005,10 @@ async function buildSSRInMemory(
       // Use esbuild for faster transforms
       esbuild: {
         target: "node18",
-        keepNames: true,
+        // Adapters can render provider scripts by serializing function source.
+        // keepNames injects helper calls into those functions; after Nitro
+        // minifies the server chunk the helper is no longer in script scope.
+        keepNames: !(config.docs?.enabled && config.docs.adapter?.server),
         jsxDev: false,
       },
       // SSR configuration to externalize problematic modules
@@ -3008,6 +3064,7 @@ async function buildSSRInMemory(
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(config.vite.plugins || []),
         ...(!useExternalMetadataImageRuntime &&
         metadataImageRoutes.some((image) => image.sourceType === "module")
           ? [createMetadataImageWasmPlugin()]
@@ -3122,6 +3179,9 @@ function generateVirtualEntryCode(
   i18nCatalogs: FarmI18nCatalogs,
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
+  const adapterOwnsDocsRuntime = Boolean(
+    config.docs?.enabled && config.docs.adapter?.server && config.docs.adapter.react,
+  );
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -3337,7 +3397,11 @@ function generateVirtualEntryCode(
     ? `import { _runWithFarmI18nRequest, _setDefaultFarmI18nRuntime, createFarmI18nRuntime, getFarmI18nClientSnapshot } from "@farm.js/core/i18n/server";`
     : "";
   const docsHandlerImport = config.docs?.enabled
-    ? `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farm.js/core/docs";`
+    ? adapterOwnsDocsRuntime
+      ? `import { isFarmDocsAPIRequest } from "@farm.js/core/docs";
+import { createFarmDocsRuntimeHandler as createFarmDocsAdapterRuntimeHandler } from ${JSON.stringify(config.docs.adapter!.server)};
+import * as FarmDocsAdapterReact from ${JSON.stringify(config.docs.adapter!.react)};`
+      : `import { createFarmDocsAPIHandler, createFarmDocsHandler, isFarmDocsAPIRequest } from "@farm.js/core/docs";`
     : "";
   const docsFontImport = config.docs?.enabled
     ? `import { resolveFarmLayoutFonts } from "@farm.js/core/font";`
@@ -3621,7 +3685,23 @@ globalThis.__FARM_DOCS_RUNTIME_CONFIG__ = {
 };
 const farmDocsHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsHandler(farmDocsResolvedConfig, {
+      ? adapterOwnsDocsRuntime
+        ? `createFarmDocsAdapterRuntimeHandler({
+  ...farmDocsResolvedConfig.config,
+  entry: farmDocsResolvedConfig.config?.entry || String(farmDocsResolvedConfig.entry || "/docs").replace(/^\\/+|\\/+$/g, "") || "docs",
+  docsPath: farmDocsResolvedConfig.entry,
+  contentDir: farmDocsResolvedConfig.contentDir || farmDocsResolvedConfig.config?.contentDir,
+}, {
+  rootDir: farmDocsRuntimeRoot,
+  clientEntry: "/farm-client.js",
+  stylesheets: ["/farm-fonts.css", "/farm-client.css"],
+  resolveLayoutFonts: (pathname) =>
+    resolveFarmLayoutFonts(
+      getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
+    ),
+  loadReactModule: async () => FarmDocsAdapterReact,
+})`
+        : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
   srcDir: ${JSON.stringify(config.srcDir)},
   clientEntry: "/farm-client.js",
@@ -3631,12 +3711,15 @@ const farmDocsHandler = ${
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
     ),
   fontStylesheetHref: "/farm-fonts.css",
+  globalStylesheetHref: "/assets/globals.css",
 })`
       : "null"
   };
 const farmDocsAPIHandler = ${
     config.docs?.enabled
-      ? `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig })`
+      ? adapterOwnsDocsRuntime
+        ? "null"
+        : `createFarmDocsAPIHandler({ rootDir: farmDocsRuntimeRoot, srcDir: ${JSON.stringify(config.srcDir)}, docs: farmDocsResolvedConfig })`
       : "null"
   };
 
@@ -4679,6 +4762,7 @@ ${
   config.docs?.enabled
     ? `async function wrapFarmDocsResponseWithLayouts(request, response) {
   if (request.method === "HEAD") return response;
+  if (response.headers.get("x-farm-docs-adapter")) return response;
 
   const pathname = getFarmRoutePathname(new URL(request.url).pathname);
   const applicableLayouts = getApplicableLayouts(pathname);
@@ -6653,6 +6737,13 @@ export default async function farmNitroEventHandler(event) {
 
   const shouldMinify = nitroConfig.minify !== false;
   const configuredEsbuildOptions = nitroConfig.esbuild?.options || {};
+  const resolvedEsbuildOptions = {
+    ...configuredEsbuildOptions,
+    // Function-name helpers are unsafe for provider scripts that serialize a
+    // function with toString(); the helper is outside the emitted script scope.
+    keepNames:
+      configuredEsbuildOptions.keepNames ?? !(config.docs?.enabled && config.docs.adapter?.server),
+  };
   const effectiveMinify = configuredEsbuildOptions.minify ?? shouldMinify;
   const useFarmEsbuildMinifier =
     effectiveMinify &&
@@ -6660,7 +6751,7 @@ export default async function farmNitroEventHandler(event) {
     !hasUnsupportedEsbuildOverrides &&
     !hasLateBuildMutationConfig;
   const esbuildChunkMinifier = useFarmEsbuildMinifier
-    ? createEsbuildChunkMinifyPlugin(configuredEsbuildOptions)
+    ? createEsbuildChunkMinifyPlugin(resolvedEsbuildOptions)
     : null;
   if (canReusePrebuiltSSR) {
     const configuredRollupPlugins = nitroConfig.rollupConfig?.plugins;
@@ -6681,9 +6772,9 @@ export default async function farmNitroEventHandler(event) {
   nitroConfig.esbuild = {
     ...nitroConfig.esbuild,
     options: {
-      ...configuredEsbuildOptions,
+      ...resolvedEsbuildOptions,
       minify: useFarmEsbuildMinifier ? false : configuredEsbuildOptions.minify,
-      keepNames: configuredEsbuildOptions.keepNames ?? true,
+      keepNames: resolvedEsbuildOptions.keepNames,
       legalComments: configuredEsbuildOptions.legalComments ?? "none",
     },
   };

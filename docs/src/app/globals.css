@@ -1,3 +1,5 @@
+@import "@farming-labs/theme/pixel-border/css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -8,6 +10,8 @@
     --farm-line: rgb(255 255 255 / 0.12);
     --farm-line-soft: rgb(255 255 255 / 0.055);
     --farm-rule: rgb(255 255 255 / 0.09);
+    /* Keep theme utilities on the compiled layout font instead of ui-monospace. */
+    --font-geist-mono: "Geist Mono", ui-monospace, monospace !important;
   }
 
   html {
@@ -31,7 +35,17 @@
   }
 
   .farm-home .font-mono {
+    font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
     letter-spacing: 0;
+  }
+
+  .farm-home,
+  .farm-home * {
+    border-color: rgb(229 231 235);
+  }
+
+  .farm-home footer > .grid > :first-child {
+    border-bottom-width: 0 !important;
   }
 
   .farm-home .font-geist-pixel {
@@ -996,5 +1010,252 @@
   .farm-build-output {
     clip-path: inset(0);
     opacity: 1;
+  }
+}
+
+/* Farm.js identity layered on the adapter-owned Pixel Border theme. */
+#nd-docs-layout {
+  --fd-content-width: 900px;
+}
+
+.dark #nd-docs-layout {
+  --color-fd-background: #000;
+}
+
+/* Farm is dark-only. Apply the adapter-emitted dark Shiki palette directly so
+   syntax colors survive the browser theme bootstrap and Pixel Border cascade. */
+html[data-farm-docs-runtime="true"] figure.shiki {
+  --padding-left: 0px;
+  --padding-right: 0px;
+  color: var(--shiki-dark, #fff) !important;
+  background-color: var(--shiki-dark-bg, #101010) !important;
+}
+
+html[data-farm-docs-runtime="true"] figure.shiki pre {
+  padding: 0.75rem 0.875rem !important;
+}
+
+html[data-farm-docs-runtime="true"] figure.shiki code span {
+  color: var(--shiki-dark, inherit) !important;
+  background-color: transparent !important;
+  font-style: var(--shiki-dark-font-style, inherit);
+  font-weight: var(--shiki-dark-font-weight, inherit);
+  text-decoration: var(--shiki-dark-text-decoration, inherit);
+}
+
+@media (max-width: 767.98px) {
+  html[data-farm-docs-runtime="true"] figure.shiki pre {
+    padding: 0.625rem 0.6875rem !important;
+  }
+}
+
+/* Pixel Border 0.2.99 hides the desktop sidebar's last child to remove its
+   theme switcher. With themeToggle disabled, the Radix scroll viewport becomes
+   that last child, so keep the actual navigation viewport visible. */
+#nd-docs-layout:not([data-fd-framework]) aside#nd-sidebar > div[dir].overflow-hidden {
+  display: block !important;
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child {
+  padding-inline: calc(var(--fd-pixel-rail-width, 12px) + 18px);
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child::before {
+  content: "";
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  margin-right: 8px;
+  background:
+    linear-gradient(currentColor 0 0) 0 0 / 4px 4px no-repeat,
+    linear-gradient(currentColor 0 0) 6px 0 / 10px 4px no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 0 6px / 4px 4px no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 64%, transparent) 0 0) 6px 6px / 10px 4px
+      no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 34%, transparent) 0 0) 0 12px / 4px 4px
+      no-repeat,
+    linear-gradient(color-mix(in srgb, currentColor 34%, transparent) 0 0) 6px 12px / 6px 4px
+      no-repeat;
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child > a {
+  gap: 0;
+  font-size: 0;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child > a::before {
+  content: "FARM";
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  background: none;
+  font-size: 12px;
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child > a::after {
+  content: ".JS";
+  font-size: 12px;
+  opacity: 0.52;
+}
+
+#nd-docs-layout aside#nd-sidebar > div:first-child > div:first-child::after {
+  content: "/ DOCS";
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-fd-foreground);
+  font-family: var(--fd-font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  letter-spacing: 0.03em;
+}
+
+@media (min-width: 1024px) {
+  #nd-docs-layout #nd-subnav button[data-search]::after {
+    content: "⌘\2002 K";
+    box-sizing: border-box;
+    width: 36px;
+    min-width: 36px;
+    height: 19px;
+    padding: 0 5px;
+    border-color: color-mix(in srgb, var(--color-fd-foreground) 14%, transparent);
+    background: color-mix(in srgb, var(--color-fd-foreground) 5%, transparent);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0;
+    line-height: 1;
+    white-space: nowrap;
+  }
+}
+
+/* Keep Farm's page actions and footer navigation in the same compact Geist
+   language as the ORM docs while leaving the shared Pixel Border preset alone. */
+#nd-docs-layout[data-fd-framework] .fd-page-action-btn,
+html[data-farm-docs-runtime="true"] .fd-page-action-menu,
+html[data-farm-docs-runtime="true"] .fd-page-action-menu-item,
+#nd-docs-layout[data-fd-framework] .fd-page-footer,
+#nd-docs-layout[data-fd-framework] .fd-page-footer a,
+#nd-docs-layout[data-fd-framework] .fd-last-updated-footer,
+#nd-docs-layout[data-fd-framework] .fd-page-nav-card {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace !important;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-action-btn,
+html[data-farm-docs-runtime="true"] .fd-page-action-menu,
+html[data-farm-docs-runtime="true"] .fd-page-action-menu-item {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+  font-weight: 150 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+}
+
+html[data-farm-docs-runtime="true"] .fd-page-action-menu {
+  border: 1px solid var(--color-fd-border) !important;
+  background: #000 !important;
+}
+
+html[data-farm-docs-runtime="true"] .fd-page-action-menu-item {
+  border-bottom: 1px solid var(--color-fd-border) !important;
+  color: var(--color-fd-foreground) !important;
+}
+
+html[data-farm-docs-runtime="true"] .fd-page-action-menu-item:last-child {
+  border-bottom: 0 !important;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  margin-top: auto;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-fd-border);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-footer > a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px !important;
+  border: 1px solid var(--color-fd-border) !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  color: var(--color-fd-foreground) !important;
+  font-size: 10px !important;
+  font-weight: 150 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-footer > a:hover {
+  background: color-mix(in srgb, var(--color-fd-foreground) 6%, transparent) !important;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-llms-txt-link,
+#nd-docs-layout[data-fd-framework] .fd-last-updated-footer {
+  border-radius: 0;
+  font-size: 10px !important;
+  font-weight: 130 !important;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-nav {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  width: 100%;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--color-fd-border);
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-nav-card {
+  min-height: 140px;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 0;
+  background: transparent;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-nav-title {
+  gap: 4px;
+  min-height: calc(1.4em * 2);
+  font-size: 11px;
+  font-weight: 150;
+  line-height: 1.4;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+#nd-docs-layout[data-fd-framework] .fd-page-nav-description {
+  min-height: calc(1.5em * 2);
+  font-size: 10px;
+  font-weight: 130;
+  line-height: 1.5;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  #nd-docs-layout[data-fd-framework] .fd-last-updated-footer {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  #nd-docs-layout[data-fd-framework] .fd-page-nav {
+    grid-template-columns: 1fr;
+  }
+
+  #nd-docs-layout[data-fd-framework] .fd-page-nav-next {
+    align-items: flex-start;
+    text-align: left;
   }
 }

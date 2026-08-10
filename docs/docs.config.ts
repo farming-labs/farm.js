@@ -339,6 +339,10 @@ const config = {
     title: "Farm.js",
     url: "/",
   },
+  github: {
+    url: "https://github.com/farming-labs/farm.js",
+    directory: "docs",
+  },
   search: {
     provider: "simple",
     enabled: true,
@@ -360,8 +364,13 @@ const config = {
     position: "footer",
   },
   pageActions: {
+    position: "below-title",
     copyMarkdown: {
       enabled: true,
+    },
+    openDocs: {
+      enabled: true,
+      target: "markdown",
     },
     alignment: "right",
   },
@@ -369,7 +378,18 @@ const config = {
   navigation: {
     sidebar,
   },
-  theme: pixelBorder(),
+  theme: pixelBorder({
+    ui: {
+      codeBlock: {
+        theme: "github-light-default",
+        darkTheme: "vesper",
+      },
+    },
+  }),
+  themeToggle: {
+    enabled: false,
+    default: "dark",
+  },
 } satisfies FarmDocsSerializableConfig;
 
 export default {
