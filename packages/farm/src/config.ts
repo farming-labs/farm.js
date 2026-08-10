@@ -77,6 +77,8 @@ import {
   type ResolvedFarmCspConfig,
   type ResolvedFarmSecurityConfig,
 } from "./security";
+import { resolveFarmThemeConfig } from "./theme/config";
+import type { ResolvedFarmThemeConfig } from "./theme/types";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -261,7 +263,8 @@ export interface ResolvedFarmDeployConfig extends Omit<FarmDeployConfig, "output
 export interface FarmUserConfig extends Omit<BaseFarmConfig, "vite" | "docs" | "env" | "layers"> {
   /** Reusable Farm directories or installed packages, applied from left to right. */
   extends?: readonly FarmLayerEntry[];
-  plugins?: FarmPlugin[];
+  /** Global plugins. Integration-bound plugins must be contributed through an integration. */
+  plugins?: FarmPlugin<any, any, any, any, unknown, false>[];
   integrations?: FarmIntegrationsUserConfig;
   /**
    * Farm-native authentication. `true` enables email/password auth with
@@ -351,6 +354,7 @@ export interface ResolvedFarmConfig extends Required<
     | "auth"
     | "performance"
     | "security"
+    | "theme"
   >
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
@@ -375,6 +379,7 @@ export interface ResolvedFarmConfig extends Required<
   auth: ResolvedFarmAuthConfig;
   performance: ResolvedFarmPerformanceConfig;
   security: ResolvedFarmSecurityConfig;
+  theme: ResolvedFarmThemeConfig;
   routeRules: FarmRouteRules;
 }
 
@@ -836,6 +841,7 @@ export async function resolveConfig(
     routeRules,
     images: resolveFarmImageConfig(userConfig.images),
     performance: resolveFarmPerformanceConfig(userConfig.performance),
+    theme: resolveFarmThemeConfig(userConfig.theme, userConfig.basePath || "/"),
     publicDir: userConfig.publicDir || "public",
     i18n: resolveFarmI18nConfig(userConfig.i18n, { root, mode }),
     openapi: {

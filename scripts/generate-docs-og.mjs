@@ -413,7 +413,7 @@ try {
             </div>
 
             <footer class="footer">
-              <div class="command"><span class="prompt">$</span><strong>pnpm create @farm.js/app</strong> my-app</div>
+              <div class="command"><span class="prompt">$</span><strong>pnpm create @farm.js/app@beta</strong> my-app</div>
               <div class="url">farmjs.dev</div>
             </footer>
           </section>

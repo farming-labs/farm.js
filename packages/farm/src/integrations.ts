@@ -460,6 +460,11 @@ export interface FarmIntegrationPluginOwner {
   serverRuntime: boolean;
 }
 
+/** A normal plugin or an integration-bound plugin compatible with the shared instance. */
+export type FarmIntegrationContributedPlugin<TInstance = unknown> =
+  | FarmPlugin<any, any, any, any, unknown, false>
+  | FarmPlugin<any, any, any, any, TInstance, true>;
+
 export interface FarmIntegration<
   TSchema extends FarmIntegrationSchema | undefined = FarmIntegrationSchema | undefined,
   TConfig = unknown,
@@ -487,7 +492,7 @@ export interface FarmIntegration<
   providers?: readonly FarmIntegrationProvider[];
   documentNavigations?: readonly FarmIntegrationDocumentNavigation[];
   /** Additional Farm plugins owned and configured by this integration. */
-  plugins?: readonly FarmPlugin<any, any, any, any, NoInfer<TInstance>>[];
+  plugins?: readonly FarmIntegrationContributedPlugin<NoInfer<TInstance>>[];
 }
 
 export type FarmIntegrationsUserConfig = Record<string, FarmIntegration<any, any, any> | undefined>;
@@ -855,7 +860,7 @@ type FarmIntegrationInput<
   config?: FarmIntegrationConfigInput<TConfig, TSchema>;
   routes?: FarmIntegrationRoutesInput<TSchema>;
   endpoints?: FarmIntegrationEndpointsInput<TSchema>;
-  plugins?: readonly FarmPlugin<any, any, any, any, NoInfer<TInstance>>[];
+  plugins?: readonly FarmIntegrationContributedPlugin<NoInfer<TInstance>>[];
 } & (
     | {
         category: FarmIntegrationCategory;
@@ -1172,7 +1177,7 @@ function createIntegrationPluginContext(
 }
 
 function withIntegrationPluginOwner(
-  plugin: FarmPlugin,
+  plugin: FarmPlugin<any, any, any, any, any, boolean>,
   owner: Readonly<FarmIntegrationPluginOwner>,
   integration?: Readonly<FarmPluginIntegrationContext>,
 ): FarmPlugin {

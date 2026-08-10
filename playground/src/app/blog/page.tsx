@@ -6,14 +6,15 @@ export default function BlogPage({ params, searchParams }: PageProps) {
     {
       slug: "hello-world",
       title: "Hello World from Farm.js",
-      excerpt: "Welcome to our new React meta-framework built on Vite!",
+      excerpt: "Welcome to our new full-stack framework built on Vite!",
       date: "2024-01-15",
       author: "Farm.js Team",
     },
     {
       slug: "why-farm-js",
       title: "Why We Built Farm.js",
-      excerpt: "The story behind creating a new React framework with Vite and Next.js semantics.",
+      excerpt:
+        "The story behind creating a full-stack framework with Vite and app-directory semantics.",
       date: "2024-01-10",
       author: "Farm.js Team",
     },

@@ -368,6 +368,35 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain('"shouldHydrate":true');
   });
 
+  it("keeps an async server page server-rendered and warns when hydration was suppressed", async () => {
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const response = createMockResponse();
+    const renderer = createRenderer(
+      {
+        [routeModulePath]: {
+          default: async function DashboardPage() {
+            return React.createElement("main", null, "Async server dashboard");
+          },
+        },
+      },
+      {
+        clientMetadata: {
+          isClientComponent: false,
+          shouldHydrate: false,
+          suppressedAsyncHydration: true,
+        },
+      },
+    );
+
+    await renderer.renderPage(createMockRequest("/dashboard"), response);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain("Async server dashboard");
+    expect(response.body).toContain("window.__FARM_PAGE_SHOULD_HYDRATE__ = false");
+    expect(response.body).toContain("window.__FARM_SHOULD_HYDRATE__ = false");
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("async server component"));
+  });
+
   it("bootstraps every matched layout when only a nested layout hydrates", async () => {
     const response = createMockResponse();
     const renderer = createRenderer(
@@ -419,7 +448,11 @@ function createRenderer(
   options: {
     opengraphImage?: boolean;
     staticImage?: { modulePath: string; staticInfo: any };
-    clientMetadata?: { isClientComponent: boolean; shouldHydrate: boolean };
+    clientMetadata?: {
+      isClientComponent: boolean;
+      shouldHydrate: boolean;
+      suppressedAsyncHydration?: true;
+    };
     layoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
     dashboardLayoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
     onGenerateClientManifest?: () => void;
@@ -543,6 +576,7 @@ function createRenderer(
             modulePath: "/src/app/dashboard/page.tsx",
             shouldHydrate: options.clientMetadata?.shouldHydrate ?? false,
             isClientComponent: options.clientMetadata?.isClientComponent ?? false,
+            suppressedAsyncHydration: options.clientMetadata?.suppressedAsyncHydration,
             segments: [{ segment: "dashboard", isDynamic: false }],
           },
         ],

@@ -363,10 +363,6 @@ export function betterAuthSessionPlugin() {
     name: "better-auth:session",
     runtime: {
       async context({ request, integration }) {
-        if (!integration) {
-          throw new Error("better-auth:session must be registered by an integration");
-        }
-
         return {
           session: await integration.instance.api.getSession({
             headers: request.headers,
@@ -386,15 +382,20 @@ export const auth = defineIntegration({
 ```
 
 `integration` contains the registration `key`, `category`, `type`, shared `instance`, and
-`serverRuntime` ownership. It is available to `setup` and every server hook on plugins contributed
-through `integration.plugins`. Because a normal application plugin has no owner, the field is
-optional and remains `undefined` for global plugins.
+`serverRuntime` ownership. It is required in `setup` and every server hook created through
+`definePlugin.forIntegration<T>()`, so bound plugins do not need a runtime guard. A normal
+application plugin has no owner; its `integration` field remains optional and `undefined` when the
+plugin is registered globally.
 
 `forIntegration<T>()` is a type-only binding: it does not wrap the plugin or add runtime data. It gives
 every server hook the exact instance type and makes `defineIntegration` reject a plugin whose
 expected instance does not match the configured `instance`. If the configured value is
 `{ auth: betterAuth() }`, bind `{ auth: BetterAuthInstance }` and
 `integration.instance.auth.api` is fully checked and autocompleted.
+
+A bound plugin cannot be registered directly in the global `plugins` array. TypeScript rejects that
+configuration because Farm cannot provide an owning integration there. Contribute it through the
+matching integration's `plugins` array instead.
 
 Prefer the return type inferred by `defineIntegration`. If a package must publish an explicit
 integration type, preserve the instance as the third `FarmIntegration` type argument so its plugin

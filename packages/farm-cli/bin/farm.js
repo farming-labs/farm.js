@@ -16,14 +16,19 @@ const { program } = require("commander");
 const { version } = require("../package.json");
 
 const banner = `
- _______                         
-|  ___  |__ _ _ __ _ __ ___     
-| |_ /| / _\` | '__| '_ \` _ \\ 
-|  _ \\| | (_| | |  | | | | | |
-|_| \\_\\_|\\__,_|_|  |_| |_| |_|
+░██████████   ░███    ░█████████  ░███     ░███         ░█████   ░██████
+░██          ░██░██   ░██     ░██ ░████   ░████           ░██   ░██   ░██
+░██         ░██  ░██  ░██     ░██ ░██░██ ░██░██           ░██  ░██
+░█████████ ░█████████ ░█████████  ░██ ░████ ░██           ░██   ░████████
+░██        ░██    ░██ ░██   ░██   ░██  ░██  ░██     ░██   ░██          ░██
+░██        ░██    ░██ ░██    ░██  ░██       ░██     ░██   ░██   ░██   ░██
+░██        ░██    ░██ ░██     ░██ ░██       ░██ ░██  ░██████     ░██████
 `;
 
-program.name("farm").description("Farm.js CLI - A modern React meta-framework").version(version);
+program
+  .name("farm")
+  .description("Farm.js CLI - A framework for product-integrated apps")
+  .version(version);
 program.addHelpText("beforeAll", `${banner}\n`);
 
 function collectOption(value, previous) {

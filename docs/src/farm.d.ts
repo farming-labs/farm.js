@@ -76,7 +76,8 @@ export type RoutePath =
   | "/docs/server-queries"
   | "/docs/server-rendering"
   | "/docs/storage"
-  | "/docs/testing";
+  | "/docs/testing"
+  | "/docs/themes";
 export type RoutePattern =
   | "/"
   | "/docs"
@@ -142,7 +143,8 @@ export type RoutePattern =
   | "/docs/server-queries"
   | "/docs/server-rendering"
   | "/docs/storage"
-  | "/docs/testing";
+  | "/docs/testing"
+  | "/docs/themes";
 export type RouteModulePattern =
   | "/"
   | "/docs"
@@ -208,7 +210,8 @@ export type RouteModulePattern =
   | "/docs/server-queries"
   | "/docs/server-rendering"
   | "/docs/storage"
-  | "/docs/testing";
+  | "/docs/testing"
+  | "/docs/themes";
 declare module "@farm.js/core/client" {
   interface LinkDefaultRoute {
     _: import("./farm").RoutePath;

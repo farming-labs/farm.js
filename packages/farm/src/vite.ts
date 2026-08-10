@@ -46,6 +46,7 @@ import { farmEnvironmentFunctionsPlugin } from "./environment-vite";
 import { FARM_VERSION } from "./version";
 import { createDeferredDataResponse } from "./deferred";
 import { _withAfterNodeMiddleware } from "./after";
+import { devServableFileExists } from "./dev-static";
 import {
   createFarmDeploymentMismatchResponse,
   FARM_DEPLOYMENT_ID_HEADER,
@@ -70,6 +71,8 @@ import {
   readNodeRequestBody,
   resolveFarmServerConfig,
 } from "./server-http";
+import { createCliColors } from "./cli-colors";
+import { createFarmThemeCssPlugin } from "./theme/vite";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -490,18 +493,14 @@ export function farmPlugin(
   let refreshRouteDiscovery: ((reason: string) => Promise<void>) | null = null;
   let workflowHandler: ((request: Request) => Promise<Response | null>) | null = null;
   const logUpdate = (tag: "PAGE" | "API" | "MIDDLEWARE" | "TYPE", message: string) => {
-    try {
-      const pc = require("picocolors");
-      const log = [
-        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.yellow("UPDATE")) + pc.dim("]"),
-        pc.gray(message),
-      ].join(" ");
-      console.log(log);
-    } catch {
-      console.log(`[FARM] [${tag}] [UPDATE] ${message}`);
-    }
+    const pc = createCliColors();
+    const log = [
+      pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.yellow("UPDATE")) + pc.dim("]"),
+      pc.gray(message),
+    ].join(" ");
+    console.log(log);
   };
 
   return {
@@ -1088,26 +1087,22 @@ window.__FARM_MANIFEST__ = ${inlineValue({
         }
         (logResponse as any).__last = { key: dedupeKey, ts: now };
 
-        try {
-          const pc = require("picocolors");
-          let statusColor = pc.green;
-          if (status >= 500) statusColor = pc.red;
-          else if (status >= 400) statusColor = pc.yellow;
-          else if (status >= 300) statusColor = pc.cyan;
+        const pc = createCliColors();
+        let statusColor = pc.green;
+        if (status >= 500) statusColor = pc.red;
+        else if (status >= 400) statusColor = pc.yellow;
+        else if (status >= 300) statusColor = pc.cyan;
 
-          const log = [
-            pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
-            pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-            pc.gray(urlPath),
-            pc.dim("-"),
-            statusColor(status.toString()),
-            pc.dim(`(${duration}ms)`),
-          ].join(" ");
-          console.log(log);
-        } catch {
-          console.log(`[FARM] [${tag}] [${method}] ${urlPath} - ${status} (${duration}ms)`);
-        }
+        const log = [
+          pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+          pc.dim("[") + pc.bold(pc.cyan(tag)) + pc.dim("]"),
+          pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+          pc.gray(urlPath),
+          pc.dim("-"),
+          statusColor(status.toString()),
+          pc.dim(`(${duration}ms)`),
+        ].join(" ");
+        console.log(log);
       };
 
       // Register middleware directly (not in return function) to ensure it runs early
@@ -1671,12 +1666,24 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           }
 
           // Skip internal Vite requests
-          if (
-            req.url?.startsWith("/@") ||
-            req.url?.startsWith("/node_modules") ||
-            (requestPathname.includes(".") && !requestPathname.endsWith(".html"))
-          ) {
+          if (req.url?.startsWith("/@") || req.url?.startsWith("/node_modules")) {
             return next();
+          }
+
+          // Dotted paths are usually static assets (modules, images, source
+          // maps), but dots are also valid inside route segments. Only skip
+          // the router when the request maps to a real file on disk or no app
+          // route matches the pathname.
+          if (requestPathname.includes(".") && !requestPathname.endsWith(".html")) {
+            const matchesAppRoute = Boolean(
+              farmApp?.getRouteManager()?.matchRoute(requestPathname)?.route,
+            );
+            if (
+              !matchesAppRoute ||
+              devServableFileExists(requestPathname, [server.config.publicDir, server.config.root])
+            ) {
+              return next();
+            }
           }
 
           // Handle SPA page-data requests for client-side navigation
@@ -3957,6 +3964,19 @@ async function tryHydrateImportedPage(
     const PageComponent = pageModule?.default;
     if (!PageComponent) return false;
 
+    if (
+      typeof PageComponent === 'function' &&
+      PageComponent.constructor &&
+      PageComponent.constructor.name === 'AsyncFunction'
+    ) {
+      console.warn(
+        '[Farm.js] Skipping hydration for ' + modulePath +
+        ': async server components cannot run in the browser. ' +
+        'Server-rendered HTML is preserved; move interactive UI into a "use client" child of a synchronous page.'
+      );
+      return false;
+    }
+
     currentPageComponent = PageComponent;
     currentPageProps = await buildRouteComponentProps(
       pageModule,
@@ -4123,14 +4143,22 @@ async function renderPage(pageData) {
     if (!doc.documentElement || !doc.body) return false;
 
     resetReactRoots();
+    const activeFarmTheme =
+      window.__FARM_THEME__?.snapshot?.resolvedTheme ||
+      document.documentElement.getAttribute('data-theme');
     Array.from(document.documentElement.attributes).forEach(function(attr) {
+      if (attr.name === 'data-theme') return;
       if (!doc.documentElement.hasAttribute(attr.name)) {
         document.documentElement.removeAttribute(attr.name);
       }
     });
     Array.from(doc.documentElement.attributes).forEach(function(attr) {
+      if (attr.name === 'data-theme') return;
       document.documentElement.setAttribute(attr.name, attr.value);
     });
+    if (activeFarmTheme) {
+      document.documentElement.setAttribute('data-theme', activeFarmTheme);
+    }
 
     document.head.innerHTML = doc.head ? doc.head.innerHTML : '';
     document.body.innerHTML = doc.body.innerHTML;
@@ -4139,6 +4167,7 @@ async function renderPage(pageData) {
 
     setTimeout(function() {
       Array.from(document.querySelectorAll('script')).forEach(function(script) {
+        if (script.id === 'farm-theme-script') return;
         const freshScript = document.createElement('script');
         Array.from(script.attributes).forEach(function(attr) {
           freshScript.setAttribute(attr.name, attr.value);
@@ -4602,7 +4631,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
   };
 
   // Custom logger to replace Vite's default logs with Farm.js branding
-  const pc = await import("picocolors").then((m) => m.default);
+  const pc = createCliColors();
   let serverStarted = false;
   let startTime = Date.now();
 
@@ -4689,6 +4718,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
 
   return {
     plugins: [
+      createFarmThemeCssPlugin(config.theme, config.basePath),
       tailwindcss(),
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),

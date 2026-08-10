@@ -6,10 +6,11 @@ const { version } = require("../package.json");
 
 program
   .name("create-farm-app")
-  .description("Create a new Farm.js application")
+  .description("Create a new FARMJS application")
   .version(version)
   .argument("[project-name]", "Name of the project")
   .option("-t, --template <template>", "Template to use")
+  .option("--list-templates", "List all available starter templates")
   .option("--typescript", "Use TypeScript template")
   .option("--skip-install", "Skip installing dependencies")
   .action(async (projectName, options) => {

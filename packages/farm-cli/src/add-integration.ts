@@ -80,6 +80,7 @@ interface IntegrationProviderDefinition {
   provider: FarmIntegrationProvider;
   aliases: readonly string[];
   defaultKey: string;
+  packageName: `@farm.js/${string}`;
   fileName: string;
   exportName: string;
   description: string;
@@ -101,6 +102,7 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
     provider: "ai",
     aliases: ["ai-sdk", "vercel-ai", "vercel-ai-sdk", "chat"],
     defaultKey: "chat",
+    packageName: "@farm.js/ai",
     fileName: "chat",
     exportName: "POST",
     description: "Vercel AI SDK chat route",
@@ -111,7 +113,7 @@ const PROVIDERS: readonly IntegrationProviderDefinition[] = [
       "No farm.config integration wiring is required for this route.",
     ],
     ui: aiChatUIFeature(),
-    template: () => `import { aiChatRoute } from "@farm.js/integrations/ai";
+    template: () => `import { aiChatRoute } from "@farm.js/ai";
 
 export const POST = aiChatRoute({
   model: "openai/gpt-4o-mini",
@@ -123,17 +125,19 @@ export const POST = aiChatRoute({
     provider: "stripe",
     aliases: ["billing-stripe", "payments", "stripe-billing"],
     defaultKey: "billing",
+    packageName: "@farm.js/stripe",
     fileName: "stripe",
     exportName: "stripeIntegration",
     description: "Stripe billing and checkout routes",
     env: ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET"],
-    template: () => `import { stripe } from "@farm.js/integrations/stripe";
+    template: () => `import type { FarmIntegrationLogEvent } from "@farm.js/core";
+import { stripe } from "@farm.js/stripe";
 
 export const stripeIntegration = stripe({
   secretKey: process.env.STRIPE_SECRET_KEY,
   webhookSecret: process.env.STRIPE_WEBHOOK_SECRET,
   products: [],
-  log(event) {
+  log(event: FarmIntegrationLogEvent) {
     console.log("[stripe]", event.phase, event.route?.path || "none");
   },
 });
@@ -144,12 +148,13 @@ export const stripeIntegration = stripe({
     provider: "supabase",
     aliases: ["auth-supabase", "supabase-auth"],
     defaultKey: "auth",
+    packageName: "@farm.js/supabase",
     fileName: "supabase",
     exportName: "supabaseIntegration",
     description: "Supabase auth routes and middleware",
     env: ["SUPABASE_URL", "SUPABASE_ANON_KEY", "APP_BASE_URL"],
     ui: supabaseAuthUIFeature(),
-    template: () => `import { supabase } from "@farm.js/integrations/supabase";
+    template: () => `import { supabase } from "@farm.js/supabase";
 
 export const supabaseIntegration = supabase({
   callbackUrl: \`\${process.env.APP_BASE_URL || "http://localhost:3000"}/auth/callback\`,
@@ -168,12 +173,13 @@ export const supabaseIntegration = supabase({
     provider: "workos",
     aliases: ["auth-workos", "workos-auth"],
     defaultKey: "auth",
+    packageName: "@farm.js/workos",
     fileName: "workos",
     exportName: "workosIntegration",
     description: "WorkOS auth routes and protected route middleware",
     env: ["WORKOS_CLIENT_ID", "WORKOS_API_KEY", "WORKOS_COOKIE_PASSWORD"],
     ui: workosAuthUIFeature(),
-    template: () => `import { workos } from "@farm.js/integrations/workos";
+    template: () => `import { workos } from "@farm.js/workos";
 
 export const workosIntegration = workos({
   protectedRoutes: ["/dashboard(.*)"],
@@ -187,12 +193,13 @@ export const workosIntegration = workos({
     provider: "auth0",
     aliases: ["auth-auth0", "auth0-auth"],
     defaultKey: "auth",
+    packageName: "@farm.js/auth0",
     fileName: "auth0",
     exportName: "auth0Integration",
     description: "Auth0 login, callback, logout, and profile routes",
     env: ["AUTH0_DOMAIN", "AUTH0_CLIENT_ID", "AUTH0_CLIENT_SECRET", "AUTH0_SECRET"],
     ui: auth0AuthUIFeature(),
-    template: () => `import { auth0 } from "@farm.js/integrations/auth0";
+    template: () => `import { auth0 } from "@farm.js/auth0";
 
 export const auth0Integration = auth0({
   callbackUrl: \`\${process.env.APP_BASE_URL || "http://localhost:3000"}/auth/callback\`,
@@ -207,12 +214,16 @@ export const auth0Integration = auth0({
     provider: "clerk",
     aliases: ["auth-clerk", "clerk-auth"],
     defaultKey: "auth",
+    packageName: "@farm.js/clerk",
     fileName: "clerk",
     exportName: "clerkIntegration",
     description: "Clerk auth provider and protected route middleware",
     env: ["NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY", "CLERK_SECRET_KEY"],
+    dependencies: {
+      "@clerk/react": "^6.1.0",
+    },
     ui: clerkAuthUIFeature(),
-    template: () => `import { clerk } from "@farm.js/integrations/clerk";
+    template: () => `import { clerk } from "@farm.js/clerk";
 
 export const clerkIntegration = clerk({
   signInUrl: "/sign-in",
@@ -228,13 +239,14 @@ export const clerkIntegration = clerk({
     provider: "resend",
     aliases: ["email", "resend-email"],
     defaultKey: "email",
+    packageName: "@farm.js/email",
     fileName: "resend",
     exportName: "resendIntegration",
     description: "Resend email send, preview, schedule, and webhook routes",
     env: ["RESEND_API_KEY", "RESEND_FROM_EMAIL", "RESEND_WEBHOOK_SECRET"],
     ui: resendEmailUIFeature(),
     template: () => `import { createElement } from "react";
-import { resend, template } from "@farm.js/integrations/email";
+import { resend, template } from "@farm.js/email";
 
 function WelcomeEmail(props: { name: string }) {
   return createElement("div", null, \`Welcome \${props.name}\`);
@@ -273,13 +285,14 @@ export const resendIntegration = resend({
     provider: "jobs-inngest",
     aliases: ["inngest", "jobs"],
     defaultKey: "jobs",
+    packageName: "@farm.js/jobs",
     fileName: "jobs-inngest",
     exportName: "jobsIntegration",
     description: "Jobs integration backed by Inngest",
     env: ["INNGEST_APP_ID", "INNGEST_EVENT_KEY", "INNGEST_SIGNING_KEY"],
     notes: ["Add tasks to jobTasks before using the generated jobs API."],
     ui: jobsUIFeature("inngest"),
-    template: () => `import { defineTasks, inngest, jobs } from "@farm.js/integrations/jobs";
+    template: () => `import { defineTasks, inngest, jobs } from "@farm.js/jobs";
 
 export const jobTasks = defineTasks({});
 
@@ -300,13 +313,14 @@ export const jobsIntegration = jobs({
     provider: "jobs-trigger",
     aliases: ["trigger", "trigger-dev", "jobs-triggerdev"],
     defaultKey: "jobs",
+    packageName: "@farm.js/jobs",
     fileName: "jobs-trigger",
     exportName: "jobsIntegration",
     description: "Jobs integration backed by Trigger.dev",
     env: ["TRIGGER_PROJECT_REF", "TRIGGER_SECRET_KEY", "TRIGGER_WEBHOOK_SECRET"],
     notes: ["Add tasks to jobTasks before using the generated jobs API."],
     ui: jobsUIFeature("trigger"),
-    template: () => `import { defineTasks, jobs, trigger } from "@farm.js/integrations/jobs";
+    template: () => `import { defineTasks, jobs, trigger } from "@farm.js/jobs";
 
 export const jobTasks = defineTasks({});
 
@@ -327,6 +341,7 @@ export const jobsIntegration = jobs({
     provider: "polar",
     aliases: ["polar-billing", "billing-polar"],
     defaultKey: "billing",
+    packageName: "@farm.js/polar",
     fileName: "polar",
     exportName: "polarIntegration",
     description: "Polar billing and checkout routes",
@@ -334,9 +349,9 @@ export const jobsIntegration = jobs({
     notes: ["Replace resolveBillingOwner with your app user or organization lookup."],
     ui: polarBillingUIFeature(),
     template: () => `import type { FarmIntegrationHandlerContext } from "@farm.js/core";
-import { polar } from "@farm.js/integrations/polar";
+import { polar } from "@farm.js/polar";
 
-async function resolveBillingOwner(_context: FarmIntegrationHandlerContext) {
+function resolveBillingOwner(_context: FarmIntegrationHandlerContext): never {
   throw new Error("Configure Polar billing owner resolution for your app.");
 }
 
@@ -364,6 +379,7 @@ export const polarIntegration = polar({
     provider: "autumn",
     aliases: ["autumn-billing", "billing-autumn"],
     defaultKey: "billing",
+    packageName: "@farm.js/autumn",
     fileName: "autumn",
     exportName: "autumnIntegration",
     description: "Autumn billing and checkout routes",
@@ -371,9 +387,9 @@ export const polarIntegration = polar({
     notes: ["Replace resolveBillingOwner with your app user or organization lookup."],
     ui: autumnBillingUIFeature(),
     template: () => `import type { FarmIntegrationHandlerContext } from "@farm.js/core";
-import { autumn } from "@farm.js/integrations/autumn";
+import { autumn } from "@farm.js/autumn";
 
-async function resolveBillingOwner(_context: FarmIntegrationHandlerContext) {
+function resolveBillingOwner(_context: FarmIntegrationHandlerContext): never {
   throw new Error("Configure Autumn billing owner resolution for your app.");
 }
 
@@ -400,6 +416,7 @@ export const autumnIntegration = autumn({
     provider: "better-auth",
     aliases: ["betterauth", "auth-better-auth"],
     defaultKey: "auth",
+    packageName: "@farm.js/better-auth",
     fileName: "better-auth",
     exportName: "betterAuthIntegration",
     description: "Better Auth route adapter",
@@ -455,7 +472,7 @@ better-auth.sqlite-wal
       },
     ],
     ui: betterAuthUIFeature(),
-    template: () => `import { betterAuth } from "@farm.js/integrations/better-auth";
+    template: () => `import { betterAuth } from "@farm.js/better-auth";
 import { auth } from "../auth.ts";
 
 export const betterAuthIntegration = betterAuth({
@@ -470,13 +487,47 @@ export const betterAuthIntegration = betterAuth({
     provider: "authjs",
     aliases: ["auth-js", "nextauth", "next-auth"],
     defaultKey: "auth",
+    packageName: "@farm.js/authjs",
     fileName: "authjs",
     exportName: "authjsIntegration",
     description: "Auth.js route adapter",
-    env: [],
-    notes: ["This template expects src/lib/auth.ts to export an Auth.js instance named auth."],
+    env: ["AUTH_SECRET", "AUTH_GITHUB_ID", "AUTH_GITHUB_SECRET"],
+    dependencies: {
+      "@auth/core": "0.34.3",
+    },
+    setupFiles: [
+      {
+        path: "src/lib/auth.ts",
+        source: () => `import { Auth } from "@auth/core";
+import GitHub from "@auth/core/providers/github";
+
+const config = {
+  providers: [
+    GitHub({
+      clientId: process.env.AUTH_GITHUB_ID!,
+      clientSecret: process.env.AUTH_GITHUB_SECRET!,
+    }),
+  ],
+  secret: process.env.AUTH_SECRET,
+  trustHost: true,
+};
+
+const handler = (request: Request) => Auth(request, config);
+
+export const auth = {
+  handlers: {
+    GET: handler,
+    POST: handler,
+  },
+};
+`,
+      },
+    ],
+    notes: [
+      "The generated Auth.js instance uses GitHub OAuth through @auth/core; add or replace providers in src/lib/auth.ts.",
+    ],
     ui: authjsUIFeature(),
-    template: () => `import { authjs } from "@farm.js/integrations/authjs";
+    template: () => `import { authjs } from "@farm.js/authjs";
 import { auth } from "../auth.ts";
 
 export const authjsIntegration = authjs({
@@ -491,12 +542,13 @@ export const authjsIntegration = authjs({
     provider: "unkey",
     aliases: ["api-keys", "apikeys", "keys", "unkey-api-keys"],
     defaultKey: "apiKeys",
+    packageName: "@farm.js/unkey",
     fileName: "unkey",
     exportName: "unkeyIntegration",
     description: "Unkey API key creation, verification, and route protection",
     env: ["UNKEY_ROOT_KEY", "UNKEY_API_ID", "UNKEY_BASE_URL"],
     ui: unkeyApiKeysUIFeature(),
-    template: () => `import { unkey } from "@farm.js/integrations/unkey";
+    template: () => `import { unkey } from "@farm.js/unkey";
 
 export const unkeyIntegration = unkey({
   rootKey: process.env.UNKEY_ROOT_KEY,
@@ -514,6 +566,7 @@ export const unkeyIntegration = unkey({
 export function listFarmIntegrationProviders() {
   return PROVIDERS.map((provider) => ({
     name: provider.provider,
+    packageName: provider.packageName,
     aliases: [...provider.aliases],
     defaultKey: provider.defaultKey,
     description: provider.description,
@@ -883,9 +936,9 @@ async function updatePackageJson(input: {
   const devDependencies = missingDependencies(manifest, input.definition.devDependencies);
   manifest.dependencies = {
     ...manifest.dependencies,
-    ...(hasPackageDependency(manifest, "@farm.js/integrations")
+    ...(hasPackageDependency(manifest, input.definition.packageName)
       ? {}
-      : { "@farm.js/integrations": getFarmIntegrationsVersion(manifest) }),
+      : { [input.definition.packageName]: getFarmIntegrationVersion(manifest) }),
     ...dependencies,
   };
   if (Object.keys(devDependencies).length) {
@@ -1024,14 +1077,18 @@ function hasPackageDependency(manifest: PackageManifest, dependency: string) {
   );
 }
 
-function getFarmIntegrationsVersion(manifest: PackageManifest) {
+function getFarmIntegrationVersion(manifest: PackageManifest) {
   const farmCoreVersion =
     manifest.dependencies?.["@farm.js/core"] ??
     manifest.devDependencies?.["@farm.js/core"] ??
     manifest.peerDependencies?.["@farm.js/core"] ??
     manifest.optionalDependencies?.["@farm.js/core"];
 
-  return farmCoreVersion?.startsWith("workspace:") ? "workspace:*" : "latest";
+  if (!farmCoreVersion) {
+    return "latest";
+  }
+
+  return farmCoreVersion.startsWith("workspace:") ? "workspace:*" : farmCoreVersion;
 }
 
 function toImportPath(relativePath: string) {

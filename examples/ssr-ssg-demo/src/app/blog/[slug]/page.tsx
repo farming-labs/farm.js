@@ -33,7 +33,7 @@ const blogPosts: Record<string, { title: string; content: string; date: string; 
   "hello-world": {
     title: "Hello World - Getting Started with Farm.js",
     content: `
-      Welcome to Farm.js! This is your first step into a powerful React meta-framework.
+      Welcome to Farm.js! This is your first step into a powerful full-stack framework.
       
       Farm.js provides:
       - File-based routing

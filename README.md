@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A modern React framework for building fast, full-stack, product-integrated applications.</strong>
+  <strong>A framework for building fast, full-stack, product-integrated applications.</strong>
 </p>
 
 <p align="center">
@@ -26,7 +26,7 @@
   <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-Ready-blue.svg" alt="TypeScript ready" /></a>
 </p>
 
-## ✨ Built for Modern React
+## ✨ Built for Full-Stack Products
 
 | Feature                            | What it gives you                                                                                                                                                                               |
 | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -47,21 +47,24 @@
 ### Create a New App
 
 ```bash
-pnpm create @farm.js/app my-app
+pnpm create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
 
 Your app will be running at `http://localhost:3000`!
 
+Use `--list-templates` to choose a ready-to-configure Auth0, Auth.js, Autumn, Clerk, Inngest,
+Trigger.dev, Polar, Resend, Stripe, Supabase, Unkey, WorkOS, or AI starter.
+
 ### Manual Installation
 
 ```bash
-npm install @farm.js/core react react-dom
+npm install @farm.js/core@beta react react-dom
 # or
-pnpm add @farm.js/core react react-dom
+pnpm add @farm.js/core@beta react react-dom
 # or
-yarn add @farm.js/core react react-dom
+yarn add @farm.js/core@beta react react-dom
 ```
 
 Create a `farm.config.ts`:

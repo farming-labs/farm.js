@@ -52,9 +52,6 @@ function integrationLabResponsePlugin() {
     name: 'integration-lab:response',
     runtime: {
       after({ kind, route, response, integration }) {
-        if (!integration) {
-          throw new Error('integration-lab:response must be registered by an integration');
-        }
         if (kind !== 'integration' || route?.pattern !== '/api/route-lab/message') {
           return;
         }

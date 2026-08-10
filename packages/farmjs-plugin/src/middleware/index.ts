@@ -18,6 +18,7 @@ import type { Plugin, ViteDevServer } from "vite";
 import type { IncomingMessage, ServerResponse } from "http";
 import { createRequire } from "node:module";
 import { _withAfterNodeMiddleware } from "@farm.js/core/after";
+import { devServableFileExists } from "../dev-static.js";
 
 // Create require for ESM compatibility
 const require_ = createRequire(import.meta.url);
@@ -548,12 +549,16 @@ export default function farmMiddleware(options: FarmMiddlewareOptions = {}): Plu
             const url = req.url || "/";
             const pathname = url.split("?")[0];
 
-            // Skip Vite internal requests
+            // Skip Vite internal requests and real static assets. Dotted
+            // paths that don't map to a file on disk are app routes (route
+            // segments may contain dots) and must still run middleware.
             if (
               pathname.startsWith("/@") ||
               pathname.startsWith("/__") ||
               pathname.startsWith("/node_modules") ||
-              (pathname.includes(".") && !pathname.endsWith("/"))
+              (pathname.includes(".") &&
+                !pathname.endsWith("/") &&
+                devServableFileExists(pathname, [server.config.publicDir, server.config.root]))
             ) {
               return next();
             }

@@ -23,6 +23,7 @@ import { sendWebResponse } from "../server/response";
 import { emitFarmEvent } from "../observability";
 import { stripFarmLocaleFromPathname } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
+import { createCliColors } from "../cli-colors";
 
 export interface DiscoveredMiddleware {
   path: string;
@@ -238,23 +239,16 @@ export class MiddlewareManager {
     if (applicable.length === 0) {
       return false; // No middleware to run
     }
-    try {
-      const pc = require("picocolors");
-      const middlewarePaths = applicable.map(({ mw }) => mw.path).join(", ");
-      const log = [
-        pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.magenta("MIDDLEWARE")) + pc.dim("]"),
-        pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
-        pc.gray("Executing middleware: "),
-        pc.gray(pathname),
-        pc.dim(` (${(Date.now() - startTime).toFixed(2)}ms)`),
-      ].join(" ");
-      console.log(log);
-    } catch {
-      console.log(
-        `[FARM] [MIDDLEWARE] [${method}] Executing ${pathname} (${applicable.length} middleware)`,
-      );
-    }
+    const pc = createCliColors();
+    const log = [
+      pc.dim("[") + pc.bold(pc.blue("FARM")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.magenta("MIDDLEWARE")) + pc.dim("]"),
+      pc.dim("[") + pc.bold(pc.white(method.padEnd(3))) + pc.dim("]"),
+      pc.gray("Executing middleware: "),
+      pc.gray(pathname),
+      pc.dim(` (${(Date.now() - startTime).toFixed(2)}ms)`),
+    ].join(" ");
+    console.log(log);
 
     // Execute middleware in cascade order
     for (const entry of applicable) {

@@ -51,6 +51,8 @@ import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { DefaultNotFoundPage } from "../components/not-found";
+import { createFarmThemeDocumentParts } from "../theme/server-runtime";
+import { getTheme as getFarmTheme } from "../theme/server";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -73,6 +75,20 @@ interface PPRShellCacheOptions {
   pathname: string;
   search: string;
   revalidate?: number;
+}
+
+const warnedSuppressedAsyncHydrationModules = new Set<string>();
+
+function warnSuppressedAsyncHydrationOnce(modulePath: string): void {
+  if (warnedSuppressedAsyncHydrationModules.has(modulePath)) return;
+  warnedSuppressedAsyncHydrationModules.add(modulePath);
+  logger.warn(
+    `${modulePath} is an async server component that imports client components. ` +
+      `React cannot hydrate async components in the browser, so this route stays ` +
+      `server-rendered and its client imports are not interactive. Move the ` +
+      `interactive UI into a "use client" child rendered by a synchronous page, ` +
+      `or enable experimental server components support.`,
+  );
 }
 
 function hasRequestHeader(req: FarmRequest, name: string): boolean {
@@ -937,6 +953,9 @@ export class ServerRenderer {
         }),
       );
       const shouldHydrate = moduleMetadata.shouldHydrate;
+      if (moduleMetadata.suppressedAsyncHydration) {
+        warnSuppressedAsyncHydrationOnce(route.modulePath);
+      }
       const layoutHydrationMetadata = layouts.map((layout) => {
         const manifestEntry = routeManifest.layouts.find(
           (entry) => entry.pattern === layout.pattern,
@@ -1728,6 +1747,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
         ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
         : "";
       const fontHead = renderFarmFontDevHead(this.config.root || process.cwd());
+      const themeDocument = createFarmThemeDocumentParts(
+        this.config.theme,
+        this.config.basePath,
+        getFarmTheme(),
+      );
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
       const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
@@ -1745,8 +1769,9 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           const shell = `<!DOCTYPE html>
 <html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
             i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
-          }>
+          }${themeDocument.attributes}>
 <head>
+  ${themeDocument.head}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
@@ -1994,12 +2019,18 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
 </script>`;
     const alternateLinks = i18nSnapshot ? renderI18nAlternateLinks(requestPath, i18nSnapshot) : "";
     const fontHead = renderFarmFontDevHead(this.config.root || process.cwd());
+    const themeDocument = createFarmThemeDocumentParts(
+      this.config.theme,
+      this.config.basePath,
+      getFarmTheme(),
+    );
 
     return `<!DOCTYPE html>
 <html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
       i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
-    }>
+    }${themeDocument.attributes}>
 <head>
+  ${themeDocument.head}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">

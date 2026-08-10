@@ -39,6 +39,8 @@ A compact map of the main package exports and where to learn more.
 | Package                          | Exports                                                                                                    |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `@farm.js/core`                  | `defineIntegration`, `integrationRoute`, `defineIntegrationSchema`, `definePlugin`, `defineConfig`.        |
+| `@farm.js/core/theme/client`     | `useTheme`, `getTheme`, `setTheme`, and `toggleTheme` for browser color-mode state.                        |
+| `@farm.js/core/theme/server`     | `getTheme` and `getThemeSnapshot` for cookie-backed server rendering.                                      |
 | `@farm.js/core/cron`             | `cronRoute`, cron config types, schedule manifests, and deployment adapter helpers.                        |
 | `@farm.js/core/workflows`        | Legacy workflow-module APIs kept for compatibility. New schedules should use `cron` config and API routes. |
 | `@farm.js/core/client`           | `createIntegrations`, `createIntegrationClient`, `createIntegrationServerClient`, `endpoint`.              |

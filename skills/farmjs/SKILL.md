@@ -7,7 +7,7 @@ metadata:
 
 # Farm.js
 
-Farm.js is a React meta-framework in active development. Prefer local repository sources over memory:
+Farm.js is a full-stack application framework in active development. Prefer local repository sources over memory:
 
 - Docs: `README.md`, `docs/src/app/docs/**`
 - Core package: `packages/farm/src/**`

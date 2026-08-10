@@ -14,6 +14,7 @@ import { getFarmPluginIntegrationContext } from "./plugin-integration-context";
 
 type MaybePromise<T> = T | Promise<T>;
 declare const FARM_PLUGIN_INTEGRATION_INSTANCE: unique symbol;
+declare const FARM_PLUGIN_INTEGRATION_BOUND: unique symbol;
 
 export interface FarmPluginIntegrationContext<TInstance = unknown> {
   /** Key used to register the integration in farm.config.ts. */
@@ -69,6 +70,17 @@ export interface FarmPluginContext<TIntegrationInstance = unknown> {
   /** @deprecated Use `ctx.req` inside request hooks. */
   requestContext: PluginRequestContext;
 }
+
+type FarmPluginHookContext<
+  TContext,
+  TIntegrationInstance,
+  TIntegrationBound extends boolean,
+> = TIntegrationBound extends true
+  ? Omit<TContext, "integration"> & {
+      /** The owning integration bound by `definePlugin.forIntegration<T>()`. */
+      readonly integration: Readonly<FarmPluginIntegrationContext<TIntegrationInstance>>;
+    }
+  : TContext;
 
 export interface FarmPluginLifecycle {
   /**
@@ -250,25 +262,97 @@ export type FarmPluginRuntimeStartEvent<
 export interface FarmPluginRuntimeCloseEvent<TState = unknown, TIntegrationInstance = unknown>
   extends FarmPluginStateContext<TState, TIntegrationInstance>, ShutdownPayload {}
 
+type FarmPluginContextFor<
+  TIntegrationInstance,
+  TIntegrationBound extends boolean,
+> = FarmPluginHookContext<
+  FarmPluginContext<TIntegrationInstance>,
+  TIntegrationInstance,
+  TIntegrationBound
+>;
+
+type FarmRequestPluginContextFor<
+  TIntegrationInstance,
+  TIntegrationBound extends boolean,
+> = FarmPluginHookContext<
+  FarmRequestPluginContext<TIntegrationInstance>,
+  TIntegrationInstance,
+  TIntegrationBound
+>;
+
+type FarmPluginSetupContextFor<
+  TIntegrationInstance,
+  TIntegrationBound extends boolean,
+> = FarmPluginHookContext<
+  FarmPluginSetupContext<TIntegrationInstance>,
+  TIntegrationInstance,
+  TIntegrationBound
+>;
+
+type FarmPluginStateContextFor<
+  TState,
+  TIntegrationInstance,
+  TIntegrationBound extends boolean,
+> = FarmPluginHookContext<
+  FarmPluginStateContext<TState, TIntegrationInstance>,
+  TIntegrationInstance,
+  TIntegrationBound
+>;
+
+type FarmPluginRuntimeEventFor<
+  TEvent,
+  TIntegrationInstance,
+  TIntegrationBound extends boolean,
+> = FarmPluginHookContext<TEvent, TIntegrationInstance, TIntegrationBound>;
+
 export interface FarmPluginRuntimeHooks<
   TState = unknown,
   TRequestContext extends object = Record<string, unknown>,
   TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
 > {
-  start?(event: FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>): MaybePromise<void>;
+  start?(
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeStartEvent<TState, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
+  ): MaybePromise<void>;
   context?(
-    event: FarmPluginRuntimeContextEvent<TState, TIntegrationInstance>,
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeContextEvent<TState, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
   ): MaybePromise<TRequestContext>;
   before?(
-    event: FarmPluginRuntimeBeforeEvent<TState, TRequestContext, TIntegrationInstance>,
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeBeforeEvent<TState, TRequestContext, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
   ): MaybePromise<Request | Response | void>;
   after?(
-    event: FarmPluginRuntimeAfterEvent<TState, TRequestContext, TIntegrationInstance>,
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeAfterEvent<TState, TRequestContext, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
   ): MaybePromise<Response | void>;
   error?(
-    event: FarmPluginRuntimeErrorEvent<TState, TRequestContext, TIntegrationInstance>,
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeErrorEvent<TState, TRequestContext, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
   ): MaybePromise<void>;
-  close?(event: FarmPluginRuntimeCloseEvent<TState, TIntegrationInstance>): MaybePromise<void>;
+  close?(
+    event: FarmPluginRuntimeEventFor<
+      FarmPluginRuntimeCloseEvent<TState, TIntegrationInstance>,
+      TIntegrationInstance,
+      TIntegrationBound
+    >,
+  ): MaybePromise<void>;
 }
 
 export interface FarmPluginRuntimeRequestOptions {
@@ -293,60 +377,76 @@ export type FarmPluginDiscoveredRoute =
   | ({ kind: "middleware" } & MiddlewareDiscoveredPayload)
   | ({ kind: "api" } & APIRouteDiscoveredPayload);
 
-export interface FarmPluginRouterHooks<TState = unknown, TIntegrationInstance = unknown> {
+export interface FarmPluginRouterHooks<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
+> {
   discovered?(
     route: FarmPluginDiscoveredRoute,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
   generated?(
     routes: RoutesGeneratedPayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
   before?(
     route: RouteMatchPayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
   after?(
     result: RouteMatchResultPayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
 }
 
-export interface FarmPluginRenderHooks<TState = unknown, TIntegrationInstance = unknown> {
+export interface FarmPluginRenderHooks<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
+> {
   before?(
     render: RenderLifecyclePayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
   html?(
     html: string,
     render: RenderLifecyclePayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<string | void>;
 }
 
-export interface FarmPluginBuildHooks<TState = unknown, TIntegrationInstance = unknown> {
+export interface FarmPluginBuildHooks<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
+> {
   before?(
     bundle: BundleLifecyclePayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
   configure?(
     buildConfig: any,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<any>;
   after?(
     result: BundleResultPayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
 }
 
-export interface FarmPluginDevHooks<TState = unknown, TIntegrationInstance = unknown> {
+export interface FarmPluginDevHooks<
+  TState = unknown,
+  TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
+> {
   server?(
     viteServer: ViteDevServer,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
   update?(
     update: HMRUpdatePayload,
-    context: FarmPluginStateContext<TState, TIntegrationInstance>,
+    context: FarmPluginStateContextFor<TState, TIntegrationInstance, TIntegrationBound>,
   ): MaybePromise<void>;
 }
 
@@ -364,6 +464,7 @@ export interface FarmPlugin<
   TClientState = any,
   TClientPublic = any,
   TIntegrationInstance = unknown,
+  TIntegrationBound extends boolean = false,
 > {
   name: string;
   version?: string;
@@ -372,156 +473,173 @@ export interface FarmPlugin<
   /** Transform Farm config before it is resolved. */
   configure?: (
     config: FarmConfig,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => MaybePromise<FarmConfig | void>;
   /** Initialize private plugin state once for this plugin manager. */
-  setup?: (context: FarmPluginSetupContext<TIntegrationInstance>) => MaybePromise<TState>;
+  setup?: (
+    context: FarmPluginSetupContextFor<TIntegrationInstance, TIntegrationBound>,
+  ) => MaybePromise<TState>;
 
-  runtime?: FarmPluginRuntimeHooks<TState, TRequestContext, TIntegrationInstance>;
-  router?: FarmPluginRouterHooks<TState, TIntegrationInstance>;
-  render?: FarmPluginRenderHooks<TState, TIntegrationInstance>;
-  build?: FarmPluginBuildHooks<TState, TIntegrationInstance>;
-  dev?: FarmPluginDevHooks<TState, TIntegrationInstance>;
+  runtime?: FarmPluginRuntimeHooks<
+    TState,
+    TRequestContext,
+    TIntegrationInstance,
+    TIntegrationBound
+  >;
+  router?: FarmPluginRouterHooks<TState, TIntegrationInstance, TIntegrationBound>;
+  render?: FarmPluginRenderHooks<TState, TIntegrationInstance, TIntegrationBound>;
+  build?: FarmPluginBuildHooks<TState, TIntegrationInstance, TIntegrationBound>;
+  dev?: FarmPluginDevHooks<TState, TIntegrationInstance, TIntegrationBound>;
   /** Optional browser lifecycle for this logical plugin. */
   client?: FarmPluginClientConfig<TClientState, TClientPublic>;
 
   /** @internal Carries the expected integration instance type without runtime data. */
   readonly [FARM_PLUGIN_INTEGRATION_INSTANCE]?: (instance: TIntegrationInstance) => void;
+  /** @internal Prevents integration-bound plugins from being registered globally. */
+  readonly [FARM_PLUGIN_INTEGRATION_BOUND]?: TIntegrationBound;
 
   /** @deprecated Use `setup` instead. */
-  init?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
+  init?: (
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
+  ) => void | Promise<void>;
   /** @deprecated Use `runtime.start` instead. */
-  ready?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
+  ready?: (
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
+  ) => void | Promise<void>;
   /** @deprecated Use `dev.server` instead. */
   devServerCreated?: (
     viteServer: ViteDevServer,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
 
   /** @deprecated Use `configure` instead. */
   config?: (
     config: FarmConfig,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => FarmConfig | Promise<FarmConfig>;
   configResolved?: (
     config: FarmConfig,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `build.before` instead. */
-  buildStart?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
+  buildStart?: (
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
+  ) => void | Promise<void>;
   /** @deprecated Use `build.after` instead. */
-  buildEnd?: (context: FarmPluginContext<TIntegrationInstance>) => void | Promise<void>;
+  buildEnd?: (
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
+  ) => void | Promise<void>;
 
   /** @deprecated Use `router.discovered` instead. */
   routeDiscovered?: (
     route: RouteDiscoveredPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.generated` instead. */
   routesGenerated?: (
     routes: RoutesGeneratedPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.discovered` instead. */
   middlewareDiscovered?: (
     middleware: MiddlewareDiscoveredPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.discovered` instead. */
   apiRouteDiscovered?: (
     route: APIRouteDiscoveredPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.before` instead. */
   beforeRouteMatch?: (
     route: RouteMatchPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `router.after` instead. */
   afterRouteMatch?: (
     result: RouteMatchResultPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `render.before` instead. */
   beforeRender?: (
     render: RenderLifecyclePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `render.html` instead. */
   afterRender?: (
     html: string,
     render: RenderLifecyclePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => string | Promise<string> | void | Promise<void>;
   /** @deprecated Use `runtime.before` instead. */
   beforeApiHandler?: (
     request: Request,
     api: APIHandlerLifecyclePayload,
-    context: FarmRequestPluginContext<TIntegrationInstance>,
+    context: FarmRequestPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => Request | Promise<Request> | void | Promise<void>;
   /** @deprecated Use `runtime.after` instead. */
   afterApiHandler?: (
     response: Response,
     api: APIHandlerLifecyclePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => Response | Promise<Response> | void | Promise<void>;
   onError?: (
     error: ErrorLifecyclePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `dev.update` instead. */
   hmrUpdate?: (
     update: HMRUpdatePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `build.before` instead. */
   beforeBundle?: (
     bundle: BundleLifecyclePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `build.after` instead. */
   afterBundle?: (
     result: BundleResultPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `build.configure` instead. */
   beforeNitroBuild?: (
     nitroConfig: any,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => any | Promise<any>;
   afterNitroBuild?: (
     payload: NitroBuildLifecyclePayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use `runtime.close` instead. */
   shutdown?: (
     payload: ShutdownPayload,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
 
   /** @deprecated Use the Web Request based `runtime.before` hook instead. */
   beforeRequest?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmRequestPluginContext<TIntegrationInstance>,
+    context: FarmRequestPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
   /** @deprecated Use the Web Response based `runtime.after` hook instead. */
   afterResponse?: (
     req: FarmRequest,
     res: FarmResponse,
-    context: FarmRequestPluginContext<TIntegrationInstance>,
+    context: FarmRequestPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => void | Promise<void>;
 
   // Transform hooks
   /** @deprecated Use `render.html` instead. */
   transformHTML?: (
     html: string,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => string | Promise<string>;
   /** @deprecated Use `render.before` or `render.html` instead. */
   transformPage?: (
     component: any,
-    context: FarmPluginContext<TIntegrationInstance>,
+    context: FarmPluginContextFor<TIntegrationInstance, TIntegrationBound>,
   ) => any | Promise<any>;
 }
 
@@ -1304,8 +1422,15 @@ export function definePlugin<
   TClientPublic = undefined,
   TIntegrationInstance = unknown,
 >(
-  plugin: FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance>,
-): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance> {
+  plugin: FarmPlugin<
+    TState,
+    TRequestContext,
+    TClientState,
+    TClientPublic,
+    TIntegrationInstance,
+    false
+  >,
+): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance, false> {
   return plugin;
 }
 
@@ -1323,9 +1448,17 @@ export namespace definePlugin {
         TRequestContext,
         TClientState,
         TClientPublic,
-        TIntegrationInstance
+        TIntegrationInstance,
+        true
       >,
-    ): FarmPlugin<TState, TRequestContext, TClientState, TClientPublic, TIntegrationInstance> {
+    ): FarmPlugin<
+      TState,
+      TRequestContext,
+      TClientState,
+      TClientPublic,
+      TIntegrationInstance,
+      true
+    > {
       return plugin;
     };
   }

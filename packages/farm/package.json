@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/core",
-  "version": "0.1.0-beta.20",
+  "version": "0.1.0-beta.25",
   "description": "Core Farm.js framework for modern integrated apps",
   "keywords": [
     "@farm.js/core",
@@ -59,6 +59,15 @@
       ],
       "headers": [
         "./dist/headers.d.ts"
+      ],
+      "theme": [
+        "./dist/theme/index.d.ts"
+      ],
+      "theme/client": [
+        "./dist/theme/client.d.ts"
+      ],
+      "theme/server": [
+        "./dist/theme/server.d.ts"
       ],
       "docs": [
         "./dist/docs.d.ts"
@@ -246,6 +255,21 @@
       "types": "./dist/headers.d.ts",
       "import": "./dist/headers.mjs",
       "require": "./dist/headers.cjs"
+    },
+    "./theme": {
+      "types": "./dist/theme/index.d.ts",
+      "import": "./dist/theme/index.mjs",
+      "require": "./dist/theme/index.cjs"
+    },
+    "./theme/client": {
+      "types": "./dist/theme/client.d.ts",
+      "import": "./dist/theme/client.mjs",
+      "require": "./dist/theme/client.cjs"
+    },
+    "./theme/server": {
+      "types": "./dist/theme/server.d.ts",
+      "import": "./dist/theme/server.mjs",
+      "require": "./dist/theme/server.cjs"
     },
     "./docs": {
       "types": "./dist/docs.d.ts",
