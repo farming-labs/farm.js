@@ -1075,3 +1075,21 @@
   font-size: 12px;
   letter-spacing: 0.03em;
 }
+
+@media (min-width: 1024px) {
+  #nd-docs-layout #nd-subnav button[data-search]::after {
+    content: "⌘\2002 K";
+    box-sizing: border-box;
+    width: 36px;
+    min-width: 36px;
+    height: 19px;
+    padding: 0 5px;
+    border-color: color-mix(in srgb, var(--color-fd-foreground) 14%, transparent);
+    background: color-mix(in srgb, var(--color-fd-foreground) 5%, transparent);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0;
+    line-height: 1;
+    white-space: nowrap;
+  }
+}
