@@ -382,9 +382,9 @@ export default function RootLayout({ children }) {
           const clientStylesheetIndex = html.indexOf(
             '<link rel="stylesheet" href="/farm-client.css">',
           );
-          const docsThemeIndex = html.indexOf("<style>");
           expect(clientStylesheetIndex).toBeGreaterThan(-1);
-          expect(docsThemeIndex).toBeGreaterThan(clientStylesheetIndex);
+          expect(clientStylesheetIndex).toBeLessThan(html.indexOf("</head>"));
+          expect(html).not.toContain("<style>");
         },
         "/docs",
       );

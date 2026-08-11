@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { UserConfig as ViteUserConfig } from "vite";
+import type { FarmRenderer } from "../renderer";
 
 const FARM_CLIENT_ENTRY_PATTERN =
   "**/{page,layout,loading,error,not-found,default}.{js,jsx,ts,tsx}";
@@ -25,6 +26,12 @@ export const FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE = [
   "@farm.js/core/server-query/client",
 ] as const;
 
+export function getFarmClientOptimizeDepsInclude(renderer?: FarmRenderer): string[] {
+  return Array.from(
+    new Set([...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE, ...(renderer?.optimizeDeps || [])]),
+  );
+}
+
 export function createFarmClientOptimizeDepsEntries(
   projectRoot: string,
   appDirectories: readonly string[],
@@ -42,6 +49,7 @@ export function createFarmClientOptimizeDepsEntries(
 
 export function createFarmClientOptimizeDepsConfig(
   entries?: readonly string[],
+  renderer?: FarmRenderer,
 ): ViteUserConfig["optimizeDeps"] {
   return {
     // Keep normal application dependency discovery for CJS-only packages, but
@@ -50,7 +58,7 @@ export function createFarmClientOptimizeDepsConfig(
     // Waiting for the crawl avoids serving a partial optimizer generation and
     // then changing browser hashes while hydration is already in progress.
     holdUntilCrawlEnd: true,
-    include: [...FARM_CLIENT_OPTIMIZE_DEPS_INCLUDE],
+    include: getFarmClientOptimizeDepsInclude(renderer),
     // Farm's HTML boots through a virtual module and imports route UI lazily.
     // Explicit entries let Vite finish that crawl before a navigation can
     // rotate the optimizer hash underneath a hydrated React runtime.

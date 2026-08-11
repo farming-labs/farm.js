@@ -10,6 +10,7 @@ import type { FarmClientNavigationSession, FarmClientPluginManager } from "./plu
 import { _hydrateFarmI18n, isFarmLocaleChangeHref } from "../i18n/client-runtime";
 import type { FarmI18nClientSnapshot } from "../i18n/types";
 import type { FarmIslandStrategy } from "../island";
+import type { FarmRouteRenderPlan } from "../navigation/render-plan";
 
 /**
  * Farm.js SPA Router
@@ -26,10 +27,16 @@ import type { FarmIslandStrategy } from "../island";
 interface PageData {
   props: Record<string, any>;
   modulePath: string;
+  loadingModulePath?: string | null;
   canonicalPath?: string;
   isClientComponent?: boolean;
   shouldHydrate?: boolean;
   islandStrategy?: FarmIslandStrategy | null;
+  renderPlan?: FarmRouteRenderPlan;
+  fragment?: {
+    html: string;
+    layoutPatterns: string[];
+  };
   metadata?: {
     title?: string;
     description?: string;
@@ -115,6 +122,16 @@ const IDLE_NAVIGATION_STATE: FarmNavigationState = {
   action: null,
   startedAt: null,
 };
+
+function getActiveLayoutChainHeader(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const patterns = Array.from(
+    document.querySelectorAll<HTMLElement>('[data-farm-layout-boundary="true"]'),
+  )
+    .map((element) => element.dataset.farmLayoutPattern)
+    .filter((pattern): pattern is string => Boolean(pattern));
+  return patterns.length > 0 ? JSON.stringify(patterns) : undefined;
+}
 
 // Global router instance
 let routerInstance: SPARouter | null = null;
@@ -240,12 +257,6 @@ export class SPARouter {
       const pageData = await this.fetchPageData(fullPath, true, from);
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
-      }
-
-      if (pageData.isClientComponent === false && !pageData.interception) {
-        this.finishNavigation();
-        window.location.assign(pageData.canonicalPath || fullPath);
-        return;
       }
 
       await this.runViewTransition(viewTransition, () =>
@@ -473,11 +484,14 @@ export class SPARouter {
       return cached.data;
     }
 
-    // Fetch from server
+    // Fetch from server. The active layout chain lets the server omit shared
+    // shell HTML from the fragment without inspecting component source.
+    const activeLayoutChain = getActiveLayoutChainHeader();
     const response = await fetch(`/__farm/page-data?path=${encodeURIComponent(path)}`, {
       headers: createFarmDeploymentRequestHeaders(this.options.deploymentId, {
         Accept: "application/x-farm-deferred+json, application/json",
         "X-Farm-SPA": "1",
+        ...(activeLayoutChain ? { "X-Farm-Layout-Chain": activeLayoutChain } : {}),
         ...(interceptFrom ? { "X-Farm-Intercept-From": interceptFrom } : {}),
       }),
     });

@@ -131,6 +131,29 @@ describe("RouteManager", () => {
   });
 
   describe("discoverRoutes", () => {
+    it("reuses compiled navigation metadata until route discovery invalidates it", async () => {
+      const { globFiles } = await import("../utils");
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.tsx", "about/page.tsx"];
+        if (pattern.includes("layout")) return ["layout.tsx"];
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+      const first = routeManager.generateClientManifest(mockConfig.root);
+      const cached = routeManager.generateClientManifest(mockConfig.root);
+
+      expect(cached).toBe(first);
+
+      await routeManager.discoverRoutes();
+      const refreshed = routeManager.generateClientManifest(mockConfig.root);
+
+      expect(refreshed).not.toBe(first);
+      expect(new Set(refreshed.routes.map((route) => route.pattern))).toEqual(
+        new Set(["/", "/about"]),
+      );
+    });
+
     it("should discover page/layout/loading/error files", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {

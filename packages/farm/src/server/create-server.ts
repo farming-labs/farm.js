@@ -29,6 +29,7 @@ import {
   resolveFarmInstrumentationFile,
   type FarmInstrumentationLifecycle,
 } from "../instrumentation";
+import { loadFarmRendererVitePlugins, resolveFarmRenderer } from "../renderer";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -196,7 +197,13 @@ export async function createServer(config: FarmConfig = {}) {
 
     let finalConfig = resolvedConfig || config;
     finalConfig = await pluginManager.runHookSerial("config", finalConfig);
+    finalConfig.renderer = resolveFarmRenderer(finalConfig.renderer);
     const projectRoot = finalConfig.root || process.cwd();
+    const rendererVitePlugins = await loadFarmRendererVitePlugins(
+      finalConfig.renderer,
+      projectRoot,
+      { ssr: true },
+    );
 
     let tailwindVitePlugin: any = undefined;
     const shouldUseProjectPostcss = hasProjectPostcssConfig(projectRoot);
@@ -221,6 +228,7 @@ export async function createServer(config: FarmConfig = {}) {
           plugins: [
             createFarmThemeCssPlugin(finalConfig.theme, finalConfig.basePath),
             ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+            ...(rendererVitePlugins as any[]),
             createDevDependencyStubsPlugin(),
             farmI18nClientBridgePlugin(),
             farmPlugin(finalConfig, pluginManager),
@@ -233,12 +241,13 @@ export async function createServer(config: FarmConfig = {}) {
             strictPort: true,
           },
           resolve: {
-            // Keep framework and application modules on one React runtime.
-            dedupe: ["react", "react-dom"],
+            // Keep framework and application modules on one renderer runtime.
+            dedupe: [...(finalConfig.renderer.dedupe || [])],
           },
           optimizeDeps: {
             ...createFarmClientOptimizeDepsConfig(
               createFarmClientOptimizeDepsEntries(projectRoot, getFarmAppDirectories(finalConfig)),
+              finalConfig.renderer,
             ),
             exclude: [
               "@farm.js/core/server",

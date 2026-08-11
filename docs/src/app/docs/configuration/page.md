@@ -39,6 +39,38 @@ export default defineConfig({
 
 `defineConfig` is the canonical Farm helper. `defineFarmConfig` remains available as a deprecated exact alias for existing applications.
 
+## Renderer
+
+React remains the default renderer, so existing applications and configurations do not need to
+change. To use Solid, install the adapter and select it in `farm.config.ts`:
+
+```bash
+pnpm add @farm.js/solid@beta solid-js
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { solid } from "@farm.js/solid";
+
+export default defineConfig({
+  renderer: solid(),
+});
+```
+
+The renderer controls JSX compilation, server rendering, and browser hydration. FARMJS continues
+to own routing, layouts, API routes, middleware, data access, observability, and deployment, so those
+server features use the same APIs with either renderer. UI code uses the selected library's native
+primitives—for example, Solid signals instead of React hooks.
+
+Create a ready-to-run Solid application directly from the CLI:
+
+```bash
+pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+```
+
+Omitting `renderer` selects React. The renderer option is currently available for the basic starter;
+integration starters continue to use React while their UI packages are migrated individually.
+
 ### Docs config
 
 Configure the docs runtime directly in `farm.config.ts`:
@@ -88,6 +120,7 @@ mount, and shortcut together.
 | ------------- | --------------------------------------------------------------------------------- |
 | extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
+| renderer      | Selecting React (default) or a renderer adapter such as Solid.                    |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
 | theme         | Enabling light, dark, and system modes with client and server APIs.               |

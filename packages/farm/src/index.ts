@@ -1,4 +1,6 @@
 export * from "./types";
+export { defineRenderer, REACT_RENDERER } from "./renderer";
+export type { FarmRenderer } from "./renderer";
 export * from "./utils";
 export * from "./storage";
 export * from "./integrations";

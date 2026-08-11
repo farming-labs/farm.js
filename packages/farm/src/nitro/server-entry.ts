@@ -8,7 +8,6 @@ import { createHandler } from "./create-handler";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
-import { getClientModuleMetadata } from "../utils/client-component";
 import { setEnv } from "../env";
 import { withFarmRouteContext } from "../route-context";
 import { createDeferredDataResponse } from "../deferred";
@@ -17,6 +16,13 @@ import {
   getFarmDeploymentMismatch,
   withFarmDeploymentResponse,
 } from "../deployment";
+import { resolveRouteRenderingConfig } from "../ssg";
+import {
+  createFarmRouteRenderPlan,
+  getSharedLayoutPrefixLength,
+  getFarmFragmentCacheControl,
+  parseFarmLayoutChainHeader,
+} from "../navigation/render-plan";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -153,8 +159,19 @@ async function defaultHandler({
 
       // Load route module to get metadata
       const routeModule = await rm.loadRouteModule(route.modulePath);
+      const loadingBoundary = rm.getMatchingLoading(targetPathname);
+      const loadingModule = loadingBoundary
+        ? await rm.loadRouteModule(loadingBoundary.modulePath)
+        : null;
 
-      const moduleMetadata = getClientModuleMetadata(route.modulePath);
+      const navigationManifest = rm.generateClientManifest();
+      const moduleMetadata = navigationManifest.routes.find(
+        (entry) => entry.pattern === route.pattern,
+      ) ?? {
+        isClientComponent: false,
+        shouldHydrate: false,
+        islandStrategy: null,
+      };
       const isClientComponent = moduleMetadata.isClientComponent;
       const shouldHydrate = moduleMetadata.shouldHydrate;
 
@@ -163,6 +180,32 @@ async function defaultHandler({
       const layoutModules = await Promise.all(
         layouts.map((layout) => rm.loadLayoutModule(layout.modulePath)),
       );
+      const layoutHydrationMetadata = layouts.map(
+        (layout) =>
+          navigationManifest.layouts.find((entry) => entry.pattern === layout.pattern) ?? {
+            isClientComponent: false,
+            shouldHydrate: false,
+            islandStrategy: null,
+          },
+      );
+      const layoutShouldHydrate = layoutHydrationMetadata.some(
+        (metadata) => metadata.shouldHydrate,
+      );
+      const hydrationStrategies = [
+        ...(shouldHydrate && moduleMetadata.islandStrategy
+          ? [moduleMetadata.islandStrategy]
+          : []),
+        ...layoutHydrationMetadata.flatMap((metadata) =>
+          metadata.shouldHydrate && metadata.islandStrategy
+            ? [metadata.islandStrategy]
+            : [],
+        ),
+      ];
+      const hydrationIslandStrategy = hydrationStrategies.every(
+        (strategy) => strategy === hydrationStrategies[0],
+      )
+        ? (hydrationStrategies[0] ?? "load")
+        : "load";
 
       for (const layoutModule of layoutModules) {
         if (layoutModule.metadata) {
@@ -199,6 +242,33 @@ async function defaultHandler({
         search: searchParams,
         routePath: route.pattern,
       });
+      const renderPlan = createFarmRouteRenderPlan({
+        pageShouldHydrate: shouldHydrate,
+        layoutShouldHydrate,
+        islandStrategy: hydrationIslandStrategy,
+        rendering: resolveRouteRenderingConfig(routeModule),
+      });
+      const destinationLayoutPatterns = layouts.map((layout) => layout.pattern);
+      const layoutStartIndex = getSharedLayoutPrefixLength(
+        parseFarmLayoutChainHeader(request.headers.get("x-farm-layout-chain")),
+        destinationLayoutPatterns,
+      );
+      const fragmentHtml = sr
+        ? await sr.renderNavigationFragment({
+            PageComponent: routeModule.default,
+            LoadingComponent: loadingModule?.default,
+            pageProps: routeProps as Record<string, unknown>,
+            params,
+            layouts: layouts.map((layout, index) => ({
+              pattern: layout.pattern,
+              module: layoutModules[index] as any,
+            })),
+            layoutStartIndex,
+            pageShouldHydrate: shouldHydrate,
+            layoutShouldHydrate,
+            islandStrategy: hydrationIslandStrategy,
+          })
+        : undefined;
 
       // Return page data for SPA navigation
       const pageData = {
@@ -216,9 +286,19 @@ async function defaultHandler({
         },
         canonicalPath: (routeProps as any).__farmCanonicalPath,
         modulePath: route.modulePath,
+        loadingModulePath: loadingBoundary?.modulePath ?? null,
         isClientComponent,
-        shouldHydrate,
-        islandStrategy: moduleMetadata.islandStrategy,
+        pageShouldHydrate: shouldHydrate,
+        layoutShouldHydrate,
+        shouldHydrate: shouldHydrate || layoutShouldHydrate,
+        islandStrategy: hydrationIslandStrategy,
+        renderPlan,
+        fragment: fragmentHtml
+          ? {
+              html: fragmentHtml,
+              layoutPatterns: destinationLayoutPatterns,
+            }
+          : undefined,
         metadata: {
           title: mergedMetadata.title,
           description: mergedMetadata.description,
@@ -231,7 +311,11 @@ async function defaultHandler({
           pageData,
           {
             status: 200,
-            headers: { "Cache-Control": "private, max-age=0" },
+            headers: {
+              "Cache-Control": getFarmFragmentCacheControl(renderPlan),
+              "X-Farm-Navigation": "html-fragment",
+              Vary: "X-Farm-Layout-Chain",
+            },
           },
           {
             onError(error, id) {
