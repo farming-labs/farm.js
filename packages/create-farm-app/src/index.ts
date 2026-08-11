@@ -179,7 +179,7 @@ function integrationTemplate(
 }
 
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
-export type RendererName = "react" | "solid" | "vue" | "svelte";
+export type RendererName = "react" | "preact" | "solid" | "vue" | "svelte";
 
 export interface PackageManager {
   name: PackageManagerName;
@@ -262,12 +262,13 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   if (
     renderer &&
     renderer !== "react" &&
+    renderer !== "preact" &&
     renderer !== "solid" &&
     renderer !== "vue" &&
     renderer !== "svelte"
   ) {
     logger.error(
-      `Unknown renderer "${options.renderer}". Available: "react", "solid", "vue", "svelte".`,
+      `Unknown renderer "${options.renderer}". Available: "react", "preact", "solid", "vue", "svelte".`,
     );
     process.exit(1);
   }
@@ -285,6 +286,11 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
           title: "React",
           value: "react",
           description: "The default FARMJS renderer",
+        },
+        {
+          title: "Preact",
+          value: "preact",
+          description: "Small React-compatible runtime with SSR and hydration",
         },
         {
           title: "Solid",
@@ -419,6 +425,11 @@ async function copyTemplate(
 
   if (renderer === "solid") {
     const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "solid");
+    await copyDir(rendererTemplatePath, projectPath);
+  }
+
+  if (renderer === "preact") {
+    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "preact");
     await copyDir(rendererTemplatePath, projectPath);
   }
 

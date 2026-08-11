@@ -277,6 +277,58 @@ test("generates a Solid starter while keeping React as the default renderer", as
   }
 });
 
+test("generates a Preact starter with typed server interaction", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-preact-"));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "preact-app",
+        "--template",
+        "basic",
+        "--renderer",
+        "preact",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+
+    const generatedDir = path.join(tempDir, "preact-app");
+    const packageJson = JSON.parse(await readFile(path.join(generatedDir, "package.json"), "utf8"));
+    const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+    const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
+    const apiRoute = await readFile(
+      path.join(generatedDir, "src/app/api/greeting/route.ts"),
+      "utf8",
+    );
+    const apiClient = await readFile(path.join(generatedDir, "src/lib/api-client.ts"), "utf8");
+    const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
+    const rendererPackage = JSON.parse(
+      await readFile(path.join(packageDir, "..", "farm-preact", "package.json"), "utf8"),
+    );
+
+    assert.equal(packageJson.dependencies["@farm.js/preact"], rendererPackage.version);
+    assert.equal(packageJson.dependencies.preact, "10.29.8");
+    assert.equal(packageJson.dependencies.react, undefined);
+    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    assert.match(config, /renderer: preact\(\)/);
+    assert.match(config, /from "@farm\.js\/preact"/);
+    assert.match(page, /useState/);
+    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /Edit <code>page\.tsx<\/code>/);
+    assert.match(apiRoute, /createEndpoint/);
+    assert.match(apiRoute, /FARMJS server/);
+    assert.match(apiClient, /createAPIClient<APIRouter>/);
+    assert.equal(tsconfig.compilerOptions.jsx, "react-jsx");
+    assert.equal(tsconfig.compilerOptions.jsxImportSource, "preact");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 test("generates a Vue SFC starter with typed server interaction", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-vue-"));
 
