@@ -1,0 +1,103 @@
+---
+title: "Solid Renderer"
+description: "Use Solid components, signals, SSR, and hydration with FARMJS routing and renderer-neutral server primitives."
+section: "Core"
+---
+
+# Solid Renderer
+
+`@farm.js/solid` connects Solid component compilation, server rendering, and browser hydration to
+the FARMJS renderer contract. React remains the default unless the application selects Solid.
+
+## Create an app
+
+```bash
+pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+```
+
+For an existing Basic app, install the adapter and Solid runtime:
+
+```bash
+pnpm add @farm.js/solid@beta solid-js
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { solid } from "@farm.js/solid";
+
+export default defineConfig({
+  renderer: solid(),
+});
+```
+
+## Pages and layouts
+
+Solid routes use `.tsx` or `.jsx`. Layout children arrive through the normal `children` property:
+
+```tsx
+import type { LayoutProps, Metadata } from "@farm.js/core";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "FARMJS with Solid",
+};
+
+export default function RootLayout(props: LayoutProps) {
+  return <>{props.children}</>;
+}
+```
+
+Use Solid primitives inside interactive components and mark the component with `"use client"`:
+
+```tsx
+"use client";
+
+import { createSignal } from "solid-js";
+
+export function Counter() {
+  const [count, setCount] = createSignal(0);
+  return <button onClick={() => setCount((value) => value + 1)}>Count: {count()}</button>;
+}
+```
+
+FARMJS server-renders the route and hydrates the Solid boundary in the browser.
+
+## Call FARMJS server code
+
+API routes, endpoint schemas, server functions, middleware, cache, storage, and observability are
+renderer-neutral. Use the generated API client from Solid UI and keep the privileged handler in a
+server module:
+
+```tsx
+"use client";
+
+import { createSignal } from "solid-js";
+import { api } from "../../lib/api.generated";
+
+export function Greeting() {
+  const [message, setMessage] = createSignal("Ready");
+
+  const callServer = async () => {
+    const result = await api.greeting.post({ body: { name: "Solid" } });
+    if (result.data) setMessage(result.data.message);
+  };
+
+  return <button onClick={callServer}>{message()}</button>;
+}
+```
+
+## Current boundaries
+
+React-based client exports such as `Link`, `useAction`, fetchers, query hooks, `useTheme`, and
+integration providers do not become Solid primitives automatically. Use native Solid state and the
+generated API client. Programmatic UI routes, Markdown/MDX visual pages, the docs adapter, and
+generated JSX metadata images remain React-oriented today.
+
+Run the complete example:
+
+```bash
+pnpm --filter farm-solid-renderer-example dev
+```
+
+See the [Solid renderer example](https://github.com/farming-labs/farm.js/tree/main/examples/solid-renderer)
+and the [renderer support matrix](/docs/renderers).
