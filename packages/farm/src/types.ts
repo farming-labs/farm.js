@@ -362,9 +362,8 @@ export type Page<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = 
 export type Layout<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
   LayoutProps<TRoute>
 >;
-export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
-  LoadingProps<TRoute>
->;
+export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+  FarmComponentType<LoadingProps<TRoute>>;
 export type ErrorBoundary<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
   FarmComponentType<ErrorProps<TRoute>>;
 /**
