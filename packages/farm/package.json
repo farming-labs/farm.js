@@ -81,6 +81,9 @@
       "observability": [
         "./dist/observability.d.ts"
       ],
+      "instrumentation": [
+        "./dist/instrumentation.d.ts"
+      ],
       "workflows": [
         "./dist/workflows.d.ts"
       ],
@@ -290,6 +293,11 @@
       "types": "./dist/observability.d.ts",
       "import": "./dist/observability.mjs",
       "require": "./dist/observability.cjs"
+    },
+    "./instrumentation": {
+      "types": "./dist/instrumentation.d.ts",
+      "import": "./dist/instrumentation.mjs",
+      "require": "./dist/instrumentation.cjs"
     },
     "./workflows": {
       "types": "./dist/workflows.d.ts",
@@ -523,6 +531,7 @@
     "@farming-labs/orm-runtime": "0.0.62",
     "@formatjs/icu-messageformat-parser": "3.5.15",
     "@mdx-js/mdx": "^3.1.1",
+    "@opentelemetry/api": "1.9.1",
     "@scalar/api-reference": "^1.38.1",
     "@scalar/openapi-parser": "^0.22.3",
     "@tailwindcss/vite": "4.1.18",
@@ -550,6 +559,9 @@
   },
   "devDependencies": {
     "@clerk/react": "^6.1.0",
+    "@farm.js/otel": "workspace:*",
+    "@opentelemetry/sdk-node": "0.221.0",
+    "@opentelemetry/sdk-trace-base": "2.10.0",
     "@types/react": "^18.2.45",
     "@types/react-dom": "^18.2.18",
     "@vitest/coverage-v8": "^1.1.0",

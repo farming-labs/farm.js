@@ -64,6 +64,7 @@ import type { FarmIslandStrategy } from "../island";
 import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found";
 import { createFarmThemeCssPlugin } from "../theme/vite";
+import { resolveFarmInstrumentationFile } from "../instrumentation";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -2876,6 +2877,7 @@ async function buildSSRInMemory(
 
   const appDirs = getFarmAppDirectories(config);
   const middlewareRoutes = await discoverMiddlewareRoutes(appDirs);
+  const instrumentationPath = resolveFarmInstrumentationFile(root, config.srcDir || "src");
 
   // Check for custom not-found page
   let notFoundPath: string | null = null;
@@ -2952,6 +2954,7 @@ async function buildSSRInMemory(
     configuredRewrites,
     configuredHeaderRoutes,
     notFoundPath,
+    instrumentationPath,
     config,
     configModulePath,
     hasServerRuntimeIntegrations,
@@ -3170,6 +3173,7 @@ function generateVirtualEntryCode(
   configuredRewriteRoutes: RewriteConfig[],
   configuredHeaderRoutes: UniversalConfiguredHeaderRoute[],
   notFoundPath: string | null,
+  instrumentationPath: string | null,
   config: ResolvedFarmConfig,
   configModulePath: string | null,
   hasServerRuntimeIntegrations: boolean,
@@ -3363,6 +3367,7 @@ function generateVirtualEntryCode(
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
+  createFarmInstrumentationLifecycle,
   createFarmCacheKey,
   createFarmThemeDocumentParts,
   createFarmLocaleCookie,
@@ -3384,6 +3389,8 @@ function generateVirtualEntryCode(
   reportFarmPreloadWarnings,
   renderMetadataHead,
   resolveFarmRouteContext,
+  resolveFarmInstrumentationRuntime,
+  runWithFarmRequestSpan,
   stripFarmLocaleFromPathname,
   withFarmRouteContext,
 } from "@farm.js/core/internal/production-runtime";`;
@@ -3453,6 +3460,9 @@ import { fileURLToPath as farmDocsFileURLToPath } from "node:url";`
   const integrationRuntimeImport = integrationRuntimeExports.length
     ? `import { ${integrationRuntimeExports.join(", ")} } from "@farm.js/core/integrations";`
     : "";
+  const instrumentationImport = instrumentationPath
+    ? `import * as FarmInstrumentationModule from "${instrumentationPath.replace(/\\/g, "/")}";`
+    : "";
   const integrationImports = `
 ${configModulePath ? `import * as FarmUserConfigModule from "${configModulePath}";` : ""}
 ${layerConfigImports}
@@ -3486,22 +3496,56 @@ async function handleAPIRequest(request) {
   }
 
   const { route, params } = match;
+  const startedAt = Date.now();
+  emitFarmEvent({ type: "route.matched", pathname: url.pathname, route: route.path });
+  emitFarmEvent({
+    type: "api.request.start",
+    pathname: url.pathname,
+    route: route.path,
+    method,
+  });
   const endpoint = route.handlers[method];
   if (!endpoint) {
-    return new Response(
+    const response = new Response(
       JSON.stringify({ error: "Method Not Allowed" }),
       { status: 405, headers: { "Content-Type": "application/json" } }
     );
+    emitFarmEvent({
+      type: "api.request.complete",
+      pathname: url.pathname,
+      route: route.path,
+      method,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+    });
+    return response;
   }
 
   try {
-    return await invokeAPIRouteEndpoint(
+    const response = await invokeAPIRouteEndpoint(
       endpoint,
       request,
       params,
       farmServerConfig.bodySizeLimit,
     );
+    emitFarmEvent({
+      type: "api.request.complete",
+      pathname: url.pathname,
+      route: route.path,
+      method,
+      status: response.status,
+      durationMs: Date.now() - startedAt,
+    });
+    return response;
   } catch (error) {
+    emitFarmEvent({
+      type: "api.error",
+      pathname: url.pathname,
+      route: route.path,
+      method,
+      durationMs: Date.now() - startedAt,
+      error,
+    });
     console.error(\`[API Error] \${url.pathname}:\`, error);
     return new Response(
       JSON.stringify({ error: "Internal Server Error" }),
@@ -3544,6 +3588,7 @@ ${markdownHandlerImport}
 ${appMarkdownImport}
 ${mdxComponentsImport}
 ${integrationImports}
+${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
@@ -3635,10 +3680,33 @@ const farmI18nConfig = ${JSON.stringify(config.i18n)};
 const farmServerConfig = ${JSON.stringify(config.server)};
 const farmThemeConfig = ${JSON.stringify(config.theme)};
 _setDefaultFarmThemeConfig(farmThemeConfig);
+const farmInstrumentationLifecycle = createFarmInstrumentationLifecycle(
+  ${instrumentationPath ? "FarmInstrumentationModule" : "null"},
+  {
+    root:
+      typeof globalThis.process?.cwd === "function" ? globalThis.process.cwd() : ".",
+    mode: "production",
+    runtime: resolveFarmInstrumentationRuntime(${JSON.stringify(preset)}),
+  },
+);
 export const farmProductionLifecycle = createFarmProductionLifecycle({
   server: farmServerConfig,
-  start: () => farmPluginRuntime?.startRuntime(),
-  close: (reason) => farmPluginRuntime?.closeRuntime(reason),
+  start: async () => {
+    await farmInstrumentationLifecycle.start();
+    try {
+      await farmPluginRuntime?.startRuntime();
+    } catch (error) {
+      await farmInstrumentationLifecycle.shutdown();
+      throw error;
+    }
+  },
+  close: async (reason) => {
+    try {
+      await farmPluginRuntime?.closeRuntime(reason);
+    } finally {
+      await farmInstrumentationLifecycle.shutdown();
+    }
+  },
 });
 const farmI18nRuntime = ${
     config.i18n.enabled
@@ -6118,34 +6186,38 @@ export async function fetch(request, context) {
   const healthResponse = await farmProductionLifecycle.handleHealthRequest(request);
   if (healthResponse) return healthResponse;
 
-  return farmProductionLifecycle.runRequest(async () => {
-    const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
-    const runRequest = () => farmPluginRuntime
-      ? farmPluginRuntime.runRuntimeRequest(
-        request,
-          (runtimeRequest) =>
-            _runWithCurrentRequest(runtimeRequest, () =>
-              handleFarmPluginRequest(runtimeRequest, runtimeOptions)
-            ),
-          {
-            ...runtimeOptions,
-            waitUntil: typeof context?.waitUntil === "function"
-              ? context.waitUntil.bind(context)
-              : undefined,
-          },
-        )
-      : handleFarmRequest(request);
+  return farmProductionLifecycle.runRequest(
+    () =>
+      runWithFarmRequestSpan(request, async () => {
+        const runtimeOptions = farmPluginRuntime ? getFarmPluginRequestOptions(request) : null;
+        const runRequest = () => farmPluginRuntime
+          ? farmPluginRuntime.runRuntimeRequest(
+              request,
+              (runtimeRequest) =>
+                _runWithCurrentRequest(runtimeRequest, () =>
+                  handleFarmPluginRequest(runtimeRequest, runtimeOptions)
+                ),
+              {
+                ...runtimeOptions,
+                waitUntil: typeof context?.waitUntil === "function"
+                  ? context.waitUntil.bind(context)
+                  : undefined,
+              },
+            )
+          : handleFarmRequest(request);
 
-    const response = await _runWithCurrentRequest(request, () =>
-      _runWithAfterRequest(request, runRequest, context),
-    );
-    const pathname = new URL(request.url).pathname;
-    return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
-  }, {
-    onResponseFinished: typeof context?.onResponseFinished === "function"
-      ? context.onResponseFinished
-      : undefined,
-  });
+        const response = await _runWithCurrentRequest(request, () =>
+          _runWithAfterRequest(request, runRequest, context),
+        );
+        const pathname = new URL(request.url).pathname;
+        return applyFarmPreloadBudget(applyConfiguredResponseHeaders(response, pathname), pathname);
+      }),
+    {
+      onResponseFinished: typeof context?.onResponseFinished === "function"
+        ? context.onResponseFinished
+        : undefined,
+    },
+  );
 }
 export default { fetch, lifecycle: farmProductionLifecycle };
   `.trim();

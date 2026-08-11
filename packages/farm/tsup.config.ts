@@ -35,6 +35,7 @@ export const farmPackageBuildOptions = {
     markdown: "src/markdown.ts",
     "app-markdown": "src/app-markdown.ts",
     observability: "src/observability.ts",
+    instrumentation: "src/instrumentation.ts",
     workflows: "src/workflows.ts",
     cron: "src/cron.ts",
     "server-fn": "src/server-fn.ts",

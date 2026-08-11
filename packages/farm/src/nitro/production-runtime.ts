@@ -29,7 +29,15 @@ export {
   isFarmNotFoundError,
   isFarmRedirectError,
 } from "../navigation-errors";
-export { configureFarmObservability, emitFarmEvent } from "../observability";
+export {
+  configureFarmObservability,
+  emitFarmEvent,
+  runWithFarmRequestSpan,
+} from "../observability";
+export {
+  createFarmInstrumentationLifecycle,
+  resolveFarmInstrumentationRuntime,
+} from "../instrumentation-runtime";
 export { resolveFarmRouteContext, withFarmRouteContext } from "../route-context";
 export { _setDefaultFarmThemeConfig, getTheme } from "../theme/server";
 export { applyFarmThemeDocument, createFarmThemeDocumentParts } from "../theme/server-runtime";
