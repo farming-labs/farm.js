@@ -1,6 +1,6 @@
 {
   "name": "@farm.js/supabase",
-  "version": "0.1.0-beta.28",
+  "version": "0.1.0-beta.29",
   "description": "Supabase integration for Farm.js",
   "license": "MIT",
   "repository": {
