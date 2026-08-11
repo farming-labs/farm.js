@@ -149,6 +149,44 @@ test("applies only safe additive fixes", async () => {
   }
 });
 
+test("recognizes Vue pages and creates a Vue root layout", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-vue-"));
+  const layoutPath = path.join(root, "src/app/layout.vue");
+
+  try {
+    await mkdir(path.join(root, "src/app"), { recursive: true });
+    await writeFile(path.join(root, "package.json"), JSON.stringify({ name: "vue-doctor" }));
+    await writeFile(
+      path.join(root, "farm.config.mjs"),
+      `export default {
+  renderer: {
+    name: "vue",
+    vite: "@farm.js/vue/vite",
+    server: "@farm.js/vue/server",
+    client: "@farm.js/vue/client",
+    componentExtensions: [".vue"],
+  },
+};
+`,
+    );
+    await writeFile(path.join(root, "src/app/page.vue"), "<template><main>Vue</main></template>\n");
+
+    const report = await runFarmDoctor({ root, offline: true, fix: true });
+
+    assert.deepEqual(report.fixes, [
+      {
+        code: "ROOT_LAYOUT_CREATED",
+        title: "Created the missing root layout",
+        filePath: "src/app/layout.vue",
+      },
+    ]);
+    assert.ok(report.checks.some((check) => check.code === "APP_ROUTER_READY"));
+    assert.match(await readFile(layoutPath, "utf8"), /<slot \/>/);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("applies safe fixes inside a configured project root", async () => {
   const root = await mkdtemp(path.join(os.tmpdir(), "farm-cli-doctor-root-"));
   const projectRoot = path.join(root, "application");

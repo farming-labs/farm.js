@@ -2,6 +2,7 @@ import type { ResolvedFarmConfig } from "../config";
 import { resolveDeployOutputPath } from "../config";
 import type { ViteDevServer } from "vite";
 import path from "path";
+import { existsSync } from "node:fs";
 import { logger } from "../utils";
 import { createFarmApp } from "../app";
 import { APIRouteManager } from "../api/route-manager";
@@ -13,7 +14,7 @@ import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import { farmFontImportsPlugin } from "../font-vite";
 import { createFarmSourceAlias, mergeFarmViteConfig } from "../server/vite-config";
-import { loadFarmRendererVitePlugins } from "../renderer";
+import { getFarmRendererComponentExtensions, loadFarmRendererVitePlugins } from "../renderer";
 import {
   canUseRolldownForRouteDiscovery,
   loadFarmProductionVite,
@@ -99,6 +100,7 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
         ...getFarmDocsRouteTypeEntries(config.docs),
       ],
       suppressLintOnLink: config.suppressLintOnLink,
+      componentExtensions: config.renderer.componentExtensions,
       i18nConfig: config.i18n,
     }).catch(() => {
       // Non-fatal; type generation is for DX only.
@@ -282,7 +284,7 @@ async function buildClient(
       outDir: outputDir,
       emptyOutDir: true,
       rollupOptions: {
-        input: path.join(root, srcDir, "app", "page.tsx"),
+        input: resolveLegacyPageEntry(config, root, srcDir),
       },
     },
     plugins: [
@@ -314,9 +316,7 @@ async function buildSSR(
   });
   pluginManager.addPlugins(config.plugins || []);
 
-  // Use server-entry.ts as the SSR entry point for universal builds
-  // For legacy builds, use page.tsx directly
-  const ssrEntry = path.join(root, srcDir, "app", "page.tsx");
+  const ssrEntry = resolveLegacyPageEntry(config, root, srcDir);
 
   await viteBuild({
     root,
@@ -339,6 +339,15 @@ async function buildSSR(
     ],
     mode: "production",
   });
+}
+
+function resolveLegacyPageEntry(config: ResolvedFarmConfig, root: string, srcDir: string): string {
+  const appDir = path.join(root, srcDir, "app");
+  for (const extension of getFarmRendererComponentExtensions(config.renderer)) {
+    const candidate = path.join(appDir, `page${extension}`);
+    if (existsSync(candidate)) return candidate;
+  }
+  return path.join(appDir, "page.tsx");
 }
 
 /**

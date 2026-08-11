@@ -179,7 +179,7 @@ function integrationTemplate(
 }
 
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
-export type RendererName = "react" | "solid";
+export type RendererName = "react" | "solid" | "vue";
 
 export interface PackageManager {
   name: PackageManagerName;
@@ -259,8 +259,8 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   }
 
   let renderer = options.renderer?.toLowerCase() as RendererName | undefined;
-  if (renderer && renderer !== "react" && renderer !== "solid") {
-    logger.error(`Unknown renderer "${options.renderer}". Available: "react", "solid".`);
+  if (renderer && renderer !== "react" && renderer !== "solid" && renderer !== "vue") {
+    logger.error(`Unknown renderer "${options.renderer}". Available: "react", "solid", "vue".`);
     process.exit(1);
   }
 
@@ -283,6 +283,11 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
           value: "solid",
           description: "Fine-grained reactivity with Solid",
         },
+        {
+          title: "Vue",
+          value: "vue",
+          description: "Vue SFCs with server rendering and hydration",
+        },
       ],
       initial: 0,
     });
@@ -294,9 +299,9 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   }
   renderer ||= "react";
 
-  if (renderer === "solid" && template !== "basic") {
+  if (renderer !== "react" && template !== "basic") {
     logger.error(
-      `The "${template}" integration starter currently targets React. Use --template basic with --renderer solid.`,
+      `The "${template}" integration starter currently targets React. Use --template basic with --renderer ${renderer}.`,
     );
     process.exit(1);
   }
@@ -401,6 +406,16 @@ async function copyTemplate(
 
   if (renderer === "solid") {
     const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "solid");
+    await copyDir(rendererTemplatePath, projectPath);
+  }
+
+  if (renderer === "vue") {
+    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "vue");
+    await Promise.all([
+      fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
+      fs.rm(path.join(projectPath, "src", "app", "layout.tsx"), { force: true }),
+      fs.rm(path.join(projectPath, "src", "components", "resource-links.tsx"), { force: true }),
+    ]);
     await copyDir(rendererTemplatePath, projectPath);
   }
 

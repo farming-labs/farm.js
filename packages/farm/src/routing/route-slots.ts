@@ -19,7 +19,7 @@ export function parseRouteSlotFile(filePath: string): RouteSlotConvention | null
   const normalized = filePath.replace(/\\/g, "/");
   const parts = normalized.split("/").filter(Boolean);
   const fileName = parts.at(-1) ?? "";
-  const baseName = fileName.replace(/\.(tsx?|jsx?)$/, "");
+  const baseName = fileName.replace(/\.(tsx?|jsx?|vue)$/, "");
   if (baseName !== "page" && baseName !== "default") return null;
 
   const slotIndex = parts.findIndex((part) => SLOT_SEGMENT.test(part));

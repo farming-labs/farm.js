@@ -21,10 +21,31 @@ export interface FarmRenderer {
   client: string;
   /** JSX import source written to generated TypeScript configuration. */
   jsxImportSource?: string;
+  /** Additional file extensions used for renderer-owned route components. */
+  componentExtensions?: readonly string[];
   /** Packages that must share one module instance in a Farm application. */
   dedupe?: readonly string[];
   /** Renderer packages seeded into Vite's dependency optimizer. */
   optimizeDeps?: readonly string[];
+}
+
+export const FARM_COMPONENT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"] as const;
+
+export function resolveFarmComponentExtensions(extensions: readonly string[] = []): string[] {
+  return Array.from(
+    new Set(
+      [...FARM_COMPONENT_EXTENSIONS, ...extensions].map((extension) => {
+        const normalized = extension.trim().toLowerCase();
+        return normalized.startsWith(".") ? normalized : `.${normalized}`;
+      }),
+    ),
+  ).filter((extension) => extension.length > 1);
+}
+
+export function getFarmRendererComponentExtensions(
+  renderer?: Pick<FarmRenderer, "componentExtensions">,
+): string[] {
+  return resolveFarmComponentExtensions(renderer?.componentExtensions);
 }
 
 export interface FarmRendererViteModule {
@@ -89,6 +110,7 @@ export function resolveFarmRenderer(renderer?: FarmRenderer): FarmRenderer {
 
   return {
     ...resolved,
+    componentExtensions: [...(resolved.componentExtensions || [])],
     dedupe: [...(resolved.dedupe || [])],
     optimizeDeps: [...(resolved.optimizeDeps || [])],
   };

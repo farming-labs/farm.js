@@ -1,7 +1,11 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { REACT_RENDERER, resolveFarmRenderer } from "../renderer";
+import {
+  getFarmRendererComponentExtensions,
+  REACT_RENDERER,
+  resolveFarmRenderer,
+} from "../renderer";
 
 describe("renderer configuration", () => {
   it("keeps React as the default renderer", () => {
@@ -22,12 +26,24 @@ describe("renderer configuration", () => {
       vite: "test-renderer/vite",
       server: "test-renderer/server",
       client: "test-renderer/client",
+      componentExtensions: ["vue"],
       dedupe: ["test-renderer"],
     };
     const renderer = resolveFarmRenderer(descriptor);
 
     expect(renderer).toMatchObject(descriptor);
+    expect(renderer.componentExtensions).not.toBe(descriptor.componentExtensions);
     expect(renderer.dedupe).not.toBe(descriptor.dedupe);
+  });
+
+  it("adds renderer component extensions without dropping JavaScript routes", () => {
+    expect(getFarmRendererComponentExtensions({ componentExtensions: ["vue", ".VUE"] })).toEqual([
+      ".ts",
+      ".tsx",
+      ".js",
+      ".jsx",
+      ".vue",
+    ]);
   });
 
   it("rejects incomplete renderer descriptors", () => {

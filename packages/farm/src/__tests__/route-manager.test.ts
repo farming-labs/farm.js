@@ -131,6 +131,31 @@ describe("RouteManager", () => {
   });
 
   describe("discoverRoutes", () => {
+    it("uses renderer component extensions for route discovery", async () => {
+      const { globFiles } = await import("../utils");
+      mockConfig.renderer = {
+        name: "vue",
+        vite: "@farm.js/vue/vite",
+        server: "@farm.js/vue/server",
+        client: "@farm.js/vue/client",
+        componentExtensions: [".vue"],
+      };
+      routeManager = new RouteManager(mockConfig);
+      vi.mocked(globFiles).mockImplementation(async (pattern: string) => {
+        if (pattern.includes("page")) return ["page.vue"];
+        if (pattern.includes("layout")) return ["layout.vue"];
+        return [];
+      });
+
+      await routeManager.discoverRoutes();
+
+      expect(vi.mocked(globFiles).mock.calls.some(([pattern]) => pattern.includes("vue"))).toBe(
+        true,
+      );
+      expect(routeManager.getRoutes().get("/")?.modulePath).toBe("/test/src/app/page.vue");
+      expect(routeManager.getLayouts().get("/")?.modulePath).toBe("/test/src/app/layout.vue");
+    });
+
     it("reuses compiled navigation metadata until route discovery invalidates it", async () => {
       const { globFiles } = await import("../utils");
       vi.mocked(globFiles).mockImplementation(async (pattern: string) => {

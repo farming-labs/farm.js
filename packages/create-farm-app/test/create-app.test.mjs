@@ -277,6 +277,51 @@ test("generates a Solid starter while keeping React as the default renderer", as
   }
 });
 
+test("generates a Vue SFC starter with typed server interaction", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-vue-"));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "vue-app",
+        "--template",
+        "basic",
+        "--renderer",
+        "vue",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+
+    const generatedDir = path.join(tempDir, "vue-app");
+    const packageJson = JSON.parse(await readFile(path.join(generatedDir, "package.json"), "utf8"));
+    const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+    const page = await readFile(path.join(generatedDir, "src/app/page.vue"), "utf8");
+    const layout = await readFile(path.join(generatedDir, "src/app/layout.vue"), "utf8");
+    const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
+
+    assert.equal(packageJson.dependencies["@farm.js/vue"], "0.1.0-beta.26");
+    assert.equal(packageJson.dependencies.vue, "3.5.41");
+    assert.equal(packageJson.dependencies.react, undefined);
+    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    assert.equal(packageJson.scripts["type-check"], "vue-tsc --noEmit");
+    assert.match(config, /renderer: vue\(\)/);
+    assert.match(config, /from "@farm\.js\/vue"/);
+    assert.match(page, /export const hydrate = true/);
+    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /Edit <code>page\.vue<\/code>/);
+    assert.match(layout, /<slot \/>/);
+    assert.deepEqual(tsconfig.include, ["src/**/*.ts", "src/**/*.vue", "farm.config.ts"]);
+    await assert.rejects(readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8"));
+    await assert.rejects(readFile(path.join(generatedDir, "src/app/layout.tsx"), "utf8"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 for (const template of [
   {
     name: "auth",

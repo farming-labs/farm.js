@@ -7,6 +7,21 @@ const templatesRoot = path.join(workspaceRoot, "packages/create-farm-app/templat
 
 const workspaceVersions = new Map();
 
+function findTemplatePackageFiles(directory) {
+  const packageFiles = [];
+
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      packageFiles.push(...findTemplatePackageFiles(entryPath));
+    } else if (entry.name === "package.json") {
+      packageFiles.push(entryPath);
+    }
+  }
+
+  return packageFiles;
+}
+
 for (const directoryName of fs.readdirSync(packagesRoot).sort()) {
   const packageJsonPath = path.join(packagesRoot, directoryName, "package.json");
   if (!fs.existsSync(packageJsonPath)) continue;
@@ -17,10 +32,8 @@ for (const directoryName of fs.readdirSync(packagesRoot).sort()) {
   }
 }
 
-for (const templateName of fs.readdirSync(templatesRoot).sort()) {
-  const templatePackagePath = path.join(templatesRoot, templateName, "package.json");
-  if (!fs.existsSync(templatePackagePath)) continue;
-
+for (const templatePackagePath of findTemplatePackageFiles(templatesRoot).sort()) {
+  const templateName = path.relative(templatesRoot, path.dirname(templatePackagePath));
   const templatePackage = JSON.parse(fs.readFileSync(templatePackagePath, "utf8"));
   const syncedPackages = [];
 

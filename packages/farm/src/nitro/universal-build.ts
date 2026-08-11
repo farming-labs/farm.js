@@ -65,7 +65,12 @@ import { createFarmSourceAlias } from "../server/vite-config";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
-import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
+import {
+  getFarmRendererComponentExtensions,
+  isReactRenderer,
+  loadFarmRendererVitePlugins,
+  REACT_RENDERER,
+} from "../renderer";
 import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
@@ -720,7 +725,7 @@ export async function buildUniversal(
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
-          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?)$/)) {
+          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?|vue)$/)) {
             layoutRoutes.push({
               pattern: routePrefix,
               modulePath: path.join(dir, entry.name),
@@ -2994,7 +2999,7 @@ async function buildSSRInMemory(
 
   // Check for custom not-found page
   let notFoundPath: string | null = null;
-  const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
+  const notFoundExtensions = getFarmRendererComponentExtensions(config.renderer);
   for (const sourceAppDir of appDirs) {
     for (const ext of notFoundExtensions) {
       const checkPath = path.join(sourceAppDir, `not-found${ext}`);

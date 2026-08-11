@@ -34,7 +34,7 @@ import { resolveFarmSecurityConfig, type ResolvedFarmSecurityConfig } from "./se
 import { resolveFarmThemeConfig } from "./theme/config";
 import { _setDefaultFarmThemeConfig } from "./theme/server";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
-import { resolveFarmRenderer } from "./renderer";
+import { getFarmRendererComponentExtensions, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
 
 type NormalizedFarmConfig = Omit<
@@ -215,12 +215,10 @@ export class FarmApp {
       );
     }
 
-    const rootLayoutPaths = appDirs.flatMap((appDir) => [
-      path.join(appDir, "layout.tsx"),
-      path.join(appDir, "layout.ts"),
-      path.join(appDir, "layout.jsx"),
-      path.join(appDir, "layout.js"),
-    ]);
+    const componentExtensions = getFarmRendererComponentExtensions(this.config.renderer);
+    const rootLayoutPaths = appDirs.flatMap((appDir) =>
+      componentExtensions.map((extension) => path.join(appDir, `layout${extension}`)),
+    );
 
     const hasRootLayout = await Promise.all(rootLayoutPaths.map((p) => fileExists(p))).then(
       (results) => results.some(Boolean),
@@ -228,7 +226,7 @@ export class FarmApp {
 
     if (!hasRootLayout) {
       logger.warn(
-        "No root layout found. Consider creating src/app/layout.tsx for consistent page structure.",
+        `No root layout found. Consider creating src/app/layout${componentExtensions[0]} for consistent page structure.`,
       );
     }
   }

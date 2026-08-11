@@ -16,7 +16,7 @@ import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import pc from "picocolors";
 
-const ROUTE_EXTENSIONS = ["tsx", "ts", "jsx", "js", "mdx", "md"] as const;
+const ROUTE_EXTENSIONS = ["tsx", "ts", "jsx", "js", "vue", "mdx", "md"] as const;
 const MIDDLEWARE_EXTENSIONS = ["ts", "tsx", "js", "jsx", "mjs", "cjs"] as const;
 const SOCIAL_IMAGE_EXTENSIONS = [
   "tsx",
@@ -232,7 +232,7 @@ function discoverMatchingPages(
     const appDirectory = path.join(source.root, source.srcDir, "app");
     if (existsSync(appDirectory)) {
       for (const filePath of walkFiles(appDirectory)) {
-        if (!/^page\.(?:tsx?|jsx?|mdx?)$/.test(path.basename(filePath))) continue;
+        if (!/^page\.(?:tsx?|jsx?|vue|mdx?)$/.test(path.basename(filePath))) continue;
         const relativeDirectory = path.relative(appDirectory, path.dirname(filePath));
         if (
           relativeDirectory.split(path.sep).includes("api") ||

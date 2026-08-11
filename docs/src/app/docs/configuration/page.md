@@ -42,7 +42,48 @@ export default defineConfig({
 ## Renderer
 
 React remains the default renderer, so existing applications and configurations do not need to
-change. To use Solid, install the adapter and select it in `farm.config.ts`:
+change. Select another renderer when you want to author the UI with that library while keeping
+FARMJS routing and server features.
+
+### Vue
+
+Install Vue and its FARMJS renderer adapter:
+
+```bash
+pnpm add @farm.js/vue@beta vue
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { vue } from "@farm.js/vue";
+
+export default defineConfig({
+  renderer: vue(),
+});
+```
+
+Routes can then use Vue Single-File Components directly:
+
+```text
+src/app/layout.vue
+src/app/page.vue
+src/app/products/[id]/page.vue
+```
+
+FARMJS compiles the SFCs with Vue's Vite plugin, renders them with `createSSRApp` and
+`renderToString`, and hydrates interactive routes in the browser. Layout children are exposed through
+Vue's default `<slot />`. See the [Vue server-rendering guide](https://vuejs.org/guide/scaling-up/ssr)
+for Vue-specific SSR constraints.
+
+Create a ready-to-run Vue application from the CLI:
+
+```bash
+pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+```
+
+### Solid
+
+Install the Solid adapter and runtime:
 
 ```bash
 pnpm add @farm.js/solid@beta solid-js
@@ -57,9 +98,9 @@ export default defineConfig({
 });
 ```
 
-The renderer controls JSX compilation, server rendering, and browser hydration. FARMJS continues
+The renderer controls component compilation, server rendering, and browser hydration. FARMJS continues
 to own routing, layouts, API routes, middleware, data access, observability, and deployment, so those
-server features use the same APIs with either renderer. UI code uses the selected library's native
+server features use the same APIs with every renderer. UI code uses the selected library's native
 primitives—for example, Solid signals instead of React hooks.
 
 Create a ready-to-run Solid application directly from the CLI:
@@ -120,7 +161,7 @@ mount, and shortcut together.
 | ------------- | --------------------------------------------------------------------------------- |
 | extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
-| renderer      | Selecting React (default) or a renderer adapter such as Solid.                    |
+| renderer      | Selecting React (default) or an adapter such as Vue or Solid.                     |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
 | theme         | Enabling light, dark, and system modes with client and server APIs.               |

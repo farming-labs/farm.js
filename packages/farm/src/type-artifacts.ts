@@ -23,6 +23,7 @@ export interface GenerateFarmTypeArtifactsOptions {
   extraRoutes?: string[];
   layers?: readonly ResolvedFarmLayer[];
   suppressLintOnLink?: boolean;
+  componentExtensions?: readonly string[];
   routeTypesOutFile?: string;
   apiTypesOutFile?: string;
   envTypesOutFile?: string;
@@ -80,6 +81,7 @@ export async function generateFarmTypeArtifacts(
       srcDir,
       extraRoutes: options.extraRoutes || [],
       suppressLintOnLink: options.suppressLintOnLink,
+      componentExtensions: options.componentExtensions,
       sourceRoots,
     };
     unifiedSections.push(await createRouteTypeDeclarations(routeOptions, unifiedTypesPath));
@@ -91,6 +93,7 @@ export async function generateFarmTypeArtifacts(
       outFile: options.routeTypesOutFile,
       extraRoutes: options.extraRoutes || [],
       suppressLintOnLink: options.suppressLintOnLink,
+      componentExtensions: options.componentExtensions,
       sourceRoots,
     } satisfies GenerateRouteTypesOptions;
     if (options.check) {
