@@ -18,8 +18,8 @@ A Farm app can be as small as src, farm.config.ts, package.json, and tsconfig.js
 my-app/
   src/
     app/
-      layout.tsx # layout.vue or layout.svelte with the selected renderer
-      page.tsx   # page.vue or page.svelte with the selected renderer
+      layout.tsx # Preact/Solid also use TSX; Vue/Svelte use their component extensions
+      page.tsx
   farm.config.ts
   package.json
   tsconfig.json
@@ -54,7 +54,7 @@ Use vite.config.ts only when you need custom Vite behavior. Use platform files o
 | `middleware.ts`                                              | Request behavior before the route renders. |
 | `route.ts`                                                   | API handlers for the current URL segment.  |
 
-Use `.tsx` or `.jsx` with React and Solid, `.vue` with Vue, and `.svelte` with Svelte. See
+Use `.tsx` or `.jsx` with React, Preact, and Solid, `.vue` with Vue, and `.svelte` with Svelte. See
 [Renderers](/docs/renderers) for renderer-specific conventions and current feature boundaries.
 
 ## Recommended app layout

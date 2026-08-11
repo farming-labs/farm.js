@@ -1,0 +1,181 @@
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  color: #f5f5f5;
+  background: #000;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+  background: #000;
+}
+
+button,
+code,
+.eyebrow,
+.links {
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+}
+
+button,
+a {
+  color: inherit;
+}
+
+a {
+  text-decoration: none;
+}
+
+:focus-visible {
+  outline: 2px solid #a78bfa;
+  outline-offset: 4px;
+}
+
+.page-shell {
+  min-height: 100vh;
+  display: grid;
+  align-items: center;
+  padding: clamp(2rem, 7vw, 6rem);
+}
+
+.hero {
+  width: min(100%, 680px);
+}
+
+.eyebrow {
+  display: flex;
+  gap: 0.7rem;
+  color: #737373;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.eyebrow span:first-child {
+  color: #a78bfa;
+}
+
+h1 {
+  margin: 1.5rem 0 2rem;
+  font-size: clamp(2rem, 5vw, 4rem);
+  font-weight: 520;
+  letter-spacing: -0.055em;
+  line-height: 0.98;
+}
+
+h1 span {
+  color: #737373;
+}
+
+.server-demo {
+  border-block: 1px solid rgb(255 255 255 / 0.14);
+}
+
+.demo-row {
+  min-height: 3.4rem;
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.demo-row + .demo-row {
+  border-top: 1px solid rgb(255 255 255 / 0.1);
+}
+
+.demo-row > span {
+  color: #686868;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 0.62rem;
+}
+
+.demo-row code,
+.demo-row button {
+  min-width: 0;
+  font-size: 0.78rem;
+}
+
+.demo-row button {
+  width: fit-content;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.demo-row button:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 0.25rem;
+}
+
+.demo-row button:disabled {
+  color: #737373;
+  cursor: wait;
+}
+
+.demo-row button.failed {
+  color: #fca5a5;
+}
+
+.demo-detail code {
+  overflow: hidden;
+  color: #a1a1a1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.links {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin-top: 1.5rem;
+  color: #a1a1a1;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+
+.links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.links svg {
+  width: 0.82rem;
+  height: 0.82rem;
+}
+
+.links a:hover {
+  color: #fff;
+}
+
+@media (max-width: 620px) {
+  .page-shell {
+    padding: 2rem 1.25rem;
+  }
+
+  h1 {
+    font-size: clamp(2rem, 12vw, 3.2rem);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

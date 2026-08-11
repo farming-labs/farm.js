@@ -14,7 +14,7 @@ Create an app and learn the files that matter.
 - [Getting Started](/docs/getting-started): Create a Farm.js app, understand the files that matter, and run the development server.
 - [Project Structure](/docs/project-structure): The compact file layout Farm expects, plus the optional files you add only when the app needs them.
 - [Configuration](/docs/configuration): Use farm.config.ts as the single project control plane for source paths, integrations, docs, KV storage, database clients, deployment, and framework behavior.
-- [Renderers](/docs/renderers): Choose React, Solid, Vue, or Svelte and review the cross-renderer feature-support matrix.
+- [Renderers](/docs/renderers): Choose React, Preact, Solid, Vue, or Svelte and review the cross-renderer feature-support matrix.
 
 ### Core
 
@@ -26,6 +26,7 @@ Routes, rendering, layouts, and request flow.
 - [Layouts and Route Boundaries](/docs/layouts): Wrap routes with root and nested layouts, then use loading, error, and not-found files for route-level UX.
 - [Rendering Model](/docs/server-rendering): Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports and config.
 - [React Renderer](/docs/renderers/react): Use the default renderer with the complete FARMJS client API, integrations, and experimental Server Components.
+- [Preact Renderer](/docs/renderers/preact): Use Preact hooks, streaming SSR, hydration, and React-compatible FARMJS client APIs.
 - [Solid Renderer](/docs/renderers/solid): Use Solid signals, SSR, hydration, and renderer-neutral FARMJS server primitives.
 - [Vue Renderer](/docs/renderers/vue): Use Vue SFCs, SSR, hydration, and typed FARMJS server calls.
 - [Svelte Renderer](/docs/renderers/svelte): Use Svelte 5 components, runes, SSR, hydration, and typed FARMJS server calls.

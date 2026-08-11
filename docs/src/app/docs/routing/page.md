@@ -633,9 +633,9 @@ This creates `/`, `/dashboard`, `/dashboard/settings`, `/blog/:slug`, and `/docs
 
 Use `page.md` or `page.mdx` for static content routes. They behave like app pages, participate in layouts, and get route types.
 
-Markdown/MDX visual routes currently use the React content renderer. Solid, Vue, and Svelte
-applications can still serve renderer-neutral API content or ordinary static assets, but should use
-renderer-owned component pages for visual routes.
+Markdown/MDX visual routes currently use the React content renderer. Preact treats this as a
+`preact/compat` surface, while Solid, Vue, and Svelte applications can still serve renderer-neutral
+API content or ordinary static assets but should use renderer-owned component pages for visual routes.
 
 **src/app/about/page.mdx**
 
@@ -841,7 +841,7 @@ Keep only one implementation for each image kind in a segment. For example, defi
 ## File Route States
 
 Use `loading.*` and `error.*` next to a file route to define route-local loading and error states.
-Use `.tsx`/`.jsx` with React or Solid, `.vue` with Vue, and `.svelte` with Svelte. Farm picks the
+Use `.tsx`/`.jsx` with React, Preact, or Solid, `.vue` with Vue, and `.svelte` with Svelte. Farm picks the
 nearest matching boundary, so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard
 pages unless a deeper segment defines its own boundary.
 

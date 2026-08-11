@@ -44,8 +44,36 @@ export default defineConfig({
 React remains the default renderer, so existing applications and configurations do not need to
 change. Select another renderer when you want to author the UI with that library while keeping
 FARMJS routing and server features. See [Renderers](/docs/renderers) for the feature matrix and
-dedicated [React](/docs/renderers/react), [Solid](/docs/renderers/solid),
-[Vue](/docs/renderers/vue), and [Svelte](/docs/renderers/svelte) guides.
+dedicated [React](/docs/renderers/react), [Preact](/docs/renderers/preact),
+[Solid](/docs/renderers/solid), [Vue](/docs/renderers/vue), and
+[Svelte](/docs/renderers/svelte) guides.
+
+### Preact
+
+Install Preact and its FARMJS renderer adapter:
+
+```bash
+pnpm add @farm.js/preact@beta preact
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { preact } from "@farm.js/preact";
+
+export default defineConfig({
+  renderer: preact(),
+});
+```
+
+Preact routes use `.tsx` or `.jsx`. The adapter configures Preact JSX, Prefresh, React compatibility
+aliases, server rendering and streaming, and browser hydration. See the
+[Preact Renderer](/docs/renderers/preact) guide for typed server calls and compatibility boundaries.
+
+Create a ready-to-run Preact application from the CLI:
+
+```bash
+pnpm create @farm.js/app@beta my-preact-app --template basic --renderer preact --typescript
+```
 
 ### Svelte
 
@@ -203,7 +231,7 @@ mount, and shortcut together.
 | ------------- | --------------------------------------------------------------------------------- |
 | extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
-| renderer      | Selecting React (default) or an adapter such as Svelte, Vue, or Solid.            |
+| renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.    |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
 | theme         | Enabling light, dark, and system modes with client and server APIs.               |

@@ -3,7 +3,7 @@ import { pixelBorder } from "@farming-labs/theme/pixel-border";
 import type { FarmDocsSidebarItem, FarmDocsSocialImageConfig } from "@farm.js/core";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { siCloudflare, siNextdotjs, siNuxt, siSvelte, siTanstack } from "simple-icons";
+import { siCloudflare, siNextdotjs, siNuxt, siPreact, siSvelte, siTanstack } from "simple-icons";
 
 type FarmDocsSerializableConfig = Parameters<typeof defineDocs>[0] & {
   favicon?: string;
@@ -63,6 +63,7 @@ const icons = {
     "M66.428 274.26c68.448 46.333 161.497 28.406 207.83-40.041 46.335-68.448 28.408-161.497-40.04-207.83C165.77-19.946 72.721-2.019 26.388 66.428-19.948 134.878-2.02 227.928 66.427 274.26ZM47.956 116.67c-17.119 52.593-11.412 105.223 11.29 139.703C18.04 217.361 7.275 150.307 36.943 92.318c18.971-37.082 50.622-62.924 85.556-73.97-31.909 18.363-59.945 53.466-74.544 98.322Zm127.391 166.467c36.03-10.531 68.864-36.752 88.338-74.815 29.416-57.497 19.083-123.905-21.258-163.055 21.793 34.496 27.046 86.275 10.204 138.02-15.016 46.134-44.246 81.952-77.284 99.85Zm8.28-16.908c24.318-20.811 44.389-55.625 53.308-97.439 14.098-66.097-4.384-127.592-41.823-148.113 19.858 26.718 29.91 78.613 23.712 136.656-4.739 44.391-18.01 83.26-35.197 108.896ZM63.717 131.844c-14.201 66.586 4.66 128.501 42.657 148.561-20.378-26.396-30.777-78.891-24.498-137.694 4.661-43.657 17.574-81.974 34.349-107.614-23.957 20.886-43.687 55.392-52.507 96.747Zm136.117 17.717c1.074 67.912-20.244 123.317-47.612 123.748-27.369.433-50.425-54.27-51.498-122.182-1.073-67.913 20.244-123.318 47.613-123.75 27.368-.432 50.425 54.271 51.497 122.184Z",
     "0 0 300 300",
   ),
+  "brand-preact": brandPath(siPreact.path),
   "brand-resend": brandPath(
     "M14.679 0c4.648 0 7.413 2.765 7.413 6.434s-2.765 6.434-7.413 6.434H12.33L24 24h-8.245l-8.88-8.44c-.636-.588-.93-1.273-.93-1.86 0-.831.587-1.565 1.713-1.883l4.574-1.224c1.737-.465 2.936-1.81 2.936-3.572 0-2.153-1.761-3.4-3.939-3.4H0V0z",
   ),
@@ -154,6 +155,7 @@ const sidebar = [
         children: [
           { label: "Overview", slug: "renderers", icon: "layout" },
           { label: "React", slug: "renderers/react", icon: "code" },
+          { label: "Preact", slug: "renderers/preact", icon: "brand-preact" },
           { label: "Solid", slug: "renderers/solid", icon: "code" },
           { label: "Vue", slug: "renderers/vue", icon: "code" },
           { label: "Svelte", slug: "renderers/svelte", icon: "brand-svelte" },

@@ -11,8 +11,8 @@ Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports
 Rendering controls decide when HTML is produced. [Route Runtime](/docs/route-runtime) separately decides where a dynamic page or API handler executes and how deployment limits are applied.
 
 Dynamic rendering, static rendering, and revalidation apply to every renderer. The component
-examples below use React; see [Renderers](/docs/renderers) for Solid, Vue, and Svelte conventions and
-the features that remain React-specific.
+examples below use React-compatible TSX; see [Renderers](/docs/renderers) for Preact, Solid, Vue, and
+Svelte conventions and the features that remain React-specific.
 
 ## Rendering options
 
@@ -133,9 +133,9 @@ export default function DashboardPage() {
 
 ## Deferred route islands
 
-The route-level hydration strategy is shared by renderer adapters. The current nested Client
-Component analysis described below is React-specific; Solid, Vue, and Svelte currently hydrate at
-the route boundary selected by their adapter.
+The route-level hydration strategy is shared by renderer adapters. Preact uses the same nested
+`"use client"` analysis through its compatibility runtime; Solid, Vue, and Svelte currently hydrate
+at the route boundary selected by their adapter.
 
 Client routes and server routes that import a client boundary can defer their JavaScript while Farm
 keeps the server-rendered HTML visible. Add an optional static `island` export to the client module:
@@ -168,13 +168,13 @@ route immediately instead of leaving the previous route visible while waiting fo
 The export must be one of these static string literals so Farm can analyze it without executing
 application code. Without an explicit route-level `island` export, a route that imports client
 boundaries with different strategies safely falls back to `load` because its current route-level
-React root cannot schedule those children independently. Keep interactive leaves small today; a
+React-compatible root cannot schedule those children independently. Keep interactive leaves small today; a
 future compiler boundary can reuse the same export for independently hydrated nested component
 islands.
 
 ### Async pages stay server-only
 
-React cannot hydrate an `async` component in the browser. When a page's default export is `async`
+React and Preact cannot hydrate an `async` component in the browser. When a page's default export is `async`
 and it imports client components (or exports `hydrate = true`), Farm keeps the route
 server-rendered instead of hydrating it: the SSR HTML stays visible, but the imported client
 components are not interactive on that route. Farm logs a warning pointing at the module when this
@@ -184,8 +184,8 @@ components support.
 
 ## Automatic optimized boundaries
 
-Automatic optimized boundaries are a React-only experiment and are not applied to Solid, Vue, or
-Svelte routes.
+Automatic optimized boundaries are a React-only experiment and are not applied to Preact, Solid,
+Vue, or Svelte routes.
 
 Farm can experimentally render large, non-interactive Server Component regions through the native
 Strata renderer. Enable the flag once in `farm.config.ts`:

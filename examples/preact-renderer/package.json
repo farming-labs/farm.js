@@ -1,0 +1,25 @@
+{
+  "name": "farm-preact-renderer-example",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "start": "farm start",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@farm.js/core": "workspace:*",
+    "@farm.js/preact": "workspace:*",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "preact": "10.29.8",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "workspace:*",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.3.3"
+  }
+}
