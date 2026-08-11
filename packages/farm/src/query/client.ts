@@ -41,7 +41,7 @@ const getCurrentSearchParams = (): URLSearchParams => {
   return new URLSearchParams(window.location.search);
 };
 
-const throttleTimers = new Map<string, NodeJS.Timeout>();
+const throttleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 const applyChange = (
   searchParams: URLSearchParams,

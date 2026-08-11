@@ -81,6 +81,7 @@ import {
   getFarmFragmentCacheControl,
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
+import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -2060,18 +2061,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               });
               return;
             } catch (error) {
-              await emitPluginError("page-data", error, {
-                path: targetPath,
-              });
-              console.error("[Farm.js] Page data error:", error);
-              res.statusCode = 500;
+              const failure = resolveFarmPageDataFailure(error);
+              if (failure.status >= 500) {
+                await emitPluginError("page-data", error, {
+                  path: targetPath,
+                });
+                console.error("[Farm.js] Page data error:", error);
+              }
+              res.statusCode = failure.status;
               res.setHeader("Content-Type", "application/json");
-              res.end(
-                JSON.stringify({
-                  error: "Failed to load page data",
-                  message: error instanceof Error ? error.message : "Unknown error",
-                }),
-              );
+              res.end(JSON.stringify(failure.payload));
               return;
             }
           }

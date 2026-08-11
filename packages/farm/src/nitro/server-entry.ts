@@ -23,6 +23,7 @@ import {
   getFarmFragmentCacheControl,
   parseFarmLayoutChainHeader,
 } from "../navigation/render-plan";
+import { resolveFarmPageDataFailure } from "../navigation/page-data-error";
 
 // Managers will be available via globalThis.__FARM_REGISTRY__
 // They are injected via Nitro hooks (ready hook) or set during build
@@ -322,17 +323,14 @@ async function defaultHandler({
         activeDeploymentId,
       );
     } catch (error) {
-      console.error("[Farm.js] Page data error:", error);
-      return new Response(
-        JSON.stringify({
-          error: "Failed to load page data",
-          message: error instanceof Error ? error.message : "Unknown error",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      const failure = resolveFarmPageDataFailure(error);
+      if (failure.status >= 500) {
+        console.error("[Farm.js] Page data error:", error);
+      }
+      return new Response(JSON.stringify(failure.payload), {
+        status: failure.status,
+        headers: { "Content-Type": "application/json" },
+      });
     }
   }
 
