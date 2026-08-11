@@ -27,14 +27,15 @@ my-app/
 
 ## Common folders
 
-| Path           | Purpose                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| src/app        | Pages, nested layouts, API routes, route boundaries, middleware.         |
-| src/lib        | Shared server and client utilities.                                      |
-| src/components | Reusable UI and client components.                                       |
-| layers         | Optional local Farm layers consumed through `extends`.                   |
-| src/farm.d.ts  | Generated project types for routes, env, and i18n.                       |
-| farm.config.ts | Framework config, integrations, docs, KV storage, databases, deployment. |
+| Path           | Purpose                                                                      |
+| -------------- | ---------------------------------------------------------------------------- |
+| src/app        | Pages, nested layouts, API routes, route boundaries, middleware.             |
+| src/client.ts  | Optional typed browser lifecycle for HTML-first application enhancements.    |
+| src/lib        | Shared server and client utilities.                                          |
+| src/components | Reusable UI and client components.                                           |
+| layers         | Optional local Farm layers consumed through `extends`.                       |
+| src/farm.d.ts  | Generated project types for routes, env, and i18n.                           |
+| farm.config.ts | Framework config, integrations, docs, KV storage, databases, and deployment. |
 
 ## Optional files stay optional
 
@@ -84,6 +85,35 @@ my-app/
 Keep framework configuration in `farm.config.ts`. Keep application helpers under `src/lib`, and keep UI that is reused across pages under `src/components`.
 
 Reusable product areas can live under `layers/<name>` with their own optional `farm.config.ts` and `src` directory. The application enables them explicitly through `extends`; see [Layers](/docs/layers).
+
+## HTML-first client lifecycle
+
+Add `src/client.ts` when server-rendered HTML needs small browser enhancements without turning a page or layout into a hydrated React tree. Farm discovers the file at build time, includes it in the existing client runtime, and invokes it on the initial document and fragment navigations.
+
+```ts
+import { defineClient } from "@farm.js/core/client/lifecycle";
+
+export default defineClient({
+  setup({ router }) {
+    const controller = new AbortController();
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (event.target instanceof Element && event.target.closest(".js-refresh")) {
+          void router.refresh?.();
+        }
+      },
+      { signal: controller.signal },
+    );
+    return controller;
+  },
+  close({ state }) {
+    state.abort();
+  },
+});
+```
+
+The entry is ordinary typed TypeScript, not an inline script string. It does not hydrate React unless the application imports and mounts React itself. Serializable values in `publicRuntimeConfig` are provided as the typed `public` field of `setup`, so environment-derived public endpoints can stay in `farm.config.ts`.
 
 ## Generated files
 

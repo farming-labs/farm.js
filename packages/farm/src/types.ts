@@ -204,6 +204,10 @@ export interface FarmConfig {
   i18n?: FarmI18nUserConfig | ResolvedFarmI18nConfig | false;
   /** Build identifier used to detect stale clients during rolling deployments. */
   deploymentId?: string;
+  /** Server-only application runtime values. */
+  serverRuntimeConfig?: Record<string, unknown>;
+  /** Serializable application values exposed to `src/client.ts`. */
+  publicRuntimeConfig?: Record<string, unknown>;
   docs?: FarmDocsUserConfig | FarmDocsResolvedConfig;
   md?: FarmMarkdownUserConfig | FarmMarkdownResolvedConfig | boolean;
   mdx?: FarmMdxUserConfig | FarmMdxResolvedConfig;
@@ -358,9 +362,8 @@ export type Page<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = 
 export type Layout<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
   LayoutProps<TRoute>
 >;
-export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
-  LoadingProps<TRoute>
->;
+export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
+  FarmComponentType<LoadingProps<TRoute>>;
 export type ErrorBoundary<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
   FarmComponentType<ErrorProps<TRoute>>;
 /**

@@ -39,10 +39,7 @@ import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
-import {
-  createFarmRouteRenderPlan,
-  type FarmRouteRenderPlan,
-} from "../navigation/render-plan";
+import { createFarmRouteRenderPlan, type FarmRouteRenderPlan } from "../navigation/render-plan";
 import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
 import {
   inspectStaticMetadataImage,

@@ -1174,6 +1174,7 @@ async function buildClient(
     config.i18n,
     config.plugins,
     config.renderer,
+    config.publicRuntimeConfig,
   );
 
   // Write the client entry to a temporary file
@@ -1595,11 +1596,14 @@ function generateClientHydrationEntry(
   },
   plugins: readonly FarmPlugin[] = [],
   renderer: FarmRenderer = REACT_RENDERER,
+  publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
     plugins,
     root,
+    srcDir,
+    publicRuntimeConfig,
   );
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
@@ -1729,7 +1733,7 @@ ${generateUniversalRouterStateProperties()}
 
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
-    if (action !== "pop" && to === this.currentPath) {
+    if (!options.refresh && action !== "pop" && to === this.currentPath) {
       if (url.hash) window.location.hash = url.hash;
       return;
     }
@@ -1747,7 +1751,7 @@ ${generateUniversalRouterStateProperties()}
         to: url,
         action,
       });
-      const html = await this.fetchPage(url.pathname + url.search);
+      const html = await this.fetchPage(url.pathname + url.search, options.refresh === true);
       await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
       await this.runViewTransition(options.viewTransition, async () => {
         if (!this.swapContent(html)) {
@@ -1784,9 +1788,20 @@ ${generateUniversalRouterStateProperties()}
       else window.location.href = href;
     }
   },
+
+  refresh: function(options = {}) {
+    return this.navigate(window.location.href, {
+      ...options,
+      action: "replace",
+      replace: true,
+      refresh: true,
+      scroll: options.scroll === undefined ? false : options.scroll,
+    });
+  },
   
-  fetchPage: async function(url) {
-    const cached = this.prefetchCache.get(url);
+  fetchPage: async function(url, fresh = false) {
+    if (fresh) this.prefetchCache.delete(url);
+    const cached = fresh ? undefined : this.prefetchCache.get(url);
     if (cached) return cached;
     
     const response = await fetch(url, {
@@ -1868,6 +1883,10 @@ ${generateUniversalRouterStateProperties()}
     this.fetchPage(pathname)
       .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
       .catch(function() {});
+  },
+
+  clearCache: function() {
+    this.prefetchCache.clear();
   },
   
   observeForPrefetch: function(element) {
@@ -1961,7 +1980,7 @@ document.addEventListener("click", function(e) {
     const load = page.pageShouldHydrate
       ? `() => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default)`
       : "null";
-  routeEntries.push(`  {
+    routeEntries.push(`  {
     pattern: ${JSON.stringify(page.pattern)},
     pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
     islandStrategy: ${JSON.stringify(page.islandStrategy)},

@@ -88,6 +88,7 @@ import {
   getFarmFragmentCacheControl,
   parseFarmLayoutChainHeader,
 } from "./navigation/render-plan";
+import { resolveFarmPageDataFailure } from "./navigation/page-data-error";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -1815,12 +1816,9 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   ? await routeManager.loadRouteModule(loadingBoundary.modulePath)
                   : null;
 
-                const navigationManifest = routeManager.generateClientManifest(
-                  server.config.root,
-                );
-                const moduleMetadata = navigationManifest.routes.find(
-                  (entry) => entry.pattern === route.pattern,
-                ) ??
+                const navigationManifest = routeManager.generateClientManifest(server.config.root);
+                const moduleMetadata =
+                  navigationManifest.routes.find((entry) => entry.pattern === route.pattern) ??
                   getClientModuleMetadata(route.modulePath, server.config.root);
                 const isClientComponent = moduleMetadata.isClientComponent;
                 const shouldHydrate = moduleMetadata.shouldHydrate;
@@ -1832,9 +1830,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 );
                 const layoutHydrationMetadata = layouts.map(
                   (layout) =>
-                    navigationManifest.layouts.find(
-                      (entry) => entry.pattern === layout.pattern,
-                    ) ?? getClientModuleMetadata(layout.modulePath, server.config.root),
+                    navigationManifest.layouts.find((entry) => entry.pattern === layout.pattern) ??
+                    getClientModuleMetadata(layout.modulePath, server.config.root),
                 );
                 const shouldHydrateLayout = layoutHydrationMetadata.some(
                   (metadata) => metadata.shouldHydrate,
@@ -1898,13 +1895,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 const routeSlots = await Promise.all(
                   slots.map(async (slot) => {
                     const slotModule = await routeManager.loadRouteModule(slot.route.modulePath);
-                    const slotMetadata = navigationManifest.slots.find(
-                      (entry) =>
-                        entry.name === slot.name &&
-                        entry.ownerPattern === slot.ownerPattern &&
-                        entry.pattern === slot.route.pattern,
-                    ) ??
-                      getClientModuleMetadata(slot.route.modulePath, server.config.root);
+                    const slotMetadata =
+                      navigationManifest.slots.find(
+                        (entry) =>
+                          entry.name === slot.name &&
+                          entry.ownerPattern === slot.ownerPattern &&
+                          entry.pattern === slot.route.pattern,
+                      ) ?? getClientModuleMetadata(slot.route.modulePath, server.config.root);
                     const slotContext = await resolveFarmRouteContext(farmApp.getConfig(), {
                       request,
                       params: slot.params,
@@ -1973,29 +1970,27 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   parseFarmLayoutChainHeader(request.headers.get("x-farm-layout-chain")),
                   destinationLayoutPatterns,
                 );
-                const fragmentHtml = await farmApp
-                  .getServerRenderer()
-                  .renderNavigationFragment({
-                    PageComponent: (routeModule as any).default,
-                    LoadingComponent: (loadingModule as any)?.default,
-                    pageProps: routeProps as Record<string, unknown>,
-                    params,
-                    layouts: layouts.map((layout, index) => ({
-                      pattern: layout.pattern,
-                      module: layoutModules[index] as any,
-                    })),
-                    layoutStartIndex,
-                    slots: routeSlots.map((slot) => ({
-                      name: slot.name,
-                      ownerPattern: slot.ownerPattern,
-                      containerId: slot.containerId,
-                      module: slot.renderModule as any,
-                      props: slot.props,
-                    })),
-                    pageShouldHydrate: shouldHydrate,
-                    layoutShouldHydrate: shouldHydrateLayout,
-                    islandStrategy: hydrationIslandStrategy,
-                  });
+                const fragmentHtml = await farmApp.getServerRenderer().renderNavigationFragment({
+                  PageComponent: (routeModule as any).default,
+                  LoadingComponent: (loadingModule as any)?.default,
+                  pageProps: routeProps as Record<string, unknown>,
+                  params,
+                  layouts: layouts.map((layout, index) => ({
+                    pattern: layout.pattern,
+                    module: layoutModules[index] as any,
+                  })),
+                  layoutStartIndex,
+                  slots: routeSlots.map((slot) => ({
+                    name: slot.name,
+                    ownerPattern: slot.ownerPattern,
+                    containerId: slot.containerId,
+                    module: slot.renderModule as any,
+                    props: slot.props,
+                  })),
+                  pageShouldHydrate: shouldHydrate,
+                  layoutShouldHydrate: shouldHydrateLayout,
+                  islandStrategy: hydrationIslandStrategy,
+                });
 
                 // Return page data for SPA navigation
                 const pageData = {
@@ -2015,9 +2010,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   },
                   canonicalPath: (routeProps as any).__farmCanonicalPath,
                   modulePath: toUrlPath(route.modulePath),
-                  loadingModulePath: loadingBoundary
-                    ? toUrlPath(loadingBoundary.modulePath)
-                    : null,
+                  loadingModulePath: loadingBoundary ? toUrlPath(loadingBoundary.modulePath) : null,
                   isClientComponent: routeSlots.length > 0 ? false : isClientComponent,
                   pageShouldHydrate: shouldHydrate,
                   layoutShouldHydrate: shouldHydrateLayout,
@@ -2075,18 +2068,16 @@ window.__FARM_MANIFEST__ = ${inlineValue({
               });
               return;
             } catch (error) {
-              await emitPluginError("page-data", error, {
-                path: targetPath,
-              });
-              console.error("[Farm.js] Page data error:", error);
-              res.statusCode = 500;
+              const failure = resolveFarmPageDataFailure(error);
+              if (failure.status >= 500) {
+                await emitPluginError("page-data", error, {
+                  path: targetPath,
+                });
+                console.error("[Farm.js] Page data error:", error);
+              }
+              res.statusCode = failure.status;
               res.setHeader("Content-Type", "application/json");
-              res.end(
-                JSON.stringify({
-                  error: "Failed to load page data",
-                  message: error instanceof Error ? error.message : "Unknown error",
-                }),
-              );
+              res.end(JSON.stringify(failure.payload));
               return;
             }
           }
@@ -2464,6 +2455,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           generatedDevtoolsClientRuntime,
           resolvedConfig?.plugins || [],
           root,
+          resolvedConfig?.srcDir || options.srcDir || "src",
+          resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
           isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
           renderer,
         );
@@ -3270,6 +3263,8 @@ function generateClientCode(
   devtoolsClientRuntime = "",
   plugins: readonly FarmPlugin[] = [],
   root = process.cwd(),
+  srcDir = "src",
+  publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   docsAdapterReact?: string,
   renderer: FarmRenderer = REACT_RENDERER,
 ): string {
@@ -3277,7 +3272,12 @@ function generateClientCode(
   const providerImportBlock = hasClerkProvider
     ? `import { ClerkProvider } from '@clerk/react';`
     : "";
-  const clientPluginEntry = generateFarmClientPluginEntryCode(plugins, root);
+  const clientPluginEntry = generateFarmClientPluginEntryCode(
+    plugins,
+    root,
+    srcDir,
+    publicRuntimeConfig,
+  );
   const rendererClientImports = isReactRenderer(renderer)
     ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
     : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;

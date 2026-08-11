@@ -18,9 +18,7 @@ function layoutAppliesToRoute(layoutPattern: string, routePattern: string): bool
   if (layoutPattern === "/") return true;
   const normalizedLayout = layoutPattern.replace(/\/$/, "");
   const normalizedRoute = routePattern.replace(/\/$/, "");
-  return (
-    normalizedRoute === normalizedLayout || normalizedRoute.startsWith(`${normalizedLayout}/`)
-  );
+  return normalizedRoute === normalizedLayout || normalizedRoute.startsWith(`${normalizedLayout}/`);
 }
 
 interface RouteInfo {

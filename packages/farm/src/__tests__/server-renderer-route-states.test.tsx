@@ -229,7 +229,10 @@ describe("file route loading.tsx and error.tsx", () => {
           },
         },
       },
-      { opengraphImage: true, staticImage: { modulePath: imagePath, staticInfo } },
+      {
+        opengraphImage: true,
+        staticImage: { modulePath: imagePath, staticInfo },
+      },
     );
 
     const pageResponse = createMockResponse();
@@ -419,7 +422,10 @@ describe("file route loading.tsx and error.tsx", () => {
       },
       {
         layoutMetadata: { shouldHydrate: false },
-        dashboardLayoutMetadata: { shouldHydrate: true, islandStrategy: "visible" },
+        dashboardLayoutMetadata: {
+          shouldHydrate: true,
+          islandStrategy: "visible",
+        },
       },
     );
 
@@ -492,7 +498,10 @@ function createRenderer(
       suppressedAsyncHydration?: true;
     };
     layoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
-    dashboardLayoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
+    dashboardLayoutMetadata?: {
+      shouldHydrate: boolean;
+      islandStrategy?: string;
+    };
     onGenerateClientManifest?: () => void;
   } = {},
 ) {

@@ -15,7 +15,10 @@ export interface FarmClientLocation {
 
 export interface FarmClientPluginRouter {
   navigate(href: string, options?: Record<string, unknown>): MaybePromise<void>;
+  /** Re-render the current URL from fresh server data without replacing the document shell. */
+  refresh?(options?: Record<string, unknown>): MaybePromise<void>;
   prefetch?(href: string): MaybePromise<void>;
+  clearCache?(): void;
   getNavigationState?(): unknown;
 }
 
@@ -155,6 +158,17 @@ export interface FarmClientPluginRegistration<TPublic = undefined> {
   enforce?: FarmClientPluginEnforce;
   definition: FarmClientPlugin<any, TPublic>;
   public?: TPublic;
+}
+
+/**
+ * Define the lifecycle for an application's auto-discovered `src/client.ts`
+ * entry. The identity helper preserves state inference while keeping the
+ * module entirely in the browser bundle.
+ */
+export function defineClient<TState = unknown, TPublic = undefined>(
+  definition: FarmClientPlugin<TState, TPublic>,
+): FarmClientPlugin<TState, TPublic> {
+  return definition;
 }
 
 export interface FarmClientPluginManagerOptions {

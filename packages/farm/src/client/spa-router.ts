@@ -92,6 +92,8 @@ export interface FarmNavigateOptions {
   scroll?: boolean;
   state?: unknown;
   viewTransition?: FarmViewTransitionMode;
+  /** Re-fetch the current route even when its URL has not changed. */
+  refresh?: boolean;
 }
 
 export interface FarmNavigationLocation {
@@ -198,7 +200,13 @@ export class SPARouter {
    * Navigate to a new URL
    */
   async navigate(href: string, options: FarmNavigateOptions = {}): Promise<void> {
-    const { replace = false, scroll = true, state, viewTransition = false } = options;
+    const {
+      replace = false,
+      scroll = true,
+      state,
+      viewTransition = false,
+      refresh = false,
+    } = options;
 
     // Parse the URL
     const url = new URL(href, window.location.origin);
@@ -216,7 +224,7 @@ export class SPARouter {
     }
 
     // Same page navigation - just update hash/scroll
-    if (pathname === window.location.pathname && search === window.location.search) {
+    if (!refresh && pathname === window.location.pathname && search === window.location.search) {
       if (url.hash) {
         window.location.hash = url.hash;
       }
@@ -254,7 +262,7 @@ export class SPARouter {
       });
 
       // Fetch page data (from cache or server)
-      const pageData = await this.fetchPageData(fullPath, true, from);
+      const pageData = await this.fetchPageData(fullPath, true, from, refresh);
       if (clientNavigation) {
         await this.clientPlugins?.markNavigationLoaded(clientNavigation, pageData);
       }
@@ -285,6 +293,19 @@ export class SPARouter {
       // Fall back to full page navigation
       window.location.href = href;
     }
+  }
+
+  /**
+   * Re-render the active route from the server while preserving the document,
+   * shared layouts, client runtime, and browser history entry.
+   */
+  refresh(options: Omit<FarmNavigateOptions, "replace" | "refresh"> = {}): Promise<void> {
+    return this.navigate(window.location.href, {
+      ...options,
+      replace: true,
+      refresh: true,
+      scroll: options.scroll ?? false,
+    });
   }
 
   /**
@@ -476,10 +497,11 @@ export class SPARouter {
     path: string,
     recover = true,
     interceptFrom?: string,
+    fresh = false,
   ): Promise<PageData> {
     const cacheKey = getPageDataCacheKey(path, interceptFrom);
     // Check cache first
-    const cached = this.cache.get(cacheKey);
+    const cached = fresh ? undefined : this.cache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < this.options.cacheMaxAge) {
       return cached.data;
     }

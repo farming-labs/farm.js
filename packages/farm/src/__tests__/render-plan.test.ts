@@ -47,10 +47,7 @@ describe("manifest rendering plans", () => {
   });
 
   it("validates layout-chain hints and finds the changed segment", () => {
-    expect(parseFarmLayoutChainHeader('["/","/dashboard"]')).toEqual([
-      "/",
-      "/dashboard",
-    ]);
+    expect(parseFarmLayoutChainHeader('["/","/dashboard"]')).toEqual(["/", "/dashboard"]);
     expect(parseFarmLayoutChainHeader('{"unsafe":true}')).toEqual([]);
     expect(getSharedLayoutPrefixLength(["/", "/dashboard"], ["/", "/settings"])).toBe(1);
     expect(getSharedLayoutPrefixLength(["/"], ["/"])).toBe(1);

@@ -470,8 +470,11 @@ describe("static rendering suggestions with i18n", () => {
         detection: ["url", "cookie"],
       }),
     ).toBe(false);
-    expect(shouldSuggestStaticRenderingForI18n({ routing: "none", detection: ["url"] })).toBe(
-      false,
-    );
+    expect(
+      shouldSuggestStaticRenderingForI18n({
+        routing: "none",
+        detection: ["url"],
+      }),
+    ).toBe(false);
   });
 });
