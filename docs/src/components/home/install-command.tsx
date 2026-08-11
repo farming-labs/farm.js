@@ -61,7 +61,8 @@ const commands: readonly CommandOption[] = [
   },
   {
     label: "pnpm",
-    command: "pnpm create @farm.js/app@beta my-app --template basic --typescript",
+    command:
+      "pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript",
     brand: pnpmIconUrl,
     kind: "install",
   },

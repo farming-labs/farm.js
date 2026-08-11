@@ -15,12 +15,14 @@ Farm keeps the first project small: an app directory, a config file, package met
 **Terminal**
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm --config.minimumReleaseAge=0 create @farm.js/app@beta my-app --template basic --typescript
 cd my-app
 pnpm dev
 ```
 
 This command follows the current `beta` dist-tag and explicitly selects the minimal Basic starter.
+The scoped `minimumReleaseAge=0` setting lets pnpm 11 use a beta published within the last 24 hours
+without changing your global supply-chain policy.
 Use `pnpm create`, not `pnpm add`: pnpm resolves the `@farm.js/app` initializer name to the
 published `@farm.js/create-app` package. The scaffolder installs React and all other starter
 dependencies automatically. Use `--skip-install` if you only want it to generate the project
