@@ -53,6 +53,7 @@ import { createFarmMetadataImageResponse } from "../metadata-image";
 import { DefaultNotFoundPage } from "../components/not-found";
 import { createFarmThemeDocumentParts } from "../theme/server-runtime";
 import { getTheme as getFarmTheme } from "../theme/server";
+import type { FarmIslandStrategy } from "../island";
 
 let cachedClerkProvider: {
   ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
@@ -75,6 +76,33 @@ interface PPRShellCacheOptions {
   pathname: string;
   search: string;
   revalidate?: number;
+}
+
+export interface FarmNavigationFragmentLayout {
+  pattern: string;
+  module: { default?: React.ComponentType<any> };
+}
+
+export interface FarmNavigationFragmentSlot {
+  name: string;
+  ownerPattern: string;
+  containerId: string;
+  module: { default?: React.ComponentType<any> };
+  props: Record<string, unknown>;
+}
+
+export interface FarmNavigationFragmentInput {
+  PageComponent: React.ComponentType<any>;
+  LoadingComponent?: React.ComponentType<any>;
+  pageProps: Record<string, unknown>;
+  params: Record<string, string>;
+  layouts: FarmNavigationFragmentLayout[];
+  /** First destination layout that changed compared with the active shell. */
+  layoutStartIndex?: number;
+  slots?: FarmNavigationFragmentSlot[];
+  pageShouldHydrate: boolean;
+  layoutShouldHydrate: boolean;
+  islandStrategy?: FarmIslandStrategy | null;
 }
 
 const warnedSuppressedAsyncHydrationModules = new Set<string>();
@@ -365,6 +393,124 @@ export class ServerRenderer {
     this.routeManager = routeManager;
     this.i18nRuntime = i18nRuntime;
     this.loadSSGManifest();
+  }
+
+  private createPageBoundary(
+    pageElement: React.ReactNode,
+    options: {
+      pageShouldHydrate: boolean;
+      layoutShouldHydrate: boolean;
+      islandStrategy?: FarmIslandStrategy | null;
+    },
+  ): React.ReactElement {
+    return React.createElement(
+      "div",
+      {
+        id: "__farm_page__",
+        "data-farm-segment": "page",
+        "data-farm-client": options.pageShouldHydrate ? "true" : "false",
+        ...(options.layoutShouldHydrate ? { "data-farm-layout-client": "true" } : {}),
+        "data-farm-island": "page",
+        "data-farm-island-strategy": options.islandStrategy || "load",
+      },
+      pageElement,
+    );
+  }
+
+  private createLayoutBoundary(
+    pattern: string,
+    layoutElement: React.ReactNode,
+  ): React.ReactElement {
+    return React.createElement(
+      "div",
+      {
+        "data-farm-layout-boundary": "true",
+        "data-farm-layout-pattern": pattern,
+        style: { display: "contents" },
+      },
+      layoutElement,
+    );
+  }
+
+  private async renderElementToCompleteHTML(element: React.ReactNode): Promise<string> {
+    return await new Promise<string>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let started = false;
+      const writable = new Writable({
+        write(chunk, _encoding, callback) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          callback();
+        },
+      });
+      writable.once("finish", () => resolve(Buffer.concat(chunks).toString("utf8")));
+      writable.once("error", reject);
+
+      const stream = renderToPipeableStream(element, {
+        onShellReady() {
+          started = true;
+          stream.pipe(writable);
+        },
+        onShellError(error) {
+          reject(error);
+        },
+        onError(error) {
+          if (!started) reject(error);
+        },
+      });
+    });
+  }
+
+  /** Render the changed route tree without producing a second document response. */
+  async renderNavigationFragment(input: FarmNavigationFragmentInput): Promise<string> {
+    let element: React.ReactElement = React.createElement(input.PageComponent, input.pageProps);
+    if (input.LoadingComponent) {
+      element = React.createElement(
+        React.Suspense,
+        {
+          fallback: React.createElement(input.LoadingComponent, {
+            params: input.params,
+            path: (input.pageProps as any).path,
+          }),
+        },
+        element,
+      );
+    }
+    element = this.createPageBoundary(element, {
+      pageShouldHydrate: input.pageShouldHydrate,
+      layoutShouldHydrate: input.layoutShouldHydrate,
+      islandStrategy: input.islandStrategy,
+    });
+
+    const layoutStartIndex = Math.max(
+      0,
+      Math.min(input.layoutStartIndex ?? 0, input.layouts.length),
+    );
+    for (let index = input.layouts.length - 1; index >= layoutStartIndex; index--) {
+      const layout = input.layouts[index]!;
+      const LayoutComponent = layout.module.default;
+      if (!LayoutComponent) continue;
+      const slotProps: Record<string, React.ReactElement> = {};
+      for (const slot of input.slots || []) {
+        if (slot.ownerPattern !== layout.pattern || !slot.module.default) continue;
+        slotProps[slot.name] = React.createElement(
+          "div",
+          {
+            id: slot.containerId,
+            "data-farm-route-slot": slot.name,
+            "data-farm-slot-owner": slot.ownerPattern,
+          },
+          React.createElement(slot.module.default, slot.props),
+        );
+      }
+      element = React.createElement(LayoutComponent, {
+        children: element,
+        params: input.params,
+        ...slotProps,
+      });
+      element = this.createLayoutBoundary(layout.pattern, element);
+    }
+
+    return this.renderElementToCompleteHTML(await this.wrapWithIntegrationProviders(element));
   }
 
   async runWithRequestContext<T>(request: Request, fn: () => T | Promise<T>): Promise<T> {
@@ -1107,21 +1253,14 @@ export class ServerRenderer {
               );
             }
 
-            // Wrap hydratable pages in a targeted container so the client can attach
-            // without re-hydrating the surrounding layout shell.
-            if (isClientComponent || shouldHydrate || shouldHydrateLayout) {
-              pageElement = React.createElement(
-                "div",
-                {
-                  id: "__farm_page__",
-                  "data-farm-client": isClientComponent || shouldHydrate ? "true" : "false",
-                  ...(shouldHydrateLayout ? { "data-farm-layout-client": "true" } : {}),
-                  "data-farm-island": "page",
-                  "data-farm-island-strategy": hydrationIslandStrategy,
-                },
-                pageElement,
-              );
-            }
+            // Every route gets a stable HTML boundary. Server-only pages keep
+            // native markup with no React root; interactive pages hydrate this
+            // exact boundary.
+            pageElement = this.createPageBoundary(pageElement, {
+              pageShouldHydrate: isClientComponent || shouldHydrate,
+              layoutShouldHydrate: shouldHydrateLayout,
+              islandStrategy: hydrationIslandStrategy,
+            });
 
             let wrappedElement: React.ReactElement = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
@@ -1155,6 +1294,7 @@ export class ServerRenderer {
                   ...slotProps,
                 } as React.Attributes,
               );
+              wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
             }
 
             if (ErrorFallbackComponent) {

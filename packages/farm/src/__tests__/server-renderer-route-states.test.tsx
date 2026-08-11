@@ -229,7 +229,10 @@ describe("file route loading.tsx and error.tsx", () => {
           },
         },
       },
-      { opengraphImage: true, staticImage: { modulePath: imagePath, staticInfo } },
+      {
+        opengraphImage: true,
+        staticImage: { modulePath: imagePath, staticInfo },
+      },
     );
 
     const pageResponse = createMockResponse();
@@ -419,7 +422,10 @@ describe("file route loading.tsx and error.tsx", () => {
       },
       {
         layoutMetadata: { shouldHydrate: false },
-        dashboardLayoutMetadata: { shouldHydrate: true, islandStrategy: "visible" },
+        dashboardLayoutMetadata: {
+          shouldHydrate: true,
+          islandStrategy: "visible",
+        },
       },
     );
 
@@ -431,6 +437,44 @@ describe("file route loading.tsx and error.tsx", () => {
     expect(response.body).toContain(
       'window.__FARM_LAYOUTS__ = [{"pattern":"/","modulePath":"/src/app/layout.tsx","shouldHydrate":false,"islandStrategy":null},{"pattern":"/dashboard","modulePath":"/src/app/dashboard/layout.tsx","shouldHydrate":true,"islandStrategy":"visible"}]',
     );
+  });
+
+  it("renders navigation fragments with stable page and nested layout boundaries", async () => {
+    const renderer = createRenderer({});
+    const html = await renderer.renderNavigationFragment({
+      PageComponent: function SettingsPage() {
+        return React.createElement("main", null, "Settings fragment");
+      },
+      pageProps: {},
+      params: {},
+      layouts: [
+        {
+          pattern: "/",
+          module: {
+            default: function RootLayout({ children }: { children: React.ReactNode }) {
+              return React.createElement("section", { "data-shell": "root" }, children);
+            },
+          },
+        },
+        {
+          pattern: "/dashboard",
+          module: {
+            default: function DashboardLayout({ children }: { children: React.ReactNode }) {
+              return React.createElement("article", { "data-shell": "dashboard" }, children);
+            },
+          },
+        },
+      ],
+      pageShouldHydrate: false,
+      layoutShouldHydrate: false,
+      islandStrategy: null,
+    });
+
+    expect(html).toContain('data-farm-layout-pattern="/"');
+    expect(html).toContain('data-farm-layout-pattern="/dashboard"');
+    expect(html).toContain('id="__farm_page__"');
+    expect(html).toContain('data-farm-client="false"');
+    expect(html).toContain("Settings fragment");
   });
 });
 
@@ -454,7 +498,10 @@ function createRenderer(
       suppressedAsyncHydration?: true;
     };
     layoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
-    dashboardLayoutMetadata?: { shouldHydrate: boolean; islandStrategy?: string };
+    dashboardLayoutMetadata?: {
+      shouldHydrate: boolean;
+      islandStrategy?: string;
+    };
     onGenerateClientManifest?: () => void;
   } = {},
 ) {

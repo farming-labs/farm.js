@@ -120,7 +120,10 @@ describe("navigation state and blocking", () => {
                   modulePath: "/src/app/reports/page.tsx",
                   metadata: { title: "Reports" },
                 }),
-                { status: 200, headers: { "Content-Type": "application/json" } },
+                {
+                  status: 200,
+                  headers: { "Content-Type": "application/json" },
+                },
               ),
             );
           };
@@ -188,6 +191,45 @@ describe("navigation state and blocking", () => {
     expect(window.location.pathname).toBe("/gallery");
   });
 
+  it("commits server HTML routes through the navigation handler without reloading", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          props: {},
+          modulePath: "/src/app/server/page.tsx",
+          isClientComponent: false,
+          renderPlan: {
+            version: 1,
+            output: "html",
+            navigation: "html-fragment",
+            hydration: "none",
+            islandStrategy: null,
+            cache: { mode: "dynamic" },
+          },
+          fragment: {
+            html: '<div id="__farm_page__"><h1>Server page</h1></div>',
+            layoutPatterns: ["/"],
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.spyOn(window, "scrollTo").mockImplementation(() => {});
+    const router = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn(async () => undefined);
+    router.setNavigationHandler(onNavigate);
+
+    await router.navigate("/server", { scroll: false });
+
+    expect(onNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        isClientComponent: false,
+        fragment: expect.objectContaining({ layoutPatterns: ["/"] }),
+      }),
+    );
+    expect(window.location.pathname).toBe("/server");
+  });
+
   it("commits immediate route data while deferred fields keep streaming", async () => {
     const reviews = createControlledPromise<string[]>();
     vi.mocked(fetch).mockResolvedValueOnce(
@@ -225,7 +267,9 @@ describe("navigation state and blocking", () => {
 
   it("reports stale prefetches without retrying or navigating", async () => {
     const mismatchListener = vi.fn();
-    window.addEventListener("farm:deployment-mismatch", mismatchListener, { once: true });
+    window.addEventListener("farm:deployment-mismatch", mismatchListener, {
+      once: true,
+    });
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.mocked(fetch).mockResolvedValueOnce(
       new Response(JSON.stringify({ error: "FARM_DEPLOYMENT_MISMATCH" }), {

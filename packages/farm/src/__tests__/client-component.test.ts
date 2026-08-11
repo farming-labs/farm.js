@@ -578,18 +578,18 @@ export function Chart() {}
     expect(source).not.toContain("imports.push(`import Page${index}");
   });
 
-  it("uses a document swap when dev navigation enters the docs runtime", () => {
+  it("uses manifest fragments for dev navigation and leaves docs navigation isolated", () => {
     const source = fs.readFileSync(path.join(process.cwd(), "src", "vite.ts"), "utf-8");
     const routerSource = fs.readFileSync(
       path.join(process.cwd(), "src", "client", "spa-router.ts"),
       "utf-8",
     );
 
-    expect(source).toContain("if (!doc.documentElement || !doc.body) return false;");
-    expect(source).toContain("document.head.innerHTML = doc.head ? doc.head.innerHTML : '';");
-    expect(source).toContain("document.body.innerHTML = doc.body.innerHTML;");
-    expect(source).toContain("delete window.__farmDocsRuntime;");
-    expect(source).toContain("script.replaceWith(freshScript);");
+    expect(source).toContain("MANIFEST-DRIVEN HTML-FRAGMENT NAVIGATION");
+    expect(source).toContain("pageData.fragment?.html");
+    expect(source).toContain("replaceNavigationBoundary(");
+    expect(source).toContain("activeLayoutPatterns");
+    expect(source).not.toContain("async function moduleLooksClient(");
     expect(source).toContain(
       "if (document.documentElement.dataset.farmDocsRuntime === 'true') return;",
     );
@@ -598,6 +598,7 @@ export function Chart() {}
     );
     expect(source).toContain("The scheduler owns queue draining and exactly-once click replay");
     expect(source).toContain("pendingPageHydrationController?.abort()");
+    expect(routerSource).not.toContain("pageData.isClientComponent === false");
     expect(routerSource).toContain(
       'if (document.documentElement.dataset.farmDocsRuntime === "true") return;',
     );

@@ -103,6 +103,10 @@ export class FarmApp {
     // Discover and register routes
     await this.routeManager.discoverRoutes();
 
+    // Compile hydration and island decisions once during startup. Navigation
+    // requests only read this manifest; HMR invalidates it when route code changes.
+    this.routeManager.generateClientManifest(this.config.root);
+
     if (process.env.FARM_VERBOSE) {
       logger.success("Farm.js application initialized successfully!");
     }

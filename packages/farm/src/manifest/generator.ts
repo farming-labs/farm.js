@@ -12,6 +12,14 @@ import type {
   RouterManagedTag,
 } from "./types";
 import { getClientModuleMetadata } from "../utils/client-component";
+import { createFarmRouteRenderPlan } from "../navigation/render-plan";
+
+function layoutAppliesToRoute(layoutPattern: string, routePattern: string): boolean {
+  if (layoutPattern === "/") return true;
+  const normalizedLayout = layoutPattern.replace(/\/$/, "");
+  const normalizedRoute = routePattern.replace(/\/$/, "");
+  return normalizedRoute === normalizedLayout || normalizedRoute.startsWith(`${normalizedLayout}/`);
+}
 
 interface RouteInfo {
   pattern: string;
@@ -142,6 +150,12 @@ export async function generateDevManifest(
   projectRoot: string,
 ): Promise<AppManifest> {
   const { routes, layouts } = await discoverRoutes(appDir);
+  const layoutMetadata = new Map(
+    layouts.map((layout) => [
+      layout.pattern,
+      getClientModuleMetadata(layout.modulePath, projectRoot),
+    ]),
+  );
 
   const toUrlPath = (absolutePath: string): string => {
     if (absolutePath.startsWith(projectRoot)) {
@@ -153,6 +167,12 @@ export async function generateDevManifest(
   const routeManifest: Record<string, RouteManifestEntry> = {};
   for (const route of routes) {
     const metadata = getClientModuleMetadata(route.modulePath, projectRoot);
+    const routeLayouts = layouts.filter((layout) =>
+      layoutAppliesToRoute(layout.pattern, route.pattern),
+    );
+    const layoutShouldHydrate = routeLayouts.some(
+      (layout) => layoutMetadata.get(layout.pattern)?.shouldHydrate === true,
+    );
     routeManifest[route.pattern] = {
       modulePath: toUrlPath(route.modulePath),
       pattern: route.pattern,
@@ -160,6 +180,11 @@ export async function generateDevManifest(
       isClientComponent: metadata.isClientComponent,
       shouldHydrate: metadata.shouldHydrate,
       islandStrategy: metadata.islandStrategy,
+      renderPlan: createFarmRouteRenderPlan({
+        pageShouldHydrate: metadata.shouldHydrate,
+        layoutShouldHydrate,
+        islandStrategy: metadata.islandStrategy,
+      }),
       preloads: [],
       assets: [],
     };
@@ -167,11 +192,14 @@ export async function generateDevManifest(
 
   const layoutManifest: Record<string, LayoutManifestEntry> = {};
   for (const layout of layouts) {
+    const metadata = layoutMetadata.get(layout.pattern);
     layoutManifest[layout.pattern] = {
       modulePath: toUrlPath(layout.modulePath),
       pattern: layout.pattern,
       preloads: [],
       assets: [],
+      shouldHydrate: metadata?.shouldHydrate === true,
+      islandStrategy: metadata?.islandStrategy ?? null,
     };
   }
 
@@ -201,6 +229,12 @@ export async function generateProdManifest(
   clientBundle: Record<string, ChunkInfo>,
 ): Promise<AppManifest> {
   const { routes, layouts } = await discoverRoutes(appDir);
+  const layoutMetadata = new Map(
+    layouts.map((layout) => [
+      layout.pattern,
+      getClientModuleMetadata(layout.modulePath, projectRoot),
+    ]),
+  );
 
   const toUrlPath = (absolutePath: string): string => {
     if (absolutePath.startsWith(projectRoot)) {
@@ -245,6 +279,12 @@ export async function generateProdManifest(
     }
 
     const metadata = getClientModuleMetadata(route.modulePath, projectRoot);
+    const routeLayouts = layouts.filter((layout) =>
+      layoutAppliesToRoute(layout.pattern, route.pattern),
+    );
+    const layoutShouldHydrate = routeLayouts.some(
+      (layout) => layoutMetadata.get(layout.pattern)?.shouldHydrate === true,
+    );
     routeManifest[route.pattern] = {
       modulePath: urlPath,
       pattern: route.pattern,
@@ -252,6 +292,11 @@ export async function generateProdManifest(
       isClientComponent: metadata.isClientComponent,
       shouldHydrate: metadata.shouldHydrate,
       islandStrategy: metadata.islandStrategy,
+      renderPlan: createFarmRouteRenderPlan({
+        pageShouldHydrate: metadata.shouldHydrate,
+        layoutShouldHydrate,
+        islandStrategy: metadata.islandStrategy,
+      }),
       preloads,
       assets,
     };
@@ -260,11 +305,14 @@ export async function generateProdManifest(
   const layoutManifest: Record<string, LayoutManifestEntry> = {};
   for (const layout of layouts) {
     const urlPath = toUrlPath(layout.modulePath);
+    const metadata = layoutMetadata.get(layout.pattern);
     layoutManifest[layout.pattern] = {
       modulePath: urlPath,
       pattern: layout.pattern,
       preloads: [],
       assets: [],
+      shouldHydrate: metadata?.shouldHydrate === true,
+      islandStrategy: metadata?.islandStrategy ?? null,
     };
   }
 

@@ -1951,6 +1951,7 @@ document.addEventListener("click", function(e) {
     pattern: ${JSON.stringify(page.pattern)},
     pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
     islandStrategy: ${JSON.stringify(page.islandStrategy)},
+    navigation: "html-fragment",
     load: ${load},
   }`);
   });
@@ -2037,9 +2038,19 @@ function wrapWithLayouts(pageElement, pathname, params) {
   
   // Wrap from innermost to outermost (reverse order since layouts are root-first)
   for (let i = layouts.length - 1; i >= 0; i--) {
-    const LayoutComponent = layouts[i].Component;
+    const layout = layouts[i];
+    const LayoutComponent = layout.Component;
     if (LayoutComponent) {
       wrapped = React.createElement(LayoutComponent, { children: wrapped, params: params });
+      wrapped = React.createElement(
+        "div",
+        {
+          "data-farm-layout-boundary": "true",
+          "data-farm-layout-pattern": layout.pattern,
+          style: { display: "contents" },
+        },
+        wrapped,
+      );
     }
   }
   
@@ -2079,7 +2090,7 @@ async function loadRouteComponent(route) {
   return route.Component;
 }
 
-async function createMatchedHydrationElement(matched, pathname, searchParams) {
+async function createMatchedHydrationElement(matched, pathname, searchParams, serverHtml) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
@@ -2101,7 +2112,7 @@ async function createMatchedHydrationElement(matched, pathname, searchParams) {
     pageElement = createLayoutPageBoundary(
       matched.route,
       null,
-      serverPage ? serverPage.innerHTML : "",
+      typeof serverHtml === "string" ? serverHtml : serverPage ? serverPage.innerHTML : "",
     );
   }
 
@@ -2364,6 +2375,68 @@ async function hydrate() {
   }
 }
 
+function findLayoutBoundary(root, pattern) {
+  const boundaries = root?.querySelectorAll?.('[data-farm-layout-boundary="true"]') || [];
+  for (const boundary of boundaries) {
+    if (boundary.getAttribute("data-farm-layout-pattern") === pattern) return boundary;
+  }
+  return null;
+}
+
+function getLayoutPatterns(root) {
+  return Array.from(root?.querySelectorAll?.('[data-farm-layout-boundary="true"]') || [])
+    .map(function(element) { return element.getAttribute("data-farm-layout-pattern"); })
+    .filter(Boolean);
+}
+
+function activateNavigationScripts(root) {
+  for (const script of Array.from(root?.querySelectorAll?.("script") || [])) {
+    const freshScript = document.createElement("script");
+    for (const attribute of Array.from(script.attributes)) {
+      freshScript.setAttribute(attribute.name, attribute.value);
+    }
+    freshScript.textContent = script.textContent || "";
+    script.replaceWith(freshScript);
+  }
+}
+
+function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
+  const currentPatterns = getLayoutPatterns(currentRoot);
+  const nextPatterns = getLayoutPatterns(nextRoot);
+  let sharedCount = 0;
+  while (
+    sharedCount < currentPatterns.length &&
+    sharedCount < nextPatterns.length &&
+    currentPatterns[sharedCount] === nextPatterns[sharedCount]
+  ) sharedCount++;
+
+  const nextTreeRoot = nextPatterns.length
+    ? findLayoutBoundary(nextRoot, nextPatterns[0])
+    : nextRoot.querySelector("#__farm_page__");
+  const currentTarget = sharedCount < currentPatterns.length
+    ? findLayoutBoundary(currentRoot, currentPatterns[sharedCount])
+    : currentRoot.querySelector("#__farm_page__");
+  const nextTarget = sharedCount < nextPatterns.length
+    ? findLayoutBoundary(nextRoot, nextPatterns[sharedCount])
+    : nextRoot.querySelector("#__farm_page__");
+
+  if (!currentTarget || !nextTarget) return false;
+  currentTarget.replaceWith(nextTarget);
+  activateNavigationScripts(nextTarget);
+  if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
+
+  if (nextRoot.childNodes.length) {
+    const support = document.createElement("div");
+    support.hidden = true;
+    support.dataset.farmFragmentSupport = "true";
+    while (nextRoot.firstChild) support.appendChild(nextRoot.firstChild);
+    document.body.appendChild(support);
+    activateNavigationScripts(support);
+    setTimeout(function() { support.remove(); }, 0);
+  }
+  return true;
+}
+
 // SPA Router
 const spaRouter = {
 ${generateUniversalRouterStateProperties()}
@@ -2460,7 +2533,7 @@ ${generateUniversalRouterStateProperties()}
         }
       }
 
-      if (matched?.route.pageShouldHydrate) {
+      if (matched?.route.navigation === "client-render") {
         // Navigation itself signals intent, so destination routes load eagerly even
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
@@ -2589,19 +2662,43 @@ ${generateUniversalRouterStateProperties()}
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
     if (!newRoot || !currentRoot) return this.swapDocument(doc);
-    resetReactRoot();
-    resetRouteSlotRoots();
-    currentRoot.innerHTML = newRoot.innerHTML;
-    window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
-    hydrateInitialRouteSlots();
-
-    // Check if new page has a client component
     const targetUrl = new URL(targetPath || window.location.href, window.location.origin);
     const newPathname = targetUrl.pathname;
     const matched = matchRoute(newPathname);
+    const hydrateLayouts = hasHydratableLayout(newPathname);
+    const nextPage = newRoot.querySelector("#__farm_page__");
+
+    // If React already owns the shared layout, update that root. React keeps
+    // matching layout component instances and their state mounted.
+    if (matched && hydrateLayouts && reactRoot && reactRootContainer === currentRoot) {
+      const searchParams = Object.fromEntries(targetUrl.searchParams);
+      const wrappedElement = await createMatchedHydrationElement(
+        matched,
+        newPathname,
+        searchParams,
+        nextPage ? nextPage.innerHTML : "",
+      );
+      if (wrappedElement) {
+        reactRoot.render(wrappedElement);
+        window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
+        isHydrated = true;
+        return true;
+      }
+    }
+
+    const rootWasReactOwned = reactRootContainer === currentRoot;
+    resetReactRoot();
+    resetRouteSlotRoots();
+    if (rootWasReactOwned || !replaceSharedLayoutBoundary(currentRoot, newRoot)) {
+      currentRoot.innerHTML = newRoot.innerHTML;
+      activateNavigationScripts(currentRoot);
+    }
+    window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
+    hydrateInitialRouteSlots();
+
+    // Check if the new HTML contains an interactive route boundary.
     if (matched) {
       const searchParams = Object.fromEntries(targetUrl.searchParams);
-      const hydrateLayouts = hasHydratableLayout(newPathname);
       const pageContainer =
         hydrateLayouts ? currentRoot : document.getElementById("__farm_page__") || currentRoot;
       const wrappedElement = await createMatchedHydrationElement(
@@ -5522,21 +5619,20 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
-            if (route.shouldHydrate || shouldHydrateLayout) {
-              pageElement = React.createElement(
-                "div",
-                {
-                  id: "__farm_page__",
-                  "data-farm-client": route.shouldHydrate ? "true" : "false",
-                  ...(shouldHydrateLayout
-                    ? { "data-farm-layout-client": "true" }
-                    : {}),
-                  "data-farm-island": "page",
-                  "data-farm-island-strategy": hydrationIslandStrategy,
-                },
-                pageElement,
-              );
-            }
+            pageElement = React.createElement(
+              "div",
+              {
+                id: "__farm_page__",
+                "data-farm-segment": "page",
+                "data-farm-client": route.shouldHydrate ? "true" : "false",
+                ...(shouldHydrateLayout
+                  ? { "data-farm-layout-client": "true" }
+                  : {}),
+                "data-farm-island": "page",
+                "data-farm-island-strategy": hydrationIslandStrategy,
+              },
+              pageElement,
+            );
 
             // Wrap with layouts (from innermost to outermost)
             // Layouts are sorted by depth (root first), so we process in reverse
@@ -5563,6 +5659,15 @@ async function handleFarmRequestInContext(
                   params,
                   ...slotProps,
                 });
+                wrappedElement = React.createElement(
+                  "div",
+                  {
+                    "data-farm-layout-boundary": "true",
+                    "data-farm-layout-pattern": layout.pattern,
+                    style: { display: "contents" },
+                  },
+                  wrappedElement,
+                );
               }
             }
 
