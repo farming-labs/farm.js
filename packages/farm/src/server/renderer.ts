@@ -53,6 +53,7 @@ import { createFarmThemeDocumentParts } from "../theme/server-runtime";
 import { getTheme as getFarmTheme } from "../theme/server";
 import type { ViteDevServer } from "vite";
 import {
+  getFarmRendererComponentExtensions,
   isReactRenderer,
   resolveFarmRendererModule,
   type FarmServerRendererRuntime,
@@ -2257,7 +2258,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     try {
       // Look for custom not-found page
       const appDir = path.join(this.config.root, this.config.srcDir, "app");
-      const notFoundExtensions = [".tsx", ".jsx", ".ts", ".js"];
+      const notFoundExtensions = getFarmRendererComponentExtensions(this.config.renderer);
       let notFoundPath: string | null = null;
 
       for (const ext of notFoundExtensions) {

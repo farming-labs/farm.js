@@ -6,6 +6,7 @@ import type { ParsedRoute } from "../types";
 import { discoverProgrammaticRoutePaths } from "../routes.server";
 import type { FarmSourceRoot } from "../layers";
 import { writeFileIfChanged } from "../write-file-if-changed";
+import { resolveFarmComponentExtensions } from "../renderer";
 
 function routeSegmentsToTsTypeLiteral(segments: string[]): string {
   if (segments.length === 0) return '"/"';
@@ -69,6 +70,8 @@ export interface GenerateRouteTypesOptions {
   sourceRoots?: readonly FarmSourceRoot[];
   /** When true, do not augment LinkDefaultRoute so Link href accepts any string (no route-type errors). */
   suppressLintOnLink?: boolean;
+  /** Additional renderer-owned component extensions, such as `.vue`. */
+  componentExtensions?: readonly string[];
 }
 
 const DEFAULT_OUT_FILE = "farm-routes.d.ts";
@@ -96,6 +99,9 @@ export async function createRouteTypeDeclarations(
 ): Promise<string> {
   const { root, srcDir = "src", extraRoutes = [], suppressLintOnLink = false } = options;
   const sourceRoots = options.sourceRoots ?? [{ name: "project", root, srcDir, layer: false }];
+  const componentExtensions = resolveFarmComponentExtensions(options.componentExtensions).map(
+    (extension) => extension.slice(1),
+  );
 
   const patterns = new Set<string>();
   const routeModulePatterns = new Set<string>();
@@ -105,7 +111,7 @@ export async function createRouteTypeDeclarations(
     const appDir = path.join(source.root, source.srcDir, "app");
     if (fs.existsSync(appDir)) {
       const routeModuleFiles = await glob.default(
-        "**/{page,layout,loading,error}.{ts,tsx,js,jsx,md,mdx}",
+        `**/{page,layout,loading,error}.{${componentExtensions.join(",")},md,mdx}`,
         {
           cwd: appDir,
           absolute: false,

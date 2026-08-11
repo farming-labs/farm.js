@@ -60,6 +60,24 @@ describe("generateRouteTypes", () => {
     expect(content).toContain("interface RouteRegistry");
   });
 
+  it("discovers renderer-owned Vue route components", async () => {
+    const reportsDir = path.join(tmpDir, "src", "app", "reports");
+    await fs.promises.mkdir(reportsDir, { recursive: true });
+    await fs.promises.writeFile(
+      path.join(reportsDir, "page.vue"),
+      "<template><main>Reports</main></template>",
+    );
+
+    const outPath = await generateRouteTypes({
+      root: tmpDir,
+      srcDir: "src",
+      componentExtensions: [".vue"],
+    });
+    const content = fs.readFileSync(outPath, "utf8");
+
+    expect(readTypeAlias(content, "RoutePath")).toContain('"/reports"');
+  });
+
   it("types route-slot targets without exposing slot directory syntax", async () => {
     const feedDir = path.join(tmpDir, "src", "app", "feed");
     const photoDir = path.join(feedDir, "photo", "[id]");

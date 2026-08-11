@@ -76,6 +76,7 @@ interface ParsedClientModuleMetadata {
 }
 
 const RESOLVABLE_SOURCE_EXTENSIONS = [
+  ".vue",
   ".tsx",
   ".ts",
   ".jsx",

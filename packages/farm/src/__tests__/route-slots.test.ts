@@ -8,6 +8,13 @@ function routeSegments(filePath: string) {
 }
 
 describe("route slot conventions", () => {
+  it("recognizes Vue SFC pages inside slots", () => {
+    const slot = parseRouteSlotFile("feed/@modal/(.)photo/[id]/page.vue");
+
+    expect(slot?.name).toBe("modal");
+    expect(routeSegments("feed/@modal/(.)photo/[id]/page.vue")).toEqual(["feed", "photo", "[id]"]);
+  });
+
   it("removes named slots and same-level interception markers from public paths", () => {
     const slot = parseRouteSlotFile("feed/@modal/(.)photo/[id]/page.tsx");
 

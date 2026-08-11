@@ -648,6 +648,7 @@ export function farmPlugin(
             layers: farmConfig.layers,
             extraRoutes: getExtraRouteTypes(),
             suppressLintOnLink: farmConfig.suppressLintOnLink,
+            componentExtensions: farmConfig.renderer.componentExtensions,
             i18nConfig: farmConfig.i18n,
             ...selection,
           });

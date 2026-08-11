@@ -99,7 +99,7 @@ type LiveSnapshot = {
   }>;
 };
 
-const ROUTE_EXTENSIONS = ["ts", "tsx", "js", "jsx", "md", "mdx"];
+const ROUTE_EXTENSIONS = ["ts", "tsx", "js", "jsx", "vue", "md", "mdx"];
 const CONFIG_FILES = [
   "farm.config.ts",
   "farm.config.mts",
@@ -354,12 +354,17 @@ function applySafeProjectFixes(
 ): FarmDoctorFix[] {
   const fixes: FarmDoctorFix[] = [];
   if (checks.some((check) => check.code === "ROOT_LAYOUT_MISSING")) {
-    const layoutPath = path.join(config.root, config.srcDir, "app", "layout.tsx");
+    const rendererExtension = config.renderer.componentExtensions?.[0] || ".tsx";
+    const layoutPath = path.join(config.root, config.srcDir, "app", `layout${rendererExtension}`);
     if (!existsSync(layoutPath)) {
       mkdirSync(path.dirname(layoutPath), { recursive: true });
       writeFileSync(
         layoutPath,
-        `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`,
+        config.renderer.name === "vue"
+          ? `<script setup lang="ts">\ndefineOptions({ inheritAttrs: false });\n</script>\n\n<template>\n  <slot />\n</template>\n`
+          : config.renderer.name === "solid"
+            ? `import type { ParentProps } from "solid-js";\n\nexport default function RootLayout(props: ParentProps) {\n  return <>{props.children}</>;\n}\n`
+            : `import type { ReactNode } from "react";\n\nexport default function RootLayout({ children }: { children: ReactNode }) {\n  return (\n    <html lang="en">\n      <body>{children}</body>\n    </html>\n  );\n}\n`,
         { encoding: "utf8", flag: "wx" },
       );
       fixes.push({
@@ -444,7 +449,7 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
   const sources = getFarmSourceRoots(config);
   const appDirectories = sources.map((source) => path.join(source.root, source.srcDir, "app"));
   const hasPages = appDirectories.some((directory) =>
-    containsFile(directory, /^page\.(?:ts|tsx|js|jsx|md|mdx)$/),
+    containsFile(directory, /^page\.(?:ts|tsx|js|jsx|vue|md|mdx)$/),
   );
   const hasProgrammaticRoutes = sources.some((source) =>
     ROUTE_EXTENSIONS.some((extension) =>
@@ -471,6 +476,7 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
   const hasRootLayout = appDirectories.some((directory) =>
     ROUTE_EXTENSIONS.some((extension) => existsSync(path.join(directory, `layout.${extension}`))),
   );
+  const suggestedLayoutExtension = config.renderer.componentExtensions?.[0] || ".tsx";
   checks.push(
     hasRootLayout
       ? {
@@ -484,7 +490,7 @@ function collectRouterChecks(config: ResolvedFarmConfig, checks: FarmDoctorCheck
           code: "ROOT_LAYOUT_MISSING",
           title: "Root layout is missing",
           message: "The application has no shared root layout.",
-          action: `Add ${config.srcDir}/app/layout.tsx.`,
+          action: `Add ${config.srcDir}/app/layout${suggestedLayoutExtension}.`,
         },
   );
 }

@@ -62,6 +62,7 @@ import {
 } from "../i18n/routing";
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
+import { getFarmRendererComponentExtensions } from "../renderer";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -645,13 +646,17 @@ export class RouteManager {
 
   private async discoverFileRoutes(source: FarmSourceRoot): Promise<void> {
     const appDir = resolveAppPath(source.root, source.srcDir, "app");
-    const pageFiles = await safeGlobFiles("**/page.{ts,tsx,js,jsx,md,mdx}", appDir);
-    const slotDefaultFiles = await safeGlobFiles("**/@*/**/default.{ts,tsx,js,jsx}", appDir);
-    const layoutFiles = await safeGlobFiles("**/layout.{ts,tsx,js,jsx}", appDir);
-    const loadingFiles = await safeGlobFiles("**/loading.{ts,tsx,js,jsx}", appDir);
-    const errorFiles = await safeGlobFiles("**/error.{ts,tsx,js,jsx}", appDir);
+    const componentExtensions = getFarmRendererComponentExtensions(this.config.renderer).map(
+      (extension) => extension.slice(1),
+    );
+    const componentGlob = componentExtensions.join(",");
+    const pageFiles = await safeGlobFiles(`**/page.{${componentGlob},md,mdx}`, appDir);
+    const slotDefaultFiles = await safeGlobFiles(`**/@*/**/default.{${componentGlob}}`, appDir);
+    const layoutFiles = await safeGlobFiles(`**/layout.{${componentGlob}}`, appDir);
+    const loadingFiles = await safeGlobFiles(`**/loading.{${componentGlob}}`, appDir);
+    const errorFiles = await safeGlobFiles(`**/error.{${componentGlob}}`, appDir);
     const metadataImageFiles = await safeGlobFiles(
-      "**/{opengraph-image,twitter-image}.{ts,tsx,js,jsx,png,jpg,jpeg,gif,webp}",
+      `**/{opengraph-image,twitter-image}.{${componentGlob},png,jpg,jpeg,gif,webp}`,
       appDir,
     );
 
