@@ -232,7 +232,7 @@ function discoverMatchingPages(
     const appDirectory = path.join(source.root, source.srcDir, "app");
     if (existsSync(appDirectory)) {
       for (const filePath of walkFiles(appDirectory)) {
-        if (!/^page\.(?:tsx?|jsx?|vue|mdx?)$/.test(path.basename(filePath))) continue;
+        if (!/^page\.(?:tsx?|jsx?|vue|svelte|mdx?)$/.test(path.basename(filePath))) continue;
         const relativeDirectory = path.relative(appDirectory, path.dirname(filePath));
         if (
           relativeDirectory.split(path.sep).includes("api") ||

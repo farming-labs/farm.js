@@ -12,8 +12,8 @@ the homepage comparison: Next.js, SvelteKit, Nuxt, and TanStack Start.
 ## Choose a source
 
 Two sources have dry-run-first CLI migrators. Nuxt and SvelteKit still require a manual migration.
-Nuxt applications can retain Vue SFCs through `@farm.js/vue`, while Svelte components currently
-need to move to one of the supported renderers.
+Nuxt applications can retain Vue SFCs through `@farm.js/vue`, and SvelteKit applications can retain
+Svelte components through `@farm.js/svelte` while their framework-specific modules are adapted.
 
 | Source                                      | Migration type | Coverage                                                                                |
 | ------------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |

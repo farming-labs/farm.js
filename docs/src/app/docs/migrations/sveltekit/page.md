@@ -7,9 +7,9 @@ section: "Migrations"
 # Migrate from SvelteKit
 
 SvelteKit and Farm both use filesystem routes, nested layouts, server rendering, Vite, and
-standards-based server APIs. Their component runtimes differ: SvelteKit renders Svelte components,
-while Farm renders React components. Preserve the route tree and request contracts while rewriting
-the UI layer.
+standards-based server APIs. The `@farm.js/svelte` renderer lets route UI remain in Svelte 5
+components. Preserve the route tree and component markup while replacing SvelteKit-specific data,
+navigation, hooks, environment, and deployment APIs.
 
 > **Manual migration**
 >
@@ -18,10 +18,10 @@ the UI layer.
 
 ## Create the Farm shell
 
-Add Farm and React without removing SvelteKit first:
+Add FARMJS and its Svelte renderer without removing SvelteKit first:
 
 ```bash
-pnpm add @farm.js/core react react-dom
+pnpm add @farm.js/core @farm.js/svelte svelte
 pnpm add -D @farm.js/cli
 ```
 
@@ -29,8 +29,11 @@ Create the smallest Farm config:
 
 ```ts
 import { defineConfig } from "@farm.js/core";
+import { svelte } from "@farm.js/svelte";
 
-export default defineConfig({});
+export default defineConfig({
+  renderer: svelte(),
+});
 ```
 
 Point the application scripts at Farm when the first route is ready:
@@ -40,7 +43,7 @@ Point the application scripts at Farm when the first route is ready:
   "scripts": {
     "dev": "farm dev",
     "build": "farm build",
-    "start": "node .output/server/index.mjs"
+    "start": "farm start"
   }
 }
 ```
@@ -50,15 +53,15 @@ Point the application scripts at Farm when the first route is ready:
 SvelteKit and Farm both use bracketed dynamic segments. The main change is replacing SvelteKit's
 `+file` convention with Farm's page and route modules.
 
-| SvelteKit source                         | Farm output                       |
-| ---------------------------------------- | --------------------------------- |
-| `src/routes/+page.svelte`                | `src/app/page.tsx`                |
-| `src/routes/about/+page.svelte`          | `src/app/about/page.tsx`          |
-| `src/routes/posts/[id]/+page.svelte`     | `src/app/posts/[id]/page.tsx`     |
-| `src/routes/docs/[...slug]/+page.svelte` | `src/app/docs/[...slug]/page.tsx` |
-| `src/routes/+layout.svelte`              | `src/app/layout.tsx`              |
-| nested `+layout.svelte`                  | nested `src/app/**/layout.tsx`    |
-| `+error.svelte`                          | the nearest `error.tsx`           |
+| SvelteKit source                         | FARMJS output                        |
+| ---------------------------------------- | ------------------------------------ |
+| `src/routes/+page.svelte`                | `src/app/page.svelte`                |
+| `src/routes/about/+page.svelte`          | `src/app/about/page.svelte`          |
+| `src/routes/posts/[id]/+page.svelte`     | `src/app/posts/[id]/page.svelte`     |
+| `src/routes/docs/[...slug]/+page.svelte` | `src/app/docs/[...slug]/page.svelte` |
+| `src/routes/+layout.svelte`              | `src/app/layout.svelte`              |
+| nested `+layout.svelte`                  | nested `src/app/**/layout.svelte`    |
+| `+error.svelte`                          | the nearest `error.svelte`           |
 
 SvelteKit route groups such as `(app)` do not add a URL segment. Recreate their layout intent with
 Farm route groups or the appropriate nested layout structure, and review advanced layout resets
@@ -66,16 +69,20 @@ manually.
 
 Create a root layout before moving pages:
 
-```tsx
-import type { LayoutProps } from "@farm.js/core";
+```svelte
+<script lang="ts">
+  import type { Snippet } from "svelte";
 
-export default function Layout({ children }: LayoutProps) {
-  return <>{children}</>;
-}
+  let { children }: { children?: Snippet } = $props();
+</script>
+
+{@render children?.()}
 ```
 
-Rewrite Svelte markup, runes, stores, actions, transitions, and scoped styles as React components,
-hooks, state, effects, and CSS. Do not rename `.svelte` files to `.tsx` without converting them.
+Keep ordinary Svelte markup, runes, stores, actions, transitions, and scoped styles. Replace
+SvelteKit imports and conventions inside each component, and move FARMJS route exports such as
+`metadata` and `hydrate` into `<script module lang="ts">`. See
+[Svelte Renderer](/docs/renderers/svelte) for the complete component conventions.
 
 ## Move load functions
 
@@ -84,10 +91,10 @@ data into pages and layouts. Move each load function according to its responsibi
 
 | SvelteKit behavior        | Farm destination                                     |
 | ------------------------- | ---------------------------------------------------- |
-| server-only page load     | async page component or `createServerQuery`          |
-| universal load            | server query plus a client consumer when needed      |
+| server-only page load     | `createServerQuery`, server function, or API route   |
+| universal load            | typed API/server query plus a Svelte client consumer |
 | reusable cached read      | `createServerQuery` with an explicit structured key  |
-| layout load               | async layout or shared server query                  |
+| layout load               | shared server query or typed API route               |
 | redirect or 404 from load | `redirect()` or `notFound()`                         |
 | dependency invalidation   | Farm cache, route, API, or server-query invalidation |
 
@@ -116,15 +123,15 @@ progressive enhancement intentionally when replacing SvelteKit form actions.
 
 ## Replace navigation and app state
 
-| SvelteKit API                 | Farm equivalent                                       |
-| ----------------------------- | ----------------------------------------------------- |
-| ordinary internal `<a>` links | `Link` from `@farm.js/core/client`                    |
-| `goto()`                      | `navigateTo()` from `@farm.js/core/client`            |
-| `redirect()`                  | `redirect()` from `@farm.js/core/navigation`          |
-| `error(404)`                  | `notFound()`                                          |
-| page params                   | page `params` or `useRouter()`                        |
-| URL search values             | page `searchParams` or `useSearchParams()`            |
-| `$app/state` or `$app/stores` | page props, React state, Farm stores, or router hooks |
+| SvelteKit API                 | FARMJS Svelte equivalent                                   |
+| ----------------------------- | ---------------------------------------------------------- |
+| ordinary internal `<a>` links | ordinary Svelte `<a>` elements                             |
+| `goto()`                      | `navigateTo()` from `@farm.js/core/client`                 |
+| `redirect()`                  | `redirect()` from `@farm.js/core/navigation`               |
+| `error(404)`                  | `notFound()`                                               |
+| page params                   | `params` from `$props()`                                   |
+| URL search values             | `searchParams` from `$props()` or browser URL state        |
+| `$app/state` or `$app/stores` | route props, Svelte runes/stores, or renderer-neutral APIs |
 
 Choose the smallest state owner. Do not move server-derived user or tenant data into a global
 browser store unless it is safe to expose.
@@ -136,7 +143,7 @@ Review `src/hooks.server.ts`, `src/hooks.client.ts`, and `event.locals` by lifec
 - move request authentication and request-scoped values into Farm middleware
 - move route-specific guards into nested `src/app/**/middleware.ts`
 - move global server lifecycle behavior into Farm plugins
-- move browser lifecycle behavior into client components or Farm client plugin hooks
+- move browser lifecycle behavior into hydrated Svelte components or FARMJS client plugin hooks
 - pass safe request data through middleware data and keep secrets in server-only context
 
 Repeat sensitive authorization inside API routes and server functions.
@@ -170,8 +177,9 @@ Run both applications during the transition and compare:
 - SSR, hydration, and client navigation
 - adapter behavior on the target deployment platform
 
-After the Farm application passes those checks, remove SvelteKit, Svelte, its adapter, `.svelte-kit`,
-and framework-specific configuration.
+After the FARMJS application passes those checks, remove `@sveltejs/kit`, the SvelteKit adapter,
+`.svelte-kit`, and framework-specific configuration. Keep `svelte` and `@farm.js/svelte` as
+application dependencies.
 
 For source behavior, refer to SvelteKit's official [routing](https://svelte.dev/docs/kit/routing),
 [loading data](https://svelte.dev/docs/kit/load), [advanced routing](https://svelte.dev/docs/kit/advanced-routing),

@@ -1,0 +1,28 @@
+{
+  "name": "farm-app",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "farm dev",
+    "build": "farm build",
+    "deploy": "farm deploy",
+    "start": "farm start",
+    "type-check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@farm.js/core": "0.1.0-beta.29",
+    "@farm.js/svelte": "0.1.0-beta.29",
+    "@fontsource-variable/geist": "5.3.0",
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "svelte": "5.56.8",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@farm.js/cli": "0.1.0-beta.29",
+    "svelte-check": "4.7.5",
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.3.3"
+  },
+  "packageManager": "pnpm@8.12.1"
+}

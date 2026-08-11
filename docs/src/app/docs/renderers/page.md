@@ -1,22 +1,23 @@
 ---
 title: "Renderers"
-description: "Choose React, Solid, or Vue for application UI while keeping FARMJS routing, server APIs, middleware, observability, and deployment."
+description: "Choose React, Solid, Vue, or Svelte for application UI while keeping FARMJS routing, server APIs, middleware, observability, and deployment."
 section: "Core"
 ---
 
 # Renderers
 
-Choose React, Solid, or Vue for application UI while keeping FARMJS routing, server APIs,
-middleware, observability, and deployment. React remains the default; Solid and Vue are beta
-renderer adapters.
+Choose React, Solid, Vue, or Svelte for application UI while keeping FARMJS routing, server APIs,
+middleware, observability, and deployment. React remains the default; Solid, Vue, and Svelte are
+beta renderer adapters.
 
 ## Choose a renderer
 
-| Renderer                       | Select it with      | Route components | Best fit                                                 |
-| ------------------------------ | ------------------- | ---------------- | -------------------------------------------------------- |
-| [React](/docs/renderers/react) | Omit `renderer`     | `.tsx`, `.jsx`   | Complete FARMJS client API and integration UI support.   |
-| [Solid](/docs/renderers/solid) | `renderer: solid()` | `.tsx`, `.jsx`   | Fine-grained interactive UI with FARMJS server features. |
-| [Vue](/docs/renderers/vue)     | `renderer: vue()`   | `.vue`           | Vue SFCs, SSR, hydration, and FARMJS server features.    |
+| Renderer                         | Select it with       | Route components | Best fit                                                     |
+| -------------------------------- | -------------------- | ---------------- | ------------------------------------------------------------ |
+| [React](/docs/renderers/react)   | Omit `renderer`      | `.tsx`, `.jsx`   | Complete FARMJS client API and integration UI support.       |
+| [Solid](/docs/renderers/solid)   | `renderer: solid()`  | `.tsx`, `.jsx`   | Fine-grained interactive UI with FARMJS server features.     |
+| [Vue](/docs/renderers/vue)       | `renderer: vue()`    | `.vue`           | Vue SFCs, SSR, hydration, and FARMJS server features.        |
+| [Svelte](/docs/renderers/svelte) | `renderer: svelte()` | `.svelte`        | Svelte 5 components, runes, SSR, and FARMJS server features. |
 
 The renderer controls component compilation, element creation, server rendering, and browser
 hydration. FARMJS continues to control route discovery, layouts, API routes, middleware, cache and
@@ -24,27 +25,27 @@ storage, integrations, observability, and deployment output.
 
 ## Feature support
 
-| Capability                                       | React                    | Solid                | Vue                  |
-| ------------------------------------------------ | ------------------------ | -------------------- | -------------------- |
-| File pages and nested layouts                    | Available                | Available            | Available            |
-| Server rendering and browser hydration           | Available                | Available            | Available            |
-| Loading, error, not-found, and slot files        | Available                | Available            | Available            |
-| Static metadata and favicon configuration        | Available                | Available            | Available            |
-| API routes and generated typed API clients       | Available                | Available            | Available            |
-| Server functions, middleware, cache, and storage | Available                | Available            | Available            |
-| Observability and production Node output         | Available                | Available            | Available            |
-| Basic create-app starter                         | Available                | Available            | Available            |
-| `Link`, router hooks, actions, fetchers, queries | Available                | React API only       | React API only       |
-| Client theme and i18n hooks                      | Available                | React API only       | React API only       |
-| Programmatic UI routes                           | Available                | React-oriented today | React-oriented today |
-| Markdown/MDX visual routes and docs adapter      | Available                | React-oriented today | React-oriented today |
-| Generated JSX metadata images                    | Available                | React-oriented today | React-oriented today |
-| React Server Components and optimized boundaries | Available experimentally | Not applicable       | Not applicable       |
-| Integration UI providers and provider starters   | Available                | React-oriented today | React-oriented today |
+| Capability                                       | React                    | Solid                | Vue                  | Svelte               |
+| ------------------------------------------------ | ------------------------ | -------------------- | -------------------- | -------------------- |
+| File pages and nested layouts                    | Available                | Available            | Available            | Available            |
+| Server rendering and browser hydration           | Available                | Available            | Available            | Available            |
+| Loading, error, not-found, and slot files        | Available                | Available            | Available            | Available            |
+| Static metadata and favicon configuration        | Available                | Available            | Available            | Available            |
+| API routes and generated typed API clients       | Available                | Available            | Available            | Available            |
+| Server functions, middleware, cache, and storage | Available                | Available            | Available            | Available            |
+| Observability and production Node output         | Available                | Available            | Available            | Available            |
+| Basic create-app starter                         | Available                | Available            | Available            | Available            |
+| `Link`, router hooks, actions, fetchers, queries | Available                | React API only       | React API only       | React API only       |
+| Client theme and i18n hooks                      | Available                | React API only       | React API only       | React API only       |
+| Programmatic UI routes                           | Available                | React-oriented today | React-oriented today | React-oriented today |
+| Markdown/MDX visual routes and docs adapter      | Available                | React-oriented today | React-oriented today | React-oriented today |
+| Generated JSX metadata images                    | Available                | React-oriented today | React-oriented today | React-oriented today |
+| React Server Components and optimized boundaries | Available experimentally | Not applicable       | Not applicable       | Not applicable       |
+| Integration UI providers and provider starters   | Available                | React-oriented today | React-oriented today | React-oriented today |
 
 “React API only” means the server feature remains usable, but its current convenience hook or
-component imports React. Solid and Vue applications should call validated endpoints through the
-generated API client and use their renderer's native state primitives.
+component imports React. Solid, Vue, and Svelte applications should call validated endpoints through
+the generated API client and use their renderer's native state primitives.
 
 ## Renderer-neutral server code
 
@@ -71,15 +72,15 @@ export const POST = createEndpoint(
 );
 ```
 
-React, Solid, and Vue components can call this endpoint through the same generated client. Database
-access, secrets, validation, cache invalidation, middleware, and the server-function handler remain
-on the server.
+React, Solid, Vue, and Svelte components can call this endpoint through the same generated client.
+Database access, secrets, validation, cache invalidation, middleware, and the server-function
+handler remain on the server.
 
 ## Switch renderers deliberately
 
-The renderer option is application-wide. Do not mix React, Solid, and Vue route components in the
-same route tree. Share server modules, schemas, API clients, CSS, and plain TypeScript across
+The renderer option is application-wide. Do not mix React, Solid, Vue, and Svelte route components
+in the same route tree. Share server modules, schemas, API clients, CSS, and plain TypeScript across
 renderers; rewrite component and client-state code using the selected renderer's native primitives.
 
-Integration starter templates currently target React. Use the Basic starter for Solid or Vue, then
-add renderer-neutral integrations without their React UI scaffold.
+Integration starter templates currently target React. Use the Basic starter for Solid, Vue, or
+Svelte, then add renderer-neutral integrations without their React UI scaffold.

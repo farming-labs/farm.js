@@ -1,0 +1,76 @@
+{
+  "name": "@farm.js/svelte",
+  "version": "0.1.0-beta.29",
+  "description": "Svelte renderer for FARMJS applications",
+  "keywords": [
+    "farmjs",
+    "renderer",
+    "ssr",
+    "svelte"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-svelte"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.mjs",
+      "require": "./dist/server.cjs"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.mjs",
+      "require": "./dist/client.cjs"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.mjs",
+      "require": "./dist/vite.cjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "compile-runtime": "node scripts/compile-runtime.mjs",
+    "build": "pnpm run compile-runtime && tsup",
+    "dev": "pnpm run compile-runtime && tsup --watch",
+    "type-check": "pnpm run compile-runtime && tsc --noEmit",
+    "test": "pnpm run compile-runtime && vitest run",
+    "clean": "rm -rf dist src/generated"
+  },
+  "dependencies": {
+    "@sveltejs/vite-plugin-svelte": "4.0.4"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*",
+    "@types/node": "^20.10.5",
+    "jsdom": "^25.0.0",
+    "svelte": "5.56.8",
+    "tsup": "^8.3.5",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "vitest": "^1.1.0"
+  },
+  "peerDependencies": {
+    "@farm.js/core": "workspace:*",
+    "svelte": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,152 @@
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+
+:root {
+  color-scheme: dark;
+  font-family: "Geist Variable", sans-serif;
+  background: #000;
+  color: #f5f5f5;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: #000;
+}
+
+body {
+  min-width: 320px;
+}
+
+button,
+code {
+  font: inherit;
+}
+
+button,
+a {
+  color: inherit;
+}
+
+.page-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding: clamp(1.5rem, 5vw, 6rem);
+}
+
+.hero {
+  width: min(100%, 60rem);
+}
+
+.eyebrow,
+.demo-row,
+.links {
+  font-family: "Geist Mono Variable", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.eyebrow {
+  display: flex;
+  gap: 1rem;
+  color: #737373;
+  font-size: 0.7rem;
+}
+
+h1 {
+  max-width: 14ch;
+  margin: 1.75rem 0 2.25rem;
+  font-size: clamp(2.4rem, 7vw, 5.5rem);
+  line-height: 0.98;
+  letter-spacing: -0.06em;
+}
+
+h1 span {
+  color: #737373;
+}
+
+.server-demo {
+  border-top: 1px solid #202020;
+  border-bottom: 1px solid #202020;
+}
+
+.demo-row {
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  min-height: 3rem;
+  border-bottom: 1px solid #171717;
+  font-size: 0.72rem;
+}
+
+.demo-row:last-child {
+  border-bottom: 0;
+}
+
+.demo-row > span {
+  color: #555;
+}
+
+.demo-row button {
+  width: fit-content;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+
+.demo-row button:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 0.25rem;
+}
+
+.demo-row button:disabled {
+  color: #737373;
+  cursor: wait;
+}
+
+.demo-row button.failed {
+  color: #fca5a5;
+}
+
+.demo-detail code {
+  overflow: hidden;
+  color: #737373;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.links {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+  color: #8a8a8a;
+  font-size: 0.68rem;
+}
+
+.links a {
+  text-decoration: none;
+}
+
+.links a:hover {
+  color: #fff;
+}
+
+@media (max-width: 640px) {
+  .page-shell {
+    align-items: flex-start;
+    padding-top: 24vh;
+  }
+
+  h1 {
+    font-size: clamp(2.4rem, 13vw, 4rem);
+  }
+}

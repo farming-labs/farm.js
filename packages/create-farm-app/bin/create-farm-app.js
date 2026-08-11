@@ -10,7 +10,7 @@ program
   .version(version)
   .argument("[project-name]", "Name of the project")
   .option("-t, --template <template>", "Template to use")
-  .option("-r, --renderer <renderer>", "Rendering library to use (react, solid, or vue)")
+  .option("-r, --renderer <renderer>", "Rendering library to use (react, solid, vue, or svelte)")
   .option("--list-templates", "List all available starter templates")
   .option("--typescript", "Use TypeScript template")
   .option("--skip-install", "Skip installing dependencies")

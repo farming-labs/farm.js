@@ -17,6 +17,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/ssr-ssg-demo           | SSR, SSG, ISR, API routes, middleware.                                                          |
 | examples/solid-renderer         | Solid TSX routes, SSR, hydration, signals, and a typed FARMJS server call.                      |
 | examples/vue-renderer           | Vue SFC routes, SSR, hydration, refs, and a typed FARMJS server call.                           |
+| examples/svelte-renderer        | Svelte 5 routes, SSR, hydration, runes, and a typed FARMJS server call.                         |
 | examples/i18n                   | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
 | examples/docs-integration       | Docs runtime and /api/docs machine routes.                                                      |
 | examples/stripe-integration     | Stripe checkout, portal, session, webhooks.                                                     |

@@ -26,11 +26,12 @@ published `@farm.js/create-app` package. The scaffolder installs React and all o
 dependencies automatically. Use `--skip-install` if you only want it to generate the project
 files.
 
-React is the default renderer. The Basic starter can instead use Solid or Vue:
+React is the default renderer. The Basic starter can instead use Solid, Vue, or Svelte:
 
 ```bash
 pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
 pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
 ```
 
 See [Renderers](/docs/renderers) before choosing an adapter. Integration starters currently use
@@ -78,7 +79,7 @@ The generated README lists the required environment values and links to the prov
 
 ## Your first page
 
-The default starter uses React. Solid and Vue projects should follow their dedicated
+The default starter uses React. Solid, Vue, and Svelte projects should follow their dedicated
 [renderer guide](/docs/renderers) for the equivalent component file.
 
 **src/app/page.tsx**
@@ -192,7 +193,7 @@ Use `farm add integration better-auth --ui` instead when the application needs t
 ## Next steps
 
 - Read Project Structure when you want the compact file layout.
-- Read Renderers when choosing React, Solid, or Vue for the component layer.
+- Read Renderers when choosing React, Solid, Vue, or Svelte for the component layer.
 - Read Routing and Layouts when you start nesting pages.
 - Read API Routes and API Client when you need typed server/client calls.
 - Read Integrations when provider features should be packaged instead of copied route-by-route.

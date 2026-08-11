@@ -725,7 +725,7 @@ export async function buildUniversal(
       try {
         const entries = await fs.readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
-          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?|vue)$/)) {
+          if (entry.isFile() && entry.name.match(/^layout\.(tsx?|jsx?|vue|svelte)$/)) {
             layoutRoutes.push({
               pattern: routePrefix,
               modulePath: path.join(dir, entry.name),

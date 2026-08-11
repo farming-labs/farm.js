@@ -42,8 +42,8 @@ function parseRoutePath(filePath: string): {
 } {
   // Remove the renderer-owned page or layout filename from the path.
   const routePath = filePath
-    .replace(/\/page\.(tsx?|jsx?|vue)$/, "")
-    .replace(/\/layout\.(tsx?|jsx?|vue)$/, "");
+    .replace(/\/page\.(tsx?|jsx?|vue|svelte)$/, "")
+    .replace(/\/layout\.(tsx?|jsx?|vue|svelte)$/, "");
 
   if (!routePath || routePath === ".") {
     return { segments: [], pattern: "/" };
@@ -116,14 +116,14 @@ async function discoverRoutes(
 
       if (entry.isDirectory()) {
         await scanDir(fullPath, path.join(relativePath, entry.name));
-      } else if (entry.name.match(/^page\.(tsx?|jsx?|vue)$/)) {
+      } else if (entry.name.match(/^page\.(tsx?|jsx?|vue|svelte)$/)) {
         const { segments, pattern } = parseRoutePath(relativePath);
         routes.push({
           pattern,
           modulePath: fullPath,
           segments,
         });
-      } else if (entry.name.match(/^layout\.(tsx?|jsx?|vue)$/)) {
+      } else if (entry.name.match(/^layout\.(tsx?|jsx?|vue|svelte)$/)) {
         const { segments, pattern } = parseRoutePath(relativePath);
         layouts.push({
           pattern,

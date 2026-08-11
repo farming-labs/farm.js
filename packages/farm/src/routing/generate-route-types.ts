@@ -70,7 +70,7 @@ export interface GenerateRouteTypesOptions {
   sourceRoots?: readonly FarmSourceRoot[];
   /** When true, do not augment LinkDefaultRoute so Link href accepts any string (no route-type errors). */
   suppressLintOnLink?: boolean;
-  /** Additional renderer-owned component extensions, such as `.vue`. */
+  /** Additional renderer-owned component extensions, such as `.vue` or `.svelte`. */
   componentExtensions?: readonly string[];
 }
 
