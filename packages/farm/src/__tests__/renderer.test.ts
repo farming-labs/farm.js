@@ -37,13 +37,9 @@ describe("renderer configuration", () => {
   });
 
   it("adds renderer component extensions without dropping JavaScript routes", () => {
-    expect(getFarmRendererComponentExtensions({ componentExtensions: ["vue", ".VUE"] })).toEqual([
-      ".ts",
-      ".tsx",
-      ".js",
-      ".jsx",
-      ".vue",
-    ]);
+    expect(
+      getFarmRendererComponentExtensions({ componentExtensions: ["vue", ".VUE", "svelte"] }),
+    ).toEqual([".ts", ".tsx", ".js", ".jsx", ".vue", ".svelte"]);
   });
 
   it("rejects incomplete renderer descriptors", () => {

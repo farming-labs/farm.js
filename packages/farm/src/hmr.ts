@@ -45,12 +45,12 @@ export class HMRManager {
       return;
     }
 
-    if (file.includes("/app/") && /\/page\.(?:tsx?|jsx?|vue)$/.test(file)) {
+    if (file.includes("/app/") && /\/page\.(?:tsx?|jsx?|vue|svelte)$/.test(file)) {
       await this.reloadPage();
       return;
     }
 
-    if (file.includes("/app/") && /\/layout\.(?:tsx?|jsx?|vue)$/.test(file)) {
+    if (file.includes("/app/") && /\/layout\.(?:tsx?|jsx?|vue|svelte)$/.test(file)) {
       await this.reloadPage();
       return;
     }

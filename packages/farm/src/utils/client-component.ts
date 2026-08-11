@@ -76,6 +76,7 @@ interface ParsedClientModuleMetadata {
 }
 
 const RESOLVABLE_SOURCE_EXTENSIONS = [
+  ".svelte",
   ".vue",
   ".tsx",
   ".ts",

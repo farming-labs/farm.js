@@ -109,6 +109,25 @@ describe("client component path resolution", () => {
     expect(shouldHydrateModule(sourceFile, root)).toBe(true);
   });
 
+  it("detects hydrate exports in Svelte route modules", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-svelte-hydrate-"));
+    tempDirs.push(root);
+
+    const sourceFile = path.join(root, "src", "app", "page.svelte");
+    fs.mkdirSync(path.dirname(sourceFile), { recursive: true });
+    fs.writeFileSync(
+      sourceFile,
+      '<script module lang="ts">\n  export const hydrate = true;\n</script>\n<h1>Svelte</h1>\n',
+    );
+
+    expect(resolveModuleSourcePath("/src/app/page.svelte", root)).toBe(sourceFile);
+    expect(getClientModuleMetadata(sourceFile, root)).toEqual({
+      isClientComponent: false,
+      shouldHydrate: true,
+      islandStrategy: "load",
+    });
+  });
+
   it("hydrates a server page automatically when it imports a client component", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-client-import-"));
     tempDirs.push(root);

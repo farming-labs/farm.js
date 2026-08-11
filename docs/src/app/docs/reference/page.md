@@ -29,6 +29,7 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/otel                 | Optional Node OpenTelemetry SDK, OTLP exporter, and auto-instrumentation setup.      |
 | @farm.js/solid                | Solid renderer descriptor, SSR runtime, browser hydration, and Vite integration.     |
 | @farm.js/vue                  | Vue renderer descriptor, SFC compilation, SSR runtime, and browser hydration.        |
+| @farm.js/svelte               | Svelte renderer descriptor, component compilation, SSR, and browser hydration.       |
 | @farm.js/integrations         | Auth, billing, email, jobs, AI, API keys, provider clients.                          |
 
 ## Recommended reading path

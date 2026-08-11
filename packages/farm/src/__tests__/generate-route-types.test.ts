@@ -78,6 +78,21 @@ describe("generateRouteTypes", () => {
     expect(readTypeAlias(content, "RoutePath")).toContain('"/reports"');
   });
 
+  it("discovers renderer-owned Svelte route components", async () => {
+    const dashboardDir = path.join(tmpDir, "src", "app", "dashboard");
+    await fs.promises.mkdir(dashboardDir, { recursive: true });
+    await fs.promises.writeFile(path.join(dashboardDir, "page.svelte"), "<main>Dashboard</main>");
+
+    const outPath = await generateRouteTypes({
+      root: tmpDir,
+      srcDir: "src",
+      componentExtensions: [".svelte"],
+    });
+    const content = fs.readFileSync(outPath, "utf8");
+
+    expect(readTypeAlias(content, "RoutePath")).toContain('"/dashboard"');
+  });
+
   it("types route-slot targets without exposing slot directory syntax", async () => {
     const feedDir = path.join(tmpDir, "src", "app", "feed");
     const photoDir = path.join(feedDir, "photo", "[id]");

@@ -15,6 +15,17 @@ describe("route slot conventions", () => {
     expect(routeSegments("feed/@modal/(.)photo/[id]/page.vue")).toEqual(["feed", "photo", "[id]"]);
   });
 
+  it("recognizes Svelte pages inside slots", () => {
+    const slot = parseRouteSlotFile("feed/@modal/(.)photo/[id]/page.svelte");
+
+    expect(slot?.name).toBe("modal");
+    expect(routeSegments("feed/@modal/(.)photo/[id]/page.svelte")).toEqual([
+      "feed",
+      "photo",
+      "[id]",
+    ]);
+  });
+
   it("removes named slots and same-level interception markers from public paths", () => {
     const slot = parseRouteSlotFile("feed/@modal/(.)photo/[id]/page.tsx");
 

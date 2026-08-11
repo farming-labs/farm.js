@@ -18,8 +18,8 @@ A Farm app can be as small as src, farm.config.ts, package.json, and tsconfig.js
 my-app/
   src/
     app/
-      layout.tsx # layout.vue with the Vue renderer
-      page.tsx   # page.vue with the Vue renderer
+      layout.tsx # layout.vue or layout.svelte with the selected renderer
+      page.tsx   # page.vue or page.svelte with the selected renderer
   farm.config.ts
   package.json
   tsconfig.json
@@ -43,18 +43,18 @@ Use vite.config.ts only when you need custom Vite behavior. Use platform files o
 
 ## Route files
 
-| File                                       | Used for                                   |
-| ------------------------------------------ | ------------------------------------------ |
-| `page.tsx` / `page.jsx` / `page.vue`       | The route UI for the selected renderer.    |
-| `page.md` / `page.mdx`                     | React-oriented Markdown-first app pages.   |
-| `layout.tsx` / `layout.jsx` / `layout.vue` | Shared shell for every child segment.      |
-| `loading.*`                                | Pending UI for async route work.           |
-| `error.*`                                  | Segment-level error UI.                    |
-| `not-found.*`                              | Segment-level 404 UI.                      |
-| `middleware.ts`                            | Request behavior before the route renders. |
-| `route.ts`                                 | API handlers for the current URL segment.  |
+| File                                                         | Used for                                   |
+| ------------------------------------------------------------ | ------------------------------------------ |
+| `page.tsx` / `page.jsx` / `page.vue` / `page.svelte`         | The route UI for the selected renderer.    |
+| `page.md` / `page.mdx`                                       | React-oriented Markdown-first app pages.   |
+| `layout.tsx` / `layout.jsx` / `layout.vue` / `layout.svelte` | Shared shell for every child segment.      |
+| `loading.*`                                                  | Pending UI for async route work.           |
+| `error.*`                                                    | Segment-level error UI.                    |
+| `not-found.*`                                                | Segment-level 404 UI.                      |
+| `middleware.ts`                                              | Request behavior before the route renders. |
+| `route.ts`                                                   | API handlers for the current URL segment.  |
 
-Use `.tsx` or `.jsx` with React and Solid, and `.vue` with Vue. See
+Use `.tsx` or `.jsx` with React and Solid, `.vue` with Vue, and `.svelte` with Svelte. See
 [Renderers](/docs/renderers) for renderer-specific conventions and current feature boundaries.
 
 ## Recommended app layout

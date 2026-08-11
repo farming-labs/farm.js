@@ -44,8 +44,42 @@ export default defineConfig({
 React remains the default renderer, so existing applications and configurations do not need to
 change. Select another renderer when you want to author the UI with that library while keeping
 FARMJS routing and server features. See [Renderers](/docs/renderers) for the feature matrix and
-dedicated [React](/docs/renderers/react), [Solid](/docs/renderers/solid), and
-[Vue](/docs/renderers/vue) guides.
+dedicated [React](/docs/renderers/react), [Solid](/docs/renderers/solid),
+[Vue](/docs/renderers/vue), and [Svelte](/docs/renderers/svelte) guides.
+
+### Svelte
+
+Install the Svelte adapter and runtime:
+
+```bash
+pnpm add @farm.js/svelte@beta svelte
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { svelte } from "@farm.js/svelte";
+
+export default defineConfig({
+  renderer: svelte(),
+});
+```
+
+Routes can then use Svelte 5 components directly:
+
+```text
+src/app/layout.svelte
+src/app/page.svelte
+src/app/products/[id]/page.svelte
+```
+
+See [Svelte Renderer](/docs/renderers/svelte) for module route exports, layout snippets, hydration,
+typed server calls, and current compatibility boundaries.
+
+Create a ready-to-run Svelte application from the CLI:
+
+```bash
+pnpm create @farm.js/app@beta my-svelte-app --template basic --renderer svelte --typescript
+```
 
 ### Vue
 
@@ -117,7 +151,7 @@ Create a ready-to-run Solid application directly from the CLI:
 pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
 ```
 
-Omitting `renderer` selects React. The renderer option is currently available for the basic starter;
+Omitting `renderer` selects React. The renderer option is currently available for the Basic starter;
 integration starters continue to use React while their UI packages are migrated individually.
 
 ### Docs config
@@ -169,7 +203,7 @@ mount, and shortcut together.
 | ------------- | --------------------------------------------------------------------------------- |
 | extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
-| renderer      | Selecting React (default) or an adapter such as Vue or Solid.                     |
+| renderer      | Selecting React (default) or an adapter such as Svelte, Vue, or Solid.            |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
 | theme         | Enabling light, dark, and system modes with client and server APIs.               |

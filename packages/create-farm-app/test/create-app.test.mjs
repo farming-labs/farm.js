@@ -322,6 +322,55 @@ test("generates a Vue SFC starter with typed server interaction", async () => {
   }
 });
 
+test("generates a Svelte starter with typed server interaction", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-svelte-"));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "svelte-app",
+        "--template",
+        "basic",
+        "--renderer",
+        "svelte",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+
+    const generatedDir = path.join(tempDir, "svelte-app");
+    const packageJson = JSON.parse(await readFile(path.join(generatedDir, "package.json"), "utf8"));
+    const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+    const page = await readFile(path.join(generatedDir, "src/app/page.svelte"), "utf8");
+    const layout = await readFile(path.join(generatedDir, "src/app/layout.svelte"), "utf8");
+    const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
+    const rendererPackage = JSON.parse(
+      await readFile(path.join(packageDir, "..", "farm-svelte", "package.json"), "utf8"),
+    );
+
+    assert.equal(packageJson.dependencies["@farm.js/svelte"], rendererPackage.version);
+    assert.equal(packageJson.dependencies.svelte, "5.56.8");
+    assert.equal(packageJson.dependencies.react, undefined);
+    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    assert.equal(packageJson.scripts["type-check"], "svelte-check --tsconfig ./tsconfig.json");
+    assert.match(config, /renderer: svelte\(\)/);
+    assert.match(config, /from "@farm\.js\/svelte"/);
+    assert.match(page, /export const hydrate = true/);
+    assert.match(page, /api\.greeting\.post/);
+    assert.match(page, /Edit <code>page\.svelte<\/code>/);
+    assert.match(page, /let message = \$state/);
+    assert.match(layout, /\{@render children\?\.\(\)\}/);
+    assert.deepEqual(tsconfig.include, ["src/**/*.ts", "src/**/*.svelte", "farm.config.ts"]);
+    await assert.rejects(readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8"));
+    await assert.rejects(readFile(path.join(generatedDir, "src/app/layout.tsx"), "utf8"));
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 for (const template of [
   {
     name: "auth",

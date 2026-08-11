@@ -179,7 +179,7 @@ function integrationTemplate(
 }
 
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
-export type RendererName = "react" | "solid" | "vue";
+export type RendererName = "react" | "solid" | "vue" | "svelte";
 
 export interface PackageManager {
   name: PackageManagerName;
@@ -259,8 +259,16 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   }
 
   let renderer = options.renderer?.toLowerCase() as RendererName | undefined;
-  if (renderer && renderer !== "react" && renderer !== "solid" && renderer !== "vue") {
-    logger.error(`Unknown renderer "${options.renderer}". Available: "react", "solid", "vue".`);
+  if (
+    renderer &&
+    renderer !== "react" &&
+    renderer !== "solid" &&
+    renderer !== "vue" &&
+    renderer !== "svelte"
+  ) {
+    logger.error(
+      `Unknown renderer "${options.renderer}". Available: "react", "solid", "vue", "svelte".`,
+    );
     process.exit(1);
   }
 
@@ -287,6 +295,11 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
           title: "Vue",
           value: "vue",
           description: "Vue SFCs with server rendering and hydration",
+        },
+        {
+          title: "Svelte",
+          value: "svelte",
+          description: "Svelte components with server rendering and hydration",
         },
       ],
       initial: 0,
@@ -411,6 +424,16 @@ async function copyTemplate(
 
   if (renderer === "vue") {
     const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "vue");
+    await Promise.all([
+      fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
+      fs.rm(path.join(projectPath, "src", "app", "layout.tsx"), { force: true }),
+      fs.rm(path.join(projectPath, "src", "components", "resource-links.tsx"), { force: true }),
+    ]);
+    await copyDir(rendererTemplatePath, projectPath);
+  }
+
+  if (renderer === "svelte") {
+    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "svelte");
     await Promise.all([
       fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
       fs.rm(path.join(projectPath, "src", "app", "layout.tsx"), { force: true }),

@@ -156,6 +156,7 @@ const sidebar = [
           { label: "React", slug: "renderers/react", icon: "code" },
           { label: "Solid", slug: "renderers/solid", icon: "code" },
           { label: "Vue", slug: "renderers/vue", icon: "code" },
+          { label: "Svelte", slug: "renderers/svelte", icon: "brand-svelte" },
         ],
       },
       { label: "Internationalization", slug: "internationalization", icon: "languages" },

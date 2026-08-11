@@ -8,8 +8,8 @@ section: "Core"
 
 Farm uses an app directory routing model with static routes, dynamic segments, catch-all routes, and typed navigation.
 
-The examples on this page use the default React renderer. Solid uses `.tsx`/`.jsx` route files and
-Vue uses `.vue` route files. The route tree and server contracts stay the same; see
+The examples on this page use the default React renderer. Solid uses `.tsx`/`.jsx` route files, Vue
+uses `.vue`, and Svelte uses `.svelte`. The route tree and server contracts stay the same; see
 [Renderers](/docs/renderers) for component conventions and feature compatibility.
 
 ## File routes
@@ -24,6 +24,8 @@ Vue uses `.vue` route files. The route tree and server contracts stay the same; 
 
 With Vue, the same routes use names such as `src/app/page.vue` and
 `src/app/blog/[slug]/page.vue`.
+
+With Svelte, use `src/app/page.svelte` and `src/app/blog/[slug]/page.svelte`.
 
 ## Named slots and intercepted routes
 
@@ -631,9 +633,9 @@ This creates `/`, `/dashboard`, `/dashboard/settings`, `/blog/:slug`, and `/docs
 
 Use `page.md` or `page.mdx` for static content routes. They behave like app pages, participate in layouts, and get route types.
 
-Markdown/MDX visual routes currently use the React content renderer. Solid and Vue applications can
-still serve renderer-neutral API content or ordinary static assets, but should use renderer-owned
-component pages for visual routes.
+Markdown/MDX visual routes currently use the React content renderer. Solid, Vue, and Svelte
+applications can still serve renderer-neutral API content or ordinary static assets, but should use
+renderer-owned component pages for visual routes.
 
 **src/app/about/page.mdx**
 
@@ -839,9 +841,9 @@ Keep only one implementation for each image kind in a segment. For example, defi
 ## File Route States
 
 Use `loading.*` and `error.*` next to a file route to define route-local loading and error states.
-Use `.tsx`/`.jsx` with React or Solid and `.vue` with Vue. Farm picks the nearest matching boundary,
-so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard pages unless a deeper
-segment defines its own boundary.
+Use `.tsx`/`.jsx` with React or Solid, `.vue` with Vue, and `.svelte` with Svelte. Farm picks the
+nearest matching boundary, so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard
+pages unless a deeper segment defines its own boundary.
 
 ```txt
 src/app/
