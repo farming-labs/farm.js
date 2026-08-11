@@ -25,6 +25,16 @@ Bumpp uses `beta` as the prerelease identifier, then pnpm publishes every packag
 beta to npm's `latest` tag so unqualified installs receive the newest beta. If a package already
 has a stable `latest` version, the stable tag is preserved.
 
+To build and publish a beta without running the test suite, pass `--no-test`:
+
+```bash
+pnpm release:beta --no-test
+```
+
+This still synchronizes template versions, builds every public package, and performs the normal
+npm publish and dist-tag promotion steps. Use it only when the release has already been tested or
+when intentionally accepting the risk of publishing without the release test suite.
+
 ## Canary release
 
 ```bash
