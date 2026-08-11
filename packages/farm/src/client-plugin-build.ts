@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { FarmClientPlugin } from "./client/plugin";
 import type { FarmPlugin, FarmPluginClientConfig } from "./plugin";
 
@@ -26,6 +28,20 @@ const CLIENT_KEYS = [
 ] as const;
 const HYDRATION_KEYS = ["before", "after"] as const;
 const NAVIGATION_KEYS = ["before", "loaded", "resolved", "rendered", "error"] as const;
+const APP_CLIENT_EXTENSIONS = ["ts", "tsx", "js", "jsx", "mts", "mjs"] as const;
+
+/** Resolve the optional application-owned browser lifecycle entry. */
+export function resolveFarmAppClientEntry(
+  root = process.cwd(),
+  srcDir = "src",
+): string | undefined {
+  const sourceRoot = path.resolve(root, srcDir);
+  for (const extension of APP_CLIENT_EXTENSIONS) {
+    const candidate = path.join(sourceRoot, `client.${extension}`);
+    if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) return candidate;
+  }
+  return undefined;
+}
 
 export function resolveFarmClientPlugins(
   plugins: readonly FarmPlugin[] | undefined,
@@ -53,11 +69,15 @@ export function resolveFarmClientPlugins(
 export function generateFarmClientPluginEntryCode(
   plugins: readonly FarmPlugin[] | undefined,
   root?: string,
+  srcDir = "src",
+  appPublicData?: unknown,
 ): FarmClientPluginEntryCode {
   const resolved = resolveFarmClientPlugins(plugins, root);
-  const registrations = `[
-${resolved
-  .map(
+  const appClientEntry = root ? resolveFarmAppClientEntry(root, srcDir) : undefined;
+  const imports = appClientEntry
+    ? `import farmAppClientDefinition from ${JSON.stringify(appClientEntry.replace(/\\/g, "/"))};`
+    : "";
+  const serializedPlugins = resolved.map(
     (plugin) => `  {
     name: ${JSON.stringify(plugin.name)},
     version: ${serializeOptionalString(plugin.version)},
@@ -65,11 +85,21 @@ ${resolved
     definition: ${serializeClientLifecycle(plugin.definition, plugin.name)},
     public: ${serializePublicData(plugin.publicData)},
   }`,
-  )
-  .join(",\n")}
+  );
+  if (appClientEntry) {
+    assertPublicData(appPublicData, "farm:app-client");
+    serializedPlugins.push(`  {
+    name: "farm:app-client",
+    enforce: "post",
+    definition: farmAppClientDefinition,
+    public: ${serializePublicData(appPublicData)},
+  }`);
+  }
+  const registrations = `[
+${serializedPlugins.join(",\n")}
 ]`;
 
-  return { imports: "", registrations, plugins: resolved };
+  return { imports, registrations, plugins: resolved };
 }
 
 function assertClientLifecycle(client: FarmPluginClientConfig, pluginName: string): void {

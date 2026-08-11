@@ -1168,6 +1168,7 @@ async function buildClient(
     adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
     config.i18n,
     config.plugins,
+    config.publicRuntimeConfig,
   );
 
   // Write the client entry to a temporary file
@@ -1584,11 +1585,14 @@ function generateClientHydrationEntry(
     direction: {},
   },
   plugins: readonly FarmPlugin[] = [],
+  publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
     plugins,
     root,
+    srcDir,
+    publicRuntimeConfig,
   );
 
   // Always import global CSS for Tailwind
@@ -1715,7 +1719,7 @@ ${generateUniversalRouterStateProperties()}
 
     const action = options.action || (options.replace ? "replace" : "push");
     const to = url.pathname + url.search;
-    if (action !== "pop" && to === this.currentPath) {
+    if (!options.refresh && action !== "pop" && to === this.currentPath) {
       if (url.hash) window.location.hash = url.hash;
       return;
     }
@@ -1733,7 +1737,7 @@ ${generateUniversalRouterStateProperties()}
         to: url,
         action,
       });
-      const html = await this.fetchPage(url.pathname + url.search);
+      const html = await this.fetchPage(url.pathname + url.search, options.refresh === true);
       await farmClientRuntime.markNavigationLoaded(clientNavigation, html);
       await this.runViewTransition(options.viewTransition, async () => {
         if (!this.swapContent(html)) {
@@ -1770,9 +1774,20 @@ ${generateUniversalRouterStateProperties()}
       else window.location.href = href;
     }
   },
+
+  refresh: function(options = {}) {
+    return this.navigate(window.location.href, {
+      ...options,
+      action: "replace",
+      replace: true,
+      refresh: true,
+      scroll: options.scroll === undefined ? false : options.scroll,
+    });
+  },
   
-  fetchPage: async function(url) {
-    const cached = this.prefetchCache.get(url);
+  fetchPage: async function(url, fresh = false) {
+    if (fresh) this.prefetchCache.delete(url);
+    const cached = fresh ? undefined : this.prefetchCache.get(url);
     if (cached) return cached;
     
     const response = await fetch(url, {
@@ -1854,6 +1869,10 @@ ${generateUniversalRouterStateProperties()}
     this.fetchPage(pathname)
       .then(function(html) { spaRouter.prefetchCache.set(pathname, html); })
       .catch(function() {});
+  },
+
+  clearCache: function() {
+    this.prefetchCache.clear();
   },
   
   observeForPrefetch: function(element) {

@@ -66,6 +66,9 @@
       "theme/client": [
         "./dist/theme/client.d.ts"
       ],
+      "theme/runtime": [
+        "./dist/theme/runtime.d.ts"
+      ],
       "theme/server": [
         "./dist/theme/server.d.ts"
       ],
@@ -180,6 +183,9 @@
         "./types/client.d.ts",
         "./dist/client.d.ts"
       ],
+      "client/lifecycle": [
+        "./dist/client/lifecycle.d.ts"
+      ],
       "server": [
         "./dist/server.d.ts"
       ],
@@ -223,6 +229,11 @@
       "types": "./types/client.d.ts",
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
+    },
+    "./client/lifecycle": {
+      "types": "./dist/client/lifecycle.d.ts",
+      "import": "./dist/client/lifecycle.mjs",
+      "require": "./dist/client/lifecycle.cjs"
     },
     "./storage": {
       "types": "./dist/storage.d.ts",
@@ -268,6 +279,11 @@
       "types": "./dist/theme/client.d.ts",
       "import": "./dist/theme/client.mjs",
       "require": "./dist/theme/client.cjs"
+    },
+    "./theme/runtime": {
+      "types": "./dist/theme/runtime.d.ts",
+      "import": "./dist/theme/runtime.mjs",
+      "require": "./dist/theme/runtime.cjs"
     },
     "./theme/server": {
       "types": "./dist/theme/server.d.ts",

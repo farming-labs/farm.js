@@ -230,6 +230,21 @@ describe("navigation state and blocking", () => {
     expect(window.location.pathname).toBe("/server");
   });
 
+  it("refreshes the current route from fresh server data without adding history", async () => {
+    const router = new SPARouter({ scrollRestoration: false });
+    const onNavigate = vi.fn(async () => undefined);
+    router.setNavigationHandler(onNavigate);
+
+    await router.navigate("/reports", { scroll: false });
+    const historyLength = window.history.length;
+    await router.refresh();
+
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(onNavigate).toHaveBeenCalledTimes(2);
+    expect(window.location.pathname).toBe("/reports");
+    expect(window.history.length).toBe(historyLength);
+  });
+
   it("commits immediate route data while deferred fields keep streaming", async () => {
     const reviews = createControlledPromise<string[]>();
     vi.mocked(fetch).mockResolvedValueOnce(

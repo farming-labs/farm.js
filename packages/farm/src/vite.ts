@@ -2445,6 +2445,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           generatedDevtoolsClientRuntime,
           resolvedConfig?.plugins || [],
           root,
+          resolvedConfig?.srcDir || options.srcDir || "src",
+          resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
           docs?.adapter?.react,
         );
       }
@@ -3250,13 +3252,20 @@ function generateClientCode(
   devtoolsClientRuntime = "",
   plugins: readonly FarmPlugin[] = [],
   root = process.cwd(),
+  srcDir = "src",
+  publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   docsAdapterReact?: string,
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
     ? `import { ClerkProvider } from '@clerk/react';`
     : "";
-  const clientPluginEntry = generateFarmClientPluginEntryCode(plugins, root);
+  const clientPluginEntry = generateFarmClientPluginEntryCode(
+    plugins,
+    root,
+    srcDir,
+    publicRuntimeConfig,
+  );
   const docsAdapterImportBlock = docsAdapterReact
     ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
 

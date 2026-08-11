@@ -1,12 +1,37 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   generateFarmClientPluginEntryCode,
+  resolveFarmAppClientEntry,
   resolveFarmClientPlugins,
 } from "../client-plugin-build";
 import { defineIntegration, resolveIntegrationPlugins } from "../integrations";
 import { definePlugin } from "../plugin";
 
 describe("client plugin build boundary", () => {
+  it("discovers and imports the typed application client entry", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-app-client-"));
+    try {
+      const sourceRoot = path.join(root, "source");
+      fs.mkdirSync(sourceRoot, { recursive: true });
+      const entry = path.join(sourceRoot, "client.ts");
+      fs.writeFileSync(entry, "export default { setup() {} };\n");
+
+      expect(resolveFarmAppClientEntry(root, "source")).toBe(entry);
+      const generated = generateFarmClientPluginEntryCode([], root, "source", {
+        apiBase: "https://api.example.com",
+      });
+      expect(generated.imports).toContain(entry.replace(/\\/g, "/"));
+      expect(generated.registrations).toContain('name: "farm:app-client"');
+      expect(generated.registrations).toContain("definition: farmAppClientDefinition");
+      expect(generated.registrations).toContain("https://api.example.com");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("resolves lifecycle hooks directly from definePlugin", () => {
     const setup = () => ({ ready: true });
     const plugins = [
