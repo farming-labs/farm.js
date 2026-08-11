@@ -1,0 +1,75 @@
+{
+  "name": "@farm.js/solid",
+  "version": "0.1.0-beta.26",
+  "description": "Solid renderer for FARMJS applications",
+  "keywords": [
+    "farmjs",
+    "renderer",
+    "solid",
+    "ssr"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/farming-labs/farm.js",
+    "directory": "packages/farm-solid"
+  },
+  "files": [
+    "dist"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.mjs",
+      "require": "./dist/server.cjs"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.mjs",
+      "require": "./dist/client.cjs"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.mjs",
+      "require": "./dist/vite.cjs"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "vite-plugin-solid": "2.11.14"
+  },
+  "devDependencies": {
+    "@farm.js/core": "workspace:*",
+    "@types/node": "^20.10.5",
+    "jsdom": "^25.0.0",
+    "solid-js": "1.9.14",
+    "tsup": "^8.3.5",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.10",
+    "vitest": "^1.1.0"
+  },
+  "peerDependencies": {
+    "@farm.js/core": "workspace:*",
+    "solid-js": "^1.9.14"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -34,6 +34,8 @@ import { resolveFarmSecurityConfig, type ResolvedFarmSecurityConfig } from "./se
 import { resolveFarmThemeConfig } from "./theme/config";
 import { _setDefaultFarmThemeConfig } from "./theme/server";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
+import { resolveFarmRenderer } from "./renderer";
+import type { FarmRenderer } from "./renderer";
 
 type NormalizedFarmConfig = Omit<
   Required<FarmConfig>,
@@ -51,6 +53,7 @@ type NormalizedFarmConfig = Omit<
   performance: ResolvedFarmPerformanceConfig;
   security: ResolvedFarmSecurityConfig;
   theme: ResolvedFarmThemeConfig;
+  renderer: FarmRenderer;
 };
 
 const defaultDocsConfig: FarmDocsResolvedConfig = {
@@ -84,7 +87,12 @@ export class FarmApp {
     _setDefaultFarmI18nRuntime(this.i18nRuntime);
     this.viteServer = viteServer;
     this.routeManager = new RouteManager(this.config, viteServer);
-    this.serverRenderer = new ServerRenderer(this.config, this.routeManager, this.i18nRuntime);
+    this.serverRenderer = new ServerRenderer(
+      this.config,
+      this.routeManager,
+      this.i18nRuntime,
+      this.viteServer,
+    );
   }
 
   async initialize(): Promise<void> {
@@ -96,6 +104,7 @@ export class FarmApp {
     await initStorage(this.config.storage);
     await configureFarmCache(this.config.cache);
     await this.i18nRuntime.initialize();
+    await this.serverRenderer.initialize();
 
     // Verify app directory structure
     await this.verifyAppStructure();
@@ -138,6 +147,7 @@ export class FarmApp {
       layers: [...(config.layers || [])],
       outDir: config.outDir || "dist",
       basePath: config.basePath || "/",
+      renderer: resolveFarmRenderer(config.renderer),
       preset: config.preset ?? "node-server",
       deploy: config.deploy || {},
       storage: config.storage || {},

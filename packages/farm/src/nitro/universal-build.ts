@@ -62,9 +62,11 @@ import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 import { mergeFarmFontCss } from "../font-vite";
 import type { FarmIslandStrategy } from "../island";
 import { createFarmSourceAlias } from "../server/vite-config";
-import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found";
+import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
+import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
+import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -1040,7 +1042,10 @@ async function buildClient(
     routePattern.startsWith(`${layoutPattern}/`);
 
   const adapterOwnsDocsRuntime = Boolean(
-    config.docs?.enabled && config.docs.adapter?.server && config.docs.adapter.react,
+    isReactRenderer(config.renderer) &&
+    config.docs?.enabled &&
+    config.docs.adapter?.server &&
+    config.docs.adapter.react,
   );
   const adapterDocsEntry = config.docs?.enabled
     ? `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/"
@@ -1168,6 +1173,7 @@ async function buildClient(
     adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
     config.i18n,
     config.plugins,
+    config.renderer,
     config.publicRuntimeConfig,
   );
 
@@ -1180,6 +1186,9 @@ async function buildClient(
   const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
   let postcssSearchPath: string | undefined;
   let tailwindVitePlugin: any = undefined;
+  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
+    ssr: false,
+  });
   if (hasScopedPostcssConfig) {
     logger.info("📦 Using project PostCSS/Tailwind configuration");
   } else {
@@ -1264,6 +1273,7 @@ async function buildClient(
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
@@ -1348,7 +1358,7 @@ async function buildClient(
         : undefined,
       // Ensure React is bundled for client
       resolve: {
-        dedupe: ["react", "react-dom"],
+        dedupe: [...(config.renderer.dedupe || [])],
       },
       // Optimize dependencies - exclude server-side code from client bundle
       optimizeDeps: {
@@ -1585,6 +1595,7 @@ function generateClientHydrationEntry(
     direction: {},
   },
   plugins: readonly FarmPlugin[] = [],
+  renderer: FarmRenderer = REACT_RENDERER,
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
@@ -1594,6 +1605,9 @@ function generateClientHydrationEntry(
     srcDir,
     publicRuntimeConfig,
   );
+  const rendererClientImports = isReactRenderer(renderer)
+    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
+    : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
 
   // Always import global CSS for Tailwind
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
@@ -1993,8 +2007,7 @@ document.addEventListener("click", function(e) {
 // Farm.js Client Runtime - SPA with Hydration
 ${cssImport}
 ${layoutImports}
-import React from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+${rendererClientImports}
 import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -2902,6 +2915,9 @@ async function buildSSRInMemory(
   const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
   let postcssConfigDir: string | undefined;
   let tailwindVitePlugin: any = undefined;
+  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
+    ssr: true,
+  });
   if (!hasScopedPostcssConfig) {
     postcssConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-postcss-"));
     await fs.writeFile(
@@ -3183,6 +3199,7 @@ async function buildSSRInMemory(
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         ...(!useExternalMetadataImageRuntime &&
         metadataImageRoutes.some((image) => image.sourceType === "module")
@@ -3250,10 +3267,8 @@ async function buildSSRInMemory(
         : undefined,
       resolve: {
         alias: createFarmSourceAlias(root, config.srcDir),
-        // Programmatic route wrappers are created inside @farm.js/core. Resolve
-        // their React imports from the application so React 18/19 elements and
-        // the selected server renderer always share the same runtime instance.
-        dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+        // Route modules and the renderer adapter must share one runtime instance.
+        dedupe: [...(config.renderer.dedupe || [])],
       },
     });
   } finally {
@@ -3300,8 +3315,14 @@ function generateVirtualEntryCode(
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
   const adapterOwnsDocsRuntime = Boolean(
-    config.docs?.enabled && config.docs.adapter?.server && config.docs.adapter.react,
+    isReactRenderer(config.renderer) &&
+    config.docs?.enabled &&
+    config.docs.adapter?.server &&
+    config.docs.adapter.react,
   );
+  const rendererServerImports = isReactRenderer(config.renderer)
+    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";`
+    : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};`;
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -3708,8 +3729,7 @@ ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
-import * as React from "react";
-import * as ReactDOMServer from "react-dom/server";
+${rendererServerImports}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
 
@@ -3987,6 +4007,12 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
     '</script><script>' + source + '</script>';
 }
 
+function renderFarmRendererHydrationScript() {
+  return typeof ReactDOMServer.generateHydrationScript === "function"
+    ? ReactDOMServer.generateHydrationScript()
+    : "";
+}
+
 function escapeFarmHtmlAttribute(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -4184,7 +4210,7 @@ async function renderFarmElement(ReactDOMServer, element) {
     };
   }
 
-  const html = ReactDOMServer.renderToString(element);
+  const html = await ReactDOMServer.renderToString(element);
   return { html, shellHtml: html, streamErrors };
 }
 
@@ -4236,6 +4262,7 @@ function createFarmErrorDocument(html, title) {
       '  <link rel="icon" href="data:,">\\n' +
       '  <title>' + escapedTitle + '</title>\\n' +
       '  <link rel="stylesheet" href="/farm-client.css">\\n' +
+      renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
       '  ' + renderFarmClientBootstrapScript() + '\\n' +
@@ -4251,6 +4278,7 @@ function createFarmErrorDocument(html, title) {
   }
   fullHtml = fullHtml
     .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+    .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
     .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, function(match, attrs, headContent) {
       return headContent.includes("<title")
         ? match
@@ -5017,6 +5045,9 @@ ${
       /<[/]body>/i,
       '  <script type="module" src="/farm-client.js"></script>\\n</body>',
     );
+  }
+  if (!html.includes('window._$HY')) {
+    html = html.replace(/<[/]head>/i, renderFarmRendererHydrationScript() + "\\n</head>");
   }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
@@ -5786,6 +5817,7 @@ async function handleFarmRequestInContext(
             '  <title>' + title + '</title>' + metaTags + '\\n' +
             '  <link rel="stylesheet" href="/farm-client.css">\\n' +
             '  <link rel="modulepreload" href="/farm-client.js">\\n' +
+            renderFarmRendererHydrationScript() + '\\n' +
             '</head>\\n<body>\\n  <div id="root">';
           const streamSuffix = '</div>\\n' +
             '  ' + renderFarmClientBootstrapScript(
@@ -5839,6 +5871,7 @@ async function handleFarmRequestInContext(
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+            .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
             // Inject title if not present and we have one
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
               let nextHeadContent = headContent;
@@ -5875,6 +5908,7 @@ async function handleFarmRequestInContext(
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>\${title}</title>\${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
+  \${renderFarmRendererHydrationScript()}
 </head>
 <body>
   <div id="root">\${html}</div>
@@ -6123,7 +6157,7 @@ async function handleFarmRequestInContext(
       }
     }
     
-    const html = ReactDOMServer.renderToString(notFoundElement);
+    const html = await ReactDOMServer.renderToString(notFoundElement);
     
     // Check if layout provides full HTML document
     const trimmedHtml = html.trim();
@@ -6133,6 +6167,7 @@ async function handleFarmRequestInContext(
     if (hasFullDocument) {
       fullHtml = html
         .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+        .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
           '  ' + renderFarmClientBootstrapScript() + '\\n' +
@@ -6150,6 +6185,7 @@ async function handleFarmRequestInContext(
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/farm-client.css">
   <title>404 - Page Not Found</title>
+  \${renderFarmRendererHydrationScript()}
 </head>
 <body>
   <div id="root">\${html}</div>

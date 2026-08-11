@@ -461,8 +461,8 @@ export class RouteManager {
   }
 
   /**
-   * Generate a client-side route manifest for SPA navigation
-   * This eliminates the need for server requests during navigation
+   * Generate the compiled route decisions consumed by SPA navigation.
+   * Requests still fetch route data, but never inspect component source.
    */
   generateClientManifest(projectRoot: string = this.config.root): FarmClientRouteManifest {
     const normalizedProjectRoot = path.resolve(projectRoot);
@@ -553,7 +553,10 @@ export class RouteManager {
     return manifest;
   }
 
-  /** Invalidate compiled route metadata after a page or layout changes in dev. */
+  /**
+   * Invalidate build-time route metadata after a page or layout changes in dev.
+   * Navigation requests reuse the cached manifest and never inspect source files.
+   */
   invalidateClientManifest(): void {
     this.clientManifestCache = undefined;
   }

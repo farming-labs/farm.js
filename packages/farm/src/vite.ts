@@ -74,6 +74,13 @@ import {
 import { createCliColors } from "./cli-colors";
 import { createFarmThemeCssPlugin } from "./theme/vite";
 import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
+import {
+  isReactRenderer,
+  loadFarmRendererVitePlugins,
+  REACT_RENDERER,
+  resolveFarmRenderer,
+} from "./renderer";
+import type { FarmRenderer } from "./renderer";
 import { resolveRouteRenderingConfig } from "./ssg";
 import {
   createFarmRouteRenderPlan,
@@ -2412,10 +2419,13 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
       if (id === "/@farm/client" || id === "/@farm/client.js") {
         const resolvedConfig = farmApp?.getConfig();
+        const renderer = resolvedConfig?.renderer || resolveFarmRenderer(options.renderer);
         const integrations = resolvedConfig?.integrations || options.integrations;
         const root = resolvedConfig?.root || server?.config.root || process.cwd();
         const docs = resolvedConfig?.docs;
-        const adapterOwnsDocsRuntime = Boolean(docs?.adapter?.server && docs.adapter.react);
+        const adapterOwnsDocsRuntime = Boolean(
+          isReactRenderer(renderer) && docs?.adapter?.server && docs.adapter.react,
+        );
         const devtools = resolvedConfig?.devtools ?? resolveFarmDevtoolsConfig(false, "production");
         const [docsRuntime, docsSearchRuntime, devtoolsClientRuntime] = await Promise.all([
           docs?.enabled ? loadFarmDocsDevRuntime() : null,
@@ -2436,7 +2446,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           : "";
 
         return generateClientCode(
-          getIntegrationProviders(integrations),
+          isReactRenderer(renderer) ? getIntegrationProviders(integrations) : [],
           [
             ...getIntegrationDocumentNavigationMatchers(integrations),
             ...(docsRuntime?.getFarmDocsDocumentNavigationMatchers(docs) ?? []),
@@ -2447,7 +2457,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
           root,
           resolvedConfig?.srcDir || options.srcDir || "src",
           resolvedConfig?.publicRuntimeConfig || options.publicRuntimeConfig,
-          docs?.adapter?.react,
+          isReactRenderer(renderer) ? docs?.adapter?.react : undefined,
+          renderer,
         );
       }
 
@@ -3255,6 +3266,7 @@ function generateClientCode(
   srcDir = "src",
   publicRuntimeConfig: Record<string, unknown> | undefined = undefined,
   docsAdapterReact?: string,
+  renderer: FarmRenderer = REACT_RENDERER,
 ): string {
   const hasClerkProvider = integrationProviders.some((provider) => provider.type === "clerk");
   const providerImportBlock = hasClerkProvider
@@ -3266,6 +3278,9 @@ function generateClientCode(
     srcDir,
     publicRuntimeConfig,
   );
+  const rendererClientImports = isReactRenderer(renderer)
+    ? `import React from 'react'\nimport { hydrateRoot, createRoot } from 'react-dom/client'`
+    : `import React, { hydrateRoot, createRoot } from ${JSON.stringify(renderer.client)}`;
   const docsAdapterImportBlock = docsAdapterReact
     ? `import * as FarmDocsAdapterReact from ${JSON.stringify(docsAdapterReact)};
 
@@ -3284,8 +3299,7 @@ async function hydrateFarmDocsAdapterRuntime() {
     : `async function hydrateFarmDocsAdapterRuntime() { return false; }`;
 
   return `
-import React from 'react'
-import { hydrateRoot, createRoot } from 'react-dom/client'
+${rendererClientImports}
 import { installChunkErrorRecovery, SPARouter } from '@farm.js/core/client'
 import { createClientPluginManager } from '@farm.js/core/plugin/client'
 import { scheduleFarmIslandHydration } from '@farm.js/core/internal/client-runtime'
@@ -4673,6 +4687,10 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
     );
     config = layeredConfig;
   }
+  config.renderer = resolveFarmRenderer(config.renderer);
+  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, appRoot, {
+    ssr: true,
+  });
   // Node.js built-in module stubs for browser
   const nodeBuiltinStubs: Record<string, string> = {
     "node:string_decoder":
@@ -4846,6 +4864,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
     plugins: [
       createFarmThemeCssPlugin(config.theme, config.basePath),
       tailwindcss(),
+      ...(rendererVitePlugins as any[]),
       viteBrowserExternalPlugin,
       farmI18nClientBridgePlugin(),
       farmPlugin(config),
@@ -4860,11 +4879,12 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
           appRoot,
           getFarmAppDirectories({ ...config, root: appRoot }),
         ),
+        config.renderer,
       ),
-      // Pre-bundle every framework client-runtime entry with React. Without
+      // Pre-bundle every framework client-runtime entry with the renderer. Without
       // this, Vite can discover a linked Farm entry after the page has loaded,
-      // regenerate the optimizer browser hash, and leave React DOM holding a
-      // different React module instance from a client component.
+      // regenerate the optimizer browser hash, and leave the browser runtime
+      // holding a different renderer instance from a client component.
       // Exclude server-side packages from browser bundling
       exclude: [
         "@farm.js/core/server",
@@ -4890,12 +4910,12 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
     },
     ssr: {
       noExternal: ["farm", "@farm.js/core"],
-      // Externalize React to prevent multiple instances during SSR
-      external: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+      // Externalize the renderer to prevent multiple runtime instances during SSR.
+      external: [...(config.renderer.dedupe || [])],
     },
     resolve: {
-      // Ensure single React instance across all modules (critical for hooks!)
-      dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+      // Ensure one renderer instance across application and framework modules.
+      dedupe: [...(config.renderer.dedupe || [])],
       // Stub out problematic server-only modules during dev mode
       alias: {
         ...getFarmLayerAliases(config.layers),

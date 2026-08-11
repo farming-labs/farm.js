@@ -1,5 +1,3 @@
-import React from "react";
-import { renderToPipeableStream } from "react-dom/server";
 import * as fs from "fs";
 import * as path from "path";
 import type {
@@ -50,14 +48,19 @@ import { localizeFarmHref, localizeFarmPathname } from "../i18n/routing";
 import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
-import { DefaultNotFoundPage } from "../components/not-found";
+import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeDocumentParts } from "../theme/server-runtime";
 import { getTheme as getFarmTheme } from "../theme/server";
+import type { ViteDevServer } from "vite";
+import {
+  isReactRenderer,
+  resolveFarmRendererModule,
+  type FarmServerRendererRuntime,
+} from "../renderer";
+import { pathToFileURL } from "node:url";
 import type { FarmIslandStrategy } from "../island";
 
-let cachedClerkProvider: {
-  ClerkProvider: React.ComponentType<{ children?: React.ReactNode } & Record<string, unknown>>;
-} | null = null;
+let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
 const importRuntimeModule = new Function("specifier", "return import(specifier);") as (
   specifier: string,
@@ -80,20 +83,20 @@ interface PPRShellCacheOptions {
 
 export interface FarmNavigationFragmentLayout {
   pattern: string;
-  module: { default?: React.ComponentType<any> };
+  module: { default?: any };
 }
 
 export interface FarmNavigationFragmentSlot {
   name: string;
   ownerPattern: string;
   containerId: string;
-  module: { default?: React.ComponentType<any> };
+  module: { default?: any };
   props: Record<string, unknown>;
 }
 
 export interface FarmNavigationFragmentInput {
-  PageComponent: React.ComponentType<any>;
-  LoadingComponent?: React.ComponentType<any>;
+  PageComponent: any;
+  LoadingComponent?: any;
   pageProps: Record<string, unknown>;
   params: Record<string, string>;
   layouts: FarmNavigationFragmentLayout[];
@@ -264,36 +267,6 @@ function isWebResponse(value: unknown): value is Response {
   );
 }
 
-class FarmRouteErrorBoundary extends React.Component<
-  {
-    Fallback: React.ComponentType<any>;
-    fallbackProps: Record<string, any>;
-    children: React.ReactNode;
-  },
-  { hasError: boolean; error: unknown }
-> {
-  constructor(props: any) {
-    super(props);
-    this.state = { hasError: false, error: null };
-  }
-
-  static getDerivedStateFromError(error: unknown) {
-    return { hasError: true, error };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      const Fallback = this.props.Fallback;
-      return React.createElement(Fallback, {
-        ...this.props.fallbackProps,
-        error: this.state.error,
-        reset: () => this.setState({ hasError: false, error: null }),
-      });
-    }
-    return this.props.children as React.ReactElement;
-  }
-}
-
 async function parseRouteModuleProps(
   routeModule: RouteModule,
   input: {
@@ -383,27 +356,59 @@ export class ServerRenderer {
   private ssgManifest: SSGPage[] = [];
   private dataCache = getFarmDataCache();
   private i18nRuntime?: FarmI18nRuntime;
+  private viteServer?: ViteDevServer;
+  private rendererRuntime!: FarmServerRendererRuntime;
 
   constructor(
     config: Required<FarmConfig>,
     routeManager: RouteManager,
     i18nRuntime?: FarmI18nRuntime,
+    viteServer?: ViteDevServer,
   ) {
     this.config = config;
     this.routeManager = routeManager;
     this.i18nRuntime = i18nRuntime;
+    this.viteServer = viteServer;
     this.loadSSGManifest();
   }
 
+  async initialize(): Promise<void> {
+    if (this.rendererRuntime) return;
+
+    const loaded = isReactRenderer(this.config.renderer)
+      ? await import("../renderer/react/server")
+      : this.viteServer
+        ? await this.viteServer.ssrLoadModule(this.config.renderer.server)
+        : await import(
+            pathToFileURL(
+              resolveFarmRendererModule(
+                this.config.root || process.cwd(),
+                this.config.renderer.server,
+              ),
+            ).href
+          );
+    const runtime = loaded as Partial<FarmServerRendererRuntime>;
+    const required = ["createElement", "isValidElement", "renderToString"] as const;
+    for (const key of required) {
+      if (typeof runtime[key] !== "function") {
+        throw new Error(
+          `Renderer \`${this.config.renderer.name}\` server module must export ${key}().`,
+        );
+      }
+    }
+
+    this.rendererRuntime = runtime as FarmServerRendererRuntime;
+  }
+
   private createPageBoundary(
-    pageElement: React.ReactNode,
+    pageElement: unknown,
     options: {
       pageShouldHydrate: boolean;
       layoutShouldHydrate: boolean;
       islandStrategy?: FarmIslandStrategy | null;
     },
-  ): React.ReactElement {
-    return React.createElement(
+  ): unknown {
+    return this.rendererRuntime.createElement(
       "div",
       {
         id: "__farm_page__",
@@ -417,11 +422,8 @@ export class ServerRenderer {
     );
   }
 
-  private createLayoutBoundary(
-    pattern: string,
-    layoutElement: React.ReactNode,
-  ): React.ReactElement {
-    return React.createElement(
+  private createLayoutBoundary(pattern: string, layoutElement: unknown): unknown {
+    return this.rendererRuntime.createElement(
       "div",
       {
         "data-farm-layout-boundary": "true",
@@ -432,7 +434,12 @@ export class ServerRenderer {
     );
   }
 
-  private async renderElementToCompleteHTML(element: React.ReactNode): Promise<string> {
+  private async renderElementToCompleteHTML(element: unknown): Promise<string> {
+    const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
+    if (!renderToPipeableStream) {
+      return await this.rendererRuntime.renderToString(element);
+    }
+
     return await new Promise<string>((resolve, reject) => {
       const chunks: Buffer[] = [];
       let started = false;
@@ -460,14 +467,19 @@ export class ServerRenderer {
     });
   }
 
-  /** Render the changed route tree without producing a second document response. */
+  /**
+   * Render the route tree used by client navigation without producing a second
+   * document response. Layout markers let the browser preserve the longest
+   * common shell and replace only the first changed boundary.
+   */
   async renderNavigationFragment(input: FarmNavigationFragmentInput): Promise<string> {
-    let element: React.ReactElement = React.createElement(input.PageComponent, input.pageProps);
+    await this.initialize();
+    let element = this.rendererRuntime.createElement(input.PageComponent, input.pageProps);
     if (input.LoadingComponent) {
-      element = React.createElement(
-        React.Suspense,
+      element = this.rendererRuntime.createElement(
+        this.rendererRuntime.Suspense,
         {
-          fallback: React.createElement(input.LoadingComponent, {
+          fallback: this.rendererRuntime.createElement(input.LoadingComponent, {
             params: input.params,
             path: (input.pageProps as any).path,
           }),
@@ -489,20 +501,21 @@ export class ServerRenderer {
       const layout = input.layouts[index]!;
       const LayoutComponent = layout.module.default;
       if (!LayoutComponent) continue;
-      const slotProps: Record<string, React.ReactElement> = {};
+      const slotProps: Record<string, unknown> = {};
       for (const slot of input.slots || []) {
         if (slot.ownerPattern !== layout.pattern || !slot.module.default) continue;
-        slotProps[slot.name] = React.createElement(
+        const slotElement = this.rendererRuntime.createElement(slot.module.default, slot.props);
+        slotProps[slot.name] = this.rendererRuntime.createElement(
           "div",
           {
             id: slot.containerId,
             "data-farm-route-slot": slot.name,
             "data-farm-slot-owner": slot.ownerPattern,
           },
-          React.createElement(slot.module.default, slot.props),
+          slotElement,
         );
       }
-      element = React.createElement(LayoutComponent, {
+      element = this.rendererRuntime.createElement(LayoutComponent, {
         children: element,
         params: input.params,
         ...slotProps,
@@ -694,10 +707,11 @@ export class ServerRenderer {
           const mod = await this.routeManager.loadRouteModule(page.filePath);
           if (!mod?.default) return;
 
-          const { layouts } = this.routeManager.matchRoute(page.urlPath);
+          const { route, layouts } = this.routeManager.matchRoute(page.urlPath);
           const layoutModules = await Promise.all(
             layouts.map((l) => this.routeManager.loadLayoutModule(l.modulePath)),
           );
+          const routeManifest = this.routeManager.generateClientManifest(this.config.root);
 
           const PageComponent = mod.default;
           const pageProps = {
@@ -706,25 +720,40 @@ export class ServerRenderer {
             path: page.urlPath,
           };
 
-          let pageElement = React.createElement(
-            PageComponent as React.ComponentType<unknown>,
-            pageProps as React.Attributes,
+          let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
+          const pageMetadata = routeManifest.routes.find(
+            (entry) => entry.pattern === route?.pattern,
+          ) ?? {
+            shouldHydrate: false,
+            islandStrategy: null,
+          };
+          const layoutMetadata = layouts.map(
+            (layout) =>
+              routeManifest.layouts.find((entry) => entry.pattern === layout.pattern) ?? {
+                shouldHydrate: false,
+                islandStrategy: null,
+              },
           );
+          const layoutShouldHydrate = layoutMetadata.some((metadata) => metadata.shouldHydrate);
+          pageElement = this.createPageBoundary(pageElement, {
+            pageShouldHydrate: pageMetadata.shouldHydrate,
+            layoutShouldHydrate,
+            islandStrategy: pageMetadata.islandStrategy,
+          });
 
           for (let i = layoutModules.length - 1; i >= 0; i--) {
             const layoutModule = layoutModules[i];
             const LayoutComponent = layoutModule.default;
-            pageElement = React.createElement(
-              LayoutComponent as React.ComponentType<unknown>,
-              {
-                children: pageElement,
-                params: page.params,
-              } as React.Attributes,
-            );
+            pageElement = this.rendererRuntime.createElement(LayoutComponent, {
+              children: pageElement,
+              params: page.params,
+            });
+            pageElement = this.createLayoutBoundary(layouts[i]!.pattern, pageElement);
           }
 
-          const { renderToString } = await import("react-dom/server");
-          const html = renderToString(await this.wrapWithIntegrationProviders(pageElement));
+          const html = await this.rendererRuntime.renderToString(
+            await this.wrapWithIntegrationProviders(pageElement),
+          );
 
           await this.cacheSSGPage(page, html, { document: false });
 
@@ -795,6 +824,7 @@ export class ServerRenderer {
   }
 
   async renderPage(req: FarmRequest, res: FarmResponse): Promise<void> {
+    await this.initialize();
     const request = createWebRequestFromFarmRequest(req);
     const runtime = this.i18nRuntime;
 
@@ -933,8 +963,8 @@ export class ServerRenderer {
       );
       const programmaticRouteComponents = (routeModule as any).__farmRouteComponents as
         | {
-            error?: React.ComponentType<any>;
-            notFound?: React.ComponentType<any>;
+            error?: any;
+            notFound?: any;
           }
         | undefined;
       let PageComponent = routeModule.default;
@@ -1029,7 +1059,7 @@ export class ServerRenderer {
         });
       }
 
-      let LoadingFallbackComponent: React.ComponentType<any> | null = null;
+      let LoadingFallbackComponent: any = null;
       if (loadingBoundaryEntry) {
         const loadingModule = await this.routeManager.loadRouteModule(
           loadingBoundaryEntry.modulePath,
@@ -1039,7 +1069,7 @@ export class ServerRenderer {
         }
       }
 
-      let ErrorFallbackComponent: React.ComponentType<any> | null = null;
+      let ErrorFallbackComponent: any = null;
       if (errorBoundaryEntry) {
         const errorModule = await this.routeManager.loadRouteModule(errorBoundaryEntry.modulePath);
         if (errorModule.default) {
@@ -1047,8 +1077,8 @@ export class ServerRenderer {
         }
       }
 
-      // Build one fresh manifest per response and reuse its route metadata below.
-      // This preserves immediate HMR visibility without scanning every route twice.
+      // Hydration decisions are compiled into a manifest and reused on requests.
+      // Development HMR invalidates this cache when a route module changes.
       const routeManifest = this.routeManager.generateClientManifest(this.config.root);
       const routeManifestEntry = routeManifest.routes.find(
         (entry) => entry.pattern === route.pattern,
@@ -1087,7 +1117,15 @@ export class ServerRenderer {
             search: searchParamsObject,
             routePath: slot.route.pattern,
           });
-          const metadata = getClientModuleMetadata(slot.route.modulePath, this.config.root);
+          const metadata = routeManifest.slots.find(
+            (entry) =>
+              entry.name === slot.name &&
+              entry.ownerPattern === slot.ownerPattern &&
+              entry.pattern === slot.route.pattern,
+          ) ?? {
+            isClientComponent: false,
+            shouldHydrate: false,
+          };
 
           return {
             ...slot,
@@ -1119,7 +1157,11 @@ export class ServerRenderer {
             islandStrategy: manifestEntry.islandStrategy ?? null,
           };
         }
-        return getClientModuleMetadata(layout.modulePath, this.config.root);
+        return {
+          isClientComponent: false,
+          shouldHydrate: false,
+          islandStrategy: null,
+        };
       });
       const shouldHydrateLayout = layoutHydrationMetadata.some(
         (metadata) => metadata.shouldHydrate,
@@ -1230,13 +1272,10 @@ export class ServerRenderer {
       await _runWithMiddlewareData(middlewareDataForContext, async () => {
         await _runWithMiddlewareContext(middlewareContext, async () => {
           await _runWithCurrentRequest(currentRequest, async () => {
-            let pageElement = React.createElement(
-              PageComponent as React.ComponentType<unknown>,
-              pageProps as React.Attributes,
-            );
+            let pageElement: any = this.rendererRuntime.createElement(PageComponent, pageProps);
 
             if (LoadingFallbackComponent) {
-              const loadingFallback = React.createElement(LoadingFallbackComponent, {
+              const loadingFallback = this.rendererRuntime.createElement(LoadingFallbackComponent, {
                 ...createRouteStateProps({
                   params,
                   searchParamsObject,
@@ -1244,10 +1283,10 @@ export class ServerRenderer {
                   middlewareMap,
                   pluginExposedContext,
                 }),
-              } as React.Attributes);
+              });
 
-              pageElement = React.createElement(
-                React.Suspense,
+              pageElement = this.rendererRuntime.createElement(
+                this.rendererRuntime.Suspense,
                 { fallback: loadingFallback },
                 pageElement,
               );
@@ -1262,20 +1301,20 @@ export class ServerRenderer {
               islandStrategy: hydrationIslandStrategy,
             });
 
-            let wrappedElement: React.ReactElement = pageElement;
+            let wrappedElement: any = pageElement;
             for (let i = layoutModules.length - 1; i >= 0; i--) {
               const layoutModule = layoutModules[i];
               const layoutEntry = layouts[i];
               const LayoutComponent = layoutModule.default;
-              const slotProps: Record<string, React.ReactElement> = {};
+              const slotProps: Record<string, any> = {};
               for (const slot of renderedRouteSlots) {
                 if (slot.ownerPattern !== layoutEntry.pattern) continue;
 
-                let slotElement = React.createElement(
-                  slot.module.default as React.ComponentType<unknown>,
-                  slot.props as React.Attributes,
+                let slotElement = this.rendererRuntime.createElement(
+                  slot.module.default,
+                  slot.props,
                 );
-                slotElement = React.createElement(
+                slotElement = this.rendererRuntime.createElement(
                   "div",
                   {
                     id: slot.containerId,
@@ -1286,20 +1325,17 @@ export class ServerRenderer {
                 );
                 slotProps[slot.name] = slotElement;
               }
-              wrappedElement = React.createElement(
-                LayoutComponent as React.ComponentType<unknown>,
-                {
-                  children: wrappedElement,
-                  params,
-                  ...slotProps,
-                } as React.Attributes,
-              );
+              wrappedElement = this.rendererRuntime.createElement(LayoutComponent, {
+                children: wrappedElement,
+                params,
+                ...slotProps,
+              });
               wrappedElement = this.createLayoutBoundary(layoutEntry.pattern, wrappedElement);
             }
 
-            if (ErrorFallbackComponent) {
-              wrappedElement = React.createElement(
-                FarmRouteErrorBoundary,
+            if (ErrorFallbackComponent && this.rendererRuntime.ErrorBoundary) {
+              wrappedElement = this.rendererRuntime.createElement(
+                this.rendererRuntime.ErrorBoundary,
                 {
                   Fallback: ErrorFallbackComponent,
                   fallbackProps: {
@@ -1444,20 +1480,23 @@ export class ServerRenderer {
     }
   }
 
-  private async wrapWithIntegrationProviders(
-    element: React.ReactElement,
-  ): Promise<React.ReactElement> {
+  private async wrapWithIntegrationProviders(element: any): Promise<any> {
     const providers = getIntegrationProviders(this.config.integrations);
     let wrapped = element;
 
     for (let i = providers.length - 1; i >= 0; i--) {
       const provider = providers[i];
       if (provider.type === "clerk") {
+        if (!isReactRenderer(this.config.renderer)) {
+          throw new Error(
+            `Integration provider \`${provider.type}\` currently requires the React renderer.`,
+          );
+        }
         if (!cachedClerkProvider) {
           cachedClerkProvider = await importRuntimeModule("@clerk/react");
         }
 
-        wrapped = React.createElement(
+        wrapped = this.rendererRuntime.createElement(
           cachedClerkProvider!.ClerkProvider,
           provider.props || {},
           wrapped,
@@ -1690,8 +1729,8 @@ export class ServerRenderer {
         return false;
       }
 
-      const ErrorComponent = errorModule.default as React.ComponentType<unknown>;
-      const errorElement = React.createElement(ErrorComponent, {
+      const ErrorComponent = errorModule.default;
+      const errorElement = this.rendererRuntime.createElement(ErrorComponent, {
         ...createRouteStateProps({
           params: options.params,
           searchParamsObject: options.searchParamsObject,
@@ -1701,27 +1740,23 @@ export class ServerRenderer {
         }),
         error: options.error,
         reset: () => {},
-      } as React.Attributes);
+      });
 
-      let wrapped: React.ReactElement = errorElement;
+      let wrapped: any = errorElement;
       const layoutModules = await Promise.all(
         options.layouts.map((layout) => this.routeManager.loadLayoutModule(layout.modulePath)),
       );
       for (let i = layoutModules.length - 1; i >= 0; i--) {
         const LayoutComponent = layoutModules[i].default;
-        wrapped = React.createElement(
-          LayoutComponent as React.ComponentType<unknown>,
-          {
-            children: wrapped,
-            params: options.params,
-          } as React.Attributes,
-        );
+        wrapped = this.rendererRuntime.createElement(LayoutComponent, {
+          children: wrapped,
+          params: options.params,
+        });
       }
 
-      const ReactDOMServer = await import("react-dom/server");
       const html = await _runWithMiddlewareData(options.middlewareMap, () =>
         _runWithMiddlewareContext(options.middlewareContext, () =>
-          ReactDOMServer.renderToString(wrapped),
+          this.rendererRuntime.renderToString(wrapped),
         ),
       );
       res.statusCode = 500;
@@ -1735,8 +1770,8 @@ export class ServerRenderer {
     }
   }
 
-  private async renderWithSSR(
-    element: React.ReactElement,
+  private async renderBufferedSSR(
+    element: unknown,
     req: FarmRequest,
     res: FarmResponse,
     clearMiddlewareData?: () => void,
@@ -1749,6 +1784,180 @@ export class ServerRenderer {
       onSuspenseHoleDetected?: () => void;
     } = {},
   ): Promise<void> {
+    const startedAt = Date.now();
+    const route = options.observabilityRoute || (req as any).__FARM_ROUTE__ || req.url || "/";
+    emitFarmEvent({ type: "render.stream.start", route });
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    for (const [key, value] of Object.entries(options.responseHeaders || {})) {
+      res.setHeader(key, value);
+    }
+
+    try {
+      const manifest =
+        options.routeManifest ?? this.routeManager.generateClientManifest(this.config.root);
+      const clientManifest = {
+        clientEntry: "/@farm/client.js",
+        routes: {} as Record<string, any>,
+        layouts: {} as Record<string, any>,
+        slots: [] as Array<Record<string, any>>,
+        sharedAssets: [
+          {
+            tag: "link",
+            attrs: { rel: "stylesheet", href: "/src/app/globals.css" },
+          },
+        ],
+      };
+
+      for (const routeEntry of manifest.routes) {
+        clientManifest.routes[routeEntry.pattern] = {
+          modulePath: routeEntry.modulePath,
+          pattern: routeEntry.pattern,
+          segments: routeEntry.segments,
+          search: routeEntry.search,
+          isClientComponent: routeEntry.isClientComponent,
+          shouldHydrate: routeEntry.shouldHydrate,
+          islandStrategy: routeEntry.islandStrategy,
+          renderPlan: routeEntry.renderPlan,
+          preloads: [routeEntry.modulePath],
+          assets: [],
+        };
+      }
+      for (const layoutEntry of manifest.layouts) {
+        clientManifest.layouts[layoutEntry.pattern] = {
+          modulePath: layoutEntry.modulePath,
+          pattern: layoutEntry.pattern,
+          shouldHydrate: layoutEntry.shouldHydrate,
+          islandStrategy: layoutEntry.islandStrategy,
+          preloads: [layoutEntry.modulePath],
+          assets: [],
+        };
+      }
+      for (const slotEntry of manifest.slots ?? []) {
+        clientManifest.slots.push({
+          ...slotEntry,
+          preloads: [slotEntry.modulePath],
+          assets: [],
+        });
+      }
+
+      const routeSlots = ((req as any).__FARM_ROUTE_SLOTS__ || []).map(
+        (slot: Record<string, any>) => ({
+          ...slot,
+          modulePath:
+            typeof slot.modulePath === "string" && slot.modulePath.startsWith(this.config.root)
+              ? slot.modulePath.slice(this.config.root.length)
+              : slot.modulePath,
+        }),
+      );
+      const deferredProps = prepareDeferredData({
+        page: (req as any).__FARM_PROPS__ || {},
+        slots: routeSlots,
+      });
+      const pagePath = (req as any).__FARM_PAGE_PATH__;
+      const relativePath = pagePath
+        ? pagePath.startsWith(this.config.root)
+          ? pagePath.slice(this.config.root.length)
+          : pagePath
+        : "/src/app/page.tsx";
+      const deploymentId = this.getDeploymentId();
+      const bootstrapScript = `<script>
+window.__FARM_PROPS__ = ${serializeInlineValue((deferredProps.data as any).page)};
+window.__FARM_ROUTE_SLOTS__ = ${serializeInlineValue((deferredProps.data as any).slots)};
+window.__FARM_DEPLOYMENT_ID__ = ${serializeInlineValue(deploymentId)};
+window.__FARM_PATH__ = ${JSON.stringify((req as any).__FARM_ROUTE__ || req.url || "/")};
+window.__FARM_IS_CLIENT__ = ${JSON.stringify((req as any).__FARM_IS_CLIENT_COMPONENT__ === true)};
+window.__FARM_PAGE_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_PAGE_SHOULD_HYDRATE__ === true)};
+window.__FARM_LAYOUT_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_LAYOUT_SHOULD_HYDRATE__ === true)};
+window.__FARM_LAYOUTS__ = ${JSON.stringify((req as any).__FARM_LAYOUTS__ || [])};
+window.__FARM_SHOULD_HYDRATE__ = ${JSON.stringify((req as any).__FARM_SHOULD_HYDRATE__ === true)};
+window.__FARM_ISLAND_STRATEGY__ = ${JSON.stringify((req as any).__FARM_ISLAND_STRATEGY__ || "load")};
+window.__FARM_PAGE_MODULE__ = ${JSON.stringify(relativePath)};
+window.__FARM_LOADING_MODULE__ = ${JSON.stringify((req as any).__FARM_LOADING_MODULE_PATH__ || null)};
+window.__FARM_MANIFEST__ = ${JSON.stringify(clientManifest)};
+window.__FARM_INTEGRATION_API_MANIFEST__ = ${JSON.stringify(getRegisteredIntegrationAPIManifest())};
+${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(getFarmI18nClientSnapshot())};` : ""}
+</script>`;
+      const deferredScript = createDeferredHydrationScript(deferredProps.records);
+      const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
+      const content = await this.rendererRuntime.renderToString(element);
+      const {
+        title,
+        tags: metaTags,
+        hasFavicon,
+      } = renderMetadataHead((req as any).__FARM_METADATA__);
+      const i18nSnapshot = getFarmI18nClientSnapshot();
+      const alternateTags = i18nSnapshot
+        ? renderI18nAlternateLinks((req as any).__FARM_ROUTE__ || req.url || "/", i18nSnapshot)
+        : "";
+      const themeDocument = createFarmThemeDocumentParts(
+        this.config.theme,
+        this.config.basePath,
+        getFarmTheme(),
+      );
+      const html = `<!DOCTYPE html>
+<html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
+        i18nSnapshot ? ` dir="${i18nSnapshot.direction}"` : ""
+      }${themeDocument.attributes}>
+<head>
+  ${themeDocument.head}
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="farm-deployment-id" content="${escapeHtmlAttribute(deploymentId)}">
+  ${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
+  <title>${title}</title>${metaTags}${alternateTags}
+  ${renderFarmFontDevHead(this.config.root || process.cwd())}
+  <link rel="stylesheet" href="/src/app/globals.css">
+  <script type="module" src="/@vite/client"></script>
+  ${rendererHydrationScript}
+  ${bootstrapScript}
+</head>
+<body class="">
+  <div id="root">${content}</div>
+  ${deferredScript}
+  <script type="module" src="/@farm/client.js"></script>
+</body>
+</html>`;
+
+      emitFarmEvent({
+        type: "render.stream.shellReady",
+        route,
+        durationMs: Date.now() - startedAt,
+      });
+      if ((req.method || "GET").toUpperCase() !== "HEAD") res.write(html);
+      res.end();
+      await options.onComplete?.(html);
+      emitFarmEvent({
+        type: "render.stream.complete",
+        route,
+        durationMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      emitFarmEvent({ type: "render.error", route, error });
+      throw error;
+    } finally {
+      clearMiddlewareData?.();
+    }
+  }
+
+  private async renderWithSSR(
+    element: any,
+    req: FarmRequest,
+    res: FarmResponse,
+    clearMiddlewareData?: () => void,
+    options: {
+      responseHeaders?: Record<string, string> | undefined;
+      routeManifest?: ReturnType<RouteManager["generateClientManifest"]>;
+      onComplete?: (html: string) => void | Promise<void>;
+      captureStaticShell?: boolean;
+      observabilityRoute?: string;
+      onSuspenseHoleDetected?: () => void;
+    } = {},
+  ): Promise<void> {
+    const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
+    if (!renderToPipeableStream) {
+      return this.renderBufferedSSR(element, req, res, clearMiddlewareData, options);
+    }
+
     return new Promise((resolve, reject) => {
       const streamStartTime = Date.now();
       const observabilityRoute =
@@ -1803,6 +2012,7 @@ export class ServerRenderer {
           isClientComponent: routeEntry.isClientComponent,
           shouldHydrate: routeEntry.shouldHydrate,
           islandStrategy: routeEntry.islandStrategy,
+          renderPlan: routeEntry.renderPlan,
           preloads: [routeEntry.modulePath],
           assets: [],
         };
@@ -1810,15 +2020,11 @@ export class ServerRenderer {
 
       // Convert layouts array to object
       for (const layoutEntry of manifest.layouts) {
-        const layoutMetadata =
-          typeof (layoutEntry as any).shouldHydrate === "boolean"
-            ? (layoutEntry as any)
-            : getClientModuleMetadata(layoutEntry.modulePath, this.config.root);
         clientManifest.layouts[layoutEntry.pattern] = {
           modulePath: layoutEntry.modulePath,
           pattern: layoutEntry.pattern,
-          shouldHydrate: layoutMetadata.shouldHydrate,
-          islandStrategy: layoutMetadata.islandStrategy,
+          shouldHydrate: layoutEntry.shouldHydrate,
+          islandStrategy: layoutEntry.islandStrategy,
           preloads: [layoutEntry.modulePath],
           assets: [],
         };
@@ -1894,7 +2100,11 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       );
 
       // React 19: ensure root is a single DOM node so streaming starts early (avoids Fragment delay)
-      const streamRoot = React.createElement("div", { style: { display: "contents" } }, element);
+      const streamRoot = this.rendererRuntime.createElement(
+        "div",
+        { style: { display: "contents" } },
+        element,
+      );
       const { pipe } = renderToPipeableStream(streamRoot, {
         onShellReady() {
           const shellReadyMs = Date.now() - streamStartTime;
@@ -2065,13 +2275,13 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
 
         if (NotFoundComponent) {
           // Look for root layout
-          let LayoutComponent: React.ComponentType<unknown> | null = null;
+          let LayoutComponent: any = null;
           for (const ext of notFoundExtensions) {
             const layoutPath = path.join(appDir, `layout${ext}`);
             if (fs.existsSync(layoutPath)) {
               try {
                 const layoutModule = await this.routeManager.loadLayoutModule(layoutPath);
-                LayoutComponent = layoutModule.default as React.ComponentType<unknown>;
+                LayoutComponent = layoutModule.default;
               } catch {
                 // Layout import failed, continue without it
               }
@@ -2080,22 +2290,17 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
           }
 
           // Render the 404 page
-          let element = React.createElement(
-            NotFoundComponent as React.ComponentType<unknown>,
-            { pathname } as React.Attributes,
-          );
+          let element: any = this.rendererRuntime.createElement(NotFoundComponent, { pathname });
 
           // Wrap with layout if available
           if (LayoutComponent) {
-            element = React.createElement(
-              LayoutComponent as React.ComponentType<unknown>,
-              { children: element } as React.Attributes,
-            );
+            element = this.rendererRuntime.createElement(LayoutComponent, {
+              children: element,
+            });
           }
 
           // Render to string
-          const ReactDOMServer = await import("react-dom/server");
-          const content = ReactDOMServer.renderToString(element);
+          const content = await this.rendererRuntime.renderToString(element);
 
           const html = this.createFullHTML(content, false, pathname);
           res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -2109,10 +2314,7 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     }
 
     // Render the shared adaptive fallback when the app does not provide its own page.
-    const ReactDOMServer = await import("react-dom/server");
-    const defaultContent = ReactDOMServer.renderToString(
-      React.createElement(DefaultNotFoundPage, { pathname }),
-    );
+    const defaultContent = `<style>${DEFAULT_NOT_FOUND_STYLES}</style><main class="farm-default-not-found" aria-labelledby="farm-default-not-found-title" aria-describedby="farm-default-not-found-description"><div class="farm-default-not-found__content"><h1 id="farm-default-not-found-title" class="farm-default-not-found__code">404</h1><p id="farm-default-not-found-description" class="farm-default-not-found__description">Not found</p><a class="farm-default-not-found__home" href="/">GO HOME</a></div></main>`;
 
     const html = this.createFullHTML(defaultContent, false, pathname);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -2164,6 +2366,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
       this.config.basePath,
       getFarmTheme(),
     );
+    const rendererHydrationScript = this.rendererRuntime.generateHydrationScript?.() || "";
 
     return `<!DOCTYPE html>
 <html lang="${escapeHtmlAttribute(i18nSnapshot?.locale || "en")}"${
@@ -2179,6 +2382,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   ${fontHead}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>
+  ${rendererHydrationScript}
   ${integrationManifestScript}
 </head>
 <body class="">

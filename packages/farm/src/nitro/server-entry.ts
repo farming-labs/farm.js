@@ -252,7 +252,7 @@ async function defaultHandler({
       );
       const fragmentHtml = sr
         ? await sr.renderNavigationFragment({
-            PageComponent: routeModule.default as any,
+            PageComponent: routeModule.default,
             LoadingComponent: loadingModule?.default,
             pageProps: routeProps as Record<string, unknown>,
             params,
