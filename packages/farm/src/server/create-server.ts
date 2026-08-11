@@ -23,6 +23,12 @@ import { FARM_VERSION } from "../version";
 import { getFarmAppDirectories } from "../layers";
 import { createCliColors } from "../cli-colors";
 import { createFarmThemeCssPlugin } from "../theme/vite";
+import {
+  createFarmInstrumentationLifecycle,
+  loadFarmInstrumentation,
+  resolveFarmInstrumentationFile,
+  type FarmInstrumentationLifecycle,
+} from "../instrumentation";
 
 export const DEFAULT_FARM_DEV_SERVER_PORT = 3000;
 
@@ -116,6 +122,7 @@ function createDevDependencyStubsPlugin() {
  */
 export async function createServer(config: FarmConfig = {}) {
   let pluginManager: PluginManager | null = null;
+  let instrumentation: FarmInstrumentationLifecycle | null = null;
   try {
     const root = config.root || process.cwd();
 
@@ -124,6 +131,22 @@ export async function createServer(config: FarmConfig = {}) {
     const userConfig = await loadConfig(root, undefined, mode);
 
     const resolvedConfig = userConfig ? await resolveConfig(userConfig, mode) : null;
+    const instrumentationConfig = resolvedConfig || config;
+    const instrumentationRoot = instrumentationConfig.root || root;
+    const instrumentationFile = resolveFarmInstrumentationFile(
+      instrumentationRoot,
+      instrumentationConfig.srcDir || "src",
+    );
+    const instrumentationModule = await loadFarmInstrumentation(
+      instrumentationFile,
+      instrumentationRoot,
+    );
+    instrumentation = createFarmInstrumentationLifecycle(instrumentationModule, {
+      root: instrumentationRoot,
+      mode,
+      runtime: "nodejs",
+    });
+    await instrumentation.start();
 
     // Initialize plugin manager
     pluginManager = new PluginManager({
@@ -259,6 +282,20 @@ export async function createServer(config: FarmConfig = {}) {
     );
 
     (server as any).__farmPluginManager = pluginManager;
+    (server as any).__farmInstrumentation = instrumentation;
+    const closeViteServer = server.close.bind(server);
+    server.close = async () => {
+      try {
+        await closeViteServer();
+      } finally {
+        await instrumentation?.shutdown();
+      }
+    };
+    server.httpServer?.once("close", () => {
+      instrumentation?.shutdown().catch((error) => {
+        logger.warn(`Instrumentation shutdown failed: ${error}`);
+      });
+    });
 
     // Update plugin manager with vite server
     pluginManager.updateContext({ config: finalConfig, viteServer: server });
@@ -279,6 +316,7 @@ export async function createServer(config: FarmConfig = {}) {
         error,
       });
     }
+    await instrumentation?.shutdown().catch(() => {});
     logger.error(`Failed to create server: ${error}`);
     throw error;
   }

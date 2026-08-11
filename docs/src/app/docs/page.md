@@ -59,7 +59,7 @@ Cache, PPR, observability, instant preview, and deployment output.
 
 - [Post-response Work](/docs/after): Schedule short server work with after() without delaying the response.
 - [Cache and PPR](/docs/cache-ppr): Use shared runtime cache helpers, tag/path invalidation, ISR-style revalidation, and static shell caching for PPR pages.
-- [Observability](/docs/observability): Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, integration databases, cache, PPR, builds, plugins, and errors.
+- [Observability](/docs/observability): Export OpenTelemetry traces and consume correlated Farm runtime events in development and production.
 - [DevTools and Doctor](/docs/devtools): Inspect the resolved app runtime in the browser and run the same diagnostics from the terminal or CI.
 - [Cron](/docs/cron): Map portable UTC schedules to ordinary API routes, run them locally, and compile them to deployment-native triggers.
 - [Instant Preview](/docs/preview): Expose the current local app through a public URL for sharing, webhooks, OAuth callbacks, and external testing.

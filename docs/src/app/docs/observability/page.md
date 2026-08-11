@@ -1,12 +1,112 @@
 ---
-title: "Observability"
-description: "Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, integration databases, cache, PPR, builds, plugins, and errors."
+title: "Observability and tracing"
+description: "Export OpenTelemetry traces and listen to correlated Farm runtime events in development and production."
 section: "Runtime"
 ---
 
-# Observability
+# Observability and tracing
 
-Listen to Farm runtime events for server lifecycle, route matching, rendering, API routes, integrations, integration databases, cache, PPR, builds, plugins, and errors.
+Farm has two complementary observability layers:
+
+- OpenTelemetry traces show the request timeline and export to any OTLP-compatible backend.
+- Farm events expose detailed framework lifecycle data for logs, alerts, and custom integrations.
+
+The same lifecycle events are attached to the active OpenTelemetry span, and delivered events include `traceId`, `spanId`, and `traceSampled` for correlation.
+
+## OpenTelemetry quick start
+
+Install Farm's optional Node SDK setup package:
+
+```bash
+pnpm add @farm.js/otel
+```
+
+Create one instrumentation file at `src/instrumentation.ts` or `instrumentation.ts`:
+
+```ts
+import type { FarmInstrumentationContext } from "@farm.js/core/instrumentation";
+
+export async function register(context: FarmInstrumentationContext) {
+  if (context.runtime !== "nodejs") return;
+
+  const { registerOTel } = await import("@farm.js/otel");
+  return registerOTel({
+    serviceName: "storefront",
+    serviceVersion: process.env.APP_VERSION,
+  });
+}
+```
+
+Enable Farm spans in `farm.config.ts`:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  observability: {
+    tracing: {
+      attributes: {
+        "deployment.environment": process.env.NODE_ENV ?? "development",
+      },
+    },
+  },
+});
+```
+
+`@farm.js/otel` uses the OTLP HTTP trace exporter by default. Configure the destination with standard OpenTelemetry environment variables:
+
+```bash
+OTEL_EXPORTER_OTLP_ENDPOINT=https://otel-collector.example.com
+OTEL_EXPORTER_OTLP_HEADERS="authorization=Bearer%20TOKEN"
+```
+
+Use `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` when traces need a different endpoint. You can also pass a custom `traceExporter`, `spanProcessors`, sampler, resource, or instrumentation list to `registerOTel`.
+
+Both pieces are intentional: `instrumentation.ts` starts an SDK/exporter, while `observability.tracing` tells Farm to create framework spans. Without an SDK, the OpenTelemetry API remains a no-op.
+
+## What Farm traces
+
+| Span                                      | Meaning                                                                       |
+| ----------------------------------------- | ----------------------------------------------------------------------------- |
+| `GET /products/:id`                       | Server request span with method, route, path, status, and propagated context. |
+| `farm.render /products/:id`               | Completed page render.                                                        |
+| `farm.middleware auth`                    | Completed middleware execution.                                               |
+| `farm.api POST /api/products`             | Completed API route execution.                                                |
+| `farm.integration stripe.checkout.create` | Completed integration operation when that event is emitted.                   |
+| `farm.storage query`                      | Completed integration database operation when that event is emitted.          |
+| `farm.ppr.refresh /dashboard`             | Completed PPR refresh.                                                        |
+| `farm.plugin plugin.hook`                 | Completed plugin hook when that event is emitted.                             |
+
+Incoming W3C `traceparent` headers are extracted automatically. A matched Farm route renames the request span from the raw pathname to the route pattern and sets `http.route`. Status codes of 500 or higher and thrown errors mark spans as errors.
+
+To wrap application work in a typed Farm-aware child span:
+
+```ts
+import { runWithFarmSpan } from "@farm.js/core/observability";
+
+const result = await runWithFarmSpan(
+  "catalog.recommendations",
+  () => loadRecommendations(productId),
+  {
+    kind: "integration",
+    attributes: { "product.id": productId },
+  },
+);
+```
+
+Use `getFarmTraceContext()` when a log or provider call needs the current trace and span IDs.
+
+## Instrumentation lifecycle
+
+Farm calls `register(context)` once before the development server or production request runtime starts. The context contains:
+
+- `mode`: `development`, `production`, or `test`
+- `runtime`: `nodejs`, `edge`, or `bun`
+- `root`: the runtime working directory
+
+`register` may return a cleanup function or an object with `shutdown()`. An exported `shutdown()` function is also supported. Farm runs cleanup during development server close and production graceful shutdown, after active requests drain, so batched spans are flushed before the process exits.
+
+Keep Node-only SDK imports inside the `runtime === "nodejs"` branch. Edge and Bun deployments can initialize a runtime-compatible OpenTelemetry SDK in their own branch without changing Farm's tracing API.
 
 ## Subscribe to events
 
@@ -26,6 +126,7 @@ onFarmEvent((event) => {
 
 | Family               | Examples                                                                         |
 | -------------------- | -------------------------------------------------------------------------------- |
+| Request              | request.start, request.complete, request.error                                   |
 | Server               | server.start, server.ready, server.shutdown                                      |
 | Routing              | route.discovered, route.matched, route.notFound, route.redirect                  |
 | Rendering            | render.start, render.complete, render.stream.shellReady, render.error            |
@@ -48,6 +149,7 @@ import { defineConfig } from "@farm.js/core";
 export default defineConfig({
   observability: {
     logs: true,
+    tracing: true,
     events: ["cache.hit", "cache.miss", "ppr.shell.cached"],
     onEvent(event) {
       if (event.type === "cache.miss") {
@@ -58,7 +160,7 @@ export default defineConfig({
 });
 ```
 
-`events` is optional. Leave it out to receive every emitted event.
+`events` is optional. Leave it out to receive every emitted event. Filtering event delivery does not disable span creation or the events recorded on active spans.
 
 ## Runtime subscription
 
@@ -116,7 +218,10 @@ export default defineConfig({
 
 ## Production notes
 
+- Keep `@farm.js/otel` in `dependencies`, not `devDependencies`, so it is available in the deployed server bundle.
+- Set `OTEL_SERVICE_NAME` or pass `serviceName` explicitly; use deployment/version resource attributes for release comparisons.
+- Farm's production lifecycle waits for active requests and then shuts down instrumentation, allowing the batch processor to flush.
 - Filter high-volume events before shipping them to a log drain.
-- Attach request IDs in middleware so event streams can be correlated.
+- Use the emitted trace and span IDs to correlate Farm events with application logs.
 - Treat event payloads as operational metadata; do not put secrets in event fields.
 - Watch `api.validation.failed`, `integration.webhook.failed`, `cache.error`, and `ppr.refresh.error` in production.

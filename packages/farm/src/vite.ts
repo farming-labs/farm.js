@@ -1,4 +1,4 @@
-import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext } from "vite";
+import type { ConfigEnv, Plugin, UserConfig, ViteDevServer, HmrContext, Connect } from "vite";
 import type { FarmConfig } from "./types";
 import { FarmApp } from "./app";
 import { logger, toViteModuleId } from "./utils";
@@ -73,6 +73,7 @@ import {
 } from "./server-http";
 import { createCliColors } from "./cli-colors";
 import { createFarmThemeCssPlugin } from "./theme/vite";
+import { emitFarmEvent, runWithFarmRequestSpan } from "./observability";
 
 interface FarmVitePluginOptions extends FarmConfig {
   openapi?: FarmUserConfig["openapi"];
@@ -242,6 +243,19 @@ function createRequestFromNodeRequest(
     method: req.method || "GET",
     headers,
   });
+}
+
+function withFarmRequestTracing(
+  handler: Parameters<typeof _withAfterNodeMiddleware>[0],
+): Connect.NextHandleFunction {
+  const middleware = _withAfterNodeMiddleware(handler);
+  return (req, res, next) => {
+    const traceUrl = new URL(`http://${req.headers.host || "localhost:3000"}${req.url || "/"}`);
+    const traceRequest = createRequestFromNodeRequest(req, traceUrl);
+    return runWithFarmRequestSpan(traceRequest, () => middleware(req, res, next), {
+      getStatusCode: () => res.statusCode || 200,
+    });
+  };
 }
 
 function toRequestBody(body: Buffer | undefined): ArrayBuffer | undefined {
@@ -1107,7 +1121,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
 
       // Register middleware directly (not in return function) to ensure it runs early
       server.middlewares.use(
-        _withAfterNodeMiddleware(async (req, res, next) => {
+        withFarmRequestTracing(async (req, res, next) => {
           const requestUrl = req.url || "/";
           const requestMethod = req.method || "GET";
           const fullUrl = `http://${req.headers.host || "localhost:3000"}${requestUrl}`;
@@ -1504,6 +1518,21 @@ window.__FARM_MANIFEST__ = ${inlineValue({
             const hasExplicitAPIRoute =
               hasMatchedApiRoute || Boolean(apiRouteManager.matchRoute(pathname));
             if (apiHandler && hasExplicitAPIRoute) {
+              const apiRoutePattern =
+                matchedApiRoute?.route.path ||
+                apiRouteManager.matchRoute(pathname)?.route.path ||
+                urlPath;
+              emitFarmEvent({
+                type: "route.matched",
+                pathname,
+                route: apiRoutePattern,
+              });
+              emitFarmEvent({
+                type: "api.request.start",
+                pathname,
+                route: apiRoutePattern,
+                method,
+              });
               try {
                 // Convert Node.js request to Web Request
                 const url = `http://${req.headers.host || "localhost:3000"}${req.url}`;
@@ -1529,10 +1558,7 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                 const apiLifecyclePayload = {
                   pathname: new URL(url).pathname,
                   method,
-                  routePath:
-                    apiRouteManager.matchRoute(new URL(url).pathname)?.route.path ||
-                    matchedApiRoute?.route.path ||
-                    urlPath,
+                  routePath: apiRoutePattern,
                 };
                 const invokeAPIHandler = async (runtimeRequest: Request) => {
                   const handledRequest: Request = pm
@@ -1559,14 +1585,32 @@ window.__FARM_MANIFEST__ = ${inlineValue({
                   : await invokeAPIHandler(request);
 
                 const duration = Date.now() - startTime;
+                emitFarmEvent({
+                  type: "api.request.complete",
+                  pathname,
+                  route: apiRoutePattern,
+                  method,
+                  status: handledResponse.status,
+                  durationMs: duration,
+                });
                 logResponse(method, urlPath, handledResponse.status, duration, "API");
 
                 // Send response
                 await sendWebResponse(res, handledResponse);
                 return;
               } catch (error) {
+                const duration = Date.now() - startTime;
+                emitFarmEvent({
+                  type: "api.error",
+                  pathname,
+                  route: apiRoutePattern,
+                  method,
+                  durationMs: duration,
+                  error,
+                });
                 const bodyErrorResponse = createFarmRequestBodyErrorResponse(error);
                 if (bodyErrorResponse) {
+                  logResponse(method, urlPath, bodyErrorResponse.status, duration, "API");
                   await sendWebResponse(res, bodyErrorResponse);
                   return;
                 }

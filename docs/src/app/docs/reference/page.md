@@ -10,21 +10,24 @@ A compact map of the main package exports and where to learn more.
 
 ## Core exports
 
-| Export area                 | What it covers                                                                       |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| @farm.js/core               | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
-| @farm.js/core/client        | Link, router helpers, callable route actions, API client, integration client.        |
-| @farm.js/core/plugin/client | Advanced browser lifecycle manager and client plugin event types.                    |
-| @farm.js/core/navigation    | Next-compatible redirect, notFound, and client navigation hooks.                     |
-| @farm.js/core/headers       | Next-compatible request headers and cookies helpers.                                 |
-| @farm.js/core/router        | Lightweight route matching, href building, and active-route checks.                  |
-| @farm.js/core/query         | Query and route param types.                                                         |
-| @farm.js/core/storage       | Key/value clients, drivers, mounts, and `getStorage()`.                              |
-| @farm.js/core/cache         | Data cache, revalidation, cache keys.                                                |
-| @farm.js/cache-redis        | Distributed Redis cache, tag versions, and regeneration leases.                      |
-| @farm.js/core/after         | Post-response server work with `after()`.                                            |
-| @farm.js/core/cron          | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
-| @farm.js/integrations       | Auth, billing, email, jobs, AI, API keys, provider clients.                          |
+| Export area                   | What it covers                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------ |
+| @farm.js/core                 | Config, app types, plugins, integrations, routing, OpenAPI, docs, cache.             |
+| @farm.js/core/client          | Link, router helpers, callable route actions, API client, integration client.        |
+| @farm.js/core/plugin/client   | Advanced browser lifecycle manager and client plugin event types.                    |
+| @farm.js/core/navigation      | Next-compatible redirect, notFound, and client navigation hooks.                     |
+| @farm.js/core/headers         | Next-compatible request headers and cookies helpers.                                 |
+| @farm.js/core/router          | Lightweight route matching, href building, and active-route checks.                  |
+| @farm.js/core/query           | Query and route param types.                                                         |
+| @farm.js/core/storage         | Key/value clients, drivers, mounts, and `getStorage()`.                              |
+| @farm.js/core/cache           | Data cache, revalidation, cache keys.                                                |
+| @farm.js/cache-redis          | Distributed Redis cache, tag versions, and regeneration leases.                      |
+| @farm.js/core/after           | Post-response server work with `after()`.                                            |
+| @farm.js/core/cron            | Cron route authorization, schedule types, manifests, and deployment adapter helpers. |
+| @farm.js/core/observability   | Farm events, request tracing, custom spans, and active trace context.                |
+| @farm.js/core/instrumentation | Startup and shutdown convention types for development and production runtimes.       |
+| @farm.js/otel                 | Optional Node OpenTelemetry SDK, OTLP exporter, and auto-instrumentation setup.      |
+| @farm.js/integrations         | Auth, billing, email, jobs, AI, API keys, provider clients.                          |
 
 ## Recommended reading path
 

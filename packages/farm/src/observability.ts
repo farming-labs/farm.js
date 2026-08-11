@@ -1,3 +1,20 @@
+import {
+  _runWithFarmRequestSpan,
+  configureFarmTracing,
+  getFarmTraceContext,
+  normalizeFarmTracingConfig,
+  recordFarmEventTrace,
+  resetFarmTracing,
+  runWithFarmSpan,
+  type FarmRequestSpanOptions,
+  type FarmResolvedTracingConfig,
+  type FarmSpanOptions,
+  type FarmTraceContext,
+  type FarmTraceSpanKind,
+  type FarmTracingConfig,
+  type FarmTracingUserConfig,
+} from "./tracing";
+
 export type FarmEventLevel = "debug" | "info" | "warn" | "error";
 
 export interface FarmEventBase {
@@ -5,9 +22,29 @@ export interface FarmEventBase {
   timestamp: number;
   level: FarmEventLevel;
   requestId?: string;
+  traceId?: string;
+  spanId?: string;
+  traceSampled?: boolean;
   route?: string;
   pathname?: string;
 }
+
+export type FarmRequestEvent =
+  | (FarmEventBase & { type: "request.start"; method: string; pathname: string })
+  | (FarmEventBase & {
+      type: "request.complete";
+      method: string;
+      pathname: string;
+      status: number;
+      durationMs: number;
+    })
+  | (FarmEventBase & {
+      type: "request.error";
+      method: string;
+      pathname: string;
+      durationMs: number;
+      error: unknown;
+    });
 
 export type FarmServerEvent =
   | (FarmEventBase & {
@@ -130,7 +167,13 @@ export type FarmAPIEvent =
       method: string;
       issues?: unknown;
     })
-  | (FarmEventBase & { type: "api.error"; route: string; method: string; error: unknown });
+  | (FarmEventBase & {
+      type: "api.error";
+      route: string;
+      method: string;
+      durationMs: number;
+      error: unknown;
+    });
 
 export type FarmIntegrationEvent =
   | (FarmEventBase & { type: "integration.registered"; name: string })
@@ -217,6 +260,7 @@ export type FarmErrorEvent = FarmEventBase & {
 };
 
 export type FarmEvent =
+  | FarmRequestEvent
   | FarmServerEvent
   | FarmRouteEvent
   | FarmRenderEvent
@@ -245,33 +289,37 @@ export type FarmObservabilityUserConfig =
       logs?: boolean;
       onEvent?: FarmEventHandler | readonly FarmEventHandler[];
       events?: readonly FarmEventType[];
+      tracing?: FarmTracingUserConfig;
     };
 
 export interface FarmResolvedObservabilityConfig {
   logs: boolean;
   handlers: FarmEventHandler[];
   events?: Set<FarmEventType>;
+  tracing: FarmResolvedTracingConfig;
 }
 
 const runtimeHandlers = new Set<FarmEventHandler>();
 let observabilityState: FarmResolvedObservabilityConfig = {
   logs: false,
   handlers: [],
+  tracing: normalizeFarmTracingConfig(false),
 };
 
 export function configureFarmObservability(config: FarmObservabilityUserConfig | undefined): void {
   observabilityState = normalizeFarmObservabilityConfig(config);
+  configureFarmTracing(observabilityState.tracing);
 }
 
 export function normalizeFarmObservabilityConfig(
   config: FarmObservabilityUserConfig | undefined,
 ): FarmResolvedObservabilityConfig {
   if (config === undefined || config === false) {
-    return { logs: false, handlers: [] };
+    return { logs: false, handlers: [], tracing: normalizeFarmTracingConfig(false) };
   }
 
   if (config === true) {
-    return { logs: true, handlers: [] };
+    return { logs: true, handlers: [], tracing: normalizeFarmTracingConfig(false) };
   }
 
   const handlers = config.onEvent
@@ -284,6 +332,7 @@ export function normalizeFarmObservabilityConfig(
     logs: config.logs ?? false,
     handlers,
     events: config.events ? new Set(config.events) : undefined,
+    tracing: normalizeFarmTracingConfig(config.tracing),
   };
 }
 
@@ -299,7 +348,9 @@ export function resetFarmObservability(): void {
   observabilityState = {
     logs: false,
     handlers: [],
+    tracing: normalizeFarmTracingConfig(false),
   };
+  resetFarmTracing();
 }
 
 export function emitFarmEvent(input: FarmEventInput): FarmEvent {
@@ -308,6 +359,13 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
     level: inferFarmEventLevel(input.type),
     ...input,
   } as FarmEvent;
+
+  const traceContext = recordFarmEventTrace(event);
+  if (traceContext) {
+    event.traceId = traceContext.traceId;
+    event.spanId = traceContext.spanId;
+    event.traceSampled = traceContext.traceSampled;
+  }
 
   if (!shouldEmitFarmEvent(event)) {
     return event;
@@ -329,6 +387,53 @@ export function emitFarmEvent(input: FarmEventInput): FarmEvent {
 
   return event;
 }
+
+export async function runWithFarmRequestSpan<T>(
+  request: Request,
+  handler: () => T | Promise<T>,
+  options: FarmRequestSpanOptions = {},
+): Promise<T> {
+  const url = new URL(request.url);
+  const method = request.method || "GET";
+  return await _runWithFarmRequestSpan(request, handler, {
+    ...options,
+    onStart() {
+      emitFarmEvent({ type: "request.start", method, pathname: url.pathname });
+      options.onStart?.();
+    },
+    onComplete(status, durationMs) {
+      emitFarmEvent({
+        type: "request.complete",
+        method,
+        pathname: url.pathname,
+        status,
+        durationMs,
+      });
+      options.onComplete?.(status, durationMs);
+    },
+    onError(error, durationMs) {
+      emitFarmEvent({
+        type: "request.error",
+        method,
+        pathname: url.pathname,
+        durationMs,
+        error,
+      });
+      options.onError?.(error, durationMs);
+    },
+  });
+}
+
+export { configureFarmTracing, getFarmTraceContext, normalizeFarmTracingConfig, runWithFarmSpan };
+export type {
+  FarmRequestSpanOptions,
+  FarmResolvedTracingConfig,
+  FarmSpanOptions,
+  FarmTraceContext,
+  FarmTraceSpanKind,
+  FarmTracingConfig,
+  FarmTracingUserConfig,
+};
 
 function shouldEmitFarmEvent(event: FarmEvent): boolean {
   if (
