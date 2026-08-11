@@ -49,9 +49,9 @@
     "release:canary": "bumpp --preid canary && pnpm run release:prepare && pnpm run publish:canary",
     "publish:dry-run": "pnpm -r --filter \"./packages/*\" publish --dry-run --access public --tag beta --publish-branch main",
     "publish:latest": "pnpm -r --filter \"./packages/*\" publish --access public --tag latest --publish-branch main",
-    "publish:beta": "pnpm -r --filter \"./packages/*\" publish --access public --tag beta --publish-branch main && pnpm run dist-tags:promote-create-app-beta",
+    "publish:beta": "pnpm -r --filter \"./packages/*\" publish --access public --tag beta --publish-branch main && pnpm run dist-tags:promote-betas",
     "publish:canary": "pnpm -r --filter \"./packages/*\" publish --access public --tag canary --publish-branch main",
-    "dist-tags:promote-create-app-beta": "node scripts/promote-create-app-beta.js"
+    "dist-tags:promote-betas": "node scripts/promote-betas.js"
   },
   "dependencies": {
     "@rollup/plugin-terser": "^0.4.4",
