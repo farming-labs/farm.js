@@ -26,6 +26,16 @@ published `@farm.js/create-app` package. The scaffolder installs React and all o
 dependencies automatically. Use `--skip-install` if you only want it to generate the project
 files.
 
+React is the default renderer. The Basic starter can instead use Solid or Vue:
+
+```bash
+pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
+```
+
+See [Renderers](/docs/renderers) before choosing an adapter. Integration starters currently use
+React because their generated UI and provider packages are React-oriented.
+
 ## Choose a starter
 
 Use `--list-templates` to see the same catalog in the terminal. Provider templates include the
@@ -61,12 +71,15 @@ The generated README lists the required environment values and links to the prov
 ## What you get
 
 - File-based routes in src/app.
-- React rendering with pages, layouts, loading, error, and not-found boundaries.
-- Typed Link hrefs generated from the route tree.
+- Renderer-owned pages, layouts, loading, error, and not-found boundaries.
+- Route types generated from the route tree.
 - API routes and a generated client for api.users.get style calls.
 - Deployment output powered by Farm config instead of extra root files.
 
 ## Your first page
+
+The default starter uses React. Solid and Vue projects should follow their dedicated
+[renderer guide](/docs/renderers) for the equivalent component file.
 
 **src/app/page.tsx**
 
@@ -179,6 +192,7 @@ Use `farm add integration better-auth --ui` instead when the application needs t
 ## Next steps
 
 - Read Project Structure when you want the compact file layout.
+- Read Renderers when choosing React, Solid, or Vue for the component layer.
 - Read Routing and Layouts when you start nesting pages.
 - Read API Routes and API Client when you need typed server/client calls.
 - Read Integrations when provider features should be packaged instead of copied route-by-route.

@@ -8,6 +8,10 @@ section: "Core"
 
 Wrap routes with root and nested layouts, then use loading, error, and not-found files for route-level UX.
 
+The examples below use the default React renderer. Solid uses the equivalent `.tsx` files, while
+Vue uses `.vue` files and exposes layout children through `<slot />`. See
+[Renderers](/docs/renderers) for renderer-specific conventions.
+
 ## Root layout
 
 **src/app/layout.tsx**
@@ -47,9 +51,11 @@ export default function DashboardLayout({ children }: LayoutProps) {
 
 ## Route boundaries
 
-- loading.tsx provides pending UI for a route segment.
-- error.tsx catches render failures in that segment.
-- not-found.tsx renders when the route intentionally returns a 404.
+- `loading.*` provides pending UI for a route segment.
+- `error.*` catches render failures in that segment.
+- `not-found.*` renders when the route intentionally returns a 404.
+
+The extension follows the selected renderer: `.tsx`/`.jsx` for React or Solid, and `.vue` for Vue.
 
 ## Loading UI
 

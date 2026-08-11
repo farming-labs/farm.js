@@ -148,6 +148,16 @@ const sidebar = [
     icon: "box",
     children: [
       { label: "Routing", slug: "routing", icon: "route" },
+      {
+        label: "Renderers",
+        icon: "layout",
+        children: [
+          { label: "Overview", slug: "renderers", icon: "layout" },
+          { label: "React", slug: "renderers/react", icon: "code" },
+          { label: "Solid", slug: "renderers/solid", icon: "code" },
+          { label: "Vue", slug: "renderers/vue", icon: "code" },
+        ],
+      },
       { label: "Internationalization", slug: "internationalization", icon: "languages" },
       { label: "Layouts", slug: "layouts", icon: "layout" },
       { label: "Rendering Model", slug: "server-rendering", icon: "monitor" },

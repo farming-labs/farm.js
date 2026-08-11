@@ -8,6 +8,10 @@ section: "Core"
 
 Farm uses an app directory routing model with static routes, dynamic segments, catch-all routes, and typed navigation.
 
+The examples on this page use the default React renderer. Solid uses `.tsx`/`.jsx` route files and
+Vue uses `.vue` route files. The route tree and server contracts stay the same; see
+[Renderers](/docs/renderers) for component conventions and feature compatibility.
+
 ## File routes
 
 | File                            | URL           |
@@ -18,9 +22,12 @@ Farm uses an app directory routing model with static routes, dynamic segments, c
 | src/app/blog/[slug]/page.tsx    | /blog/:slug   |
 | src/app/docs/[...slug]/page.tsx | /docs/:slug\* |
 
+With Vue, the same routes use names such as `src/app/page.vue` and
+`src/app/blog/[slug]/page.vue`.
+
 ## Named slots and intercepted routes
 
-An `@name` directory gives its owning layout another React node alongside `children`. Use slots
+An `@name` directory gives its owning layout another rendered node alongside `children`. Use slots
 for independently composed areas such as activity panels, drawers, and modals. The slot name and
 interception marker never become part of the public URL.
 
@@ -624,6 +631,10 @@ This creates `/`, `/dashboard`, `/dashboard/settings`, `/blog/:slug`, and `/docs
 
 Use `page.md` or `page.mdx` for static content routes. They behave like app pages, participate in layouts, and get route types.
 
+Markdown/MDX visual routes currently use the React content renderer. Solid and Vue applications can
+still serve renderer-neutral API content or ordinary static assets, but should use renderer-owned
+component pages for visual routes.
+
 **src/app/about/page.mdx**
 
 ```mdx
@@ -769,6 +780,9 @@ Static images inside a dynamic segment are shared by every concrete route. Use a
 
 ### Generated metadata images
 
+Generated JSX metadata images currently use the React image renderer. Every renderer can use static
+`opengraph-image.png`, `twitter-image.png`, and explicit metadata image URLs.
+
 Place `opengraph-image.tsx` or `twitter-image.tsx` next to a route segment when the image needs data or route params. Return ordinary stateless JSX: Farm owns the image endpoint and PNG renderer, so the component does not import `ImageResponse` or declare an API URL. Farm also adds the nearest matching image to the page head when `openGraph.images` or `twitter.images` is not already set.
 
 **src/app/products/[id]/opengraph-image.tsx**
@@ -824,7 +838,10 @@ Keep only one implementation for each image kind in a segment. For example, defi
 
 ## File Route States
 
-Use `loading.tsx` and `error.tsx` next to a file route to define route-local loading and error states. Farm picks the nearest matching boundary, so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard pages unless a deeper segment defines its own boundary.
+Use `loading.*` and `error.*` next to a file route to define route-local loading and error states.
+Use `.tsx`/`.jsx` with React or Solid and `.vue` with Vue. Farm picks the nearest matching boundary,
+so `src/app/dashboard/error.tsx` handles `/dashboard` and nested dashboard pages unless a deeper
+segment defines its own boundary.
 
 ```txt
 src/app/

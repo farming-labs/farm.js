@@ -11,8 +11,9 @@ the homepage comparison: Next.js, SvelteKit, Nuxt, and TanStack Start.
 
 ## Choose a source
 
-Two sources have dry-run-first CLI migrators. Nuxt and SvelteKit require a manual migration because
-their Vue and Svelte components must be rewritten as React components.
+Two sources have dry-run-first CLI migrators. Nuxt and SvelteKit still require a manual migration.
+Nuxt applications can retain Vue SFCs through `@farm.js/vue`, while Svelte components currently
+need to move to one of the supported renderers.
 
 | Source                                      | Migration type | Coverage                                                                                |
 | ------------------------------------------- | -------------- | --------------------------------------------------------------------------------------- |
@@ -60,7 +61,7 @@ For Nuxt and SvelteKit, use the source guide as a checklist:
 1. Create a minimal Farm shell next to the existing source.
 2. Reproduce the route tree with Farm page, layout, and API route files.
 3. Move one vertical feature at a time, including its data access and mutations.
-4. Rewrite Vue or Svelte components as React components instead of mechanically renaming files.
+4. Select a FARMJS renderer and adapt framework-specific components and client APIs deliberately.
 5. Verify routing, server rendering, forms, APIs, middleware, environment variables, and deployment.
 6. Remove the previous framework only after the Farm build behaves the same in production.
 

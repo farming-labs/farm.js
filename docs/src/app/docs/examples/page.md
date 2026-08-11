@@ -15,6 +15,8 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/basic                  | Core routing, layouts, deployment config, markdown mirrors, PPR, and framework Cron.            |
 | examples/deployment-presets     | Vercel, Cloudflare Pages, Netlify, self-hosted Node, and direct Nitro preset deployment output. |
 | examples/ssr-ssg-demo           | SSR, SSG, ISR, API routes, middleware.                                                          |
+| examples/solid-renderer         | Solid TSX routes, SSR, hydration, signals, and a typed FARMJS server call.                      |
+| examples/vue-renderer           | Vue SFC routes, SSR, hydration, refs, and a typed FARMJS server call.                           |
 | examples/i18n                   | Typed ICU messages, locale routing, detection, client switching, API context, and RTL.          |
 | examples/docs-integration       | Docs runtime and /api/docs machine routes.                                                      |
 | examples/stripe-integration     | Stripe checkout, portal, session, webhooks.                                                     |
@@ -40,6 +42,7 @@ pnpm --dir examples/basic dev
 | Example type         | Things to click/test                                                                                           |
 | -------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Basic routing        | Navigation, route params, layouts, and route config exports.                                                   |
+| Renderer adapters    | Server HTML, hydration, native client state, and the typed greeting server call.                               |
 | API routes           | Typed callers, validation errors, success responses, and generated types.                                      |
 | Docs integration     | `/docs`, markdown mirrors, docs API routes, page actions, and search.                                          |
 | Stripe               | Products, checkout redirect, portal redirect, session/status reads, and webhook handling.                      |

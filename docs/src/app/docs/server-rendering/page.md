@@ -10,6 +10,10 @@ Choose dynamic rendering, static rendering, ISR, or PPR with route-level exports
 
 Rendering controls decide when HTML is produced. [Route Runtime](/docs/route-runtime) separately decides where a dynamic page or API handler executes and how deployment limits are applied.
 
+Dynamic rendering, static rendering, and revalidation apply to every renderer. The component
+examples below use React; see [Renderers](/docs/renderers) for Solid and Vue conventions and the
+features that remain React-specific.
+
 ## Rendering options
 
 | Mode    | How to opt in                                  | Best for                                |
@@ -129,6 +133,10 @@ export default function DashboardPage() {
 
 ## Deferred route islands
 
+The route-level hydration strategy is shared by renderer adapters. The current nested Client
+Component analysis described below is React-specific; Solid and Vue currently hydrate at the route
+boundary selected by their adapter.
+
 Client routes and server routes that import a client boundary can defer their JavaScript while Farm
 keeps the server-rendered HTML visible. Add an optional static `island` export to the client module:
 
@@ -175,6 +183,9 @@ route loader) and render the `"use client"` component from there, or enable expe
 components support.
 
 ## Automatic optimized boundaries
+
+Automatic optimized boundaries are a React-only experiment and are not applied to Solid or Vue
+routes.
 
 Farm can experimentally render large, non-interactive Server Component regions through the native
 Strata renderer. Enable the flag once in `farm.config.ts`:

@@ -12,6 +12,8 @@ Use the Farm CLI to run, build, generate types, migrate apps, deploy output, and
 
 ```bash
 pnpm create @farm.js/app@beta my-app --template basic --typescript
+pnpm create @farm.js/app@beta my-solid-app --template basic --renderer solid --typescript
+pnpm create @farm.js/app@beta my-vue-app --template basic --renderer vue --typescript
 pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
 pnpm create @farm.js/app@beta --list-templates
 ```
@@ -19,6 +21,10 @@ pnpm create @farm.js/app@beta --list-templates
 The create-app CLI includes Basic, Farm.js Auth, Better Auth, and one ready-to-configure starter
 for every provider supported by `farm add integration --ui`. See [Getting Started](/docs/getting-started#choose-a-starter)
 for the complete template catalog.
+
+React is the default renderer. `--renderer solid` and `--renderer vue` are available with the Basic
+starter; integration starters currently target React. See [Renderers](/docs/renderers) for setup and
+feature compatibility.
 
 ## Common commands
 

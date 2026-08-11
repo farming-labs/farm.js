@@ -18,8 +18,8 @@ A Farm app can be as small as src, farm.config.ts, package.json, and tsconfig.js
 my-app/
   src/
     app/
-      layout.tsx
-      page.tsx
+      layout.tsx # layout.vue with the Vue renderer
+      page.tsx   # page.vue with the Vue renderer
   farm.config.ts
   package.json
   tsconfig.json
@@ -43,16 +43,19 @@ Use vite.config.ts only when you need custom Vite behavior. Use platform files o
 
 ## Route files
 
-| File                   | Used for                                   |
-| ---------------------- | ------------------------------------------ |
-| `page.tsx`             | The route UI.                              |
-| `page.md` / `page.mdx` | Markdown-first static app pages.           |
-| `layout.tsx`           | Shared shell for every child segment.      |
-| `loading.tsx`          | Pending UI for async route work.           |
-| `error.tsx`            | Segment-level error UI.                    |
-| `not-found.tsx`        | Segment-level 404 UI.                      |
-| `middleware.ts`        | Request behavior before the route renders. |
-| `route.ts`             | API handlers for the current URL segment.  |
+| File                                       | Used for                                   |
+| ------------------------------------------ | ------------------------------------------ |
+| `page.tsx` / `page.jsx` / `page.vue`       | The route UI for the selected renderer.    |
+| `page.md` / `page.mdx`                     | React-oriented Markdown-first app pages.   |
+| `layout.tsx` / `layout.jsx` / `layout.vue` | Shared shell for every child segment.      |
+| `loading.*`                                | Pending UI for async route work.           |
+| `error.*`                                  | Segment-level error UI.                    |
+| `not-found.*`                              | Segment-level 404 UI.                      |
+| `middleware.ts`                            | Request behavior before the route renders. |
+| `route.ts`                                 | API handlers for the current URL segment.  |
+
+Use `.tsx` or `.jsx` with React and Solid, and `.vue` with Vue. See
+[Renderers](/docs/renderers) for renderer-specific conventions and current feature boundaries.
 
 ## Recommended app layout
 
@@ -88,7 +91,9 @@ Reusable product areas can live under `layers/<name>` with their own optional `f
 
 ## HTML-first client lifecycle
 
-Add `src/client.ts` when server-rendered HTML needs small browser enhancements without turning a page or layout into a hydrated React tree. Farm discovers the file at build time, includes it in the existing client runtime, and invokes it on the initial document and fragment navigations.
+Add `src/client.ts` when server-rendered HTML needs small browser enhancements without turning a
+page or layout into a hydrated component tree. Farm discovers the file at build time, includes it in
+the existing client runtime, and invokes it on the initial document and fragment navigations.
 
 ```ts
 import { defineClient } from "@farm.js/core/client/lifecycle";
@@ -113,7 +118,10 @@ export default defineClient({
 });
 ```
 
-The entry is ordinary typed TypeScript, not an inline script string. It does not hydrate React unless the application imports and mounts React itself. Serializable values in `publicRuntimeConfig` are provided as the typed `public` field of `setup`, so environment-derived public endpoints can stay in `farm.config.ts`.
+The entry is ordinary typed TypeScript, not an inline script string. It does not hydrate the selected
+renderer unless the application imports and mounts that renderer itself. Serializable values in
+`publicRuntimeConfig` are provided as the typed `public` field of `setup`, so environment-derived
+public endpoints can stay in `farm.config.ts`.
 
 ## Generated files
 
@@ -127,7 +135,8 @@ Farm keeps project-specific route, environment, and internationalization declara
 farm generate
 ```
 
-Generated route types make `Link` stricter, and generated API types make `api.hello.post(...)` match the route's body and query schemas.
+Generated route types narrow route component props and make the React `Link` API stricter. Generated
+API types make `api.hello.post(...)` match the route's body and query schemas in every renderer.
 
 ## When to add root files
 

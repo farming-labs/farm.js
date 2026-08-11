@@ -27,12 +27,14 @@ A compact map of the main package exports and where to learn more.
 | @farm.js/core/observability   | Farm events, request tracing, custom spans, and active trace context.                |
 | @farm.js/core/instrumentation | Startup and shutdown convention types for development and production runtimes.       |
 | @farm.js/otel                 | Optional Node OpenTelemetry SDK, OTLP exporter, and auto-instrumentation setup.      |
+| @farm.js/solid                | Solid renderer descriptor, SSR runtime, browser hydration, and Vite integration.     |
+| @farm.js/vue                  | Vue renderer descriptor, SFC compilation, SSR runtime, and browser hydration.        |
 | @farm.js/integrations         | Auth, billing, email, jobs, AI, API keys, provider clients.                          |
 
 ## Recommended reading path
 
 1. Start with Getting Started and Project Structure.
-2. Read Routing, Layouts, and Rendering Model.
+2. Choose a renderer, then read Routing, Layouts, and Rendering Model.
 3. Add API Routes, API Client, and Query.
 4. Choose integrations, KV storage, and database ownership once your product needs them.
 5. Finish with Deployment, Observability, and Reference.

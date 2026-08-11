@@ -43,7 +43,9 @@ export default defineConfig({
 
 React remains the default renderer, so existing applications and configurations do not need to
 change. Select another renderer when you want to author the UI with that library while keeping
-FARMJS routing and server features.
+FARMJS routing and server features. See [Renderers](/docs/renderers) for the feature matrix and
+dedicated [React](/docs/renderers/react), [Solid](/docs/renderers/solid), and
+[Vue](/docs/renderers/vue) guides.
 
 ### Vue
 
@@ -75,6 +77,9 @@ FARMJS compiles the SFCs with Vue's Vite plugin, renders them with `createSSRApp
 Vue's default `<slot />`. See the [Vue server-rendering guide](https://vuejs.org/guide/scaling-up/ssr)
 for Vue-specific SSR constraints.
 
+See [Vue Renderer](/docs/renderers/vue) for SFC route exports, hydration, typed server calls, and
+current compatibility boundaries.
+
 Create a ready-to-run Vue application from the CLI:
 
 ```bash
@@ -102,6 +107,9 @@ The renderer controls component compilation, server rendering, and browser hydra
 to own routing, layouts, API routes, middleware, data access, observability, and deployment, so those
 server features use the same APIs with every renderer. UI code uses the selected library's native
 primitives—for example, Solid signals instead of React hooks.
+
+See [Solid Renderer](/docs/renderers/solid) for route conventions, client boundaries, typed server
+calls, and current compatibility boundaries.
 
 Create a ready-to-run Solid application directly from the CLI:
 
