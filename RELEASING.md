@@ -21,7 +21,9 @@ pnpm release:beta
 ```
 
 Bumpp uses `beta` as the prerelease identifier, then pnpm publishes every package with the
-`beta` tag.
+`beta` tag. After every package is published successfully, the release promotes each current
+beta to npm's `latest` tag so unqualified installs receive the newest beta. If a package already
+has a stable `latest` version, the stable tag is preserved.
 
 ## Canary release
 
@@ -49,6 +51,13 @@ current version directly:
 pnpm publish:latest
 pnpm publish:beta
 pnpm publish:canary
+```
+
+If every beta package was published but updating the `latest` tags failed, retry only the
+promotion step instead of publishing again:
+
+```bash
+pnpm dist-tags:promote-betas
 ```
 
 Before releasing, authenticate with npm and confirm that your account can publish public
