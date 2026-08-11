@@ -4,6 +4,7 @@
  */
 
 import type { FarmIslandStrategy } from "../island";
+import type { FarmRouteRenderPlan } from "../navigation/render-plan";
 
 /**
  * A tag to be rendered in the HTML (script, link, meta, etc.)
@@ -30,6 +31,8 @@ export interface RouteManifestEntry {
   shouldHydrate?: boolean;
   /** When Farm should import and hydrate this route boundary */
   islandStrategy?: FarmIslandStrategy | null;
+  /** Build-time HTML navigation and hydration decision. */
+  renderPlan?: FarmRouteRenderPlan;
   /** Route pattern (for client-side matching) */
   pattern: string;
   /** Serializable route search behavior for browser navigation. */
@@ -59,6 +62,10 @@ export interface LayoutManifestEntry {
   preloads?: string[];
   /** Assets */
   assets?: RouterManagedTag[];
+  /** Whether this layout owns a client hydration boundary. */
+  shouldHydrate?: boolean;
+  /** Hydration schedule for an interactive layout. */
+  islandStrategy?: FarmIslandStrategy | null;
 }
 
 /**
@@ -94,11 +101,15 @@ export interface DehydratedManifest {
       | "isClientComponent"
       | "shouldHydrate"
       | "islandStrategy"
+      | "renderPlan"
       | "search"
     >
   >;
   /** All layouts (for navigation) */
-  allLayouts: Record<string, Pick<LayoutManifestEntry, "modulePath" | "pattern">>;
+  allLayouts: Record<
+    string,
+    Pick<LayoutManifestEntry, "modulePath" | "pattern" | "shouldHydrate" | "islandStrategy">
+  >;
   /** Shared assets */
   sharedAssets?: RouterManagedTag[];
   /** Client entry */

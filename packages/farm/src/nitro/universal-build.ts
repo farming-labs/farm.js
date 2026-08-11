@@ -62,9 +62,11 @@ import { adaptTailwindVitePlugin } from "../build/vite-plugin-compat";
 import { mergeFarmFontCss } from "../font-vite";
 import type { FarmIslandStrategy } from "../island";
 import { createFarmSourceAlias } from "../server/vite-config";
-import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found";
+import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
 import { createFarmThemeCssPlugin } from "../theme/vite";
 import { resolveFarmInstrumentationFile } from "../instrumentation";
+import { isReactRenderer, loadFarmRendererVitePlugins, REACT_RENDERER } from "../renderer";
+import type { FarmRenderer } from "../renderer";
 
 // Type alias for OutputBundle
 type OutputBundle = Rollup.OutputBundle;
@@ -1040,7 +1042,10 @@ async function buildClient(
     routePattern.startsWith(`${layoutPattern}/`);
 
   const adapterOwnsDocsRuntime = Boolean(
-    config.docs?.enabled && config.docs.adapter?.server && config.docs.adapter.react,
+    isReactRenderer(config.renderer) &&
+    config.docs?.enabled &&
+    config.docs.adapter?.server &&
+    config.docs.adapter.react,
   );
   const adapterDocsEntry = config.docs?.enabled
     ? `/${config.docs.entry || "docs"}`.replace(/\/+/g, "/").replace(/\/$/, "") || "/"
@@ -1168,6 +1173,7 @@ async function buildClient(
     adapterOwnsDocsRuntime ? config.docs.adapter?.react : undefined,
     config.i18n,
     config.plugins,
+    config.renderer,
   );
 
   // Write the client entry to a temporary file
@@ -1179,6 +1185,9 @@ async function buildClient(
   const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
   let postcssSearchPath: string | undefined;
   let tailwindVitePlugin: any = undefined;
+  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
+    ssr: false,
+  });
   if (hasScopedPostcssConfig) {
     logger.info("📦 Using project PostCSS/Tailwind configuration");
   } else {
@@ -1263,6 +1272,7 @@ async function buildClient(
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         // Plugin to redirect @farm.js/core imports to client-only exports
         {
@@ -1347,7 +1357,7 @@ async function buildClient(
         : undefined,
       // Ensure React is bundled for client
       resolve: {
-        dedupe: ["react", "react-dom"],
+        dedupe: [...(config.renderer.dedupe || [])],
       },
       // Optimize dependencies - exclude server-side code from client bundle
       optimizeDeps: {
@@ -1584,12 +1594,16 @@ function generateClientHydrationEntry(
     direction: {},
   },
   plugins: readonly FarmPlugin[] = [],
+  renderer: FarmRenderer = REACT_RENDERER,
 ): string {
   const toImportPath = (targetPath: string) => targetPath.replace(/\\/g, "/");
   const clientPluginEntry: FarmClientPluginEntryCode = generateFarmClientPluginEntryCode(
     plugins,
     root,
   );
+  const rendererClientImports = isReactRenderer(renderer)
+    ? `import React from "react";\nimport { createRoot, hydrateRoot } from "react-dom/client";`
+    : `import React, { createRoot, hydrateRoot } from ${JSON.stringify(renderer.client)};`;
 
   // Always import global CSS for Tailwind
   const globalsCssPath = path.join(root, srcDir, "app", "globals.css");
@@ -1947,10 +1961,11 @@ document.addEventListener("click", function(e) {
     const load = page.pageShouldHydrate
       ? `() => import(${JSON.stringify(toImportPath(page.modulePath))}).then((module) => module.default)`
       : "null";
-    routeEntries.push(`  {
+  routeEntries.push(`  {
     pattern: ${JSON.stringify(page.pattern)},
     pageShouldHydrate: ${JSON.stringify(page.pageShouldHydrate)},
     islandStrategy: ${JSON.stringify(page.islandStrategy)},
+    navigation: "html-fragment",
     load: ${load},
   }`);
   });
@@ -1973,8 +1988,7 @@ document.addEventListener("click", function(e) {
 // Farm.js Client Runtime - SPA with Hydration
 ${cssImport}
 ${layoutImports}
-import React from "react";
-import { createRoot, hydrateRoot } from "react-dom/client";
+${rendererClientImports}
 import { createClientPluginManager, installChunkErrorRecovery, scheduleFarmIslandHydration } from "@farm.js/core/internal/client-runtime";
 import { matchFarmRoute } from "@farm.js/core/router";
 ${clientPluginEntry.imports}
@@ -2037,9 +2051,19 @@ function wrapWithLayouts(pageElement, pathname, params) {
   
   // Wrap from innermost to outermost (reverse order since layouts are root-first)
   for (let i = layouts.length - 1; i >= 0; i--) {
-    const LayoutComponent = layouts[i].Component;
+    const layout = layouts[i];
+    const LayoutComponent = layout.Component;
     if (LayoutComponent) {
       wrapped = React.createElement(LayoutComponent, { children: wrapped, params: params });
+      wrapped = React.createElement(
+        "div",
+        {
+          "data-farm-layout-boundary": "true",
+          "data-farm-layout-pattern": layout.pattern,
+          style: { display: "contents" },
+        },
+        wrapped,
+      );
     }
   }
   
@@ -2079,7 +2103,7 @@ async function loadRouteComponent(route) {
   return route.Component;
 }
 
-async function createMatchedHydrationElement(matched, pathname, searchParams) {
+async function createMatchedHydrationElement(matched, pathname, searchParams, serverHtml) {
   const hydrateLayouts = hasHydratableLayout(pathname);
   const params = matched.params;
   let pageElement = null;
@@ -2101,7 +2125,7 @@ async function createMatchedHydrationElement(matched, pathname, searchParams) {
     pageElement = createLayoutPageBoundary(
       matched.route,
       null,
-      serverPage ? serverPage.innerHTML : "",
+      typeof serverHtml === "string" ? serverHtml : serverPage ? serverPage.innerHTML : "",
     );
   }
 
@@ -2364,6 +2388,68 @@ async function hydrate() {
   }
 }
 
+function findLayoutBoundary(root, pattern) {
+  const boundaries = root?.querySelectorAll?.('[data-farm-layout-boundary="true"]') || [];
+  for (const boundary of boundaries) {
+    if (boundary.getAttribute("data-farm-layout-pattern") === pattern) return boundary;
+  }
+  return null;
+}
+
+function getLayoutPatterns(root) {
+  return Array.from(root?.querySelectorAll?.('[data-farm-layout-boundary="true"]') || [])
+    .map(function(element) { return element.getAttribute("data-farm-layout-pattern"); })
+    .filter(Boolean);
+}
+
+function activateNavigationScripts(root) {
+  for (const script of Array.from(root?.querySelectorAll?.("script") || [])) {
+    const freshScript = document.createElement("script");
+    for (const attribute of Array.from(script.attributes)) {
+      freshScript.setAttribute(attribute.name, attribute.value);
+    }
+    freshScript.textContent = script.textContent || "";
+    script.replaceWith(freshScript);
+  }
+}
+
+function replaceSharedLayoutBoundary(currentRoot, nextRoot) {
+  const currentPatterns = getLayoutPatterns(currentRoot);
+  const nextPatterns = getLayoutPatterns(nextRoot);
+  let sharedCount = 0;
+  while (
+    sharedCount < currentPatterns.length &&
+    sharedCount < nextPatterns.length &&
+    currentPatterns[sharedCount] === nextPatterns[sharedCount]
+  ) sharedCount++;
+
+  const nextTreeRoot = nextPatterns.length
+    ? findLayoutBoundary(nextRoot, nextPatterns[0])
+    : nextRoot.querySelector("#__farm_page__");
+  const currentTarget = sharedCount < currentPatterns.length
+    ? findLayoutBoundary(currentRoot, currentPatterns[sharedCount])
+    : currentRoot.querySelector("#__farm_page__");
+  const nextTarget = sharedCount < nextPatterns.length
+    ? findLayoutBoundary(nextRoot, nextPatterns[sharedCount])
+    : nextRoot.querySelector("#__farm_page__");
+
+  if (!currentTarget || !nextTarget) return false;
+  currentTarget.replaceWith(nextTarget);
+  activateNavigationScripts(nextTarget);
+  if (nextTreeRoot && nextTreeRoot !== nextTarget) nextTreeRoot.remove();
+
+  if (nextRoot.childNodes.length) {
+    const support = document.createElement("div");
+    support.hidden = true;
+    support.dataset.farmFragmentSupport = "true";
+    while (nextRoot.firstChild) support.appendChild(nextRoot.firstChild);
+    document.body.appendChild(support);
+    activateNavigationScripts(support);
+    setTimeout(function() { support.remove(); }, 0);
+  }
+  return true;
+}
+
 // SPA Router
 const spaRouter = {
 ${generateUniversalRouterStateProperties()}
@@ -2460,7 +2546,7 @@ ${generateUniversalRouterStateProperties()}
         }
       }
 
-      if (matched?.route.pageShouldHydrate) {
+      if (matched?.route.navigation === "client-render") {
         // Navigation itself signals intent, so destination routes load eagerly even
         // when their initial document hydration strategy is deferred.
         const Component = await loadRouteComponent(matched.route);
@@ -2589,19 +2675,43 @@ ${generateUniversalRouterStateProperties()}
     const newRoot = doc.getElementById("root");
     const currentRoot = document.getElementById("root");
     if (!newRoot || !currentRoot) return this.swapDocument(doc);
-    resetReactRoot();
-    resetRouteSlotRoots();
-    currentRoot.innerHTML = newRoot.innerHTML;
-    window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
-    hydrateInitialRouteSlots();
-
-    // Check if new page has a client component
     const targetUrl = new URL(targetPath || window.location.href, window.location.origin);
     const newPathname = targetUrl.pathname;
     const matched = matchRoute(newPathname);
+    const hydrateLayouts = hasHydratableLayout(newPathname);
+    const nextPage = newRoot.querySelector("#__farm_page__");
+
+    // If React already owns the shared layout, update that root. React keeps
+    // matching layout component instances and their state mounted.
+    if (matched && hydrateLayouts && reactRoot && reactRootContainer === currentRoot) {
+      const searchParams = Object.fromEntries(targetUrl.searchParams);
+      const wrappedElement = await createMatchedHydrationElement(
+        matched,
+        newPathname,
+        searchParams,
+        nextPage ? nextPage.innerHTML : "",
+      );
+      if (wrappedElement) {
+        reactRoot.render(wrappedElement);
+        window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
+        isHydrated = true;
+        return true;
+      }
+    }
+
+    const rootWasReactOwned = reactRootContainer === currentRoot;
+    resetReactRoot();
+    resetRouteSlotRoots();
+    if (rootWasReactOwned || !replaceSharedLayoutBoundary(currentRoot, newRoot)) {
+      currentRoot.innerHTML = newRoot.innerHTML;
+      activateNavigationScripts(currentRoot);
+    }
+    window.__FARM_ROUTE_SLOTS__ = nextRouteSlots;
+    hydrateInitialRouteSlots();
+
+    // Check if the new HTML contains an interactive route boundary.
     if (matched) {
       const searchParams = Object.fromEntries(targetUrl.searchParams);
-      const hydrateLayouts = hasHydratableLayout(newPathname);
       const pageContainer =
         hydrateLayouts ? currentRoot : document.getElementById("__farm_page__") || currentRoot;
       const wrappedElement = await createMatchedHydrationElement(
@@ -2786,6 +2896,9 @@ async function buildSSRInMemory(
   const hasScopedPostcssConfig = hasProjectPostcssConfig(root);
   let postcssConfigDir: string | undefined;
   let tailwindVitePlugin: any = undefined;
+  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
+    ssr: true,
+  });
   if (!hasScopedPostcssConfig) {
     postcssConfigDir = await fs.mkdtemp(path.join(os.tmpdir(), "farm-postcss-"));
     await fs.writeFile(
@@ -3067,6 +3180,7 @@ async function buildSSRInMemory(
       plugins: [
         createFarmThemeCssPlugin(config.theme, config.basePath),
         ...(tailwindVitePlugin ? [tailwindVitePlugin] : []),
+        ...(rendererVitePlugins as any[]),
         ...(config.vite.plugins || []),
         ...(!useExternalMetadataImageRuntime &&
         metadataImageRoutes.some((image) => image.sourceType === "module")
@@ -3134,10 +3248,8 @@ async function buildSSRInMemory(
         : undefined,
       resolve: {
         alias: createFarmSourceAlias(root, config.srcDir),
-        // Programmatic route wrappers are created inside @farm.js/core. Resolve
-        // their React imports from the application so React 18/19 elements and
-        // the selected server renderer always share the same runtime instance.
-        dedupe: ["react", "react-dom", "react/jsx-runtime", "react/jsx-dev-runtime"],
+        // Route modules and the renderer adapter must share one runtime instance.
+        dedupe: [...(config.renderer.dedupe || [])],
       },
     });
   } finally {
@@ -3184,8 +3296,14 @@ function generateVirtualEntryCode(
 ): string {
   const hasPluginRuntime = hasRuntimeIntegrationConfig || hasConfiguredRuntimePlugins;
   const adapterOwnsDocsRuntime = Boolean(
-    config.docs?.enabled && config.docs.adapter?.server && config.docs.adapter.react,
+    isReactRenderer(config.renderer) &&
+    config.docs?.enabled &&
+    config.docs.adapter?.server &&
+    config.docs.adapter.react,
   );
+  const rendererServerImports = isReactRenderer(config.renderer)
+    ? `import * as React from "react";\nimport * as ReactDOMServer from "react-dom/server";`
+    : `import React, * as ReactDOMServer from ${JSON.stringify(config.renderer.server)};`;
   const hasGeneratedMetadataImages = metadataImageRoutes.some(
     (image) => image.sourceType === "module",
   );
@@ -3592,8 +3710,7 @@ ${instrumentationImport}
 ${imageRuntimeImport}
 ${imageNodeRuntimeImport}
 import { farmFontPreloadHeader } from "virtual:farm-font-runtime";
-import * as React from "react";
-import * as ReactDOMServer from "react-dom/server";
+${rendererServerImports}
 
 const farmPreloadConfig = ${JSON.stringify(config.performance.preload)};
 
@@ -3871,6 +3988,12 @@ function renderFarmClientBootstrapScript(canonicalPath, selectedRouteSlots, page
     '</script><script>' + source + '</script>';
 }
 
+function renderFarmRendererHydrationScript() {
+  return typeof ReactDOMServer.generateHydrationScript === "function"
+    ? ReactDOMServer.generateHydrationScript()
+    : "";
+}
+
 function escapeFarmHtmlAttribute(value) {
   return String(value)
     .replace(/&/g, "&amp;")
@@ -4068,7 +4191,7 @@ async function renderFarmElement(ReactDOMServer, element) {
     };
   }
 
-  const html = ReactDOMServer.renderToString(element);
+  const html = await ReactDOMServer.renderToString(element);
   return { html, shellHtml: html, streamErrors };
 }
 
@@ -4120,6 +4243,7 @@ function createFarmErrorDocument(html, title) {
       '  <link rel="icon" href="data:,">\\n' +
       '  <title>' + escapedTitle + '</title>\\n' +
       '  <link rel="stylesheet" href="/farm-client.css">\\n' +
+      renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
       '  ' + renderFarmClientBootstrapScript() + '\\n' +
@@ -4135,6 +4259,7 @@ function createFarmErrorDocument(html, title) {
   }
   fullHtml = fullHtml
     .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+    .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
     .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, function(match, attrs, headContent) {
       return headContent.includes("<title")
         ? match
@@ -4902,6 +5027,9 @@ ${
       '  <script type="module" src="/farm-client.js"></script>\\n</body>',
     );
   }
+  if (!html.includes('window._$HY')) {
+    html = html.replace(/<[/]head>/i, renderFarmRendererHydrationScript() + "\\n</head>");
+  }
   const headers = new Headers(response.headers);
   headers.delete("content-length");
   headers.delete("etag");
@@ -5522,21 +5650,20 @@ async function handleFarmRequestInContext(
               pageElement = React.createElement(PageComponent, pageProps);
             }
 
-            if (route.shouldHydrate || shouldHydrateLayout) {
-              pageElement = React.createElement(
-                "div",
-                {
-                  id: "__farm_page__",
-                  "data-farm-client": route.shouldHydrate ? "true" : "false",
-                  ...(shouldHydrateLayout
-                    ? { "data-farm-layout-client": "true" }
-                    : {}),
-                  "data-farm-island": "page",
-                  "data-farm-island-strategy": hydrationIslandStrategy,
-                },
-                pageElement,
-              );
-            }
+            pageElement = React.createElement(
+              "div",
+              {
+                id: "__farm_page__",
+                "data-farm-segment": "page",
+                "data-farm-client": route.shouldHydrate ? "true" : "false",
+                ...(shouldHydrateLayout
+                  ? { "data-farm-layout-client": "true" }
+                  : {}),
+                "data-farm-island": "page",
+                "data-farm-island-strategy": hydrationIslandStrategy,
+              },
+              pageElement,
+            );
 
             // Wrap with layouts (from innermost to outermost)
             // Layouts are sorted by depth (root first), so we process in reverse
@@ -5563,6 +5690,15 @@ async function handleFarmRequestInContext(
                   params,
                   ...slotProps,
                 });
+                wrappedElement = React.createElement(
+                  "div",
+                  {
+                    "data-farm-layout-boundary": "true",
+                    "data-farm-layout-pattern": layout.pattern,
+                    style: { display: "contents" },
+                  },
+                  wrappedElement,
+                );
               }
             }
 
@@ -5662,6 +5798,7 @@ async function handleFarmRequestInContext(
             '  <title>' + title + '</title>' + metaTags + '\\n' +
             '  <link rel="stylesheet" href="/farm-client.css">\\n' +
             '  <link rel="modulepreload" href="/farm-client.js">\\n' +
+            renderFarmRendererHydrationScript() + '\\n' +
             '</head>\\n<body>\\n  <div id="root">';
           const streamSuffix = '</div>\\n' +
             '  ' + renderFarmClientBootstrapScript(
@@ -5715,6 +5852,7 @@ async function handleFarmRequestInContext(
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
             .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+            .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
             // Inject title if not present and we have one
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
               let nextHeadContent = headContent;
@@ -5751,6 +5889,7 @@ async function handleFarmRequestInContext(
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>\${title}</title>\${metaTags}
   <link rel="stylesheet" href="/farm-client.css">
+  \${renderFarmRendererHydrationScript()}
 </head>
 <body>
   <div id="root">\${html}</div>
@@ -5999,7 +6138,7 @@ async function handleFarmRequestInContext(
       }
     }
     
-    const html = ReactDOMServer.renderToString(notFoundElement);
+    const html = await ReactDOMServer.renderToString(notFoundElement);
     
     // Check if layout provides full HTML document
     const trimmedHtml = html.trim();
@@ -6009,6 +6148,7 @@ async function handleFarmRequestInContext(
     if (hasFullDocument) {
       fullHtml = html
         .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+        .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
           '  ' + renderFarmClientBootstrapScript() + '\\n' +
@@ -6026,6 +6166,7 @@ async function handleFarmRequestInContext(
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/farm-client.css">
   <title>404 - Page Not Found</title>
+  \${renderFarmRendererHydrationScript()}
 </head>
 <body>
   <div id="root">\${html}</div>

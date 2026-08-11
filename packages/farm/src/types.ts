@@ -1,4 +1,4 @@
-import type { ReactNode, ComponentType } from "react";
+import type { FarmRenderer } from "./renderer";
 import type { IncomingMessage, ServerResponse } from "http";
 import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
@@ -32,6 +32,11 @@ declare global {
     interface RouteRegistry {}
   }
 }
+
+/** A renderer-neutral component accepted by Farm's file-system router. */
+export type FarmComponentType<TProps = Record<string, unknown>> =
+  | ((props: TProps) => any)
+  | (new (props: TProps) => any);
 
 /** All generated route module patterns for the current application. */
 export type AppRoutePattern = FarmJS.RouteRegistry extends {
@@ -144,6 +149,11 @@ export interface FarmConfig {
   layers?: readonly ResolvedFarmLayer[];
   outDir?: string;
   basePath?: string;
+  /**
+   * Component renderer used for JSX compilation, SSR, and browser hydration.
+   * React is used when omitted.
+   */
+  renderer?: FarmRenderer;
   preset?: NitroPreset;
   deploy?: {
     target?: "vercel" | "cloudflare" | "netlify" | "node" | string;
@@ -329,7 +339,7 @@ export type PagePropsWithMiddleware<
 };
 
 export interface LayoutProps<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> {
-  children: ReactNode;
+  children: any;
   params: ResolvePageRouteParams<TRoute>;
 }
 
@@ -342,17 +352,17 @@ export interface LayoutMetadataProps<TRoute extends FarmRoutePropsTarget = FarmR
   params: ResolvePageRouteParams<TRoute>;
 }
 
-export type Page<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = ComponentType<
+export type Page<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
   PageProps<TRoute>
 >;
-export type Layout<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = ComponentType<
+export type Layout<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
   LayoutProps<TRoute>
 >;
-export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = ComponentType<
+export type Loading<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> = FarmComponentType<
   LoadingProps<TRoute>
 >;
 export type ErrorBoundary<TRoute extends FarmRoutePropsTarget = FarmRoutePropsDefault> =
-  ComponentType<ErrorProps<TRoute>>;
+  FarmComponentType<ErrorProps<TRoute>>;
 /**
  * Route module exports for pages
  *

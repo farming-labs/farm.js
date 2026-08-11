@@ -13,6 +13,7 @@ import { PluginManager } from "../plugin";
 import { farmEnvironmentFunctionsPlugin } from "../environment-vite";
 import { farmFontImportsPlugin } from "../font-vite";
 import { createFarmSourceAlias, mergeFarmViteConfig } from "../server/vite-config";
+import { loadFarmRendererVitePlugins } from "../renderer";
 import {
   canUseRolldownForRouteDiscovery,
   loadFarmProductionVite,
@@ -195,6 +196,9 @@ async function createProjectModuleServer(
   config: ResolvedFarmConfig,
   root: string,
 ): Promise<ViteDevServer> {
+  const rendererVitePlugins = await loadFarmRendererVitePlugins(config.renderer, root, {
+    ssr: true,
+  });
   const viteConfig = mergeFarmViteConfig(
     {
       root,
@@ -206,6 +210,7 @@ async function createProjectModuleServer(
         },
       },
       plugins: [
+        ...(rendererVitePlugins as any[]),
         farmFontImportsPlugin({
           root,
           basePath: config.basePath,
@@ -219,6 +224,7 @@ async function createProjectModuleServer(
       },
       resolve: {
         alias: createFarmSourceAlias(root, config.srcDir),
+        dedupe: [...(config.renderer.dedupe || [])],
       },
       optimizeDeps: {
         noDiscovery: true,

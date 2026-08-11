@@ -229,6 +229,54 @@ test("generates a buildable starter application", async () => {
   }
 });
 
+test("generates a Solid starter while keeping React as the default renderer", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-solid-"));
+
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "solid-app",
+        "--template",
+        "basic",
+        "--renderer",
+        "solid",
+        "--typescript",
+        "--skip-install",
+      ],
+      { cwd: tempDir, stdio: "pipe" },
+    );
+
+    const generatedDir = path.join(tempDir, "solid-app");
+    const packageJson = JSON.parse(await readFile(path.join(generatedDir, "package.json"), "utf8"));
+    const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+    const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
+    const apiRoute = await readFile(
+      path.join(generatedDir, "src/app/api/greeting/route.ts"),
+      "utf8",
+    );
+    const apiClient = await readFile(path.join(generatedDir, "src/lib/api-client.ts"), "utf8");
+    const tsconfig = JSON.parse(await readFile(path.join(generatedDir, "tsconfig.json"), "utf8"));
+
+    assert.equal(packageJson.dependencies["@farm.js/solid"], "0.1.0-beta.26");
+    assert.equal(packageJson.dependencies["solid-js"], "1.9.14");
+    assert.equal(packageJson.dependencies.react, undefined);
+    assert.equal(packageJson.dependencies["react-dom"], undefined);
+    assert.match(config, /renderer: solid\(\)/);
+    assert.match(config, /from "@farm\.js\/solid"/);
+    assert.match(page, /createSignal/);
+    assert.match(page, /api\.greeting\.post/);
+    assert.match(apiRoute, /createEndpoint/);
+    assert.match(apiRoute, /FARMJS server/);
+    assert.match(apiClient, /createAPIClient<APIRouter>/);
+    assert.equal(tsconfig.compilerOptions.jsx, "preserve");
+    assert.equal(tsconfig.compilerOptions.jsxImportSource, "solid-js");
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 for (const template of [
   {
     name: "auth",

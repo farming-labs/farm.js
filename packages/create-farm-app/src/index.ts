@@ -11,6 +11,7 @@ import { logger, showBanner } from "./utils";
 
 interface CreateAppOptions {
   template?: string;
+  renderer?: string;
   typescript?: boolean;
   skipInstall?: boolean;
   listTemplates?: boolean;
@@ -178,6 +179,7 @@ function integrationTemplate(
 }
 
 export type PackageManagerName = "npm" | "pnpm" | "yarn" | "bun";
+export type RendererName = "react" | "solid";
 
 export interface PackageManager {
   name: PackageManagerName;
@@ -256,6 +258,49 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     process.exit(1);
   }
 
+  let renderer = options.renderer?.toLowerCase() as RendererName | undefined;
+  if (renderer && renderer !== "react" && renderer !== "solid") {
+    logger.error(`Unknown renderer "${options.renderer}". Available: "react", "solid".`);
+    process.exit(1);
+  }
+
+  // Preserve React for every existing command. The renderer chooser is shown
+  // during the fully interactive basic flow, while --renderer enables CI and
+  // scripted scaffolding without introducing another prompt.
+  if (!renderer && !options.template && template === "basic") {
+    const response = await prompts({
+      type: "select",
+      name: "renderer",
+      message: "Which rendering library would you like to use?",
+      choices: [
+        {
+          title: "React",
+          value: "react",
+          description: "The default FARMJS renderer",
+        },
+        {
+          title: "Solid",
+          value: "solid",
+          description: "Fine-grained reactivity with Solid",
+        },
+      ],
+      initial: 0,
+    });
+    if (!response.renderer) {
+      logger.error("Operation cancelled.");
+      process.exit(1);
+    }
+    renderer = response.renderer;
+  }
+  renderer ||= "react";
+
+  if (renderer === "solid" && template !== "basic") {
+    logger.error(
+      `The "${template}" integration starter currently targets React. Use --template basic with --renderer solid.`,
+    );
+    process.exit(1);
+  }
+
   // Check TypeScript preference
   let useTypeScript = options.typescript;
   if (useTypeScript === undefined) {
@@ -294,7 +339,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
 
   await fs.mkdir(projectPath, { recursive: true });
 
-  const integrationResult = await copyTemplate(template!, projectPath, useTypeScript!);
+  const integrationResult = await copyTemplate(template!, projectPath, useTypeScript!, renderer);
 
   await updatePackageJson(projectPath, projectName!, packageManager);
 
@@ -333,6 +378,7 @@ async function copyTemplate(
   template: string,
   projectPath: string,
   useTypeScript: boolean,
+  renderer: RendererName,
 ): Promise<AddFarmIntegrationResult | undefined> {
   const details = templateDetails[template];
   const templatePath = path.join(
@@ -351,6 +397,11 @@ async function copyTemplate(
     if (await dirExists(tsTemplatePath)) {
       await copyDir(tsTemplatePath, projectPath);
     }
+  }
+
+  if (renderer === "solid") {
+    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "solid");
+    await copyDir(rendererTemplatePath, projectPath);
   }
 
   if (!details?.integration) {

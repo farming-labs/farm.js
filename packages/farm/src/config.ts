@@ -79,6 +79,8 @@ import {
 } from "./security";
 import { resolveFarmThemeConfig } from "./theme/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
+import { resolveFarmRenderer } from "./renderer";
+import type { FarmRenderer } from "./renderer";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -167,6 +169,8 @@ export type {
   ResolvedFarmCspConfig,
   ResolvedFarmSecurityConfig,
 } from "./security";
+export type { FarmRenderer } from "./renderer";
+export { defineRenderer } from "./renderer";
 
 export interface RedirectConfig {
   source: string;
@@ -355,6 +359,7 @@ export interface ResolvedFarmConfig extends Required<
     | "performance"
     | "security"
     | "theme"
+    | "renderer"
   >
 > {
   /** @internal Tracks whether `context` came from user/layer config instead of the default noop. */
@@ -380,6 +385,7 @@ export interface ResolvedFarmConfig extends Required<
   performance: ResolvedFarmPerformanceConfig;
   security: ResolvedFarmSecurityConfig;
   theme: ResolvedFarmThemeConfig;
+  renderer: FarmRenderer;
   routeRules: FarmRouteRules;
 }
 
@@ -809,6 +815,7 @@ export async function resolveConfig(
     layers: layerResolution.layers,
     outDir: userConfig.outDir || "dist",
     basePath: userConfig.basePath || "/",
+    renderer: resolveFarmRenderer(userConfig.renderer),
     preset: deploy.preset || "node-server",
     deploy,
     docs,

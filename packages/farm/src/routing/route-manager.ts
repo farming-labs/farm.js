@@ -39,6 +39,10 @@ import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
+import {
+  createFarmRouteRenderPlan,
+  type FarmRouteRenderPlan,
+} from "../navigation/render-plan";
 import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
 import {
   inspectStaticMetadataImage,
@@ -89,6 +93,44 @@ export interface MatchedRouteSlot {
   params: Record<string, string>;
 }
 
+export interface FarmClientRouteManifest {
+  routes: Array<{
+    pattern: string;
+    modulePath: string;
+    shouldHydrate: boolean;
+    isClientComponent: boolean;
+    islandStrategy: FarmIslandStrategy | null;
+    renderPlan: FarmRouteRenderPlan;
+    suppressedAsyncHydration?: true;
+    search?: ProgrammaticRouteSearchClientOptions;
+    segments: Array<{
+      segment: string;
+      isDynamic: boolean;
+      isCatchAll?: boolean;
+      isOptional?: boolean;
+    }>;
+  }>;
+  layouts: Array<{
+    pattern: string;
+    modulePath: string;
+    shouldHydrate: boolean;
+    isClientComponent: boolean;
+    islandStrategy: FarmIslandStrategy | null;
+  }>;
+  slots: Array<{
+    name: string;
+    ownerPattern: string;
+    pattern: string;
+    modulePath: string;
+    containerId: string;
+    interception: boolean;
+    fallback: boolean;
+    shouldHydrate: boolean;
+    isClientComponent: boolean;
+    segments: RouteEntry["route"]["segments"];
+  }>;
+}
+
 export function shouldSuggestStaticRenderingForI18n(
   i18n: Pick<ResolvedFarmI18nConfig, "routing" | "detection"> | undefined,
 ): boolean {
@@ -135,6 +177,10 @@ export class RouteManager {
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
   private viteServer?: ViteDevServer;
+  private clientManifestCache?: {
+    projectRoot: string;
+    manifest: FarmClientRouteManifest;
+  };
 
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
     this.config = config;
@@ -145,6 +191,7 @@ export class RouteManager {
    * Discover all routes in the app directory
    */
   async discoverRoutes(): Promise<void> {
+    this.invalidateClientManifest();
     this.routes.clear();
     this.layouts.clear();
     this.routeSlots.clear();
@@ -417,45 +464,21 @@ export class RouteManager {
   }
 
   /**
-   * Generate a client-side route manifest for SPA navigation
-   * This eliminates the need for server requests during navigation
+   * Generate the compiled route decisions consumed by SPA navigation.
+   * Requests still fetch route data, but never inspect component source.
    */
-  generateClientManifest(projectRoot: string): {
-    routes: Array<{
-      pattern: string;
-      modulePath: string;
-      shouldHydrate: boolean;
-      isClientComponent: boolean;
-      islandStrategy: FarmIslandStrategy | null;
-      suppressedAsyncHydration?: true;
-      search?: ProgrammaticRouteSearchClientOptions;
-      segments: Array<{
-        segment: string;
-        isDynamic: boolean;
-        isCatchAll?: boolean;
-        isOptional?: boolean;
-      }>;
-    }>;
-    layouts: Array<{
-      pattern: string;
-      modulePath: string;
-    }>;
-    slots: Array<{
-      name: string;
-      ownerPattern: string;
-      pattern: string;
-      modulePath: string;
-      containerId: string;
-      interception: boolean;
-      fallback: boolean;
-      shouldHydrate: boolean;
-      isClientComponent: boolean;
-      segments: RouteEntry["route"]["segments"];
-    }>;
-  } {
+  generateClientManifest(projectRoot: string = this.config.root): FarmClientRouteManifest {
+    const normalizedProjectRoot = path.resolve(projectRoot);
+    if (this.clientManifestCache?.projectRoot === normalizedProjectRoot) {
+      return this.clientManifestCache.manifest;
+    }
+
     const toUrlPath = (absolutePath: string) => {
-      if (absolutePath === projectRoot || absolutePath.startsWith(`${projectRoot}${path.sep}`)) {
-        return absolutePath.slice(projectRoot.length);
+      if (
+        absolutePath === normalizedProjectRoot ||
+        absolutePath.startsWith(`${normalizedProjectRoot}${path.sep}`)
+      ) {
+        return absolutePath.slice(normalizedProjectRoot.length);
       }
       if (path.isAbsolute(absolutePath)) {
         const normalized = absolutePath.replace(/\\/g, "/");
@@ -464,15 +487,32 @@ export class RouteManager {
       return absolutePath;
     };
 
+    const layoutEntries = Array.from(this.layouts.values()).map((entry) => ({
+      entry,
+      metadata: getClientModuleMetadata(entry.modulePath, normalizedProjectRoot),
+    }));
+
     const routes = Array.from(this.routes.values()).map((entry) => {
-      const metadata = getClientModuleMetadata(entry.modulePath, projectRoot);
+      const metadata = getClientModuleMetadata(entry.modulePath, normalizedProjectRoot);
       const programmaticPage = this.programmaticPages.get(entry.modulePath);
+      const layoutShouldHydrate = layoutEntries.some(
+        ({ entry: layout, metadata: layoutMetadata }) =>
+          layoutMetadata.shouldHydrate &&
+          (layout.pattern === "/" ||
+            entry.pattern === layout.pattern ||
+            entry.pattern.startsWith(`${layout.pattern.replace(/\/$/, "")}/`)),
+      );
       return {
         pattern: entry.pattern,
         modulePath: toUrlPath(entry.modulePath),
         shouldHydrate: metadata.shouldHydrate,
         isClientComponent: metadata.isClientComponent,
         islandStrategy: metadata.islandStrategy,
+        renderPlan: createFarmRouteRenderPlan({
+          pageShouldHydrate: metadata.shouldHydrate,
+          layoutShouldHydrate,
+          islandStrategy: metadata.islandStrategy,
+        }),
         suppressedAsyncHydration: metadata.suppressedAsyncHydration,
         search: getProgrammaticRouteSearchClientOptions(programmaticPage?.search),
         segments: entry.route.segments.map((seg) => ({
@@ -484,13 +524,16 @@ export class RouteManager {
       };
     });
 
-    const layouts = Array.from(this.layouts.values()).map((entry) => ({
+    const layouts = layoutEntries.map(({ entry, metadata }) => ({
       pattern: entry.pattern,
       modulePath: toUrlPath(entry.modulePath),
+      shouldHydrate: metadata.shouldHydrate,
+      isClientComponent: metadata.isClientComponent,
+      islandStrategy: metadata.islandStrategy,
     }));
 
     const slots = Array.from(this.routeSlots.values()).map((entry) => {
-      const metadata = getClientModuleMetadata(entry.modulePath, projectRoot);
+      const metadata = getClientModuleMetadata(entry.modulePath, normalizedProjectRoot);
       return {
         name: entry.name,
         ownerPattern: entry.ownerPattern,
@@ -505,7 +548,20 @@ export class RouteManager {
       };
     });
 
-    return { routes, layouts, slots };
+    const manifest = { routes, layouts, slots };
+    this.clientManifestCache = {
+      projectRoot: normalizedProjectRoot,
+      manifest,
+    };
+    return manifest;
+  }
+
+  /**
+   * Invalidate build-time route metadata after a page or layout changes in dev.
+   * Navigation requests reuse the cached manifest and never inspect source files.
+   */
+  invalidateClientManifest(): void {
+    this.clientManifestCache = undefined;
   }
 
   /**
