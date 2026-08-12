@@ -597,6 +597,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@farm.js/renderer-tests": "workspace:*",
     "@clerk/react": "^6.1.0",
     "@farm.js/otel": "workspace:*",
     "@opentelemetry/sdk-node": "0.221.0",
