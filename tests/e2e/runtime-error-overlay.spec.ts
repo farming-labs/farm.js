@@ -13,7 +13,9 @@ test.describe("Development runtime error overlay", () => {
     await expect(inlineCode).toHaveText("response.user.profile.formatDisplayName");
     await expect(inlineCode).toHaveCSS("font-family", /monospace/);
     await expect(inlineCode).toHaveCSS("font-weight", "600");
-    await expect(inlineCode).toHaveCSS("background-color", "rgba(185, 28, 28, 0.08)");
+    await expect(inlineCode).toHaveCSS("color", "rgb(185, 28, 28)");
+    await expect(inlineCode).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    await expect(inlineCode).toHaveCSS("border-top-width", "0px");
     await expect(overlay.getByText("Runtime TypeError", { exact: true })).toBeVisible();
     await expect(overlay.getByText("Error message", { exact: true })).toBeVisible();
     await expect(overlay.getByText("Window", { exact: true })).toHaveCount(0);
