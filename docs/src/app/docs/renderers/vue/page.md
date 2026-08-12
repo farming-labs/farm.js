@@ -88,8 +88,8 @@ const count = ref(0);
 </template>
 ```
 
-FARMJS server-renders the SFC with `createSSRApp` and Vue's `renderToString`, then uses
-`createSSRApp` again to claim the existing browser markup.
+FARMJS server-renders the SFC with `createSSRApp` and Vue's native Node or WHATWG Web stream, then
+uses `createSSRApp` again to claim the existing browser markup.
 
 ## Call FARMJS server code
 

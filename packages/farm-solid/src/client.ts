@@ -18,10 +18,11 @@ export interface FarmSolidRoot {
 function inferHydrationRenderId(firstHydratableElement: HTMLElement | null): string | undefined {
   const hydrationKey = firstHydratableElement?.dataset.hk;
 
-  // A resumed component's first hydration key is `${renderId}0`. FARMJS may render
-  // framework-owned page/layout wrappers before entering the selected
-  // renderer, so the Solid subtree can have a non-empty renderId.
-  return hydrationKey?.endsWith("0") ? hydrationKey.slice(0, -1) : undefined;
+  // FARMJS creates host elements through Solid's Dynamic component. Solid
+  // allocates one context id for Dynamic and another for its host element, so
+  // the first key is `${renderId}00`. Recover the owning render id rather than
+  // resuming inside Dynamic's already-serialized component context.
+  return hydrationKey?.endsWith("00") ? hydrationKey.slice(0, -2) : undefined;
 }
 
 function createManagedRoot(

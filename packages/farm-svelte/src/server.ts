@@ -10,6 +10,9 @@ import SvelteCompat, {
 } from "./runtime";
 
 export const name = "svelte";
+export const capabilities = {
+  streaming: { node: false, web: false },
+} as const;
 export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
 
 /** Svelte hydration markers are already included in the server-rendered body. */

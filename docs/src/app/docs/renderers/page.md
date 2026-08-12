@@ -30,7 +30,7 @@ storage, integrations, observability, and deployment output.
 | ------------------------------------------------ | ------------------------ | ------------------------------- | -------------------- | -------------------- | -------------------- |
 | File pages and nested layouts                    | Available                | Available                       | Available            | Available            | Available            |
 | Server rendering and browser hydration           | Available                | Available                       | Available            | Available            | Available            |
-| Streaming SSR                                    | Available                | Available                       | Buffered today       | Buffered today       | Buffered today       |
+| Streaming SSR                                    | Node                     | Node and Web                    | Node and Web         | Node and Web         | Buffered today       |
 | Loading, error, not-found, and slot files        | Available                | Available                       | Available            | Available            | Available            |
 | Static metadata and favicon configuration        | Available                | Available                       | Available            | Available            | Available            |
 | API routes and generated typed API clients       | Available                | Available                       | Available            | Available            | Available            |
@@ -76,6 +76,34 @@ Actions remain normal typed RPC calls. Solid exposes action state through reacti
 through refs, and Svelte through the callable action's readable-store subscription. Server queries
 share FARMJS's existing browser cache, invalidation, deduplication, stale-while-revalidate, focus,
 and reconnect behavior across all bindings.
+
+## Renderer capability contract
+
+Renderer packages advertise streaming support in their descriptor instead of relying on FARMJS to
+guess from optional runtime exports:
+
+```ts
+import { defineRenderer } from "@farm.js/core";
+
+export const customRenderer = defineRenderer({
+  name: "custom",
+  vite: "@example/renderer/vite",
+  server: "@example/renderer/server",
+  client: "@example/renderer/client",
+  capabilities: {
+    streaming: {
+      node: false,
+      web: true,
+    },
+  },
+});
+```
+
+A renderer advertising `node` streaming must export `renderToPipeableStream()` from its server
+entry. A renderer advertising `web` streaming must export `renderToReadableStream()` returning a
+WHATWG `ReadableStream`. FARMJS validates those declarations when the server renderer starts and
+uses buffered `renderToString()` when neither capability is enabled. Descriptors without a
+`capabilities` field remain buffered for compatibility.
 
 ## Renderer-neutral server code
 

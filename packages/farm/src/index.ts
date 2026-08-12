@@ -1,6 +1,11 @@
 export * from "./types";
 export { defineRenderer, REACT_RENDERER } from "./renderer";
-export type { FarmRenderer } from "./renderer";
+export type {
+  FarmRenderer,
+  FarmRendererCapabilities,
+  FarmRendererCapabilitiesInput,
+  FarmRendererStreamingCapabilities,
+} from "./renderer";
 export * from "./utils";
 export * from "./storage";
 export * from "./integrations";
