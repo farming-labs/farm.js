@@ -232,6 +232,7 @@ mount, and shortcut together.
 | extends       | Composing local or package Farm layers with project-first overrides.              |
 | srcDir        | Changing the app source folder from the default src.                              |
 | renderer      | Selecting React (default) or an adapter such as Preact, Svelte, Vue, or Solid.    |
+| api           | Configuring the public root used by Farm's typed browser API client.              |
 | integrations  | Registering built-in or custom integrations.                                      |
 | auth          | Enabling Farm's built-in email/password auth, sessions, helpers, and hooks.       |
 | theme         | Enabling light, dark, and system modes with client and server APIs.               |
@@ -250,6 +251,32 @@ mount, and shortcut together.
 | images        | Configuring responsive widths, remote allowlists, formats, and optimizer limits.  |
 | performance   | Budgeting image and font preload hints without changing the rendered resources.   |
 | openapi       | Publishing API reference docs.                                                    |
+
+## API client base URL
+
+Farm's typed API client uses the current origin and `/api` by default. Configure `api` when the
+browser should call a different origin or path:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  api: {
+    baseURL: ({ mode }) =>
+      process.env.GITHUH_API_URL ?? (mode === "development" ? "http://127.0.0.1:8080" : undefined),
+    basePath: "/api",
+  },
+});
+```
+
+An origin-only `baseURL`, such as `https://api.example.com`, is joined with `basePath`. If
+`baseURL` already contains a path, such as `https://api.example.com/v1`, that path is the API root
+and `basePath` is ignored. Both fields accept a string or a sync/async resolver receiving
+`{ root, mode, env }`. Farm resolves the function during configuration and only embeds the resulting
+public URL in the browser bundle.
+
+The option configures `createAPIClient()` automatically. An explicit per-client `baseURL` still
+takes precedence.
 
 ## Images
 

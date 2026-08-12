@@ -19,6 +19,25 @@ import type { APIRouter } from "./api.generated";
 export const api = createAPIClient<APIRouter>();
 ```
 
+The client uses the current origin and `/api` by default. To point every default client at another
+API, configure it once in `farm.config.ts`:
+
+```ts
+import { defineConfig } from "@farm.js/core";
+
+export default defineConfig({
+  api: {
+    baseURL: () => process.env.API_ORIGIN,
+    basePath: "/api",
+  },
+});
+```
+
+`https://api.example.com` becomes `https://api.example.com/api`. A URL that already has a path,
+such as `https://api.example.com/v1`, uses that path directly. `baseURL` and `basePath` may be sync
+or async resolver functions; Farm evaluates them during config resolution and embeds only the
+resulting public URL.
+
 ## Call a route
 
 **Browser usage**

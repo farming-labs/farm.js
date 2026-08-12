@@ -36,11 +36,13 @@ import { _setDefaultFarmThemeConfig } from "./theme/server";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import { getFarmRendererComponentExtensions, resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { normalizeFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
 
 type NormalizedFarmConfig = Omit<
   Required<FarmConfig>,
-  "devtools" | "images" | "i18n" | "performance" | "security" | "theme"
+  "api" | "devtools" | "images" | "i18n" | "performance" | "security" | "theme"
 > & {
+  api: ResolvedFarmAPIConfig;
   docs: FarmDocsResolvedConfig;
   md: FarmMarkdownResolvedConfig;
   mdx: FarmMdxResolvedConfig;
@@ -158,6 +160,7 @@ export class FarmApp {
       migrations: config.migrations || { commands: [] },
       cron: resolveCronConfig(config.cron),
       workflows: resolveWorkflowsConfig(config.workflows),
+      api: normalizeFarmAppAPIConfig(config.api),
       middleware: config.middleware || {},
       routeRules: normalizeRouteRules(config.routeRules),
       context: config.context || (() => undefined),
@@ -246,6 +249,15 @@ function isResolvedAuthConfig(value: FarmConfig["auth"]): value is ResolvedFarmA
     "emailAndPassword" in value &&
     "database" in value,
   );
+}
+
+function normalizeFarmAppAPIConfig(config: FarmConfig["api"]): ResolvedFarmAPIConfig {
+  if (typeof config?.baseURL === "function" || typeof config?.basePath === "function") {
+    throw new Error(
+      "Farm API config resolver functions must be processed with resolveConfig() before creating a FarmApp.",
+    );
+  }
+  return normalizeFarmAPIConfig(config as { baseURL?: string; basePath?: string } | undefined);
 }
 
 export function createFarmApp(config?: FarmConfig, viteServer?: ViteDevServer): FarmApp {

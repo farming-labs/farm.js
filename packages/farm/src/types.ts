@@ -25,6 +25,7 @@ import type { FarmPerformanceConfig } from "./preload";
 import type { FarmLayoutFonts } from "./font";
 import type { FarmSecurityConfig, ResolvedFarmSecurityConfig } from "./security";
 import type { FarmThemeConfig, ResolvedFarmThemeConfig } from "./theme/types";
+import type { FarmAPIConfig } from "./api/config";
 
 declare global {
   namespace FarmJS {
@@ -187,6 +188,8 @@ export interface FarmConfig {
   /** Map portable cron schedules to ordinary GET API routes. */
   cron?: FarmCronUserConfig | FarmCronResolvedConfig | false;
   workflows?: FarmWorkflowsUserConfig | boolean;
+  /** Public base URL and path used by Farm's browser API clients. */
+  api?: FarmAPIConfig;
   env?: FarmEnvConfig<any, any> | ResolvedFarmEnv;
   middleware?: FarmMiddlewareConfig;
   routeRules?: FarmRouteRules;

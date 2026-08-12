@@ -108,6 +108,7 @@ describe("env", () => {
       { command: "build", mode: "production", isSsrBuild: false },
     );
     expect(browserConfig.define).toEqual({
+      __FARM_API_BASE_URL__: JSON.stringify("/api"),
       __FARM_PUBLIC_ENV__: JSON.stringify({ PUBLIC_APP_URL: "https://farm.test" }),
       __FARM_IMAGE_CONFIG__: publicImageConfig,
     });
@@ -117,6 +118,7 @@ describe("env", () => {
       { command: "build", mode: "production", isSsrBuild: true },
     );
     expect(ssrConfig.define).toEqual({
+      __FARM_API_BASE_URL__: JSON.stringify("/api"),
       __FARM_PUBLIC_ENV__: JSON.stringify({ PUBLIC_APP_URL: "https://farm.test" }),
       __FARM_IMAGE_CONFIG__: publicImageConfig,
       __FARM_ENV__: JSON.stringify({
