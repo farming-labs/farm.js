@@ -14,6 +14,9 @@ const PREACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
     "preact/jsx-runtime",
     "@farm.js/preact/client",
   ],
+  capabilities: {
+    streaming: { node: true, web: true },
+  },
 });
 
 /** Select Preact for JSX compilation, server rendering, streaming, and browser hydration. */
@@ -22,6 +25,9 @@ export function preact(): FarmRenderer {
     ...PREACT_RENDERER,
     dedupe: [...(PREACT_RENDERER.dedupe || [])],
     optimizeDeps: [...(PREACT_RENDERER.optimizeDeps || [])],
+    capabilities: {
+      streaming: { ...PREACT_RENDERER.capabilities?.streaming },
+    },
   };
 }
 

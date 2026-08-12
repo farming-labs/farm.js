@@ -50,6 +50,34 @@ component imports React. Preact resolves many of those imports through `preact/c
 and Svelte applications should call validated endpoints through the generated API client and use
 their renderer's native state primitives.
 
+## Renderer capability contract
+
+Renderer packages advertise streaming support in their descriptor instead of relying on FARMJS to
+guess from optional runtime exports:
+
+```ts
+import { defineRenderer } from "@farm.js/core";
+
+export const customRenderer = defineRenderer({
+  name: "custom",
+  vite: "@example/renderer/vite",
+  server: "@example/renderer/server",
+  client: "@example/renderer/client",
+  capabilities: {
+    streaming: {
+      node: false,
+      web: true,
+    },
+  },
+});
+```
+
+A renderer advertising `node` streaming must export `renderToPipeableStream()` from its server
+entry. A renderer advertising `web` streaming must export `renderToReadableStream()` returning a
+WHATWG `ReadableStream`. FARMJS validates those declarations when the server renderer starts and
+uses buffered `renderToString()` when neither capability is enabled. Descriptors without a
+`capabilities` field remain buffered for compatibility.
+
 ## Renderer-neutral server code
 
 Keep product and server behavior outside the component runtime whenever possible:

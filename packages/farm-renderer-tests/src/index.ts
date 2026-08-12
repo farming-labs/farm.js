@@ -9,6 +9,12 @@ export interface RendererDescriptorFixture {
   componentExtensions?: readonly string[];
   dedupe?: readonly string[];
   optimizeDeps?: readonly string[];
+  capabilities?: {
+    streaming?: {
+      node?: boolean;
+      web?: boolean;
+    };
+  };
 }
 
 export interface RendererServerFixture {

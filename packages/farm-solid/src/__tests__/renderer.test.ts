@@ -17,6 +17,7 @@ defineRendererDescriptorConformance({
     server: "@farm.js/solid/server",
     client: "@farm.js/solid/client",
     jsxImportSource: "solid-js",
+    capabilities: { streaming: { node: false, web: false } },
   },
 });
 

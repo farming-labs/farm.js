@@ -59,8 +59,10 @@ import { getTheme as getFarmTheme } from "../theme/server";
 import { FARM_VERSION } from "../version";
 import type { ViteDevServer } from "vite";
 import {
+  getFarmRendererCapabilities,
   getFarmRendererComponentExtensions,
   isReactRenderer,
+  readFarmRendererWebStream,
   resolveFarmRendererModule,
   type FarmServerRendererRuntime,
 } from "../renderer";
@@ -405,6 +407,18 @@ export class ServerRenderer {
       }
     }
 
+    const capabilities = getFarmRendererCapabilities(this.config.renderer);
+    if (capabilities.streaming.node && typeof runtime.renderToPipeableStream !== "function") {
+      throw new Error(
+        `Renderer \`${this.config.renderer.name}\` advertises Node streaming but its server module does not export renderToPipeableStream().`,
+      );
+    }
+    if (capabilities.streaming.web && typeof runtime.renderToReadableStream !== "function") {
+      throw new Error(
+        `Renderer \`${this.config.renderer.name}\` advertises Web streaming but its server module does not export renderToReadableStream().`,
+      );
+    }
+
     this.rendererRuntime = runtime as FarmServerRendererRuntime;
   }
 
@@ -443,36 +457,45 @@ export class ServerRenderer {
   }
 
   private async renderElementToCompleteHTML(element: unknown): Promise<string> {
-    const renderToPipeableStream = this.rendererRuntime.renderToPipeableStream;
-    if (!renderToPipeableStream) {
-      return await this.rendererRuntime.renderToString(element);
+    const capabilities = getFarmRendererCapabilities(this.config.renderer);
+    const renderToPipeableStream = capabilities.streaming.node
+      ? this.rendererRuntime.renderToPipeableStream
+      : undefined;
+
+    if (renderToPipeableStream) {
+      return await new Promise<string>((resolve, reject) => {
+        const chunks: Buffer[] = [];
+        let started = false;
+        const writable = new Writable({
+          write(chunk, _encoding, callback) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+            callback();
+          },
+        });
+        writable.once("finish", () => resolve(Buffer.concat(chunks).toString("utf8")));
+        writable.once("error", reject);
+
+        const stream = renderToPipeableStream(element, {
+          onShellReady() {
+            started = true;
+            stream.pipe(writable);
+          },
+          onShellError(error) {
+            reject(error);
+          },
+          onError(error) {
+            if (!started) reject(error);
+          },
+        });
+      });
     }
 
-    return await new Promise<string>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      let started = false;
-      const writable = new Writable({
-        write(chunk, _encoding, callback) {
-          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-          callback();
-        },
-      });
-      writable.once("finish", () => resolve(Buffer.concat(chunks).toString("utf8")));
-      writable.once("error", reject);
+    if (capabilities.streaming.web && this.rendererRuntime.renderToReadableStream) {
+      const stream = await this.rendererRuntime.renderToReadableStream(element);
+      return await readFarmRendererWebStream(stream);
+    }
 
-      const stream = renderToPipeableStream(element, {
-        onShellReady() {
-          started = true;
-          stream.pipe(writable);
-        },
-        onShellError(error) {
-          reject(error);
-        },
-        onError(error) {
-          if (!started) reject(error);
-        },
-      });
-    });
+    return await this.rendererRuntime.renderToString(element);
   }
 
   /**

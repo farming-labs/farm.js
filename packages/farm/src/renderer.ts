@@ -27,6 +27,38 @@ export interface FarmRenderer {
   dedupe?: readonly string[];
   /** Renderer packages seeded into Vite's dependency optimizer. */
   optimizeDeps?: readonly string[];
+  /** Runtime features this renderer intentionally supports. */
+  capabilities?: FarmRendererCapabilitiesInput;
+}
+
+export interface FarmRendererStreamingCapabilities {
+  /** Supports Node.js writable streams through renderToPipeableStream(). */
+  node: boolean;
+  /** Supports WHATWG ReadableStream output through renderToReadableStream(). */
+  web: boolean;
+}
+
+export interface FarmRendererCapabilities {
+  streaming: FarmRendererStreamingCapabilities;
+}
+
+export interface FarmRendererCapabilitiesInput {
+  streaming?: Partial<FarmRendererStreamingCapabilities>;
+}
+
+const DEFAULT_RENDERER_CAPABILITIES: Readonly<FarmRendererCapabilities> = Object.freeze({
+  streaming: Object.freeze({ node: false, web: false }),
+});
+
+export function getFarmRendererCapabilities(
+  renderer?: Pick<FarmRenderer, "capabilities">,
+): FarmRendererCapabilities {
+  return {
+    streaming: {
+      node: renderer?.capabilities?.streaming?.node ?? DEFAULT_RENDERER_CAPABILITIES.streaming.node,
+      web: renderer?.capabilities?.streaming?.web ?? DEFAULT_RENDERER_CAPABILITIES.streaming.web,
+    },
+  };
 }
 
 export const FARM_COMPONENT_EXTENSIONS = [".ts", ".tsx", ".js", ".jsx"] as const;
@@ -61,6 +93,8 @@ export interface FarmServerRendererRuntime {
   createElement(type: unknown, props?: unknown, ...children: unknown[]): unknown;
   isValidElement(value: unknown): boolean;
   renderToString(element: unknown): string | Promise<string>;
+  /** Optional runtime copy of the descriptor capabilities for diagnostics. */
+  readonly capabilities?: FarmRendererCapabilities;
   /** Optional bootstrap required before this renderer hydrates server markup. */
   generateHydrationScript?: () => string;
   /** Optional component used to render route-level failures. */
@@ -74,6 +108,10 @@ export interface FarmServerRendererRuntime {
       onError(error: unknown): void;
     },
   ) => { pipe(destination: NodeJS.WritableStream): void };
+  /** WHATWG streaming primitive used by Web-stream-capable renderers. */
+  renderToReadableStream?: (
+    element: unknown,
+  ) => ReadableStream<Uint8Array | string> | Promise<ReadableStream<Uint8Array | string>>;
 }
 
 export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
@@ -90,6 +128,9 @@ export const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
     "react/jsx-runtime",
     "react/jsx-dev-runtime",
   ],
+  capabilities: {
+    streaming: { node: true, web: false },
+  },
 });
 
 export function defineRenderer<const TRenderer extends FarmRenderer>(
@@ -113,7 +154,24 @@ export function resolveFarmRenderer(renderer?: FarmRenderer): FarmRenderer {
     componentExtensions: [...(resolved.componentExtensions || [])],
     dedupe: [...(resolved.dedupe || [])],
     optimizeDeps: [...(resolved.optimizeDeps || [])],
+    capabilities: getFarmRendererCapabilities(resolved),
   };
+}
+
+export async function readFarmRendererWebStream(
+  stream: ReadableStream<Uint8Array | string>,
+): Promise<string> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let html = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    html += typeof value === "string" ? value : decoder.decode(value, { stream: true });
+  }
+
+  return html + decoder.decode();
 }
 
 export function isReactRenderer(renderer: Pick<FarmRenderer, "name"> | undefined): boolean {

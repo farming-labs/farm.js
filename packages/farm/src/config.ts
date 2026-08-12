@@ -169,7 +169,12 @@ export type {
   ResolvedFarmCspConfig,
   ResolvedFarmSecurityConfig,
 } from "./security";
-export type { FarmRenderer } from "./renderer";
+export type {
+  FarmRenderer,
+  FarmRendererCapabilities,
+  FarmRendererCapabilitiesInput,
+  FarmRendererStreamingCapabilities,
+} from "./renderer";
 export { defineRenderer } from "./renderer";
 
 export interface RedirectConfig {

@@ -17,6 +17,7 @@ defineRendererDescriptorConformance({
     server: "@farm.js/svelte/server",
     client: "@farm.js/svelte/client",
     componentExtensions: [".svelte"],
+    capabilities: { streaming: { node: false, web: false } },
   },
 });
 

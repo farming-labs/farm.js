@@ -18,6 +18,7 @@ defineRendererDescriptorConformance({
     server: "@farm.js/vue/server",
     client: "@farm.js/vue/client",
     componentExtensions: [".vue"],
+    capabilities: { streaming: { node: false, web: false } },
   },
 });
 

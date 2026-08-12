@@ -35,6 +35,9 @@ export class ErrorBoundary extends React.Component<
 }
 
 export const name = "react";
+export const capabilities = {
+  streaming: { node: true, web: false },
+} as const;
 export const Fragment = React.Fragment;
 export const Suspense = React.Suspense;
 export const createElement = React.createElement;
