@@ -151,6 +151,55 @@ describe("client runtime error overlay", () => {
     overlay.destroy();
   });
 
+  it("leaves recoverable React hydration diagnostics in the console", () => {
+    const message =
+      "Hydration failed because the server rendered text didn't match the client. As a result this tree will be regenerated on the client.";
+    const error = new Error(message);
+    error.stack = [
+      error.toString(),
+      `    at throwOnHydrationMismatch (${window.location.origin}/node_modules/.vite/deps/react-dom_client.js:3920:13)`,
+    ].join("\n");
+    const overlay = createFarmRuntimeErrorOverlay({ window });
+
+    overlay.show(error, {
+      phase: "window",
+      location: createLocation("/feature-lab"),
+    });
+
+    expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
+
+    overlay.show(error, {
+      phase: "hydration",
+      location: createLocation("/feature-lab"),
+    });
+
+    const { shadow } = getOverlay();
+    expect(shadow.querySelector("[data-farm-runtime-error-type]")?.textContent).toBe(
+      "Hydration Error",
+    );
+    overlay.destroy();
+  });
+
+  it("formats property paths in messages as safe inline code", () => {
+    const overlay = createFarmRuntimeErrorOverlay({ window });
+    const message =
+      "response.user.profile.formatDisplayName is not a function <img src=x onerror=alert(1)>";
+
+    overlay.show(new TypeError(message), {
+      phase: "window",
+      location: createLocation(),
+    });
+
+    const { shadow } = getOverlay();
+    const messageElement = shadow.querySelector("[data-farm-runtime-error-message]");
+    expect(messageElement?.textContent).toBe(message);
+    expect(messageElement?.querySelector(".farm-runtime-error__inline-code")?.textContent).toBe(
+      "response.user.profile.formatDisplayName",
+    );
+    expect(messageElement?.querySelector("img")).toBeNull();
+    overlay.destroy();
+  });
+
   it("deduplicates repeated failures and does not reopen a dismissed error", () => {
     const overlay = createFarmRuntimeErrorOverlay({ window });
     const error = new Error("Render loop failed");

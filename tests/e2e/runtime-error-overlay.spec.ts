@@ -9,6 +9,9 @@ test.describe("Development runtime error overlay", () => {
     const overlay = page.getByRole("alertdialog", { name: "Application failed in the browser" });
     await expect(overlay).toBeVisible();
     await expect(overlay.getByText(/formatDisplayName is not a function/)).toBeVisible();
+    await expect(overlay.locator(".farm-runtime-error__inline-code")).toHaveText(
+      "response.user.profile.formatDisplayName",
+    );
     await expect(overlay.getByText("Runtime TypeError", { exact: true })).toBeVisible();
     await expect(overlay.getByText("Error message", { exact: true })).toBeVisible();
     await expect(overlay.getByText("Window", { exact: true })).toHaveCount(0);

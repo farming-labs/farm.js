@@ -182,6 +182,22 @@ const OVERLAY_STYLES = `
   color: currentColor;
 }
 
+.farm-runtime-error__message-value {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.farm-runtime-error__inline-code {
+  padding: 2px 4px;
+  border: 1px solid var(--farm-error-line);
+  background: var(--farm-error-panel);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.92em;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
 @media (max-width: 620px) {
   .farm-runtime-error__occurrences {
     margin-right: 0;
@@ -260,7 +276,7 @@ const OVERLAY_MARKUP = `
         </div>
         <div class="farm-default-error__row">
           <span class="farm-default-error__label">Error message</span>
-          <span id="farm-runtime-error-description" class="farm-default-error__value" data-farm-runtime-error-message></span>
+          <span id="farm-runtime-error-description" class="farm-default-error__value farm-runtime-error__message-value" data-farm-runtime-error-message></span>
         </div>
         <div class="farm-default-error__row">
           <span class="farm-default-error__label">Location</span>
@@ -355,6 +371,7 @@ class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
       this.options.window,
     );
     if (sourceLocation && isBrowserExtensionUrl(sourceLocation.url)) return;
+    if (isRecoverableReactHydrationError(error, context, sourceLocation)) return;
 
     const fingerprint = createErrorFingerprint(error, context, sourceLocation);
     if (this.dismissedFingerprints.has(fingerprint)) return;
@@ -445,7 +462,11 @@ class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
       record.error,
       record.context.phase,
     );
-    this.getElement("[data-farm-runtime-error-message]").textContent = record.error.message;
+    renderErrorMessage(
+      this.getElement("[data-farm-runtime-error-message]"),
+      record.error.message,
+      this.document,
+    );
     this.getElement("[data-farm-runtime-error-location]").textContent =
       `${record.context.location.pathname}${record.context.location.search}` || "/";
     this.getElement("[data-farm-runtime-error-meta]").textContent =
@@ -876,6 +897,45 @@ function isBrowserExtensionUrl(url: string): boolean {
   } catch {
     return /^(?:chrome|moz|safari-web|ms-browser)-extension:\/\//i.test(url);
   }
+}
+
+function isRecoverableReactHydrationError(
+  error: NormalizedRuntimeError,
+  context: FarmRuntimeErrorOverlayContext,
+  location?: BrowserSourceLocation,
+): boolean {
+  if (context.phase !== "window") return false;
+
+  const isKnownRecoverableMessage = [
+    /^Hydration failed because the server rendered (?:text|HTML) didn't match the client\b/i,
+    /^Text content does not match server-rendered HTML\b/i,
+    /^There was an error while hydrating but React was able to recover\b/i,
+  ].some((pattern) => pattern.test(error.message));
+  if (!isKnownRecoverableMessage) return false;
+
+  return /(?:react-dom(?:_client)?(?:\.development)?\.js|react-dom\/|throwOnHydrationMismatch|onRecoverableError)/i.test(
+    `${location?.url || ""}\n${error.stack || ""}`,
+  );
+}
+
+function renderErrorMessage(container: Element, message: string, document: Document): void {
+  const fragments: Node[] = [];
+  const codePattern = /`([^`\n]+)`|\b[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*){2,}\b/g;
+  let offset = 0;
+
+  for (const match of message.matchAll(codePattern)) {
+    const index = match.index ?? 0;
+    if (index > offset) fragments.push(document.createTextNode(message.slice(offset, index)));
+
+    const code = document.createElement("code");
+    code.className = "farm-runtime-error__inline-code";
+    code.textContent = match[1] || match[0];
+    fragments.push(code);
+    offset = index + match[0].length;
+  }
+
+  if (offset < message.length) fragments.push(document.createTextNode(message.slice(offset)));
+  container.replaceChildren(...fragments);
 }
 
 function createErrorFingerprint(
