@@ -1,5 +1,9 @@
 // @vitest-environment node
 
+import {
+  defineRendererDescriptorConformance,
+  defineRendererServerConformance,
+} from "@farm.js/renderer-tests";
 import { describe, expect, it } from "vitest";
 import {
   getFarmRendererCapabilities,
@@ -8,6 +12,21 @@ import {
   REACT_RENDERER,
   resolveFarmRenderer,
 } from "../renderer";
+import * as serverRuntime from "../renderer/react/server";
+
+defineRendererDescriptorConformance({
+  name: "react",
+  createDescriptor: () => resolveFarmRenderer(),
+  expected: {
+    vite: "@farm.js/core/renderer/react/vite",
+    server: "@farm.js/core/renderer/react/server",
+    client: "@farm.js/core/renderer/react/client",
+    jsxImportSource: "react",
+    capabilities: { streaming: { node: true, web: false } },
+  },
+});
+
+defineRendererServerConformance(serverRuntime);
 
 describe("renderer configuration", () => {
   it("keeps React as the default renderer", () => {
