@@ -100,7 +100,7 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__viewport .farm-default-error__code {
-  font-size: clamp(64px, 10vw, 92px);
+  font-size: clamp(96px, 10vw, 120px);
   line-height: 0.92;
 }
 
@@ -174,10 +174,12 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__github-icon {
-  width: 15px;
-  height: 15px;
+  display: block;
+  width: 18px;
+  height: 18px;
   flex: 0 0 auto;
-  margin-right: 8px;
+  margin-right: 10px;
+  color: currentColor;
 }
 
 @media (max-width: 620px) {
@@ -201,6 +203,10 @@ const OVERLAY_STYLES = `
   .farm-runtime-error__viewport .farm-default-error__action {
     min-width: 0;
   }
+
+  .farm-runtime-error__viewport .farm-default-error__code {
+    font-size: 80px;
+  }
 }
 
 @media (max-height: 760px) {
@@ -211,7 +217,7 @@ const OVERLAY_STYLES = `
   }
 
   .farm-runtime-error__viewport .farm-default-error__code {
-    font-size: 80px;
+    font-size: 88px;
   }
 
   .farm-runtime-error__viewport .farm-default-error__eyebrow {

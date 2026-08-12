@@ -26,7 +26,7 @@ test.describe("Development runtime error overlay", () => {
     expect(issueUrl.searchParams.get("title")).toContain("formatDisplayName is not a function");
     expect(issueUrl.searchParams.get("body")).toContain("- Page path: /runtime-error-demo");
     await expect(overlay.getByRole("button", { name: "Reload page" })).toBeVisible();
-    await expect(overlay.locator(".farm-default-error__code")).toHaveCSS("font-size", "80px");
+    await expect(overlay.locator(".farm-default-error__code")).toHaveCSS("font-size", "88px");
     await expect(overlay.locator(".farm-default-error__panel")).toHaveCSS(
       "border-top-width",
       "0px",
@@ -36,6 +36,7 @@ test.describe("Development runtime error overlay", () => {
       /0\.5px.*inset/,
     );
     await expect(overlay.locator(".farm-runtime-error__github-icon")).toBeVisible();
+    await expect(overlay.locator(".farm-runtime-error__github-icon")).toHaveCSS("width", "18px");
     await expect(issueLink).not.toContainText("↗");
 
     const statusBox = await overlay.locator(".farm-default-error__code").boundingBox();
@@ -54,6 +55,7 @@ test.describe("Development runtime error overlay", () => {
   });
 
   test("follows dark mode for unhandled promise rejections", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
     await page.emulateMedia({ colorScheme: "dark" });
     await page.goto("/runtime-error-demo");
     await page.getByRole("button", { name: "Trigger rejected promise" }).click();
@@ -69,6 +71,7 @@ test.describe("Development runtime error overlay", () => {
     await expect(
       page.locator("[data-farm-runtime-error-viewport][data-theme='dark']"),
     ).toBeVisible();
+    await expect(overlay.locator(".farm-default-error__code")).toHaveCSS("font-size", "120px");
   });
 
   test("keeps the overlay inside a mobile viewport", async ({ page }) => {
