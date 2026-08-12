@@ -60,7 +60,8 @@ export function Counter() {
 }
 ```
 
-FARMJS server-renders the route and hydrates the Solid boundary in the browser.
+FARMJS streams the route through Solid's native SSR runtime and hydrates the Solid boundary in the
+browser. The adapter exposes both Node and WHATWG Web stream modes.
 
 ## Call FARMJS server code
 
