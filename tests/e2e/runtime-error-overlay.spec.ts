@@ -10,6 +10,12 @@ test.describe("Development runtime error overlay", () => {
     await expect(overlay).toBeVisible();
     await expect(overlay.getByText(/Cannot read properties of undefined/)).toBeVisible();
     await expect(overlay.getByText("Window", { exact: true })).toBeVisible();
+    await expect(
+      overlay.getByText("/src/app/runtime-error-demo/page.tsx:20:7", { exact: true }),
+    ).toBeVisible();
+    await expect(overlay.locator(".farm-default-error__source-line--active")).toContainText(
+      "document.title = response.user.profile.displayName;",
+    );
     await expect(overlay.getByRole("button", { name: "Copy debug report" })).toBeVisible();
     const issueLink = overlay.getByRole("link", { name: "Open GitHub issue" });
     await expect(issueLink).toBeVisible();

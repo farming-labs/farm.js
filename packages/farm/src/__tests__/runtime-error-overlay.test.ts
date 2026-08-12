@@ -80,6 +80,73 @@ describe("client runtime error overlay", () => {
     overlay.destroy();
   });
 
+  it("maps transformed module positions back to clean original source", async () => {
+    const originalSource = [
+      "export function render() {",
+      "  const user = undefined;",
+      "",
+      "  user.profile.name;",
+      "}",
+    ].join("\n");
+    const sourceMap = window.btoa(
+      JSON.stringify({
+        version: 3,
+        sources: ["example.tsx"],
+        sourcesContent: [originalSource],
+        names: [],
+        mappings: ";AAGE",
+      }),
+    );
+    const transformedSource = [
+      "const user = void 0;",
+      "user.profile.name;",
+      `//# sourceMappingURL=data:application/json;base64,${sourceMap}`,
+    ].join("\n");
+    const request = vi.fn(async () => new Response(transformedSource, { status: 200 }));
+    const overlay = createFarmRuntimeErrorOverlay({ window, fetch: request });
+    const error = new TypeError("Cannot read properties of undefined (reading 'profile')");
+    error.stack = [
+      error.toString(),
+      `    at render (${window.location.origin}/src/example.tsx?import:2:5)`,
+    ].join("\n");
+
+    overlay.show(error, {
+      phase: "window",
+      location: createLocation(),
+    });
+    await flushAsyncWork();
+
+    const { shadow } = getOverlay();
+    expect(shadow.querySelector(".farm-default-error__source-path")?.textContent).toBe(
+      "/src/example.tsx:4:3",
+    );
+    expect(shadow.querySelector(".farm-default-error__source-path")?.textContent).not.toContain(
+      "?import",
+    );
+    expect(shadow.querySelector(".farm-default-error__source-line--active")?.textContent).toContain(
+      "user.profile.name;",
+    );
+
+    overlay.destroy();
+  });
+
+  it("ignores errors raised by injected browser extensions", () => {
+    const overlay = createFarmRuntimeErrorOverlay({ window });
+    const error = new Error("Extension connection failed");
+    error.stack = [
+      error.toString(),
+      "    at Object.connect (chrome-extension://nkbihfbeogaeaoehlefnkodbefgpgknn/scripts/inpage.js:7:84179)",
+    ].join("\n");
+
+    overlay.show(error, {
+      phase: "window",
+      location: createLocation(),
+    });
+
+    expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
+    overlay.destroy();
+  });
+
   it("deduplicates repeated failures and does not reopen a dismissed error", () => {
     const overlay = createFarmRuntimeErrorOverlay({ window });
     const error = new Error("Render loop failed");

@@ -1,5 +1,11 @@
 "use client";
 
+import {
+  originalPositionFor,
+  sourceContentFor,
+  TraceMap,
+  type SourceMapInput,
+} from "@jridgewell/trace-mapping";
 import { DEFAULT_ERROR_STYLES } from "../components/error-styles";
 import { FARM_VERSION } from "../version";
 import { isChunkLoadError } from "./chunk-recovery";
@@ -327,6 +333,8 @@ class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
       context.sourceEvent,
       this.options.window,
     );
+    if (sourceLocation && isBrowserExtensionUrl(sourceLocation.url)) return;
+
     const fingerprint = createErrorFingerprint(error, context, sourceLocation);
     if (this.dismissedFingerprints.has(fingerprint)) return;
 
@@ -610,7 +618,7 @@ function resolveBrowserSourceLocation(
   for (const stackLine of error.stack.split("\n").slice(1)) {
     const match = stackLine
       .trim()
-      .match(/\(?((?:https?|file):\/\/[^)\s]+|\/[^)\s]+):(\d+):(\d+)\)?$/);
+      .match(/\(?((?:[a-z][a-z\d+.-]*):\/\/[^)\s]+|\/[^)\s]+):(\d+):(\d+)\)?$/i);
     if (!match) continue;
     return {
       ...createSourceLocation(match[1], Number(match[2]), Number(match[3]), clientWindow),
@@ -629,10 +637,7 @@ function createSourceLocation(
   let displayPath = url;
   try {
     const parsed = new URL(url, clientWindow.location.href);
-    displayPath =
-      parsed.origin === clientWindow.location.origin
-        ? `${parsed.pathname}${parsed.search}`
-        : parsed.href;
+    displayPath = parsed.origin === clientWindow.location.origin ? parsed.pathname : parsed.href;
   } catch {}
 
   return { url, displayPath, line, column };
@@ -687,27 +692,167 @@ async function loadBrowserSourceFrame(
     const source = await response.text();
     if (source.length > 1_000_000) return undefined;
 
-    const lines = source.split(/\r?\n/);
-    if (location.line < 1 || location.line > lines.length) return undefined;
-    const start = Math.max(1, location.line - 2);
-    const end = Math.min(lines.length, location.line + 2);
-    const frameLines: BrowserSourceLine[] = [];
-    for (let number = start; number <= end; number += 1) {
-      frameLines.push({
-        number,
-        content: lines[number - 1] || " ",
-        highlight: number === location.line,
-      });
-    }
+    const mappedFrame = await createMappedSourceFrame(
+      source,
+      sourceUrl,
+      location,
+      request,
+      options.window,
+    );
+    if (mappedFrame) return mappedFrame;
 
-    return {
-      path: location.displayPath,
-      line: location.line,
-      column: location.column,
-      lines: frameLines,
-    };
+    return createSourceFrame(source, location.displayPath, location.line, location.column);
   } catch {
     return undefined;
+  }
+}
+
+async function createMappedSourceFrame(
+  generatedSource: string,
+  generatedUrl: URL,
+  location: BrowserSourceLocation,
+  request: typeof fetch,
+  clientWindow: Window,
+): Promise<BrowserSourceFrame | undefined> {
+  const traceMap = await loadTraceMap(generatedSource, generatedUrl, request, clientWindow);
+  if (!traceMap) return undefined;
+
+  const original = originalPositionFor(traceMap, {
+    line: location.line,
+    column: Math.max(0, location.column - 1),
+  });
+  if (!original.source || original.line == null) return undefined;
+
+  const originalSource = sourceContentFor(traceMap, original.source);
+  if (originalSource == null) return undefined;
+
+  const originalLines = originalSource.split(/\r?\n/);
+  const generatedLine = generatedSource.split(/\r?\n/)[location.line - 1] || "";
+  const line = refineOriginalLine(generatedLine, originalLines, original.line);
+  const lineContent = originalLines[line - 1] || "";
+  const trimmedGeneratedLine = generatedLine.trim();
+  const column =
+    line !== original.line && trimmedGeneratedLine && lineContent.includes(trimmedGeneratedLine)
+      ? lineContent.indexOf(trimmedGeneratedLine) + 1
+      : (original.column ?? 0) + 1;
+
+  return createSourceFrame(
+    originalSource,
+    formatDisplaySourceUrl(original.source, clientWindow),
+    line,
+    column,
+  );
+}
+
+async function loadTraceMap(
+  generatedSource: string,
+  generatedUrl: URL,
+  request: typeof fetch,
+  clientWindow: Window,
+): Promise<TraceMap | undefined> {
+  const matches = Array.from(generatedSource.matchAll(/\/\/[#@]\s*sourceMappingURL=([^\s]+)/g));
+  const reference = matches[matches.length - 1]?.[1];
+  if (!reference) return undefined;
+
+  let sourceMapJson: string;
+  if (reference.startsWith("data:")) {
+    sourceMapJson = decodeSourceMapDataUrl(reference, clientWindow);
+  } else {
+    const sourceMapUrl = new URL(reference, generatedUrl);
+    if (sourceMapUrl.origin !== clientWindow.location.origin) return undefined;
+    const response = await request(sourceMapUrl.href, {
+      headers: { Accept: "application/json, text/plain" },
+    });
+    if (!response.ok) return undefined;
+    sourceMapJson = await response.text();
+    if (sourceMapJson.length > 2_000_000) return undefined;
+  }
+
+  return new TraceMap(JSON.parse(sourceMapJson) as SourceMapInput, generatedUrl.href);
+}
+
+function decodeSourceMapDataUrl(value: string, clientWindow: Window): string {
+  const separator = value.indexOf(",");
+  if (separator < 0) throw new Error("Invalid inline source map");
+  const metadata = value.slice(0, separator);
+  const payload = value.slice(separator + 1);
+  if (!metadata.includes(";base64")) return decodeURIComponent(payload);
+
+  const binary = clientWindow.atob(payload);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function refineOriginalLine(
+  generatedLine: string,
+  originalLines: string[],
+  mappedLine: number,
+): number {
+  const normalizedGeneratedLine = normalizeSourceLine(generatedLine);
+  if (normalizedGeneratedLine.length < 8) return mappedLine;
+
+  let bestMatch = mappedLine;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < originalLines.length; index += 1) {
+    if (normalizeSourceLine(originalLines[index]) !== normalizedGeneratedLine) continue;
+    const line = index + 1;
+    const distance = Math.abs(line - mappedLine);
+    if (distance < bestDistance) {
+      bestMatch = line;
+      bestDistance = distance;
+    }
+  }
+  return bestMatch;
+}
+
+function normalizeSourceLine(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function createSourceFrame(
+  source: string,
+  path: string,
+  line: number,
+  column: number,
+): BrowserSourceFrame | undefined {
+  const lines = source.split(/\r?\n/);
+  if (line < 1 || line > lines.length) return undefined;
+  const start = Math.max(1, line - 2);
+  const end = Math.min(lines.length, line + 2);
+  const frameLines: BrowserSourceLine[] = [];
+  for (let number = start; number <= end; number += 1) {
+    frameLines.push({
+      number,
+      content: lines[number - 1] || " ",
+      highlight: number === line,
+    });
+  }
+
+  return { path, line, column, lines: frameLines };
+}
+
+function formatDisplaySourceUrl(url: string, clientWindow: Window): string {
+  try {
+    const parsed = new URL(url, clientWindow.location.href);
+    return parsed.origin === clientWindow.location.origin ? parsed.pathname : parsed.href;
+  } catch {
+    return url.replace(/[?#].*$/, "");
+  }
+}
+
+function isBrowserExtensionUrl(url: string): boolean {
+  try {
+    return [
+      "chrome-extension:",
+      "moz-extension:",
+      "safari-web-extension:",
+      "ms-browser-extension:",
+    ].includes(new URL(url).protocol);
+  } catch {
+    return /^(?:chrome|moz|safari-web|ms-browser)-extension:\/\//i.test(url);
   }
 }
 
