@@ -1,23 +1,27 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import { Link } from "@farm.js/core/client";
 
 interface DemoApiResponse {
   user: {
     profile: {
-      displayName: string;
+      formatDisplayName(): string;
     };
   };
 }
 
 export default function RuntimeErrorDemoPage() {
+  const [displayName, setDisplayName] = useState("Waiting for a profile");
+
   const triggerRuntimeError = () => {
-    const response = { user: undefined } as unknown as DemoApiResponse;
+    const response = {
+      user: { profile: { displayName: "Ada Lovelace" } },
+    } as unknown as DemoApiResponse;
 
     window.setTimeout(() => {
-      // This deliberately mirrors an API response shape mismatch after hydration.
-      document.title = response.user.profile.displayName;
+      // The deployed API still returns displayName, but this client expects the newer SDK method.
+      setDisplayName(response.user.profile.formatDisplayName());
     }, 0);
   };
 
@@ -55,9 +59,10 @@ export default function RuntimeErrorDemoPage() {
             <div>
               <h2 className="font-semibold text-gray-950">Unexpected API response</h2>
               <p className="mt-1 text-sm leading-6 text-gray-600">
-                Reads a nested profile field from missing user data and causes a genuine
-                JavaScript TypeError.
+                Calls a profile formatter added by a newer client, while the API still returns
+                the older data shape.
               </p>
+              <p className="mt-2 font-mono text-xs text-gray-500">Preview: {displayName}</p>
             </div>
             <button
               type="button"

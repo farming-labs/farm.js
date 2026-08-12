@@ -8,13 +8,13 @@ test.describe("Development runtime error overlay", () => {
 
     const overlay = page.getByRole("alertdialog", { name: "Application failed in the browser" });
     await expect(overlay).toBeVisible();
-    await expect(overlay.getByText(/Cannot read properties of undefined/)).toBeVisible();
+    await expect(overlay.getByText(/formatDisplayName is not a function/)).toBeVisible();
     await expect(overlay.getByText("Window", { exact: true })).toBeVisible();
     await expect(
-      overlay.getByText("/src/app/runtime-error-demo/page.tsx:20:7", { exact: true }),
+      overlay.getByText(/\/src\/app\/runtime-error-demo\/page\.tsx:24:\d+/, { exact: true }),
     ).toBeVisible();
     await expect(overlay.locator(".farm-default-error__source-line--active")).toContainText(
-      "document.title = response.user.profile.displayName;",
+      "setDisplayName(response.user.profile.formatDisplayName());",
     );
     await expect(overlay.getByRole("button", { name: "Copy debug report" })).toBeVisible();
     const issueLink = overlay.getByRole("link", { name: "Open GitHub issue" });
@@ -23,10 +23,20 @@ test.describe("Development runtime error overlay", () => {
     expect(issueUrl.origin + issueUrl.pathname).toBe(
       "https://github.com/farming-labs/farm.js/issues/new",
     );
-    expect(issueUrl.searchParams.get("title")).toContain("Cannot read properties of undefined");
+    expect(issueUrl.searchParams.get("title")).toContain("formatDisplayName is not a function");
     expect(issueUrl.searchParams.get("body")).toContain("- Page path: /runtime-error-demo");
     await expect(overlay.getByRole("button", { name: "Reload page" })).toBeVisible();
-    await expect(overlay.locator(".farm-default-error__code")).toHaveCSS("font-size", "72px");
+    await expect(overlay.locator(".farm-default-error__code")).toHaveCSS("font-size", "80px");
+    await expect(overlay.locator(".farm-default-error__panel")).toHaveCSS(
+      "border-top-width",
+      "0px",
+    );
+    await expect(overlay.locator(".farm-default-error__panel")).toHaveCSS(
+      "box-shadow",
+      /0\.5px.*inset/,
+    );
+    await expect(overlay.locator(".farm-runtime-error__github-icon")).toBeVisible();
+    await expect(issueLink).not.toContainText("↗");
 
     const statusBox = await overlay.locator(".farm-default-error__code").boundingBox();
     const actionsBox = await overlay.locator(".farm-default-error__actions").boundingBox();
