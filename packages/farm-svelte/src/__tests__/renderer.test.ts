@@ -14,6 +14,7 @@ describe("Svelte renderer", () => {
       vite: "@farm.js/svelte/vite",
       server: "@farm.js/svelte/server",
       client: "@farm.js/svelte/client",
+      capabilities: { streaming: { node: false, web: false } },
       componentExtensions: [".svelte"],
     });
     expect(first.componentExtensions).not.toBe(second.componentExtensions);

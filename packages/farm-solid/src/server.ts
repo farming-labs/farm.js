@@ -9,6 +9,9 @@ import SolidCompat, {
 } from "./runtime";
 
 export const name = "solid";
+export const capabilities = {
+  streaming: { node: false, web: false },
+} as const;
 export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
 export { generateHydrationScript };
 

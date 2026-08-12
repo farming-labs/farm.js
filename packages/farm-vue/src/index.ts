@@ -8,6 +8,9 @@ const VUE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   componentExtensions: [".vue"],
   dedupe: ["vue"],
   optimizeDeps: ["vue", "@farm.js/vue/client"],
+  capabilities: {
+    streaming: { node: false, web: false },
+  },
 });
 
 /** Select Vue for SFC compilation, server rendering, and browser hydration. */
@@ -17,6 +20,9 @@ export function vue(): FarmRenderer {
     componentExtensions: [...(VUE_RENDERER.componentExtensions || [])],
     dedupe: [...(VUE_RENDERER.dedupe || [])],
     optimizeDeps: [...(VUE_RENDERER.optimizeDeps || [])],
+    capabilities: {
+      streaming: { ...VUE_RENDERER.capabilities?.streaming },
+    },
   };
 }
 

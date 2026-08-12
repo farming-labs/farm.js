@@ -15,6 +15,7 @@ describe("Solid renderer", () => {
       server: "@farm.js/solid/server",
       client: "@farm.js/solid/client",
       jsxImportSource: "solid-js",
+      capabilities: { streaming: { node: false, web: false } },
     });
     expect(first.dedupe).not.toBe(second.dedupe);
     expect(first.optimizeDeps).not.toBe(second.optimizeDeps);

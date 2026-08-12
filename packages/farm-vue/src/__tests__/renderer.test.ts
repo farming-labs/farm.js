@@ -15,6 +15,7 @@ describe("Vue renderer", () => {
       vite: "@farm.js/vue/vite",
       server: "@farm.js/vue/server",
       client: "@farm.js/vue/client",
+      capabilities: { streaming: { node: false, web: false } },
       componentExtensions: [".vue"],
     });
     expect(first.componentExtensions).not.toBe(second.componentExtensions);

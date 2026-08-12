@@ -11,6 +11,9 @@ import PreactCompat, {
 } from "./runtime";
 
 export const name = "preact";
+export const capabilities = {
+  streaming: { node: true, web: true },
+} as const;
 export { ErrorBoundary, Fragment, Suspense, createElement, isValidElement };
 
 /** Preact hydration does not require an inline bootstrap before the client entry. */

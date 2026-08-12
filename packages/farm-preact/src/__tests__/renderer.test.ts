@@ -22,6 +22,7 @@ describe("Preact renderer", () => {
       server: "@farm.js/preact/server",
       client: "@farm.js/preact/client",
       jsxImportSource: "preact",
+      capabilities: { streaming: { node: true, web: true } },
     });
     expect(first.dedupe).not.toBe(second.dedupe);
     expect(first.optimizeDeps).not.toBe(second.optimizeDeps);

@@ -10,6 +10,9 @@ import VueCompat, {
 } from "./runtime";
 
 export const name = "vue";
+export const capabilities = {
+  streaming: { node: false, web: false },
+} as const;
 export { Fragment, Suspense, ErrorBoundary, createElement, isValidElement };
 
 /** Vue hydration does not require an inline bootstrap before the client entry. */
