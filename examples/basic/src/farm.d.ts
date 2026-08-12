@@ -43,6 +43,7 @@ export type RoutePath =
   | "/prefetch-e2e"
   | "/query-demo"
   | `/repos/${string}/${string}`
+  | "/runtime-error-demo"
   | "/slot-lab"
   | `/slot-lab/photo/${string}`
   | "/storage-demo"
@@ -79,6 +80,7 @@ export type RoutePattern =
   | "/prefetch-e2e"
   | "/query-demo"
   | "/repos/[owner]/[repo]"
+  | "/runtime-error-demo"
   | "/slot-lab"
   | "/slot-lab/photo/[id]"
   | "/storage-demo"
@@ -115,6 +117,7 @@ export type RouteModulePattern =
   | "/prefetch-e2e"
   | "/query-demo"
   | "/repos/[owner]/[repo]"
+  | "/runtime-error-demo"
   | "/slot-lab"
   | "/slot-lab/photo/[id]"
   | "/storage-demo"

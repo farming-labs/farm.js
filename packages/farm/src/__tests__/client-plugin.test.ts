@@ -25,7 +25,12 @@ function createManager(registrations: FarmClientPluginRegistration[]) {
 }
 
 describe("client plugin lifecycle", () => {
-  afterEach(() => {
+  afterEach(async () => {
+    window.dispatchEvent(new Event("pagehide"));
+    await Promise.resolve();
+    document.querySelectorAll("[data-farm-runtime-error-overlay]").forEach((element) => {
+      element.remove();
+    });
     vi.restoreAllMocks();
   });
 
@@ -278,5 +283,44 @@ describe("client plugin lifecycle", () => {
     await manager.failNavigation(navigation, failure);
 
     expect(calls).toEqual(["navigation-error", "navigation"]);
+  });
+
+  it("shows unexpected browser failures in development without requiring an error plugin", async () => {
+    const manager = createManager([]);
+    await manager.start();
+
+    const event = new ErrorEvent("error", {
+      error: new Error("Unexpected client render failure"),
+      message: "Unexpected client render failure",
+      filename: "http://localhost/src/app.tsx",
+      lineno: 17,
+      colno: 9,
+    });
+    window.dispatchEvent(event);
+    await Promise.resolve();
+
+    const host = document.querySelector<HTMLElement>("[data-farm-runtime-error-overlay]");
+    expect(host?.hidden).toBe(false);
+    expect(host?.shadowRoot?.querySelector("[data-farm-runtime-error-message]")?.textContent).toBe(
+      "Unexpected client render failure",
+    );
+
+    await manager.close();
+    expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
+  });
+
+  it("does not install the runtime error overlay in production", async () => {
+    const manager = createClientPluginManager([], {
+      router: createRouter(),
+      isDev: false,
+      isProd: true,
+      window,
+    });
+    await manager.start();
+
+    await manager.reportError(new Error("Production failure"), "window");
+
+    expect(document.querySelector("[data-farm-runtime-error-overlay]")).toBeNull();
+    await manager.close();
   });
 });

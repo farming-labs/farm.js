@@ -1,5 +1,10 @@
 "use client";
 
+import {
+  createFarmRuntimeErrorOverlay,
+  type FarmRuntimeErrorOverlay,
+} from "./runtime-error-overlay";
+
 type MaybePromise<T> = T | Promise<T>;
 
 export type FarmClientPluginEnforce = "pre" | "post";
@@ -209,14 +214,21 @@ export class FarmClientPluginManager {
   private started = false;
   private closed = false;
   private readonly reportedErrors = new WeakSet<object>();
+  private readonly runtimeErrorOverlay?: FarmRuntimeErrorOverlay;
 
   private readonly handleWindowError = (event: ErrorEvent) => {
     const error = event.error ?? new Error(event.message || "Unknown browser error");
-    void this.reportError(error, "window");
+    void this.reportError(error, "window", undefined, this.getLocation(), event);
   };
 
   private readonly handleUnhandledRejection = (event: PromiseRejectionEvent) => {
-    void this.reportError(event.reason, "unhandled-rejection");
+    void this.reportError(
+      event.reason,
+      "unhandled-rejection",
+      undefined,
+      this.getLocation(),
+      event,
+    );
   };
 
   private readonly handlePageHide = () => {
@@ -234,6 +246,11 @@ export class FarmClientPluginManager {
       isProd: options.isProd ?? !options.isDev,
       window: options.window ?? (typeof window !== "undefined" ? window : undefined),
     };
+    if (this.options.isDev && this.options.window) {
+      this.runtimeErrorOverlay = createFarmRuntimeErrorOverlay({
+        window: this.options.window,
+      });
+    }
   }
 
   start(): Promise<void> {
@@ -392,6 +409,7 @@ export class FarmClientPluginManager {
     phase: FarmClientPluginErrorPhase,
     navigation?: FarmClientNavigationSession,
     location = this.getLocation(),
+    sourceEvent?: Event,
   ): Promise<void> {
     if (this.closed) return;
     if (isObject(error)) {
@@ -400,7 +418,7 @@ export class FarmClientPluginManager {
     }
 
     if (!this.started && !this.starting) await this.start();
-    await this.runErrorHooks({ error, phase, navigation, location });
+    await this.runErrorHooks({ error, phase, navigation, location }, undefined, sourceEvent);
   }
 
   close(reason: FarmClientPluginCloseEvent["reason"] = "manual"): Promise<void> {
@@ -459,7 +477,7 @@ export class FarmClientPluginManager {
     const clientWindow = this.options.window;
     if (!clientWindow) return;
 
-    if (this.instances.some(({ plugin }) => plugin.error)) {
+    if (this.runtimeErrorOverlay || this.instances.some(({ plugin }) => plugin.error)) {
       clientWindow.addEventListener("error", this.handleWindowError);
       clientWindow.addEventListener("unhandledrejection", this.handleUnhandledRejection);
     }
@@ -509,6 +527,7 @@ export class FarmClientPluginManager {
     clientWindow?.removeEventListener("pagehide", this.handlePageHide);
     for (const observer of this.performanceObservers) observer.disconnect();
     this.performanceObservers.length = 0;
+    this.runtimeErrorOverlay?.destroy();
 
     for (const instance of [...this.instances].reverse()) {
       try {
@@ -546,7 +565,13 @@ export class FarmClientPluginManager {
   private async runErrorHooks(
     event: Pick<FarmClientPluginErrorEvent, "error" | "phase" | "location" | "navigation">,
     excluded?: FarmClientPluginInstance,
+    sourceEvent?: Event,
   ): Promise<void> {
+    this.runtimeErrorOverlay?.show(event.error, {
+      phase: event.phase,
+      location: event.location,
+      sourceEvent,
+    });
     for (const instance of this.instances) {
       if (instance === excluded || !instance.plugin.error) continue;
       try {

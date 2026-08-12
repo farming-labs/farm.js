@@ -1,0 +1,879 @@
+"use client";
+
+import { DEFAULT_ERROR_STYLES } from "../components/error-styles";
+import { FARM_VERSION } from "../version";
+import { isChunkLoadError } from "./chunk-recovery";
+
+export interface FarmRuntimeErrorLocation {
+  href: string;
+  pathname: string;
+  search: string;
+  hash: string;
+}
+
+export interface FarmRuntimeErrorOverlayContext {
+  phase: string;
+  location: FarmRuntimeErrorLocation;
+  sourceEvent?: Event;
+}
+
+export interface FarmRuntimeErrorOverlayOptions {
+  window: Window;
+  farmVersion?: string;
+  reload?: () => void;
+  fetch?: typeof fetch;
+}
+
+export interface FarmRuntimeErrorOverlay {
+  show(error: unknown, context: FarmRuntimeErrorOverlayContext): void;
+  dismiss(): void;
+  destroy(): void;
+}
+
+interface NormalizedRuntimeError {
+  name: string;
+  message: string;
+  stack?: string;
+}
+
+interface BrowserSourceLocation {
+  url: string;
+  displayPath: string;
+  line: number;
+  column: number;
+  stackLine?: string;
+}
+
+interface BrowserSourceLine {
+  number?: number;
+  content: string;
+  highlight?: boolean;
+}
+
+interface BrowserSourceFrame {
+  path: string;
+  line?: number;
+  column?: number;
+  lines: BrowserSourceLine[];
+  unavailable?: boolean;
+}
+
+interface RuntimeErrorRecord {
+  error: NormalizedRuntimeError;
+  context: FarmRuntimeErrorOverlayContext;
+  fingerprint: string;
+  occurrences: number;
+  sourceLocation?: BrowserSourceLocation;
+  sourceFrame: BrowserSourceFrame;
+}
+
+const OVERLAY_STYLES = `
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 2147483647;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+:host([hidden]) {
+  display: none;
+}
+
+.farm-runtime-error__viewport {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.farm-runtime-error__viewport .farm-default-error {
+  min-height: 100%;
+  padding: clamp(22px, 4vh, 36px) 24px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__code {
+  font-size: clamp(64px, 10vw, 92px);
+  line-height: 0.92;
+}
+
+.farm-runtime-error__viewport .farm-default-error__eyebrow {
+  margin-top: 22px;
+  margin-bottom: 18px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__summary {
+  margin-bottom: 20px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__row {
+  min-height: 48px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__details {
+  padding-top: 16px;
+  padding-bottom: 14px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__details-header {
+  margin-bottom: 8px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__source-path {
+  padding-top: 9px;
+  padding-bottom: 9px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__source-code {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__meta {
+  margin-top: 10px;
+}
+
+.farm-runtime-error__viewport .farm-default-error__actions {
+  margin-top: 20px;
+}
+
+.farm-runtime-error__occurrences {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  margin-right: auto;
+  padding: 0 8px;
+  border: 1px solid var(--farm-error-line);
+  color: var(--farm-error-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.farm-runtime-error__occurrences[hidden],
+.farm-runtime-error__action[hidden] {
+  display: none;
+}
+
+.farm-runtime-error__copy {
+  min-width: 166px;
+}
+
+@media (max-width: 620px) {
+  .farm-runtime-error__occurrences {
+    margin-right: 0;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__content,
+  .farm-runtime-error__viewport .farm-default-error__panel,
+  .farm-runtime-error__viewport .farm-default-error__details,
+  .farm-runtime-error__viewport .farm-default-error__source,
+  .farm-runtime-error__viewport .farm-default-error__actions {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__actions {
+    width: 100%;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__action {
+    min-width: 0;
+  }
+}
+
+@media (max-height: 760px) {
+  .farm-runtime-error__viewport .farm-default-error {
+    place-items: start center;
+    padding-top: 16px;
+    padding-bottom: 16px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__code {
+    font-size: 60px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__eyebrow {
+    margin-top: 14px;
+    margin-bottom: 12px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__summary {
+    margin-bottom: 14px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__row {
+    min-height: 42px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__details {
+    padding-top: 12px;
+    padding-bottom: 10px;
+  }
+
+  .farm-runtime-error__viewport .farm-default-error__actions {
+    margin-top: 14px;
+  }
+}
+`;
+
+const OVERLAY_MARKUP = `
+<div class="farm-runtime-error__viewport" data-farm-runtime-error-viewport>
+  <main class="farm-default-error" data-farm-runtime-error role="alertdialog" aria-modal="true" aria-labelledby="farm-runtime-error-title" aria-describedby="farm-runtime-error-description">
+    <div class="farm-default-error__content">
+      <p class="farm-default-error__code" aria-hidden="true">500</p>
+      <p class="farm-default-error__eyebrow">Client runtime error</p>
+      <header class="farm-default-error__summary">
+        <h1 id="farm-runtime-error-title" class="farm-default-error__title">Application failed in the browser</h1>
+        <p id="farm-runtime-error-description" class="farm-default-error__message" data-farm-runtime-error-message></p>
+      </header>
+      <section class="farm-default-error__panel" aria-label="Error information">
+        <div class="farm-default-error__row">
+          <span class="farm-default-error__label">Location</span>
+          <span class="farm-default-error__value" data-farm-runtime-error-location></span>
+        </div>
+        <div class="farm-default-error__row">
+          <span class="farm-default-error__label">Phase</span>
+          <span class="farm-default-error__value" data-farm-runtime-error-phase></span>
+        </div>
+        <section class="farm-default-error__details" aria-labelledby="farm-runtime-error-details-title">
+          <div class="farm-default-error__details-header">
+            <h2 id="farm-runtime-error-details-title" class="farm-default-error__details-title">Details</h2>
+            <span class="farm-runtime-error__occurrences" data-farm-runtime-error-occurrences hidden></span>
+            <button class="farm-default-error__copy farm-runtime-error__copy" type="button" data-farm-runtime-error-copy>
+              <span data-farm-runtime-error-copy-label>Copy debug report</span>
+              <span class="farm-default-error__sr-only" aria-live="polite" data-farm-runtime-error-copy-status></span>
+            </button>
+          </div>
+          <div data-farm-runtime-error-source></div>
+          <p class="farm-default-error__meta" data-farm-runtime-error-meta></p>
+        </section>
+      </section>
+      <div class="farm-default-error__actions">
+        <a class="farm-default-error__action farm-default-error__action--primary farm-runtime-error__action" data-farm-runtime-error-issue target="_blank" rel="noopener noreferrer">Open GitHub issue <span aria-hidden="true">↗</span></a>
+        <button class="farm-default-error__action farm-runtime-error__action" type="button" data-farm-runtime-error-reload>Reload page</button>
+        <button class="farm-default-error__action farm-runtime-error__action" type="button" data-farm-runtime-error-dismiss>Dismiss</button>
+      </div>
+    </div>
+  </main>
+</div>
+`;
+
+class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
+  private readonly options: FarmRuntimeErrorOverlayOptions;
+  private readonly document: Document;
+  private readonly host: HTMLDivElement;
+  private readonly shadow: ShadowRoot;
+  private readonly dismissedFingerprints = new Set<string>();
+  private readonly themeObserver: MutationObserver;
+  private readonly colorSchemeQuery?: MediaQueryList;
+  private current?: RuntimeErrorRecord;
+  private previousFocus?: Element | null;
+  private renderSequence = 0;
+  private copyResetTimer?: number;
+  private destroyed = false;
+
+  constructor(options: FarmRuntimeErrorOverlayOptions) {
+    this.options = options;
+    this.document = options.window.document;
+    this.host = this.document.createElement("div");
+    this.host.dataset.farmRuntimeErrorOverlay = "";
+    this.host.hidden = true;
+    this.shadow = this.host.attachShadow({ mode: "open" });
+    this.shadow.innerHTML = `<style>${DEFAULT_ERROR_STYLES}${OVERLAY_STYLES}</style>${OVERLAY_MARKUP}`;
+
+    this.getElement<HTMLButtonElement>("[data-farm-runtime-error-reload]").addEventListener(
+      "click",
+      this.handleReload,
+    );
+    this.getElement<HTMLButtonElement>("[data-farm-runtime-error-dismiss]").addEventListener(
+      "click",
+      this.handleDismiss,
+    );
+    this.getElement<HTMLButtonElement>("[data-farm-runtime-error-copy]").addEventListener(
+      "click",
+      this.handleCopy,
+    );
+    this.shadow.addEventListener("keydown", this.handleKeyDown);
+
+    this.themeObserver = new MutationObserver(this.updateTheme);
+    this.themeObserver.observe(this.document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "data-theme", "data-color-scheme", "style"],
+    });
+    if (this.document.body) {
+      this.themeObserver.observe(this.document.body, {
+        attributes: true,
+        attributeFilter: ["class", "data-theme", "data-color-scheme", "style"],
+      });
+    }
+
+    this.colorSchemeQuery = options.window.matchMedia?.("(prefers-color-scheme: dark)");
+    this.colorSchemeQuery?.addEventListener?.("change", this.updateTheme);
+    this.updateTheme();
+  }
+
+  show(errorLike: unknown, context: FarmRuntimeErrorOverlayContext): void {
+    if (this.destroyed || isChunkLoadError(errorLike) || isChunkLoadError(context.sourceEvent)) {
+      return;
+    }
+
+    const error = normalizeRuntimeError(errorLike);
+    const sourceLocation = resolveBrowserSourceLocation(
+      error,
+      context.sourceEvent,
+      this.options.window,
+    );
+    const fingerprint = createErrorFingerprint(error, context, sourceLocation);
+    if (this.dismissedFingerprints.has(fingerprint)) return;
+
+    if (this.current?.fingerprint === fingerprint) {
+      this.current.occurrences += 1;
+      this.renderOccurrences(this.current.occurrences);
+      return;
+    }
+
+    const record: RuntimeErrorRecord = {
+      error,
+      context,
+      fingerprint,
+      occurrences: 1,
+      sourceLocation,
+      sourceFrame: createFallbackSourceFrame(error, sourceLocation),
+    };
+    this.current = record;
+    const sequence = ++this.renderSequence;
+    this.render(record);
+    this.mount();
+
+    if (sourceLocation) {
+      void loadBrowserSourceFrame(sourceLocation, this.options)
+        .then((sourceFrame) => {
+          if (
+            !sourceFrame ||
+            this.destroyed ||
+            sequence !== this.renderSequence ||
+            this.current !== record
+          ) {
+            return;
+          }
+          record.sourceFrame = sourceFrame;
+          this.renderSourceFrame(sourceFrame);
+          this.renderIssueLink(record);
+        })
+        .catch(() => {});
+    }
+  }
+
+  dismiss(): void {
+    if (this.destroyed || this.host.hidden) return;
+    if (this.current) this.dismissedFingerprints.add(this.current.fingerprint);
+    this.host.hidden = true;
+    this.renderSequence += 1;
+    if (this.previousFocus instanceof HTMLElement && this.previousFocus.isConnected) {
+      this.previousFocus.focus();
+    }
+    this.previousFocus = undefined;
+  }
+
+  destroy(): void {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    this.renderSequence += 1;
+    this.themeObserver.disconnect();
+    this.colorSchemeQuery?.removeEventListener?.("change", this.updateTheme);
+    this.shadow.removeEventListener("keydown", this.handleKeyDown);
+    if (this.copyResetTimer !== undefined) {
+      this.options.window.clearTimeout(this.copyResetTimer);
+    }
+    this.host.remove();
+    this.current = undefined;
+  }
+
+  private mount(): void {
+    if (!this.host.isConnected) {
+      (this.document.body || this.document.documentElement).appendChild(this.host);
+    }
+    const wasHidden = this.host.hidden;
+    this.host.hidden = false;
+    if (wasHidden) {
+      this.previousFocus = this.document.activeElement;
+      this.options.window.setTimeout(() => {
+        if (!this.host.hidden && !this.destroyed) {
+          this.getElement<HTMLAnchorElement>("[data-farm-runtime-error-issue]").focus({
+            preventScroll: true,
+          });
+        }
+      }, 0);
+    }
+  }
+
+  private render(record: RuntimeErrorRecord): void {
+    this.getElement("[data-farm-runtime-error-message]").textContent = record.error.message;
+    this.getElement("[data-farm-runtime-error-location]").textContent =
+      `${record.context.location.pathname}${record.context.location.search}` || "/";
+    this.getElement("[data-farm-runtime-error-phase]").textContent = formatPhase(
+      record.context.phase,
+    );
+    this.getElement("[data-farm-runtime-error-meta]").textContent =
+      `Farm.js v${this.options.farmVersion || FARM_VERSION} · development · browser`;
+    this.renderIssueLink(record);
+    this.renderOccurrences(record.occurrences);
+    this.renderSourceFrame(record.sourceFrame);
+    this.resetCopyStatus();
+  }
+
+  private renderOccurrences(occurrences: number): void {
+    const badge = this.getElement<HTMLElement>("[data-farm-runtime-error-occurrences]");
+    badge.hidden = occurrences < 2;
+    badge.textContent = occurrences < 2 ? "" : `Repeated ×${occurrences}`;
+  }
+
+  private renderIssueLink(record: RuntimeErrorRecord): void {
+    this.getElement<HTMLAnchorElement>("[data-farm-runtime-error-issue]").href =
+      createGithubIssueUrl(record, this.options.window, this.options.farmVersion || FARM_VERSION);
+  }
+
+  private renderSourceFrame(sourceFrame: BrowserSourceFrame): void {
+    const container = this.getElement<HTMLElement>("[data-farm-runtime-error-source]");
+    container.replaceChildren();
+
+    const source = this.document.createElement("div");
+    source.className = "farm-default-error__source";
+
+    const path = this.document.createElement("p");
+    path.className = "farm-default-error__source-path";
+    path.textContent = formatSourcePath(sourceFrame);
+    source.appendChild(path);
+
+    const pre = this.document.createElement("pre");
+    pre.className = "farm-default-error__source-code";
+    pre.tabIndex = 0;
+    const code = this.document.createElement("code");
+    for (const line of sourceFrame.lines) {
+      const row = this.document.createElement("span");
+      row.className = `farm-default-error__source-line${line.highlight ? " farm-default-error__source-line--active" : ""}`;
+
+      const gutter = this.document.createElement("span");
+      gutter.className = "farm-default-error__source-gutter";
+      gutter.textContent = `${line.highlight ? ">" : " "} ${line.number ?? ""}`;
+
+      const text = this.document.createElement("span");
+      text.className = "farm-default-error__source-text";
+      text.textContent = line.content || " ";
+
+      row.append(gutter, text);
+      code.appendChild(row);
+    }
+    pre.appendChild(code);
+    source.appendChild(pre);
+    container.appendChild(source);
+  }
+
+  private readonly handleReload = () => {
+    (this.options.reload || (() => this.options.window.location.reload()))();
+  };
+
+  private readonly handleDismiss = () => {
+    this.dismiss();
+  };
+
+  private readonly handleCopy = async () => {
+    if (!this.current) return;
+    const report = createFarmRuntimeErrorDebugReport(
+      this.current,
+      this.options.window,
+      this.options.farmVersion || FARM_VERSION,
+    );
+    const label = this.getElement<HTMLElement>("[data-farm-runtime-error-copy-label]");
+    const status = this.getElement<HTMLElement>("[data-farm-runtime-error-copy-status]");
+
+    try {
+      await copyText(report, this.options.window, this.document);
+      label.textContent = "Copied";
+      status.textContent = "Debug report copied";
+      if (this.copyResetTimer !== undefined) {
+        this.options.window.clearTimeout(this.copyResetTimer);
+      }
+      this.copyResetTimer = this.options.window.setTimeout(() => this.resetCopyStatus(), 1800);
+    } catch {
+      status.textContent = "Unable to copy the debug report";
+    }
+  };
+
+  private readonly handleKeyDown = (event: Event) => {
+    const keyboardEvent = event as KeyboardEvent;
+    if (keyboardEvent.key === "Escape") {
+      keyboardEvent.preventDefault();
+      this.dismiss();
+      return;
+    }
+    if (keyboardEvent.key !== "Tab") return;
+
+    const controls = Array.from(
+      this.shadow.querySelectorAll<HTMLElement>("a[href], button:not([hidden]):not([disabled])"),
+    );
+    if (controls.length === 0) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    const active = this.shadow.activeElement;
+
+    if (keyboardEvent.shiftKey && active === first) {
+      keyboardEvent.preventDefault();
+      last.focus();
+    } else if (!keyboardEvent.shiftKey && active === last) {
+      keyboardEvent.preventDefault();
+      first.focus();
+    }
+  };
+
+  private readonly updateTheme = () => {
+    this.getElement<HTMLElement>("[data-farm-runtime-error-viewport]").dataset.theme =
+      resolveDocumentTheme(this.document, this.options.window);
+  };
+
+  private resetCopyStatus(): void {
+    this.getElement("[data-farm-runtime-error-copy-label]").textContent = "Copy debug report";
+    this.getElement("[data-farm-runtime-error-copy-status]").textContent = "";
+  }
+
+  private getElement<T extends Element = HTMLElement>(selector: string): T {
+    const element = this.shadow.querySelector<T>(selector);
+    if (!element) throw new Error(`Farm runtime error overlay is missing ${selector}`);
+    return element;
+  }
+}
+
+export function createFarmRuntimeErrorOverlay(
+  options: FarmRuntimeErrorOverlayOptions,
+): FarmRuntimeErrorOverlay {
+  return new DefaultFarmRuntimeErrorOverlay(options);
+}
+
+function normalizeRuntimeError(errorLike: unknown): NormalizedRuntimeError {
+  if (errorLike instanceof Error) {
+    return {
+      name: errorLike.name || "Error",
+      message: errorLike.message || "An unknown browser error occurred.",
+      stack: errorLike.stack,
+    };
+  }
+
+  if (errorLike && typeof errorLike === "object") {
+    const error = errorLike as Record<string, unknown>;
+    const name = typeof error.name === "string" && error.name ? error.name : "Error";
+    const message =
+      typeof error.message === "string" && error.message
+        ? error.message
+        : typeof error.reason === "string" && error.reason
+          ? error.reason
+          : stringifyUnknown(errorLike);
+    return {
+      name,
+      message: message || "An unknown browser error occurred.",
+      stack: typeof error.stack === "string" ? error.stack : undefined,
+    };
+  }
+
+  return {
+    name: "Error",
+    message: stringifyUnknown(errorLike) || "An unknown browser error occurred.",
+  };
+}
+
+function stringifyUnknown(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value == null) return "";
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function resolveBrowserSourceLocation(
+  error: NormalizedRuntimeError,
+  sourceEvent: Event | undefined,
+  clientWindow: Window,
+): BrowserSourceLocation | undefined {
+  if (sourceEvent && "filename" in sourceEvent) {
+    const event = sourceEvent as ErrorEvent;
+    if (event.filename && event.lineno) {
+      return createSourceLocation(event.filename, event.lineno, event.colno || 1, clientWindow);
+    }
+  }
+
+  if (!error.stack) return undefined;
+  for (const stackLine of error.stack.split("\n").slice(1)) {
+    const match = stackLine
+      .trim()
+      .match(/\(?((?:https?|file):\/\/[^)\s]+|\/[^)\s]+):(\d+):(\d+)\)?$/);
+    if (!match) continue;
+    return {
+      ...createSourceLocation(match[1], Number(match[2]), Number(match[3]), clientWindow),
+      stackLine: stackLine.trim(),
+    };
+  }
+  return undefined;
+}
+
+function createSourceLocation(
+  url: string,
+  line: number,
+  column: number,
+  clientWindow: Window,
+): BrowserSourceLocation {
+  let displayPath = url;
+  try {
+    const parsed = new URL(url, clientWindow.location.href);
+    displayPath =
+      parsed.origin === clientWindow.location.origin
+        ? `${parsed.pathname}${parsed.search}`
+        : parsed.href;
+  } catch {}
+
+  return { url, displayPath, line, column };
+}
+
+function createFallbackSourceFrame(
+  error: NormalizedRuntimeError,
+  location?: BrowserSourceLocation,
+): BrowserSourceFrame {
+  const firstStackLine =
+    location?.stackLine || error.stack?.split("\n").find((line) => line.trim().startsWith("at "));
+  return {
+    path: location?.displayPath || "Browser stack",
+    line: location?.line,
+    column: location?.column,
+    unavailable: true,
+    lines: [
+      {
+        number: location?.line,
+        content: firstStackLine?.trim() || error.message,
+        highlight: true,
+      },
+    ],
+  };
+}
+
+async function loadBrowserSourceFrame(
+  location: BrowserSourceLocation,
+  options: FarmRuntimeErrorOverlayOptions,
+): Promise<BrowserSourceFrame | undefined> {
+  const request = options.fetch || options.window.fetch?.bind(options.window);
+  if (!request) return undefined;
+
+  let sourceUrl: URL;
+  try {
+    sourceUrl = new URL(location.url, options.window.location.href);
+  } catch {
+    return undefined;
+  }
+  if (
+    sourceUrl.origin !== options.window.location.origin ||
+    (sourceUrl.protocol !== "http:" && sourceUrl.protocol !== "https:")
+  ) {
+    return undefined;
+  }
+
+  try {
+    const response = await request(sourceUrl.href, {
+      headers: { Accept: "text/plain, application/javascript" },
+    });
+    if (!response.ok) return undefined;
+    const source = await response.text();
+    if (source.length > 1_000_000) return undefined;
+
+    const lines = source.split(/\r?\n/);
+    if (location.line < 1 || location.line > lines.length) return undefined;
+    const start = Math.max(1, location.line - 2);
+    const end = Math.min(lines.length, location.line + 2);
+    const frameLines: BrowserSourceLine[] = [];
+    for (let number = start; number <= end; number += 1) {
+      frameLines.push({
+        number,
+        content: lines[number - 1] || " ",
+        highlight: number === location.line,
+      });
+    }
+
+    return {
+      path: location.displayPath,
+      line: location.line,
+      column: location.column,
+      lines: frameLines,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function createErrorFingerprint(
+  error: NormalizedRuntimeError,
+  context: FarmRuntimeErrorOverlayContext,
+  location?: BrowserSourceLocation,
+): string {
+  return [
+    context.phase,
+    context.location.pathname,
+    error.name,
+    error.message,
+    location?.displayPath || "",
+    location?.line || "",
+    error.stack?.split("\n")[1]?.trim() || "",
+  ].join("\u0000");
+}
+
+function formatPhase(phase: string): string {
+  return phase
+    .replace(/^plugin:/, "Plugin · ")
+    .replace(/-/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function formatSourcePath(sourceFrame: BrowserSourceFrame): string {
+  if (!sourceFrame.line) return sourceFrame.path;
+  return `${sourceFrame.path}:${sourceFrame.line}:${sourceFrame.column || 1}${
+    sourceFrame.unavailable ? " · source preview unavailable" : ""
+  }`;
+}
+
+function resolveDocumentTheme(document: Document, clientWindow: Window): "light" | "dark" {
+  for (const element of [document.documentElement, document.body]) {
+    if (!element) continue;
+    const explicit =
+      element.getAttribute("data-theme") || element.getAttribute("data-color-scheme");
+    if (explicit === "dark" || element.classList.contains("dark")) return "dark";
+    if (explicit === "light" || element.classList.contains("light")) return "light";
+  }
+
+  const colorScheme = clientWindow.getComputedStyle?.(document.documentElement).colorScheme;
+  if (colorScheme?.includes("dark") && !colorScheme.includes("light")) return "dark";
+  return clientWindow.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function createFarmRuntimeErrorDebugReport(
+  record: RuntimeErrorRecord,
+  clientWindow: Window,
+  farmVersion: string,
+): string {
+  const source = record.sourceFrame.lines
+    .map(
+      (line) =>
+        `${line.highlight ? ">" : " "} ${line.number ? String(line.number).padStart(4, " ") : "    "} | ${line.content}`,
+    )
+    .join("\n");
+  const viewport = `${clientWindow.innerWidth}×${clientWindow.innerHeight}`;
+
+  return [
+    "# Farm.js client runtime debug report",
+    "",
+    "## Error",
+    `- Name: ${record.error.name}`,
+    `- Message: ${record.error.message}`,
+    `- Phase: ${formatPhase(record.context.phase)}`,
+    `- Page: ${record.context.location.href}`,
+    `- Occurrences: ${record.occurrences}`,
+    "",
+    "## Browser runtime",
+    `- Farm.js: ${farmVersion}`,
+    `- User agent: ${clientWindow.navigator.userAgent}`,
+    `- Viewport: ${viewport}`,
+    `- Online: ${clientWindow.navigator.onLine === false ? "no" : "yes"}`,
+    "",
+    "## Source",
+    `\`${formatSourcePath(record.sourceFrame)}\``,
+    "",
+    "```text",
+    source,
+    "```",
+    "",
+    "## Stack trace",
+    "```text",
+    record.error.stack || "Stack trace unavailable.",
+    "```",
+    "",
+    "## Diagnostic request",
+    "Identify the most likely root cause from the message, source frame, and stack trace. Explain the smallest safe fix and how to verify it.",
+  ].join("\n");
+}
+
+function createGithubIssueUrl(
+  record: RuntimeErrorRecord,
+  clientWindow: Window,
+  farmVersion: string,
+): string {
+  const source = record.sourceFrame.lines
+    .map(
+      (line) =>
+        `${line.highlight ? ">" : " "} ${line.number ? String(line.number).padStart(4, " ") : "    "} | ${line.content}`,
+    )
+    .join("\n");
+  const body = truncateText(
+    [
+      "## Runtime error report",
+      "",
+      "> This report was prefilled by the Farm.js development error overlay. Review it and remove sensitive information before submitting.",
+      "",
+      "### Error",
+      `- Name: ${record.error.name}`,
+      `- Message: ${record.error.message}`,
+      `- Phase: ${formatPhase(record.context.phase)}`,
+      `- Page path: ${record.context.location.pathname}`,
+      `- Occurrences: ${record.occurrences}`,
+      `- Farm.js: ${farmVersion}`,
+      `- Browser: ${clientWindow.navigator.userAgent}`,
+      `- Viewport: ${clientWindow.innerWidth}×${clientWindow.innerHeight}`,
+      `- Online: ${clientWindow.navigator.onLine === false ? "no" : "yes"}`,
+      "",
+      "### Source",
+      `\`${formatSourcePath(record.sourceFrame)}\``,
+      "",
+      "```text",
+      source,
+      "```",
+      "",
+      "### Stack trace",
+      "```text",
+      record.error.stack || "Stack trace unavailable.",
+      "```",
+      "",
+      "### Expected behavior",
+      "Describe what you expected to happen and the steps needed to reproduce the failure.",
+      "",
+      "### Diagnostic request",
+      "Identify the most likely root cause from the message, source frame, and stack trace. Explain the smallest safe fix and how to verify it.",
+    ].join("\n"),
+    6_000,
+  );
+  const issueUrl = new URL("https://github.com/farming-labs/farm.js/issues/new");
+  issueUrl.searchParams.set("title", truncateText(`[runtime error] ${record.error.message}`, 120));
+  issueUrl.searchParams.set("body", body);
+  return issueUrl.href;
+}
+
+function truncateText(value: string, maxLength: number): string {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength - 24)}\n\n[report truncated]`;
+}
+
+async function copyText(value: string, clientWindow: Window, document: Document): Promise<void> {
+  if (clientWindow.navigator.clipboard && clientWindow.isSecureContext) {
+    await clientWindow.navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.readOnly = true;
+  area.style.position = "fixed";
+  area.style.opacity = "0";
+  document.body.appendChild(area);
+  area.select();
+  const copied = document.execCommand("copy");
+  area.remove();
+  if (!copied) throw new Error("Copy command was rejected");
+}
