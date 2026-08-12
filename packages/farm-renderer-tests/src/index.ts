@@ -9,6 +9,7 @@ export interface RendererDescriptorFixture {
   componentExtensions?: readonly string[];
   dedupe?: readonly string[];
   optimizeDeps?: readonly string[];
+  buildConcurrency?: "parallel" | "serial";
   capabilities?: {
     streaming?: {
       node?: boolean;

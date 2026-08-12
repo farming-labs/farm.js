@@ -100,6 +100,11 @@ export const customRenderer = defineRenderer({
 });
 ```
 
+FARMJS builds the production client and SSR graphs in parallel by default. If a renderer's compiler
+plugin uses process-global mutable caches, set `buildConcurrency: "serial"` on its descriptor. The
+official Vue renderer does this because `@vitejs/plugin-vue` shares SFC descriptor and script caches
+between plugin instances.
+
 A renderer advertising `node` streaming must export `renderToPipeableStream()` from its server
 entry. A renderer advertising `web` streaming must export `renderToReadableStream()` returning a
 WHATWG `ReadableStream`. FARMJS validates those declarations when the server renderer starts and

@@ -25,6 +25,7 @@ defineRendererDescriptorConformance({
     server: "@farm.js/vue/server",
     client: "@farm.js/vue/client",
     componentExtensions: [".vue"],
+    buildConcurrency: "serial",
     capabilities: { streaming: { node: true, web: true } },
   },
 });
