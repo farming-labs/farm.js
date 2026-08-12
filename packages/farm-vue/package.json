@@ -63,6 +63,7 @@
   },
   "devDependencies": {
     "@farm.js/core": "workspace:*",
+    "@farm.js/renderer-tests": "workspace:*",
     "@types/node": "^20.10.5",
     "jsdom": "^25.0.0",
     "tsup": "^8.3.5",

@@ -42,6 +42,11 @@ export { resolveFarmRouteContext, withFarmRouteContext } from "../route-context"
 export { _setDefaultFarmThemeConfig, getTheme } from "../theme/server";
 export { applyFarmThemeDocument, createFarmThemeDocumentParts } from "../theme/server-runtime";
 export {
+  createDefaultErrorMarkup,
+  getDefaultErrorStatusText,
+  resolveDefaultErrorStatus,
+} from "../components/error-page";
+export {
   manageFarmDocumentPreloads,
   manageFarmHtmlPreloads,
   manageFarmLinkHeaderPreloads,

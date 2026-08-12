@@ -1,0 +1,12 @@
+{
+  "name": "@farm.js/renderer-tests",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "vitest": "^1.1.0"
+  }
+}

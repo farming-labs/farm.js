@@ -8,6 +8,9 @@ const SOLID_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   jsxImportSource: "solid-js",
   dedupe: ["solid-js", "solid-js/web", "solid-js/store"],
   optimizeDeps: ["solid-js", "solid-js/web", "solid-js/store", "@farm.js/solid/client"],
+  capabilities: {
+    streaming: { node: true, web: true },
+  },
 });
 
 /** Select Solid for JSX compilation, server rendering, and browser hydration. */
@@ -16,6 +19,9 @@ export function solid(): FarmRenderer {
     ...SOLID_RENDERER,
     dedupe: [...(SOLID_RENDERER.dedupe || [])],
     optimizeDeps: [...(SOLID_RENDERER.optimizeDeps || [])],
+    capabilities: {
+      streaming: { ...SOLID_RENDERER.capabilities?.streaming },
+    },
   };
 }
 

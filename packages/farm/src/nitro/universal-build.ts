@@ -3521,6 +3521,7 @@ function generateVirtualEntryCode(
   applyProductionMiddlewareHeaders,
   configureFarmCache,
   configureFarmObservability,
+  createDefaultErrorMarkup,
   createFarmInstrumentationLifecycle,
   createFarmCacheKey,
   createFarmThemeDocumentParts,
@@ -3532,6 +3533,7 @@ function generateVirtualEntryCode(
   getFarmDataCache,
   getFarmLocaleVaryHeaders,
   getFarmRedirectError,
+  getDefaultErrorStatusText,
   isFarmNotFoundError,
   isFarmRedirectError,
   localizeFarmHref,
@@ -3543,6 +3545,7 @@ function generateVirtualEntryCode(
   reportFarmPreloadWarnings,
   renderMetadataHead,
   resolveFarmRouteContext,
+  resolveDefaultErrorStatus,
   resolveFarmInstrumentationRuntime,
   runWithFarmRequestSpan,
   stripFarmLocaleFromPathname,
@@ -6035,6 +6038,8 @@ async function handleFarmRequestInContext(
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
       console.error("SSR Error:", error);
+      const errorStatus = resolveDefaultErrorStatus(error);
+      const errorStatusText = getDefaultErrorStatusText(errorStatus);
 
       const errorBoundaryMatch = getMatchingErrorBoundary(routePathname);
       if (errorBoundaryMatch?.route.module?.default) {
@@ -6085,11 +6090,11 @@ async function handleFarmRequestInContext(
             type: "render.complete",
             route: pathname,
             pathname,
-            status: 500,
+            status: errorStatus,
             durationMs: Date.now() - requestStartTime,
           });
           return applyProductionMiddlewareHeaders(new Response(errorDocument, {
-            status: 500,
+            status: errorStatus,
             headers: {
               "Content-Type": "text/html; charset=utf-8",
               "Cache-Control": "private, no-store",
@@ -6101,12 +6106,20 @@ async function handleFarmRequestInContext(
         }
       }
 
-      const errorMessage = "Internal Server Error";
-      const fallbackHtml = '<main><h1>Application Error</h1><p>' +
-        escapeFarmHtmlAttribute(errorMessage) + '</p></main>';
+      const fallbackHtml = createDefaultErrorMarkup({
+        statusCode: errorStatus,
+        statusText: errorStatusText,
+        requestPath: pathname,
+        method: request.method,
+        development: false,
+        mode: "production",
+      });
       const fallbackDocument = applyFarmThemeDocument(
         applyFarmI18nDocument(
-          createFarmErrorDocument(fallbackHtml, "Application Error"),
+          createFarmErrorDocument(
+            fallbackHtml,
+            errorStatus + " - " + errorStatusText
+          ),
           pathname,
           getFarmI18nSnapshot()
         ),
@@ -6117,7 +6130,7 @@ async function handleFarmRequestInContext(
       return applyProductionMiddlewareHeaders(new Response(
         fallbackDocument,
         {
-          status: 500,
+          status: errorStatus,
           headers: {
             "Content-Type": "text/html; charset=utf-8",
             "Cache-Control": "private, no-store",

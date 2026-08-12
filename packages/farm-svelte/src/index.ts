@@ -8,6 +8,9 @@ const SVELTE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   componentExtensions: [".svelte"],
   dedupe: ["svelte"],
   optimizeDeps: ["svelte", "@farm.js/svelte/client"],
+  capabilities: {
+    streaming: { node: false, web: false },
+  },
 });
 
 /** Select Svelte for component compilation, server rendering, and browser hydration. */
@@ -17,6 +20,9 @@ export function svelte(): FarmRenderer {
     componentExtensions: [...(SVELTE_RENDERER.componentExtensions || [])],
     dedupe: [...(SVELTE_RENDERER.dedupe || [])],
     optimizeDeps: [...(SVELTE_RENDERER.optimizeDeps || [])],
+    capabilities: {
+      streaming: { ...SVELTE_RENDERER.capabilities?.streaming },
+    },
   };
 }
 
