@@ -10,10 +10,19 @@ cd my-app
 pnpm dev
 ```
 
-The scaffolder installs React, React DOM, FARMJS, TypeScript, and the other starter dependencies
+The scaffolder installs FARMJS, React by default, TypeScript, and the other starter dependencies
 automatically. The command explicitly selects the minimal Basic starter. Use `pnpm create`, not
 `pnpm add`; pnpm resolves this initializer command to the published `@farm.js/create-app` package.
 Pass `--skip-install` when you only want to generate the project files.
+
+Choose React, Preact, Solid, Vue, or Svelte for the Basic and Better Auth starters:
+
+```bash
+pnpm create @farm.js/app@beta my-app --template better-auth --renderer solid --typescript
+```
+
+React remains the default when `--renderer` is omitted. The interactive Basic and Better Auth
+flows also offer a renderer chooser.
 
 List every starter:
 
@@ -29,7 +38,8 @@ Available templates:
 - Product integrations: `ai`, `jobs-inngest`, `jobs-trigger`, `resend`, `unkey`
 
 Integration templates include provider wiring, a local UI feature, `.env.example`, a minimal dark
-home page, and setup documentation. For example:
+home page, and setup documentation. Better Auth has renderer-native UI for all five renderers;
+other integration templates currently use React. For example:
 
 ```bash
 pnpm create @farm.js/app@beta stripe-app --template stripe --typescript

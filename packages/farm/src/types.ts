@@ -4,7 +4,7 @@ import type { FarmStorageUserConfig } from "./storage/types";
 import type { FarmIntegrationsUserConfig } from "./integrations";
 import type { FarmDocsResolvedConfig, FarmDocsUserConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig, FarmMarkdownUserConfig } from "./markdown";
-import type { FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
+import type { FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown-config";
 import type { FarmObservabilityUserConfig } from "./observability";
 import type { FarmMiddlewareConfig } from "./middleware/types";
 import type { FarmWorkflowsUserConfig } from "./workflows";

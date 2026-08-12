@@ -1,8 +1,7 @@
 import type { FarmConfig } from "./types";
 import type { FarmDocsResolvedConfig } from "./docs/types";
 import type { FarmMarkdownResolvedConfig } from "./markdown";
-import type { FarmMdxResolvedConfig } from "./app-markdown";
-import { resolveMdxConfig } from "./app-markdown";
+import { resolveMdxConfig, type FarmMdxResolvedConfig } from "./app-markdown-config";
 import { resolveMarkdownConfig } from "./markdown";
 import { resolveWorkflowsConfig, type FarmWorkflowsResolvedConfig } from "./workflows";
 import { resolveCronConfig, type FarmCronResolvedConfig } from "./cron";

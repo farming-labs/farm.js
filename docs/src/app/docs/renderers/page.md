@@ -37,6 +37,7 @@ storage, integrations, observability, and deployment output.
 | Server functions, middleware, cache, and storage | Available                | Available                       | Available            | Available            | Available            |
 | Observability and production Node output         | Available                | Available                       | Available            | Available            | Available            |
 | Basic create-app starter                         | Available                | Available                       | Available            | Available            | Available            |
+| Better Auth create-app starter                   | Available                | Native                          | Native               | Native               | Native               |
 | Router state and programmatic navigation         | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Callable actions and server queries              | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
 | Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
@@ -45,7 +46,7 @@ storage, integrations, observability, and deployment output.
 | Markdown/MDX visual routes and docs adapter      | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
-| Integration UI providers and provider starters   | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
+| Other integration UI providers and starters      | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
 
 Preact resolves the React-shaped bindings through `preact/compat`. Solid exposes signal-backed
 getters, Vue exposes refs and computed values, and Svelte exposes readable stores. The underlying
@@ -112,5 +113,11 @@ The renderer option is application-wide. Do not mix React, Preact, Solid, Vue, a
 in the same route tree. Share server modules, schemas, API clients, CSS, and plain TypeScript across
 renderers; rewrite component and client-state code using the selected renderer's native primitives.
 
-Integration starter templates currently target React. Use the Basic starter for Preact, Solid, Vue,
-or Svelte, then add renderer-neutral integrations without their React UI scaffold.
+The Basic and Better Auth templates support every renderer directly:
+
+```bash
+pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer vue --typescript
+```
+
+Other integration starter templates currently target React. Add their renderer-neutral server
+integration to a native Basic starter when using Preact, Solid, Vue, or Svelte.

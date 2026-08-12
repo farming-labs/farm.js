@@ -1,11 +1,7 @@
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
-import {
-  PROGRAMMATIC_ROUTE_FILE_NAMES,
-  getProgrammaticRouteManifest,
-  scanProgrammaticPagePaths,
-  type ProgrammaticRouteManifest,
-} from "./routes";
+import { PROGRAMMATIC_ROUTE_FILE_NAMES, scanProgrammaticPagePaths } from "./routes-shared";
+import type { ProgrammaticRouteManifest } from "./routes";
 
 export interface LoadedProgrammaticRouteManifest {
   filePath: string;
@@ -18,8 +14,12 @@ export async function loadProgrammaticRouteManifests(options: {
   loadModule: (filePath: string) => Promise<Record<string, any>>;
 }): Promise<LoadedProgrammaticRouteManifest[]> {
   const manifests: LoadedProgrammaticRouteManifest[] = [];
+  const routeFiles = findProgrammaticRouteFiles(options.root, options.srcDir);
+  if (routeFiles.length === 0) return manifests;
 
-  for (const filePath of findProgrammaticRouteFiles(options.root, options.srcDir)) {
+  const { getProgrammaticRouteManifest } = await import("./routes");
+
+  for (const filePath of routeFiles) {
     const mod = await options.loadModule(filePath);
     const manifest = getProgrammaticRouteManifest(mod);
     if (manifest) {

@@ -1,4 +1,4 @@
-import { createEndpoint } from "@farm.js/core";
+import { createEndpoint } from "@farm.js/core/api";
 import { z } from "zod";
 
 export const POST = createEndpoint(

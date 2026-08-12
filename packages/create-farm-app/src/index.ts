@@ -29,6 +29,13 @@ interface TemplateDetails {
   };
 }
 
+interface TemplatePackageJson extends Record<string, unknown> {
+  type?: string;
+  scripts?: Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+}
+
 const templateDetails: Record<string, TemplateDetails> = {
   basic: {
     title: "Basic starter",
@@ -273,10 +280,10 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     process.exit(1);
   }
 
-  // Preserve React for every existing command. The renderer chooser is shown
-  // during the fully interactive basic flow, while --renderer enables CI and
-  // scripted scaffolding without introducing another prompt.
-  if (!renderer && !options.template && template === "basic") {
+  // Preserve React for every existing scripted command. Renderer-aware
+  // templates expose the chooser in the fully interactive flow, while
+  // --renderer keeps CI and scripted scaffolding deterministic.
+  if (!renderer && !options.template && (template === "basic" || template === "better-auth")) {
     const response = await prompts({
       type: "select",
       name: "renderer",
@@ -318,9 +325,13 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
   }
   renderer ||= "react";
 
-  if (renderer !== "react" && template !== "basic") {
+  if (
+    renderer !== "react" &&
+    template !== "basic" &&
+    !(await hasRendererIntegrationTemplate(template!, renderer))
+  ) {
     logger.error(
-      `The "${template}" integration starter currently targets React. Use --template basic with --renderer ${renderer}.`,
+      `The "${template}" integration starter currently targets React. Use --template basic or --template better-auth with --renderer ${renderer}.`,
     );
     process.exit(1);
   }
@@ -415,6 +426,8 @@ async function copyTemplate(
   // Copy base template files
   await copyDir(templatePath, projectPath);
 
+  const basePackageJson = await readPackageJson(projectPath);
+
   // If TypeScript is requested, copy TS-specific files
   if (useTypeScript) {
     const tsTemplatePath = path.join(__dirname, "..", "templates", "_typescript");
@@ -423,34 +436,14 @@ async function copyTemplate(
     }
   }
 
-  if (renderer === "solid") {
-    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "solid");
-    await copyDir(rendererTemplatePath, projectPath);
-  }
+  if (renderer !== "react") {
+    await applyRendererTemplate(projectPath, renderer, basePackageJson);
 
-  if (renderer === "preact") {
-    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "preact");
-    await copyDir(rendererTemplatePath, projectPath);
-  }
-
-  if (renderer === "vue") {
-    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "vue");
-    await Promise.all([
-      fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
-      fs.rm(path.join(projectPath, "src", "app", "layout.tsx"), { force: true }),
-      fs.rm(path.join(projectPath, "src", "components", "resource-links.tsx"), { force: true }),
-    ]);
-    await copyDir(rendererTemplatePath, projectPath);
-  }
-
-  if (renderer === "svelte") {
-    const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", "svelte");
-    await Promise.all([
-      fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
-      fs.rm(path.join(projectPath, "src", "app", "layout.tsx"), { force: true }),
-      fs.rm(path.join(projectPath, "src", "components", "resource-links.tsx"), { force: true }),
-    ]);
-    await copyDir(rendererTemplatePath, projectPath);
+    const integrationRendererPath = getRendererIntegrationTemplatePath(template, renderer);
+    if (await dirExists(integrationRendererPath)) {
+      await removeRendererIntegrationConflicts(projectPath);
+      await copyDir(integrationRendererPath, projectPath);
+    }
   }
 
   if (!details?.integration) {
@@ -466,6 +459,106 @@ async function copyTemplate(
   await writeIntegrationHomePage(projectPath, details.integration, result.env.length > 0);
   await writeIntegrationReadme(projectPath, details.integration, result.env);
   return result;
+}
+
+async function applyRendererTemplate(
+  projectPath: string,
+  renderer: Exclude<RendererName, "react">,
+  basePackageJson: TemplatePackageJson,
+) {
+  const rendererTemplatePath = path.join(__dirname, "..", "templates", "_renderers", renderer);
+
+  if (renderer === "vue" || renderer === "svelte") {
+    await Promise.all([
+      fs.rm(path.join(projectPath, "src", "app", "page.tsx"), { force: true }),
+      fs.rm(path.join(projectPath, "src", "app", "layout.tsx"), { force: true }),
+      fs.rm(path.join(projectPath, "src", "components", "resource-links.tsx"), { force: true }),
+    ]);
+  }
+
+  await copyDir(rendererTemplatePath, projectPath);
+  const rendererPackageJson = await readPackageJson(projectPath);
+  await writePackageJson(
+    projectPath,
+    mergeRendererPackageJson(basePackageJson, rendererPackageJson),
+  );
+}
+
+function mergeRendererPackageJson(
+  base: TemplatePackageJson,
+  renderer: TemplatePackageJson,
+): Record<string, unknown> {
+  const dependencies = { ...base.dependencies, ...renderer.dependencies };
+  const devDependencies = { ...base.devDependencies, ...renderer.devDependencies };
+
+  for (const name of ["react", "react-dom"]) delete dependencies[name];
+  for (const name of ["@types/react", "@types/react-dom"]) delete devDependencies[name];
+
+  return {
+    ...base,
+    ...(renderer.type ? { type: renderer.type } : {}),
+    scripts: { ...base.scripts, ...renderer.scripts },
+    dependencies,
+    devDependencies,
+  };
+}
+
+async function readPackageJson(projectPath: string): Promise<TemplatePackageJson> {
+  return JSON.parse(
+    await fs.readFile(path.join(projectPath, "package.json"), "utf8"),
+  ) as TemplatePackageJson;
+}
+
+async function writePackageJson(projectPath: string, packageJson: Record<string, unknown>) {
+  await fs.writeFile(
+    path.join(projectPath, "package.json"),
+    `${JSON.stringify(packageJson, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+function getRendererIntegrationTemplatePath(template: string, renderer: RendererName): string {
+  return path.join(__dirname, "..", "templates", "_integrations", template, renderer);
+}
+
+async function hasRendererIntegrationTemplate(template: string, renderer: RendererName) {
+  return dirExists(getRendererIntegrationTemplatePath(template, renderer));
+}
+
+async function removeRendererIntegrationConflicts(projectPath: string) {
+  const appFiles = [
+    "page.tsx",
+    "layout.tsx",
+    "loading.tsx",
+    "error.tsx",
+    "not-found.tsx",
+    "sign-in/page.tsx",
+    "sign-up/page.tsx",
+    "dashboard/page.tsx",
+    "preact.css",
+    "solid.css",
+    "vue.css",
+    "svelte.css",
+    "api/greeting/route.ts",
+  ];
+  const componentFiles = [
+    "auth-form.tsx",
+    "auth-shell.tsx",
+    "sign-out-button.tsx",
+    "site-header.tsx",
+  ];
+
+  await Promise.all([
+    ...appFiles.map((file) => fs.rm(path.join(projectPath, "src", "app", file), { force: true })),
+    ...componentFiles.map((file) =>
+      fs.rm(path.join(projectPath, "src", "components", file), { force: true }),
+    ),
+    fs.rm(path.join(projectPath, "src", "lib", "api-client.ts"), { force: true }),
+    fs.rm(path.join(projectPath, "src", "lib", "api.generated.ts"), { force: true }),
+  ]);
+
+  // The generic renderer owns the native resource-links component. The
+  // integration overlay supplies all other UI files.
 }
 
 async function writeEnvironmentExample(projectPath: string, keys: string[]) {

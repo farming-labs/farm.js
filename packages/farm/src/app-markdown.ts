@@ -1,35 +1,21 @@
-import React from "react";
 import { readFile } from "fs/promises";
 import path from "path";
 import { pathToFileURL } from "url";
 import type { Metadata, RouteModule } from "./types";
+import type { ComponentType } from "react";
 import { requestAcceptsMarkdown } from "./markdown";
-
-export type FarmMdxComponent = React.ComponentType<any> | keyof React.JSX.IntrinsicElements;
-export type FarmMdxComponents = Record<string, FarmMdxComponent>;
-
-export interface FarmMdxUserConfig {
-  /**
-   * Component map or module path that exports `components` or a default component map.
-   * Relative paths resolve from the project root.
-   */
-  components?: string | FarmMdxComponents;
-  /**
-   * Serve source-authored markdown pages at `/route.md`.
-   * Enabled by default for `page.md` and `page.mdx`.
-   */
-  markdownRoutes?: boolean;
-  /**
-   * Class name used for the wrapper around rendered markdown content.
-   */
-  className?: string;
-}
-
-export interface FarmMdxResolvedConfig {
-  components?: string | FarmMdxComponents;
-  markdownRoutes: boolean;
-  className: string;
-}
+import {
+  resolveMdxConfig,
+  type FarmMdxComponents,
+  type FarmMdxResolvedConfig,
+} from "./app-markdown-config";
+export {
+  resolveMdxConfig,
+  type FarmMdxComponent,
+  type FarmMdxComponents,
+  type FarmMdxResolvedConfig,
+  type FarmMdxUserConfig,
+} from "./app-markdown-config";
 
 export interface FarmMarkdownPageSource {
   source: string;
@@ -39,14 +25,6 @@ export interface FarmMarkdownPageSource {
 export interface FarmMarkdownPageModuleInput extends FarmMarkdownPageSource {
   components?: FarmMdxComponents;
   config?: FarmMdxResolvedConfig;
-}
-
-export function resolveMdxConfig(config: FarmMdxUserConfig | undefined): FarmMdxResolvedConfig {
-  return {
-    components: config?.components,
-    markdownRoutes: config?.markdownRoutes ?? true,
-    className: config?.className ?? "farm-markdown",
-  };
 }
 
 export function isFarmMarkdownPageFile(filePath: string): boolean {
@@ -142,22 +120,23 @@ export function createFarmMarkdownRouteModule(
   const { body } = parseMarkdownFrontmatter(input.source);
   const components = input.components || {};
   const className = input.config?.className || "farm-markdown";
-  let evaluatedPromise: Promise<{ default: React.ComponentType<any> }> | undefined;
+  let evaluatedPromise: Promise<{ default: ComponentType<any> }> | undefined;
 
   const loadContent = async () => {
     evaluatedPromise ??= evaluateMdxSource(body, input.filePath) as Promise<{
-      default: React.ComponentType<any>;
+      default: ComponentType<any>;
     }>;
     return evaluatedPromise;
   };
 
   async function FarmMarkdownPage(props: any) {
+    const { createElement } = await import("react");
     const evaluated = await loadContent();
     const MDXContent = evaluated.default;
-    return React.createElement(
+    return createElement(
       "article",
       { className, "data-farm-markdown-page": "" },
-      React.createElement(MDXContent, {
+      createElement(MDXContent, {
         ...props,
         components: {
           ...components,

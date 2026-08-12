@@ -25,7 +25,7 @@ import {
   resolveMdxConfig,
   type FarmMdxResolvedConfig,
   type FarmMdxUserConfig,
-} from "./app-markdown";
+} from "./app-markdown-config";
 import {
   normalizeRouteRules,
   routeRulesToHeaders,
@@ -96,7 +96,11 @@ export type {
   FarmMarkdownRouteInput,
   FarmMarkdownUserConfig,
 } from "./markdown";
-export type { FarmMdxComponents, FarmMdxResolvedConfig, FarmMdxUserConfig } from "./app-markdown";
+export type {
+  FarmMdxComponents,
+  FarmMdxResolvedConfig,
+  FarmMdxUserConfig,
+} from "./app-markdown-config";
 export type {
   FarmMigrationCommand,
   FarmMigrationsConfig,

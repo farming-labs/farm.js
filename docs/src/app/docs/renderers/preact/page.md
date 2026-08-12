@@ -107,8 +107,14 @@ React Server Components remain React-only. Programmatic UI routes, Markdown/MDX 
 docs adapter, generated JSX metadata images, and integration UI providers should be treated as
 compatibility surfaces until their Preact paths are covered by dedicated tests.
 
-Integration starter templates currently target React, so select the Basic template for Preact and
-add renderer-neutral provider code afterward.
+The Better Auth starter includes native Preact routes and forms:
+
+```bash
+pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer preact --typescript
+```
+
+Other integration starter templates currently target React, so add their renderer-neutral provider
+code to a native Basic starter.
 
 Run the complete example:
 

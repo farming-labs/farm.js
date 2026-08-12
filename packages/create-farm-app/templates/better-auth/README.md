@@ -1,6 +1,7 @@
 # FARMJS Better Auth Starter
 
-A standalone authentication starter built with FARMJS, Better Auth, React, and Neon Postgres.
+A standalone authentication starter built with FARMJS, Better Auth, your selected UI renderer,
+and Neon Postgres.
 
 This project was generated from the Better Auth template included with `@farm.js/create-app`.
 
@@ -18,7 +19,7 @@ This project was generated from the Better Auth template included with `@farm.js
 ## Quick start
 
 ```bash
-pnpm create @farm.js/app@beta my-app --template better-auth --typescript
+pnpm create @farm.js/app@beta my-app --template better-auth --renderer solid --typescript
 cd my-app
 cp .env.example .env.local
 ```
@@ -46,7 +47,8 @@ Open [http://localhost:3000](http://localhost:3000), create an account, and cont
 - [`src/lib/auth-client.ts`](./src/lib/auth-client.ts) exposes the browser client.
 - [`src/lib/session.ts`](./src/lib/session.ts) resolves the current request session on the server.
 - [`src/app/dashboard/middleware.ts`](./src/app/dashboard/middleware.ts) redirects unauthenticated requests before the dashboard route runs.
-- [`src/app/dashboard/page.tsx`](./src/app/dashboard/page.tsx) reads the already-authorized session and renders the account UI.
+- `src/app/dashboard/page.*` reads the already-authorized session and renders the account UI in the
+  selected renderer.
 
 FARMJS owns the catch-all integration route, so the starter does not need a manual API route:
 

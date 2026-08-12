@@ -3108,6 +3108,16 @@ async function buildSSRInMemory(
     preset,
     metadataImageRoutes.some((image) => image.sourceType === "module"),
   );
+  const rendererOptionalExternals = isReactRenderer(config.renderer)
+    ? []
+    : [
+        "react",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+        "react-dom",
+        "react-dom/client",
+        "react-dom/server",
+      ];
 
   try {
     await viteBuild({
@@ -3126,6 +3136,7 @@ async function buildSSRInMemory(
           external: [
             "fsevents",
             "sharp",
+            ...rendererOptionalExternals,
             ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
             "@prisma/client",
             "@prisma/client/default",
@@ -3158,6 +3169,7 @@ async function buildSSRInMemory(
         external: [
           "fsevents",
           "sharp",
+          ...rendererOptionalExternals,
           ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
           "esbuild",
           "lightningcss",

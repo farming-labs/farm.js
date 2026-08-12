@@ -106,6 +106,15 @@ The binding properties are backed by Solid signals. Renderer-specific `Link` and
 fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages, the docs
 adapter, and generated JSX metadata images remain React-oriented today.
 
+The Better Auth starter includes native Solid routes, signals, and forms:
+
+```bash
+pnpm create @farm.js/app@beta my-auth-app --template better-auth --renderer solid --typescript
+```
+
+Other integration starter templates currently target React, so add their renderer-neutral provider
+code to a native Basic starter.
+
 Run the complete example:
 
 ```bash
