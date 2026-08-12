@@ -1,27 +1,29 @@
 // @vitest-environment node
 
+import {
+  defineRendererDescriptorConformance,
+  defineRendererServerConformance,
+} from "@farm.js/renderer-tests";
 import { describe, expect, it } from "vitest";
 import { svelte } from "../index";
+import * as serverRuntime from "../server";
 import { createElement, generateHydrationScript, renderToString } from "../server";
 
+defineRendererDescriptorConformance({
+  name: "svelte",
+  createDescriptor: svelte,
+  expected: {
+    vite: "@farm.js/svelte/vite",
+    server: "@farm.js/svelte/server",
+    client: "@farm.js/svelte/client",
+    componentExtensions: [".svelte"],
+    capabilities: { streaming: { node: false, web: false } },
+  },
+});
+
+defineRendererServerConformance(serverRuntime);
+
 describe("Svelte renderer", () => {
-  it("returns an isolated renderer descriptor", () => {
-    const first = svelte();
-    const second = svelte();
-
-    expect(first).toMatchObject({
-      name: "svelte",
-      vite: "@farm.js/svelte/vite",
-      server: "@farm.js/svelte/server",
-      client: "@farm.js/svelte/client",
-      capabilities: { streaming: { node: false, web: false } },
-      componentExtensions: [".svelte"],
-    });
-    expect(first.componentExtensions).not.toBe(second.componentExtensions);
-    expect(first.dedupe).not.toBe(second.dedupe);
-    expect(first.optimizeDeps).not.toBe(second.optimizeDeps);
-  });
-
   it("renders FARMJS elements with Svelte's server runtime", async () => {
     const html = await renderToString(
       createElement(

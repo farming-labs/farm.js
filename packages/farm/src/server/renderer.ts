@@ -49,8 +49,14 @@ import { sendWebResponse } from "./response";
 import { renderFarmFontDevHead } from "../font-vite";
 import { createFarmMetadataImageResponse } from "../metadata-image";
 import { DEFAULT_NOT_FOUND_STYLES } from "../components/not-found-styles";
+import {
+  createDefaultErrorMarkup,
+  getDefaultErrorStatusText,
+  resolveDefaultErrorStatus,
+} from "../components/error-page";
 import { createFarmThemeDocumentParts } from "../theme/server-runtime";
 import { getTheme as getFarmTheme } from "../theme/server";
+import { FARM_VERSION } from "../version";
 import type { ViteDevServer } from "vite";
 import {
   getFarmRendererCapabilities,
@@ -62,6 +68,7 @@ import {
 } from "../renderer";
 import { pathToFileURL } from "node:url";
 import type { FarmIslandStrategy } from "../island";
+import { createDefaultErrorDiagnostics } from "./error-diagnostics";
 
 let cachedClerkProvider: { ClerkProvider: any } | null = null;
 
@@ -1466,6 +1473,7 @@ export class ServerRenderer {
       }
 
       emitFarmEvent({ type: "render.error", route: pathname, error });
+      const errorStatus = resolveDefaultErrorStatus(error);
       if (pprRefreshRoute) {
         emitFarmEvent({
           type: "ppr.refresh.error",
@@ -1492,6 +1500,7 @@ export class ServerRenderer {
           middlewareContext,
           pluginExposedContext,
           error,
+          statusCode: errorStatus,
           errorModulePath: errorBoundaryEntry.modulePath,
         });
 
@@ -1500,7 +1509,7 @@ export class ServerRenderer {
         }
       }
 
-      await this.render500(req, res, error);
+      await this.renderError(req, res, error, errorStatus);
     }
   }
 
@@ -1737,6 +1746,7 @@ export class ServerRenderer {
       middlewareContext: Map<string, any>;
       pluginExposedContext: Map<string, any>;
       error: unknown;
+      statusCode: number;
       errorModulePath: string;
     },
   ): Promise<boolean> {
@@ -1783,7 +1793,7 @@ export class ServerRenderer {
           this.rendererRuntime.renderToString(wrapped),
         ),
       );
-      res.statusCode = 500;
+      res.statusCode = options.statusCode;
       res.setHeader("Content-Type", "text/html; charset=utf-8");
       res.write(this.createFullHTML(html, false, options.pathname));
       res.end();
@@ -2346,7 +2356,12 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
     res.end();
   }
 
-  private async render500(req: FarmRequest, res: FarmResponse, error: any): Promise<void> {
+  private async renderError(
+    req: FarmRequest,
+    res: FarmResponse,
+    error: unknown,
+    statusCode = 500,
+  ): Promise<void> {
     if (res.headersSent || (res as any).writableEnded) {
       if (!(res as any).writableEnded) {
         res.end();
@@ -2354,26 +2369,48 @@ ${getFarmI18nClientSnapshot() ? `window.__FARM_I18N__ = ${serializeInlineValue(g
       return;
     }
 
-    res.statusCode = 500;
-
+    res.statusCode = statusCode;
     const isDev = process.env.NODE_ENV === "development";
-    const errorMessage = isDev ? error.stack || error.message : "Internal Server Error";
+    const requestUrl = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
+    const diagnostics = isDev
+      ? createDefaultErrorDiagnostics(error, this.config.root || process.cwd())
+      : undefined;
+    const statusText = getDefaultErrorStatusText(statusCode);
+    const content = createDefaultErrorMarkup({
+      statusCode,
+      statusText,
+      requestPath: requestUrl.pathname,
+      method: req.method || "GET",
+      message: diagnostics?.message,
+      errorName: diagnostics?.name,
+      stack: diagnostics?.stack,
+      sourceFrame: diagnostics?.sourceFrame,
+      development: isDev,
+      farmVersion: FARM_VERSION,
+      nodeVersion: process.version,
+      mode: isDev ? "development" : "production",
+    });
 
     const html = this.createFullHTML(
-      `
-        <h1>500 - Internal Server Error</h1>
-        ${isDev ? `<pre>${errorMessage}</pre>` : ""}
-      `,
+      content,
       false,
-      req.url || "/",
+      requestUrl.pathname,
+      `${statusCode} - ${statusText}`,
     );
 
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.write(html);
     res.end();
   }
 
-  private createFullHTML(content: string, isClientComponent = false, requestPath = "/"): string {
+  private createFullHTML(
+    content: string,
+    isClientComponent = false,
+    requestPath = "/",
+    documentTitle = "Farm.js App",
+  ): string {
     const i18nSnapshot = getFarmI18nClientSnapshot();
     const clientScript = isClientComponent
       ? `  <script type="module" src="/@farm/client.js"></script>`
@@ -2402,7 +2439,7 @@ ${i18nSnapshot ? `window.__FARM_I18N__ = ${serializeInlineValue(i18nSnapshot)};`
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="farm-deployment-id" content="${escapeHtmlAttribute(this.getDeploymentId())}">
   <link rel="icon" href="data:,">
-  <title>Farm.js App</title>${alternateLinks}
+  <title>${escapeHtmlAttribute(documentTitle)}</title>${alternateLinks}
   ${fontHead}
   <link rel="stylesheet" href="/src/app/globals.css" />
   <script type="module" src="/@vite/client"></script>

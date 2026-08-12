@@ -1,46 +1,35 @@
 // @vitest-environment node
 
 import { Writable } from "node:stream";
+import {
+  defineRendererDescriptorConformance,
+  defineRendererServerConformance,
+} from "@farm.js/renderer-tests";
 import { describe, expect, it } from "vitest";
 import { preact } from "../index";
+import * as serverRuntime from "../server";
 import {
   createElement,
   generateHydrationScript,
   renderToPipeableStream,
   renderToReadableStream,
-  renderToString,
 } from "../server";
 
+defineRendererDescriptorConformance({
+  name: "preact",
+  createDescriptor: preact,
+  expected: {
+    vite: "@farm.js/preact/vite",
+    server: "@farm.js/preact/server",
+    client: "@farm.js/preact/client",
+    jsxImportSource: "preact",
+    capabilities: { streaming: { node: true, web: true } },
+  },
+});
+
+defineRendererServerConformance(serverRuntime);
+
 describe("Preact renderer", () => {
-  it("returns an isolated renderer descriptor", () => {
-    const first = preact();
-    const second = preact();
-
-    expect(first).toMatchObject({
-      name: "preact",
-      vite: "@farm.js/preact/vite",
-      server: "@farm.js/preact/server",
-      client: "@farm.js/preact/client",
-      jsxImportSource: "preact",
-      capabilities: { streaming: { node: true, web: true } },
-    });
-    expect(first.dedupe).not.toBe(second.dedupe);
-    expect(first.optimizeDeps).not.toBe(second.optimizeDeps);
-  });
-
-  it("renders FARMJS elements with Preact's server runtime", () => {
-    const html = renderToString(
-      createElement(
-        "main",
-        { className: "preact-app" },
-        createElement("h1", null, "Hello from Preact"),
-      ),
-    );
-
-    expect(html).toContain('<main class="preact-app">');
-    expect(html).toContain("<h1>Hello from Preact</h1>");
-  });
-
   it("streams FARMJS elements through Preact's Node renderer", async () => {
     const html = await new Promise<string>((resolve, reject) => {
       const chunks: Buffer[] = [];
