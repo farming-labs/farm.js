@@ -19,6 +19,7 @@ import {
   FARM_CACHE_INVALIDATION_HEADER,
 } from "../cache-invalidation";
 import type { DefinedCacheKey, InferCacheKeyData, RouteDataCacheKey } from "../cache";
+import { getFarmAPIBaseURL, resolveFarmAPIRequestURL } from "./config";
 import {
   isFarmAPIStream,
   isJSONStreamResponse,
@@ -422,10 +423,7 @@ export function createAPIClient<
   options: APIClientOptions | APIClientWithoutIntegrationsOptions = {},
 ): RouteAPIClient<TRouter> | APIClient<TRouter, TIntegrations> {
   options ??= {};
-  // Auto-detect baseURL
-  const baseURL =
-    options.baseURL ||
-    (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
+  const baseURL = options.baseURL || getFarmAPIBaseURL();
   const integrationOptions =
     options.integrations === false
       ? false
@@ -449,7 +447,7 @@ export function createAPIClient<
 
   // Create a simple fetch-based client (browser compatible)
   const fetchClient = async (path: string, requestOptions: any = {}) => {
-    const url = new URL(path, baseURL);
+    const url = resolveFarmAPIRequestURL(path, baseURL);
 
     // Handle query parameters
     if (requestOptions.query) {
@@ -787,7 +785,7 @@ export function createAPIClient<
     request,
     routeMeta,
     baseURL,
-    options.baseURL === undefined,
+    isSameOriginAPIBaseURL(baseURL),
     rootAliases,
   ) as APIClient<TRouter, TIntegrations>;
 }
@@ -823,10 +821,11 @@ function createNestedProxy(
       }
       if (prop === FARM_API_ROUTE_META_SYMBOL) {
         const metadata = resolveRouteMeta({ path, baseURL });
+        const requestURL = resolveFarmAPIRequestURL(metadata.routePath, baseURL);
         return Object.freeze({
-          path: metadata.routePath,
+          path: `${requestURL.pathname}${requestURL.search}${requestURL.hash}`,
           method: metadata.method,
-          baseURL,
+          baseURL: requestURL.origin,
           sameOrigin,
         });
       }
@@ -993,8 +992,13 @@ type OptimisticSnapshot = {
 function buildCacheKey(method: string, path: string, input: any, baseURL: string): string {
   const keyInput =
     input && typeof input === "object" ? { query: input.query, body: input.body } : input;
-  const url = new URL(path, baseURL);
+  const url = resolveFarmAPIRequestURL(path, baseURL);
   return `${method}:${url.origin}${url.pathname}:${stableStringify(keyInput ?? {})}`;
+}
+
+function isSameOriginAPIBaseURL(baseURL: string): boolean {
+  if (typeof window === "undefined") return baseURL.startsWith("/");
+  return resolveFarmAPIRequestURL("/api", baseURL).origin === window.location.origin;
 }
 
 function stableStringify(value: any): string {

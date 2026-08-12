@@ -60,6 +60,21 @@ beforeEach(() => {
 });
 
 describe("createAPIClient", () => {
+  it("uses a baseURL path as the API root", async () => {
+    const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({
+      baseURL: "https://api.example.com/gateway/v1",
+    });
+
+    await api.users.get({ query: { limit: "5" } });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.com/gateway/v1/users?limit=5",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("applies invalidations declared by the server response", async () => {
     const key = '["products","list"]';
     const cache = getFarmClientDataCache();

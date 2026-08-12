@@ -501,6 +501,30 @@ describe("resolveConfig", () => {
     expect(getResolvedEnv()).toEqual(config.env);
   });
 
+  it("resolves API URL functions after typed env", async () => {
+    process.env.PUBLIC_API_ORIGIN = "https://api.example.com";
+
+    const config = await resolveConfig(
+      {
+        env: {
+          public: {
+            PUBLIC_API_ORIGIN: (value) => String(value),
+          },
+        },
+        api: {
+          baseURL: ({ env }) => env.public.PUBLIC_API_ORIGIN as string,
+          basePath: async ({ mode }) => (mode === "production" ? "/v2" : "/api"),
+        },
+      },
+      "production",
+    );
+
+    expect(config.api).toEqual({
+      baseURL: "https://api.example.com/v2",
+      basePath: "/v2",
+    });
+  });
+
   it("throws when typed env validation fails", async () => {
     await expect(
       resolveConfig(

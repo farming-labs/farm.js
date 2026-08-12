@@ -4,6 +4,7 @@ import type {
   FarmIntegrationAPIOperation,
 } from "./integration-api";
 import type { FarmIntegration as FarmIntegrationDefinition } from "./integrations";
+import { resolveFarmAPIRequestURL } from "./api/config";
 
 /**
  * Small per-call integration metadata. When sent from a browser, values are
@@ -697,7 +698,7 @@ async function executeClientOperation(
     const baseURL =
       options.baseURL ||
       (typeof window !== "undefined" ? window.location.origin : "http://localhost:3000");
-    const url = new URL(operation.path, baseURL);
+    const url = resolveFarmAPIRequestURL(operation.path, baseURL);
     appendQuery(url, input.query as Record<string, unknown> | undefined);
 
     const headers = new Headers({

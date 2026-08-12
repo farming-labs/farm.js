@@ -329,6 +329,7 @@ async function buildSSR(
       },
     },
     define: {
+      __FARM_API_BASE_URL__: JSON.stringify(config.api.baseURL),
       __FARM_ENV__: JSON.stringify(config.env || { server: {}, public: {} }),
       __FARM_PUBLIC_ENV__: JSON.stringify(config.env?.public || {}),
     },

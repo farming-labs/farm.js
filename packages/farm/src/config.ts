@@ -81,6 +81,7 @@ import { resolveFarmThemeConfig } from "./theme/config";
 import type { ResolvedFarmThemeConfig } from "./theme/types";
 import { resolveFarmRenderer } from "./renderer";
 import type { FarmRenderer } from "./renderer";
+import { resolveFarmAPIConfig, type ResolvedFarmAPIConfig } from "./api/config";
 
 const FARM_RESOLVED_CUSTOM_CONTEXT = Symbol.for("farm.resolvedCustomContext");
 
@@ -176,6 +177,12 @@ export type {
   FarmRendererStreamingCapabilities,
 } from "./renderer";
 export { defineRenderer } from "./renderer";
+export type {
+  FarmAPIConfig,
+  FarmAPIConfigResolverContext,
+  FarmAPIConfigValue,
+  ResolvedFarmAPIConfig,
+} from "./api/config";
 
 export interface RedirectConfig {
   source: string;
@@ -354,6 +361,7 @@ export interface ResolvedFarmConfig extends Required<
     | "migrations"
     | "cron"
     | "workflows"
+    | "api"
     | "env"
     | "server"
     | "serverActions"
@@ -380,6 +388,7 @@ export interface ResolvedFarmConfig extends Required<
   migrations: ResolvedFarmMigrationsConfig;
   cron: FarmCronResolvedConfig;
   workflows: FarmWorkflowsResolvedConfig;
+  api: ResolvedFarmAPIConfig;
   env: ResolvedFarmEnv;
   server: ResolvedFarmServerConfig;
   serverActions: ResolvedFarmServerActionsConfig;
@@ -790,6 +799,7 @@ export async function resolveConfig(
   const mdx = resolveMdxConfig(userConfig.mdx);
   const env = resolveEnv(userConfig.env, process.env);
   setEnv(env);
+  const api = await resolveFarmAPIConfig(userConfig.api, { root, mode, env });
   const auth = resolveFarmAuthConfig(userConfig.auth);
   if (auth.enabled && userConfig.integrations?.auth) {
     throw new Error(
@@ -829,6 +839,7 @@ export async function resolveConfig(
     migrations: resolveMigrationsConfig(userConfig.migrations),
     cron: resolveCronConfig(userConfig.cron),
     workflows: resolveWorkflowsConfig(userConfig.workflows),
+    api,
     observability: userConfig.observability ?? false,
     devtools: resolveFarmDevtoolsConfig(userConfig.devtools, mode),
     storage: userConfig.storage || {},

@@ -6,6 +6,7 @@ import { defaultGlobalCSS } from "./default-styles";
 import type { FarmPlugin, FarmPluginRuntimeSession, PluginManager } from "./plugin";
 import { generateFarmClientPluginEntryCode } from "./client-plugin-build";
 import { APIRouteManager } from "./api/route-manager";
+import { DEFAULT_FARM_API_BASE_PATH } from "./api/config";
 import type { OpenAPIManager } from "./openapi/manager";
 import { MiddlewareManager } from "./middleware/manager";
 import { generateFarmTypeArtifacts, type GenerateFarmTypeArtifactsOptions } from "./type-artifacts";
@@ -355,6 +356,7 @@ function getEnvDefines(
   configEnv?: ConfigEnv,
 ): Record<string, string> {
   const defines: Record<string, string> = {
+    __FARM_API_BASE_URL__: JSON.stringify(getFarmAPIBaseURLDefine(config)),
     __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
     __FARM_IMAGE_CONFIG__: JSON.stringify(
       getPublicFarmImageConfig(resolveFarmImageConfig(config.images)),
@@ -366,6 +368,11 @@ function getEnvDefines(
   }
 
   return defines;
+}
+
+function getFarmAPIBaseURLDefine(config: FarmVitePluginOptions): string {
+  const baseURL = config.api?.baseURL;
+  return typeof baseURL === "string" && baseURL ? baseURL : DEFAULT_FARM_API_BASE_PATH;
 }
 
 function isResolvedEnvScope(value: unknown): value is Record<string, unknown> {
@@ -4937,6 +4944,7 @@ export async function defineConfig(config: FarmVitePluginOptions = {}): Promise<
     },
     define: {
       __FARM_DEV__: JSON.stringify(process.env.NODE_ENV === "development"),
+      __FARM_API_BASE_URL__: JSON.stringify(getFarmAPIBaseURLDefine(config)),
       __FARM_PUBLIC_ENV__: JSON.stringify(getPublicEnvDefine(config)),
     },
   };
