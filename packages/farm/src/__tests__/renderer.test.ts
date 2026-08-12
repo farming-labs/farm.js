@@ -37,6 +37,7 @@ describe("renderer configuration", () => {
       server: "@farm.js/core/renderer/react/server",
       client: "@farm.js/core/renderer/react/client",
       jsxImportSource: "react",
+      buildConcurrency: "parallel",
       capabilities: { streaming: { node: true, web: false } },
     });
     expect(renderer).not.toBe(REACT_RENDERER);
@@ -83,6 +84,18 @@ describe("renderer configuration", () => {
     expect(renderer).toMatchObject(descriptor);
     expect(renderer.componentExtensions).not.toBe(descriptor.componentExtensions);
     expect(renderer.dedupe).not.toBe(descriptor.dedupe);
+  });
+
+  it("preserves an explicit serial production-build policy", () => {
+    const renderer = resolveFarmRenderer({
+      name: "stateful-compiler",
+      vite: "stateful-renderer/vite",
+      server: "stateful-renderer/server",
+      client: "stateful-renderer/client",
+      buildConcurrency: "serial",
+    });
+
+    expect(renderer.buildConcurrency).toBe("serial");
   });
 
   it("adds renderer component extensions without dropping JavaScript routes", () => {

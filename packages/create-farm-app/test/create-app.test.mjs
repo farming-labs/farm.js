@@ -423,6 +423,103 @@ test("generates a Svelte starter with typed server interaction", async () => {
   }
 });
 
+const betterAuthRenderers = [
+  {
+    name: "preact",
+    packageName: "@farm.js/preact",
+    label: "Preact",
+    authClient: "better-auth/client",
+    page: "page.tsx",
+    form: "auth-form.tsx",
+    nativePattern: /from "preact\/hooks"/,
+  },
+  {
+    name: "solid",
+    packageName: "@farm.js/solid",
+    label: "Solid",
+    authClient: "better-auth/solid",
+    page: "page.tsx",
+    form: "auth-form.tsx",
+    nativePattern: /createSignal/,
+  },
+  {
+    name: "vue",
+    packageName: "@farm.js/vue",
+    label: "Vue",
+    authClient: "better-auth/vue",
+    page: "page.vue",
+    form: "auth-form.vue",
+    nativePattern: /computed, ref/,
+  },
+  {
+    name: "svelte",
+    packageName: "@farm.js/svelte",
+    label: "Svelte",
+    authClient: "better-auth/svelte",
+    page: "page.svelte",
+    form: "auth-form.svelte",
+    nativePattern: /\$state\(false\)/,
+  },
+];
+
+test("generates renderer-native Better Auth starters", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-native-auth-"));
+
+  try {
+    for (const renderer of betterAuthRenderers) {
+      const projectName = `${renderer.name}-auth-app`;
+      execFileSync(
+        process.execPath,
+        [
+          path.join(packageDir, "bin/create-farm-app.js"),
+          projectName,
+          "--template",
+          "better-auth",
+          "--renderer",
+          renderer.name,
+          "--typescript",
+          "--skip-install",
+        ],
+        { cwd: tempDir, stdio: "pipe" },
+      );
+
+      const generatedDir = path.join(tempDir, projectName);
+      const packageJson = JSON.parse(
+        await readFile(path.join(generatedDir, "package.json"), "utf8"),
+      );
+      const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+      const home = await readFile(path.join(generatedDir, "src/app", renderer.page), "utf8");
+      const form = await readFile(path.join(generatedDir, "src/components", renderer.form), "utf8");
+      const authClient = await readFile(path.join(generatedDir, "src/lib/auth-client.ts"), "utf8");
+
+      assert.equal(typeof packageJson.dependencies[renderer.packageName], "string");
+      assert.equal(packageJson.dependencies["@farm.js/better-auth"], "0.1.0-beta.31");
+      assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
+      assert.equal(packageJson.dependencies.react, undefined);
+      assert.equal(packageJson.dependencies["react-dom"], undefined);
+      assert.equal(packageJson.devDependencies["@types/react"], undefined);
+      assert.equal(packageJson.devDependencies["@types/react-dom"], undefined);
+      assert.match(config, new RegExp(`renderer: ${renderer.name}\\(\\)`));
+      assert.match(config, /auth: betterAuth\(\{ instance: auth \}\)/);
+      assert.match(home, new RegExp(`FARMJS / ${renderer.label} \\+ Better Auth`));
+      assert.match(home, /Get started/);
+      assert.match(form, renderer.nativePattern);
+      assert.doesNotMatch(form, /from "react/);
+      assert.match(authClient, new RegExp(`from "${renderer.authClient.replace("/", "\\/")}"`));
+      await readFile(path.join(generatedDir, "src/app/dashboard/middleware.ts"), "utf8");
+
+      if (renderer.name === "vue" || renderer.name === "svelte") {
+        await assert.rejects(readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8"));
+        await assert.rejects(
+          readFile(path.join(generatedDir, "src/components/auth-form.tsx"), "utf8"),
+        );
+      }
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
 for (const template of [
   {
     name: "auth",

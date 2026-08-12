@@ -19,7 +19,7 @@ import type { Plugin, ViteDevServer } from "vite";
 import { API_ROUTE_METHODS, invokeAPIRouteEndpoint, matchAPIRoute } from "./route-manager";
 import { sendWebResponse } from "../server/response";
 import { _withAfterNodeMiddleware } from "../after";
-import { getProgrammaticRouteManifest, isProgrammaticRoutesFileName } from "../routes";
+import { isProgrammaticRoutesFileName } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
 import { toViteModuleId } from "../utils";
 import {
@@ -261,6 +261,8 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         const path = await import("path");
         const srcRoot = path.join(server.config.root, srcDir);
         const routeFiles = findProgrammaticRouteFilesInDir(srcRoot);
+        if (routeFiles.length === 0) return;
+        const { getProgrammaticRouteManifest } = await import("../routes");
 
         for (const routeFile of routeFiles) {
           try {
@@ -436,6 +438,7 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
             }
           }
 
+          const { getProgrammaticRouteManifest } = await import("../routes");
           const manifest = getProgrammaticRouteManifest(routesModule);
           if (manifest) {
             for (const definition of manifest.routes) {

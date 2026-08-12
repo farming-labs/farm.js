@@ -214,6 +214,7 @@ describe("programmatic routes", () => {
         return { default: manifest };
       },
     } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
 
     await manager.discoverRoutes();
 
@@ -331,6 +332,7 @@ describe("programmatic routes", () => {
         return { Route: ProductRoute };
       },
     } as any);
+    manager.setRendererRuntime(createTestRendererRuntime() as any);
 
     await manager.discoverRoutes();
 
@@ -801,7 +803,24 @@ describe("programmatic routes", () => {
 function createRouteModuleFromProgrammaticPageForTest(
   route: ProgrammaticPageRoute<any, any, any, any>,
 ) {
-  return createRouteModuleFromProgrammaticPage(route);
+  return createRouteModuleFromProgrammaticPage(route, createTestRendererRuntime());
+}
+
+function createTestRendererRuntime() {
+  return {
+    Suspense: Symbol.for("farm.test.suspense"),
+    createElement(type, props, ...children) {
+      return {
+        type,
+        props: {
+          ...(props as Record<string, unknown> | undefined),
+          ...(children.length > 0
+            ? { children: children.length === 1 ? children[0] : children }
+            : {}),
+        },
+      };
+    },
+  };
 }
 
 function createControlledPromise<T>() {

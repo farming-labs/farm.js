@@ -27,6 +27,14 @@ export interface FarmRenderer {
   dedupe?: readonly string[];
   /** Renderer packages seeded into Vite's dependency optimizer. */
   optimizeDeps?: readonly string[];
+  /**
+   * Scheduling policy for the production client and SSR graphs.
+   *
+   * Most renderer plugins are safe to run in parallel. Renderers whose
+   * compiler plugins keep process-global mutable state can opt into serial
+   * builds so one graph cannot invalidate the other's transforms.
+   */
+  buildConcurrency?: "parallel" | "serial";
   /** Runtime features this renderer intentionally supports. */
   capabilities?: FarmRendererCapabilitiesInput;
 }
@@ -154,6 +162,7 @@ export function resolveFarmRenderer(renderer?: FarmRenderer): FarmRenderer {
     componentExtensions: [...(resolved.componentExtensions || [])],
     dedupe: [...(resolved.dedupe || [])],
     optimizeDeps: [...(resolved.optimizeDeps || [])],
+    buildConcurrency: resolved.buildConcurrency || "parallel",
     capabilities: getFarmRendererCapabilities(resolved),
   };
 }

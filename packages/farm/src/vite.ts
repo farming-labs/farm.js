@@ -14,7 +14,7 @@ import {
   isProgrammaticRoutesFileName,
   parseProgrammaticRouteModuleId,
   scanProgrammaticPagePaths,
-} from "./routes";
+} from "./routes-shared";
 import type { FarmDocsAPIHandler } from "./docs";
 import { createMarkdownMirrorResponse, resolveMarkdownMirrorTarget } from "./markdown";
 import { createFarmMarkdownSourceResponse, isFarmMarkdownPageFile } from "./app-markdown";
@@ -2422,7 +2422,8 @@ window.__FARM_MANIFEST__ = ${inlineValue({
       }
 
       if (parseProgrammaticRouteModuleId(id)) {
-        return generateProgrammaticRouteModule(id, server?.config.root || options.root);
+        const renderer = farmApp?.getConfig().renderer || resolveFarmRenderer(options.renderer);
+        return generateProgrammaticRouteModule(id, server?.config.root || options.root, renderer);
       }
 
       if (id === "/@farm/client" || id === "/@farm/client.js") {
@@ -2892,7 +2893,11 @@ if (import.meta.hot) {
   };
 }
 
-function generateProgrammaticRouteModule(moduleId: string, root?: string): string {
+function generateProgrammaticRouteModule(
+  moduleId: string,
+  root?: string,
+  renderer: FarmRenderer = REACT_RENDERER,
+): string {
   const parsed = parseProgrammaticRouteModuleId(moduleId);
   if (!parsed) {
     return "";
@@ -2905,7 +2910,10 @@ function generateProgrammaticRouteModule(moduleId: string, root?: string): strin
   }
 
   return `
-import { createElement as __farmCreateElement } from "react";
+import {
+  createElement as __farmCreateElement,
+  Suspense as __farmSuspense,
+} from ${JSON.stringify(renderer.server)};
 import {
   createLayoutModuleFromProgrammaticLayout as __farmCreateLayoutRouteModule,
   createRouteModuleFromProgrammaticPage as __farmCreatePageRouteModule,
@@ -2962,7 +2970,10 @@ if (!__farmRoute) {
 
 const __farmRouteModule = __farmRoute.kind === "layout"
   ? __farmCreateLayoutRouteModule(__farmRoute)
-  : __farmCreatePageRouteModule(__farmRoute);
+  : __farmCreatePageRouteModule(__farmRoute, {
+      createElement: __farmCreateElement,
+      Suspense: __farmSuspense,
+    });
 
 export const metadata = __farmRouteModule.metadata;
 export const generateMetadata = __farmRouteModule.generateMetadata;

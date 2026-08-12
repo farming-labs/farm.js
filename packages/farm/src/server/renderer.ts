@@ -25,7 +25,11 @@ import { getIntegrationProviders, getRegisteredIntegrationAPIManifest } from "..
 import { _runWithCurrentRequest, createWebRequestFromFarmRequest } from "./request";
 import { createFarmCacheKey, getFarmDataCache, normalizeRevalidatePath } from "../cache";
 import { emitFarmEvent } from "../observability";
-import { getFarmRedirectError, isFarmNotFoundError, isFarmRedirectError } from "../navigation";
+import {
+  getFarmRedirectError,
+  isFarmNotFoundError,
+  isFarmRedirectError,
+} from "../navigation-errors";
 import {
   addMetadataImageReference,
   mergeMetadata,
@@ -420,6 +424,7 @@ export class ServerRenderer {
     }
 
     this.rendererRuntime = runtime as FarmServerRendererRuntime;
+    this.routeManager.setRendererRuntime?.(this.rendererRuntime);
   }
 
   private createPageBoundary(

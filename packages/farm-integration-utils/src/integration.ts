@@ -5,7 +5,7 @@ import {
   type FarmIntegrationAPIOperation,
   type FarmIntegrationLogger,
   type FarmIntegrationRouteMethod,
-} from "@farm.js/core";
+} from "@farm.js/core/integrations";
 import type { FarmIntegrationAPI } from "@farm.js/core/client";
 
 export interface AuthRouteIntegrationConfig<TInstance> {

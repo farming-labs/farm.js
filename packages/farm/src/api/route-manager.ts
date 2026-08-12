@@ -2,11 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import type { ViteDevServer } from "vite";
 import { logger } from "../utils";
-import {
-  createProgrammaticRouteModuleId,
-  getProgrammaticRouteManifest,
-  type ProgrammaticApiRoute,
-} from "../routes";
+import type { ProgrammaticApiRoute } from "../routes";
+import { createProgrammaticRouteModuleId } from "../routes-shared";
 import { findProgrammaticRouteFilesInDir } from "../routes.server";
 import {
   getFarmRouteRuntimeConfig,
@@ -190,6 +187,9 @@ export class APIRouteManager {
     const routeFiles = Array.from(
       new Set(candidateRoots.flatMap((srcRoot) => findProgrammaticRouteFilesInDir(srcRoot))),
     );
+    if (routeFiles.length === 0) return;
+
+    const { getProgrammaticRouteManifest } = await import("../routes");
 
     for (const routeFile of routeFiles) {
       try {

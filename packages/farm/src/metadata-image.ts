@@ -1,7 +1,8 @@
-import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import type { ImageResponseOptions } from "@vercel/og";
+import type { ReactElement } from "react";
 
+const REACT_ELEMENT_TYPE = Symbol.for("react.element");
+const REACT_TRANSITIONAL_ELEMENT_TYPE = Symbol.for("react.transitional.element");
 const REACT_FORWARD_REF_TYPE = Symbol.for("react.forward_ref");
 const REACT_MEMO_TYPE = Symbol.for("react.memo");
 const REACT_LAZY_TYPE = Symbol.for("react.lazy");
@@ -50,6 +51,12 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
   );
 }
 
+function isReactElement(value: unknown): value is ReactElement<Record<string, unknown>> {
+  if (!value || typeof value !== "object") return false;
+  const marker = (value as { $$typeof?: symbol }).$$typeof;
+  return marker === REACT_ELEMENT_TYPE || marker === REACT_TRANSITIONAL_ELEMENT_TYPE;
+}
+
 async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
   if (isThenable(node)) {
     return prepareMetadataImageNode(await node);
@@ -59,11 +66,11 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
     return Promise.all(node.map((child) => prepareMetadataImageNode(child)));
   }
 
-  if (!React.isValidElement(node)) {
+  if (!isReactElement(node)) {
     return node;
   }
 
-  const element = node as React.ReactElement<Record<string, unknown>>;
+  const element = node;
   const type = element.type as any;
   const props = element.props || {};
 
@@ -78,13 +85,15 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
 
   if (type && typeof type === "object") {
     if (type.$$typeof === REACT_MEMO_TYPE) {
-      return prepareMetadataImageNode(React.createElement(type.type, props));
+      const { createElement } = await import("react");
+      return prepareMetadataImageNode(createElement(type.type, props));
     }
     if (type.$$typeof === REACT_FORWARD_REF_TYPE) {
       return prepareMetadataImageNode(await type.render(props, null));
     }
     if (type.$$typeof === REACT_LAZY_TYPE) {
-      return prepareMetadataImageNode(React.createElement(type._init(type._payload), props));
+      const { createElement } = await import("react");
+      return prepareMetadataImageNode(createElement(type._init(type._payload), props));
     }
   }
 
@@ -97,7 +106,8 @@ async function prepareMetadataImageNode(node: unknown): Promise<unknown> {
   }
   delete preparedProps.children;
 
-  return React.createElement(type, {
+  const { createElement } = await import("react");
+  return createElement(type, {
     ...preparedProps,
     key: element.key,
     children: preparedChildren,
@@ -189,9 +199,9 @@ export async function createFarmMetadataImageResponse(
   const cacheControl = resolveCacheControl(imageModule.revalidate);
   const explicitContentType = imageModule.contentType?.split(";", 1)[0]?.trim().toLowerCase();
 
-  if (React.isValidElement(value) && explicitContentType !== "image/svg+xml") {
+  if (isReactElement(value) && explicitContentType !== "image/svg+xml") {
     const { ImageResponse } = await import("@vercel/og");
-    const element = (await prepareMetadataImageNode(value)) as React.ReactElement;
+    const element = (await prepareMetadataImageNode(value)) as ReactElement;
     const response = new ImageResponse(element, {
       width: imageModule.size?.width || 1200,
       height: imageModule.size?.height || 630,
@@ -210,7 +220,8 @@ export async function createFarmMetadataImageResponse(
     body = toArrayBuffer(new TextEncoder().encode(value));
   } else if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
     body = toArrayBuffer(value);
-  } else if (React.isValidElement(value)) {
+  } else if (isReactElement(value)) {
+    const { renderToStaticMarkup } = await import("react-dom/server");
     body = toArrayBuffer(new TextEncoder().encode(renderToStaticMarkup(value)));
   } else {
     throw new Error("Metadata image must return a Response, string, bytes, or React element");

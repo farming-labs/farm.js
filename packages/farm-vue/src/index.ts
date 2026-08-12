@@ -8,6 +8,9 @@ const VUE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   componentExtensions: [".vue"],
   dedupe: ["vue"],
   optimizeDeps: ["vue", "@farm.js/vue/client"],
+  // @vitejs/plugin-vue keeps descriptor and script caches at module scope.
+  // Serial graphs prevent one plugin instance from invalidating the other.
+  buildConcurrency: "serial",
   capabilities: {
     streaming: { node: true, web: true },
   },
@@ -20,6 +23,7 @@ export function vue(): FarmRenderer {
     componentExtensions: [...(VUE_RENDERER.componentExtensions || [])],
     dedupe: [...(VUE_RENDERER.dedupe || [])],
     optimizeDeps: [...(VUE_RENDERER.optimizeDeps || [])],
+    buildConcurrency: VUE_RENDERER.buildConcurrency,
     capabilities: {
       streaming: { ...VUE_RENDERER.capabilities?.streaming },
     },

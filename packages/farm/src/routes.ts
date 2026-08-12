@@ -1,4 +1,4 @@
-import { Suspense, createElement, type ComponentType } from "react";
+import type { ComponentType } from "react";
 import {
   createFarmCacheKey,
   createRouteDataCacheTag,
@@ -9,6 +9,7 @@ import {
 import { getFarmRouteContext } from "./route-context";
 import { normalizeFarmRouteRuntimeConfig, type FarmRouteRuntimeConfig } from "./route-runtime";
 import type { ServerFn } from "./server-fn";
+import type { FarmServerRendererRuntime } from "./renderer";
 import type {
   FarmAppContext,
   LayoutProps,
@@ -974,9 +975,12 @@ export function parseProgrammaticRoutePath(
   };
 }
 
-export function createRouteModuleFromProgrammaticPage(route: ProgrammaticPageRoute): RouteModule {
+export function createRouteModuleFromProgrammaticPage(
+  route: ProgrammaticPageRoute,
+  rendererRuntime?: Pick<FarmServerRendererRuntime, "createElement" | "Suspense">,
+): RouteModule {
   const mod: RouteModule = {
-    default: createProgrammaticPageComponent(route),
+    default: createProgrammaticPageComponent(route, rendererRuntime),
     ...normalizeFarmRouteRuntimeConfig(route, `Route "${route.path}"`),
   };
 
@@ -1058,7 +1062,10 @@ export function scanProgrammaticPagePaths(source: string): string[] {
   return Array.from(paths);
 }
 
-function createProgrammaticPageComponent(route: ProgrammaticPageRoute): ComponentType<PageProps> {
+function createProgrammaticPageComponent(
+  route: ProgrammaticPageRoute,
+  rendererRuntime?: Pick<FarmServerRendererRuntime, "createElement" | "Suspense">,
+): ComponentType<PageProps> {
   if (
     !route.params &&
     !route.search &&
@@ -1071,6 +1078,14 @@ function createProgrammaticPageComponent(route: ProgrammaticPageRoute): Componen
     return route.component as ComponentType<PageProps>;
   }
 
+  const createElement: FarmServerRendererRuntime["createElement"] = (...args) => {
+    if (!rendererRuntime) {
+      throw new Error(
+        `Programmatic route "${route.path}" requires a FARMJS renderer runtime before it can render.`,
+      );
+    }
+    return rendererRuntime.createElement(...args);
+  };
   const Component = route.component;
 
   if (route.pending) {
@@ -1099,7 +1114,7 @@ function createProgrammaticPageComponent(route: ProgrammaticPageRoute): Componen
     const PageContent = FarmProgrammaticPageContent as unknown as ComponentType<PageProps>;
     const FarmProgrammaticPage = function FarmProgrammaticPage(props: PageProps) {
       return createElement(
-        Suspense,
+        rendererRuntime!.Suspense,
         {
           fallback: createElement(PendingComponent, createProgrammaticRoutePendingProps(props)),
         },

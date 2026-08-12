@@ -21,12 +21,10 @@ import type {
   ProgrammaticRouteSearchClientOptions,
 } from "../routes";
 import {
-  createLayoutModuleFromProgrammaticLayout,
   createProgrammaticRouteModuleId,
-  createRouteModuleFromProgrammaticPage,
   getProgrammaticRouteSearchClientOptions,
   parseProgrammaticRoutePath,
-} from "../routes";
+} from "../routes-shared";
 import { loadProgrammaticRouteManifests } from "../routes.server";
 import {
   createFarmMarkdownRouteModuleFromFile,
@@ -39,6 +37,7 @@ import type { ViteDevServer } from "vite";
 import { getClientModuleMetadata } from "../utils/client-component";
 import type { MetadataImageKind } from "../metadata";
 import type { FarmIslandStrategy } from "../island";
+import type { FarmServerRendererRuntime } from "../renderer";
 import { createFarmRouteRenderPlan, type FarmRouteRenderPlan } from "../navigation/render-plan";
 import { getFarmSourceRoots, type FarmSourceRoot } from "../layers";
 import {
@@ -174,6 +173,7 @@ export class RouteManager {
   private redirects: Map<string, RedirectEntry> = new Map();
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
+  private rendererRuntime?: FarmServerRendererRuntime;
   private viteServer?: ViteDevServer;
   private clientManifestCache?: {
     projectRoot: string;
@@ -183,6 +183,10 @@ export class RouteManager {
   constructor(config: Required<FarmConfig>, viteServer?: ViteDevServer) {
     this.config = config;
     this.viteServer = viteServer;
+  }
+
+  setRendererRuntime(rendererRuntime: FarmServerRendererRuntime): void {
+    this.rendererRuntime = rendererRuntime;
   }
 
   /**
@@ -569,7 +573,8 @@ export class RouteManager {
     try {
       const programmaticPage = this.programmaticPages.get(modulePath);
       if (programmaticPage) {
-        return createRouteModuleFromProgrammaticPage(programmaticPage);
+        const { createRouteModuleFromProgrammaticPage } = await import("../routes");
+        return createRouteModuleFromProgrammaticPage(programmaticPage, this.rendererRuntime);
       }
 
       if (isFarmMarkdownPageFile(modulePath)) {
@@ -606,6 +611,7 @@ export class RouteManager {
     try {
       const programmaticLayout = this.programmaticLayouts.get(modulePath);
       if (programmaticLayout) {
+        const { createLayoutModuleFromProgrammaticLayout } = await import("../routes");
         return createLayoutModuleFromProgrammaticLayout(programmaticLayout) as LayoutModule;
       }
 

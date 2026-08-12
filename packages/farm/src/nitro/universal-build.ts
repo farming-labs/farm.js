@@ -766,12 +766,7 @@ export async function buildUniversal(
       logger.info("⚡ Building application bundles with Vite Rolldown");
     }
 
-    // Route metadata and the client/SSR graphs read independent inputs. Drain
-    // every task before propagating a deterministic first failure so a rejected
-    // sibling cannot keep mutating build output in the background.
-    logger.info("📦 Building client and SSR bundles in parallel...");
-    const [clientBuildResult, ssrBuildResult] = await Promise.allSettled([
-      // Client build (to disk)
+    const buildClientBundle = () =>
       buildClient(
         productionVite,
         config,
@@ -781,8 +776,8 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
-      ),
-      // SSR build (in memory)
+      );
+    const buildSSRBundle = () =>
       buildSSRInMemory(
         productionVite,
         config,
@@ -794,8 +789,25 @@ export async function buildUniversal(
         pageRoutes,
         layoutRoutes,
         routeSlots,
-      ),
-    ]);
+      );
+
+    // Route metadata and the client/SSR graphs read independent inputs. Drain
+    // every task before propagating a deterministic first failure so a rejected
+    // sibling cannot keep mutating build output in the background. Renderer
+    // compiler plugins with process-global caches can request serial graphs.
+    let clientBuildResult: PromiseSettledResult<Awaited<ReturnType<typeof buildClientBundle>>>;
+    let ssrBuildResult: PromiseSettledResult<Awaited<ReturnType<typeof buildSSRBundle>>>;
+    if (config.renderer.buildConcurrency === "serial") {
+      logger.info(`📦 Building client and SSR bundles serially for ${config.renderer.name}...`);
+      [clientBuildResult] = await Promise.allSettled([buildClientBundle()]);
+      [ssrBuildResult] = await Promise.allSettled([buildSSRBundle()]);
+    } else {
+      logger.info("📦 Building client and SSR bundles in parallel...");
+      [clientBuildResult, ssrBuildResult] = await Promise.allSettled([
+        buildClientBundle(),
+        buildSSRBundle(),
+      ]);
+    }
     const [routeRuntimeManifestResult] = await routeRuntimeManifestResultPromise;
     if (routeRuntimeManifestResult.status === "rejected") {
       throw routeRuntimeManifestResult.reason;
@@ -3108,6 +3120,16 @@ async function buildSSRInMemory(
     preset,
     metadataImageRoutes.some((image) => image.sourceType === "module"),
   );
+  const rendererOptionalExternals = isReactRenderer(config.renderer)
+    ? []
+    : [
+        "react",
+        "react/jsx-runtime",
+        "react/jsx-dev-runtime",
+        "react-dom",
+        "react-dom/client",
+        "react-dom/server",
+      ];
 
   try {
     await viteBuild({
@@ -3126,6 +3148,7 @@ async function buildSSRInMemory(
           external: [
             "fsevents",
             "sharp",
+            ...rendererOptionalExternals,
             ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
             "@prisma/client",
             "@prisma/client/default",
@@ -3158,6 +3181,7 @@ async function buildSSRInMemory(
         external: [
           "fsevents",
           "sharp",
+          ...rendererOptionalExternals,
           ...(useExternalMetadataImageRuntime ? ["@vercel/og"] : []),
           "esbuild",
           "lightningcss",
