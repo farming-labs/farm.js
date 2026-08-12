@@ -187,11 +187,13 @@ const OVERLAY_STYLES = `
 }
 
 .farm-runtime-error__inline-code {
-  padding: 2px 4px;
-  border: 1px solid var(--farm-error-line);
-  background: var(--farm-error-panel);
+  padding: 2px 5px;
+  border: 1px solid var(--farm-error-line-strong);
+  background: var(--farm-error-source-line);
+  color: var(--farm-error-source-marker);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.92em;
+  font-size: 0.94em;
+  font-weight: 600;
   line-height: inherit;
   overflow-wrap: anywhere;
   box-decoration-break: clone;
