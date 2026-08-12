@@ -26,6 +26,7 @@ test.describe("Development runtime error overlay", () => {
     expect(issueUrl.searchParams.get("title")).toContain("Cannot read properties of undefined");
     expect(issueUrl.searchParams.get("body")).toContain("- Page path: /runtime-error-demo");
     await expect(overlay.getByRole("button", { name: "Reload page" })).toBeVisible();
+    await expect(overlay.locator(".farm-default-error__code")).toHaveCSS("font-size", "72px");
 
     const statusBox = await overlay.locator(".farm-default-error__code").boundingBox();
     const actionsBox = await overlay.locator(".farm-default-error__actions").boundingBox();

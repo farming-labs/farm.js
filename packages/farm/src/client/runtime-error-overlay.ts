@@ -199,7 +199,7 @@ const OVERLAY_STYLES = `
   }
 
   .farm-runtime-error__viewport .farm-default-error__code {
-    font-size: 60px;
+    font-size: 72px;
   }
 
   .farm-runtime-error__viewport .farm-default-error__eyebrow {
