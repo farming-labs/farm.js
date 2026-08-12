@@ -212,8 +212,8 @@ const OVERLAY_STYLES = `
 @media (max-height: 760px) {
   .farm-runtime-error__viewport .farm-default-error {
     place-items: start center;
-    padding-top: 16px;
-    padding-bottom: 16px;
+    padding-top: 12px;
+    padding-bottom: 12px;
   }
 
   .farm-runtime-error__viewport .farm-default-error__code {
@@ -239,7 +239,7 @@ const OVERLAY_STYLES = `
   }
 
   .farm-runtime-error__viewport .farm-default-error__actions {
-    margin-top: 14px;
+    margin-top: 10px;
   }
 }
 `;
@@ -252,16 +252,19 @@ const OVERLAY_MARKUP = `
       <p class="farm-default-error__eyebrow">Client runtime error</p>
       <header class="farm-default-error__summary">
         <h1 id="farm-runtime-error-title" class="farm-default-error__title">Application failed in the browser</h1>
-        <p id="farm-runtime-error-description" class="farm-default-error__message" data-farm-runtime-error-message></p>
       </header>
       <section class="farm-default-error__panel" aria-label="Error information">
         <div class="farm-default-error__row">
-          <span class="farm-default-error__label">Location</span>
-          <span class="farm-default-error__value" data-farm-runtime-error-location></span>
+          <span class="farm-default-error__label">Error type</span>
+          <span class="farm-default-error__value" data-farm-runtime-error-type></span>
         </div>
         <div class="farm-default-error__row">
-          <span class="farm-default-error__label">Phase</span>
-          <span class="farm-default-error__value" data-farm-runtime-error-phase></span>
+          <span class="farm-default-error__label">Error message</span>
+          <span id="farm-runtime-error-description" class="farm-default-error__value" data-farm-runtime-error-message></span>
+        </div>
+        <div class="farm-default-error__row">
+          <span class="farm-default-error__label">Location</span>
+          <span class="farm-default-error__value" data-farm-runtime-error-location></span>
         </div>
         <section class="farm-default-error__details" aria-labelledby="farm-runtime-error-details-title">
           <div class="farm-default-error__details-header">
@@ -438,12 +441,13 @@ class DefaultFarmRuntimeErrorOverlay implements FarmRuntimeErrorOverlay {
   }
 
   private render(record: RuntimeErrorRecord): void {
+    this.getElement("[data-farm-runtime-error-type]").textContent = formatErrorType(
+      record.error,
+      record.context.phase,
+    );
     this.getElement("[data-farm-runtime-error-message]").textContent = record.error.message;
     this.getElement("[data-farm-runtime-error-location]").textContent =
       `${record.context.location.pathname}${record.context.location.search}` || "/";
-    this.getElement("[data-farm-runtime-error-phase]").textContent = formatPhase(
-      record.context.phase,
-    );
     this.getElement("[data-farm-runtime-error-meta]").textContent =
       `Farm.js v${this.options.farmVersion || FARM_VERSION} · development · browser`;
     this.renderIssueLink(record);
@@ -897,6 +901,21 @@ function formatPhase(phase: string): string {
     .replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
+function formatErrorType(error: NormalizedRuntimeError, phase: string): string {
+  const category =
+    phase === "hydration"
+      ? "Hydration"
+      : phase === "navigation"
+        ? "Navigation"
+        : phase === "setup" || phase.startsWith("plugin:")
+          ? "Plugin"
+          : phase === "performance"
+            ? "Performance"
+            : "Runtime";
+  const name = error.name.trim() || "Error";
+  return `${category} ${name}`;
+}
+
 function formatSourcePath(sourceFrame: BrowserSourceFrame): string {
   if (!sourceFrame.line) return sourceFrame.path;
   return `${sourceFrame.path}:${sourceFrame.line}:${sourceFrame.column || 1}${
@@ -935,7 +954,7 @@ function createFarmRuntimeErrorDebugReport(
     "# Farm.js client runtime debug report",
     "",
     "## Error",
-    `- Name: ${record.error.name}`,
+    `- Type: ${formatErrorType(record.error, record.context.phase)}`,
     `- Message: ${record.error.message}`,
     `- Phase: ${formatPhase(record.context.phase)}`,
     `- Page: ${record.context.location.href}`,
@@ -982,7 +1001,7 @@ function createGithubIssueUrl(
       "> This report was prefilled by the Farm.js development error overlay. Review it and remove sensitive information before submitting.",
       "",
       "### Error",
-      `- Name: ${record.error.name}`,
+      `- Type: ${formatErrorType(record.error, record.context.phase)}`,
       `- Message: ${record.error.message}`,
       `- Phase: ${formatPhase(record.context.phase)}`,
       `- Page path: ${record.context.location.pathname}`,

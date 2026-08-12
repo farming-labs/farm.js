@@ -59,9 +59,13 @@ describe("client runtime error overlay", () => {
     expect(shadow.querySelector("[data-farm-runtime-error-message]")?.textContent).toBe(
       "Cannot read properties of undefined (reading 'name')",
     );
-    expect(shadow.querySelector("[data-farm-runtime-error-phase]")?.textContent).toBe(
-      "Unhandled Rejection",
+    expect(shadow.querySelector("[data-farm-runtime-error-type]")?.textContent).toBe(
+      "Runtime TypeError",
     );
+    expect(
+      shadow.querySelector("[data-farm-runtime-error-message]")?.closest(".farm-default-error__row")
+        ?.textContent,
+    ).toContain("Cannot read properties of undefined (reading 'name')");
     expect(shadow.querySelector(".farm-default-error__source-path")?.textContent).toBe(
       "/src/dashboard.tsx:3:15",
     );
@@ -202,6 +206,7 @@ describe("client runtime error overlay", () => {
     await flushAsyncWork();
 
     expect(copiedReport).toContain("# Farm.js client runtime debug report");
+    expect(copiedReport).toContain("- Type: Hydration Error");
     expect(copiedReport).toContain("- Message: Widget crashed");
     expect(copiedReport).toContain("- Phase: Hydration");
     expect(copiedReport).toContain("- Farm.js: test-version");

@@ -9,7 +9,9 @@ test.describe("Development runtime error overlay", () => {
     const overlay = page.getByRole("alertdialog", { name: "Application failed in the browser" });
     await expect(overlay).toBeVisible();
     await expect(overlay.getByText(/formatDisplayName is not a function/)).toBeVisible();
-    await expect(overlay.getByText("Window", { exact: true })).toBeVisible();
+    await expect(overlay.getByText("Runtime TypeError", { exact: true })).toBeVisible();
+    await expect(overlay.getByText("Error message", { exact: true })).toBeVisible();
+    await expect(overlay.getByText("Window", { exact: true })).toHaveCount(0);
     await expect(
       overlay.getByText(/\/src\/app\/runtime-error-demo\/page\.tsx:24:\d+/, { exact: true }),
     ).toBeVisible();
@@ -67,7 +69,7 @@ test.describe("Development runtime error overlay", () => {
         exact: true,
       }),
     ).toBeVisible();
-    await expect(overlay.getByText("Unhandled Rejection", { exact: true })).toBeVisible();
+    await expect(overlay.getByText("Runtime Error", { exact: true })).toBeVisible();
     await expect(
       page.locator("[data-farm-runtime-error-viewport][data-theme='dark']"),
     ).toBeVisible();
