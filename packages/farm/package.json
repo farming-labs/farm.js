@@ -99,6 +99,12 @@
       "server-fn/client": [
         "./dist/server-fn-client.d.ts"
       ],
+      "server-query": [
+        "./dist/server-query.d.ts"
+      ],
+      "server-query/client": [
+        "./dist/server-query-client.d.ts"
+      ],
       "server-action-security": [
         "./dist/server-action-security.d.ts"
       ],
@@ -169,6 +175,9 @@
       "renderer": [
         "./dist/renderer.d.ts"
       ],
+      "renderer-client": [
+        "./dist/renderer-client.d.ts"
+      ],
       "api": [
         "./types/api.d.ts",
         "./dist/api.d.ts"
@@ -227,6 +236,11 @@
       "types": "./dist/renderer.d.ts",
       "import": "./dist/renderer.mjs",
       "require": "./dist/renderer.cjs"
+    },
+    "./renderer-client": {
+      "types": "./dist/renderer-client.d.ts",
+      "import": "./dist/renderer-client.mjs",
+      "require": "./dist/renderer-client.cjs"
     },
     "./renderer/react/server": {
       "types": "./dist/renderer/react/server.d.ts",

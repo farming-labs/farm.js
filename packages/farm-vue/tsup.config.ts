@@ -5,6 +5,7 @@ export default defineConfig({
     index: "src/index.ts",
     server: "src/server.ts",
     client: "src/client.ts",
+    bindings: "src/bindings.ts",
     vite: "src/vite.ts",
   },
   format: ["cjs", "esm"],
@@ -12,7 +13,14 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   treeshake: true,
-  external: ["@farm.js/core", "vue", "@vue/server-renderer", "vite", "@vitejs/plugin-vue"],
+  external: [
+    "@farm.js/core",
+    "@farm.js/core/renderer-client",
+    "vue",
+    "@vue/server-renderer",
+    "vite",
+    "@vitejs/plugin-vue",
+  ],
   outExtension({ format }) {
     return { js: format === "cjs" ? ".cjs" : ".mjs" };
   },

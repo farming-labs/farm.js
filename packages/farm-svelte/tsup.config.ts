@@ -5,6 +5,7 @@ export default defineConfig({
     index: "src/index.ts",
     server: "src/server.ts",
     client: "src/client.ts",
+    bindings: "src/bindings.ts",
     vite: "src/vite.ts",
   },
   format: ["cjs", "esm"],
@@ -14,6 +15,7 @@ export default defineConfig({
   treeshake: true,
   external: [
     "@farm.js/core",
+    "@farm.js/core/renderer-client",
     "svelte",
     "svelte/server",
     "svelte/internal/client",
