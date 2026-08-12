@@ -37,18 +37,45 @@ storage, integrations, observability, and deployment output.
 | Server functions, middleware, cache, and storage | Available                | Available                       | Available            | Available            | Available            |
 | Observability and production Node output         | Available                | Available                       | Available            | Available            | Available            |
 | Basic create-app starter                         | Available                | Available                       | Available            | Available            | Available            |
-| `Link`, router hooks, actions, fetchers, queries | Available                | Through `preact/compat`         | React API only       | React API only       | React API only       |
-| Client theme and i18n hooks                      | Available                | Through `preact/compat`         | React API only       | React API only       | React API only       |
+| Router state and programmatic navigation         | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Callable actions and server queries              | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Client theme and i18n state                      | Available                | Through `preact/compat`         | Solid binding        | Vue binding          | Svelte store         |
+| Renderer-specific `Link` and form components     | Available                | Through `preact/compat`         | Not yet              | Not yet              | Not yet              |
 | Programmatic UI routes                           | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | Markdown/MDX visual routes and docs adapter      | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | Generated JSX metadata images                    | Available                | Compatibility surface           | React-oriented today | React-oriented today | React-oriented today |
 | React Server Components and optimized boundaries | Available experimentally | Not applicable                  | Not applicable       | Not applicable       | Not applicable       |
 | Integration UI providers and provider starters   | Available                | Provider-specific compatibility | React-oriented today | React-oriented today | React-oriented today |
 
-“React API only” means the server feature remains usable, but its current convenience hook or
-component imports React. Preact resolves many of those imports through `preact/compat`; Solid, Vue,
-and Svelte applications should call validated endpoints through the generated API client and use
-their renderer's native state primitives.
+Preact resolves the React-shaped bindings through `preact/compat`. Solid exposes signal-backed
+getters, Vue exposes refs and computed values, and Svelte exposes readable stores. The underlying
+navigation, action, query-cache, theme, and i18n transports live in the renderer-neutral
+`@farm.js/core/renderer-client` entry.
+
+## Native client bindings
+
+Import client bindings from the selected renderer rather than importing React hooks:
+
+```ts
+// Solid
+import { useAction, useRouter, useServerQuery, useTheme } from "@farm.js/solid/bindings";
+
+// Vue
+import { useAction, useRouter, useServerQuery, useTheme } from "@farm.js/vue/bindings";
+
+// Svelte
+import {
+  createAction,
+  createRouter,
+  createServerQuery,
+  createTheme,
+} from "@farm.js/svelte/bindings";
+```
+
+Actions remain normal typed RPC calls. Solid exposes action state through reactive properties, Vue
+through refs, and Svelte through the callable action's readable-store subscription. Server queries
+share FARMJS's existing browser cache, invalidation, deduplication, stale-while-revalidate, focus,
+and reconnect behavior across all bindings.
 
 ## Renderer capability contract
 

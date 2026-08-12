@@ -6,6 +6,7 @@ export const farmPackageBuildOptions = {
     version: "src/version.ts",
     server: "src/server.ts",
     client: "src/client.ts",
+    "renderer-client": "src/renderer-client.ts",
     "client/lifecycle": "src/client/lifecycle.ts",
     vite: "src/vite.ts",
     "server-plugins": "src/server-plugins.ts",

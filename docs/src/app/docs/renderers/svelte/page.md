@@ -109,10 +109,23 @@ in the server bundle.
 
 ## Current boundaries
 
-React-based client exports such as `Link`, `useAction`, fetchers, query hooks, `useTheme`, and
-integration providers do not become Svelte APIs automatically. Use Svelte runes/stores and the
-generated API client. Programmatic UI routes, Markdown/MDX visual pages, the docs adapter, and
-generated JSX metadata images remain React-oriented today.
+Use the Svelte-native bindings for router, action, server-query, theme, and i18n stores:
+
+```svelte
+<script lang="ts">
+  import { createAction, createRouter, createTheme } from "@farm.js/svelte/bindings";
+
+  const router = createRouter();
+  const save = createAction(saveProduct);
+  const theme = createTheme();
+</script>
+
+<button on:click={() => save({ name: "FARMJS" })} disabled={$save.pending}>Save</button>
+```
+
+The returned values implement Svelte's readable-store contract. Renderer-specific `Link` and form
+components, fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages,
+the docs adapter, and generated JSX metadata images remain React-oriented today.
 
 Integration starter templates currently target React, so select the Basic template for Svelte and
 add renderer-neutral provider code afterward.

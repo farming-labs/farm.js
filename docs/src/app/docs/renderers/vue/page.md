@@ -119,10 +119,23 @@ in the server bundle.
 
 ## Current boundaries
 
-React-based client exports such as `Link`, `useAction`, fetchers, query hooks, `useTheme`, and
-integration providers do not become Vue composables automatically. Use Vue refs/composables and the
-generated API client. Programmatic UI routes, Markdown/MDX visual pages, the docs adapter, and
-generated JSX metadata images remain React-oriented today.
+Use the Vue-native composables for reactive router, action, server-query, theme, and i18n state:
+
+```ts
+import { useAction, useRouter, useTheme } from "@farm.js/vue/bindings";
+
+const router = useRouter();
+const save = useAction(saveProduct);
+const theme = useTheme();
+
+await save({ name: "FARMJS" });
+await router.push("/products");
+theme.toggleTheme();
+```
+
+The composables return Vue refs and computed values. Renderer-specific `Link` and form components,
+fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages, the docs
+adapter, and generated JSX metadata images remain React-oriented today.
 
 Integration starter templates currently target React, so select the Basic template for Vue and add
 renderer-neutral provider code afterward.

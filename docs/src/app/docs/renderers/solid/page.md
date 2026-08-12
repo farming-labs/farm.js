@@ -89,10 +89,23 @@ export function Greeting() {
 
 ## Current boundaries
 
-React-based client exports such as `Link`, `useAction`, fetchers, query hooks, `useTheme`, and
-integration providers do not become Solid primitives automatically. Use native Solid state and the
-generated API client. Programmatic UI routes, Markdown/MDX visual pages, the docs adapter, and
-generated JSX metadata images remain React-oriented today.
+Use the Solid-native bindings for reactive router, action, server-query, theme, and i18n state:
+
+```tsx
+import { useAction, useRouter, useTheme } from "@farm.js/solid/bindings";
+
+const router = useRouter();
+const save = useAction(saveProduct);
+const theme = useTheme();
+
+await save({ name: "FARMJS" });
+await router.push("/products");
+theme.toggleTheme();
+```
+
+The binding properties are backed by Solid signals. Renderer-specific `Link` and form components,
+fetchers, integration providers, programmatic UI routes, Markdown/MDX visual pages, the docs
+adapter, and generated JSX metadata images remain React-oriented today.
 
 Run the complete example:
 

@@ -36,6 +36,11 @@
       "import": "./dist/client.mjs",
       "require": "./dist/client.cjs"
     },
+    "./bindings": {
+      "types": "./dist/bindings.d.ts",
+      "import": "./dist/bindings.mjs",
+      "require": "./dist/bindings.cjs"
+    },
     "./vite": {
       "types": "./dist/vite.d.ts",
       "import": "./dist/vite.mjs",

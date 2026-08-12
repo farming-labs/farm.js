@@ -118,3 +118,6 @@ pnpm --filter farm-preact-renderer-example dev
 
 See the [Preact renderer example](https://github.com/farming-labs/farm.js/tree/main/examples/preact-renderer)
 and the [renderer support matrix](/docs/renderers).
+
+Preact applications can import FARMJS client hooks from `@farm.js/preact/bindings`. The adapter
+routes those React-shaped hooks through its existing `preact/compat` aliases.
