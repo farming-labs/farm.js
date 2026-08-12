@@ -599,6 +599,7 @@
   "devDependencies": {
     "@clerk/react": "^6.1.0",
     "@farm.js/otel": "workspace:*",
+    "@farm.js/renderer-tests": "workspace:*",
     "@opentelemetry/sdk-node": "0.221.0",
     "@opentelemetry/sdk-trace-base": "2.10.0",
     "@types/react": "^18.2.45",
