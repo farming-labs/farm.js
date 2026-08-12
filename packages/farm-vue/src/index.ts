@@ -9,7 +9,7 @@ const VUE_RENDERER: Readonly<FarmRenderer> = Object.freeze({
   dedupe: ["vue"],
   optimizeDeps: ["vue", "@farm.js/vue/client"],
   capabilities: {
-    streaming: { node: false, web: false },
+    streaming: { node: true, web: true },
   },
 });
 

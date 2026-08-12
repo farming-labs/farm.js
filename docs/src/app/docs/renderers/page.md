@@ -30,7 +30,7 @@ storage, integrations, observability, and deployment output.
 | ------------------------------------------------ | ------------------------ | ------------------------------- | -------------------- | -------------------- | -------------------- |
 | File pages and nested layouts                    | Available                | Available                       | Available            | Available            | Available            |
 | Server rendering and browser hydration           | Available                | Available                       | Available            | Available            | Available            |
-| Streaming SSR                                    | Available                | Available                       | Buffered today       | Buffered today       | Buffered today       |
+| Streaming SSR                                    | Node                     | Node and Web                    | Node and Web         | Node and Web         | Buffered today       |
 | Loading, error, not-found, and slot files        | Available                | Available                       | Available            | Available            | Available            |
 | Static metadata and favicon configuration        | Available                | Available                       | Available            | Available            | Available            |
 | API routes and generated typed API clients       | Available                | Available                       | Available            | Available            | Available            |
