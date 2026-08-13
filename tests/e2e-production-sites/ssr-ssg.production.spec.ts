@@ -5,8 +5,8 @@ const timestampPattern = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/;
 
 test.beforeAll(async () => {
   await Promise.all([
-    access("examples/ssr-ssg-demo/.vercel/output/server/index.mjs"),
-    access("examples/ssr-ssg-demo/.vercel/output/public/farm-client.js"),
+    access("examples/ssr-ssg-demo/.farm/.output/server/index.mjs"),
+    access("examples/ssr-ssg-demo/.farm/.output/public/farm-client.js"),
   ]);
 });
 

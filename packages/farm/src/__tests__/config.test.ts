@@ -719,10 +719,7 @@ describe("resolveDeployConfig", () => {
     // `farm build --preset node-server` produced a node server inside
     // .vercel/output — a directory Vercel deploys as Build Output API
     // content. The explicit preset must replace the deployment plan.
-    const deploy = resolveDeployConfig(
-      { deploy: { target: "vercel" } },
-      { preset: "node-server" },
-    );
+    const deploy = resolveDeployConfig({ deploy: { target: "vercel" } }, { preset: "node-server" });
 
     expect(deploy).toMatchObject({
       target: "node",
@@ -732,10 +729,7 @@ describe("resolveDeployConfig", () => {
   });
 
   it("keeps a preset override with no matching target out of platform directories", () => {
-    const deploy = resolveDeployConfig(
-      { deploy: { target: "vercel" } },
-      { preset: "deno-server" },
-    );
+    const deploy = resolveDeployConfig({ deploy: { target: "vercel" } }, { preset: "deno-server" });
 
     expect(deploy.preset).toBe("deno-server");
     expect(deploy.outputDir).toBe(".farm/.output");

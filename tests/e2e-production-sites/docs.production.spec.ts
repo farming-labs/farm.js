@@ -3,8 +3,8 @@ import { expect, test } from "@playwright/test";
 
 test.beforeAll(async () => {
   await Promise.all([
-    access("docs/.vercel/output/server/index.mjs"),
-    access("docs/.vercel/output/public/farm-client.js"),
+    access("docs/.farm/.output/server/index.mjs"),
+    access("docs/.farm/.output/public/farm-client.js"),
   ]);
 });
 
