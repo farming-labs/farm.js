@@ -113,6 +113,13 @@ async function waitForServer(
   );
 }
 
+async function readClientBundle(root: string): Promise<string> {
+  const clientDir = path.join(root, ".farm", "client");
+  const entries = await fs.readdir(clientDir);
+  const fingerprinted = entries.find((name) => /^farm-client-h[0-9a-f]+\.js$/.test(name));
+  return fs.readFile(path.join(clientDir, fingerprinted ?? "farm-client.js"), "utf8");
+}
+
 async function runProductionRequest(
   serverDir: string,
   assertion: (response: Response) => Promise<void>,
@@ -347,10 +354,7 @@ export default function RootLayout({ children }) {
       );
       await build(config, { root, preset: "node-server" });
 
-      const clientBundle = await fs.readFile(
-        path.join(root, ".farm", "client", "farm-client.js"),
-        "utf8",
-      );
+      const clientBundle = await readClientBundle(root);
       expect(clientBundle).toContain("layout-effect-fired");
       expect(clientBundle).toContain("/docs/[...slug]");
 
@@ -377,7 +381,8 @@ export default function RootLayout({ children }) {
           expect(html).toContain('data-farm-client="false"');
           expect(html).toContain('data-farm-layout-client="true"');
           expect(html).toContain('id="__farm_route_slots_data__"');
-          expect(html.match(/src="\/farm-client\.js"/g)).toHaveLength(1);
+          const scriptPattern = /src="\/farm-client-h[0-9a-f]{8}\.js"/g;
+          expect(html.match(scriptPattern)).toHaveLength(1);
           // The stylesheet href carries a content fingerprint so browsers
           // cannot serve stale CSS against fresh HTML.
           const stylesheetPattern = /href="\/assets\/farm-client-h[0-9a-f]{8}\.css"/g;
@@ -472,10 +477,7 @@ export default function DynamicPage({ params }) {
         fs.readFile(path.join(root, ".farm", "ssr", "nitro-entry.mjs"), "utf8"),
       ).resolves.toContain("farmNitroApp.hooks.hook('close'");
 
-      const clientBundle = await fs.readFile(
-        path.join(root, ".farm", "client", "farm-client.js"),
-        "utf8",
-      );
+      const clientBundle = await readClientBundle(root);
       expect(clientBundle).toContain("Minified React error");
       expect(clientBundle).not.toContain("Download the React DevTools");
 
@@ -1134,7 +1136,9 @@ export default defineRoutes(() => [
             expect(html).toContain("suspense-ready");
             expect(html).toContain('data-page-render-count="1"');
             expect(html).not.toContain('data-page-render-count="2"');
-            expect(html).toContain('<link rel="modulepreload" href="/farm-client.js">');
+            expect(html).toMatch(
+              /<link rel="modulepreload" href="\/farm-client-h[0-9a-f]{8}\.js">/,
+            );
             expect(html).not.toContain("renderToString which does not support Suspense");
           },
           "/suspense",

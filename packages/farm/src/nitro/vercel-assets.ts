@@ -10,15 +10,18 @@ export interface FarmVercelImmutableAssetRoute {
 /**
  * Apply immutable caching only to Farm/Vite filenames carrying Farm's `-h`
  * content-fingerprint marker. Stable entry filenames and HTML are deliberately
- * excluded because they can change between deployments.
+ * excluded because they can change between deployments. The fingerprinted
+ * client entry lives at the public root — its relative chunk imports pin it
+ * there — so root-level farm-client-h files qualify alongside assets/chunks.
  */
 export function createFarmVercelImmutableAssetRoute(basePath = "/"): FarmVercelImmutableAssetRoute {
   const normalizedBasePath = normalizeBasePath(basePath);
   const escapedBasePath = escapeRegex(normalizedBasePath);
   const prefix = escapedBasePath ? `/${escapedBasePath}` : "";
+  const fingerprint = "-h(?:[a-fA-F0-9]{8}|[a-fA-F0-9]{12}|[a-fA-F0-9]{16})";
 
   return {
-    src: `^${prefix}/(?:assets|chunks)/(?:.+/)*[^/]+-h(?:[a-fA-F0-9]{8}|[a-fA-F0-9]{12}|[a-fA-F0-9]{16})\\.(?!(?:[hH][tT][mM][lL]?)$)[^/]+$`,
+    src: `^${prefix}/(?:(?:assets|chunks)/(?:.+/)*[^/]+|farm-client)${fingerprint}\\.(?!(?:[hH][tT][mM][lL]?)$)[^/]+$`,
     headers: {
       "Cache-Control": FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
     },

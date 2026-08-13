@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FARM_CLIENT_CSS_HREF_PLACEHOLDER,
+  FARM_CLIENT_JS_SRC_PLACEHOLDER,
   resolveHashedClientCssHref,
+  resolveHashedClientJsSrc,
 } from "../nitro/client-css-href";
 
 const tempDirs: string[] = [];
@@ -55,9 +57,32 @@ describe("resolveHashedClientCssHref", () => {
     );
   });
 
+  it("references the fingerprinted entry and shims the stable name onto it", async () => {
+    const dir = await makeClientOutputDir();
+    // The bundler emits the fingerprinted entry directly; a copy would be
+    // instantiated a second time through the chunks' back-imports.
+    await fs.writeFile(path.join(dir, "farm-client-hab12cd34.js"), "export const real = true;");
+
+    const src = await resolveHashedClientJsSrc(dir);
+
+    expect(src).toBe("/farm-client-hab12cd34.js");
+    // The stable name becomes a re-export shim, so hardcoded references
+    // still execute the one real module instead of a second instance.
+    await expect(fs.readFile(path.join(dir, "farm-client.js"), "utf8")).resolves.toBe(
+      'export * from "./farm-client-hab12cd34.js";\n',
+    );
+  });
+
+  it("falls back to the stable entry name when no fingerprinted entry exists", async () => {
+    await expect(resolveHashedClientJsSrc(await makeClientOutputDir())).resolves.toBe(
+      "/farm-client.js",
+    );
+  });
+
   it("produces hrefs the placeholder can never collide with", () => {
     // Substitution is a plain string replace over generated code, so the
     // placeholder must not be a substring any real href could contain.
     expect(FARM_CLIENT_CSS_HREF_PLACEHOLDER).toMatch(/^\/__[a-z_]+__$/);
+    expect(FARM_CLIENT_JS_SRC_PLACEHOLDER).toMatch(/^\/__[a-z_]+__$/);
   });
 });
