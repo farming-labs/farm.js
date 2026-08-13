@@ -8,6 +8,7 @@ process.env.FARM_E2E_MODE = "prod";
 
 export default defineConfig({
   testDir: "./tests/e2e",
+  testIgnore: ["runtime-error-overlay.spec.ts"],
   timeout: 30_000,
   expect: {
     timeout: 5_000,
