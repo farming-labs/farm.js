@@ -102,8 +102,12 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
       suppressLintOnLink: config.suppressLintOnLink,
       componentExtensions: config.renderer.componentExtensions,
       i18nConfig: config.i18n,
-    }).catch(() => {
-      // Non-fatal; type generation is for DX only.
+    }).catch((error: unknown) => {
+      // Non-fatal; type generation is for DX only. But say so: a silently
+      // skipped run leaves src/farm.d.ts describing routes that no longer
+      // exist, which reads as the framework having gone stale.
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn(`Route type generation failed (farm.d.ts may be stale): ${message}`);
     });
 
     // Type artifacts and API discovery scan independent inputs, so keep them
@@ -167,7 +171,10 @@ async function buildWithProductionNodeEnv(config: ResolvedFarmConfig, options: B
       success: true,
     });
 
-    logger.success("✅ Build completed successfully!");
+    // The one completion summary for the whole pipeline: inner stages and the
+    // CLI stay quiet so success is reported exactly once, and the line that
+    // names the output directory also names the preset that chose it.
+    logger.success(`✅ Build completed successfully! (preset: ${preset})`);
     logger.info(`📁 Output directory: ${deployOutputDir}`);
   } catch (error) {
     await pluginManager.runHookParallel("onError", {

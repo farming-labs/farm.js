@@ -875,9 +875,7 @@ export async function buildUniversal(
       routeRuntimeManifest,
     );
     logger.info(`📋 Route runtime manifest: ${path.relative(root, runtimeManifestPath)}`);
-
-    logger.success("✅ Build completed successfully!");
-    logger.info(`📁 Output directory: ${deployOutputDir}`);
+    // The completion summary is printed once, by the build orchestrator.
   } catch (error) {
     if (lifecyclePluginManager) {
       await lifecyclePluginManager.runHookParallel("onError", {
