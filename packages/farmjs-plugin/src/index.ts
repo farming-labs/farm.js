@@ -40,7 +40,7 @@
  * ```
  */
 
-export const version = "0.1.0-beta.31";
+export const version = "0.1.0-beta.32";
 
 // Note: Import plugins from their respective subpaths:
 // - @farm.js/plugin/rsc
