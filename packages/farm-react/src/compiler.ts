@@ -1,10 +1,4 @@
-import {
-  transformAsync,
-  traverse,
-  types as t,
-  type NodePath,
-  type PluginObj,
-} from "@babel/core";
+import { transformAsync, traverse, types as t, type NodePath, type PluginObj } from "@babel/core";
 import type { NormalizedReactCompilerOptions } from "./index";
 
 export interface CompilerDiagnostic {
@@ -37,9 +31,7 @@ interface PendingBinding {
 
 interface Candidate {
   name: string;
-  path: NodePath<
-    t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression
-  >;
+  path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>;
   statementPath: NodePath;
 }
 
@@ -47,9 +39,7 @@ function isComponentName(name: string): boolean {
   return /^[A-Z]/.test(name);
 }
 
-function directiveValues(node: {
-  directives?: readonly t.Directive[] | null;
-}): string[] {
+function directiveValues(node: { directives?: readonly t.Directive[] | null }): string[] {
   return (node.directives || []).map((directive) => directive.value.value);
 }
 
@@ -59,8 +49,7 @@ function isUseStateCall(
   reactNames: ReadonlySet<string>,
 ): expression is t.CallExpression {
   if (!t.isCallExpression(expression)) return false;
-  if (t.isIdentifier(expression.callee))
-    return useStateNames.has(expression.callee.name);
+  if (t.isIdentifier(expression.callee)) return useStateNames.has(expression.callee.name);
   return (
     t.isMemberExpression(expression.callee) &&
     !expression.callee.computed &&
@@ -87,8 +76,7 @@ function collectStateDependencies(
   traverse(file, {
     ReferencedIdentifier(path) {
       const state = statesByValue.get(path.node.name);
-      if (state && !path.scope.hasBinding(path.node.name))
-        dependencies.add(state.index);
+      if (state && !path.scope.hasBinding(path.node.name)) dependencies.add(state.index);
     },
   });
   return [...dependencies].sort((left, right) => left - right);
@@ -108,8 +96,7 @@ function referencesIdentifier(expression: t.Expression, name: string): boolean {
 
 function findContainingEvent(path: NodePath): NodePath<t.JSXAttribute> | null {
   const attribute = path.findParent((parent) => parent.isJSXAttribute());
-  if (!attribute?.isJSXAttribute() || !t.isJSXIdentifier(attribute.node.name))
-    return null;
+  if (!attribute?.isJSXAttribute() || !t.isJSXIdentifier(attribute.node.name)) return null;
   return /^on[A-Z]/.test(attribute.node.name.name) ? attribute : null;
 }
 
@@ -147,17 +134,12 @@ function rewriteStateAccess(
   traverse(file, {
     CallExpression(path) {
       const callee = path.get("callee");
-      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name))
-        return;
+      if (!callee.isIdentifier() || callee.scope.hasBinding(callee.node.name)) return;
       const state = statesBySetter.get(callee.node.name);
       if (!state) return;
       callee.replaceWith(
         t.memberExpression(
-          t.memberExpression(
-            t.cloneNode(stateParameter),
-            t.numericLiteral(state.index),
-            true,
-          ),
+          t.memberExpression(t.cloneNode(stateParameter), t.numericLiteral(state.index), true),
           t.identifier("set"),
         ),
       );
@@ -168,11 +150,7 @@ function rewriteStateAccess(
       path.replaceWith(
         t.callExpression(
           t.memberExpression(
-            t.memberExpression(
-              t.cloneNode(stateParameter),
-              t.numericLiteral(state.index),
-              true,
-            ),
+            t.memberExpression(t.cloneNode(stateParameter), t.numericLiteral(state.index), true),
             t.identifier("get"),
           ),
           [],
@@ -187,9 +165,7 @@ function cleanJsxText(value: string): string {
   const lines = value.replace(/\r/g, "").split("\n");
   let result = "";
   for (let index = 0; index < lines.length; index += 1) {
-    const lastNonEmptyLine = lines
-      .slice(index + 1)
-      .every((line) => line.trim().length === 0);
+    const lastNonEmptyLine = lines.slice(index + 1).every((line) => line.trim().length === 0);
     let line = lines[index].replace(/\t/g, " ").replace(/ +/g, " ");
     if (index > 0) line = line.replace(/^ /, "");
     if (!lastNonEmptyLine) line = line.replace(/ $/, "");
@@ -209,21 +185,14 @@ function isTextExpression(expression: t.Expression): boolean {
     return false;
   }
   if (t.isConditionalExpression(expression)) {
-    return (
-      isTextExpression(expression.consequent) &&
-      isTextExpression(expression.alternate)
-    );
+    return isTextExpression(expression.consequent) && isTextExpression(expression.alternate);
   }
   if (t.isLogicalExpression(expression)) {
-    return (
-      isTextExpression(expression.left) && isTextExpression(expression.right)
-    );
+    return isTextExpression(expression.left) && isTextExpression(expression.right);
   }
   if (t.isArrayExpression(expression)) {
     return expression.elements.every(
-      (element) =>
-        element === null ||
-        (t.isExpression(element) && isTextExpression(element)),
+      (element) => element === null || (t.isExpression(element) && isTextExpression(element)),
     );
   }
   return true;
@@ -246,8 +215,7 @@ function analyzeHostTree(
     }
 
     for (const attribute of element.openingElement.attributes) {
-      if (t.isJSXSpreadAttribute(attribute))
-        return "JSX attribute spreads are not supported yet";
+      if (t.isJSXSpreadAttribute(attribute)) return "JSX attribute spreads are not supported yet";
       const name = jsxAttributeName(attribute);
       if (!name) return "namespaced JSX attributes are not supported yet";
       if (name === "ref" || name === "dangerouslySetInnerHTML") {
@@ -275,12 +243,11 @@ function analyzeHostTree(
       });
     }
 
-    const nestedElements = element.children.filter(
-      (child): child is t.JSXElement => t.isJSXElement(child),
+    const nestedElements = element.children.filter((child): child is t.JSXElement =>
+      t.isJSXElement(child),
     );
-    const expressionChildren = element.children.filter(
-      (child): child is t.JSXExpressionContainer =>
-        t.isJSXExpressionContainer(child),
+    const expressionChildren = element.children.filter((child): child is t.JSXExpressionContainer =>
+      t.isJSXExpressionContainer(child),
     );
     for (const child of expressionChildren) {
       if (t.isJSXEmptyExpression(child.expression)) continue;
@@ -296,12 +263,9 @@ function analyzeHostTree(
         if (t.isJSXText(child)) {
           const text = cleanJsxText(child.value);
           if (text) parts.push(t.stringLiteral(text));
-        } else if (
-          t.isJSXExpressionContainer(child) &&
-          !t.isJSXEmptyExpression(child.expression)
-        ) {
-          collectStateDependencies(child.expression, statesByValue).forEach(
-            (dependency) => dependencies.add(dependency),
+        } else if (t.isJSXExpressionContainer(child) && !t.isJSXEmptyExpression(child.expression)) {
+          collectStateDependencies(child.expression, statesByValue).forEach((dependency) =>
+            dependencies.add(dependency),
           );
           parts.push(cloneExpression(child.expression));
         }
@@ -341,16 +305,12 @@ function analyzeHostTree(
 
 function lazyInitialValue(expression?: t.Expression): t.Expression {
   const value = t.identifier("_initial");
-  const initializer = expression
-    ? cloneExpression(expression)
-    : t.identifier("undefined");
+  const initializer = expression ? cloneExpression(expression) : t.identifier("undefined");
   return t.callExpression(
     t.arrowFunctionExpression(
       [],
       t.blockStatement([
-        t.variableDeclaration("const", [
-          t.variableDeclarator(value, initializer),
-        ]),
+        t.variableDeclaration("const", [t.variableDeclarator(value, initializer)]),
         t.returnStatement(
           t.conditionalExpression(
             t.binaryExpression(
@@ -369,9 +329,7 @@ function lazyInitialValue(expression?: t.Expression): t.Expression {
 }
 
 function clonePropsParameter(
-  path: NodePath<
-    t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression
-  >,
+  path: NodePath<t.FunctionDeclaration | t.FunctionExpression | t.ArrowFunctionExpression>,
 ): t.Identifier {
   const parameter = path.node.params[0];
   return parameter && t.isIdentifier(parameter)
@@ -394,44 +352,27 @@ function bindingObject(
     ),
     t.objectProperty(
       t.identifier("dependencies"),
-      t.arrayExpression(
-        binding.dependencies.map((part) => t.numericLiteral(part)),
-      ),
+      t.arrayExpression(binding.dependencies.map((part) => t.numericLiteral(part))),
     ),
   ];
   if (binding.name)
-    properties.push(
-      t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)),
-    );
+    properties.push(t.objectProperty(t.identifier("name"), t.stringLiteral(binding.name)));
   properties.push(
     t.objectProperty(
       t.identifier("read"),
       t.arrowFunctionExpression(
         [clonePropsParameter(componentPath), t.cloneNode(stateParameter)],
-        rewriteStateAccess(
-          binding.value,
-          stateParameter,
-          statesByValue,
-          statesBySetter,
-        ),
+        rewriteStateAccess(binding.value, stateParameter, statesByValue, statesBySetter),
       ),
     ),
   );
   return t.objectExpression(properties);
 }
 
-function wrapperElement(
-  definitionIdentifier: t.Identifier,
-  props?: t.Identifier,
-): t.JSXElement {
+function wrapperElement(definitionIdentifier: t.Identifier, props?: t.Identifier): t.JSXElement {
   const name = t.jsxIdentifier(definitionIdentifier.name);
   const attributes = props ? [t.jsxSpreadAttribute(t.cloneNode(props))] : [];
-  return t.jsxElement(
-    t.jsxOpeningElement(name, attributes, true),
-    null,
-    [],
-    true,
-  );
+  return t.jsxElement(t.jsxOpeningElement(name, attributes, true), null, [], true);
 }
 
 function compileCandidate(
@@ -443,16 +384,14 @@ function compileCandidate(
   const { path, name, statementPath } = candidate;
   if (path.node.async || path.node.generator)
     return "async and generator components are not supported";
-  if (path.node.typeParameters)
-    return "generic components are not supported yet";
+  if (path.node.typeParameters) return "generic components are not supported yet";
   if (
     path.node.params.length > 1 ||
     (path.node.params[0] && !t.isIdentifier(path.node.params[0]))
   ) {
     return "components must use zero parameters or one props identifier";
   }
-  if (!t.isBlockStatement(path.node.body))
-    return "components must use a block body";
+  if (!t.isBlockStatement(path.node.body)) return "components must use a block body";
 
   const states: StateBinding[] = [];
   let returned: t.ReturnStatement | undefined;
@@ -462,10 +401,7 @@ function compileCandidate(
       returned = statement;
       continue;
     }
-    if (
-      !t.isVariableDeclaration(statement) ||
-      statement.declarations.length !== 1
-    ) {
+    if (!t.isVariableDeclaration(statement) || statement.declarations.length !== 1) {
       return "only top-level useState declarations and one return are supported in Group 1";
     }
     const declaration = statement.declarations[0];
@@ -477,8 +413,7 @@ function compileCandidate(
       !t.isIdentifier(declaration.id.elements[1]) ||
       !isUseStateCall(declaration.init, useStateNames, reactNames) ||
       declaration.init.arguments.length > 1 ||
-      (declaration.init.arguments[0] &&
-        !t.isExpression(declaration.init.arguments[0]))
+      (declaration.init.arguments[0] && !t.isExpression(declaration.init.arguments[0]))
     ) {
       return "only const [value, setValue] = useState(initial) declarations are supported";
     }
@@ -495,12 +430,8 @@ function compileCandidate(
     return "the component must return one host JSX element";
   }
 
-  const statesByValue = new Map(
-    states.map((state) => [state.valueName, state]),
-  );
-  const statesBySetter = new Map(
-    states.map((state) => [state.setterName, state]),
-  );
+  const statesByValue = new Map(states.map((state) => [state.valueName, state]));
+  const statesBySetter = new Map(states.map((state) => [state.setterName, state]));
   for (const state of states) {
     if (
       state.initialValue &&
@@ -518,9 +449,7 @@ function compileCandidate(
   if (analysis.reason) return analysis.reason;
 
   const stateParameter = path.scope.generateUidIdentifier("farmState");
-  const definitionIdentifier = path.scope.generateUidIdentifier(
-    `${name}Compiled`,
-  );
+  const definitionIdentifier = path.scope.generateUidIdentifier(`${name}Compiled`);
   const propsParameter = clonePropsParameter(path);
   const rewrittenRoot = rewriteStateAccess(
     returned.argument,
@@ -535,9 +464,7 @@ function compileCandidate(
         t.identifier("initialize"),
         t.arrowFunctionExpression(
           [t.cloneNode(propsParameter)],
-          t.arrayExpression(
-            states.map((state) => lazyInitialValue(state.initialValue)),
-          ),
+          t.arrayExpression(states.map((state) => lazyInitialValue(state.initialValue))),
         ),
       ),
       t.objectProperty(
@@ -551,13 +478,7 @@ function compileCandidate(
         t.identifier("bindings"),
         t.arrayExpression(
           (analysis.bindings || []).map((binding) =>
-            bindingObject(
-              binding,
-              path,
-              stateParameter,
-              statesByValue,
-              statesBySetter,
-            ),
+            bindingObject(binding, path, stateParameter, statesByValue, statesBySetter),
           ),
         ),
       ),
@@ -572,17 +493,13 @@ function compileCandidate(
         t.returnStatement(
           wrapperElement(
             definitionIdentifier,
-            originalProps && t.isIdentifier(originalProps)
-              ? originalProps
-              : undefined,
+            originalProps && t.isIdentifier(originalProps) ? originalProps : undefined,
           ),
         ),
       ]),
     );
   statementPath.insertAfter(
-    t.variableDeclaration("const", [
-      t.variableDeclarator(definitionIdentifier, definition),
-    ]),
+    t.variableDeclaration("const", [t.variableDeclarator(definitionIdentifier, definition)]),
   );
   return undefined;
 }
@@ -610,8 +527,7 @@ function collectCandidates(programPath: NodePath<t.Program>): Candidate[] {
       if (
         !t.isIdentifier(path.node.id) ||
         !isComponentName(path.node.id.name) ||
-        (!t.isFunctionExpression(path.node.init) &&
-          !t.isArrowFunctionExpression(path.node.init))
+        (!t.isFunctionExpression(path.node.init) && !t.isArrowFunctionExpression(path.node.init))
       ) {
         return;
       }
@@ -620,8 +536,7 @@ function collectCandidates(programPath: NodePath<t.Program>): Candidate[] {
       if (!statement) return;
       const topLevel = statement.isProgram()
         ? declaration
-        : statement.isExportNamedDeclaration() &&
-            statement.parentPath.isProgram()
+        : statement.isExportNamedDeclaration() && statement.parentPath.isProgram()
           ? statement
           : null;
       if (!topLevel) return;
@@ -650,16 +565,9 @@ export async function compileReactModule(
         const useStateNames = new Set<string>();
         const reactNames = new Set<string>();
         for (const statement of programPath.node.body) {
-          if (
-            !t.isImportDeclaration(statement) ||
-            statement.source.value !== "react"
-          )
-            continue;
+          if (!t.isImportDeclaration(statement) || statement.source.value !== "react") continue;
           for (const specifier of statement.specifiers) {
-            if (
-              t.isImportDefaultSpecifier(specifier) ||
-              t.isImportNamespaceSpecifier(specifier)
-            ) {
+            if (t.isImportDefaultSpecifier(specifier) || t.isImportNamespaceSpecifier(specifier)) {
               reactNames.add(specifier.local.name);
             } else if (
               t.isImportSpecifier(specifier) &&
@@ -680,8 +588,7 @@ export async function compileReactModule(
               : [],
           );
           const explicitlySelected =
-            moduleDirectives.has(options.directive) ||
-            functionDirectives.has(options.directive);
+            moduleDirectives.has(options.directive) || functionDirectives.has(options.directive);
           if (functionDirectives.has("use no compiler")) continue;
           if (options.mode === "annotation" && !explicitlySelected) continue;
 

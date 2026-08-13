@@ -26,9 +26,7 @@ export interface CompilerAttributeBinding<Props> {
   read(props: Props, state: readonly CompilerCell[]): unknown;
 }
 
-export type CompilerBinding<Props> =
-  | CompilerTextBinding<Props>
-  | CompilerAttributeBinding<Props>;
+export type CompilerBinding<Props> = CompilerTextBinding<Props> | CompilerAttributeBinding<Props>;
 
 export interface CompiledComponentDefinition<Props> {
   displayName: string;
@@ -39,15 +37,11 @@ export interface CompiledComponentDefinition<Props> {
 
 function renderTextValue(value: unknown): string {
   if (Array.isArray(value)) return value.map(renderTextValue).join("");
-  if (value === null || value === undefined || typeof value === "boolean")
-    return "";
+  if (value === null || value === undefined || typeof value === "boolean") return "";
   return String(value);
 }
 
-function findBindingTarget(
-  root: Element,
-  path: readonly number[],
-): Element | null {
+function findBindingTarget(root: Element, path: readonly number[]): Element | null {
   let current: Element | null = root;
   for (const index of path) {
     current = current?.children.item(index) || null;
@@ -56,8 +50,7 @@ function findBindingTarget(
 }
 
 function updateAttribute(element: Element, name: string, value: unknown): void {
-  const attributeName =
-    name === "className" ? "class" : name === "htmlFor" ? "for" : name;
+  const attributeName = name === "className" ? "class" : name === "htmlFor" ? "for" : name;
 
   if (name === "value" && element instanceof HTMLInputElement) {
     element.value = value === null || value === undefined ? "" : String(value);
@@ -145,9 +138,7 @@ export function createCompiledComponent<Props>(
         this.dirtyState.clear();
         if (dirty.size === 0) return;
         for (const binding of definition.bindings) {
-          if (
-            binding.dependencies.some((dependency) => dirty.has(dependency))
-          ) {
+          if (binding.dependencies.some((dependency) => dirty.has(dependency))) {
             this.applyBinding(binding);
           }
         }

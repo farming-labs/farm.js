@@ -6,9 +6,7 @@ import { createFarmRendererPlugin } from "../vite";
 
 describe("React renderer Vite integration", () => {
   it("does not install a transform when the compiler is disabled", () => {
-    expect(
-      createFarmRendererPlugin({ rendererOptions: react().options }),
-    ).toEqual([]);
+    expect(createFarmRendererPlugin({ rendererOptions: react().options })).toEqual([]);
   });
 
   it("installs automatic inference from compiler: true", () => {

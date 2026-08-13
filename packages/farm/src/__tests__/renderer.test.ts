@@ -103,9 +103,7 @@ describe("renderer configuration", () => {
   });
 
   it("passes renderer-owned options to its Vite plugin factory", async () => {
-    const root = await mkdtemp(
-      path.join(os.tmpdir(), "farm-renderer-options-"),
-    );
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-renderer-options-"));
     const packageRoot = path.join(root, "node_modules", "test-renderer");
     try {
       await mkdir(packageRoot, { recursive: true });

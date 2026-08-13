@@ -1,9 +1,6 @@
 import { normalizePath, type Plugin } from "vite";
 import { compileReactModule } from "./compiler";
-import {
-  normalizeReactCompilerOptions,
-  type NormalizedReactCompilerOptions,
-} from "./index";
+import { normalizeReactCompilerOptions, type NormalizedReactCompilerOptions } from "./index";
 
 interface RendererPluginOptions {
   ssr?: boolean;
@@ -33,14 +30,10 @@ function readCompilerOptions(
   ) {
     return normalized as NormalizedReactCompilerOptions;
   }
-  return normalizeReactCompilerOptions(
-    compiler as NormalizedReactCompilerOptions,
-  );
+  return normalizeReactCompilerOptions(compiler as NormalizedReactCompilerOptions);
 }
 
-export function createFarmRendererPlugin(
-  options: RendererPluginOptions = {},
-): Plugin[] {
+export function createFarmRendererPlugin(options: RendererPluginOptions = {}): Plugin[] {
   const compilerOptions = readCompilerOptions(options.rendererOptions);
   if (!compilerOptions) return [];
 
@@ -66,8 +59,7 @@ export function createFarmRendererPlugin(
         for (const diagnostic of result.diagnostics) {
           const message = `[react-compiler] ${diagnostic.component}: ${diagnostic.reason}; using React.`;
           if (compilerOptions.onUnsupported === "error") this.error(message);
-          if (compilerOptions.onUnsupported === "warn" || diagnostic.selected)
-            this.warn(message);
+          if (compilerOptions.onUnsupported === "warn" || diagnostic.selected) this.warn(message);
         }
         if (result.compiled.length === 0) return null;
         return { code: result.code, map: result.map as any };

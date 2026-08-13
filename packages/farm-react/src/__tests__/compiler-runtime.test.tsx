@@ -49,8 +49,7 @@ function createCompiledCounter(onRender: () => void) {
         path: [],
         dependencies: [0],
         name: "className",
-        read: (_props, state) =>
-          Number(state[0].get()) > 0 ? "active" : "idle",
+        read: (_props, state) => (Number(state[0].get()) > 0 ? "active" : "idle"),
       },
     ],
   });
@@ -115,9 +114,7 @@ describe("compiled React runtime", () => {
   it("preserves the host markup across SSR and hydration", async () => {
     const Counter = createCompiledCounter(() => {});
     const html = renderToString(<Counter />);
-    expect(html.replace("<!-- -->", "")).toContain(
-      '<button class="idle">Count: 0</button>',
-    );
+    expect(html.replace("<!-- -->", "")).toContain('<button class="idle">Count: 0</button>');
     expect(html).not.toContain("farm");
 
     const container = document.createElement("div");

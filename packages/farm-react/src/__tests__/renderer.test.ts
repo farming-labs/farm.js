@@ -1,11 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import {
-  DEFAULT_COMPILER_DIRECTIVE,
-  normalizeReactCompilerOptions,
-  react,
-} from "../index";
+import { DEFAULT_COMPILER_DIRECTIVE, normalizeReactCompilerOptions, react } from "../index";
 
 describe("React renderer compiler options", () => {
   it("keeps the compiler disabled unless the experimental option is enabled", () => {

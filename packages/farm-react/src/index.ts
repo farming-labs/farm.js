@@ -38,17 +38,13 @@ export function normalizeReactCompilerOptions(
   }
 
   if (options.directive !== undefined && mode !== "annotation") {
-    throw new TypeError(
-      "The React compiler directive can only be configured in annotation mode.",
-    );
+    throw new TypeError("The React compiler directive can only be configured in annotation mode.");
   }
 
   const directive = options.directive?.trim() || DEFAULT_COMPILER_DIRECTIVE;
   const onUnsupported = options.onUnsupported || "fallback";
   if (!(["fallback", "warn", "error"] as const).includes(onUnsupported)) {
-    throw new TypeError(
-      `Unknown unsupported-component behavior: ${String(onUnsupported)}`,
-    );
+    throw new TypeError(`Unknown unsupported-component behavior: ${String(onUnsupported)}`);
   }
 
   return { mode, directive, onUnsupported };
@@ -77,9 +73,7 @@ const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({
 /** Select React and optionally enable Farm's experimental AOT compiler. */
 export function react(options: ReactRendererOptions = {}): FarmRenderer {
   const compiler = options.experimental?.compiler;
-  const normalizedCompiler = compiler
-    ? normalizeReactCompilerOptions(compiler)
-    : false;
+  const normalizedCompiler = compiler ? normalizeReactCompilerOptions(compiler) : false;
 
   return {
     ...REACT_RENDERER,

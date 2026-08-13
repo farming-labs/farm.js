@@ -11,12 +11,8 @@
     "baseUrl": ".",
     "paths": {
       "@farm.js/core/renderer": ["../farm/src/renderer.ts"],
-      "@farm.js/core/renderer/react/client": [
-        "../farm/src/renderer/react/client.ts"
-      ],
-      "@farm.js/core/renderer/react/server": [
-        "../farm/src/renderer/react/server.ts"
-      ]
+      "@farm.js/core/renderer/react/client": ["../farm/src/renderer/react/client.ts"],
+      "@farm.js/core/renderer/react/server": ["../farm/src/renderer/react/server.ts"]
     }
   },
   "include": ["src/**/*"],
