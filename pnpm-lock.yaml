@@ -1830,6 +1830,46 @@ importers:
         specifier: ^1.1.0
         version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
 
+  packages/farm-react:
+    dependencies:
+      '@babel/core':
+        specifier: 7.28.4
+        version: 7.28.4(supports-color@10.2.2)
+    devDependencies:
+      '@farm.js/core':
+        specifier: workspace:*
+        version: link:../farm
+      '@types/babel__core':
+        specifier: ^7.20.5
+        version: 7.20.5
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.2.13
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.2.3(@types/react@19.2.13)
+      jsdom:
+        specifier: ^25.0.0
+        version: 25.0.1(supports-color@10.2.2)
+      react:
+        specifier: ^19.0.0
+        version: 19.2.8
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.2.8(react@19.2.8)
+      tsup:
+        specifier: ^8.3.5
+        version: 8.5.1(supports-color@10.2.2)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.0.10
+        version: 5.4.20(@types/node@20.19.21)
+      vitest:
+        specifier: ^1.1.0
+        version: 1.6.1(@types/node@20.19.21)(jsdom@25.0.1)(supports-color@10.2.2)
+
   packages/farm-preview-gateway:
     devDependencies:
       '@types/node':

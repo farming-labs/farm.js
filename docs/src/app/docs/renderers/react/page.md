@@ -60,6 +60,54 @@ export function Counter() {
 }
 ```
 
+## Experimental AOT compiler
+
+Install `@farm.js/react` to keep React as the renderer while opting into Farm's experimental
+ahead-of-time state compiler:
+
+```bash
+pnpm add @farm.js/react
+```
+
+```ts
+import { defineConfig } from "@farm.js/core";
+import { react } from "@farm.js/react";
+
+export default defineConfig({
+  renderer: react({
+    experimental: {
+      compiler: true,
+    },
+  }),
+});
+```
+
+`compiler: true` automatically considers application TSX and JSX. Eligible components keep React
+for placement, props, events, server rendering, and hydration, but local `useState` updates patch
+precomputed text and attribute bindings without rerunning the component or reconciling its tree.
+Unsupported components safely remain ordinary React components.
+
+Use annotation mode for selective adoption:
+
+```ts
+renderer: react({
+  experimental: {
+    compiler: {
+      mode: "annotation",
+      directive: "use compiler",
+      onUnsupported: "warn",
+    },
+  },
+}),
+```
+
+Place the directive inside a component or at the top of its module. The directive can be renamed in
+configuration and only applies in annotation mode.
+
+The initial compiler group supports a single static host-element tree, top-level `useState`, basic
+events, and state-driven text or attributes. Keyed lists, conditional child structure, effects,
+refs, and custom child components fall back to React and are planned as later compiler groups.
+
 ## React-specific FARMJS APIs
 
 Choose React when the application needs the complete built-in client layer:
