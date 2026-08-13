@@ -6760,7 +6760,9 @@ async function buildNitroUniversal(
   const clientCssHref = await resolveHashedClientCssHref(clientOutputDir);
   for (const output of Object.values(ssrBundle)) {
     if (output.type === "chunk" && output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
-      output.code = output.code.replaceAll(FARM_CLIENT_CSS_HREF_PLACEHOLDER, clientCssHref);
+      // split/join rather than replaceAll: the package's lib target predates
+      // ES2021, and a fixed token needs no regex escaping either way.
+      output.code = output.code.split(FARM_CLIENT_CSS_HREF_PLACEHOLDER).join(clientCssHref);
     }
   }
 
