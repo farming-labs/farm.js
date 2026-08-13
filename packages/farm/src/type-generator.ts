@@ -84,7 +84,7 @@ export class APITypeGenerator {
 
   private extractExportedMethods(content: string): string[] {
     const methods: string[] = [];
-    const httpMethods = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"];
+    const httpMethods = ["GET", "HEAD", "QUERY", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"];
 
     for (const method of httpMethods) {
       // Look for export const METHOD = or export { METHOD }

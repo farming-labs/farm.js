@@ -29,6 +29,7 @@ export interface APIRouteManagerOptions {
 export const API_ROUTE_METHODS = [
   "GET",
   "HEAD",
+  "QUERY",
   "POST",
   "PUT",
   "DELETE",
@@ -311,7 +312,10 @@ export class APIRouteManager {
       if (!endpoint) {
         return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
           status: 405,
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            Allow: route.methods.join(", "),
+            "Content-Type": "application/json",
+          },
         });
       }
 

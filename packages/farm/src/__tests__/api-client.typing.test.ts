@@ -28,6 +28,13 @@ type APIRouter = {
         response: { results: string[] };
       };
     };
+    query: {
+      __types: {
+        body: { filters: Array<{ field: string; value: string }>; limit?: number };
+        query: never;
+        response: { results: Array<{ id: string; title: string }>; total: number };
+      };
+    };
   };
   users: {
     get: {
@@ -82,6 +89,12 @@ describe("createAPIClient typing", () => {
     const helloWithQuery = await api.hello.get({ query: { name: "Farm" } });
     const helloPost = await api.hello.post({ body: { name: "Farm" } });
     const search = await api.search.get({ query: { term: "routes" } });
+    const structuredSearch = await api.search.query({
+      body: {
+        filters: [{ field: "category", value: "tools" }],
+        limit: 20,
+      },
+    });
 
     expectTypeOf<IsAny<typeof helloWithoutQuery.data>>().toEqualTypeOf<false>();
     expectTypeOf(helloWithoutQuery.data).toEqualTypeOf<
@@ -90,6 +103,9 @@ describe("createAPIClient typing", () => {
     expectTypeOf(helloWithQuery.data?.message).toEqualTypeOf<string | undefined>();
     expectTypeOf(helloPost.data?.timestamp).toEqualTypeOf<string | undefined>();
     expectTypeOf(search.data?.results).toEqualTypeOf<string[] | undefined>();
+    expectTypeOf(structuredSearch.data?.results).toEqualTypeOf<
+      Array<{ id: string; title: string }> | undefined
+    >();
 
     // @ts-expect-error body schemas require the body wrapper.
     await api.hello.post();
@@ -99,6 +115,10 @@ describe("createAPIClient typing", () => {
     await api.search.get();
     // @ts-expect-error required body fields stay required.
     await api.users.post({ body: { name: "Ada" } });
+    // @ts-expect-error QUERY preserves its required request body.
+    await api.search.query();
+    // @ts-expect-error QUERY body fields retain their generated types.
+    await api.search.query({ body: { filters: [{ field: "category", value: 1 }] } });
   });
 
   it("infers optimistic updater types from route refs and typed cache keys", async () => {

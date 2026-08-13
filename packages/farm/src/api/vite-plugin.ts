@@ -134,7 +134,10 @@ export function farmApiPlugin(options: FarmApiPluginOptions = {}): Plugin {
         if (!endpoint) {
           return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
             status: 405,
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              Allow: route.methods.join(", "),
+              "Content-Type": "application/json",
+            },
           });
         }
 

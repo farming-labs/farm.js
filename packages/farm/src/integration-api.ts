@@ -1,5 +1,6 @@
 export type FarmIntegrationAPIMethod =
   | "GET"
+  | "QUERY"
   | "POST"
   | "PUT"
   | "PATCH"
@@ -348,6 +349,15 @@ export const api = {
   get,
   route,
   fromRoutes,
+  query<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+    pathOrOptions?: string | IntegrationAPIBuilderOptions<TServer>,
+    maybeOptions: IntegrationAPIBuilderOptions<TServer> = {} as IntegrationAPIBuilderOptions<TServer>,
+  ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, "QUERY"> {
+    return operation<TBody, TQuery, TResponse, TServer, "QUERY">("QUERY", pathOrOptions, {
+      bodyFormat: "json",
+      ...(typeof pathOrOptions === "string" ? maybeOptions : pathOrOptions),
+    });
+  },
   post<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
     pathOrOptions?: string | IntegrationAPIBuilderOptions<TServer>,
     maybeOptions: IntegrationAPIBuilderOptions<TServer> = {} as IntegrationAPIBuilderOptions<TServer>,
@@ -405,6 +415,15 @@ export const api = {
     );
   },
   form: {
+    query<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      pathOrOptions?: string | IntegrationAPIBuilderOptions<TServer>,
+      maybeOptions: IntegrationAPIBuilderOptions<TServer> = {} as IntegrationAPIBuilderOptions<TServer>,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, "QUERY"> {
+      return operation<TBody, TQuery, TResponse, TServer, "QUERY">("QUERY", pathOrOptions, {
+        bodyFormat: "form",
+        ...(typeof pathOrOptions === "string" ? maybeOptions : pathOrOptions),
+      });
+    },
     post<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
       pathOrOptions?: string | IntegrationAPIBuilderOptions<TServer>,
       maybeOptions: IntegrationAPIBuilderOptions<TServer> = {} as IntegrationAPIBuilderOptions<TServer>,

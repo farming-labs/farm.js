@@ -12,6 +12,15 @@ import { PluginManager } from "../plugin";
 import { _runWithCurrentRequest } from "../server/request";
 
 type APIRouter = {
+  search: {
+    query: {
+      __types: {
+        body: { filters: string[] };
+        query: never;
+        response: { results: string[] };
+      };
+    };
+  };
   users: {
     get: {
       __types: {
@@ -60,6 +69,38 @@ beforeEach(() => {
 });
 
 describe("createAPIClient", () => {
+  it("sends typed QUERY bodies and caches each representation separately", async () => {
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      return buildResponse({ results: body.filters });
+    });
+    globalThis.fetch = fetchMock as any;
+    const api = createAPIClient<APIRouter>({ baseURL: "http://example.com" });
+    const cache = { policy: "cache-first" as const, staleTime: 10_000 };
+
+    const first = await api.search.query({ body: { filters: ["tools"] } }, { cache });
+    const cached = await api.search.query({ body: { filters: ["tools"] } }, { cache });
+    const differentBody = await api.search.query({ body: { filters: ["seeds"] } }, { cache });
+    const alternateRepresentation = createAPIClient<APIRouter>({
+      baseURL: "http://example.com",
+      headers: { "Content-Type": "application/vnd.farm.search+json" },
+    });
+    await alternateRepresentation.search.query({ body: { filters: ["tools"] } }, { cache });
+
+    expect(first.data).toEqual({ results: ["tools"] });
+    expect(cached.data).toEqual({ results: ["tools"] });
+    expect(differentBody.data).toEqual({ results: ["seeds"] });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "http://example.com/api/search",
+      expect.objectContaining({
+        method: "QUERY",
+        body: JSON.stringify({ filters: ["tools"] }),
+      }),
+    );
+  });
+
   it("uses a baseURL path as the API root", async () => {
     const fetchMock = vi.fn(async () => buildResponse({ users: [], total: 0 }));
     globalThis.fetch = fetchMock as any;

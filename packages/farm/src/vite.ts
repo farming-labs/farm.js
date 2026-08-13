@@ -3182,6 +3182,7 @@ if (!__farmRoute) {
 
 export const GET = __farmRoute.methods.GET;
 export const HEAD = __farmRoute.methods.HEAD;
+export const QUERY = __farmRoute.methods.QUERY;
 export const POST = __farmRoute.methods.POST;
 export const PUT = __farmRoute.methods.PUT;
 export const DELETE = __farmRoute.methods.DELETE;

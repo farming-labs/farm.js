@@ -421,6 +421,14 @@ describe("integration client", () => {
             "content-type": "application/json",
           },
         }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: true, mode: "query" }), {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+          },
+        }),
       );
 
     const api = createIntegrationClient({
@@ -434,6 +442,9 @@ describe("integration client", () => {
             endpoint.post<{ message: string }, { ok: boolean; mode: string }>({
               responseFormat: "json",
             }),
+            endpoint.query<{ filters: string[] }, { ok: boolean; mode: string }>({
+              responseFormat: "json",
+            }),
           ),
         },
       },
@@ -445,11 +456,18 @@ describe("integration client", () => {
         message: "hello",
       },
     });
+    const queryResult = await api.localDemo.message.query({
+      body: {
+        filters: ["tools"],
+      },
+    });
 
     expect(getResult.error).toBeNull();
     expect(postResult.error).toBeNull();
     expect(getResult.data?.mode).toBe("get");
     expect(postResult.data?.mode).toBe("post");
+    expect(queryResult.error).toBeNull();
+    expect(queryResult.data?.mode).toBe("query");
     expect(fetchSpy).toHaveBeenNthCalledWith(
       1,
       "http://localhost:3000/api/local-demo/message",
@@ -467,6 +485,18 @@ describe("integration client", () => {
         }),
       }),
     );
+    expect(fetchSpy).toHaveBeenNthCalledWith(
+      3,
+      "http://localhost:3000/api/local-demo/message",
+      expect.objectContaining({
+        method: "QUERY",
+        body: JSON.stringify({
+          filters: ["tools"],
+        }),
+      }),
+    );
+    const queryHeaders = new Headers(fetchSpy.mock.calls[2]?.[1]?.headers as HeadersInit);
+    expect(queryHeaders.get("content-type")).toBe("application/json");
   });
 
   it("allows calling single-method namespaces directly while preserving the method accessor", async () => {

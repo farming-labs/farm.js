@@ -819,9 +819,11 @@ export default defineConfig({
     try {
       const failureApiDir = path.join(root, "src", "app", "api", "failure");
       const afterApiDir = path.join(root, "src", "app", "api", "after-response");
+      const queryApiDir = path.join(root, "src", "app", "api", "structured-search");
       const afterMarkerPath = path.join(root, "after-response.txt");
       await fs.mkdir(failureApiDir, { recursive: true });
       await fs.mkdir(afterApiDir, { recursive: true });
+      await fs.mkdir(queryApiDir, { recursive: true });
       await fs.writeFile(
         path.join(failureApiDir, "route.ts"),
         `
@@ -839,6 +841,17 @@ import { after } from "@farm.js/core";
 export async function GET() {
   after(() => writeFile(${JSON.stringify(afterMarkerPath)}, "finished"));
   return Response.json({ accepted: true }, { status: 202 });
+}
+`.trim(),
+      );
+      await fs.writeFile(
+        path.join(queryApiDir, "route.ts"),
+        `
+export async function QUERY(request: Request) {
+  return Response.json({
+    method: request.method,
+    body: await request.json(),
+  });
 }
 `.trim(),
       );
@@ -880,6 +893,22 @@ export async function GET() {
           expect(marker).toBe("finished");
         },
         "/api/after-response",
+      );
+      await runProductionRequest(
+        path.join(root, ".farm", ".output", "server"),
+        async (response) => {
+          expect(response.status).toBe(200);
+          await expect(response.json()).resolves.toEqual({
+            method: "QUERY",
+            body: { filters: ["tools", "seeds"] },
+          });
+        },
+        "/api/structured-search",
+        {
+          method: "QUERY",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ filters: ["tools", "seeds"] }),
+        },
       );
     } finally {
       await fs.rm(root, { recursive: true, force: true });

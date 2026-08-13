@@ -475,7 +475,7 @@ declare module "@farm.js/core/client" {
   export type StatusEvent<TData = unknown, TError = unknown> = {
     phase: StatusPhase;
     requestId: string;
-    method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+    method: "GET" | "HEAD" | "QUERY" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
     key: string;
     input?: unknown;
     data?: TData;
@@ -571,7 +571,7 @@ declare module "@farm.js/core/client" {
       }
     | {
         path: string;
-        method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+        method?: "GET" | "HEAD" | "QUERY" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
         input?: unknown;
       }
     | [CallableRouteRef, unknown?];
@@ -975,6 +975,7 @@ declare module "@farm.js/core/client" {
 
   export type FarmIntegrationAPIMethod =
     | "GET"
+    | "QUERY"
     | "POST"
     | "PUT"
     | "PATCH"
@@ -1123,6 +1124,13 @@ declare module "@farm.js/core/client" {
     fromRoutes<TRoutes extends readonly FarmIntegrationRouteOperationCarrier<string, any>[]>(
       routes: TRoutes,
     ): RoutesToAPI<TRoutes>;
+    query<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      path: string,
+      options?: IntegrationAPIBuilderOptions<TServer>,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, "QUERY">;
+    query<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+      options?: IntegrationAPIBuilderOptions<TServer>,
+    ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, "QUERY">;
     post<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
       path: string,
       options?: IntegrationAPIBuilderOptions<TServer>,
@@ -1166,6 +1174,13 @@ declare module "@farm.js/core/client" {
       options?: IntegrationAPIBuilderOptions<TServer>,
     ): FarmIntegrationAPIOperation<never, TQuery, TResponse, TServer, "HEAD">;
     form: {
+      query<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+        path: string,
+        options?: IntegrationAPIBuilderOptions<TServer>,
+      ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, "QUERY">;
+      query<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
+        options?: IntegrationAPIBuilderOptions<TServer>,
+      ): FarmIntegrationAPIOperation<TBody, TQuery, TResponse, TServer, "QUERY">;
       post<TBody = never, TResponse = unknown, TQuery = never, TServer extends boolean = false>(
         path: string,
         options?: IntegrationAPIBuilderOptions<TServer>,

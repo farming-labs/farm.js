@@ -605,6 +605,25 @@ function createBody(
   return JSON.stringify(body);
 }
 
+function createOperationBody(
+  operation: Pick<FarmIntegrationAPIOperation<any, any, any>, "bodyFormat" | "method">,
+  body: unknown,
+  headers: Headers,
+): BodyInit | undefined {
+  const requestBody = createBody(operation.bodyFormat, body, headers);
+
+  if (operation.method === "QUERY" && requestBody === undefined && !headers.has("content-type")) {
+    headers.set(
+      "content-type",
+      operation.bodyFormat === "form"
+        ? "application/x-www-form-urlencoded;charset=UTF-8"
+        : "application/json",
+    );
+  }
+
+  return requestBody;
+}
+
 async function parseResponseData(response: Response): Promise<unknown> {
   if (response.status === 204 || response.status === 205) {
     return undefined;
@@ -717,10 +736,11 @@ async function executeClientOperation(
       mergeIntegrationClientData(options.data, requestOptions?.data),
     );
 
+    const body = createOperationBody(operation, input.body, headers);
     const response = await fetch(url.toString(), {
       method: operation.method,
       headers,
-      body: createBody(operation.bodyFormat, input.body, headers),
+      body,
       credentials:
         requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
       signal: requestOptions?.signal,
@@ -827,13 +847,14 @@ async function executeServerOperation(
 
       if (runtime) {
         const dispatchIntegrationRequest = resolveIntegrationRequestDispatcherLocal();
+        const body = createOperationBody(operation, input.body, headers);
         const directResponse = dispatchIntegrationRequest
           ? await dispatchIntegrationRequest(
               runtime,
               new Request(url.toString(), {
                 method: operation.method,
                 headers,
-                body: createBody(operation.bodyFormat, input.body, headers),
+                body,
               }),
               {
                 currentRequest,
@@ -851,10 +872,11 @@ async function executeServerOperation(
 
     appendIntegrationClientDataHeader(headers, data);
 
+    const body = createOperationBody(operation, input.body, headers);
     const response = await fetch(url.toString(), {
       method: operation.method,
       headers,
-      body: createBody(operation.bodyFormat, input.body, headers),
+      body,
       credentials:
         requestOptions?.credentials ?? operation.credentials ?? options.credentials ?? "include",
       signal: requestOptions?.signal,

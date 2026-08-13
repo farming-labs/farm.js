@@ -882,6 +882,41 @@ describe("integrations runtime", () => {
     });
   });
 
+  it("requires Content-Type for QUERY integration routes", async () => {
+    const handler = vi.fn(() => Response.json({ ok: true }));
+    const manager = createManager();
+    manager.addPlugins(
+      resolveIntegrationPlugins({
+        structuredSearch: defineIntegration({
+          category: "custom",
+          type: "structured-search",
+          instance: {},
+          routes: [
+            integrationRoute.query("/api/structured-search", {
+              handler,
+            }),
+          ],
+        }),
+      }),
+    );
+
+    await manager.runHookParallel("init");
+    const runtime = getRegisteredIntegrationRuntime("structuredSearch");
+    const response = await dispatchIntegrationRequest(
+      runtime!,
+      new Request("http://localhost/api/structured-search", {
+        method: "QUERY",
+      }),
+    );
+
+    expect(response?.status).toBe(400);
+    expect(await response?.json()).toEqual({
+      error: "Invalid QUERY request",
+      message: "QUERY requests must include a Content-Type header.",
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it("rejects integration request bodies above the server limit", async () => {
     const handler = vi.fn(() => Response.json({ ok: true }));
     const manager = new PluginManager({
