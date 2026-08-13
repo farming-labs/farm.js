@@ -10,6 +10,8 @@ import {
   Braces,
   Check,
   CloudCog,
+  Code2,
+  Copy,
   Cpu,
   Database,
   ExternalLink,
@@ -22,9 +24,11 @@ import {
   Menu,
   Network,
   Plug,
+  RefreshCw,
   Rocket,
   Route,
   Terminal,
+  TriangleAlert,
   Workflow,
   X,
 } from "lucide-react";
@@ -393,6 +397,7 @@ export default defineConfig({
 
 const typedApiHighlightLines = [1, 7, 8] as const;
 const docsHighlightLines = [3, 4] as const;
+const rendererOptions = ["preact()", "solid()", "vue()", "svelte()"] as const;
 
 const layersConfigTabs = [
   {
@@ -1065,6 +1070,154 @@ function BuildVisual() {
   );
 }
 
+function RendererVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <figure className="farm-renderer-code-card relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]">
+        <figcaption className="flex h-10 min-w-0 shrink-0 items-center justify-between gap-4 border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/38">
+          <span className="flex min-w-0 items-center gap-2">
+            <Code2 aria-hidden className="size-3 shrink-0" strokeWidth={1.5} />
+            <span className="truncate">farm.config.ts</span>
+          </span>
+          <span className="shrink-0 uppercase text-white/24">ts</span>
+        </figcaption>
+
+        <pre
+          aria-label="farm.config.ts with the renderer set to Preact, Solid, Vue, or Svelte. React remains the default."
+          className="min-h-0 max-w-full flex-1 overflow-x-auto py-5 font-mono text-[10.5px] leading-6 tracking-normal sm:text-[11px]"
+          tabIndex={0}
+        >
+          <code aria-hidden className="farm-highlighted-code block min-w-full">
+            <span className="sh__line">
+              <span className="text-white">import</span>
+              <span className="text-white/64"> {`{ defineConfig }`} </span>
+              <span className="text-white">from</span>
+              <span className="text-white/94"> &quot;@farm.js/core&quot;</span>
+              <span className="text-white/42">;</span>
+            </span>
+            <span className="sh__line">&nbsp;</span>
+            <span className="sh__line">
+              <span className="text-white">export default</span>
+              <span className="text-white/64"> defineConfig</span>
+              <span className="text-white/42">({`{`}</span>
+            </span>
+            <span className="sh__line sh__line--highlighted">
+              {"  "}
+              <span className="text-white/78">renderer</span>
+              <span className="text-white/42">: </span>
+              <span className="farm-renderer-value" data-renderer-count={rendererOptions.length}>
+                <span className="farm-renderer-value-track">
+                  {[...rendererOptions, rendererOptions[0]].map((renderer, index) => (
+                    <span
+                      key={`${renderer}-${index}`}
+                      className="farm-renderer-value-item text-white/94"
+                    >
+                      {renderer}
+                      <span className="text-white/42">,</span>
+                    </span>
+                  ))}
+                </span>
+              </span>
+            </span>
+            <span className="sh__line">
+              {"  "}
+              <span className="text-white/78">server</span>
+              <span className="text-white/42">: {`{`}</span>
+            </span>
+            <span className="sh__line">
+              {"    "}
+              <span className="text-white/78">runtime</span>
+              <span className="text-white/42">: </span>
+              <span className="text-white/94">&quot;node&quot;</span>
+              <span className="text-white/42">,</span>
+            </span>
+            <span className="sh__line">
+              <span className="text-white/42">{`  },`}</span>
+            </span>
+            <span className="sh__line">
+              <span className="text-white/42">{`});`}</span>
+            </span>
+          </code>
+        </pre>
+
+        <div className="flex h-10 shrink-0 items-center justify-between border-t border-white/8 px-4 font-mono text-[8px] uppercase tracking-normal sm:text-[9px]">
+          <span className="text-white/30">React by default</span>
+          <span className="flex items-center gap-1.5 text-white/68">
+            <Check aria-hidden className="size-3" strokeWidth={1.8} /> SSR + hydration
+          </span>
+        </div>
+      </figure>
+    </div>
+  );
+}
+
+function RuntimeErrorVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
+      <figure
+        aria-label="FARMJS development runtime error overlay mapped to application source"
+        className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]"
+      >
+        <figcaption className="flex h-10 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] uppercase tracking-normal">
+          <span className="flex items-center gap-2 text-white/56">
+            <TriangleAlert aria-hidden className="size-3 text-red-300/80" strokeWidth={1.5} />
+            Runtime error
+          </span>
+          <span className="border border-red-300/20 bg-red-300/[0.055] px-2 py-1 text-[8px] text-red-200/70">
+            Development
+          </span>
+        </figcaption>
+
+        <div className="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-5">
+          <div className="flex min-w-0 items-start justify-between gap-4">
+            <div className="min-w-0">
+              <span className="font-mono text-[8px] uppercase tracking-normal text-red-200/62">
+                Runtime TypeError
+              </span>
+              <h4 className="mt-1 truncate text-[13px] font-medium tracking-normal text-white/90 sm:text-sm">
+                Application failed in the browser
+              </h4>
+            </div>
+            <span className="mt-0.5 shrink-0 border border-white/10 bg-white/[0.025] px-2 py-1 font-mono text-[8px] text-white/42">
+              1 occurrence
+            </span>
+          </div>
+
+          <div className="mt-3 min-h-0 overflow-hidden border border-white/10 bg-white/[0.018] font-mono text-[8px] tracking-normal sm:text-[9px]">
+            <div className="flex h-8 min-w-0 items-center justify-between gap-3 border-b border-white/8 px-3">
+              <span className="truncate text-white/54">src/app/dashboard/page.tsx:24:38</span>
+              <span className="shrink-0 text-white/24">source mapped</span>
+            </div>
+            <div className="py-1.5">
+              <div className="grid grid-cols-[2rem_minmax(0,1fr)] px-2 leading-5 text-white/34">
+                <span className="text-right text-white/18">23</span>
+                <code className="truncate pl-3">const profile = response.user.profile;</code>
+              </div>
+              <div className="grid grid-cols-[2rem_minmax(0,1fr)] border-l-2 border-red-300/70 bg-red-300/[0.06] px-2 leading-5 text-white/86">
+                <span className="text-right text-red-200/56">24</span>
+                <code className="truncate pl-3">profile.formatDisplayName();</code>
+              </div>
+              <div className="grid grid-cols-[2rem_minmax(0,1fr)] px-2 leading-5 text-white/34">
+                <span className="text-right text-white/18">25</span>
+                <code className="truncate pl-3">setDisplayName(name);</code>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-auto flex items-center gap-2 pt-3 font-mono text-[8px] uppercase tracking-normal sm:text-[9px]">
+            <span className="inline-flex h-8 items-center gap-1.5 border border-white/18 bg-white px-3 text-black">
+              <Copy aria-hidden className="size-3" strokeWidth={1.6} /> Copy report
+            </span>
+            <span className="inline-flex h-8 items-center gap-1.5 border border-white/12 bg-white/[0.025] px-3 text-white/58">
+              <RefreshCw aria-hidden className="size-3" strokeWidth={1.6} /> Reload
+            </span>
+          </div>
+        </div>
+      </figure>
+    </div>
+  );
+}
+
 function FeatureCell({
   index,
   icon: Icon,
@@ -1141,6 +1294,26 @@ function DeveloperExperienceGrid() {
         title="Build once. Deploy together."
       >
         <BuildVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Keep React with zero config, or choose Preact, Solid, Vue, or Svelte. Routing, server features, SSR, and hydration stay on one contract."
+        className="border-t border-white/12"
+        icon={Code2}
+        index="01.5"
+        label="Renderers"
+        title="Your UI runtime, your choice"
+      >
+        <RendererVisual />
+      </FeatureCell>
+      <FeatureCell
+        body="Unhandled browser errors map to application source, group repeated failures, and offer copy and reload actions during development."
+        className="border-t border-white/12 lg:border-l"
+        icon={TriangleAlert}
+        index="01.6"
+        label="Diagnostics"
+        title="Errors that point to the source"
+      >
+        <RuntimeErrorVisual />
       </FeatureCell>
     </section>
   );
