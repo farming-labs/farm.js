@@ -1,0 +1,370 @@
+@import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/geist-mono/wght.css";
+
+:root {
+  color-scheme: dark;
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  color: #f5f5f0;
+  background: #0a0a09;
+  font-synthesis: none;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-width: 320px;
+  min-height: 100%;
+  margin: 0;
+  background:
+    radial-gradient(
+      circle at 78% 8%,
+      rgb(184 255 91 / 0.09),
+      transparent 31rem
+    ),
+    #0a0a09;
+}
+
+body::before {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+  background-size: 48px 48px;
+  content: "";
+  mask-image: linear-gradient(to bottom, black, transparent 75%);
+}
+
+button,
+.eyebrow,
+.path-badge,
+.metric span,
+.update-status,
+.flow-number,
+.footnote span {
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+}
+
+button {
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid #b8ff5b;
+  outline-offset: 4px;
+}
+
+.page-shell {
+  width: min(100%, 1180px);
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: clamp(2rem, 6vw, 5.5rem) clamp(1.25rem, 4vw, 3rem) 3rem;
+}
+
+.hero {
+  max-width: 880px;
+  margin-bottom: clamp(3rem, 7vw, 6rem);
+}
+
+.eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem 1.2rem;
+  color: #777771;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+
+.eyebrow span:first-child {
+  color: #b8ff5b;
+}
+
+h1 {
+  max-width: 780px;
+  margin: 1.5rem 0;
+  font-size: clamp(3.1rem, 9vw, 7.8rem);
+  font-weight: 520;
+  letter-spacing: -0.072em;
+  line-height: 0.84;
+}
+
+h1 span {
+  color: #676762;
+}
+
+.hero-copy {
+  max-width: 610px;
+  margin: 0;
+  color: #a4a49d;
+  font-size: clamp(1rem, 1.8vw, 1.18rem);
+  line-height: 1.55;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid #33332f;
+}
+
+.counter-card {
+  min-width: 0;
+  padding: clamp(1.25rem, 3.5vw, 2.5rem);
+  background: rgb(16 16 15 / 0.8);
+}
+
+.counter-card + .counter-card {
+  border-left: 1px solid #33332f;
+}
+
+.counter-card--compiled {
+  background:
+    linear-gradient(145deg, rgb(184 255 91 / 0.085), transparent 55%),
+    rgb(16 16 15 / 0.8);
+}
+
+.card-heading,
+.card-heading > div {
+  display: flex;
+  align-items: center;
+}
+
+.card-heading {
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.card-heading > div {
+  min-width: 0;
+  gap: 0.8rem;
+}
+
+.card-index {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid #44443f;
+  border-radius: 50%;
+  color: #b8ff5b;
+  font-family: "Geist Mono Variable", ui-monospace, monospace;
+  font-size: 0.68rem;
+}
+
+.card-heading h2 {
+  overflow: hidden;
+  margin: 0;
+  font-size: clamp(1.1rem, 2vw, 1.4rem);
+  font-weight: 540;
+  letter-spacing: -0.035em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.path-badge {
+  flex: 0 0 auto;
+  color: #777771;
+  font-size: 0.57rem;
+  letter-spacing: 0.07em;
+}
+
+.counter-card--compiled .path-badge {
+  color: #b8ff5b;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 2.5rem 0 1.15rem;
+  border-block: 1px solid #33332f;
+}
+
+.metric {
+  min-width: 0;
+  padding: 1.25rem 0;
+}
+
+.metric + .metric {
+  padding-left: clamp(1rem, 3vw, 2rem);
+  border-left: 1px solid #33332f;
+}
+
+.metric span,
+.metric strong {
+  display: block;
+}
+
+.metric span {
+  overflow: hidden;
+  margin-bottom: 0.6rem;
+  color: #777771;
+  font-size: 0.63rem;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.metric strong {
+  font-size: clamp(2.2rem, 6vw, 4rem);
+  font-weight: 480;
+  letter-spacing: -0.07em;
+  line-height: 0.9;
+}
+
+.update-status {
+  min-height: 1rem;
+  margin: 0 0 1.5rem;
+  color: #777771;
+  font-size: 0.68rem;
+}
+
+.update-status::before {
+  display: inline-block;
+  width: 0.4rem;
+  height: 0.4rem;
+  margin-right: 0.55rem;
+  border-radius: 50%;
+  background: #555550;
+  content: "";
+}
+
+.update-status--active {
+  color: #b8ff5b;
+}
+
+.update-status--active::before {
+  background: currentcolor;
+  box-shadow: 0 0 0 0.25rem rgb(184 255 91 / 0.1);
+}
+
+.counter-card button {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: 1px solid #44443f;
+  padding: 0.9rem 1rem;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.72rem;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.counter-card button:hover {
+  border-color: #8b8b82;
+  background: rgb(255 255 255 / 0.035);
+}
+
+.counter-card--compiled button {
+  border-color: #8abf46;
+}
+
+.counter-card--compiled button:hover {
+  background: #b8ff5b;
+  color: #0a0a09;
+}
+
+.flow-note {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(1.25rem, 4vw, 3rem);
+  padding: 2rem 0;
+  border-bottom: 1px solid #33332f;
+}
+
+.flow-note > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.8rem;
+}
+
+.flow-number {
+  color: #b8ff5b;
+  font-size: 0.62rem;
+}
+
+.flow-note p {
+  margin: 0;
+  color: #8d8d86;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.footnote {
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.4fr) minmax(0, 1fr);
+  gap: 2rem;
+  padding: 2rem 0 0;
+}
+
+.footnote span {
+  color: #777771;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+}
+
+.footnote p {
+  max-width: 650px;
+  margin: 0;
+  color: #b7b7b0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .comparison-grid,
+  .flow-note,
+  .footnote {
+    grid-template-columns: 1fr;
+  }
+
+  .counter-card + .counter-card {
+    border-top: 1px solid #33332f;
+    border-left: 0;
+  }
+
+  .flow-note,
+  .footnote {
+    gap: 1.25rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .card-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .metric span {
+    font-size: 0.56rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

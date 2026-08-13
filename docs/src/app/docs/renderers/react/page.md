@@ -108,6 +108,11 @@ The initial compiler group supports a single static host-element tree, top-level
 events, and state-driven text or attributes. Keyed lists, conditional child structure, effects,
 refs, and custom child components fall back to React and are planned as later compiler groups.
 
+The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
+app runs an eligible compiled counter beside an equivalent component marked `"use no compiler"`.
+Both update the same text and class bindings, while the live component-execution values expose the
+render work skipped by the compiled path.
+
 ## React-specific FARMJS APIs
 
 Choose React when the application needs the complete built-in client layer:
