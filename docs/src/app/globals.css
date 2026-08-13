@@ -1197,8 +1197,8 @@ html[data-farm-docs-runtime="true"] .fd-page-action-menu-item:last-child {
   background: color-mix(in srgb, var(--color-fd-foreground) 6%, transparent) !important;
 }
 
-/* Keep agent discovery routes available without advertising them as reader UI. */
-html[data-farm-docs-runtime="true"] .fd-agent-llms-directive[data-visible-in-header],
+/* Keep the secondary agent links out of the page footer while preserving the
+   primary llms.txt action in the header beside search. */
 html[data-farm-docs-runtime="true"] .fd-llms-txt-links {
   display: none !important;
 }
