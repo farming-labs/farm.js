@@ -1,9 +1,6 @@
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
-import {
-  FARM_CLIENT_CSS_HREF_PLACEHOLDER,
-  resolveHashedClientCssHref,
-} from "./client-css-href";
+import { FARM_CLIENT_CSS_HREF_PLACEHOLDER, resolveHashedClientCssHref } from "./client-css-href";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
