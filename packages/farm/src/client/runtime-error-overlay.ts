@@ -262,7 +262,7 @@ const OVERLAY_MARKUP = `
   <main class="farm-default-error" data-farm-runtime-error role="alertdialog" aria-modal="true" aria-labelledby="farm-runtime-error-title" aria-describedby="farm-runtime-error-description">
     <div class="farm-default-error__content">
       <p class="farm-default-error__code" aria-hidden="true">500</p>
-      <p class="farm-default-error__eyebrow">Client runtime error</p>
+      <p class="farm-default-error__eyebrow">Runtime error</p>
       <header class="farm-default-error__summary">
         <h1 id="farm-runtime-error-title" class="farm-default-error__title">Application failed in the browser</h1>
       </header>
