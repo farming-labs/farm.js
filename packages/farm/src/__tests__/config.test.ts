@@ -714,6 +714,36 @@ describe("resolveDeployConfig", () => {
     });
   });
 
+  it("lets a preset override displace the configured platform target", () => {
+    // The bug this pins: with deploy.target vercel in config,
+    // `farm build --preset node-server` produced a node server inside
+    // .vercel/output — a directory Vercel deploys as Build Output API
+    // content. The explicit preset must replace the deployment plan.
+    const deploy = resolveDeployConfig({ deploy: { target: "vercel" } }, { preset: "node-server" });
+
+    expect(deploy).toMatchObject({
+      target: "node",
+      preset: "node-server",
+      outputDir: ".farm/.output",
+    });
+  });
+
+  it("keeps a preset override with no matching target out of platform directories", () => {
+    const deploy = resolveDeployConfig({ deploy: { target: "vercel" } }, { preset: "deno-server" });
+
+    expect(deploy.preset).toBe("deno-server");
+    expect(deploy.outputDir).toBe(".farm/.output");
+  });
+
+  it("respects an explicitly configured output directory under a preset override", () => {
+    const deploy = resolveDeployConfig(
+      { deploy: { target: "vercel", outputDir: "custom-out" } },
+      { preset: "node-server" },
+    );
+
+    expect(deploy.outputDir).toBe("custom-out");
+  });
+
   it("recognizes the Cloudflare module preset used by agent Workers", () => {
     const deploy = resolveDeployConfig({ preset: "cloudflare-module" });
 

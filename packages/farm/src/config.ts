@@ -485,7 +485,17 @@ export function resolveDeployConfig(
 ): ResolvedFarmDeployConfig {
   const deploy = config.deploy || {};
   const distDir = config.distDir || ".farm";
-  const target = normalizeDeployTarget(overrides.target || deploy.target);
+  // An explicit preset override replaces the deployment plan, so the
+  // configured platform target must not keep steering the output. Otherwise
+  // `farm build --preset node-server` on an app configured for Vercel writes
+  // a node server into .vercel/output — a directory Vercel will deploy as
+  // Build Output API content.
+  const overrideTarget = normalizeDeployTarget(overrides.target);
+  const target = overrideTarget
+    ? overrideTarget
+    : overrides.preset
+      ? getDeployTargetForPreset(overrides.preset)
+      : normalizeDeployTarget(deploy.target);
   const preset =
     overrides.preset ||
     deploy.preset ||
