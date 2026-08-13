@@ -51,20 +51,39 @@ export async function resolveHashedClientCssHref(clientOutputDir: string): Promi
 }
 
 /**
- * Content-hash the client entry module and return the src generated server
- * code should reference.
+ * The client entry emitted by the current build, if it carries a content
+ * fingerprint. Vite names it farm-client-h<hash>.js so its code-split chunks
+ * import the fingerprinted name natively; emptyOutDir keeps stale builds from
+ * leaving older fingerprints behind.
+ */
+export async function findFingerprintedClientEntry(
+  clientOutputDir: string,
+): Promise<string | null> {
+  const fs = await import("fs/promises");
+  try {
+    const entries = await fs.readdir(clientOutputDir);
+    return entries.find((name) => /^farm-client-h[0-9a-f]+\.js$/.test(name)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the src generated server code should reference for the client
+ * entry, and keep the stable name working.
  *
- * Unlike the stylesheet, the hashed copy must stay at the root of the public
- * directory: the entry loads its code-split chunks with relative dynamic
- * imports and resolves assets against import.meta.url, so moving it a level
- * deeper would break every chunk load. The stable farm-client.js remains for
- * anything that hardcoded it.
+ * The entry cannot be duplicated under a second name: its chunks import back
+ * into it (it is the shared runtime), so a copy would be instantiated twice
+ * and React would see two instances. Instead the bundler emits the
+ * fingerprinted name directly, and the stable farm-client.js becomes a
+ * re-export shim — anything that hardcoded the old path still executes the
+ * one real module.
  */
 export async function resolveHashedClientJsSrc(clientOutputDir: string): Promise<string> {
-  const name = await hashAndCopy(
-    path.join(clientOutputDir, "farm-client.js"),
-    clientOutputDir,
-    (hash) => `farm-client-h${hash}.js`,
-  );
-  return name ? `/${name}` : "/farm-client.js";
+  const entryName = await findFingerprintedClientEntry(clientOutputDir);
+  if (!entryName) return "/farm-client.js";
+  const fs = await import("fs/promises");
+  const shim = `export * from "./${entryName}";\n`;
+  await fs.writeFile(path.join(clientOutputDir, "farm-client.js"), shim);
+  return `/${entryName}`;
 }

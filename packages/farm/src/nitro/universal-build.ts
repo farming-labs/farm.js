@@ -3,6 +3,7 @@ import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
 import {
   FARM_CLIENT_CSS_HREF_PLACEHOLDER,
   FARM_CLIENT_JS_SRC_PLACEHOLDER,
+  findFingerprintedClientEntry,
   resolveHashedClientCssHref,
   resolveHashedClientJsSrc,
 } from "./client-css-href";
@@ -964,7 +965,8 @@ async function validateClientBuildOutput(
   outputDir: string,
 ): Promise<void> {
   const fs = await import("fs/promises");
-  const clientEntryPath = path.join(outputDir, "farm-client.js");
+  const fingerprinted = await findFingerprintedClientEntry(outputDir);
+  const clientEntryPath = path.join(outputDir, fingerprinted ?? "farm-client.js");
   let clientEntrySize = 0;
 
   try {
@@ -1246,7 +1248,7 @@ async function buildClient(
             "farm-client": clientEntryPath,
           },
           output: {
-            entryFileNames: "[name].js",
+            entryFileNames: "[name]-h[hash].js",
             chunkFileNames: "chunks/[name]-h[hash].js",
             hashCharacters: "hex",
             // Use predictable name for CSS so we can reference it in SSR HTML

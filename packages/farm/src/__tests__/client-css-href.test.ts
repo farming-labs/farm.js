@@ -57,23 +57,23 @@ describe("resolveHashedClientCssHref", () => {
     );
   });
 
-  it("copies the entry module to a fingerprinted name at the public root", async () => {
+  it("references the fingerprinted entry and shims the stable name onto it", async () => {
     const dir = await makeClientOutputDir();
-    await fs.writeFile(path.join(dir, "farm-client.js"), "import('./chunks/a-h12345678.js')");
+    // The bundler emits the fingerprinted entry directly; a copy would be
+    // instantiated a second time through the chunks' back-imports.
+    await fs.writeFile(path.join(dir, "farm-client-hab12cd34.js"), "export const real = true;");
 
     const src = await resolveHashedClientJsSrc(dir);
 
-    // Root depth is load-bearing: the entry resolves its chunks with relative
-    // dynamic imports, so the copy must sit beside the chunks directory.
-    expect(src).toMatch(/^\/farm-client-h[0-9a-f]{8}\.js$/);
-    const copied = await fs.readFile(path.join(dir, src.slice(1)), "utf8");
-    expect(copied).toBe("import('./chunks/a-h12345678.js')");
+    expect(src).toBe("/farm-client-hab12cd34.js");
+    // The stable name becomes a re-export shim, so hardcoded references
+    // still execute the one real module instead of a second instance.
     await expect(fs.readFile(path.join(dir, "farm-client.js"), "utf8")).resolves.toBe(
-      "import('./chunks/a-h12345678.js')",
+      'export * from "./farm-client-hab12cd34.js";\n',
     );
   });
 
-  it("falls back to the stable entry name when the module is missing", async () => {
+  it("falls back to the stable entry name when no fingerprinted entry exists", async () => {
     await expect(resolveHashedClientJsSrc(await makeClientOutputDir())).resolves.toBe(
       "/farm-client.js",
     );

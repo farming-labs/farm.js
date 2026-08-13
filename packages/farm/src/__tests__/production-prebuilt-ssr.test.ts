@@ -113,6 +113,13 @@ async function waitForServer(
   );
 }
 
+async function readClientBundle(root: string): Promise<string> {
+  const clientDir = path.join(root, ".farm", "client");
+  const entries = await fs.readdir(clientDir);
+  const fingerprinted = entries.find((name) => /^farm-client-h[0-9a-f]+\.js$/.test(name));
+  return fs.readFile(path.join(clientDir, fingerprinted ?? "farm-client.js"), "utf8");
+}
+
 async function runProductionRequest(
   serverDir: string,
   assertion: (response: Response) => Promise<void>,
@@ -347,10 +354,7 @@ export default function RootLayout({ children }) {
       );
       await build(config, { root, preset: "node-server" });
 
-      const clientBundle = await fs.readFile(
-        path.join(root, ".farm", "client", "farm-client.js"),
-        "utf8",
-      );
+      const clientBundle = await readClientBundle(root);
       expect(clientBundle).toContain("layout-effect-fired");
       expect(clientBundle).toContain("/docs/[...slug]");
 
@@ -473,10 +477,7 @@ export default function DynamicPage({ params }) {
         fs.readFile(path.join(root, ".farm", "ssr", "nitro-entry.mjs"), "utf8"),
       ).resolves.toContain("farmNitroApp.hooks.hook('close'");
 
-      const clientBundle = await fs.readFile(
-        path.join(root, ".farm", "client", "farm-client.js"),
-        "utf8",
-      );
+      const clientBundle = await readClientBundle(root);
       expect(clientBundle).toContain("Minified React error");
       expect(clientBundle).not.toContain("Download the React DevTools");
 
