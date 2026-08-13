@@ -54,7 +54,7 @@ describe("APITypeGenerator", () => {
     );
     writeFileSync(
       path.join(profileRouteDir, "route.js"),
-      "export function POST() { return Response.json({ ok: true }); }\n",
+      "export function QUERY() { return Response.json({ ok: true }); }\nexport function POST() { return Response.json({ ok: true }); }\n",
     );
 
     const generator = new APITypeGenerator(appDir);
@@ -62,7 +62,9 @@ describe("APITypeGenerator", () => {
 
     expect(content).toContain("import type { GET as GET_status }");
     expect(content).toContain("import type { POST as POST_profile }");
+    expect(content).toContain("import type { QUERY as QUERY_profile }");
     expect(content).toContain("status: {");
     expect(content).toContain("profile: {");
+    expect(content).toContain("query: typeof QUERY_profile;");
   });
 });

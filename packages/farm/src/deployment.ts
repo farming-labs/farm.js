@@ -217,5 +217,5 @@ function readCookie(cookieHeader: string | null, name: string): string | undefin
 }
 
 function isSafeRequestMethod(method: string): boolean {
-  return ["GET", "HEAD", "OPTIONS"].includes(method.toUpperCase());
+  return ["GET", "HEAD", "OPTIONS", "QUERY"].includes(method.toUpperCase());
 }

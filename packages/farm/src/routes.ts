@@ -24,6 +24,7 @@ export type ProgrammaticRouteRenderMode = "static" | "dynamic";
 export type ProgrammaticRouteMethod =
   | "GET"
   | "HEAD"
+  | "QUERY"
   | "POST"
   | "PUT"
   | "DELETE"
@@ -1534,6 +1535,7 @@ function isProgrammaticRouteMethod(method: string): method is ProgrammaticRouteM
   return (
     method === "GET" ||
     method === "HEAD" ||
+    method === "QUERY" ||
     method === "POST" ||
     method === "PUT" ||
     method === "DELETE" ||

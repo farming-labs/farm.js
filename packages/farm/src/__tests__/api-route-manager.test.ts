@@ -3,7 +3,7 @@ import os from "os";
 import path from "path";
 import { afterEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { createEndpoint } from "../api/endpoint";
+import { createEndpoint, QUERY } from "../api/endpoint";
 import { APIRouteManager } from "../api/route-manager";
 import { defineRoutes } from "../routes";
 
@@ -281,6 +281,55 @@ describe("APIRouteManager", () => {
     await expect(invalidResponse.json()).resolves.toMatchObject({
       error: "Invalid request body",
     });
+  });
+
+  it("discovers QUERY exports, validates their bodies, and advertises the method", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "farm-api-route-"));
+    tempDirs.push(root);
+
+    const routeDir = path.join(root, "api", "search");
+    fs.mkdirSync(routeDir, { recursive: true });
+    const routeFile = path.join(routeDir, "route.js");
+    fs.writeFileSync(routeFile, "export {};\n");
+
+    const manager = new APIRouteManager(root, {
+      ssrLoadModule: async () => ({
+        QUERY: QUERY(
+          {
+            body: z.object({ term: z.string().min(1), limit: z.number().int() }),
+          },
+          ({ body }) => ({ matches: [`${body.term}:${body.limit}`] }),
+        ),
+      }),
+    } as any);
+
+    await manager.discoverRoutes();
+    const handler = manager.getHandler()!;
+    const response = await handler(
+      new Request("http://example.com/api/search", {
+        method: "QUERY",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ term: "tractor", limit: 5 }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ matches: ["tractor:5"] });
+
+    const missingContentType = await handler(
+      new Request("http://example.com/api/search", {
+        method: "QUERY",
+        body: new TextEncoder().encode(JSON.stringify({ term: "tractor", limit: 5 })),
+      }),
+    );
+    expect(missingContentType.status).toBe(400);
+    await expect(missingContentType.json()).resolves.toMatchObject({
+      error: "Invalid QUERY request",
+    });
+
+    const methodNotAllowed = await handler(new Request("http://example.com/api/search"));
+    expect(methodNotAllowed.status).toBe(405);
+    expect(methodNotAllowed.headers.get("Allow")).toBe("QUERY");
   });
 
   it("discovers explicit-path createEndpoint routes from root routes files", async () => {

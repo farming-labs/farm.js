@@ -10,7 +10,15 @@ declare module "@farm.js/core/api" {
   /**
    * HTTP methods supported by API routes
    */
-  export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
+  export type HttpMethod =
+    | "GET"
+    | "HEAD"
+    | "QUERY"
+    | "POST"
+    | "PUT"
+    | "PATCH"
+    | "DELETE"
+    | "OPTIONS";
 
   export type MultipartField = string | number | boolean | bigint | Blob | Date | null | undefined;
 

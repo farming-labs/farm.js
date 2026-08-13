@@ -83,6 +83,48 @@ export const GET = createEndpoint(
 
 Farm parses and validates `body`, `query`, and `headers` before middleware or handler code runs. Header schema keys use the lower-case names exposed by the Fetch `Headers` API. Invalid input returns a `400` response with structured validation issues.
 
+## HTTP QUERY
+
+Use the standardized [`QUERY` HTTP method](https://www.rfc-editor.org/rfc/rfc10008.html) when a
+read operation needs structured request content that is too large or sensitive for a URL. Like
+`GET`, `QUERY` is safe and idempotent; unlike `GET`, its request body has defined semantics.
+
+**src/app/api/products/search/route.ts**
+
+```ts
+import { QUERY as createQueryEndpoint } from "@farm.js/core/api";
+import { z } from "zod";
+
+export const QUERY = createQueryEndpoint(
+  {
+    body: z.object({
+      filters: z.array(z.object({ field: z.string(), value: z.string() })),
+      limit: z.number().int().min(1).max(100).default(20),
+    }),
+  },
+  async ({ body }) => {
+    const products = await searchProducts(body.filters, body.limit);
+    return { products, total: products.length };
+  },
+);
+```
+
+The helper infers the validated `body` inside the handler and exposes the same input and response
+types to the generated client. QUERY requests must include a `Content-Type` header; Farm's generated
+client sets `application/json` automatically. A raw handler is also valid:
+
+```ts
+export async function QUERY(request: Request) {
+  const search = await request.json();
+  return Response.json(await searchProducts(search));
+}
+```
+
+Keep `QUERY` handlers read-only. Use `POST`, `PATCH`, or another unsafe method when the operation
+changes server state. A server can advertise accepted query media types with an `Accept-Query`
+response header. Cross-origin browser requests use a CORS preflight, so include `QUERY` in the
+configured `cors.methods` list when that list is restricted.
+
 ## Uploads and streaming results
 
 Use `multipart()` when an endpoint accepts files. Farm parses the request as `FormData`, preserves

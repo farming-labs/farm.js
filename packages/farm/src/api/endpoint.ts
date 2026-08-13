@@ -220,7 +220,7 @@ export type EndpointOptions<
   TMiddlewares extends readonly AnyEndpointMiddleware[] = readonly [],
   TErrors extends EndpointErrorDefinitions = {},
 > = {
-  method?: "GET" | "HEAD" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS";
+  method?: "GET" | "HEAD" | "QUERY" | "POST" | "PUT" | "DELETE" | "PATCH" | "OPTIONS";
   body?: TBody;
   query?: TQuery;
   headers?: THeaders;
@@ -755,6 +755,32 @@ export function HEAD(...args: any[]): any {
     return createEndpoint("", { method: "HEAD" }, args[0]);
   }
   return createEndpoint("", { ...args[0], method: "HEAD" }, args[1]);
+}
+
+/**
+ * Convenience method for safe, idempotent QUERY requests with a request body
+ */
+export function QUERY<T = any>(
+  handler: EndpointHandler<never, never, never, T>,
+): CreatedEndpoint<never, never, never, T>;
+export function QUERY<const TOptions extends MethodlessEndpointOptions, TResponse = any>(
+  options: TOptions,
+  handler: ValidatedEndpointHandlerFromOptions<TOptions, TResponse>,
+): CreatedEndpointFromOptions<TOptions, TResponse>;
+export function QUERY<
+  TBody extends AnySchema = never,
+  TQuery extends AnySchema = never,
+  THeaders extends AnySchema = never,
+  TResponse = any,
+>(
+  options: Omit<EndpointOptions<TBody, TQuery, THeaders, readonly []>, "method">,
+  handler: EndpointHandler<TBody, TQuery, THeaders, TResponse>,
+): CreatedEndpoint<TBody, TQuery, THeaders, TResponse>;
+export function QUERY(...args: any[]): any {
+  if (args.length === 1) {
+    return createEndpoint("", { method: "QUERY" }, args[0]);
+  }
+  return createEndpoint("", { ...args[0], method: "QUERY" }, args[1]);
 }
 
 /**

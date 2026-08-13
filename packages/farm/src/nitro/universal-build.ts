@@ -1345,7 +1345,7 @@ async function buildClient(
             }
             if (id === "\0empty-api-route") {
               // Stub for API routes - only used in type context, provide empty exports
-              return "export const GET = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export default {};";
+              return "export const GET = () => {}; export const HEAD = () => {}; export const QUERY = () => {}; export const POST = () => {}; export const PUT = () => {}; export const DELETE = () => {}; export const PATCH = () => {}; export const OPTIONS = () => {}; export default {};";
             }
             if (id === "\0farm-i18n-client-bridge") {
               return 'export { createTranslator, format, getLocale, getLocaleSource, t } from "@farm.js/core/i18n/client";';
@@ -3678,7 +3678,13 @@ async function handleAPIRequest(request) {
   if (!endpoint) {
     const response = new Response(
       JSON.stringify({ error: "Method Not Allowed" }),
-      { status: 405, headers: { "Content-Type": "application/json" } }
+      {
+        status: 405,
+        headers: {
+          "Allow": route.methods.join(", "),
+          "Content-Type": "application/json",
+        },
+      }
     );
     emitFarmEvent({
       type: "api.request.complete",

@@ -70,6 +70,11 @@ async function invokeAPIRouteEndpointInContext(
   request: Request,
   params: APIRouteParams,
 ): Promise<Response> {
+  const queryContentTypeError = validateQueryContentType(request);
+  if (queryContentTypeError) {
+    return queryContentTypeError;
+  }
+
   const farmHandler = endpoint.__handler || (isFarmContextHandler(endpoint) ? endpoint : null);
 
   if (!farmHandler) {
@@ -141,6 +146,23 @@ async function invokeAPIRouteEndpointInContext(
 
   const response = normalizeRouteResponse(execution.result);
   return attachEndpointInvalidations(response, execution.invalidations);
+}
+
+function validateQueryContentType(request: Request): Response | null {
+  if (request.method.toUpperCase() !== "QUERY" || request.headers.has("content-type")) {
+    return null;
+  }
+
+  return new Response(
+    JSON.stringify({
+      error: "Invalid QUERY request",
+      message: "QUERY requests must include a Content-Type header.",
+    }),
+    {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    },
+  );
 }
 
 export function normalizeRouteResponse(result: unknown): Response {

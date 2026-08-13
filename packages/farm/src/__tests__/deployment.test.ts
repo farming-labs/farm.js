@@ -53,10 +53,15 @@ describe("deployment skew protocol", () => {
     const getRequest = new Request("https://farm.test/page", {
       headers: { Cookie: cookie },
     });
+    const queryRequest = new Request("https://farm.test/search", {
+      method: "QUERY",
+      headers: { Cookie: cookie },
+    });
 
     expect(getFarmRequestDeploymentId(headerRequest)).toBe("release-header");
     expect(getFarmRequestDeploymentId(postRequest)).toBe("release-cookie");
     expect(getFarmRequestDeploymentId(getRequest)).toBeUndefined();
+    expect(getFarmRequestDeploymentId(queryRequest)).toBeUndefined();
   });
 
   it("detects stale clients without rejecting missing or matching IDs", () => {

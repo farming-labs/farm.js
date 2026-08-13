@@ -596,6 +596,16 @@ export interface FarmIntegrationRouteFactory<
     path: TPath,
     input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
   ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "POST", TSchema>;
+  query<
+    TPath extends string,
+    TBody = never,
+    TResponse = unknown,
+    TQuery = never,
+    TServer extends boolean = false,
+  >(
+    path: TPath,
+    input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>,
+  ): FarmTypedIntegrationRoute<TPath, TBody, TQuery, TResponse, TServer, "QUERY", TSchema>;
   put<
     TPath extends string,
     TBody = never,
@@ -708,6 +718,26 @@ function createIntegrationRouteFactory<
           ...input,
         },
       );
+    },
+    query<
+      TPath extends string,
+      TBody = never,
+      TResponse = unknown,
+      TQuery = never,
+      TServer extends boolean = false,
+    >(path: TPath, input: IntegrationRouteBuilderOptions<TBody, TQuery, TServer, TSchema>) {
+      return defineTypedIntegrationRoute<
+        TPath,
+        TBody,
+        TQuery,
+        TResponse,
+        TServer,
+        "QUERY",
+        TSchema
+      >("QUERY", path, {
+        bodyFormat: "json",
+        ...input,
+      });
     },
     put<
       TPath extends string,
@@ -2209,6 +2239,19 @@ async function validateIntegrationRouteInput(
   request: Request,
   url: URL,
 ): Promise<IntegrationRouteInputValidationResult> {
+  if (request.method.toUpperCase() === "QUERY" && !request.headers.has("content-type")) {
+    return {
+      success: false,
+      response: Response.json(
+        {
+          error: "Invalid QUERY request",
+          message: "QUERY requests must include a Content-Type header.",
+        },
+        { status: 400 },
+      ),
+    };
+  }
+
   const schemas = route.input;
   if (!schemas?.body && !schemas?.query) {
     return {

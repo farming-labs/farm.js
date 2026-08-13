@@ -54,6 +54,12 @@ export const GET = createEndpoint(
 
 The route appears in the generated reference with a typed `limit` query parameter.
 
+`QUERY` routes include their request-body schema too. Farm currently emits OpenAPI 3.0.3, whose
+Path Item Object does not have a native `query` field. To keep the document valid, Farm places each
+`QUERY` Operation Object under the registered `x-oai-additionalOperations.QUERY` extension. This
+maps directly to the native `query` field available in OpenAPI 3.2 without mislabeling the route as
+`GET` or `POST`.
+
 ## Add metadata
 
 ```ts

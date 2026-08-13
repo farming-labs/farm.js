@@ -65,7 +65,7 @@ export type StatusPhase = "idle" | "pending" | "success" | "error" | "revalidati
 export type StatusEvent<TData = unknown, TError = unknown> = {
   phase: StatusPhase;
   requestId: string;
-  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+  method: "GET" | "HEAD" | "QUERY" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
   key: string;
   input?: unknown;
   data?: TData;
@@ -163,7 +163,7 @@ export type InvalidateTarget =
     }
   | {
       path: string;
-      method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+      method?: "GET" | "HEAD" | "QUERY" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS";
       input?: unknown;
     }
   | [CallableRouteRef<any>, unknown?];
@@ -507,7 +507,7 @@ export function createAPIClient<
       : undefined;
     const configuredCacheKey = clientOptions?.key ?? cacheOptions?.key;
     const cacheKey = normalizeFarmClientCacheKey(
-      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL),
+      configuredCacheKey ?? buildCacheKey(methodUpper, path, input, baseURL, options.headers),
     ) as CacheKey<any>;
     const now = Date.now();
 
@@ -526,7 +526,12 @@ export function createAPIClient<
     const entry = getValidCacheEntry(cacheState, cacheKey, now);
     const policy = cacheOptions?.policy ?? (cacheOptions ? "cache-first" : "network-only");
     const staleTime = cacheOptions?.staleTime ?? 0;
-    const isCacheEnabled = Boolean(cacheOptions) && methodUpper === "GET";
+    const hasReliableDefaultCacheKey =
+      methodUpper !== "QUERY" || !isFormData(input?.body) || configuredCacheKey !== undefined;
+    const isCacheEnabled =
+      Boolean(cacheOptions) &&
+      (methodUpper === "GET" || methodUpper === "QUERY") &&
+      hasReliableDefaultCacheKey;
     const isStale = entry ? isEntryStale(entry, now) : true;
 
     const applyOptimisticUpdates = () => {
@@ -538,7 +543,13 @@ export function createAPIClient<
           update.length === 2
             ? [update[0], undefined, update[1]]
             : [update[0], update[1], update[2]];
-        const targetKey = resolveTargetKey(routeMeta, target, targetInput, baseURL);
+        const targetKey = resolveTargetKey(
+          routeMeta,
+          target,
+          targetInput,
+          baseURL,
+          options.headers,
+        );
         if (!targetKey) continue;
 
         const targetEntry = getValidCacheEntry(cacheState, targetKey, now);
@@ -730,7 +741,7 @@ export function createAPIClient<
           };
 
       for (const target of invalidateOptions.targets) {
-        const targetKey = resolveTargetKey(routeMeta, target, undefined, baseURL);
+        const targetKey = resolveTargetKey(routeMeta, target, undefined, baseURL, options.headers);
         if (!targetKey) continue;
 
         const existing = cacheState.get(targetKey);
@@ -853,7 +864,7 @@ function createNestedProxy(
     apply(_target, _thisArg, args) {
       // Check if the last part is an HTTP method
       const lastPart = path[path.length - 1];
-      const httpMethods = ["get", "post", "put", "delete", "patch", "options", "head"];
+      const httpMethods = ["get", "head", "query", "post", "put", "delete", "patch", "options"];
 
       if (httpMethods.includes(lastPart)) {
         // Method is explicitly called: api.users.get() or api['auth/login'].post()
@@ -989,9 +1000,31 @@ type OptimisticSnapshot = {
   entry?: CacheEntry;
 };
 
-function buildCacheKey(method: string, path: string, input: any, baseURL: string): string {
+function buildCacheKey(
+  method: string,
+  path: string,
+  input: any,
+  baseURL: string,
+  defaultHeaders?: Record<string, string>,
+): string {
   const keyInput =
-    input && typeof input === "object" ? { query: input.query, body: input.body } : input;
+    input && typeof input === "object"
+      ? {
+          query: input.query,
+          body: input.body,
+          ...(method === "QUERY"
+            ? {
+                contentType:
+                  getHeader(input.headers, "content-type") ??
+                  getHeader(defaultHeaders, "content-type") ??
+                  "application/json",
+                contentEncoding:
+                  getHeader(input.headers, "content-encoding") ??
+                  getHeader(defaultHeaders, "content-encoding"),
+              }
+            : {}),
+        }
+      : input;
   const url = resolveFarmAPIRequestURL(path, baseURL);
   return `${method}:${url.origin}${url.pathname}:${stableStringify(keyInput ?? {})}`;
 }
@@ -1012,6 +1045,17 @@ function stableStringify(value: any): string {
   const keys = Object.keys(value).sort();
   const entries = keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`);
   return `{${entries.join(",")}}`;
+}
+
+function getHeader(headers: unknown, name: string): string | undefined {
+  if (!headers || typeof headers !== "object") return undefined;
+
+  if (typeof Headers !== "undefined" && headers instanceof Headers) {
+    return headers.get(name) ?? undefined;
+  }
+
+  const entry = Object.entries(headers).find(([key]) => key.toLowerCase() === name);
+  return entry?.[1] === undefined ? undefined : String(entry[1]);
 }
 
 function getGcAt(now: number, gcTime?: number): number | undefined {
@@ -1046,6 +1090,7 @@ function resolveTargetKey(
   target: InvalidateTarget | AnyRouteRef,
   input?: unknown,
   baseURL = "http://localhost:3000",
+  defaultHeaders?: Record<string, string>,
 ): string | null {
   if (!target) return null;
 
@@ -1056,13 +1101,13 @@ function resolveTargetKey(
     if (!meta) return null;
 
     const { method, routePath } = resolveRouteMeta(meta);
-    return buildCacheKey(method, routePath, input ?? {}, meta.baseURL);
+    return buildCacheKey(method, routePath, input ?? {}, meta.baseURL, defaultHeaders);
   }
 
   if (Array.isArray(target)) {
     const [route, routeInput] = target;
     if (typeof route === "function") {
-      return resolveTargetKey(routeMeta, route, routeInput, baseURL);
+      return resolveTargetKey(routeMeta, route, routeInput, baseURL, defaultHeaders);
     }
     return normalizeFarmClientCacheKey(target);
   }
@@ -1071,14 +1116,14 @@ function resolveTargetKey(
 
   if ("path" in target) {
     const method = target.method ?? "GET";
-    return buildCacheKey(method, target.path, target.input ?? {}, baseURL);
+    return buildCacheKey(method, target.path, target.input ?? {}, baseURL, defaultHeaders);
   }
 
   return null;
 }
 
 function resolveRouteMeta(meta: RouteMeta): { routePath: string; method: string } {
-  const httpMethods = ["get", "post", "put", "delete", "patch", "options", "head"];
+  const httpMethods = ["get", "head", "query", "post", "put", "delete", "patch", "options"];
   const lastPart = meta.path[meta.path.length - 1];
   if (lastPart && httpMethods.includes(lastPart)) {
     return {

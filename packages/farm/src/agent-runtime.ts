@@ -6,7 +6,16 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { defineIntegration, type FarmIntegration } from "./integrations";
 import type { BundleResultPayload, FarmPlugin } from "./plugin";
 
-const AGENT_RUNTIME_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"] as const;
+const AGENT_RUNTIME_METHODS = [
+  "GET",
+  "HEAD",
+  "QUERY",
+  "POST",
+  "PUT",
+  "PATCH",
+  "DELETE",
+  "OPTIONS",
+] as const;
 
 const HOP_BY_HOP_HEADERS = [
   "connection",

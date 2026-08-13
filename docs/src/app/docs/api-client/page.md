@@ -54,6 +54,39 @@ if (result.error) {
 }
 ```
 
+## Type-safe QUERY requests
+
+A route that exports `QUERY` becomes a `.query()` caller. Its body and response are inferred from
+the endpoint, just like the existing `.get()` and `.post()` callers:
+
+```ts
+const result = await api.products.search.query(
+  {
+    body: {
+      filters: [{ field: "category", value: "tools" }],
+      limit: 20,
+    },
+  },
+  {
+    cache: {
+      policy: "stale-while-revalidate",
+      staleTime: 30_000,
+    },
+  },
+);
+
+if (!result.error) {
+  // Inferred from the QUERY handler response.
+  console.log(result.data.products, result.data.total);
+}
+```
+
+TypeScript reports an error if `body` is missing or a filter has the wrong shape. Farm sends the
+body as JSON and uses the `QUERY` method on the wire. Opt-in cache keys include the API origin,
+path, URL query parameters, request body, `Content-Type`, and `Content-Encoding`. Multipart QUERY
+requests need an explicit cache key because a generated multipart boundary cannot be represented
+reliably before `fetch` sends the request.
+
 ## Upload files and consume progress streams
 
 `toFormData()` retains the endpoint's body shape while sending files as real multipart fields. When
