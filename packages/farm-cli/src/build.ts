@@ -53,15 +53,15 @@ export async function buildFarm(options: BuildFarmOptions = {}) {
         config.deploy = deploy;
       }
 
-      // Build
+      // Build. Completion is reported by the build pipeline itself, which
+      // also knows the preset and output directory; a second banner here
+      // would only repeat it.
       await buildRuntimeResult.value.build(config, {
         preset: config.preset,
         root,
         productionVite: productionViteResult.value,
       });
     });
-
-    logger.success("✅ Build completed successfully!");
   } catch (error: any) {
     logger.error(`❌ Build failed: ${error.message}`);
     if (error.stack) {
