@@ -1,5 +1,6 @@
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
+import { FARM_CLIENT_CSS_HREF_PLACEHOLDER, resolveHashedClientCssHref } from "./client-css-href";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
@@ -3935,7 +3936,7 @@ const farmDocsHandler = ${
 }, {
   rootDir: farmDocsRuntimeRoot,
   clientEntry: "/farm-client.js",
-  stylesheets: ["/farm-fonts.css", "/farm-client.css"],
+  stylesheets: ["/farm-fonts.css", "/__farm_client_css_href__"],
   resolveLayoutFonts: (pathname) =>
     resolveFarmLayoutFonts(
       getApplicableLayouts(getFarmRoutePathname(pathname)).map((layout) => layout.module),
@@ -4298,7 +4299,7 @@ function createFarmErrorDocument(html, title) {
       '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
       '  <link rel="icon" href="data:,">\\n' +
       '  <title>' + escapedTitle + '</title>\\n' +
-      '  <link rel="stylesheet" href="/farm-client.css">\\n' +
+      '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
       renderFarmRendererHydrationScript() + '\\n' +
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
@@ -4314,7 +4315,7 @@ function createFarmErrorDocument(html, title) {
       .replace(/<\\/body>/i, '</div></body>');
   }
   fullHtml = fullHtml
-    .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+    .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
     .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
     .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, function(match, attrs, headContent) {
       return headContent.includes("<title")
@@ -5066,8 +5067,8 @@ ${
     bodyMatch[0],
     "<body" + bodyMatch[1] + ">" + rootMarkup + "</body>",
   );
-  if (!html.includes('href="/farm-client.css"')) {
-    const clientStylesheet = '  <link rel="stylesheet" href="/farm-client.css">\\n';
+  if (!html.includes('href="/__farm_client_css_href__"')) {
+    const clientStylesheet = '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n';
     const firstStyleIndex = html.search(/<style(?:\\s|>)/i);
     html =
       firstStyleIndex >= 0
@@ -5852,7 +5853,7 @@ async function handleFarmRequestInContext(
             '  <meta name="viewport" content="width=device-width, initial-scale=1">\\n' +
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
             '  <title>' + title + '</title>' + metaTags + '\\n' +
-            '  <link rel="stylesheet" href="/farm-client.css">\\n' +
+            '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
             '  <link rel="modulepreload" href="/farm-client.js">\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
             '</head>\\n<body>\\n  <div id="root">';
@@ -5907,7 +5908,7 @@ async function handleFarmRequestInContext(
           // Layout provides full HTML structure - inject CSS and client script
           fullHtml = html
             // Inject CSS link after opening head tag or first meta tag
-            .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+            .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
             .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
             // Inject title if not present and we have one
             .replace(/<head([^>]*)>([\\s\\S]*?)<\\/head>/i, (match, attrs, headContent) => {
@@ -5944,7 +5945,7 @@ async function handleFarmRequestInContext(
   <meta name="viewport" content="width=device-width, initial-scale=1">
   \${hasFavicon ? "" : '<link rel="icon" href="data:,">'}
   <title>\${title}</title>\${metaTags}
-  <link rel="stylesheet" href="/farm-client.css">
+  <link rel="stylesheet" href="/__farm_client_css_href__">
   \${renderFarmRendererHydrationScript()}
 </head>
 <body>
@@ -6213,7 +6214,7 @@ async function handleFarmRequestInContext(
     let fullHtml;
     if (hasFullDocument) {
       fullHtml = html
-        .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/farm-client.css">')
+        .replace(/<head([^>]*)>/i, '<head$1>\\n  <link rel="stylesheet" href="/__farm_client_css_href__">')
         .replace(/<\\/head>/i, renderFarmRendererHydrationScript() + '\\n</head>')
         .replace(
           /<\\/body>/i,
@@ -6230,7 +6231,7 @@ async function handleFarmRequestInContext(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/farm-client.css">
+  <link rel="stylesheet" href="/__farm_client_css_href__">
   <title>404 - Page Not Found</title>
   \${renderFarmRendererHydrationScript()}
 </head>
@@ -6748,6 +6749,20 @@ async function buildNitroUniversal(
 
   const scheduledTasks = mergeScheduledTasks(farmWorkflows.scheduledTasks, farmCron.scheduledTasks);
   const cloudflareCronConfig = createFarmCronCloudflareConfig(farmCron.jobs);
+
+  // The client build has fully settled by now (fonts merged, output
+  // validated), so the stylesheet href baked into server code can carry the
+  // content hash of the bytes browsers will actually receive. Substituting in
+  // memory, before any consumer, covers the disk write below as well as the
+  // prebuilt-SSR copies and prerendering that reuse this bundle directly.
+  const clientCssHref = await resolveHashedClientCssHref(clientOutputDir);
+  for (const output of Object.values(ssrBundle)) {
+    if (output.type === "chunk" && output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
+      // split/join rather than replaceAll: the package's lib target predates
+      // ES2021, and a fixed token needs no regex escaping either way.
+      output.code = output.code.split(FARM_CLIENT_CSS_HREF_PLACEHOLDER).join(clientCssHref);
+    }
+  }
 
   // Write SSR bundle to disk
   await fs.mkdir(ssrOutputDir, { recursive: true });

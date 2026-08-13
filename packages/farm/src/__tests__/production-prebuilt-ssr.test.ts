@@ -378,9 +378,12 @@ export default function RootLayout({ children }) {
           expect(html).toContain('data-farm-layout-client="true"');
           expect(html).toContain('id="__farm_route_slots_data__"');
           expect(html.match(/src="\/farm-client\.js"/g)).toHaveLength(1);
-          expect(html.match(/href="\/farm-client\.css"/g)).toHaveLength(1);
-          const clientStylesheetIndex = html.indexOf(
-            '<link rel="stylesheet" href="/farm-client.css">',
+          // The stylesheet href carries a content fingerprint so browsers
+          // cannot serve stale CSS against fresh HTML.
+          const stylesheetPattern = /href="\/assets\/farm-client-h[0-9a-f]{8}\.css"/g;
+          expect(html.match(stylesheetPattern)).toHaveLength(1);
+          const clientStylesheetIndex = html.search(
+            /<link rel="stylesheet" href="\/assets\/farm-client-h[0-9a-f]{8}\.css">/,
           );
           expect(clientStylesheetIndex).toBeGreaterThan(-1);
           expect(clientStylesheetIndex).toBeLessThan(html.indexOf("</head>"));

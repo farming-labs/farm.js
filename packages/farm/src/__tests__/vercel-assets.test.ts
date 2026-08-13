@@ -20,6 +20,9 @@ describe("Vercel immutable Farm assets", () => {
   it("does not give immutable caching to stable or unhashed URLs", () => {
     expect(isFarmVercelImmutableAssetPath("/farm-client.js")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/farm-client.css")).toBe(false);
+    // The content-hashed stylesheet copy lives under assets/ precisely so the
+    // existing -h fingerprint rule grants it immutable caching.
+    expect(isFarmVercelImmutableAssetPath("/assets/farm-client-h1a2b3c4d.css")).toBe(true);
     expect(isFarmVercelImmutableAssetPath("/assets/logo.svg")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/icon-v2.svg")).toBe(false);
     expect(isFarmVercelImmutableAssetPath("/assets/readme-how-to-build.js")).toBe(false);
