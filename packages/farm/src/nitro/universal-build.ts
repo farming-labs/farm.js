@@ -1,6 +1,11 @@
 import type { RedirectConfig, ResolvedFarmConfig, RewriteConfig } from "../config";
 import { hasCustomFarmRouteContext, resolveDeployOutputPath } from "../config";
-import { FARM_CLIENT_CSS_HREF_PLACEHOLDER, resolveHashedClientCssHref } from "./client-css-href";
+import {
+  FARM_CLIENT_CSS_HREF_PLACEHOLDER,
+  FARM_CLIENT_JS_SRC_PLACEHOLDER,
+  resolveHashedClientCssHref,
+  resolveHashedClientJsSrc,
+} from "./client-css-href";
 import type { RouteManager } from "../routing/route-manager";
 import type { APIRouteManager } from "../api/route-manager";
 import type { ServerRenderer } from "../server/renderer";
@@ -3935,7 +3940,7 @@ const farmDocsHandler = ${
   contentDir: farmDocsResolvedConfig.contentDir || farmDocsResolvedConfig.config?.contentDir,
 }, {
   rootDir: farmDocsRuntimeRoot,
-  clientEntry: "/farm-client.js",
+  clientEntry: "/__farm_client_js_src__",
   stylesheets: ["/farm-fonts.css", "/__farm_client_css_href__"],
   resolveLayoutFonts: (pathname) =>
     resolveFarmLayoutFonts(
@@ -3946,7 +3951,7 @@ const farmDocsHandler = ${
         : `createFarmDocsHandler(farmDocsResolvedConfig, {
   root: farmDocsRuntimeRoot,
   srcDir: ${JSON.stringify(config.srcDir)},
-  clientEntry: "/farm-client.js",
+  clientEntry: "/__farm_client_js_src__",
   fontAssets: ${JSON.stringify(farmDocsFontAssets)},
   resolveLayoutFonts: (pathname) =>
     resolveFarmLayoutFonts(
@@ -4304,7 +4309,7 @@ function createFarmErrorDocument(html, title) {
       '</head>\\n<body>\\n' +
       '  <div id="root">' + html + '</div>\\n' +
       '  ' + renderFarmClientBootstrapScript() + '\\n' +
-      '  <script type="module" src="/farm-client.js"></script>\\n' +
+      '  <script type="module" src="/__farm_client_js_src__"></script>\\n' +
       '</body>\\n</html>';
   }
 
@@ -4325,7 +4330,7 @@ function createFarmErrorDocument(html, title) {
     .replace(
       /<\\/body>/i,
       '  ' + renderFarmClientBootstrapScript() + '\\n' +
-        '  <script type="module" src="/farm-client.js"></script>\\n</body>',
+        '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
     );
   return fullHtml.trim().startsWith("<!DOCTYPE")
     ? fullHtml
@@ -5078,10 +5083,10 @@ ${
   if (!html.includes('id="__farm_route_slots_data__"')) {
     html = html.replace(/<[/]body>/i, renderFarmClientBootstrapScript() + "\\n</body>");
   }
-  if (!html.includes('src="/farm-client.js"')) {
+  if (!html.includes('src="/__farm_client_js_src__"')) {
     html = html.replace(
       /<[/]body>/i,
-      '  <script type="module" src="/farm-client.js"></script>\\n</body>',
+      '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
     );
   }
   if (!html.includes('window._$HY')) {
@@ -5854,7 +5859,7 @@ async function handleFarmRequestInContext(
             (hasFavicon ? '' : '  <link rel="icon" href="data:,">\\n') +
             '  <title>' + title + '</title>' + metaTags + '\\n' +
             '  <link rel="stylesheet" href="/__farm_client_css_href__">\\n' +
-            '  <link rel="modulepreload" href="/farm-client.js">\\n' +
+            '  <link rel="modulepreload" href="/__farm_client_js_src__">\\n' +
             renderFarmRendererHydrationScript() + '\\n' +
             '</head>\\n<body>\\n  <div id="root">';
           const streamSuffix = '</div>\\n' +
@@ -5863,7 +5868,7 @@ async function handleFarmRequestInContext(
               routeSlotPayload,
               clientPageProps
             ) + '\\n' +
-            '  <script type="module" src="/farm-client.js"></script>\\n' +
+            '  <script type="module" src="/__farm_client_js_src__"></script>\\n' +
             '</body>\\n</html>';
           const themedStreamPrefix = streamPrefix.replace(
             '<html lang="en">',
@@ -5929,7 +5934,7 @@ async function handleFarmRequestInContext(
                 routeSlotPayload,
                 clientPageProps
               ) + '\\n' +
-                '  <script type="module" src="/farm-client.js"></script>\\n</body>',
+                '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
             );
           
           // Add DOCTYPE if not present
@@ -5951,7 +5956,7 @@ async function handleFarmRequestInContext(
 <body>
   <div id="root">\${html}</div>
   \${renderFarmClientBootstrapScript(pageProps.__farmCanonicalPath, routeSlotPayload, clientPageProps)}
-  <script type="module" src="/farm-client.js"></script>
+  <script type="module" src="/__farm_client_js_src__"></script>
 </body>
 </html>\`;
         }
@@ -6219,7 +6224,7 @@ async function handleFarmRequestInContext(
         .replace(
           /<\\/body>/i,
           '  ' + renderFarmClientBootstrapScript() + '\\n' +
-            '  <script type="module" src="/farm-client.js"></script>\\n</body>',
+            '  <script type="module" src="/__farm_client_js_src__"></script>\\n</body>',
         );
       if (!fullHtml.trim().startsWith('<!DOCTYPE')) {
         fullHtml = '<!DOCTYPE html>\\n' + fullHtml;
@@ -6238,7 +6243,7 @@ async function handleFarmRequestInContext(
 <body>
   <div id="root">\${html}</div>
   \${renderFarmClientBootstrapScript()}
-  <script type="module" src="/farm-client.js"></script>
+  <script type="module" src="/__farm_client_js_src__"></script>
 </body>
 </html>\`;
     }
@@ -6755,12 +6760,19 @@ async function buildNitroUniversal(
   // content hash of the bytes browsers will actually receive. Substituting in
   // memory, before any consumer, covers the disk write below as well as the
   // prebuilt-SSR copies and prerendering that reuse this bundle directly.
-  const clientCssHref = await resolveHashedClientCssHref(clientOutputDir);
+  const [clientCssHref, clientJsSrc] = await Promise.all([
+    resolveHashedClientCssHref(clientOutputDir),
+    resolveHashedClientJsSrc(clientOutputDir),
+  ]);
   for (const output of Object.values(ssrBundle)) {
-    if (output.type === "chunk" && output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
-      // split/join rather than replaceAll: the package's lib target predates
-      // ES2021, and a fixed token needs no regex escaping either way.
+    if (output.type !== "chunk") continue;
+    // split/join rather than replaceAll: the package's lib target predates
+    // ES2021, and a fixed token needs no regex escaping either way.
+    if (output.code.includes(FARM_CLIENT_CSS_HREF_PLACEHOLDER)) {
       output.code = output.code.split(FARM_CLIENT_CSS_HREF_PLACEHOLDER).join(clientCssHref);
+    }
+    if (output.code.includes(FARM_CLIENT_JS_SRC_PLACEHOLDER)) {
+      output.code = output.code.split(FARM_CLIENT_JS_SRC_PLACEHOLDER).join(clientJsSrc);
     }
   }
 

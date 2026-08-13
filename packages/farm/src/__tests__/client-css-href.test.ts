@@ -4,7 +4,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   FARM_CLIENT_CSS_HREF_PLACEHOLDER,
+  FARM_CLIENT_JS_SRC_PLACEHOLDER,
   resolveHashedClientCssHref,
+  resolveHashedClientJsSrc,
 } from "../nitro/client-css-href";
 
 const tempDirs: string[] = [];
@@ -55,9 +57,32 @@ describe("resolveHashedClientCssHref", () => {
     );
   });
 
+  it("copies the entry module to a fingerprinted name at the public root", async () => {
+    const dir = await makeClientOutputDir();
+    await fs.writeFile(path.join(dir, "farm-client.js"), "import('./chunks/a-h12345678.js')");
+
+    const src = await resolveHashedClientJsSrc(dir);
+
+    // Root depth is load-bearing: the entry resolves its chunks with relative
+    // dynamic imports, so the copy must sit beside the chunks directory.
+    expect(src).toMatch(/^\/farm-client-h[0-9a-f]{8}\.js$/);
+    const copied = await fs.readFile(path.join(dir, src.slice(1)), "utf8");
+    expect(copied).toBe("import('./chunks/a-h12345678.js')");
+    await expect(fs.readFile(path.join(dir, "farm-client.js"), "utf8")).resolves.toBe(
+      "import('./chunks/a-h12345678.js')",
+    );
+  });
+
+  it("falls back to the stable entry name when the module is missing", async () => {
+    await expect(resolveHashedClientJsSrc(await makeClientOutputDir())).resolves.toBe(
+      "/farm-client.js",
+    );
+  });
+
   it("produces hrefs the placeholder can never collide with", () => {
     // Substitution is a plain string replace over generated code, so the
     // placeholder must not be a substring any real href could contain.
     expect(FARM_CLIENT_CSS_HREF_PLACEHOLDER).toMatch(/^\/__[a-z_]+__$/);
+    expect(FARM_CLIENT_JS_SRC_PLACEHOLDER).toMatch(/^\/__[a-z_]+__$/);
   });
 });
