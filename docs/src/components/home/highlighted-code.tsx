@@ -1,13 +1,14 @@
 "use client";
 
-import { Code2 } from "lucide-react";
+import { Check, Code2, Copy, RefreshCw } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { highlight } from "sugar-high";
 
 interface HighlightedCodeProps {
   className?: string;
   code: string;
+  copyable?: boolean;
   highlightLines?: readonly number[];
   label: string;
   language: string;
@@ -37,6 +38,69 @@ function figureClassName(className?: string) {
   ]
     .filter(Boolean)
     .join(" ");
+}
+
+function copyWithSelection(value: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const didCopy = document.execCommand("copy");
+  textarea.remove();
+  return didCopy;
+}
+
+function CopyCodeButton({ code, label }: { code: string; label: string }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<number | undefined>(undefined);
+  const copyLabel = copyState === "copied" ? "Copied" : copyState === "failed" ? "Retry" : "Copy";
+  const CopyStateIcon = copyState === "copied" ? Check : copyState === "failed" ? RefreshCw : Copy;
+
+  useEffect(() => {
+    return () => window.clearTimeout(resetTimer.current);
+  }, []);
+
+  async function copyCode() {
+    let didCopy = false;
+
+    try {
+      didCopy = copyWithSelection(code);
+    } catch {
+      // Continue with the asynchronous Clipboard API.
+    }
+
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(code);
+      didCopy = true;
+    } catch {
+      // Keep the synchronous selection fallback result.
+    }
+
+    window.clearTimeout(resetTimer.current);
+    setCopyState(didCopy ? "copied" : "failed");
+    resetTimer.current = window.setTimeout(() => setCopyState("idle"), 1600);
+  }
+
+  return (
+    <button
+      aria-label={`${copyLabel} ${label} code`}
+      className="inline-flex min-w-[4.5rem] items-center justify-center gap-1.5 border-l border-white/10 pl-3 uppercase text-white/42 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      onClick={copyCode}
+      title={`${copyLabel} ${label} code`}
+      type="button"
+    >
+      <CopyStateIcon aria-hidden className="size-2.5" strokeWidth={1.5} />
+      <span>{copyLabel}</span>
+      <span aria-live="polite" className="sr-only">
+        {copyLabel}
+      </span>
+    </button>
+  );
 }
 
 function HighlightedCodeBody({
@@ -96,6 +160,7 @@ function HighlightedCodeBody({
 export function HighlightedCode({
   className,
   code,
+  copyable = false,
   highlightLines,
   label,
   language,
@@ -109,7 +174,10 @@ export function HighlightedCode({
           {prefix ? <span className="shrink-0 font-semibold text-white/72">{prefix}</span> : null}
           <span className="truncate">{label}</span>
         </span>
-        <span className="shrink-0 uppercase text-white/24">{language}</span>
+        <span className="flex shrink-0 items-center gap-3">
+          <span className="uppercase text-white/24">{language}</span>
+          {copyable ? <CopyCodeButton code={code} label={label} /> : null}
+        </span>
       </figcaption>
       <HighlightedCodeBody
         ariaLabel={`${prefix ? `${prefix} ` : ""}${label} code`}

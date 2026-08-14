@@ -398,6 +398,16 @@ export default defineConfig({
 const typedApiHighlightLines = [1, 7, 8] as const;
 const docsHighlightLines = [3, 4] as const;
 const rendererOptions = ["preact()", "solid()", "vue()", "svelte()"] as const;
+const reactCompilerCode = `import { defineConfig } from "@farm.js/core";
+import { react } from "@farm.js/react";
+
+export default defineConfig({
+    renderer: react({
+        experimental: {
+            compiler: true,
+        },
+    }),
+});`;
 
 const layersConfigTabs = [
   {
@@ -1218,6 +1228,87 @@ function RuntimeErrorVisual() {
   );
 }
 
+function ReactCompilerVisual() {
+  return (
+    <div className="farm-feature-spotlight relative flex min-h-[650px] min-w-0 items-end overflow-hidden px-6 sm:px-10 lg:h-[360px] lg:min-h-0">
+      <div className="relative z-10 grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(0,0.76fr)_minmax(0,1.24fr)]">
+        <figure
+          aria-labelledby="react-compiler-result"
+          className="flex h-[300px] min-w-0 flex-col border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]"
+        >
+          <figcaption
+            className="flex h-10 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] uppercase tracking-normal"
+            id="react-compiler-result"
+          >
+            <span className="flex items-center gap-2 text-white/54">
+              <Cpu aria-hidden className="size-3" strokeWidth={1.5} /> Compiler update path
+            </span>
+            <span className="border border-white/12 bg-white/[0.035] px-2 py-1 text-white/46">
+              Reference run
+            </span>
+          </figcaption>
+
+          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="flex min-w-0 flex-col justify-center border-r border-white/8 px-4 sm:px-5">
+              <strong className="font-geist-pixel text-4xl font-medium tracking-normal text-white sm:text-5xl">
+                8.5×
+              </strong>
+              <span className="mt-2 font-mono text-[8px] uppercase leading-4 tracking-normal text-white/36 sm:text-[9px]">
+                faster median update
+              </span>
+            </div>
+            <dl className="grid min-w-0 grid-rows-3">
+              <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/8 px-3 font-mono tracking-normal sm:px-4">
+                <dt className="truncate text-[8px] uppercase text-white/34 sm:text-[9px]">
+                  Compiler off
+                </dt>
+                <dd className="shrink-0 text-[9px] text-white/58 sm:text-[10px]">0.170 ms</dd>
+              </div>
+              <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/8 bg-white/[0.025] px-3 font-mono tracking-normal sm:px-4">
+                <dt className="truncate text-[8px] uppercase text-white/54 sm:text-[9px]">
+                  Compiler on
+                </dt>
+                <dd className="shrink-0 text-[9px] text-white/92 sm:text-[10px]">0.020 ms</dd>
+              </div>
+              <div className="flex min-w-0 items-center justify-between gap-2 px-3 font-mono tracking-normal sm:px-4">
+                <dt className="truncate text-[8px] uppercase text-white/34 sm:text-[9px]">
+                  Update executions
+                </dt>
+                <dd className="shrink-0 text-[9px] text-white/78 sm:text-[10px]">0</dd>
+              </div>
+            </dl>
+          </div>
+
+          <a
+            className="group flex h-12 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.025] px-4 font-mono text-[9px] uppercase tracking-normal text-white/44 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white sm:px-5"
+            href="/docs/renderers/react#experimental-aot-compiler"
+          >
+            Apple M1 / Chromium 145
+            <span className="flex items-center gap-2 text-white/78">
+              Method
+              <ArrowRight
+                aria-hidden
+                className="size-3 transition-transform duration-150 group-hover:translate-x-0.5"
+                strokeWidth={1.5}
+              />
+            </span>
+          </a>
+        </figure>
+
+        <HighlightedCode
+          className="flex h-[300px] min-w-0 flex-col"
+          code={reactCompilerCode}
+          copyable
+          highlightLines={[7]}
+          label="farm.config.ts"
+          language="ts"
+          prefix="AOT"
+        />
+      </div>
+    </div>
+  );
+}
+
 function FeatureCell({
   index,
   icon: Icon,
@@ -1314,6 +1405,24 @@ function DeveloperExperienceGrid() {
         title="Errors that point to the source"
       >
         <RuntimeErrorVisual />
+      </FeatureCell>
+      <FeatureCell
+        body={
+          <>
+            On a measured 768-node static-tree workload, enabling the flag cut median update latency
+            from <span className="font-mono text-white/68">0.170 ms</span> to{" "}
+            <span className="font-mono text-white/86">0.020 ms</span>—an{" "}
+            <span className="font-mono text-white/86">8.5× speed-up</span>—while compiled local
+            updates added zero component executions. Unsupported structures stay on React.
+          </>
+        }
+        className="border-t border-white/12 lg:col-span-2"
+        icon={Cpu}
+        index="01.7"
+        label="React compiler"
+        title="Turn on AOT for proven-safe local updates"
+      >
+        <ReactCompilerVisual />
       </FeatureCell>
     </section>
   );
