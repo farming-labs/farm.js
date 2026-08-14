@@ -464,6 +464,9 @@ const betterAuthRenderers = [
 
 test("generates renderer-native Better Auth starters", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-native-auth-"));
+  const templatePackage = JSON.parse(
+    await readFile(path.join(packageDir, "templates/better-auth/package.json"), "utf8"),
+  );
 
   try {
     for (const renderer of betterAuthRenderers) {
@@ -493,7 +496,10 @@ test("generates renderer-native Better Auth starters", async () => {
       const authClient = await readFile(path.join(generatedDir, "src/lib/auth-client.ts"), "utf8");
 
       assert.equal(typeof packageJson.dependencies[renderer.packageName], "string");
-      assert.equal(packageJson.dependencies["@farm.js/better-auth"], "0.1.0-beta.33");
+      assert.equal(
+        packageJson.dependencies["@farm.js/better-auth"],
+        templatePackage.dependencies["@farm.js/better-auth"],
+      );
       assert.equal(packageJson.dependencies["better-auth"], "1.6.25");
       assert.equal(packageJson.dependencies.react, undefined);
       assert.equal(packageJson.dependencies["react-dom"], undefined);
