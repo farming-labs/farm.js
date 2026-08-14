@@ -29,6 +29,7 @@ test("uses concise labels for CLI template choices", async () => {
   const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
 
   assert.match(source, /title: "Basic starter"/);
+  assert.match(source, /title: "React Compiler starter \(experimental\)"/);
   assert.match(source, /title: "Auth starter"/);
   assert.match(source, /title: "Better Auth starter"/);
   assert.match(source, /title: "Stripe starter"/);
@@ -46,6 +47,7 @@ test("lists every integration starter from the CLI", () => {
 
   for (const template of [
     "basic",
+    "react-compiler",
     "auth",
     "better-auth",
     "ai",
@@ -224,6 +226,116 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedPnpmWorkspace, /^  esbuild: true$/m);
     assert.match(generatedPnpmWorkspace, /^  sharp: true$/m);
     assert.match(generatedPnpmWorkspace, /^  vue-demi: true$/m);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("generates the experimental React Compiler starter from the maintained example UI", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-react-compiler-"));
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "compiler-app",
+        "--template",
+        "react-compiler",
+        "--typescript",
+        "--skip-install",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          npm_config_user_agent: "pnpm/11.18.0 npm/? node/v22.0.0",
+        },
+      },
+    );
+
+    const templateDir = path.join(packageDir, "templates/react-compiler");
+    const exampleDir = path.join(packageDir, "..", "..", "examples/react-compiler");
+    const generatedDir = path.join(tempDir, "compiler-app");
+    const templatePackage = JSON.parse(
+      await readFile(path.join(templateDir, "package.json"), "utf8"),
+    );
+    const generatedPackage = JSON.parse(
+      await readFile(path.join(generatedDir, "package.json"), "utf8"),
+    );
+
+    assert.equal(generatedPackage.name, "compiler-app");
+    assert.equal(generatedPackage.packageManager, "pnpm@11.18.0");
+    assert.equal(
+      generatedPackage.dependencies["@farm.js/core"],
+      templatePackage.dependencies["@farm.js/core"],
+    );
+    assert.equal(
+      generatedPackage.dependencies["@farm.js/react"],
+      templatePackage.dependencies["@farm.js/react"],
+    );
+    assert.equal(
+      generatedPackage.devDependencies["@farm.js/cli"],
+      templatePackage.devDependencies["@farm.js/cli"],
+    );
+    assert.equal(
+      generatedPackage.scripts.experiment,
+      "pnpm run build && node scripts/verify-experiment.mjs",
+    );
+    assert.equal(
+      generatedPackage.scripts["experiment:heavy"],
+      "node scripts/verify-heavy-experiment.mjs",
+    );
+
+    const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+    assert.match(config, /from "@farm\.js\/react"/);
+    assert.match(config, /experimental:\s*\{\s*compiler: compilerEnabled/s);
+    assert.match(config, /theme:\s*\{\s*default: "dark"/s);
+
+    const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
+    assert.match(page, /Same React API\./);
+    assert.match(page, /<CompilerComparison \/>/);
+    assert.match(page, /<CompilerEdgeLab \/>/);
+    assert.match(page, /<HeavyInteractionBenchmark \/>/);
+    assert.match(page, /pnpm experiment:heavy/);
+
+    const comparison = await readFile(
+      path.join(generatedDir, "src/components/compiler-comparison.tsx"),
+      "utf8",
+    );
+    assert.match(comparison, /export function CompiledCounter/);
+    assert.match(comparison, /"use no compiler"/);
+    assert.match(comparison, /data-path="compiled"/);
+    assert.match(comparison, /data-path="react"/);
+
+    for (const relativePath of [
+      "src/app/globals.css",
+      "src/components/compiler-comparison.tsx",
+      "src/components/compiler-edge-lab.tsx",
+      "src/components/heavy-interaction-benchmark.tsx",
+    ]) {
+      assert.equal(
+        await readFile(path.join(templateDir, relativePath), "utf8"),
+        await readFile(path.join(exampleDir, relativePath), "utf8"),
+        `${relativePath} should stay aligned with the maintained React Compiler example`,
+      );
+      assert.equal(
+        await readFile(path.join(generatedDir, relativePath), "utf8"),
+        await readFile(path.join(templateDir, relativePath), "utf8"),
+      );
+    }
+
+    assert.match(
+      await readFile(path.join(generatedDir, "README.md"), "utf8"),
+      /^# FARMJS React Compiler Starter/m,
+    );
+    await readFile(path.join(generatedDir, "scripts/verify-experiment.mjs"), "utf8");
+    await readFile(path.join(generatedDir, "scripts/verify-heavy-experiment.mjs"), "utf8");
+    assert.match(await readFile(path.join(generatedDir, ".gitignore"), "utf8"), /^\.farm\/$/m);
+
+    assert.match(output, /React AOT compiler is experimental/);
+    assert.match(output, /pnpm experiment/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }

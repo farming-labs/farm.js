@@ -91,6 +91,16 @@ hydration, and unmounting.
 
 ### Enable the compiler
 
+Start from the complete experimental starter when you want the compiler flag, comparison UI, safe
+fallback examples, and reproducible browser checks already wired together:
+
+```bash
+pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
+```
+
+You can also clone the standalone
+[React Compiler Starter](https://github.com/farming-labs/farmjs-react-compiler-starter).
+
 Install `@farm.js/react` to select the React renderer with compiler options:
 
 ```bash
@@ -404,8 +414,8 @@ property.
    remain eligible.
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
-app includes batching, multiple bindings, keyed fallback, compiler-on/off production builds, and
-the reproducible heavy-interaction benchmark.
+app and standalone starter include batching, multiple bindings, keyed fallback, compiler-on/off
+production builds, and the reproducible heavy-interaction benchmark.
 
 ## React-specific FARMJS APIs
 

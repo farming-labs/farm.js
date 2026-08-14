@@ -43,24 +43,25 @@ React because their generated UI and provider packages are React-oriented.
 Use `--list-templates` to see the same catalog in the terminal. Provider templates include the
 integration wiring, an app-owned UI feature, `.env.example`, and a minimal dark home page.
 
-| Template       | Included integration      |
-| -------------- | ------------------------- |
-| `basic`        | Minimal Farm.js app       |
-| `auth`         | Farm.js Auth              |
-| `better-auth`  | Better Auth               |
-| `ai`           | AI SDK chat               |
-| `auth0`        | Auth0                     |
-| `authjs`       | Auth.js with GitHub OAuth |
-| `autumn`       | Autumn billing            |
-| `clerk`        | Clerk                     |
-| `jobs-inngest` | Inngest jobs              |
-| `jobs-trigger` | Trigger.dev jobs          |
-| `polar`        | Polar billing             |
-| `resend`       | Resend email              |
-| `stripe`       | Stripe billing            |
-| `supabase`     | Supabase Auth             |
-| `unkey`        | Unkey API keys            |
-| `workos`       | WorkOS AuthKit            |
+| Template         | Included capability                                |
+| ---------------- | -------------------------------------------------- |
+| `basic`          | Minimal Farm.js app                                |
+| `react-compiler` | Experimental React AOT compiler and comparison lab |
+| `auth`           | Farm.js Auth                                       |
+| `better-auth`    | Better Auth                                        |
+| `ai`             | AI SDK chat                                        |
+| `auth0`          | Auth0                                              |
+| `authjs`         | Auth.js with GitHub OAuth                          |
+| `autumn`         | Autumn billing                                     |
+| `clerk`          | Clerk                                              |
+| `jobs-inngest`   | Inngest jobs                                       |
+| `jobs-trigger`   | Trigger.dev jobs                                   |
+| `polar`          | Polar billing                                      |
+| `resend`         | Resend email                                       |
+| `stripe`         | Stripe billing                                     |
+| `supabase`       | Supabase Auth                                      |
+| `unkey`          | Unkey API keys                                     |
+| `workos`         | WorkOS AuthKit                                     |
 
 For example:
 
@@ -69,6 +70,15 @@ pnpm create @farm.js/app@beta stripe-app --template stripe --typescript
 ```
 
 The generated README lists the required environment values and links to the provider guide.
+
+To explore Farm's experimental React AOT compiler with the dark comparison lab:
+
+```bash
+pnpm create @farm.js/app@beta compiler-app --template react-compiler --typescript
+```
+
+The same project is available as the standalone
+[React Compiler Starter](https://github.com/farming-labs/farmjs-react-compiler-starter).
 
 ## What you get
 
