@@ -387,6 +387,7 @@ function compileCandidate(
   createComponentIdentifier: t.Identifier,
   useStateNames: ReadonlySet<string>,
   reactNames: ReadonlySet<string>,
+  moduleId: string,
 ): string | undefined {
   const { path, name, statementPath } = candidate;
   if (path.node.async || path.node.generator)
@@ -467,6 +468,22 @@ function compileCandidate(
   const definition = t.callExpression(t.cloneNode(createComponentIdentifier), [
     t.objectExpression([
       t.objectProperty(t.identifier("displayName"), t.stringLiteral(name)),
+      t.spreadElement(
+        t.conditionalExpression(
+          t.memberExpression(
+            t.metaProperty(t.identifier("import"), t.identifier("meta")),
+            t.identifier("hot"),
+          ),
+          t.objectExpression([
+            t.objectProperty(t.identifier("hmrId"), t.stringLiteral(`${moduleId}#${name}`)),
+            t.objectProperty(
+              t.identifier("stateSignature"),
+              t.stringLiteral(String(states.length)),
+            ),
+          ]),
+          t.objectExpression([]),
+        ),
+      ),
       t.objectProperty(
         t.identifier("initialize"),
         t.arrowFunctionExpression(
@@ -604,6 +621,7 @@ export async function compileReactModule(
             createComponentIdentifier,
             useStateNames,
             reactNames,
+            id,
           );
           if (reason) {
             diagnostics.push({

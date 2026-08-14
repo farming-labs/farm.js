@@ -55,6 +55,54 @@ describe("React AOT compiler safety boundaries", () => {
     expect(result.code).not.toContain("compiler-runtime");
   });
 
+  it("keeps a keyed parent on React while compiling its stable row component", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function List(props) {
+        const [items, setItems] = useState(props.items);
+        return <ul onClick={() => setItems([...items])}>{items.map((item) => <Row key={item.id} item={item} />)}</ul>;
+      }
+      export function Row(props) {
+        const [selected, setSelected] = useState(false);
+        return <li onClick={() => setSelected(!selected)}>{props.item.name}: {selected ? "yes" : "no"}</li>;
+      }
+    `);
+
+    expect(result.compiled).toEqual(["Row"]);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        component: "List",
+        reason: expect.stringMatching(/dynamic child structures/i),
+      }),
+    ]);
+    expect(result.code).toContain("createCompiledComponent");
+  });
+
+  it("compiles object, array, and nullish state transitions", async () => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function StructuredState() {
+        const [record, setRecord] = useState({ count: 0 });
+        const [items, setItems] = useState([1]);
+        const [value, setValue] = useState(null);
+        return (
+          <section>
+            <button onClick={() => setRecord((current) => ({ count: current.count + 1 }))}>Object</button>
+            <button onClick={() => setItems((current) => [...current, 2])}>Array</button>
+            <button onClick={() => setValue(value === null ? "ready" : null)}>Null</button>
+            <output data-count={record.count} data-first={items[0]}>{value ?? "empty"}</output>
+          </section>
+        );
+      }
+    `);
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["StructuredState"]);
+    expect(result.code).toContain("dependencies: [0]");
+    expect(result.code).toContain("dependencies: [1]");
+    expect(result.code).toContain("dependencies: [2]");
+  });
+
   it("falls back when a stateful helper call could return a dynamic child tree", async () => {
     const result = await compile(`
       import { useState } from "react";

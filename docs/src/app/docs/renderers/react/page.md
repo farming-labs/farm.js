@@ -142,15 +142,19 @@ interface ReactCompilerOptions {
   mode?: ReactCompilerMode;
   directive?: string;
   onUnsupported?: UnsupportedCompilerBehavior;
+  report?: boolean;
+  reportFile?: string;
 }
 ```
 
-| Option          | Values                                | Default          | Purpose                                                                  |
-| --------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------ |
-| `compiler`      | `false`, `true`, or an options object | `false`          | Disables, enables with defaults, or configures the React-only transform. |
-| `mode`          | `"infer"`, `"annotation"`             | `"infer"`        | Selects components automatically or only through an explicit directive.  |
-| `directive`     | non-empty string                      | `"use compiler"` | Names the module/function directive used by annotation mode.             |
-| `onUnsupported` | `"fallback"`, `"warn"`, `"error"`     | `"fallback"`     | Controls what happens outside the current supported subset.              |
+| Option          | Values                                | Default                     | Purpose                                                                  |
+| --------------- | ------------------------------------- | --------------------------- | ------------------------------------------------------------------------ |
+| `compiler`      | `false`, `true`, or an options object | `false`                     | Disables, enables with defaults, or configures the React-only transform. |
+| `mode`          | `"infer"`, `"annotation"`             | `"infer"`                   | Selects components automatically or only through an explicit directive.  |
+| `directive`     | non-empty string                      | `"use compiler"`            | Names the module/function directive used by annotation mode.             |
+| `onUnsupported` | `"fallback"`, `"warn"`, `"error"`     | `"fallback"`                | Controls what happens outside the current supported subset.              |
+| `report`        | boolean                               | `false`                     | Writes a compiler coverage report after a successful production build.   |
+| `reportFile`    | project-relative path                 | `.farm/react-compiler.json` | Changes the report path and enables reporting when provided.             |
 
 `directive` is valid only when `mode` is `"annotation"`. Invalid modes, invalid unsupported
 behaviors, and directives configured in inference mode throw a configuration error instead of
@@ -245,6 +249,74 @@ For example, an unsupported keyed list can report:
 
 Use `"warn"` while exploring the compiler. Use annotation mode with `"error"` when CI should prove
 that every explicitly selected component still satisfies the supported contract.
+
+### Compiler coverage report
+
+Console warnings are useful while editing, but a report makes compiler coverage visible across the
+production browser graph where compiled DOM updates run. Enable it without changing selection or
+fallback behavior:
+
+```ts
+renderer: react({
+  experimental: {
+    compiler: {
+      report: true,
+    },
+  },
+}),
+```
+
+After a successful build, Farm writes `.farm/react-compiler.json`:
+
+```json
+{
+  "version": 1,
+  "summary": {
+    "modules": 2,
+    "componentsConsidered": 4,
+    "compiled": 2,
+    "fallback": 2
+  },
+  "fallbackReasons": [
+    {
+      "count": 2,
+      "reason": "dynamic child structures require React reconciliation"
+    }
+  ],
+  "modules": [
+    {
+      "id": "src/Products.tsx",
+      "compiled": ["ProductRow"],
+      "fallbacks": [
+        {
+          "module": "src/Products.tsx",
+          "component": "ProductList",
+          "reason": "dynamic child structures require React reconciliation",
+          "selected": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+`componentsConsidered` counts candidates selected by the active mode. `compiled` counts components
+using the AOT runtime, and `fallback` counts candidates left on React. `selected` is `true` when an
+annotation explicitly requested compilation. Module paths are relative to the project root, and
+the output is sorted and contains no timestamp, so CI can compare reports without machine-specific
+noise.
+
+Use a different project-relative output path when CI collects artifacts elsewhere:
+
+```ts
+compiler: {
+  reportFile: "artifacts/react-compiler.json",
+}
+```
+
+Report paths cannot be absolute or escape the project root. Reporting is observability only: it
+does not make unsupported components fail. Use `onUnsupported: "error"` when failure is the desired
+policy.
 
 ### Current supported contract
 
@@ -370,6 +442,15 @@ Attribute updates preserve important DOM behavior:
 The server output is ordinary React HTML and contains no compiler marker. React hydrates that
 markup normally; direct binding updates begin after the component mounts.
 
+During development, compiled components receive a module-and-component identity plus a state-layout
+signature. A compatible Fast Refresh replaces the compiled definition while retaining the React
+component type and its local cells. If the compiler-owned state layout changes, the identity is not
+reused and React remounts it instead of preserving incompatible state.
+
+If a direct binding evaluation throws, the runtime schedules a React update and rethrows from the
+component render. This lets the nearest React error boundary handle the failure through React's
+normal recovery path.
+
 ### Safety reasoning
 
 The compiler uses fallback as a semantic boundary, not as an error-recovery trick. A precomputed
@@ -390,6 +471,14 @@ The package and example test suites verify more than generated code:
 - server-rendered markup hydrates and remains interactive;
 - lazy initialization, event snapshots, and batched functional setters are preserved;
 - multiple state cells update only their dependent bindings;
+- Strict Mode mounting, queued-unmount cleanup, bubbled events, controlled input selection, and
+  composition events preserve their React behavior;
+- simultaneous parent-prop and compiled-local updates remain coherent;
+- compatible Fast Refresh preserves state, while binding errors reach React error boundaries;
+- hydration mismatches follow React's recoverable-error path and remain interactive;
+- object, array, and nullish state transitions match normal React across 3,000 deterministic
+  randomized updates;
+- the packaged runtime is exercised separately with React 18.3 and React 19;
 - boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
 - keyed lists, effects, refs, and custom child components remain on React without corrupting output.
 
@@ -407,10 +496,11 @@ property.
 ### Recommended rollout
 
 1. Start with `compiler: true` and confirm the application behaves normally.
-2. Change `onUnsupported` to `"warn"` to see why candidates remain on React.
-3. Add `"use no compiler"` to known React-owned boundaries when the reason is intentional.
-4. Use annotation mode for components whose compiler ownership should be explicit.
-5. Use annotation mode with `onUnsupported: "error"` when CI must enforce that selected components
+2. Enable `report` to record coverage across the complete production build.
+3. Change `onUnsupported` to `"warn"` to see fallback reasons while editing.
+4. Add `"use no compiler"` to known React-owned boundaries when the reason is intentional.
+5. Use annotation mode for components whose compiler ownership should be explicit.
+6. Use annotation mode with `onUnsupported: "error"` when CI must enforce that selected components
    remain eligible.
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)

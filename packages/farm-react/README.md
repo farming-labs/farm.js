@@ -66,6 +66,20 @@ state update therefore does not schedule a React render or reconciliation pass.
 Unsupported components fall back to React by default. Use `onUnsupported: "warn"` for diagnostics
 or `onUnsupported: "error"` while tightening an annotated migration.
 
+Enable a deterministic production-build coverage report to see which components compiled and why
+the rest stayed on React:
+
+```ts
+compiler: {
+  report: true,
+  // reportFile: "artifacts/react-compiler.json",
+}
+```
+
+The default path is `.farm/react-compiler.json`. The report covers the production browser graph and
+contains project-relative module paths, compiled component names, fallback details, and fallback
+reasons aggregated by count. A custom project-relative `reportFile` also enables reporting.
+
 The runtime test compares the same counter interaction on both paths: ordinary React performs a
 second component render and commit, while the compiled component remains at one render and one
 commit and updates its two bindings directly. This is a deterministic structural performance

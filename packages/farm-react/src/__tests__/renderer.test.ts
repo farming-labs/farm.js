@@ -1,7 +1,12 @@
 // @vitest-environment node
 
 import { describe, expect, it } from "vitest";
-import { DEFAULT_COMPILER_DIRECTIVE, normalizeReactCompilerOptions, react } from "../index";
+import {
+  DEFAULT_COMPILER_DIRECTIVE,
+  DEFAULT_COMPILER_REPORT_FILE,
+  normalizeReactCompilerOptions,
+  react,
+} from "../index";
 
 describe("React renderer compiler options", () => {
   it("keeps the compiler disabled unless the experimental option is enabled", () => {
@@ -15,6 +20,8 @@ describe("React renderer compiler options", () => {
           mode: "infer",
           directive: DEFAULT_COMPILER_DIRECTIVE,
           onUnsupported: "fallback",
+          report: false,
+          reportFile: DEFAULT_COMPILER_REPORT_FILE,
         },
       },
     });
@@ -33,6 +40,8 @@ describe("React renderer compiler options", () => {
           mode: "annotation",
           directive: "use fast component",
           onUnsupported: "fallback",
+          report: false,
+          reportFile: DEFAULT_COMPILER_REPORT_FILE,
         },
       },
     });
@@ -45,5 +54,32 @@ describe("React renderer compiler options", () => {
         directive: "use compiler",
       }),
     ).toThrow(/annotation mode/i);
+  });
+
+  it("normalizes compiler coverage reporting", () => {
+    expect(
+      normalizeReactCompilerOptions({
+        report: true,
+        reportFile: "reports/react-compiler.json",
+      }),
+    ).toEqual({
+      mode: "infer",
+      directive: DEFAULT_COMPILER_DIRECTIVE,
+      onUnsupported: "fallback",
+      report: true,
+      reportFile: "reports/react-compiler.json",
+    });
+    expect(normalizeReactCompilerOptions({ reportFile: "coverage/compiler.json" }).report).toBe(
+      true,
+    );
+  });
+
+  it("keeps compiler reports inside the project root", () => {
+    expect(() =>
+      normalizeReactCompilerOptions({ report: true, reportFile: "../outside.json" }),
+    ).toThrow(/project root/i);
+    expect(() =>
+      normalizeReactCompilerOptions({ report: false, reportFile: "compiler.json" }),
+    ).toThrow(/reporting is false/i);
   });
 });
