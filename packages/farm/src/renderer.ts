@@ -37,6 +37,14 @@ export interface FarmRenderer {
   buildConcurrency?: "parallel" | "serial";
   /** Runtime features this renderer intentionally supports. */
   capabilities?: FarmRendererCapabilitiesInput;
+  /**
+   * Serializable options consumed by the renderer's Vite integration.
+   *
+   * Keeping renderer-owned configuration on the descriptor lets one rendering
+   * library expose multiple compiler modes without teaching Farm's core about
+   * each option.
+   */
+  options?: Readonly<Record<string, unknown>>;
 }
 
 export interface FarmRendererStreamingCapabilities {
@@ -91,6 +99,7 @@ export function getFarmRendererComponentExtensions(
 export interface FarmRendererViteModule {
   createFarmRendererPlugin(options?: {
     ssr?: boolean;
+    rendererOptions?: Readonly<Record<string, unknown>>;
   }): unknown | readonly unknown[] | Promise<unknown | readonly unknown[]>;
 }
 
@@ -164,6 +173,7 @@ export function resolveFarmRenderer(renderer?: FarmRenderer): FarmRenderer {
     optimizeDeps: [...(resolved.optimizeDeps || [])],
     buildConcurrency: resolved.buildConcurrency || "parallel",
     capabilities: getFarmRendererCapabilities(resolved),
+    options: resolved.options ? { ...resolved.options } : undefined,
   };
 }
 
@@ -201,7 +211,7 @@ export async function loadFarmRendererVitePlugins(
   // React uses Vite's default automatic JSX transform today. Keep the legacy
   // path dependency-free and avoid resolving Farm's own built package while
   // running directly from source in the monorepo.
-  if (isReactRenderer(renderer)) return [];
+  if (renderer.vite === REACT_RENDERER.vite) return [];
 
   const modulePath = resolveFarmRendererModule(root, renderer.vite);
   const rendererModule = (await import(pathToFileURL(modulePath).href)) as FarmRendererViteModule;
@@ -212,7 +222,10 @@ export async function loadFarmRendererVitePlugins(
     );
   }
 
-  const created = await rendererModule.createFarmRendererPlugin(options);
+  const created = await rendererModule.createFarmRendererPlugin({
+    ...options,
+    rendererOptions: renderer.options,
+  });
   if (!created) return [];
   return Array.isArray(created) ? [...created] : [created];
 }

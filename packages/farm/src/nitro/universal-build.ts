@@ -7050,8 +7050,14 @@ export default async function farmNitroEventHandler(event) {
     // Function-name helpers are unsafe for provider scripts that serialize a
     // function with toString(); the helper is outside the emitted script scope.
     keepNames:
-      configuredEsbuildOptions.keepNames ?? !(config.docs?.enabled && config.docs.adapter?.server),
+      config.docs?.enabled && config.docs.adapter?.server
+        ? false
+        : (configuredEsbuildOptions.keepNames ?? true),
   };
+  const prebuiltSSREsbuildOptions =
+    config.docs?.enabled && config.docs.adapter?.server
+      ? resolvedEsbuildOptions
+      : configuredEsbuildOptions;
   const effectiveMinify = configuredEsbuildOptions.minify ?? shouldMinify;
   const useFarmEsbuildMinifier =
     effectiveMinify &&
@@ -7167,7 +7173,7 @@ export default async function farmNitroEventHandler(event) {
       ? copyPrebuiltSSRBundle(
           ssrBundle,
           path.join(outputDir, "server", FARM_SSR_OUTPUT_DIR),
-          configuredEsbuildOptions,
+          prebuiltSSREsbuildOptions,
           effectiveMinify,
           fs,
         )

@@ -451,12 +451,24 @@
     min-height: 1.25rem;
   }
 
+  .farm-highlighted-code--value-cycle .sh__line {
+    min-height: 1rem;
+  }
+
   .farm-highlighted-code .sh__token--keyword {
     font-weight: 650;
   }
 
   .farm-highlighted-code .sh__token--comment {
     font-style: italic;
+  }
+
+  .farm-code-cycle-panel {
+    animation: farm-code-cycle-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .farm-code-value-cycle {
+    animation: farm-code-value-cycle-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   @media (min-width: 768px) {
@@ -656,6 +668,30 @@
 
   100% {
     transform: translate3d(0, -6rem, 0);
+  }
+}
+
+@keyframes farm-code-cycle-panel-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes farm-code-value-cycle-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 3px, 0);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0);
   }
 }
 
@@ -1043,6 +1079,14 @@
   .farm-renderer-value-track {
     animation: none;
     transform: none;
+  }
+
+  .farm-code-cycle-panel {
+    animation: none;
+  }
+
+  .farm-code-value-cycle {
+    animation: none;
   }
 
   .farm-terminal-command-text,

@@ -1,5 +1,8 @@
 // @vitest-environment node
 
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   defineRendererDescriptorConformance,
   defineRendererServerConformance,
@@ -8,6 +11,7 @@ import { describe, expect, it } from "vitest";
 import {
   getFarmRendererCapabilities,
   getFarmRendererComponentExtensions,
+  loadFarmRendererVitePlugins,
   readFarmRendererWebStream,
   REACT_RENDERER,
   resolveFarmRenderer,
@@ -84,6 +88,53 @@ describe("renderer configuration", () => {
     expect(renderer).toMatchObject(descriptor);
     expect(renderer.componentExtensions).not.toBe(descriptor.componentExtensions);
     expect(renderer.dedupe).not.toBe(descriptor.dedupe);
+  });
+
+  it("copies renderer-owned compiler options", () => {
+    const options = { experimental: { compiler: true } };
+    const renderer = resolveFarmRenderer({
+      ...REACT_RENDERER,
+      vite: "@farm.js/react/vite",
+      options,
+    });
+
+    expect(renderer.options).toEqual(options);
+    expect(renderer.options).not.toBe(options);
+  });
+
+  it("passes renderer-owned options to its Vite plugin factory", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "farm-renderer-options-"));
+    const packageRoot = path.join(root, "node_modules", "test-renderer");
+    try {
+      await mkdir(packageRoot, { recursive: true });
+      await writeFile(path.join(root, "package.json"), '{"type":"module"}');
+      await writeFile(
+        path.join(packageRoot, "package.json"),
+        '{"name":"test-renderer","type":"module","exports":{"./vite":"./vite.mjs"}}',
+      );
+      await writeFile(
+        path.join(packageRoot, "vite.mjs"),
+        `export function createFarmRendererPlugin(options) {
+          return { name: "test:" + options.rendererOptions.compiler };
+        }`,
+      );
+
+      const plugins = await loadFarmRendererVitePlugins(
+        resolveFarmRenderer({
+          name: "test",
+          vite: "test-renderer/vite",
+          server: "test-renderer/server",
+          client: "test-renderer/client",
+          options: { compiler: "enabled" },
+        }),
+        root,
+        { ssr: true },
+      );
+
+      expect(plugins).toEqual([{ name: "test:enabled" }]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("preserves an explicit serial production-build policy", () => {

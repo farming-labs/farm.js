@@ -1,13 +1,14 @@
 "use client";
 
-import { Code2 } from "lucide-react";
+import { Check, Code2, Copy, RefreshCw } from "lucide-react";
 import type { KeyboardEvent } from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { highlight } from "sugar-high";
 
 interface HighlightedCodeProps {
   className?: string;
   code: string;
+  copyable?: boolean;
   highlightLines?: readonly number[];
   label: string;
   language: string;
@@ -22,12 +23,31 @@ export interface HighlightedCodeTab {
   language: string;
 }
 
+export interface HighlightedCodeValueVariant {
+  code: string;
+  id: string;
+}
+
 interface HighlightedCodeTabsProps {
+  autoRotateMs?: number;
   className?: string;
   compact?: boolean;
+  copyable?: boolean;
   id: string;
   tabs: readonly [HighlightedCodeTab, ...HighlightedCodeTab[]];
   tabsLabel?: string;
+}
+
+interface HighlightedCodeValueCycleProps {
+  autoRotateMs: number;
+  className?: string;
+  copyable?: boolean;
+  id: string;
+  label: string;
+  language: string;
+  prefixCode: string;
+  suffixCode: string;
+  variants: readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 }
 
 function figureClassName(className?: string) {
@@ -39,11 +59,107 @@ function figureClassName(className?: string) {
     .join(" ");
 }
 
+function copyWithSelection(value: string) {
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const didCopy = document.execCommand("copy");
+  textarea.remove();
+  return didCopy;
+}
+
+function CopyCodeButton({ code, label }: { code: string; label: string }) {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const resetTimer = useRef<number | undefined>(undefined);
+  const copyLabel = copyState === "copied" ? "Copied" : copyState === "failed" ? "Retry" : "Copy";
+  const CopyStateIcon = copyState === "copied" ? Check : copyState === "failed" ? RefreshCw : Copy;
+
+  useEffect(() => {
+    return () => window.clearTimeout(resetTimer.current);
+  }, []);
+
+  async function copyCode() {
+    let didCopy = false;
+
+    try {
+      didCopy = copyWithSelection(code);
+    } catch {
+      // Continue with the asynchronous Clipboard API.
+    }
+
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard API unavailable");
+      await navigator.clipboard.writeText(code);
+      didCopy = true;
+    } catch {
+      // Keep the synchronous selection fallback result.
+    }
+
+    window.clearTimeout(resetTimer.current);
+    setCopyState(didCopy ? "copied" : "failed");
+    resetTimer.current = window.setTimeout(() => setCopyState("idle"), 1600);
+  }
+
+  return (
+    <button
+      aria-label={`${copyLabel} ${label} code`}
+      className="inline-flex min-w-[4.5rem] items-center justify-center gap-1.5 border-l border-white/10 pl-3 uppercase text-white/42 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+      onClick={copyCode}
+      title={`${copyLabel} ${label} code`}
+      type="button"
+    >
+      <CopyStateIcon aria-hidden className="size-2.5" strokeWidth={1.5} />
+      <span>{copyLabel}</span>
+      <span aria-live="polite" className="sr-only">
+        {copyLabel}
+      </span>
+    </button>
+  );
+}
+
+function renderHighlightedCode(code: string, highlightLines: readonly number[] = []) {
+  const highlightedLineNumbers = new Set(highlightLines);
+
+  return highlight(code)
+    .split("\n")
+    .map((line, index) =>
+      highlightedLineNumbers.has(index + 1)
+        ? line.replace('class="sh__line"', 'class="sh__line sh__line--highlighted"')
+        : line,
+    )
+    .join("");
+}
+
+function useAutoRotatingIndex(autoRotateMs: number | undefined, itemCount: number) {
+  const [activeIndex, setActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!autoRotateMs || itemCount < 2) return;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (reducedMotion.matches) return;
+
+    const timer = window.setInterval(() => {
+      setActiveIndex((index) => (index + 1) % itemCount);
+    }, autoRotateMs);
+
+    return () => window.clearInterval(timer);
+  }, [autoRotateMs, itemCount]);
+
+  return [activeIndex, setActiveIndex] as const;
+}
+
 function HighlightedCodeBody({
   ariaLabel,
   ariaLabelledBy,
   code,
   compact = false,
+  animated = false,
   highlightLines = [],
   id,
   role,
@@ -52,19 +168,12 @@ function HighlightedCodeBody({
   ariaLabelledBy?: string;
   code: string;
   compact?: boolean;
+  animated?: boolean;
   highlightLines?: readonly number[];
   id?: string;
   role?: "tabpanel";
 }) {
-  const highlightedLineNumbers = new Set(highlightLines);
-  const highlightedCode = highlight(code.trim())
-    .split("\n")
-    .map((line, index) =>
-      highlightedLineNumbers.has(index + 1)
-        ? line.replace('class="sh__line"', 'class="sh__line sh__line--highlighted"')
-        : line,
-    )
-    .join("");
+  const highlightedCode = renderHighlightedCode(code.trim(), highlightLines);
 
   return (
     <pre
@@ -72,6 +181,7 @@ function HighlightedCodeBody({
       aria-labelledby={ariaLabelledBy}
       className={[
         "min-h-0 max-w-full flex-1 overflow-x-auto font-mono tracking-normal",
+        animated && "farm-code-cycle-panel",
         compact
           ? "py-2 text-[10px] leading-5 sm:text-[10.5px]"
           : "py-4 text-[10.5px] leading-6 sm:text-[11px]",
@@ -96,6 +206,7 @@ function HighlightedCodeBody({
 export function HighlightedCode({
   className,
   code,
+  copyable = false,
   highlightLines,
   label,
   language,
@@ -109,7 +220,10 @@ export function HighlightedCode({
           {prefix ? <span className="shrink-0 font-semibold text-white/72">{prefix}</span> : null}
           <span className="truncate">{label}</span>
         </span>
-        <span className="shrink-0 uppercase text-white/24">{language}</span>
+        <span className="flex shrink-0 items-center gap-3">
+          <span className="uppercase text-white/24">{language}</span>
+          {copyable ? <CopyCodeButton code={code} label={label} /> : null}
+        </span>
       </figcaption>
       <HighlightedCodeBody
         ariaLabel={`${prefix ? `${prefix} ` : ""}${label} code`}
@@ -120,14 +234,68 @@ export function HighlightedCode({
   );
 }
 
+export function HighlightedCodeValueCycle({
+  autoRotateMs,
+  className,
+  copyable = false,
+  id,
+  label,
+  language,
+  prefixCode,
+  suffixCode,
+  variants,
+}: HighlightedCodeValueCycleProps) {
+  const [activeIndex] = useAutoRotatingIndex(autoRotateMs, variants.length);
+  const activeVariant = variants[activeIndex] ?? variants[0];
+  const completeCode = `${prefixCode}\n${activeVariant.code}\n${suffixCode}`;
+  const valueLineCount = activeVariant.code.split("\n").length;
+  const highlightedValue = renderHighlightedCode(
+    activeVariant.code,
+    Array.from({ length: valueLineCount }, (_, index) => index + 1),
+  );
+
+  return (
+    <figure className={figureClassName(className)}>
+      <figcaption className="flex h-10 min-w-0 items-center justify-between gap-4 border-b border-white/8 px-4 font-mono text-[9px] tracking-normal text-white/38">
+        <span className="flex min-w-0 items-center gap-2">
+          <Code2 aria-hidden className="size-3 shrink-0" strokeWidth={1.5} />
+          <span className="truncate text-white/72">{label}</span>
+        </span>
+        <span className="flex shrink-0 items-center gap-3">
+          <span className="uppercase text-white/24">{language}</span>
+          {copyable ? <CopyCodeButton code={completeCode} label={label} /> : null}
+        </span>
+      </figcaption>
+      <pre
+        aria-label={`${label} code`}
+        className="min-h-0 max-w-full flex-1 overflow-x-auto py-2 font-mono text-[9.5px] leading-4 tracking-normal sm:text-[10px]"
+        id={id}
+        tabIndex={0}
+      >
+        <code className="farm-highlighted-code farm-highlighted-code--value-cycle block min-w-full">
+          <span dangerouslySetInnerHTML={{ __html: renderHighlightedCode(prefixCode) }} />
+          <span
+            key={activeVariant.id}
+            className="farm-code-value-cycle block"
+            dangerouslySetInnerHTML={{ __html: highlightedValue }}
+          />
+          <span dangerouslySetInnerHTML={{ __html: renderHighlightedCode(suffixCode) }} />
+        </code>
+      </pre>
+    </figure>
+  );
+}
+
 export function HighlightedCodeTabs({
+  autoRotateMs,
   className,
   compact = false,
+  copyable = false,
   id,
   tabs,
   tabsLabel = "Code examples",
 }: HighlightedCodeTabsProps) {
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = useAutoRotatingIndex(autoRotateMs, tabs.length);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const activeTab = tabs[activeIndex] ?? tabs[0];
   const panelId = `${id}-panel`;
@@ -185,12 +353,15 @@ export function HighlightedCodeTabs({
             );
           })}
         </span>
-        <span className="flex shrink-0 items-center px-3 uppercase text-white/24">
-          {activeTab.language}
+        <span className="flex shrink-0 items-stretch uppercase text-white/24">
+          <span className="flex items-center px-3">{activeTab.language}</span>
+          {copyable ? <CopyCodeButton code={activeTab.code} label={activeTab.label} /> : null}
         </span>
       </figcaption>
       <HighlightedCodeBody
+        key={activeTab.id}
         ariaLabelledBy={`${id}-${activeTab.id}-tab`}
+        animated={Boolean(autoRotateMs)}
         code={activeTab.code}
         compact={compact}
         highlightLines={activeTab.highlightLines}

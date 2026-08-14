@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">FARMJS React AOT</title>
+  <rect width="64" height="64" rx="14" fill="#0a0a09"/>
+  <path d="M18 16h30v8H28v8h17v8H28v16H18z" fill="#b8ff5b"/>
+</svg>

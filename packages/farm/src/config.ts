@@ -568,6 +568,21 @@ function normalizeDocsContentDir(value: string | undefined): string | undefined 
   return normalized || undefined;
 }
 
+async function inferDocsContentDir(
+  root: string,
+  srcDir: string,
+  entry: string,
+): Promise<string | undefined> {
+  const { existsSync } = await import("fs");
+  const contentDir = path.resolve(root, srcDir, "app", entry);
+  if (!existsSync(contentDir)) return undefined;
+
+  const relativeContentDir = path.relative(root, contentDir);
+  if (relativeContentDir.startsWith("..") || path.isAbsolute(relativeContentDir)) return undefined;
+
+  return normalizeDocsContentDir(relativeContentDir);
+}
+
 function isRecord(value: unknown): value is Record<string, any> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -757,7 +772,11 @@ export async function resolveDocsConfig(
     explicitRoute && explicitRoute.startsWith("/")
       ? docsRouteToEntry(explicitRoute)
       : docsRouteToEntry(configuredEntry || entryRoute);
-  const contentDir = normalizeDocsContentDir(docsOptions.contentDir || mergedDocsConfig.contentDir);
+  const configuredContentDir = normalizeDocsContentDir(
+    docsOptions.contentDir || mergedDocsConfig.contentDir,
+  );
+  const contentDir =
+    configuredContentDir || (await inferDocsContentDir(root, options.srcDir || "src", docsEntry));
 
   return {
     enabled: true,

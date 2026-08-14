@@ -15,6 +15,7 @@ Use the examples folder as executable docs for routing, RSC, agents, docs, markd
 | examples/basic                  | Core routing, layouts, deployment config, markdown mirrors, PPR, and framework Cron.            |
 | examples/deployment-presets     | Vercel, Cloudflare Pages, Netlify, self-hosted Node, and direct Nitro preset deployment output. |
 | examples/ssr-ssg-demo           | SSR, SSG, ISR, API routes, middleware.                                                          |
+| examples/react-compiler         | Side-by-side React AOT and normal reconciliation paths with visible render counts.              |
 | examples/preact-renderer        | Preact TSX routes, streaming SSR, hydration, hooks, and a typed FARMJS server call.             |
 | examples/solid-renderer         | Solid TSX routes, SSR, hydration, signals, and a typed FARMJS server call.                      |
 | examples/vue-renderer           | Vue SFC routes, SSR, hydration, refs, and a typed FARMJS server call.                           |
