@@ -53,9 +53,7 @@ declare global {
 import type FarmConfig from "../farm.config";
 import type { InferEnv } from "@farm.js/core/env";
 
-type FarmConfigEnv = typeof FarmConfig extends { env?: infer TEnv }
-  ? NonNullable<TEnv>
-  : never;
+type FarmConfigEnv = typeof FarmConfig extends { env?: infer TEnv } ? NonNullable<TEnv> : never;
 type FarmResolvedEnv = [FarmConfigEnv] extends [never]
   ? { server: {}; public: {} }
   : InferEnv<FarmConfigEnv>;
@@ -73,5 +71,3 @@ declare module "@farm.js/core" {
     public: FarmResolvedEnv["public"];
   }
 }
-
-export {};
