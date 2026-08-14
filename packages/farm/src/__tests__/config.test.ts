@@ -807,6 +807,26 @@ describe("resolveDocsConfig", () => {
     });
   });
 
+  it("infers docs content from Farm's srcDir and lets an explicit directory win", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-src-dir-"));
+    await fs.mkdir(path.join(root, "source", "app", "guides"), { recursive: true });
+
+    const inferred = await resolveDocsConfig({ entry: "/guides" }, { root, srcDir: "source" });
+    const explicit = await resolveDocsConfig(
+      { entry: "/guides", contentDir: "content/manual" },
+      { root, srcDir: "source" },
+    );
+
+    expect(inferred).toMatchObject({
+      contentDir: "source/app/guides",
+      config: { contentDir: "source/app/guides" },
+    });
+    expect(explicit).toMatchObject({
+      contentDir: "content/manual",
+      config: { contentDir: "content/manual" },
+    });
+  });
+
   it("auto-enables docs when docs.json exists", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "farm-docs-json-"));
     await fs.writeFile(
