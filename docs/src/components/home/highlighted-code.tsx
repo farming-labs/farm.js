@@ -41,6 +41,7 @@ interface HighlightedCodeTabsProps {
 interface HighlightedCodeValueCycleProps {
   autoRotateMs: number;
   className?: string;
+  compact?: boolean;
   copyable?: boolean;
   id: string;
   label: string;
@@ -49,6 +50,19 @@ interface HighlightedCodeValueCycleProps {
   suffixCode: string;
   variants: readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 }
+
+type TypewriterPhase = "holding" | "deleting" | "typing";
+
+interface TypewriterState {
+  activeIndex: number;
+  displayedCode: string;
+  phase: TypewriterPhase;
+  targetIndex: number;
+}
+
+const TYPEWRITER_DELETE_DELAY_MS = 14;
+const TYPEWRITER_START_DELAY_MS = 180;
+const TYPEWRITER_TYPE_DELAY_MS = 22;
 
 function figureClassName(className?: string) {
   return [
@@ -154,6 +168,112 @@ function useAutoRotatingIndex(autoRotateMs: number | undefined, itemCount: numbe
   return [activeIndex, setActiveIndex] as const;
 }
 
+function commonPrefixLength(first: string, second: string) {
+  const comparableLength = Math.min(first.length, second.length);
+  let index = 0;
+
+  while (index < comparableLength && first[index] === second[index]) index += 1;
+
+  return index;
+}
+
+function useTypewriterVariant(
+  holdMs: number,
+  variants: readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]],
+) {
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [state, setState] = useState<TypewriterState>(() => ({
+    activeIndex: 0,
+    displayedCode: variants[0].code,
+    phase: "holding",
+    targetIndex: 0,
+  }));
+
+  useEffect(() => {
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setPrefersReducedMotion(reducedMotion.matches);
+
+    updatePreference();
+    reducedMotion.addEventListener("change", updatePreference);
+
+    return () => reducedMotion.removeEventListener("change", updatePreference);
+  }, []);
+
+  useEffect(() => {
+    if (prefersReducedMotion || variants.length < 2) {
+      setState((current) => {
+        const firstVariant = variants[0];
+
+        if (
+          current.activeIndex === 0 &&
+          current.displayedCode === firstVariant.code &&
+          current.phase === "holding" &&
+          current.targetIndex === 0
+        ) {
+          return current;
+        }
+
+        return {
+          activeIndex: 0,
+          displayedCode: firstVariant.code,
+          phase: "holding",
+          targetIndex: 0,
+        };
+      });
+      return;
+    }
+
+    let delay = 0;
+    let updateState: (current: TypewriterState) => TypewriterState;
+
+    if (state.phase === "holding") {
+      delay = holdMs;
+      updateState = (current) => ({
+        ...current,
+        phase: "deleting",
+        targetIndex: (current.activeIndex + 1) % variants.length,
+      });
+    } else if (state.phase === "deleting") {
+      const currentCode = variants[state.activeIndex]?.code ?? variants[0].code;
+      const targetCode = variants[state.targetIndex]?.code ?? variants[0].code;
+      const retainedLength = commonPrefixLength(currentCode, targetCode);
+
+      if (state.displayedCode.length > retainedLength) {
+        delay = TYPEWRITER_DELETE_DELAY_MS;
+        updateState = (current) => ({
+          ...current,
+          displayedCode: current.displayedCode.slice(0, -1),
+        });
+      } else {
+        delay = TYPEWRITER_START_DELAY_MS;
+        updateState = (current) => ({
+          ...current,
+          activeIndex: current.targetIndex,
+          phase: "typing",
+        });
+      }
+    } else {
+      const targetCode = variants[state.activeIndex]?.code ?? variants[0].code;
+
+      if (state.displayedCode.length < targetCode.length) {
+        delay = TYPEWRITER_TYPE_DELAY_MS;
+        updateState = (current) => ({
+          ...current,
+          displayedCode: targetCode.slice(0, current.displayedCode.length + 1),
+        });
+      } else {
+        updateState = (current) => ({ ...current, phase: "holding" });
+      }
+    }
+
+    const timer = window.setTimeout(() => setState(updateState), delay);
+
+    return () => window.clearTimeout(timer);
+  }, [holdMs, prefersReducedMotion, state, variants]);
+
+  return state;
+}
+
 function HighlightedCodeBody({
   ariaLabel,
   ariaLabelledBy,
@@ -237,6 +357,7 @@ export function HighlightedCode({
 export function HighlightedCodeValueCycle({
   autoRotateMs,
   className,
+  compact = false,
   copyable = false,
   id,
   label,
@@ -245,12 +366,13 @@ export function HighlightedCodeValueCycle({
   suffixCode,
   variants,
 }: HighlightedCodeValueCycleProps) {
-  const [activeIndex] = useAutoRotatingIndex(autoRotateMs, variants.length);
-  const activeVariant = variants[activeIndex] ?? variants[0];
+  const typewriter = useTypewriterVariant(autoRotateMs, variants);
+  const activeVariant = variants[typewriter.activeIndex] ?? variants[0];
   const completeCode = `${prefixCode}\n${activeVariant.code}\n${suffixCode}`;
-  const valueLineCount = activeVariant.code.split("\n").length;
+  const visibleValue = typewriter.displayedCode || " ";
+  const valueLineCount = visibleValue.split("\n").length;
   const highlightedValue = renderHighlightedCode(
-    activeVariant.code,
+    visibleValue,
     Array.from({ length: valueLineCount }, (_, index) => index + 1),
   );
 
@@ -268,15 +390,26 @@ export function HighlightedCodeValueCycle({
       </figcaption>
       <pre
         aria-label={`${label} code`}
-        className="min-h-0 max-w-full flex-1 overflow-x-auto py-2 font-mono text-[9.5px] leading-4 tracking-normal sm:text-[10px]"
+        className={[
+          "min-h-0 max-w-full flex-1 overflow-x-auto font-mono tracking-normal",
+          compact
+            ? "py-1 text-[10.5px] leading-[18px] sm:text-[11px]"
+            : "py-2 text-[9.5px] leading-4 sm:text-[10px]",
+        ].join(" ")}
         id={id}
         tabIndex={0}
       >
-        <code className="farm-highlighted-code farm-highlighted-code--value-cycle block min-w-full">
+        <code
+          className={[
+            "farm-highlighted-code farm-highlighted-code--value-cycle block min-w-full",
+            compact && "farm-highlighted-code--value-cycle-compact",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+        >
           <span dangerouslySetInnerHTML={{ __html: renderHighlightedCode(prefixCode) }} />
           <span
-            key={activeVariant.id}
-            className="farm-code-value-cycle block"
+            className="farm-code-typewriter block"
             dangerouslySetInnerHTML={{ __html: highlightedValue }}
           />
           <span dangerouslySetInnerHTML={{ __html: renderHighlightedCode(suffixCode) }} />
