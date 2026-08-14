@@ -8,6 +8,7 @@
     "build": "farm build",
     "start": "farm start",
     "experiment": "pnpm run build && node scripts/verify-experiment.mjs",
+    "experiment:heavy": "node scripts/verify-heavy-experiment.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {

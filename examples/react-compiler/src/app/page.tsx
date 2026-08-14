@@ -1,5 +1,6 @@
 import { CompilerComparison } from "../components/compiler-comparison";
 import { CompilerEdgeLab } from "../components/compiler-edge-lab";
+import { HeavyInteractionBenchmark } from "../components/heavy-interaction-benchmark";
 
 export default function HomePage() {
   return (
@@ -57,11 +58,53 @@ export default function HomePage() {
 
       <CompilerEdgeLab />
 
+      <HeavyInteractionBenchmark />
+
+      <section
+        className="benchmark-report"
+        aria-labelledby="benchmark-report-title"
+      >
+        <header>
+          <div>
+            <span>REFERENCE RUN / APPLE M1 / CHROMIUM 145</span>
+            <h2 id="benchmark-report-title">
+              The flag changed the update path.
+            </h2>
+          </div>
+          <strong>8.5×</strong>
+        </header>
+        <dl>
+          <div>
+            <dt>Compiler off median</dt>
+            <dd>0.170 ms</dd>
+          </div>
+          <div>
+            <dt>Compiler on median</dt>
+            <dd>0.020 ms</dd>
+          </div>
+          <div>
+            <dt>Median reduction</dt>
+            <dd>88.2%</dd>
+          </div>
+          <div>
+            <dt>Gzip cost</dt>
+            <dd>+1,268 B</dd>
+          </div>
+        </dl>
+        <p>
+          This measures button dispatch through observed DOM mutation for a
+          large static tree with sparse bindings. It is deliberately favorable
+          to AOT and does not include layout, paint, network work, or
+          unsupported React structures.
+        </p>
+      </section>
+
       <footer className="footnote">
         <span>MEASURED, NOT ESTIMATED</span>
         <p>
-          Run <code>pnpm --filter farm-react-compiler-example experiment</code>
-          to build the production app and assert every result above in Chromium.
+          Run <code>pnpm --filter farm-react-compiler-example experiment</code>{" "}
+          for correctness or <code>experiment:heavy</code> for the
+          compiler-on/off production benchmark.
         </p>
       </footer>
     </main>

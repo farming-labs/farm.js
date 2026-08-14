@@ -174,4 +174,61 @@ describe("compiled React runtime", () => {
 
     expect(container.textContent).toBe("2");
   });
+
+  it("stringifies boolean data and ARIA bindings like React", async () => {
+    const Toggle = createCompiledComponent({
+      displayName: "BooleanAttributes",
+      initialize: () => [false],
+      render(_props: Record<string, never>, state) {
+        return (
+          <button
+            aria-pressed={Boolean(state[0].get())}
+            data-active={Boolean(state[0].get())}
+            onClick={() => state[0].set((value) => !value)}
+          >
+            Toggle
+          </button>
+        );
+      },
+      bindings: [
+        {
+          kind: "attribute",
+          path: [],
+          dependencies: [0],
+          name: "data-active",
+          read: (_props, state) => Boolean(state[0].get()),
+        },
+        {
+          kind: "attribute",
+          path: [],
+          dependencies: [0],
+          name: "aria-pressed",
+          read: (_props, state) => Boolean(state[0].get()),
+        },
+      ],
+    });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    roots.push(root);
+    await act(async () => root.render(<Toggle />));
+
+    const button = container.querySelector("button")!;
+    expect(button.getAttribute("data-active")).toBe("false");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+    expect(button.getAttribute("data-active")).toBe("true");
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+
+    await act(async () => {
+      button.click();
+      await Promise.resolve();
+    });
+    expect(button.getAttribute("data-active")).toBe("false");
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+  });
 });

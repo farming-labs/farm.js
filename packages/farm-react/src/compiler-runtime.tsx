@@ -51,6 +51,7 @@ function findBindingTarget(root: Element, path: readonly number[]): Element | nu
 
 function updateAttribute(element: Element, name: string, value: unknown): void {
   const attributeName = name === "className" ? "class" : name === "htmlFor" ? "for" : name;
+  const stringifiesBoolean = attributeName.startsWith("data-") || attributeName.startsWith("aria-");
 
   if (name === "value" && element instanceof HTMLInputElement) {
     element.value = value === null || value === undefined ? "" : String(value);
@@ -72,9 +73,9 @@ function updateAttribute(element: Element, name: string, value: unknown): void {
     return;
   }
 
-  if (value === null || value === undefined || value === false) {
+  if (value === null || value === undefined || (value === false && !stringifiesBoolean)) {
     element.removeAttribute(attributeName);
-  } else if (value === true) {
+  } else if (value === true && !stringifiesBoolean) {
     element.setAttribute(attributeName, "");
   } else {
     element.setAttribute(attributeName, String(value));
