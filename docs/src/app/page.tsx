@@ -11,7 +11,6 @@ import {
   Check,
   CloudCog,
   Code2,
-  Copy,
   Cpu,
   Database,
   ExternalLink,
@@ -24,11 +23,9 @@ import {
   Menu,
   Network,
   Plug,
-  RefreshCw,
   Rocket,
   Route,
   Terminal,
-  TriangleAlert,
   Workflow,
   X,
 } from "lucide-react";
@@ -65,8 +62,15 @@ import farmingLabsLogoUrl from "../assets/farming-labs-logo-dark.svg?url";
 import nitroIconUrl from "../assets/nitro.svg?url";
 import { BenchmarkSection } from "../components/home/benchmark-section";
 import { HeroTitleFrame } from "../components/home/hero-title-frame";
-import { HighlightedCode, HighlightedCodeTabs } from "../components/home/highlighted-code";
-import type { HighlightedCodeTab } from "../components/home/highlighted-code";
+import {
+  HighlightedCode,
+  HighlightedCodeTabs,
+  HighlightedCodeValueCycle,
+} from "../components/home/highlighted-code";
+import type {
+  HighlightedCodeTab,
+  HighlightedCodeValueVariant,
+} from "../components/home/highlighted-code";
 import { InstallCommand } from "../components/home/install-command";
 import { FileTree } from "../components/ui/file-tree";
 import type { FileTreeNode } from "../components/ui/file-tree";
@@ -97,9 +101,19 @@ export const metadata = {
 } satisfies Metadata;
 
 const navItems = [
-  { index: "01", label: "Guide", href: "/docs/getting-started", icon: BookOpen },
+  {
+    index: "01",
+    label: "Guide",
+    href: "/docs/getting-started",
+    icon: BookOpen,
+  },
   { index: "02", label: "Migrations", href: "/docs/migrations", icon: GitFork },
-  { index: "03", label: "Integrations", href: "/docs/integrations", icon: Blocks },
+  {
+    index: "03",
+    label: "Integrations",
+    href: "/docs/integrations",
+    icon: Blocks,
+  },
   { index: "04", label: "Resources", href: "/docs", icon: FileText },
 ] as const;
 
@@ -235,8 +249,16 @@ const integrationDirectoryItems = [
 ] as const;
 
 const ecosystemItems = [
-  { label: "React 19", href: withFarmReferral("https://react.dev/"), brand: reactIconUrl },
-  { label: "Stripe", href: withFarmReferral("https://stripe.com/"), brand: stripeIconUrl },
+  {
+    label: "React 19",
+    href: withFarmReferral("https://react.dev/"),
+    brand: reactIconUrl,
+  },
+  {
+    label: "Stripe",
+    href: withFarmReferral("https://stripe.com/"),
+    brand: stripeIconUrl,
+  },
   {
     label: "Cloudflare",
     href: withFarmReferral("https://developers.cloudflare.com/agents/"),
@@ -247,37 +269,101 @@ const ecosystemItems = [
     href: withFarmReferral("https://better-auth.com/"),
     brand: betterAuthIconUrl,
   },
-  { label: "Vercel", href: withFarmReferral("https://vercel.com/"), brand: vercelIconUrl },
-  { label: "Inngest", href: withFarmReferral("https://www.inngest.com/"), brand: inngestIconUrl },
-  { label: "Vite", href: withFarmReferral("https://vite.dev/"), brand: viteIconUrl },
-  { label: "Supabase", href: withFarmReferral("https://supabase.com/"), brand: supabaseIconUrl },
+  {
+    label: "Vercel",
+    href: withFarmReferral("https://vercel.com/"),
+    brand: vercelIconUrl,
+  },
+  {
+    label: "Inngest",
+    href: withFarmReferral("https://www.inngest.com/"),
+    brand: inngestIconUrl,
+  },
+  {
+    label: "Vite",
+    href: withFarmReferral("https://vite.dev/"),
+    brand: viteIconUrl,
+  },
+  {
+    label: "Supabase",
+    href: withFarmReferral("https://supabase.com/"),
+    brand: supabaseIconUrl,
+  },
   {
     label: "Trigger.dev",
     href: withFarmReferral("https://trigger.dev/"),
     brand: triggerIconUrl,
   },
-  { label: "Docker", href: withFarmReferral("https://www.docker.com/"), brand: dockerIconUrl },
-  { label: "Clerk", href: withFarmReferral("https://clerk.com/"), brand: clerkIconUrl },
-  { label: "Resend", href: withFarmReferral("https://resend.com/"), brand: resendIconUrl },
-  { label: "Nitro", href: withFarmReferral("https://nitro.build/"), brand: nitroIconUrl },
-  { label: "Polar", href: withFarmReferral("https://polar.sh/"), brand: polarIconUrl },
-  { label: "Netlify", href: withFarmReferral("https://www.netlify.com/"), brand: netlifyIconUrl },
-  { label: "Auth.js", href: withFarmReferral("https://authjs.dev/"), brand: authJsIconUrl },
-  { label: "Autumn", href: withFarmReferral("https://useautumn.com/"), brand: autumnIconUrl },
+  {
+    label: "Docker",
+    href: withFarmReferral("https://www.docker.com/"),
+    brand: dockerIconUrl,
+  },
+  {
+    label: "Clerk",
+    href: withFarmReferral("https://clerk.com/"),
+    brand: clerkIconUrl,
+  },
+  {
+    label: "Resend",
+    href: withFarmReferral("https://resend.com/"),
+    brand: resendIconUrl,
+  },
+  {
+    label: "Nitro",
+    href: withFarmReferral("https://nitro.build/"),
+    brand: nitroIconUrl,
+  },
+  {
+    label: "Polar",
+    href: withFarmReferral("https://polar.sh/"),
+    brand: polarIconUrl,
+  },
+  {
+    label: "Netlify",
+    href: withFarmReferral("https://www.netlify.com/"),
+    brand: netlifyIconUrl,
+  },
+  {
+    label: "Auth.js",
+    href: withFarmReferral("https://authjs.dev/"),
+    brand: authJsIconUrl,
+  },
+  {
+    label: "Autumn",
+    href: withFarmReferral("https://useautumn.com/"),
+    brand: autumnIconUrl,
+  },
   {
     label: "Cloudflare",
     href: withFarmReferral("https://www.cloudflare.com/"),
     brand: cloudflareIconUrl,
   },
-  { label: "Prisma", href: withFarmReferral("https://www.prisma.io/"), brand: prismaIconUrl },
-  { label: "Auth0", href: withFarmReferral("https://auth0.com/"), brand: auth0IconUrl },
+  {
+    label: "Prisma",
+    href: withFarmReferral("https://www.prisma.io/"),
+    brand: prismaIconUrl,
+  },
+  {
+    label: "Auth0",
+    href: withFarmReferral("https://auth0.com/"),
+    brand: auth0IconUrl,
+  },
   {
     label: "shadcn/ui",
     href: withFarmReferral("https://ui.shadcn.com/"),
     brand: shadcnIconUrl,
   },
-  { label: "WorkOS", href: withFarmReferral("https://workos.com/"), brand: workosIconUrl },
-  { label: "Unkey", href: withFarmReferral("https://www.unkey.com/"), brand: unkeyIconUrl },
+  {
+    label: "WorkOS",
+    href: withFarmReferral("https://workos.com/"),
+    brand: workosIconUrl,
+  },
+  {
+    label: "Unkey",
+    href: withFarmReferral("https://www.unkey.com/"),
+    brand: unkeyIconUrl,
+  },
   {
     label: "eve",
     href: withFarmReferral("https://www.eve.dev/"),
@@ -398,14 +484,27 @@ export default defineConfig({
 const typedApiHighlightLines = [1, 7, 8] as const;
 const docsHighlightLines = [3, 4] as const;
 const rendererOptions = ["preact()", "solid()", "vue()", "svelte()"] as const;
-const reactCompilerCode = `import { defineConfig } from "@farm.js/core";
+const reactCompilerConfigPrefix = `import { defineConfig } from "@farm.js/core";
 import { react } from "@farm.js/react";
 
 export default defineConfig({
     renderer: react({
-        experimental: {
-            compiler: true,
-        },
+        experimental: {`;
+const reactCompilerConfigVariants = [
+  {
+    id: "automatic",
+    code: `            compiler: true,`,
+  },
+  {
+    id: "annotations",
+    code: `            compiler: {
+                mode: "annotation",
+                directive: "use compiler",
+                onUnsupported: "warn",
+            },`,
+  },
+] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
+const reactCompilerConfigSuffix = `        },
     }),
 });`;
 
@@ -897,7 +996,11 @@ function EcosystemStrip() {
         >
           <div
             className="farm-logo-rail flex h-full w-max"
-            style={{ "--farm-logo-duration": `${ecosystemItems.length * 4}s` } as CSSProperties}
+            style={
+              {
+                "--farm-logo-duration": `${ecosystemItems.length * 4}s`,
+              } as CSSProperties
+            }
           >
             {([0, 1] as const).map((copyIndex) => (
               <div
@@ -1161,149 +1264,32 @@ function RendererVisual() {
   );
 }
 
-function RuntimeErrorVisual() {
-  return (
-    <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end justify-end overflow-hidden pl-6 sm:pl-10">
-      <figure
-        aria-label="FARMJS development runtime error overlay mapped to application source"
-        className="relative z-10 -mb-px -mr-px flex h-[290px] w-full max-w-full shrink-0 flex-col overflow-hidden border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]"
-      >
-        <figcaption className="flex h-10 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] uppercase tracking-normal">
-          <span className="flex items-center gap-2 text-white/56">
-            <TriangleAlert aria-hidden className="size-3 text-red-300/80" strokeWidth={1.5} />
-            Runtime error
-          </span>
-          <span className="border border-red-300/20 bg-red-300/[0.055] px-2 py-1 text-[8px] text-red-200/70">
-            Development
-          </span>
-        </figcaption>
-
-        <div className="flex min-h-0 flex-1 flex-col px-4 py-3 sm:px-5">
-          <div className="flex min-w-0 items-start justify-between gap-4">
-            <div className="min-w-0">
-              <span className="font-mono text-[8px] uppercase tracking-normal text-red-200/62">
-                Runtime TypeError
-              </span>
-              <h4 className="mt-1 truncate text-[13px] font-medium tracking-normal text-white/90 sm:text-sm">
-                Application failed in the browser
-              </h4>
-            </div>
-            <span className="mt-0.5 shrink-0 border border-white/10 bg-white/[0.025] px-2 py-1 font-mono text-[8px] text-white/42">
-              1 occurrence
-            </span>
-          </div>
-
-          <div className="mt-3 min-h-0 overflow-hidden border border-white/10 bg-white/[0.018] font-mono text-[8px] tracking-normal sm:text-[9px]">
-            <div className="flex h-8 min-w-0 items-center justify-between gap-3 border-b border-white/8 px-3">
-              <span className="truncate text-white/54">src/app/dashboard/page.tsx:24:38</span>
-              <span className="shrink-0 text-white/24">source mapped</span>
-            </div>
-            <div className="py-1.5">
-              <div className="grid grid-cols-[2rem_minmax(0,1fr)] px-2 leading-5 text-white/34">
-                <span className="text-right text-white/18">23</span>
-                <code className="truncate pl-3">const profile = response.user.profile;</code>
-              </div>
-              <div className="grid grid-cols-[2rem_minmax(0,1fr)] border-l-2 border-red-300/70 bg-red-300/[0.06] px-2 leading-5 text-white/86">
-                <span className="text-right text-red-200/56">24</span>
-                <code className="truncate pl-3">profile.formatDisplayName();</code>
-              </div>
-              <div className="grid grid-cols-[2rem_minmax(0,1fr)] px-2 leading-5 text-white/34">
-                <span className="text-right text-white/18">25</span>
-                <code className="truncate pl-3">setDisplayName(name);</code>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-auto flex items-center gap-2 pt-3 font-mono text-[8px] uppercase tracking-normal sm:text-[9px]">
-            <span className="inline-flex h-8 items-center gap-1.5 border border-white/18 bg-white px-3 text-black">
-              <Copy aria-hidden className="size-3" strokeWidth={1.6} /> Copy report
-            </span>
-            <span className="inline-flex h-8 items-center gap-1.5 border border-white/12 bg-white/[0.025] px-3 text-white/58">
-              <RefreshCw aria-hidden className="size-3" strokeWidth={1.6} /> Reload
-            </span>
-          </div>
-        </div>
-      </figure>
-    </div>
-  );
-}
-
 function ReactCompilerVisual() {
   return (
-    <div className="farm-feature-spotlight relative flex min-h-[650px] min-w-0 items-end overflow-hidden px-6 sm:px-10 lg:h-[360px] lg:min-h-0">
-      <div className="relative z-10 grid w-full min-w-0 gap-4 lg:grid-cols-[minmax(0,0.76fr)_minmax(0,1.24fr)]">
-        <figure
-          aria-labelledby="react-compiler-result"
-          className="flex h-[300px] min-w-0 flex-col border border-white/10 bg-black shadow-[0_18px_50px_rgba(0,0,0,0.18)]"
-        >
-          <figcaption
-            className="flex h-10 shrink-0 items-center justify-between border-b border-white/8 px-4 font-mono text-[9px] uppercase tracking-normal"
-            id="react-compiler-result"
-          >
-            <span className="flex items-center gap-2 text-white/54">
-              <Cpu aria-hidden className="size-3" strokeWidth={1.5} /> Compiler update path
-            </span>
-            <span className="border border-white/12 bg-white/[0.035] px-2 py-1 text-white/46">
-              Reference run
-            </span>
-          </figcaption>
-
-          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-            <div className="flex min-w-0 flex-col justify-center border-r border-white/8 px-4 sm:px-5">
-              <strong className="font-geist-pixel text-4xl font-medium tracking-normal text-white sm:text-5xl">
-                8.5×
-              </strong>
-              <span className="mt-2 font-mono text-[8px] uppercase leading-4 tracking-normal text-white/36 sm:text-[9px]">
-                faster median update
-              </span>
-            </div>
-            <dl className="grid min-w-0 grid-rows-3">
-              <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/8 px-3 font-mono tracking-normal sm:px-4">
-                <dt className="truncate text-[8px] uppercase text-white/34 sm:text-[9px]">
-                  Compiler off
-                </dt>
-                <dd className="shrink-0 text-[9px] text-white/58 sm:text-[10px]">0.170 ms</dd>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-2 border-b border-white/8 bg-white/[0.025] px-3 font-mono tracking-normal sm:px-4">
-                <dt className="truncate text-[8px] uppercase text-white/54 sm:text-[9px]">
-                  Compiler on
-                </dt>
-                <dd className="shrink-0 text-[9px] text-white/92 sm:text-[10px]">0.020 ms</dd>
-              </div>
-              <div className="flex min-w-0 items-center justify-between gap-2 px-3 font-mono tracking-normal sm:px-4">
-                <dt className="truncate text-[8px] uppercase text-white/34 sm:text-[9px]">
-                  Update executions
-                </dt>
-                <dd className="shrink-0 text-[9px] text-white/78 sm:text-[10px]">0</dd>
-              </div>
-            </dl>
-          </div>
-
-          <a
-            className="group flex h-12 shrink-0 items-center justify-between border-t border-white/10 bg-white/[0.025] px-4 font-mono text-[9px] uppercase tracking-normal text-white/44 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white sm:px-5"
-            href="/docs/renderers/react#experimental-aot-compiler"
-          >
-            Apple M1 / Chromium 145
-            <span className="flex items-center gap-2 text-white/78">
-              Method
-              <ArrowRight
-                aria-hidden
-                className="size-3 transition-transform duration-150 group-hover:translate-x-0.5"
-                strokeWidth={1.5}
-              />
-            </span>
-          </a>
-        </figure>
-
-        <HighlightedCode
-          className="flex h-[300px] min-w-0 flex-col"
-          code={reactCompilerCode}
+    <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end overflow-hidden px-6 sm:px-10">
+      <div className="relative z-10 flex w-full min-w-0 flex-col">
+        <HighlightedCodeValueCycle
+          autoRotateMs={4200}
+          className="flex h-[290px] min-w-0 flex-col"
           copyable
-          highlightLines={[7]}
+          id="react-compiler-config"
           label="farm.config.ts"
           language="ts"
-          prefix="AOT"
+          prefixCode={reactCompilerConfigPrefix}
+          suffixCode={reactCompilerConfigSuffix}
+          variants={reactCompilerConfigVariants}
         />
+        <a
+          className="group flex h-12 shrink-0 items-center justify-between border-x border-white/10 bg-black px-4 font-mono text-[9px] uppercase tracking-normal text-white/54 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white sm:px-5"
+          href="/docs/renderers/react#experimental-aot-compiler"
+        >
+          Read how it works
+          <ArrowRight
+            aria-hidden
+            className="size-3 transition-transform duration-150 group-hover:translate-x-0.5"
+            strokeWidth={1.5}
+          />
+        </a>
       </div>
     </div>
   );
@@ -1397,30 +1383,19 @@ function DeveloperExperienceGrid() {
         <RendererVisual />
       </FeatureCell>
       <FeatureCell
-        body="Unhandled browser errors map to application source, group repeated failures, and offer copy and reload actions during development."
-        className="border-t border-white/12 lg:border-l"
-        icon={TriangleAlert}
-        index="01.6"
-        label="Diagnostics"
-        title="Errors that point to the source"
-      >
-        <RuntimeErrorVisual />
-      </FeatureCell>
-      <FeatureCell
         body={
           <>
-            On a measured 768-node static-tree workload, enabling the flag cut median update latency
-            from <span className="font-mono text-white/68">0.170 ms</span> to{" "}
-            <span className="font-mono text-white/86">0.020 ms</span>—an{" "}
-            <span className="font-mono text-white/86">8.5× speed-up</span>—while compiled local
-            updates added zero component executions. Unsupported structures stay on React.
+            Turn on the compiler and Farm prepares safe state updates during the build. In our test,
+            those updates were <span className="font-mono text-white/86">8.5× faster</span> and did
+            not run the component again. React still handles anything the compiler cannot safely
+            optimize.
           </>
         }
-        className="border-t border-white/12 lg:col-span-2"
+        className="border-t border-white/12 lg:border-l"
         icon={Cpu}
-        index="01.7"
+        index="01.6"
         label="React compiler"
-        title="Turn on AOT for proven-safe local updates"
+        title="Faster React updates with AOT compilation"
       >
         <ReactCompilerVisual />
       </FeatureCell>
@@ -1525,7 +1500,14 @@ function FileTreeVisual() {
               name: "users",
               type: "folder",
               defaultOpen: true,
-              children: [{ name: "route.ts", type: "file", extension: "route", meta: "GET" }],
+              children: [
+                {
+                  name: "route.ts",
+                  type: "file",
+                  extension: "route",
+                  meta: "GET",
+                },
+              ],
             },
           ],
         },
