@@ -44,6 +44,14 @@ const templateDetails: Record<string, TemplateDetails> = {
       "Tailwind is enabled by default. You only need postcss config for custom plugins.",
     ],
   },
+  "react-compiler": {
+    title: "React Compiler starter (experimental)",
+    description: "React AOT compiler with a focused live comparison",
+    instructions: [
+      "The React AOT compiler is experimental; unsupported components safely stay on React.",
+      "Run pnpm experiment after installing Playwright Chromium to verify the compiled update path.",
+    ],
+  },
   auth: {
     title: "Auth starter",
     description: "Farm.js-native auth with local SQLite, secure sessions, and protected routes",
@@ -331,7 +339,7 @@ export async function createApp(projectName?: string, options: CreateAppOptions 
     !(await hasRendererIntegrationTemplate(template!, renderer))
   ) {
     logger.error(
-      `The "${template}" integration starter currently targets React. Use --template basic or --template better-auth with --renderer ${renderer}.`,
+      `The "${template}" starter currently targets React. Use --template basic or --template better-auth with --renderer ${renderer}.`,
     );
     process.exit(1);
   }

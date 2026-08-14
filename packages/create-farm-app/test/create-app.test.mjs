@@ -29,6 +29,7 @@ test("uses concise labels for CLI template choices", async () => {
   const source = await readFile(path.join(packageDir, "src/index.ts"), "utf8");
 
   assert.match(source, /title: "Basic starter"/);
+  assert.match(source, /title: "React Compiler starter \(experimental\)"/);
   assert.match(source, /title: "Auth starter"/);
   assert.match(source, /title: "Better Auth starter"/);
   assert.match(source, /title: "Stripe starter"/);
@@ -46,6 +47,7 @@ test("lists every integration starter from the CLI", () => {
 
   for (const template of [
     "basic",
+    "react-compiler",
     "auth",
     "better-auth",
     "ai",
@@ -224,6 +226,113 @@ test("generates a buildable starter application", async () => {
     assert.match(generatedPnpmWorkspace, /^  esbuild: true$/m);
     assert.match(generatedPnpmWorkspace, /^  sharp: true$/m);
     assert.match(generatedPnpmWorkspace, /^  vue-demi: true$/m);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("generates the experimental React Compiler starter with the shared dark starter UI", async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-react-compiler-"));
+
+  try {
+    const output = execFileSync(
+      process.execPath,
+      [
+        path.join(packageDir, "bin/create-farm-app.js"),
+        "compiler-app",
+        "--template",
+        "react-compiler",
+        "--typescript",
+        "--skip-install",
+      ],
+      {
+        cwd: tempDir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          npm_config_user_agent: "pnpm/11.18.0 npm/? node/v22.0.0",
+        },
+      },
+    );
+
+    const templateDir = path.join(packageDir, "templates/react-compiler");
+    const basicTemplateDir = path.join(packageDir, "templates/basic");
+    const generatedDir = path.join(tempDir, "compiler-app");
+    const templatePackage = JSON.parse(
+      await readFile(path.join(templateDir, "package.json"), "utf8"),
+    );
+    const generatedPackage = JSON.parse(
+      await readFile(path.join(generatedDir, "package.json"), "utf8"),
+    );
+
+    assert.equal(generatedPackage.name, "compiler-app");
+    assert.equal(generatedPackage.packageManager, "pnpm@11.18.0");
+    assert.equal(
+      generatedPackage.dependencies["@farm.js/core"],
+      templatePackage.dependencies["@farm.js/core"],
+    );
+    assert.equal(
+      generatedPackage.dependencies["@farm.js/react"],
+      templatePackage.dependencies["@farm.js/react"],
+    );
+    assert.equal(
+      generatedPackage.devDependencies["@farm.js/cli"],
+      templatePackage.devDependencies["@farm.js/cli"],
+    );
+    assert.equal(
+      generatedPackage.scripts.experiment,
+      "pnpm run build && node scripts/verify-experiment.mjs",
+    );
+    assert.equal(generatedPackage.scripts["experiment:heavy"], undefined);
+    assert.equal(generatedPackage.devDependencies.tailwindcss, "^4.0.0");
+
+    const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
+    assert.match(config, /from "@farm\.js\/react"/);
+    assert.match(config, /experimental:\s*\{\s*compiler: compilerEnabled/s);
+    assert.match(config, /theme:\s*\{\s*default: "dark"/s);
+
+    const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
+    assert.match(page, /className="landing-main"/);
+    assert.match(page, /FARMJS \/ React Compiler starter/);
+    assert.match(page, /The compiler handles the rest\./);
+    assert.match(page, /<CompilerComparison \/>/);
+    assert.match(page, /<ResourceLinks className="resource-links" \/>/);
+
+    const comparison = await readFile(
+      path.join(generatedDir, "src/components/compiler-comparison.tsx"),
+      "utf8",
+    );
+    assert.match(comparison, /export function CompiledCounter/);
+    assert.match(comparison, /"use no compiler"/);
+    assert.match(comparison, /data-path="compiled"/);
+    assert.match(comparison, /data-path="react"/);
+
+    assert.equal(
+      await readFile(path.join(templateDir, "src/components/resource-links.tsx"), "utf8"),
+      await readFile(path.join(basicTemplateDir, "src/components/resource-links.tsx"), "utf8"),
+    );
+
+    for (const relativePath of [
+      "src/app/globals.css",
+      "src/app/page.tsx",
+      "src/components/compiler-comparison.tsx",
+      "src/components/resource-links.tsx",
+    ]) {
+      assert.equal(
+        await readFile(path.join(generatedDir, relativePath), "utf8"),
+        await readFile(path.join(templateDir, relativePath), "utf8"),
+      );
+    }
+
+    assert.match(
+      await readFile(path.join(generatedDir, "README.md"), "utf8"),
+      /^# FARMJS React Compiler Starter/m,
+    );
+    await readFile(path.join(generatedDir, "scripts/verify-experiment.mjs"), "utf8");
+    assert.match(await readFile(path.join(generatedDir, ".gitignore"), "utf8"), /^\.farm\/$/m);
+
+    assert.match(output, /React AOT compiler is experimental/);
+    assert.match(output, /pnpm experiment/);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
