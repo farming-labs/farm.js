@@ -203,7 +203,7 @@ export function CompilerEdgeLab() {
   return (
     <section className="edge-lab" aria-labelledby="edge-lab-title">
       <div className="section-heading">
-        <span>EDGE LAB / GROUP 1</span>
+        <span>EDGE LAB / SUPPORTED SCOPE</span>
         <h2 id="edge-lab-title">Correctness before coverage.</h2>
         <p>
           Eligible local state gets direct bindings. Dynamic tree shapes fall
@@ -225,7 +225,8 @@ export function CompilerEdgeLab() {
         <p>
           Never call a Hook directly inside <code>items.map(...)</code>. Put the
           Hook in a separate keyed row component. This compiler rejects the
-          inline pattern; Group 1 leaves the keyed list itself to React.
+          inline pattern; the current compiler leaves the keyed list itself to
+          React.
         </p>
       </aside>
     </section>

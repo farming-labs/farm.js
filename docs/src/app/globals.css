@@ -388,22 +388,11 @@
 
   .farm-renderer-value {
     display: inline-block;
-    width: 9ch;
+    width: 10ch;
     height: 1.5rem;
     overflow: hidden;
+    white-space: nowrap;
     vertical-align: bottom;
-  }
-
-  .farm-renderer-value-track {
-    display: flex;
-    flex-direction: column;
-    animation: farm-renderer-value-cycle 10s cubic-bezier(0.65, 0, 0.35, 1) infinite;
-    will-change: transform;
-  }
-
-  .farm-renderer-value-item {
-    height: 1.5rem;
-    flex: 0 0 1.5rem;
   }
 
   .farm-highlighted-code {
@@ -455,6 +444,10 @@
     min-height: 1rem;
   }
 
+  .farm-highlighted-code--value-cycle-compact .sh__line {
+    min-height: 1.125rem;
+  }
+
   .farm-highlighted-code .sh__token--keyword {
     font-weight: 650;
   }
@@ -467,8 +460,16 @@
     animation: farm-code-cycle-panel-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .farm-code-value-cycle {
-    animation: farm-code-value-cycle-in 260ms cubic-bezier(0.22, 1, 0.36, 1);
+  .farm-code-typewriter .sh__line:last-child::after,
+  .farm-inline-typewriter::after {
+    display: inline-block;
+    width: 0.45em;
+    height: 1.05em;
+    margin-left: 0.18em;
+    background: rgb(255 255 255 / 0.72);
+    vertical-align: -0.12em;
+    animation: farm-terminal-cursor-blink 0.8s steps(1, end) infinite;
+    content: "";
   }
 
   @media (min-width: 768px) {
@@ -645,48 +646,10 @@
   }
 }
 
-@keyframes farm-renderer-value-cycle {
-  0%,
-  18% {
-    transform: translate3d(0, 0, 0);
-  }
-
-  25%,
-  43% {
-    transform: translate3d(0, -1.5rem, 0);
-  }
-
-  50%,
-  68% {
-    transform: translate3d(0, -3rem, 0);
-  }
-
-  75%,
-  93% {
-    transform: translate3d(0, -4.5rem, 0);
-  }
-
-  100% {
-    transform: translate3d(0, -6rem, 0);
-  }
-}
-
 @keyframes farm-code-cycle-panel-in {
   from {
     opacity: 0;
     transform: translate3d(0, 4px, 0);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0);
-  }
-}
-
-@keyframes farm-code-value-cycle-in {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 3px, 0);
   }
 
   to {
@@ -1076,16 +1039,13 @@
     animation: none;
   }
 
-  .farm-renderer-value-track {
-    animation: none;
-    transform: none;
-  }
-
   .farm-code-cycle-panel {
     animation: none;
   }
 
-  .farm-code-value-cycle {
+  .farm-code-typewriter .sh__line:last-child::after,
+  .farm-inline-typewriter::after {
+    display: none;
     animation: none;
   }
 

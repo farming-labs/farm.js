@@ -66,6 +66,7 @@ import {
   HighlightedCode,
   HighlightedCodeTabs,
   HighlightedCodeValueCycle,
+  TypewriterValueCycle,
 } from "../components/home/highlighted-code";
 import type {
   HighlightedCodeTab,
@@ -483,30 +484,49 @@ export default defineConfig({
 
 const typedApiHighlightLines = [1, 7, 8] as const;
 const docsHighlightLines = [3, 4] as const;
-const rendererOptions = ["preact()", "solid()", "vue()", "svelte()"] as const;
+const rendererValueVariants = [
+  { id: "preact", code: "preact()," },
+  { id: "solid", code: "solid()," },
+  { id: "vue", code: "vue()," },
+  { id: "svelte", code: "svelte()," },
+] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 const reactCompilerConfigPrefix = `import { defineConfig } from "@farm.js/core";
 import { react } from "@farm.js/react";
 
 export default defineConfig({
-    renderer: react({
-        experimental: {`;
+  renderer: react({ experimental: {`;
 const reactCompilerConfigVariants = [
   {
     id: "automatic",
-    code: `            compiler: true,`,
+    code: `    compiler: true,`,
   },
   {
     id: "annotations",
-    code: `            compiler: {
-                mode: "annotation",
-                directive: "use compiler",
-                onUnsupported: "warn",
-            },`,
+    code: `    compiler: {
+      mode: "annotation",
+      directive: "use compiler",
+    },`,
   },
 ] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
-const reactCompilerConfigSuffix = `        },
-    }),
+const reactCompilerConfigSuffix = `  } }),
 });`;
+const reactCompilerMetrics = [
+  {
+    description: "The compiler reduced the median latency of the benchmarked update path by 88.2%.",
+    label: "Median update latency",
+    value: "88.2% lower",
+  },
+  {
+    description: "The same state update was 8.5 times faster with the compiler on.",
+    label: "State update speed",
+    value: "8.5× faster",
+  },
+  {
+    description: "The compiled update caused no extra component renders.",
+    label: "Extra renders",
+    value: "0",
+  },
+] as const;
 
 const layersConfigTabs = [
   {
@@ -1218,18 +1238,13 @@ function RendererVisual() {
               {"  "}
               <span className="text-white/78">renderer</span>
               <span className="text-white/42">: </span>
-              <span className="farm-renderer-value" data-renderer-count={rendererOptions.length}>
-                <span className="farm-renderer-value-track">
-                  {[...rendererOptions, rendererOptions[0]].map((renderer, index) => (
-                    <span
-                      key={`${renderer}-${index}`}
-                      className="farm-renderer-value-item text-white/94"
-                    >
-                      {renderer}
-                      <span className="text-white/42">,</span>
-                    </span>
-                  ))}
-                </span>
+              <span className="farm-renderer-value">
+                <TypewriterValueCycle
+                  className="text-white/94"
+                  holdMs={1800}
+                  mutedTrailingText=","
+                  variants={rendererValueVariants}
+                />
               </span>
             </span>
             <span className="sh__line">
@@ -1267,10 +1282,11 @@ function RendererVisual() {
 function ReactCompilerVisual() {
   return (
     <div className="farm-feature-spotlight relative flex h-[340px] min-w-0 items-end overflow-hidden px-6 sm:px-10">
-      <div className="relative z-10 flex w-full min-w-0 flex-col">
+      <div className="relative z-10 flex h-[290px] w-full min-w-0 flex-col">
         <HighlightedCodeValueCycle
           autoRotateMs={4200}
-          className="flex h-[290px] min-w-0 flex-col"
+          className="flex h-[248px] min-w-0 flex-col border-b-0"
+          compact
           copyable
           id="react-compiler-config"
           label="farm.config.ts"
@@ -1279,17 +1295,38 @@ function ReactCompilerVisual() {
           suffixCode={reactCompilerConfigSuffix}
           variants={reactCompilerConfigVariants}
         />
-        <a
-          className="group flex h-12 shrink-0 items-center justify-between border-x border-white/10 bg-black px-4 font-mono text-[9px] uppercase tracking-normal text-white/54 transition-colors duration-150 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white sm:px-5"
-          href="/docs/renderers/react#experimental-aot-compiler"
+        <div
+          aria-label="React compiler benchmark results"
+          className="grid h-[42px] shrink-0 grid-cols-[repeat(3,minmax(0,1fr))_2.625rem] border-x border-white/10 bg-black"
+          role="group"
         >
-          Read how it works
-          <ArrowRight
-            aria-hidden
-            className="size-3 transition-transform duration-150 group-hover:translate-x-0.5"
-            strokeWidth={1.5}
-          />
-        </a>
+          {reactCompilerMetrics.map((metric) => (
+            <div
+              key={metric.label}
+              className="flex min-w-0 flex-col justify-center border-r border-white/8 px-2 sm:px-3"
+              title={metric.description}
+            >
+              <span className="truncate font-mono text-[8.5px] font-bold tabular-nums tracking-normal text-white sm:text-[10px]">
+                {metric.value}
+              </span>
+              <span className="truncate font-mono text-[6.5px] uppercase tracking-normal text-white/38 sm:text-[7.5px]">
+                {metric.label}
+              </span>
+            </div>
+          ))}
+          <a
+            aria-label="See how the React compiler works"
+            className="group grid place-items-center text-white/48 transition-[background-color,color] duration-150 hover:bg-white/[0.04] hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-white"
+            href="/docs/renderers/react#experimental-aot-compiler"
+            title="How it works"
+          >
+            <ArrowUpRight
+              aria-hidden
+              className="size-3.5 transition-transform duration-150 group-hover:-translate-y-0.5 group-hover:translate-x-0.5"
+              strokeWidth={1.5}
+            />
+          </a>
+        </div>
       </div>
     </div>
   );
@@ -1385,17 +1422,16 @@ function DeveloperExperienceGrid() {
       <FeatureCell
         body={
           <>
-            Turn on the compiler and Farm prepares safe state updates during the build. In our test,
-            those updates were <span className="font-mono text-white/86">8.5× faster</span> and did
-            not run the component again. React still handles anything the compiler cannot safely
-            optimize.
+            Farm prepares safe state updates at build time. In our test, they were{" "}
+            <span className="font-mono font-bold text-white">8.5× faster</span> with no extra
+            component renders. React handles anything the compiler cannot safely optimize.
           </>
         }
         className="border-t border-white/12 lg:border-l"
         icon={Cpu}
         index="01.6"
         label="React compiler"
-        title="Faster React updates with AOT compilation"
+        title="React updates optimized ahead of time"
       >
         <ReactCompilerVisual />
       </FeatureCell>

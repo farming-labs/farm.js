@@ -1,6 +1,6 @@
 ---
 title: "React Renderer"
-description: "Use FARMJS with the default React renderer, including client hooks, integrations, streaming SSR, and experimental Server Components."
+description: "Use FARMJS with the default React renderer, including client hooks, streaming SSR, and the experimental AOT compiler."
 section: "Core"
 ---
 
@@ -62,8 +62,36 @@ export function Counter() {
 
 ## Experimental AOT compiler
 
-Install `@farm.js/react` to keep React as the renderer while opting into Farm's experimental
-ahead-of-time state compiler:
+Farm's experimental React compiler moves a narrow class of local state-update work from React's
+runtime render-and-reconcile path into build-time binding metadata. It is disabled by default and
+only affects the React renderer that enables it. Preact, Solid, Vue, Svelte, and custom renderers do
+not receive this transform.
+
+The compiler is intentionally conservative. It only transforms a component when it can prove that
+the component has one stable host-element tree and that each supported state value maps to known
+text or attribute targets. If that proof fails, the original component stays on React.
+
+### Why this compiler exists
+
+An ordinary local `useState` update asks React to run the component again, produce another element
+tree, reconcile it with the previous tree, and commit the changed DOM. That general model is needed
+for dynamic React applications, but it repeats work when a component's structure is fixed and only
+a few text or attribute values can change.
+
+For that safe subset, Farm prepares three things ahead of time:
+
+1. local state cells and their setters;
+2. the DOM path of every state-driven text or attribute binding; and
+3. the state-cell dependencies for each binding.
+
+After mount, an eligible local update flushes the changed cells and patches only the affected
+bindings. It does not schedule another React render or reconciliation pass for that update. React
+still owns initial rendering, component placement, parent-driven prop updates, events, SSR,
+hydration, and unmounting.
+
+### Enable the compiler
+
+Install `@farm.js/react` to select the React renderer with compiler options:
 
 ```bash
 pnpm add @farm.js/react
@@ -82,12 +110,66 @@ export default defineConfig({
 });
 ```
 
-`compiler: true` automatically considers application TSX and JSX. Eligible components keep React
-for placement, props, events, server rendering, and hydration, but local `useState` updates patch
-precomputed text and attribute bindings without rerunning the component or reconciling its tree.
-Unsupported components safely remain ordinary React components.
+`compiler: true` is the recommended starting point for the experiment. It means automatic
+inference with safe React fallback:
 
-Use annotation mode for selective adoption:
+```ts
+compiler: {
+  mode: "infer",
+  onUnsupported: "fallback",
+}
+```
+
+Omitting `experimental.compiler` or setting it to `false` disables the transform.
+
+### Configuration API
+
+```ts
+type ReactCompilerMode = "infer" | "annotation";
+type UnsupportedCompilerBehavior = "fallback" | "warn" | "error";
+
+interface ReactCompilerOptions {
+  mode?: ReactCompilerMode;
+  directive?: string;
+  onUnsupported?: UnsupportedCompilerBehavior;
+}
+```
+
+| Option          | Values                                | Default          | Purpose                                                                  |
+| --------------- | ------------------------------------- | ---------------- | ------------------------------------------------------------------------ |
+| `compiler`      | `false`, `true`, or an options object | `false`          | Disables, enables with defaults, or configures the React-only transform. |
+| `mode`          | `"infer"`, `"annotation"`             | `"infer"`        | Selects components automatically or only through an explicit directive.  |
+| `directive`     | non-empty string                      | `"use compiler"` | Names the module/function directive used by annotation mode.             |
+| `onUnsupported` | `"fallback"`, `"warn"`, `"error"`     | `"fallback"`     | Controls what happens outside the current supported subset.              |
+
+`directive` is valid only when `mode` is `"annotation"`. Invalid modes, invalid unsupported
+behaviors, and directives configured in inference mode throw a configuration error instead of
+silently changing behavior.
+
+### Component selection
+
+#### Automatic inference
+
+`compiler: true` and `mode: "infer"` inspect top-level, capitalized function components in
+application `.tsx` and `.jsx` modules under the project root. Dependencies in `node_modules` are not
+transformed. Every eligible component is compiled; every unsupported component remains unchanged.
+
+Use the built-in function directive to keep a specific component entirely on React:
+
+```tsx
+export function ReactOwnedEditor() {
+  "use no compiler";
+
+  // React always owns this component.
+}
+```
+
+The opt-out is intentionally local. It documents a known ownership boundary without disabling the
+compiler for the rest of the module.
+
+#### Annotation mode
+
+Annotation mode is useful for a staged rollout or a strict, reviewed set of components:
 
 ```ts
 renderer: react({
@@ -101,17 +183,229 @@ renderer: react({
 }),
 ```
 
-Place the directive inside a component or at the top of its module. The directive can be renamed in
-configuration and only applies in annotation mode.
+Place the configured directive inside one component to select only that component:
 
-The initial compiler group supports a single static host-element tree, top-level `useState`, basic
-events, and state-driven text or attributes. Keyed lists, conditional child structure, effects,
-refs, and custom child components fall back to React and are planned as later compiler groups.
+```tsx
+export function Counter() {
+  "use compiler";
+
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount((value) => value + 1)}>{count}</button>;
+}
+```
+
+Or place it at the top of a module to select every eligible component in that module:
+
+```tsx
+"use compiler";
+
+import { useState } from "react";
+
+export function Counter() {
+  const [count, setCount] = useState(0);
+  return <button onClick={() => setCount(count + 1)}>{count}</button>;
+}
+```
+
+The directive name is configurable:
+
+```ts
+compiler: {
+  mode: "annotation",
+  directive: "use optimize",
+}
+```
+
+An explicitly selected component that cannot be compiled produces a warning even when
+`onUnsupported` is `"fallback"`. Explicit selection should not fail silently.
+
+### Unsupported-component behavior
+
+| Value        | Behavior                                                                                 | Good fit                                       |
+| ------------ | ---------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| `"fallback"` | Keep the original React component. Inferred unsupported candidates are quiet.            | Broad automatic experimentation.               |
+| `"warn"`     | Keep the React component and emit a diagnostic containing the component name and reason. | Finding missed optimization opportunities.     |
+| `"error"`    | Stop the transform/build when a considered component cannot be compiled.                 | Enforcing a reviewed annotation-mode contract. |
+
+For example, an unsupported keyed list can report:
+
+```text
+[react-compiler] KeyedList: dynamic child structures require React reconciliation; using React.
+```
+
+Use `"warn"` while exploring the compiler. Use annotation mode with `"error"` when CI should prove
+that every explicitly selected component still satisfies the supported contract.
+
+### Current supported contract
+
+The current compiler deliberately supports a smaller subset than general React. A component must
+satisfy all of these rules:
+
+| Area                | Current supported shape                                                                                                                             |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                             |
+| Function shape      | Synchronous, non-generator, non-generic block body with zero parameters or one identifier such as `props`.                                          |
+| Body                | One or more top-level `useState` declarations followed by one unconditional JSX return.                                                             |
+| State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                          |
+| Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                              |
+| Tree                | A static tree containing host elements only. Nested host elements are supported when their placement cannot change.                                 |
+| Text bindings       | State-driven text in a leaf host element.                                                                                                           |
+| Attribute bindings  | State-driven basic attributes and properties, including `className`, `htmlFor`, `data-*`, `aria-*`, `value`, `checked`, `selected`, and `disabled`. |
+| Events              | React-owned JSX event handlers. A compiled state setter must be called from a JSX event handler.                                                    |
+
+This component is eligible:
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+export function StatusButton(props: { initial: number }) {
+  const [count, setCount] = useState(props.initial);
+  const [active, setActive] = useState(false);
+
+  return (
+    <button
+      aria-pressed={active}
+      className={active ? "active" : "idle"}
+      data-count={count}
+      onClick={() => {
+        setCount((value) => value + 1);
+        setActive((value) => !value);
+      }}
+    >
+      Count: {count}
+    </button>
+  );
+}
+```
+
+The compiler records separate dependencies for `count` and `active`. Changing `count` does not
+reevaluate bindings that depend only on `active`, and vice versa.
+
+### What falls back to React
+
+| Unsupported shape                                                  | Why React keeps ownership                                                           |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| Keyed lists, `.map()`, element arrays, or helper-rendered children | Inserts, removals, moves, and identity changes require reconciliation.              |
+| Conditional JSX children or fragments                              | The prepared DOM path can change when structure appears or disappears.              |
+| Custom child components                                            | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
+| Effects or hooks other than the supported `useState` shape         | Their lifecycle and ordering must remain under React's hook dispatcher.             |
+| `ref` or `dangerouslySetInnerHTML`                                 | They directly participate in DOM ownership.                                         |
+| Stateful `style`, `children`, or `key` bindings                    | These need specialized property, structure, or identity semantics.                  |
+| JSX attribute spreads or namespaced attributes                     | The compiler cannot currently enumerate a stable binding contract.                  |
+| Multiple/conditional returns or non-state statements               | The compiler does not yet prove control flow or derived local values.               |
+| Destructured props, async/generator, or generic components         | These function shapes are outside the current lowering.                             |
+| Setters called outside JSX event handlers                          | The compiler only controls and batches event-driven local updates.                  |
+
+Keys do not make list reconciliation unnecessary. A key tells React which child identity survives
+an insert, removal, or move; React still needs to compare the dynamic children. Calling a Hook
+directly inside a list iteration is also invalid React because the number or order of calls can
+change. Put the Hook inside a keyed child component and leave that structure on React.
+
+### Build-time transformation
+
+The React renderer installs `farm:react-aot-compiler` as a pre-transform. The current implementation
+is a Babel AST transform, not a Rust compiler pass. It parses application TSX/JSX before ordinary
+JSX lowering, discovers candidate components, validates the full supported contract, and emits
+source maps with the transformed module.
+
+For each eligible component, the transform conceptually emits a definition like this:
+
+```ts
+createCompiledComponent({
+  initialize: (props) => [props.initial],
+  render: (props, state) => <button>Count: {state[0].get()}</button>,
+  bindings: [
+    {
+      kind: "text",
+      path: [],
+      dependencies: [0],
+      read: (_props, state) => ["Count: ", state[0].get()],
+    },
+  ],
+});
+```
+
+The actual output imports `createCompiledComponent` from `@farm.js/react/compiler-runtime` only in
+modules where at least one component compiled. Unsupported modules keep their original source and
+do not receive the runtime import.
+
+### Runtime behavior
+
+The generated runtime wrapper is still a React component. Its responsibilities are split as
+follows:
+
+| React owns                                     | Compiler runtime owns                                           |
+| ---------------------------------------------- | --------------------------------------------------------------- |
+| Initial element creation and placement         | Local compiler-cell values                                      |
+| SSR markup and hydration                       | Queuing local setter calls into one microtask                   |
+| JSX event registration and dispatch            | Comparing flushed values with `Object.is`                       |
+| Parent-driven prop updates                     | Selecting bindings whose state dependencies changed             |
+| Unsupported trees, hooks, refs, and lifecycles | Patching precomputed text/attribute targets after local updates |
+| Unmounting and the surrounding component tree  | Reapplying bindings after a parent-driven React update          |
+
+Queued functional setters preserve the event's state snapshot. Two calls such as
+`setCount(value => value + 1)` are applied in order during the same microtask flush, while reads
+inside the event still see the previous snapshot. If the final value is `Object.is`-equal to the
+previous value, no binding is patched.
+
+Attribute updates preserve important DOM behavior:
+
+- `className` and `htmlFor` map to `class` and `for`;
+- input `value` and `checked`, option `selected`, and element `disabled` use DOM properties;
+- `data-*` and `aria-*` booleans are stringified; and
+- nullish values and ordinary false boolean attributes are removed.
+
+The server output is ordinary React HTML and contains no compiler marker. React hydrates that
+markup normally; direct binding updates begin after the component mounts.
+
+### Safety reasoning
+
+The compiler uses fallback as a semantic boundary, not as an error-recovery trick. A precomputed
+path is only correct while the host tree has the same shape. Dynamic children, custom components,
+refs, and effects can change ownership or lifecycle in ways the current compiler does not yet
+model. Letting React handle them is the optimization's correctness mechanism.
+
+Parent-driven prop updates also remain React updates. After React reconciles the new props, the
+runtime reapplies compiler-owned bindings from the current local cells so prop changes and local
+state remain coherent.
+
+### Verification and benchmark scope
+
+The package and example test suites verify more than generated code:
+
+- compiled local updates change the same text and attributes as base React;
+- one eligible update adds no React render or commit, while the equivalent base component adds one;
+- server-rendered markup hydrates and remains interactive;
+- lazy initialization, event snapshots, and batched functional setters are preserved;
+- multiple state cells update only their dependent bindings;
+- boolean `data-*` and `aria-*` attributes keep React-compatible string values; and
+- keyed lists, effects, refs, and custom child components remain on React without corrupting output.
+
+The heavy example uses a fixed 768-host-node tree with three state cells and sparse bindings. Its
+compiler-off → compiler-on crossover run measures a deliberately favorable supported workload. The
+reference run reported 88.2% lower median update latency, 86% lower p95 latency, and zero added
+component executions on the compiled path. These numbers describe that warm update path, not page
+load, build time, browser layout/paint, network work, effects, child-component updates, or general
+React performance.
+
+Run the benchmark on target devices before using its timing as a product estimate. The structural
+result—no extra component execution or React commit for an eligible local update—is the more stable
+property.
+
+### Recommended rollout
+
+1. Start with `compiler: true` and confirm the application behaves normally.
+2. Change `onUnsupported` to `"warn"` to see why candidates remain on React.
+3. Add `"use no compiler"` to known React-owned boundaries when the reason is intentional.
+4. Use annotation mode for components whose compiler ownership should be explicit.
+5. Use annotation mode with `onUnsupported: "error"` when CI must enforce that selected components
+   remain eligible.
 
 The [`examples/react-compiler`](https://github.com/farming-labs/farm.js/tree/main/examples/react-compiler)
-app runs an eligible compiled counter beside an equivalent component marked `"use no compiler"`.
-Both update the same text and class bindings, while the live component-execution values expose the
-render work skipped by the compiled path.
+app includes batching, multiple bindings, keyed fallback, compiler-on/off production builds, and
+the reproducible heavy-interaction benchmark.
 
 ## React-specific FARMJS APIs
 

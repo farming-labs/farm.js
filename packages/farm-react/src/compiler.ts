@@ -409,7 +409,7 @@ function compileCandidate(
       continue;
     }
     if (!t.isVariableDeclaration(statement) || statement.declarations.length !== 1) {
-      return "only top-level useState declarations and one return are supported in Group 1";
+      return "only top-level useState declarations and one return are supported by the current compiler";
     }
     const declaration = statement.declarations[0];
     if (

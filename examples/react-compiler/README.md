@@ -47,9 +47,9 @@ speed depends on event work, DOM work, layout, paint, application shape, and dev
 
 ## Keys and Hooks boundary
 
-`items.map(item => <Row key={item} />)` changes tree structure, so Group 1 leaves it to React. Keys
-tell React which row identity survived an insert, delete, or move; they do not make reconciliation
-unnecessary.
+`items.map(item => <Row key={item} />)` changes tree structure, so the current compiler leaves it to
+React. Keys tell React which row identity survived an insert, delete, or move; they do not make
+reconciliation unnecessary.
 
 Calling a Hook directly inside `items.map(...)` is invalid React because the number or order of Hook
 calls can change. Put the Hook inside a separate `Row` component and key that component. The compiler
@@ -58,8 +58,8 @@ has a regression test confirming that the invalid inline shape is rejected rathe
 ## Heavy compiler-on/off benchmark
 
 The page also contains `HeavyInteractionBenchmark`: one component with 768 static host nodes, three
-local state cells, and a small number of dynamic text/attribute targets. It represents the workload
-the first compiler group is designed to optimize—a large stable tree with sparse local updates.
+local state cells, and a small number of dynamic text/attribute targets. It represents a workload
+the current compiler is designed to optimize—a large stable tree with sparse local updates.
 
 Run the full crossover benchmark:
 

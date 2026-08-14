@@ -1,6 +1,6 @@
 # @farm.js/react
 
-React renderer integration for FARMJS, including the experimental Group 1 AOT compiler.
+React renderer integration for FARMJS, including the experimental AOT compiler.
 
 React remains the default renderer and needs no package or configuration. Install this package only
 when opting into the compiler experiment:
@@ -49,9 +49,9 @@ export function Counter() {
 
 The directive is configurable and only has meaning in annotation mode.
 
-## Group 1 contract
+## Current compiler contract
 
-The first compiler group handles components that the compiler can prove have:
+The current compiler handles components that it can prove have:
 
 - one host-element root and a static host-element tree;
 - top-level `useState` declarations;
@@ -71,5 +71,5 @@ second component render and commit, while the compiled component remains at one 
 commit and updates its two bindings directly. This is a deterministic structural performance
 assertion; it is not presented as a cross-machine timing benchmark.
 
-Keyed list lowering, structural conditionals, effects, and more advanced hook support belong to
-later compiler groups and intentionally stay on React in this release.
+Keyed list lowering, structural conditionals, effects, and more advanced hook support intentionally
+stay on React in this release.
