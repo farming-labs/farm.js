@@ -1,36 +1,56 @@
-# FARMJS React AOT compiler example
+# FARMJS React AOT compiler edge lab
 
-This example runs two equivalent React counters side by side:
+This production-browser experiment answers two questions:
 
-- **AOT compiled** is selected automatically by `compiler: true`. Its local `useState` update patches
-  precomputed text and class bindings without running the component body again.
-- **Base React** contains `"use no compiler"`, so the same update follows React's normal render,
-  reconciliation, and commit path.
+1. Why build this compiler? Eligible local `useState` updates can patch precomputed DOM targets
+   without rerunning the component body or asking React to reconcile the same static tree again.
+2. Where must it stop? Keyed lists, effects, refs, custom components, and other dynamic structures
+   stay on React whenever the compiler cannot prove that a direct binding preserves behavior.
 
-Run it from the repository root:
+The default `compiler: true` configuration automatically considers components. No annotation is
+needed. A component can explicitly opt out with `"use no compiler"`.
+
+## Run the automated experiment
+
+From the repository root:
 
 ```bash
 pnpm --filter @farm.js/react build
-pnpm --filter farm-react-compiler-example dev
+pnpm --filter farm-react-compiler-example exec playwright install chromium
+pnpm --filter farm-react-compiler-example experiment
 ```
 
-Click each card's button. Both state values and status classes update, but the compiled card's
-**Component executions** value stays unchanged. The base React value increases once per click.
+The Playwright install is needed once per machine (or whenever its browser cache is cleared).
 
-## Reproducible result
+The command creates a production build, starts it on a local port, runs Chromium assertions, checks
+for console/runtime errors, saves `/tmp/farm-react-aot-edge-lab.png`, and prints a JSON report.
 
-The package runtime test performs one equivalent update under a React `Profiler`:
+## Expected report
+
+| Experiment                 | Compiled result                                         | Base React / fallback result                   | What it proves                                                         |
+| -------------------------- | ------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------- |
+| Two direct updates         | state `2`, update executions `0`                        | state `2`, update executions `2`               | Eligible updates skip post-mount component executions.                 |
+| Batched functional updates | count `2`, snapshot `0`, update executions `0`          | count `2`, snapshot `0`, update executions `1` | The compiler preserves queued updater and event snapshot behavior.     |
+| Two state cells            | text/class/data/input all update, update executions `0` | —                                              | AOT dependency lists update only bindings affected by each state cell. |
+| Keyed list                 | intentionally not compiled                              | 3 correct keyed rows, update executions `2`    | Dynamic child structure safely falls back to React reconciliation.     |
+
+The package runtime test also measures one equivalent update under a React `Profiler`:
 
 | Path       | Component renders | React commits | DOM result            |
 | ---------- | ----------------: | ------------: | --------------------- |
 | FARMJS AOT |                 1 |             1 | Text and class update |
 | Base React |                 2 |             2 | Text and class update |
 
-For this eligible local-state update, the compiler removes one post-mount component render and one
-React commit—**100% of the React render/commit work caused by the update**. This is a structural
-result, not a claim that every application is twice as fast. A broad timing claim needs larger
-applications, list-heavy cases, effects, production browser traces, and multiple devices; those are
-outside the compiler's first supported group.
+For this narrow eligible update, AOT removes all React render/commit work caused by the local update.
+This is a structural result, not a claim that an entire application is twice as fast. End-to-end
+speed depends on event work, DOM work, layout, paint, application shape, and device.
 
-The initial group intentionally falls back to React for unsupported shapes, including keyed lists,
-conditional child structure, effects, refs, and custom child components.
+## Keys and Hooks boundary
+
+`items.map(item => <Row key={item} />)` changes tree structure, so Group 1 leaves it to React. Keys
+tell React which row identity survived an insert, delete, or move; they do not make reconciliation
+unnecessary.
+
+Calling a Hook directly inside `items.map(...)` is invalid React because the number or order of Hook
+calls can change. Put the Hook inside a separate `Row` component and key that component. The compiler
+has a regression test confirming that the invalid inline shape is rejected rather than transformed.

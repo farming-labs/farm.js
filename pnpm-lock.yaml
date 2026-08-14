@@ -779,6 +779,9 @@ importers:
       '@farm.js/cli':
         specifier: workspace:*
         version: link:../../packages/farm-cli
+      '@playwright/test':
+        specifier: ^1.52.0
+        version: 1.58.2
       '@types/react':
         specifier: ^19.0.0
         version: 19.2.13

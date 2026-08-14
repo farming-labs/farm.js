@@ -7,6 +7,7 @@
     "dev": "farm dev",
     "build": "farm build",
     "start": "farm start",
+    "experiment": "pnpm run build && node scripts/verify-experiment.mjs",
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@farm.js/cli": "workspace:*",
+    "@playwright/test": "^1.52.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "typescript": "^5.3.3",

@@ -175,27 +175,34 @@ function cleanJsxText(value: string): string {
 }
 
 function isTextExpression(expression: t.Expression): boolean {
-  if (
-    t.isJSXElement(expression) ||
-    t.isJSXFragment(expression) ||
-    t.isObjectExpression(expression) ||
-    t.isFunctionExpression(expression) ||
-    t.isArrowFunctionExpression(expression)
-  ) {
-    return false;
-  }
-  if (t.isConditionalExpression(expression)) {
-    return isTextExpression(expression.consequent) && isTextExpression(expression.alternate);
-  }
-  if (t.isLogicalExpression(expression)) {
-    return isTextExpression(expression.left) && isTextExpression(expression.right);
-  }
-  if (t.isArrayExpression(expression)) {
-    return expression.elements.every(
-      (element) => element === null || (t.isExpression(element) && isTextExpression(element)),
-    );
-  }
-  return true;
+  let supported = true;
+  traverse(expressionFile(cloneExpression(expression)), {
+    CallExpression(path) {
+      supported = false;
+      path.stop();
+    },
+    OptionalCallExpression(path) {
+      supported = false;
+      path.stop();
+    },
+    JSXElement(path) {
+      supported = false;
+      path.stop();
+    },
+    JSXFragment(path) {
+      supported = false;
+      path.stop();
+    },
+    ObjectExpression(path) {
+      supported = false;
+      path.stop();
+    },
+    Function(path) {
+      supported = false;
+      path.stop();
+    },
+  });
+  return supported;
 }
 
 function jsxAttributeName(attribute: t.JSXAttribute): string | undefined {

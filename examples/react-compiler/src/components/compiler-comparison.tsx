@@ -5,16 +5,6 @@ import { useState } from "react";
 let compiledExecutions = 0;
 let reactExecutions = 0;
 
-function recordCompiledExecution() {
-  compiledExecutions += 1;
-  return compiledExecutions;
-}
-
-function recordReactExecution() {
-  reactExecutions += 1;
-  return reactExecutions;
-}
-
 export function CompiledCounter() {
   const [count, setCount] = useState(0);
 
@@ -34,11 +24,13 @@ export function CompiledCounter() {
       <div className="metrics" aria-live="polite">
         <div className="metric">
           <span>State value</span>
-          <strong>{count}</strong>
+          <strong data-metric="state">{count}</strong>
         </div>
         <div className="metric">
           <span>Component executions</span>
-          <strong>{recordCompiledExecution()}</strong>
+          <strong data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++compiledExecutions}
+          </strong>
         </div>
       </div>
 
@@ -50,7 +42,11 @@ export function CompiledCounter() {
         {count > 0 ? "DOM bindings patched" : "Ready for an update"}
       </p>
 
-      <button type="button" onClick={() => setCount((value) => value + 1)}>
+      <button
+        type="button"
+        data-action="update"
+        onClick={() => setCount((value) => value + 1)}
+      >
         Update compiled state
         <span aria-hidden="true">↗</span>
       </button>
@@ -76,11 +72,13 @@ export function BaseReactCounter() {
       <div className="metrics" aria-live="polite">
         <div className="metric">
           <span>State value</span>
-          <strong>{count}</strong>
+          <strong data-metric="state">{count}</strong>
         </div>
         <div className="metric">
           <span>Component executions</span>
-          <strong>{recordReactExecution()}</strong>
+          <strong data-metric="executions">
+            {typeof window === "undefined" ? 1 : ++reactExecutions}
+          </strong>
         </div>
       </div>
 
@@ -92,7 +90,11 @@ export function BaseReactCounter() {
         {count > 0 ? "React tree committed" : "Ready for an update"}
       </p>
 
-      <button type="button" onClick={() => setCount((value) => value + 1)}>
+      <button
+        type="button"
+        data-action="update"
+        onClick={() => setCount((value) => value + 1)}
+      >
         Update React state
         <span aria-hidden="true">↗</span>
       </button>
