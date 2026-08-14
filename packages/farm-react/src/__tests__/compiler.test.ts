@@ -32,6 +32,9 @@ describe("React AOT compiler", () => {
     expect(result.code).toContain("createCompiledComponent");
     expect(result.code).toContain('kind: "text"');
     expect(result.code).toContain('kind: "attribute"');
+    expect(result.code).toContain("import.meta.hot");
+    expect(result.code).toContain("/app/Counter.tsx#Counter");
+    expect(result.code).toContain('stateSignature: "1"');
     expect(result.code).toMatch(/farmState\[0\]\.set/);
     expect(result.code).toMatch(/farmState\[0\]\.get/);
     await expect(

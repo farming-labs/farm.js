@@ -95,6 +95,35 @@ jobs:
           pnpm lint
           pnpm format:check
 
+  react-compiler-compat:
+    name: React Compiler (React ${{ matrix.react-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        react-version: [18.3.1, 19.2.8]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build React renderer
+        run: pnpm --filter @farm.js/react build
+
+      - name: Verify packaged renderer
+        run: node packages/farm-react/scripts/test-react-version.mjs ${{ matrix.react-version }}
+
   build-examples:
     name: Build Examples
     runs-on: ubuntu-latest

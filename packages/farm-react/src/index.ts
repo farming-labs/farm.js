@@ -10,6 +10,10 @@ export interface ReactCompilerOptions {
   directive?: string;
   /** What to do when a selected component is outside the safe subset. */
   onUnsupported?: UnsupportedCompilerBehavior;
+  /** Write a machine-readable compiler coverage report after a production build. */
+  report?: boolean;
+  /** Project-relative report location. Providing it also enables reporting. */
+  reportFile?: string;
 }
 
 export interface ReactRendererOptions {
@@ -23,9 +27,28 @@ export interface NormalizedReactCompilerOptions {
   mode: ReactCompilerMode;
   directive: string;
   onUnsupported: UnsupportedCompilerBehavior;
+  report: boolean;
+  reportFile: string;
 }
 
 export const DEFAULT_COMPILER_DIRECTIVE = "use compiler";
+export const DEFAULT_COMPILER_REPORT_FILE = ".farm/react-compiler.json";
+
+function normalizeCompilerReportFile(value: unknown): string {
+  if (value === undefined) return DEFAULT_COMPILER_REPORT_FILE;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new TypeError("The React compiler report file must be a non-empty relative path.");
+  }
+  const normalized = value.trim().replace(/\\/g, "/");
+  if (
+    normalized.startsWith("/") ||
+    /^[A-Za-z]:\//.test(normalized) ||
+    normalized.split("/").includes("..")
+  ) {
+    throw new TypeError("The React compiler report file must stay inside the project root.");
+  }
+  return normalized;
+}
 
 export function normalizeReactCompilerOptions(
   value: true | ReactCompilerOptions,
@@ -47,7 +70,18 @@ export function normalizeReactCompilerOptions(
     throw new TypeError(`Unknown unsupported-component behavior: ${String(onUnsupported)}`);
   }
 
-  return { mode, directive, onUnsupported };
+  if (options.report !== undefined && typeof options.report !== "boolean") {
+    throw new TypeError("The React compiler report option must be a boolean.");
+  }
+  if (options.report === false && options.reportFile !== undefined) {
+    throw new TypeError(
+      "A React compiler report file cannot be configured when reporting is false.",
+    );
+  }
+  const reportFile = normalizeCompilerReportFile(options.reportFile);
+  const report = options.report === true || options.reportFile !== undefined;
+
+  return { mode, directive, onUnsupported, report, reportFile };
 }
 
 const REACT_RENDERER: Readonly<FarmRenderer> = Object.freeze({

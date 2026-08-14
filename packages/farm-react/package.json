@@ -56,6 +56,7 @@
     "dev": "tsup --watch",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
+    "test:compat": "pnpm build && node scripts/test-react-version.mjs 18.3.1 && node scripts/test-react-version.mjs 19.2.8",
     "clean": "rm -rf dist"
   },
   "dependencies": {

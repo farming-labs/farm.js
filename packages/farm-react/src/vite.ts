@@ -1,5 +1,6 @@
 import { normalizePath, type Plugin } from "vite";
 import { compileReactModule } from "./compiler";
+import { writeReactCompilerReport, type ReactCompilerModuleObservation } from "./compiler-report";
 import { normalizeReactCompilerOptions, type NormalizedReactCompilerOptions } from "./index";
 
 interface RendererPluginOptions {
@@ -38,6 +39,8 @@ export function createFarmRendererPlugin(options: RendererPluginOptions = {}): P
   if (!compilerOptions) return [];
 
   let projectRoot = "";
+  const reportEnabled = compilerOptions.report && options.ssr !== true;
+  const reportObservations = new Map<string, ReactCompilerModuleObservation>();
 
   return [
     {
@@ -45,6 +48,9 @@ export function createFarmRendererPlugin(options: RendererPluginOptions = {}): P
       enforce: "pre",
       configResolved(config) {
         projectRoot = normalizePath(config.root).replace(/\/$/, "");
+      },
+      buildStart() {
+        reportObservations.clear();
       },
       async transform(code, id) {
         const cleanId = normalizePath(id.split("?", 1)[0]);
@@ -56,6 +62,13 @@ export function createFarmRendererPlugin(options: RendererPluginOptions = {}): P
           return null;
 
         const result = await compileReactModule(code, cleanId, compilerOptions);
+        if (reportEnabled) {
+          if (result.compiled.length > 0 || result.diagnostics.length > 0) {
+            reportObservations.set(cleanId, { id: cleanId, result });
+          } else {
+            reportObservations.delete(cleanId);
+          }
+        }
         for (const diagnostic of result.diagnostics) {
           const message = `[react-compiler] ${diagnostic.component}: ${diagnostic.reason}; using React.`;
           if (compilerOptions.onUnsupported === "error") this.error(message);
@@ -63,6 +76,14 @@ export function createFarmRendererPlugin(options: RendererPluginOptions = {}): P
         }
         if (result.compiled.length === 0) return null;
         return { code: result.code, map: result.map as any };
+      },
+      async buildEnd(error) {
+        if (error || !reportEnabled || !projectRoot) return;
+        await writeReactCompilerReport(
+          projectRoot,
+          compilerOptions.reportFile,
+          reportObservations.values(),
+        );
       },
     },
   ];
