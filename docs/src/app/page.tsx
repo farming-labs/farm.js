@@ -66,6 +66,7 @@ import {
   HighlightedCode,
   HighlightedCodeTabs,
   HighlightedCodeValueCycle,
+  TypewriterValueCycle,
 } from "../components/home/highlighted-code";
 import type {
   HighlightedCodeTab,
@@ -483,7 +484,12 @@ export default defineConfig({
 
 const typedApiHighlightLines = [1, 7, 8] as const;
 const docsHighlightLines = [3, 4] as const;
-const rendererOptions = ["preact()", "solid()", "vue()", "svelte()"] as const;
+const rendererValueVariants = [
+  { id: "preact", code: "preact()," },
+  { id: "solid", code: "solid()," },
+  { id: "vue", code: "vue()," },
+  { id: "svelte", code: "svelte()," },
+] as const satisfies readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 const reactCompilerConfigPrefix = `import { defineConfig } from "@farm.js/core";
 import { react } from "@farm.js/react";
 
@@ -1232,18 +1238,13 @@ function RendererVisual() {
               {"  "}
               <span className="text-white/78">renderer</span>
               <span className="text-white/42">: </span>
-              <span className="farm-renderer-value" data-renderer-count={rendererOptions.length}>
-                <span className="farm-renderer-value-track">
-                  {[...rendererOptions, rendererOptions[0]].map((renderer, index) => (
-                    <span
-                      key={`${renderer}-${index}`}
-                      className="farm-renderer-value-item text-white/94"
-                    >
-                      {renderer}
-                      <span className="text-white/42">,</span>
-                    </span>
-                  ))}
-                </span>
+              <span className="farm-renderer-value">
+                <TypewriterValueCycle
+                  className="text-white/94"
+                  holdMs={1800}
+                  mutedTrailingText=","
+                  variants={rendererValueVariants}
+                />
               </span>
             </span>
             <span className="sh__line">

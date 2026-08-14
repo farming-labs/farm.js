@@ -51,6 +51,13 @@ interface HighlightedCodeValueCycleProps {
   variants: readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
 }
 
+interface TypewriterValueCycleProps {
+  className?: string;
+  holdMs: number;
+  mutedTrailingText?: string;
+  variants: readonly [HighlightedCodeValueVariant, ...HighlightedCodeValueVariant[]];
+}
+
 type TypewriterPhase = "holding" | "deleting" | "typing";
 
 interface TypewriterState {
@@ -272,6 +279,32 @@ function useTypewriterVariant(
   }, [holdMs, prefersReducedMotion, state, variants]);
 
   return state;
+}
+
+export function TypewriterValueCycle({
+  className,
+  holdMs,
+  mutedTrailingText,
+  variants,
+}: TypewriterValueCycleProps) {
+  const typewriter = useTypewriterVariant(holdMs, variants);
+  const trailingText = mutedTrailingText ?? "";
+  const hasMutedTrailingText = Boolean(
+    trailingText && typewriter.displayedCode.endsWith(trailingText),
+  );
+  const primaryText = hasMutedTrailingText
+    ? typewriter.displayedCode.slice(0, -trailingText.length)
+    : typewriter.displayedCode;
+
+  return (
+    <span
+      className={["farm-inline-typewriter", className].filter(Boolean).join(" ")}
+      data-typewriter-phase={typewriter.phase}
+    >
+      {primaryText || (hasMutedTrailingText ? null : "\u200b")}
+      {hasMutedTrailingText ? <span className="text-white/42">{trailingText}</span> : null}
+    </span>
+  );
 }
 
 function HighlightedCodeBody({
