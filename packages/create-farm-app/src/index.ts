@@ -46,7 +46,7 @@ const templateDetails: Record<string, TemplateDetails> = {
   },
   "react-compiler": {
     title: "React Compiler starter (experimental)",
-    description: "React AOT compiler with a live comparison and fallback lab",
+    description: "React AOT compiler with a focused live comparison",
     instructions: [
       "The React AOT compiler is experimental; unsupported components safely stay on React.",
       "Run pnpm experiment after installing Playwright Chromium to verify the compiled update path.",

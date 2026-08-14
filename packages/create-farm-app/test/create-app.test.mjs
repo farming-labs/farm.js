@@ -231,7 +231,7 @@ test("generates a buildable starter application", async () => {
   }
 });
 
-test("generates the experimental React Compiler starter from the maintained example UI", async () => {
+test("generates the experimental React Compiler starter with the shared dark starter UI", async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "create-farm-app-react-compiler-"));
 
   try {
@@ -256,7 +256,7 @@ test("generates the experimental React Compiler starter from the maintained exam
     );
 
     const templateDir = path.join(packageDir, "templates/react-compiler");
-    const exampleDir = path.join(packageDir, "..", "..", "examples/react-compiler");
+    const basicTemplateDir = path.join(packageDir, "templates/basic");
     const generatedDir = path.join(tempDir, "compiler-app");
     const templatePackage = JSON.parse(
       await readFile(path.join(templateDir, "package.json"), "utf8"),
@@ -283,10 +283,8 @@ test("generates the experimental React Compiler starter from the maintained exam
       generatedPackage.scripts.experiment,
       "pnpm run build && node scripts/verify-experiment.mjs",
     );
-    assert.equal(
-      generatedPackage.scripts["experiment:heavy"],
-      "node scripts/verify-heavy-experiment.mjs",
-    );
+    assert.equal(generatedPackage.scripts["experiment:heavy"], undefined);
+    assert.equal(generatedPackage.devDependencies.tailwindcss, "^4.0.0");
 
     const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
     assert.match(config, /from "@farm\.js\/react"/);
@@ -294,11 +292,11 @@ test("generates the experimental React Compiler starter from the maintained exam
     assert.match(config, /theme:\s*\{\s*default: "dark"/s);
 
     const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
-    assert.match(page, /Same React API\./);
+    assert.match(page, /className="landing-main"/);
+    assert.match(page, /FARMJS \/ React Compiler starter/);
+    assert.match(page, /The compiler handles the rest\./);
     assert.match(page, /<CompilerComparison \/>/);
-    assert.match(page, /<CompilerEdgeLab \/>/);
-    assert.match(page, /<HeavyInteractionBenchmark \/>/);
-    assert.match(page, /pnpm experiment:heavy/);
+    assert.match(page, /<ResourceLinks className="resource-links" \/>/);
 
     const comparison = await readFile(
       path.join(generatedDir, "src/components/compiler-comparison.tsx"),
@@ -309,17 +307,17 @@ test("generates the experimental React Compiler starter from the maintained exam
     assert.match(comparison, /data-path="compiled"/);
     assert.match(comparison, /data-path="react"/);
 
+    assert.equal(
+      await readFile(path.join(templateDir, "src/components/resource-links.tsx"), "utf8"),
+      await readFile(path.join(basicTemplateDir, "src/components/resource-links.tsx"), "utf8"),
+    );
+
     for (const relativePath of [
       "src/app/globals.css",
+      "src/app/page.tsx",
       "src/components/compiler-comparison.tsx",
-      "src/components/compiler-edge-lab.tsx",
-      "src/components/heavy-interaction-benchmark.tsx",
+      "src/components/resource-links.tsx",
     ]) {
-      assert.equal(
-        await readFile(path.join(templateDir, relativePath), "utf8"),
-        await readFile(path.join(exampleDir, relativePath), "utf8"),
-        `${relativePath} should stay aligned with the maintained React Compiler example`,
-      );
       assert.equal(
         await readFile(path.join(generatedDir, relativePath), "utf8"),
         await readFile(path.join(templateDir, relativePath), "utf8"),
@@ -331,7 +329,6 @@ test("generates the experimental React Compiler starter from the maintained exam
       /^# FARMJS React Compiler Starter/m,
     );
     await readFile(path.join(generatedDir, "scripts/verify-experiment.mjs"), "utf8");
-    await readFile(path.join(generatedDir, "scripts/verify-heavy-experiment.mjs"), "utf8");
     assert.match(await readFile(path.join(generatedDir, ".gitignore"), "utf8"), /^\.farm\/$/m);
 
     assert.match(output, /React AOT compiler is experimental/);

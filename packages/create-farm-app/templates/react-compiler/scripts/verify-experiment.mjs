@@ -8,7 +8,7 @@ const port = Number(process.env.FARM_EXPERIMENT_PORT || 4327);
 const origin = `http://127.0.0.1:${port}`;
 const serverEntry = path.resolve(".farm/.output/server/index.mjs");
 const screenshotPath =
-  process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-aot-edge-lab.png";
+  process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-compiler-starter.png";
 
 await access(serverEntry);
 
@@ -47,15 +47,6 @@ async function waitForServer() {
   throw new Error(`Production server did not start.\n${serverOutput}`);
 }
 
-async function assertText(page, selector, expected) {
-  await page.waitForFunction(
-    ({ target, value }) =>
-      document.querySelector(target)?.textContent?.trim() === value,
-    { target: selector, value: expected },
-  );
-  assert.equal((await page.locator(selector).textContent())?.trim(), expected);
-}
-
 async function readNumber(page, selector) {
   return Number((await page.locator(selector).textContent())?.trim());
 }
@@ -64,102 +55,38 @@ let browser;
 try {
   await waitForServer();
   browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({
-    viewport: { width: 1440, height: 1100 },
-  });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   const browserErrors = [];
+
   page.on("console", (message) => {
     if (message.type() === "error") browserErrors.push(message.text());
   });
   page.on("pageerror", (error) => browserErrors.push(error.message));
 
   await page.goto(origin, { waitUntil: "networkidle" });
-  await page.waitForTimeout(500);
+  await page.getByRole("heading", { name: /compiler handles the rest/i }).waitFor();
 
-  const directExecutions = {};
-
+  const executions = {};
   for (const pathName of ["compiled", "react"]) {
     const root = `[data-path="${pathName}"]`;
-    await assertText(page, `${root} [data-metric="state"]`, "0");
-    directExecutions[pathName] = {
+    executions[pathName] = {
       initial: await readNumber(page, `${root} [data-metric="executions"]`),
     };
     await page.locator(`${root} [data-action="update"]`).click();
     await page.locator(`${root} [data-action="update"]`).click();
-    await assertText(page, `${root} [data-metric="state"]`, "2");
-    directExecutions[pathName].final = await readNumber(
-      page,
-      `${root} [data-metric="executions"]`,
+    await page.waitForFunction(
+      (selector) => document.querySelector(selector)?.textContent?.trim() === "2",
+      `${root} [data-metric="state"]`,
     );
-    directExecutions[pathName].added =
-      directExecutions[pathName].final - directExecutions[pathName].initial;
+    executions[pathName].final = await readNumber(page, `${root} [data-metric="executions"]`);
+    executions[pathName].added = executions[pathName].final - executions[pathName].initial;
   }
-  assert.equal(directExecutions.compiled.added, 0);
-  assert.equal(directExecutions.react.added, 2);
 
-  const batchExecutions = {};
-
-  for (const pathName of ["batch-compiled", "batch-react"]) {
-    const root = `[data-experiment="${pathName}"]`;
-    batchExecutions[pathName] = {
-      initial: await readNumber(page, `${root} [data-metric="executions"]`),
-    };
-    await page.locator(`${root} [data-action="batch"]`).click();
-    await assertText(page, `${root} [data-metric="count"]`, "2");
-    await assertText(page, `${root} [data-metric="snapshot"]`, "0");
-    batchExecutions[pathName].final = await readNumber(
-      page,
-      `${root} [data-metric="executions"]`,
-    );
-    batchExecutions[pathName].added =
-      batchExecutions[pathName].final - batchExecutions[pathName].initial;
-  }
-  assert.equal(batchExecutions["batch-compiled"].added, 0);
-  assert.equal(batchExecutions["batch-react"].added, 1);
-
-  const multiple = '[data-experiment="multiple-bindings"]';
-  const multipleInitialExecutions = await readNumber(
-    page,
-    `${multiple} [data-metric="executions"]`,
-  );
-  await page.locator(`${multiple} [data-action="increment"]`).click();
-  await page.locator(`${multiple} [data-action="toggle"]`).click();
-  await assertText(page, `${multiple} [data-metric="count"]`, "1");
-  await assertText(page, `${multiple} [data-metric="status"]`, "active");
-  const multipleFinalExecutions = await readNumber(
-    page,
-    `${multiple} [data-metric="executions"]`,
-  );
-  assert.equal(multipleFinalExecutions - multipleInitialExecutions, 0);
-  assert.equal(await page.locator(`${multiple} input`).inputValue(), "value-1");
-  assert.equal(await page.locator(multiple).getAttribute("data-count"), "1");
-  assert(
-    await page
-      .locator(multiple)
-      .evaluate((element) => element.classList.contains("edge-card--active")),
-  );
-
-  const keyed = '[data-experiment="keyed-fallback"]';
-  const keyedInitialExecutions = await readNumber(
-    page,
-    `${keyed} [data-metric="executions"]`,
-  );
-  await page.locator(`${keyed} [data-action="add-item"]`).click();
-  await page.locator(`${keyed} [data-action="add-item"]`).click();
-  await assertText(page, `${keyed} [data-metric="items"]`, "3");
-  const keyedFinalExecutions = await readNumber(
-    page,
-    `${keyed} [data-metric="executions"]`,
-  );
-  assert.equal(keyedFinalExecutions - keyedInitialExecutions, 2);
-  assert.deepEqual(await page.locator(`${keyed} li`).allTextContents(), [
-    "item-1",
-    "item-2",
-    "item-3",
-  ]);
+  assert.equal(executions.compiled.added, 0);
+  assert.equal(executions.react.added, 2);
+  assert.deepEqual(browserErrors, []);
 
   await page.screenshot({ path: screenshotPath, fullPage: true });
-  assert.deepEqual(browserErrors, []);
 
   console.log(
     JSON.stringify(
@@ -167,39 +94,8 @@ try {
         result: "PASS",
         productionUrl: origin,
         screenshot: screenshotPath,
-        experiments: {
-          directUpdate: {
-            compiled: {
-              state: 2,
-              updateExecutions: directExecutions.compiled.added,
-            },
-            react: { state: 2, updateExecutions: directExecutions.react.added },
-          },
-          batchedSnapshot: {
-            compiled: {
-              count: 2,
-              snapshot: 0,
-              updateExecutions: batchExecutions["batch-compiled"].added,
-            },
-            react: {
-              count: 2,
-              snapshot: 0,
-              updateExecutions: batchExecutions["batch-react"].added,
-            },
-          },
-          multipleBindings: {
-            count: 1,
-            status: "active",
-            input: "value-1",
-            updateExecutions:
-              multipleFinalExecutions - multipleInitialExecutions,
-          },
-          keyedFallback: {
-            items: 3,
-            updateExecutions: keyedFinalExecutions - keyedInitialExecutions,
-            owner: "React",
-          },
-        },
+        compiledUpdateExecutions: executions.compiled.added,
+        reactUpdateExecutions: executions.react.added,
       },
       null,
       2,
@@ -207,5 +103,5 @@ try {
   );
 } finally {
   await browser?.close();
-  if (server.exitCode === null) server.kill("SIGTERM");
+  server.kill("SIGTERM");
 }
