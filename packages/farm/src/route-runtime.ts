@@ -15,7 +15,7 @@ export interface ResolvedFarmRouteRuntimeConfig {
   maxDuration?: number;
 }
 
-export type FarmRouteRuntimeEntryKind = "page" | "api" | "rule";
+export type FarmRouteRuntimeEntryKind = "page" | "api" | "metadata" | "rule";
 export type FarmRouteRenderingMode = "static" | "dynamic";
 
 export interface FarmRouteRuntimeManifestEntry extends ResolvedFarmRouteRuntimeConfig {

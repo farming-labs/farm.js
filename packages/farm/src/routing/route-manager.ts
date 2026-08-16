@@ -62,6 +62,7 @@ import {
 import type { ResolvedFarmI18nConfig } from "../i18n/types";
 import { createRouteSlotContainerId, parseRouteSlotFile } from "./route-slots";
 import { getFarmRendererComponentExtensions } from "../renderer";
+import type { ApplicationMetadataRouteKind } from "../metadata-route";
 
 interface RouteEntry {
   route: ParsedRoute;
@@ -145,6 +146,12 @@ interface MetadataImageEntry extends RouteEntry {
   staticInfo?: StaticMetadataImageInfo;
 }
 
+export interface ApplicationMetadataRouteEntry extends RouteEntry {
+  kind: ApplicationMetadataRouteKind;
+  fileName: "sitemap" | "robots" | "manifest";
+  outputName: "sitemap.xml" | "robots.txt" | "manifest.webmanifest";
+}
+
 interface RedirectEntry {
   route: ParsedRoute;
   pattern: string;
@@ -170,6 +177,7 @@ export class RouteManager {
   private loadings: Map<string, RouteEntry> = new Map();
   private errors: Map<string, RouteEntry> = new Map();
   private metadataImages: Map<string, MetadataImageEntry> = new Map();
+  private metadataRoutes: Map<string, ApplicationMetadataRouteEntry> = new Map();
   private redirects: Map<string, RedirectEntry> = new Map();
   private programmaticPages: Map<string, ProgrammaticPageRoute> = new Map();
   private programmaticLayouts: Map<string, ProgrammaticLayoutRoute> = new Map();
@@ -200,6 +208,7 @@ export class RouteManager {
     this.loadings.clear();
     this.errors.clear();
     this.metadataImages.clear();
+    this.metadataRoutes.clear();
     this.redirects.clear();
     this.programmaticPages.clear();
     this.programmaticLayouts.clear();
@@ -222,10 +231,17 @@ export class RouteManager {
         ([, left], [, right]) => routeSpecificity(right) - routeSpecificity(left),
       ),
     );
+    this.metadataRoutes = new Map(
+      Array.from(this.metadataRoutes.entries()).sort(
+        ([, left], [, right]) => routeSpecificity(right) - routeSpecificity(left),
+      ),
+    );
 
     // Silent discovery - only log if verbose mode enabled
     if (process.env.FARM_VERBOSE) {
-      logger.info(`Discovered ${this.routes.size} pages and ${this.layouts.size} layouts`);
+      logger.info(
+        `Discovered ${this.routes.size} pages, ${this.layouts.size} layouts, and ${this.metadataRoutes.size} metadata routes`,
+      );
     }
 
     if (process.env.FARM_VERBOSE) {
@@ -344,6 +360,10 @@ export class RouteManager {
     return new Map(this.metadataImages);
   }
 
+  getMetadataRoutes(): Map<string, ApplicationMetadataRouteEntry> {
+    return new Map(this.metadataRoutes);
+  }
+
   getRedirects(): ProgrammaticRedirectRoute[] {
     return Array.from(this.redirects.values()).map((entry) => entry.definition);
   }
@@ -420,6 +440,68 @@ export class RouteManager {
     }
 
     return null;
+  }
+
+  matchMetadataRoute(pathname: string): {
+    metadata: ApplicationMetadataRouteEntry;
+    params: Record<string, string>;
+    routePath: string;
+  } | null {
+    const routePathname = this.toRoutePathname(pathname);
+    const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
+    const suffix = getApplicationMetadataRouteSuffix(normalizedPath);
+    if (!suffix) return null;
+
+    const routePath = normalizedPath.slice(0, -suffix.outputName.length - 1) || "/";
+    for (const metadata of this.metadataRoutes.values()) {
+      if (metadata.kind !== suffix.kind) continue;
+      const match = matchRoute(routePath, metadata.route.segments);
+      if (!match.matches) continue;
+      return { metadata, params: match.params, routePath };
+    }
+
+    return null;
+  }
+
+  getMatchingMetadataRoute(
+    pathname: string,
+    kind: ApplicationMetadataRouteKind,
+  ): {
+    metadata: ApplicationMetadataRouteEntry;
+    params: Record<string, string>;
+    routePath: string;
+  } | null {
+    const routePathname = this.toRoutePathname(pathname);
+    const normalizedPath = routePathname === "/" ? "/" : routePathname.replace(/\/$/, "");
+    const pathSegments = normalizedPath.split("/").filter(Boolean);
+    let bestMatch: {
+      metadata: ApplicationMetadataRouteEntry;
+      params: Record<string, string>;
+      routePath: string;
+    } | null = null;
+
+    for (const metadata of this.metadataRoutes.values()) {
+      if (metadata.kind !== kind || metadata.route.segments.length > pathSegments.length) continue;
+      const routePath =
+        metadata.route.segments.length === 0
+          ? "/"
+          : `/${pathSegments.slice(0, metadata.route.segments.length).join("/")}`;
+      const match = matchRoute(routePath, metadata.route.segments);
+      if (!match.matches) continue;
+      if (!bestMatch || metadata.route.segments.length > bestMatch.metadata.route.segments.length) {
+        bestMatch = { metadata, params: match.params, routePath };
+      }
+    }
+
+    return bestMatch;
+  }
+
+  resolveMetadataRoutePath(
+    metadata: ApplicationMetadataRouteEntry,
+    params: Record<string, string> = {},
+  ): string {
+    const routePath = routeSegmentsToPath(metadata.route.segments, params);
+    return routePath === "/" ? `/${metadata.outputName}` : `${routePath}/${metadata.outputName}`;
   }
 
   getMatchingMetadataImage(
@@ -665,6 +747,7 @@ export class RouteManager {
       `**/{opengraph-image,twitter-image}.{${componentGlob},png,jpg,jpeg,gif,webp}`,
       appDir,
     );
+    const metadataRouteFiles = await safeGlobFiles("**/{sitemap,robots,manifest}.{ts,js}", appDir);
 
     const canonicalPageGroups = new Map<
       string,
@@ -815,6 +898,33 @@ export class RouteManager {
         fileName,
         sourceType,
         staticInfo,
+        source: "file",
+        sourceRoot: source.root,
+      });
+    }
+
+    for (const file of metadataRouteFiles) {
+      const descriptor = getApplicationMetadataRouteDescriptor(
+        path.basename(file, path.extname(file)),
+      );
+      if (!descriptor) continue;
+      const route = parseRoutePath(file);
+      const modulePath = path.join(appDir, file);
+      const pattern = this.createRoutePattern(route);
+      const key = `${descriptor.kind}:${pattern}`;
+      const existing = this.metadataRoutes.get(key);
+
+      if (existing?.sourceRoot === source.root) {
+        throw new Error(
+          `Duplicate ${descriptor.fileName} route "${pattern}". Found both ${existing.modulePath} and ${modulePath}. Keep only one .ts or .js metadata route per segment.`,
+        );
+      }
+
+      this.metadataRoutes.set(key, {
+        route,
+        modulePath,
+        pattern,
+        ...descriptor,
         source: "file",
         sourceRoot: source.root,
       });
@@ -1202,6 +1312,39 @@ function getMetadataImageSuffix(pathname: string): {
     return { kind: "twitter", fileName: "twitter-image" };
   }
 
+  return null;
+}
+
+function getApplicationMetadataRouteDescriptor(fileName: string): {
+  kind: ApplicationMetadataRouteKind;
+  fileName: ApplicationMetadataRouteEntry["fileName"];
+  outputName: ApplicationMetadataRouteEntry["outputName"];
+} | null {
+  if (fileName === "sitemap") {
+    return { kind: "sitemap", fileName: "sitemap", outputName: "sitemap.xml" };
+  }
+  if (fileName === "robots") {
+    return { kind: "robots", fileName: "robots", outputName: "robots.txt" };
+  }
+  if (fileName === "manifest") {
+    return { kind: "manifest", fileName: "manifest", outputName: "manifest.webmanifest" };
+  }
+  return null;
+}
+
+function getApplicationMetadataRouteSuffix(pathname: string): {
+  kind: ApplicationMetadataRouteKind;
+  outputName: ApplicationMetadataRouteEntry["outputName"];
+} | null {
+  for (const fileName of ["sitemap", "robots", "manifest"] as const) {
+    const descriptor = getApplicationMetadataRouteDescriptor(fileName)!;
+    if (
+      pathname === `/${descriptor.outputName}` ||
+      pathname.endsWith(`/${descriptor.outputName}`)
+    ) {
+      return { kind: descriptor.kind, outputName: descriptor.outputName };
+    }
+  }
   return null;
 }
 

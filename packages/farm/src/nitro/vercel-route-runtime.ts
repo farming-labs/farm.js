@@ -138,7 +138,7 @@ function compareRuntimeRoutes(
   left: FarmRouteRuntimeManifestEntry,
   right: FarmRouteRuntimeManifestEntry,
 ): number {
-  const kindOrder = { page: 0, api: 0, rule: 1 };
+  const kindOrder = { page: 0, api: 0, metadata: 0, rule: 1 };
   const kindDifference = kindOrder[left.kind] - kindOrder[right.kind];
   if (kindDifference !== 0) return kindDifference;
 

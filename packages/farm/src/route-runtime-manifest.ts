@@ -64,6 +64,28 @@ export async function createFarmRouteRuntimeManifest(options: {
     });
   }
 
+  for (const entry of options.routeManager.getMetadataRoutes().values()) {
+    const routeModule = await options.routeManager.loadRouteModule(entry.modulePath);
+    const pattern =
+      entry.pattern === "/" ? `/${entry.outputName}` : `${entry.pattern}/${entry.outputName}`;
+    const inherited = resolveFarmRouteRuleRuntimeConfig(pattern, options.config.routeRules);
+    const own = normalizeFarmRouteRuntimeConfig(
+      getFarmRouteRuntimeConfig(routeModule),
+      `Metadata route "${pattern}"`,
+    );
+
+    routes.push({
+      kind: "metadata",
+      pattern,
+      rendering: "dynamic",
+      source: normalizeManifestSource(root, entry.modulePath),
+      ...resolveFarmRouteRuntimeConfig(
+        mergeFarmRouteRuntimeConfigs(inherited, own),
+        `Metadata route "${pattern}"`,
+      ),
+    });
+  }
+
   for (const [pattern, rule] of Object.entries(options.config.routeRules)) {
     if (!hasFarmRouteRuntimeControls(rule)) continue;
 
