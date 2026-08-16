@@ -208,7 +208,7 @@ export async function generateFarmTypeArtifacts(
 
 import "@farm.js/core/image";
 
-${unifiedSections.map((section) => section.trimEnd()).join("\n\n")}
+${unifiedSections.map(normalizeUnifiedTypeSection).join("\n\n")}
 `,
       options.check,
       result.stalePaths,
@@ -222,6 +222,14 @@ ${unifiedSections.map((section) => section.trimEnd()).join("\n\n")}
   }
 
   return result;
+}
+
+function normalizeUnifiedTypeSection(section: string): string {
+  // The unified artifact already imports @farm.js/core/image, so it is a module.
+  // Individual generators add this marker for standalone declaration files, but
+  // formatters remove the now-redundant export and make `farm generate --check`
+  // report a false stale-file failure.
+  return section.trimEnd().replace(/\n+export \{\};$/, "");
 }
 
 function resolveGeneratedPath(
