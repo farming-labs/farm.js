@@ -101,6 +101,11 @@ try {
   }
   assert.equal(directExecutions.compiled.added, 0);
   assert.equal(directExecutions.react.added, 2);
+  await assertText(
+    page,
+    '[data-path="compiled"] .update-status',
+    "DOM bindings patched",
+  );
 
   const batchExecutions = {};
 

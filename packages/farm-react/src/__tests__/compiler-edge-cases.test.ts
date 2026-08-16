@@ -144,6 +144,46 @@ describe("React AOT compiler safety boundaries", () => {
     expect(result.diagnostics[0]?.reason).toMatch(/dynamic child structures/i);
   });
 
+  it.each([
+    {
+      name: "an impure derived call",
+      body: `
+        const label = String(count);
+        return <button onClick={() => setCount(count + 1)}>{label}</button>;
+      `,
+      reason: /derived local label cannot use function calls/i,
+    },
+    {
+      name: "a forward derived reference",
+      body: `
+        const label = next;
+        const next = count + 1;
+        return <button onClick={() => setCount(count + 1)}>{label}</button>;
+      `,
+      reason: /can only reference earlier derived local values/i,
+    },
+    {
+      name: "state declared after a derived value",
+      body: `
+        const seed = 0;
+        const [next, setNext] = useState(seed);
+        return <button onClick={() => setNext(next + 1)}>{count + next}</button>;
+      `,
+      reason: /useState declarations must appear before derived local values/i,
+    },
+  ])("falls back for $name", async ({ body, reason }) => {
+    const result = await compile(`
+      import { useState } from "react";
+      export function DerivedBoundary() {
+        const [count, setCount] = useState(0);
+        ${body}
+      }
+    `);
+
+    expect(result.compiled).toEqual([]);
+    expect(result.diagnostics[0]?.reason).toMatch(reason);
+  });
+
   it("falls back for hooks placed inside keyed list iteration", async () => {
     const result = await compile(`
       import { useState } from "react";
