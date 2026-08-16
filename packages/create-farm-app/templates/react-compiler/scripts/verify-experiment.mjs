@@ -1,16 +1,23 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 
 const port = Number(process.env.FARM_EXPERIMENT_PORT || 4327);
 const origin = `http://127.0.0.1:${port}`;
 const serverEntry = path.resolve(".farm/.output/server/index.mjs");
+const compilerReportPath = path.resolve(".farm/react-compiler.json");
 const screenshotPath =
   process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-compiler-starter.png";
 
 await access(serverEntry);
+const compilerReport = JSON.parse(await readFile(compilerReportPath, "utf8"));
+const compiledComponents = compilerReport.modules.flatMap((module) => module.compiled);
+
+assert.equal(compilerReport.version, 1);
+assert.ok(compilerReport.summary.compiled >= 1);
+assert.ok(compiledComponents.includes("CompiledCounter"));
 
 let serverOutput = "";
 const server = spawn(process.execPath, [serverEntry], {
@@ -94,6 +101,8 @@ try {
         result: "PASS",
         productionUrl: origin,
         screenshot: screenshotPath,
+        compilerReport: path.relative(process.cwd(), compilerReportPath),
+        compiledComponents,
         compiledUpdateExecutions: executions.compiled.added,
         reactUpdateExecutions: executions.react.added,
       },

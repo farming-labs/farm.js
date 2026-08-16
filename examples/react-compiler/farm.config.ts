@@ -6,7 +6,7 @@ const compilerEnabled = process.env.FARM_REACT_COMPILER !== "false";
 export default defineConfig({
   renderer: react({
     experimental: {
-      compiler: compilerEnabled,
+      compiler: compilerEnabled ? { report: true } : false,
     },
   }),
   theme: {

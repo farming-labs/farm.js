@@ -288,7 +288,7 @@ test("generates the experimental React Compiler starter with the shared dark sta
 
     const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
     assert.match(config, /from "@farm\.js\/react"/);
-    assert.match(config, /experimental:\s*\{\s*compiler: compilerEnabled/s);
+    assert.match(config, /compiler: compilerEnabled \? \{ report: true \} : false/);
     assert.match(config, /theme:\s*\{\s*default: "dark"/s);
 
     const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
@@ -328,7 +328,12 @@ test("generates the experimental React Compiler starter with the shared dark sta
       await readFile(path.join(generatedDir, "README.md"), "utf8"),
       /^# FARMJS React Compiler Starter/m,
     );
-    await readFile(path.join(generatedDir, "scripts/verify-experiment.mjs"), "utf8");
+    const experiment = await readFile(
+      path.join(generatedDir, "scripts/verify-experiment.mjs"),
+      "utf8",
+    );
+    assert.match(experiment, /\.farm\/react-compiler\.json/);
+    assert.match(experiment, /CompiledCounter/);
     assert.match(await readFile(path.join(generatedDir, ".gitignore"), "utf8"), /^\.farm\/$/m);
 
     assert.match(output, /React AOT compiler is experimental/);

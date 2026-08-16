@@ -25,10 +25,14 @@ The starter enables the compiler through the React renderer:
 ```ts
 renderer: react({
   experimental: {
-    compiler: true,
+    compiler: {
+      report: true,
+    },
   },
 }),
 ```
+
+The build writes a deterministic coverage report to `.farm/react-compiler.json`.
 
 The included environment switch defaults to enabled and makes comparison builds easy:
 
@@ -48,9 +52,9 @@ pnpm exec playwright install chromium
 pnpm experiment
 ```
 
-The command builds the app, opens the production output in Chromium, checks both counters, verifies
-that the compiled update does not execute the component again, and saves a screenshot to
-`/tmp/farm-react-compiler-starter.png`.
+The command builds the app, verifies that the report includes `CompiledCounter`, opens the
+production output in Chromium, checks both counters, verifies that the compiled update does not
+execute the component again, and saves a screenshot to `/tmp/farm-react-compiler-starter.png`.
 
 For batching, multiple bindings, safe keyed-list fallback, and the full compiler-on/off benchmark,
 see the maintained
