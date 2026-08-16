@@ -1,7 +1,10 @@
+import { publicEnv } from "@farm.js/core/env";
 import { CompilerComparison } from "../components/compiler-comparison";
 import { ResourceLinks } from "../components/resource-links";
 
 export default function HomePage() {
+  const compilerMode = String(publicEnv.FARM_REACT_COMPILER_ENABLED);
+
   return (
     <main className="landing-main">
       <section className="hero-section">
@@ -29,8 +32,8 @@ export default function HomePage() {
             <div className="command-row">
               <span>02</span>
               <div className="compiler-status">
-                <span className="status-dot" aria-hidden="true" />
-                <code>experimental.compiler: true</code>
+                <span className="status-dot" data-enabled={compilerMode} aria-hidden="true" />
+                <code data-compiler-status>experimental.compiler: {compilerMode}</code>
               </div>
             </div>
           </div>
