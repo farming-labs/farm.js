@@ -1,9 +1,9 @@
+import { publicEnv } from "@farm.js/core/env";
 import { CompilerComparison } from "../components/compiler-comparison";
 import { ResourceLinks } from "../components/resource-links";
-import { reactCompilerEnabled } from "../compiler-mode";
 
 export default function HomePage() {
-  const compilerMode = reactCompilerEnabled ? "true" : "false";
+  const compilerMode = String(publicEnv.FARM_REACT_COMPILER_ENABLED);
 
   return (
     <main className="landing-main">

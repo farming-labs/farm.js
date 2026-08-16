@@ -289,7 +289,7 @@ test("generates the experimental React Compiler starter with the shared dark sta
     const config = await readFile(path.join(generatedDir, "farm.config.ts"), "utf8");
     assert.match(config, /from "@farm\.js\/react"/);
     assert.match(config, /experimental:\s*\{\s*compiler: compilerEnabled/s);
-    assert.match(config, /__FARM_REACT_COMPILER_ENABLED__/);
+    assert.match(config, /FARM_REACT_COMPILER_ENABLED/);
     assert.match(config, /theme:\s*\{\s*default: "dark"/s);
 
     const page = await readFile(path.join(generatedDir, "src/app/page.tsx"), "utf8");
@@ -297,7 +297,7 @@ test("generates the experimental React Compiler starter with the shared dark sta
     assert.match(page, /FARMJS \/ React Compiler starter/);
     assert.match(page, /The compiler handles the rest\./);
     assert.match(page, /data-compiler-status/);
-    assert.match(page, /reactCompilerEnabled/);
+    assert.match(page, /publicEnv\.FARM_REACT_COMPILER_ENABLED/);
     assert.match(page, /<CompilerComparison \/>/);
     assert.match(page, /<ResourceLinks className="resource-links" \/>/);
 
@@ -318,7 +318,6 @@ test("generates the experimental React Compiler starter with the shared dark sta
     for (const relativePath of [
       "src/app/globals.css",
       "src/app/page.tsx",
-      "src/compiler-mode.ts",
       "src/components/compiler-comparison.tsx",
       "src/components/resource-links.tsx",
     ]) {
