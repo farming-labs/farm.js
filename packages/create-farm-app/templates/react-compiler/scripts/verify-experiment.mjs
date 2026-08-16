@@ -6,6 +6,7 @@ import { chromium } from "@playwright/test";
 
 const port = Number(process.env.FARM_EXPERIMENT_PORT || 4327);
 const origin = `http://127.0.0.1:${port}`;
+const compilerEnabled = process.env.FARM_REACT_COMPILER !== "false";
 const serverEntry = path.resolve(".farm/.output/server/index.mjs");
 const screenshotPath =
   process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-compiler-starter.png";
@@ -65,6 +66,10 @@ try {
 
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: /compiler handles the rest/i }).waitFor();
+  assert.equal(
+    (await page.locator("[data-compiler-status]").textContent())?.trim(),
+    `experimental.compiler: ${String(compilerEnabled)}`,
+  );
 
   const executions = {};
   for (const pathName of ["compiled", "react"]) {
@@ -82,7 +87,7 @@ try {
     executions[pathName].added = executions[pathName].final - executions[pathName].initial;
   }
 
-  assert.equal(executions.compiled.added, 0);
+  assert.equal(executions.compiled.added, compilerEnabled ? 0 : 2);
   assert.equal(executions.react.added, 2);
   assert.deepEqual(browserErrors, []);
 
@@ -94,6 +99,7 @@ try {
         result: "PASS",
         productionUrl: origin,
         screenshot: screenshotPath,
+        compilerEnabled,
         compiledUpdateExecutions: executions.compiled.added,
         reactUpdateExecutions: executions.react.added,
       },
