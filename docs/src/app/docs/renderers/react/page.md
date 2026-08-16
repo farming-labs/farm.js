@@ -327,7 +327,7 @@ satisfy all of these rules:
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Component discovery | A top-level, capitalized function declaration, function expression, or arrow component in application `.tsx` or `.jsx`.                             |
 | Function shape      | Synchronous, non-generator, non-generic block body with zero parameters or one identifier such as `props`.                                          |
-| Body                | One or more top-level `useState` declarations followed by one unconditional JSX return.                                                             |
+| Body                | Top-level `useState` declarations, optional compiler-safe derived `const` values in source order, then one unconditional JSX return.                |
 | State               | `const [value, setValue] = useState(initial)`, including lazy initializers, multiple cells, and queued functional updates.                          |
 | Root                | Exactly one lowercase host JSX element such as `button`, `section`, `input`, or `div`.                                                              |
 | Tree                | A static tree containing host elements only. Nested host elements are supported when their placement cannot change.                                 |
@@ -345,18 +345,20 @@ import { useState } from "react";
 export function StatusButton(props: { initial: number }) {
   const [count, setCount] = useState(props.initial);
   const [active, setActive] = useState(false);
+  const statusClass = active ? "active" : "idle";
+  const label = `Count: ${count}`;
 
   return (
     <button
       aria-pressed={active}
-      className={active ? "active" : "idle"}
+      className={statusClass}
       data-count={count}
       onClick={() => {
         setCount((value) => value + 1);
         setActive((value) => !value);
       }}
     >
-      Count: {count}
+      {label}
     </button>
   );
 }
@@ -365,20 +367,27 @@ export function StatusButton(props: { initial: number }) {
 The compiler records separate dependencies for `count` and `active`. Changing `count` does not
 reevaluate bindings that depend only on `active`, and vice versa.
 
+Derived values are expanded into the generated bindings, so they do not create a runtime scope or
+force a component rerender. They may use literals, props, state, operators, member access,
+conditionals, templates, and earlier derived values. State declarations must come first. Calls,
+assignments, object or array literals, functions, JSX, constructors, and other expressions whose
+evaluation or identity cannot be preserved safely still fall back to React.
+
 ### What falls back to React
 
-| Unsupported shape                                                  | Why React keeps ownership                                                           |
-| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
-| Keyed lists, `.map()`, element arrays, or helper-rendered children | Inserts, removals, moves, and identity changes require reconciliation.              |
-| Conditional JSX children or fragments                              | The prepared DOM path can change when structure appears or disappears.              |
-| Custom child components                                            | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
-| Effects or hooks other than the supported `useState` shape         | Their lifecycle and ordering must remain under React's hook dispatcher.             |
-| `ref` or `dangerouslySetInnerHTML`                                 | They directly participate in DOM ownership.                                         |
-| Stateful `style`, `children`, or `key` bindings                    | These need specialized property, structure, or identity semantics.                  |
-| JSX attribute spreads or namespaced attributes                     | The compiler cannot currently enumerate a stable binding contract.                  |
-| Multiple/conditional returns or non-state statements               | The compiler does not yet prove control flow or derived local values.               |
-| Destructured props, async/generator, or generic components         | These function shapes are outside the current lowering.                             |
-| Setters called outside JSX event handlers                          | The compiler only controls and batches event-driven local updates.                  |
+| Unsupported shape                                                      | Why React keeps ownership                                                           |
+| ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| Keyed lists, `.map()`, element arrays, or helper-rendered children     | Inserts, removals, moves, and identity changes require reconciliation.              |
+| Conditional JSX children or fragments                                  | The prepared DOM path can change when structure appears or disappears.              |
+| Custom child components                                                | A child component has its own props, hooks, lifecycle, and reconciliation boundary. |
+| Effects or hooks other than the supported `useState` shape             | Their lifecycle and ordering must remain under React's hook dispatcher.             |
+| `ref` or `dangerouslySetInnerHTML`                                     | They directly participate in DOM ownership.                                         |
+| Stateful `style`, `children`, or `key` bindings                        | These need specialized property, structure, or identity semantics.                  |
+| JSX attribute spreads or namespaced attributes                         | The compiler cannot currently enumerate a stable binding contract.                  |
+| Multiple/conditional returns or impure/control-flow statements         | The compiler only lowers a single, statically analyzable render path.               |
+| Derived calls, assignments, identity-bearing values, functions, or JSX | Their evaluation timing, side effects, or identity cannot yet be preserved safely.  |
+| Destructured props, async/generator, or generic components             | These function shapes are outside the current lowering.                             |
+| Setters called outside JSX event handlers                              | The compiler only controls and batches event-driven local updates.                  |
 
 Keys do not make list reconciliation unnecessary. A key tells React which child identity survives
 an insert, removal, or move; React still needs to compare the dynamic children. Calling a Hook

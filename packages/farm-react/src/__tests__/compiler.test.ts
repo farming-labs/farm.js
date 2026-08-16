@@ -47,6 +47,43 @@ describe("React AOT compiler", () => {
     });
   });
 
+  it("compiles state-driven derived local values in source order", async () => {
+    const result = await compileReactModule(
+      `
+        import { useState } from "react";
+        export function DerivedCounter(props: { prefix: string }) {
+          const [count, setCount] = useState(0);
+          const doubled = count * 2;
+          const label = \`\${props.prefix}: \${doubled}\`;
+          const tone = count > 0 ? "active" : "idle";
+          return (
+            <button
+              className={tone}
+              data-count={doubled}
+              onClick={() => setCount(doubled + 1)}
+            >{label}</button>
+          );
+        }
+      `,
+      "/app/DerivedCounter.tsx",
+      infer,
+    );
+
+    expect(result.diagnostics).toEqual([]);
+    expect(result.compiled).toEqual(["DerivedCounter"]);
+    expect(result.code).not.toMatch(/const (doubled|label|tone)/);
+    expect(result.code).toContain("dependencies: [0]");
+    expect(result.code).toMatch(/farmState\[0\]\.get/);
+    await expect(
+      transformWithEsbuild(result.code, "/app/DerivedCounter.tsx", {
+        loader: "tsx",
+        jsx: "automatic",
+      }),
+    ).resolves.toMatchObject({
+      code: expect.stringContaining("createCompiledComponent"),
+    });
+  });
+
   it("only compiles selected components in annotation mode", async () => {
     const result = await compileReactModule(
       `

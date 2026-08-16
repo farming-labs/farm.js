@@ -7,6 +7,10 @@ let reactExecutions = 0;
 
 export function CompiledCounter() {
   const [count, setCount] = useState(0);
+  const statusClass =
+    count > 0 ? "update-status update-status--active" : "update-status";
+  const statusText =
+    count > 0 ? "DOM bindings patched" : "Ready for an update";
 
   return (
     <article
@@ -34,13 +38,7 @@ export function CompiledCounter() {
         </div>
       </div>
 
-      <p
-        className={
-          count > 0 ? "update-status update-status--active" : "update-status"
-        }
-      >
-        {count > 0 ? "DOM bindings patched" : "Ready for an update"}
-      </p>
+      <p className={statusClass}>{statusText}</p>
 
       <button
         type="button"
