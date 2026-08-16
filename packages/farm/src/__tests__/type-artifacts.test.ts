@@ -75,6 +75,7 @@ describe("generateFarmTypeArtifacts", () => {
     expect(readFileSync(apiTypesPath, "utf8")).toContain("post: typeof POST_hello;");
     expect(types).toContain('import type FarmConfig from "../farm.config"');
     expect(types).toContain('declare module "@farm.js/core/env"');
+    expect(types).not.toContain("export {};");
     const imageTypes = readFileSync(path.join(process.cwd(), "types", "images.d.ts"), "utf8");
     expect(imageTypes).toContain('declare module "*.png"');
     expect(imageTypes).toContain('import("@farm.js/core/image").StaticImageData');
