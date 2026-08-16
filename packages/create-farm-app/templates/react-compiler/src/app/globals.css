@@ -216,6 +216,11 @@ code {
   box-shadow: 0 0 0 3px var(--accent-soft);
 }
 
+.status-dot[data-enabled="false"] {
+  background: var(--ink-faint);
+  box-shadow: 0 0 0 3px rgb(255 255 255 / 6%);
+}
+
 .compiler-check {
   margin-top: 1.9rem;
   border: 1px solid var(--line);

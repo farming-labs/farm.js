@@ -1,23 +1,17 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access } from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "@playwright/test";
 
 const port = Number(process.env.FARM_EXPERIMENT_PORT || 4327);
 const origin = `http://127.0.0.1:${port}`;
+const compilerEnabled = process.env.FARM_REACT_COMPILER !== "false";
 const serverEntry = path.resolve(".farm/.output/server/index.mjs");
-const compilerReportPath = path.resolve(".farm/react-compiler.json");
 const screenshotPath =
   process.env.FARM_EXPERIMENT_SCREENSHOT || "/tmp/farm-react-compiler-starter.png";
 
 await access(serverEntry);
-const compilerReport = JSON.parse(await readFile(compilerReportPath, "utf8"));
-const compiledComponents = compilerReport.modules.flatMap((module) => module.compiled);
-
-assert.equal(compilerReport.version, 1);
-assert.ok(compilerReport.summary.compiled >= 1);
-assert.ok(compiledComponents.includes("CompiledCounter"));
 
 let serverOutput = "";
 const server = spawn(process.execPath, [serverEntry], {
@@ -72,6 +66,10 @@ try {
 
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: /compiler handles the rest/i }).waitFor();
+  assert.equal(
+    (await page.locator("[data-compiler-status]").textContent())?.trim(),
+    `experimental.compiler: ${String(compilerEnabled)}`,
+  );
 
   const executions = {};
   for (const pathName of ["compiled", "react"]) {
@@ -89,7 +87,7 @@ try {
     executions[pathName].added = executions[pathName].final - executions[pathName].initial;
   }
 
-  assert.equal(executions.compiled.added, 0);
+  assert.equal(executions.compiled.added, compilerEnabled ? 0 : 2);
   assert.equal(executions.react.added, 2);
   assert.deepEqual(browserErrors, []);
 
@@ -101,8 +99,7 @@ try {
         result: "PASS",
         productionUrl: origin,
         screenshot: screenshotPath,
-        compilerReport: path.relative(process.cwd(), compilerReportPath),
-        compiledComponents,
+        compilerEnabled,
         compiledUpdateExecutions: executions.compiled.added,
         reactUpdateExecutions: executions.react.added,
       },
