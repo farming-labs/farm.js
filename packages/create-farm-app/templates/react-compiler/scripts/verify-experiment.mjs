@@ -65,6 +65,10 @@ try {
 
   await page.goto(origin, { waitUntil: "networkidle" });
   await page.getByRole("heading", { name: /compiler handles the rest/i }).waitFor();
+  assert.equal(
+    (await page.locator("[data-compiler-status]").textContent())?.trim(),
+    "experimental.compiler: true",
+  );
 
   const executions = {};
   for (const pathName of ["compiled", "react"]) {

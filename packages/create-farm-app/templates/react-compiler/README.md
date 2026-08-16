@@ -37,6 +37,8 @@ FARM_REACT_COMPILER=true pnpm build
 FARM_REACT_COMPILER=false pnpm build
 ```
 
+The status shown on the starter page reflects the resolved value used for that build.
+
 Components are considered automatically. Add `"use no compiler"` to a component when you need an
 explicit React-only path.
 
