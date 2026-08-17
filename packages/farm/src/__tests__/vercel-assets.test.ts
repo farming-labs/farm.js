@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   createFarmVercelImmutableAssetRoute,
   FARM_IMMUTABLE_ASSET_CACHE_CONTROL,
+  type FarmVercelImmutableAssetRoute,
   isFarmVercelImmutableAssetPath,
 } from "../nitro/vercel-assets";
 
@@ -37,9 +38,21 @@ describe("Vercel immutable Farm assets", () => {
     expect(isFarmVercelImmutableAssetPath("/index.html")).toBe(false);
   });
 
-  it("scopes the route to the configured base path", () => {
-    expect(isFarmVercelImmutableAssetPath("/farm/assets/logo-ha1b2c3d4.webp", "/farm")).toBe(true);
-    expect(isFarmVercelImmutableAssetPath("/assets/logo-ha1b2c3d4.webp", "/farm")).toBe(false);
+  it("matches root asset paths even when a base path is configured", () => {
+    // Hashed client assets are emitted and served at the root regardless of
+    // basePath (the client build sets no Vite `base` and Nitro mounts the
+    // client output at "/"), so a basePath-scoped route would never match the
+    // URLs browsers actually request. The cast emulates the old call site
+    // that passed config.basePath.
+    const createRoute = createFarmVercelImmutableAssetRoute as (
+      basePath?: string,
+    ) => FarmVercelImmutableAssetRoute;
+    const matcher = new RegExp(createRoute("/farm").src);
+
+    expect(matcher.test("/assets/logo-ha1b2c3d4.webp")).toBe(true);
+    expect(matcher.test("/farm-client-h1a2b3c4d.js")).toBe(true);
+    expect(matcher.test("/chunks/router-hab12cd90.js")).toBe(true);
+    expect(matcher.test("/farm/assets/logo-ha1b2c3d4.webp")).toBe(false);
   });
 
   it("emits a continuing header route for the Build Output API", () => {
